@@ -16,11 +16,17 @@ services:
     container_name: cci-backend
     env_file:
       - secrets/backend/.env
+    labels:
+      - traefik.http.routers.backend.rule=Host(`api.server.devteamatcci.site`)
 
   landing-page:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
+    labels:
+      - traefik.http.routers.landing-page.rule=Host(`landing.server.devteamatcci.site`)
 
   investment-calculator:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:latest
     container_name: cci-investment-calculator
+    labels:
+      - traefik.http.routers.investment-calculator.rule=Host(`investment-calculator.server.devteamatcci.site`)

@@ -1,0 +1,199 @@
+CLIENTE,PRECIO PRODUCTO,SUELDO,EDAD (RANGO DE EDAD EN AÑOS),DEPENDIENTES ECONOMICOS,OCUPACIÓN,ANTIGÜEDAD,ESTADO CIVIL,UTILIZACION DINERO,VIVIENDA PROPIA,VEHICULO PROPIO,TARJETA DE CREDITO,TIPO DE COMPRAS
+Carlos Eduardo Diaz Cuevas," Q 66.908,00 "," Q 60.000,00 ", 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo, Si, No, Si,Autocompras
+María Alejandra Sánchez Mazariegos," Q 74.664,00 "," Q 7.303,75 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Mario Alexander Rosales Avila," Q 32.618,00 "," Q 7.350,00 ", 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo, Si, No, Si,Autocompras
+Deyanira Elizardi Díaz," Q 10.000,00 "," Q 12.000,00 ", 50 años o mas,0, Empleado, 1-5 años, Casado, Consolidacion de deudas, Si, Si, No,Sobre Vehículos
+Jaime Efraín Monzón Alburez," Q 43.118,00 "," Q 7.820,00 ", 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo, Si, No, Si,Autocompras
+Héctor Alexander Castro Tobar," Q 38.118,00 "," Q 5.000,00 ", 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo, Si, No, No,Autocompras
+Mauricio García Dávila," Q 66.858,00 "," Q 23.800,00 ", 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Mario David García Sesam," Q 41.153,00 "," Q 54.000,00 ", 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo, No, No, Si,Autocompras
+Carlos Enrique Ixcotoy Aguirre," Q 84.578,00 "," Q 9.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Karen Janeth Lone Saénz," Q 23.985,00 "," Q 9.600,00 ", 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo, No, No, Si,Autocompras
+Xaxy Mileidy Niño Delgado," Q 103.563,00 "," Q 15.500,00 ", 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo, Si, Si, Si,Autocompras
+Sami Walid Nasser Mencos," Q 76.300,00 "," Q 15.000,00 ", 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, Si, No,Autocompras
+Raul Antonio Roca Juárez," Q 41.658,00 "," Q 5.000,00 ", 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo, Si, No, Si,Autocompras
+Carlos Otoniel Ovalle González," Q 860.000,00 "," Q 100.000,00 ", 40 - 49 años,5, Dueño, 1-5 años, Casado, Capital de trabajo, Si, Si, Si,Hipotecarios
+Marco Aurelio Collier Barillas," Q 122.680,00 "," Q 80.000,00 ", 40 - 49 años,2, Dueño, 5-10 años, Casado, Consumo, Si, Si, Si,Autocompras
+Francisco Alberto Santos Carreto," Q 52.616,00 "," Q 15.000,00 ", 40 - 49 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Jorge Mario Asturias López," Q 109.530,00 "," Q 34.500,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Nancy Del Rosario Roldán Montenegro de Chicas," Q 107.308,00 "," Q 13.000,00 ", 30 - 39 años,1, Dueño, 1-5 años, Casado, Consumo, No, No, Si,Autocompras
+Marco Aurelio Collier Barillas," Q 152.770,00 "," Q 80.000,00 ", 40 - 49 años,2, Dueño, 5-10 años, Casado, Consumo, Si, Si, Si,Autocompras
+Guemaly Gabriel López Serrano," Q 35.603,00 "," Q 12.000,00 ", 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo, Si, Si, No,Autocompras
+Joanna Del Rosario Bonilla Batres," Q 89.229,00 "," Q 40.000,00 ", 30 - 39 años,1, Empleado, 0-1 año, Casado, Consumo, No, No, Si,Autocompras
+Gilbran Emil Farach Adrover," Q 65.898,00 "," Q 12.000,00 ", 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo, No, No, Si,Autocompras
+Estuardo Francisco Alvarez Navichoque," Q 47.617,00 "," Q 13.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Bryan David Vargas Rivas," Q 33.982,00 "," Q 19.000,00 ", 18 - 29 años,0, Dueño, 0-1 año, Soltero, Consumo, Si, No, Si,Autocompras
+Meyling Xaviera Quant Leiva de Lucas," Q 32.500,00 "," Q 27.000,00 ", 40 - 49 años,2, Empleado, 5-10 años, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehículos
+Wilson Anibal Yumán Paredes," Q 52.116,00 "," Q 25.000,00 ", 30 - 39 años,1, Dueño, 1-5 años, Casado, Consumo, No, No, Si,Autocompras
+Aurora Flor de María Morales Cruz," Q 40.648,00 "," Q 17.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Eduardo Enrique Montenegro Alfaro," Q 199.506,00 "," Q 28.000,00 ", 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo, No, No, Si,Autocompras
+Angelo Paolo Ibarguren Sanchinelly," Q 48.728,00 "," Q 11.500,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Monica Maria Fuentes Rubio," Q 61.964,00 "," Q 20.000,00 ", 40 - 49 años,0, Empleado, 5-10 años, Casado, Consumo, Si, No, No,Autocompras
+Alejandro José Alvarez Aguilar," Q 47.718,00 "," Q 12.000,00 ", 30 - 39 años,4, Dueño, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Jonathan Eliezer Aguilar Leiva," Q 61.858,00 "," Q 15.000,00 ", 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Selvin Estuardo Galindo Leal," Q 51.758,00 "," Q 10.000,00 ", 30 - 39 años,2, Dueño, 5-10 años, Casado, Consumo, Si, No, Si,Autocompras
+Yunior Gomar Santos Garcia," Q 54.010,00 "," Q 6.000,00 ", 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo, Si, No, No,Autocompras
+Mauricio Enrique De Guisse Morataya," Q 130.033,00 "," Q 10.800,00 ", 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo, Si, No, No,Autocompras
+Maria Paula Girón Pereda," Q 71.958,00 "," Q 25.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Berkin Eduardo Santos Albal," Q 30.000,00 "," Q 4.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehículos
+Herlyn Samuel Carrillo Ramírez," Q 150.718,00 "," Q 9.000,00 ", 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo, Si, Si, No,Autocompras
+Mario David García Sesam," Q 16.500,00 "," Q 54.000,00 ", 40 - 49 años,3, Empleado, 1-5 años, Casado, Salud o Medico, Si, Si, Si,Sobre Vehículos
+Kebin Rolando Vargas Rivas," Q 39.436,00 "," Q 6.500,00 ", 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo, No, No, No,Autocompras
+Walter Humberto Arana Hernández," Q 119.428,00 "," Q 25.000,00 ", 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo, No, No, Si,Autocompras
+Nelson Haroldo Donis Flores," Q 143.092,00 "," Q 5.000,00 ", 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo, Si, Si, No,Autocompras
+Eddie Erly Danniery Portillo Lima," Q 268.862,00 "," Q 250.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Paola Arana Estrada," Q 68.901,00 "," Q 17.500,00 ", 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Andrés Contenti Secaira," Q 44.421,00 "," Q 30.000,00 ", 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+Luis Fernando Carrera Hernández," Q 42.500,00 "," Q 5.500,00 ", 30 - 39 años,4, Empleado, 5-10 años, Casado, Mejora Inmueble, Si, Si, No,Sobre Vehículos
+Raul Alberto Zeledon Burgalin," Q 143.871,00 "," Q 35.000,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo, No, No, No,Autocompras
+Ester Chinchilla Melgar de Sosa," Q 42.070,00 "," Q 17.000,00 ", 50 años o mas,0, Dueño, 0-1 año, Casado, Consumo, No, No, Si,Autocompras
+Yany María Berreondo Roulet de Pérez," Q 30.000,00 "," Q 12.000,00 ", 30 - 39 años,1, Empleado, 5-10 años, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehículos
+Sergio Domingo Chavac Castro," Q 36.250,00 "," Q 3.100,00 ", 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo, Si, Si, No,Autocompras
+Juan Manuel Valle Toralla," Q 195.580,00 "," Q 50.000,00 ", 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+Paula Maria De Dios Paz," Q 69.284,00 "," Q 18.190,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Andrea Isabel Marin Rodriguez," Q 40.846,00 "," Q 6.500,00 ", 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo, No, No, Si,Autocompras
+Manuel Francisco Urrutia Gaitan," Q 31.309,00 "," Q 9.000,00 ", 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo, Si, No, No,Autocompras
+Romario Raí Aldana Estrada," Q 79.713,00 "," Q 23.450,00 ", 18 - 29 años,0, Dueño, 1-5 años, Casado, Consumo, Si, No, No,Autocompras
+Francisco José Ochaita Pira," Q 52.270,00 "," Q 25.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo, Si, No, Si,Autocompras
+Ricardo Augusto Morán Castellanos," Q 76.750,00 "," Q 38.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Elliott Raúl Castellanos García," Q 91.540,00 "," Q 60.000,00 ", 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+Andres Alejandro Salvatierra Mayen," Q 40.000,00 "," Q 5.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo, No, Si, Si,Autocompras
+Josue Abel Galvez Grageda," Q 48.593,00 "," Q 10.000,00 ", 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo, Si, No, No,Autocompras
+Carlos Eduardo Diaz Cuevas," Q 77.974,00 "," Q 60.000,00 ", 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo, Si, No, Si,Autocompras
+Sergio Domingo Chavac Castro," Q 10.000,00 "," Q 3.100,00 ", 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+Augusto Fernando Aguirre Mix," Q 146.008,00 "," Q 30.000,00 ", 40 - 49 años,2, Dueño, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+Jorge Steeven Ramos," Q 34.216,00 "," Q 10.000,00 ", 18 - 29 años,1, Dueño, 5-10 años, Soltero, Capital de trabajo, No, No, Si,Autocompras
+Raul Alberto Zeledon Burgalin," Q 69.355,00 "," Q 35.000,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Vinicio Khaled Flores Aguilar," Q 21.500,00 "," Q 10.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehículos
+Carlos Eduardo Diaz Cuevas," Q 121.936,00 "," Q 60.000,00 ", 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo, Si, No, Si,Autocompras
+Mariana Wer Cabrera," Q 57.753,00 "," Q 12.600,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Jorge Armando Sandoval Lémus," Q 20.000,00 "," Q 25.000,00 ", 40 - 49 años,3, Dueño, 5-10 años, Casado, Capital de trabajo, Si, Si, Si,Prendario
+Miguel Alejandro Martínez Del Cid," Q 80.000,00 "," Q 3.700,00 ", 18 - 29 años,0, Empleado, 0-1 año, Soltero, Mejora Inmueble, Si, No, No,Hipotecarios
+María De Pilar Arévalo Cuevas," Q 83.074,00 "," Q 8.250,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Pablo Josué Alvarez Sanchez," Q 159.676,00 "," Q 71.428,57 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, No,Autocompras
+Guillermo Alejandro Lemus Montenegro," Q 62.000,00 "," Q 80.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehículos
+Carlos Roberto Sandoval Rivas," Q 114.388,00 "," Q 25.000,00 ", 50 años o mas,0, Dueño, 5-10 años, Casado, Consumo, Si, Si, Si,Autocompras
+Félix Alfredo Castro Solares," Q 74.608,00 "," Q 35.000,00 ", 30 - 39 años,3, Dueño, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Sara Abigail Rosales Soto," Q 40.000,00 "," Q 15.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Salud o Medico, No, Si, Si,Sobre Vehículos
+José Jorge Retana Melgar," Q 54.034,94 "," Q 11.000,00 ", 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo, Si, No, No,Autocompras
+Luis Eduardo Morán Castellanos," Q 88.888,00 "," Q 100.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Deiry Johana Armas De Leon de Aranda," Q 18.508,00 "," Q 3.416,00 ", 40 - 49 años,0, Empleado, 1-5 años, Casado, Consumo, No, No, Si,Autocompras
+Ana Lucia Cajas Menendéz," Q 91.948,00 "," Q 15.500,00 ", 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo, No, No, Si,Autocompras
+Karla Paola España Girón," Q 30.891,00 "," Q 8.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Gerson Abisai Chicoj Samayoa," Q 46.869,00 "," Q 5.000,00 ", 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo, No, No, No,Autocompras
+Gianina Plihal Tattersfield," Q 170.550,00 "," Q 25.500,00 ", 50 años o mas,2, Empleado, 5-10 años, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehículos
+Nanci Julissa Cano Del Valle," Q 60.000,00 "," Q 9.000,00 ", 40 - 49 años,2, Dueño, 5-10 años, Soltero, Salud o Medico, No, Si, Si,Sobre Vehículos
+Gustavo Francisco Castro Orellana," Q 65.000,00 "," Q 32.000,00 ", 30 - 39 años,1, Dueño, 1-5 años, Casado, Consumo, Si, No, Si,Autocompras
+Sharon Frinee Gámez Sical," Q 21.045,00 "," Q 7.000,00 ", 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Coralia Del Carmen Ortíz Morales," Q 50.000,00 "," Q 6.250,00 ", 40 - 49 años,1, Empleado, 1-5 años, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehículos
+Josué Israel Puac Chay," Q 102.607,00 "," Q 100.000,00 ", 18 - 29 años,0, Dueño, 5-10 años, Soltero, Consumo, No, No, No,Autocompras
+Jonathan Josué Alvarez Velásquez," Q 71.956,00 "," Q 30.000,00 ", 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo, No, No, Si,Autocompras
+Nancy Abigail Chávez Ruíz," Q 31.972,00 "," Q 4.800,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Carlos Enrique Yoc Barillas," Q 47.374,00 "," Q 25.000,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Bryan Fernando Mota Arroyo," Q 62.043,96 "," Q 4.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Sergio Raúl Del Cid Aguilar," Q 60.000,00 "," Q 4.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Mario Noé Laines Vielman," Q 53.851,00 "," Q 6.000,00 ", 40 - 49 años,1, Dueño, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+César Gersón Sicán Ojer," Q 19.885,00 "," Q 12.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Rodolfo Contreras Lemus," Q 38.811,00 "," Q 7.000,00 ", 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo, No, No, Si,Autocompras
+Edmon Hernan Robinson Cubillo," Q 245.356,00 "," Q 60.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+José Benjamín Ordoñez Gamarro," Q 99.751,00 "," Q 50.000,00 ", 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Sami Walid Nasser Mencos," Q 41.973,00 "," Q 15.000,00 ", 30 - 39 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo, Si, No, No,Autocompras
+René Lionel Velasquez Castillo," Q 650.000,00 "," Q 30.000,00 ", 50 años o mas,2, Empleado, 5-10 años, Casado, Consolidacion de deudas, Si, Si, No,Hipotecarios
+Kebín Enmanuel Perez Garcia," Q 48.972,00 "," Q 12.500,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo, No, No, No,Autocompras
+Maikel Johan Revete Perez," Q 59.890,00 "," Q 10.000,00 ", 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Rosa Adelia Reyes Herrera," Q 212.784,21 "," Q 40.000,00 ", 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehículos
+Mercy Stefany Reyes Aldana," Q 80.974,00 "," Q 8.500,00 ", 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo, Si, Si, Si,Autocompras
+César Daniel Contreras García," Q 37.852,46 "," Q 5.500,00 ", 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+Claudia María Cifuentes Medina De Pineda," Q 144.659,00 "," Q 15.000,00 ", 40 - 49 años,2, Dueño, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+Katherine Lisseth Lancerio Constanzo," Q 79.975,00 "," Q 20.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Francisco Javier Corado Rodriguez," Q 46.500,00 "," Q 15.000,00 ", 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo, No, Si, Si,Sobre Vehículos
+Frida Juliette González Morales de Azzari," Q 100.060,00 "," Q 7.500,00 ", 50 años o mas,0, Dueño, 1-5 años, Casado, Consumo, No, No, Si,Autocompras
+Ana Nicole Silva Rogel," Q 61.726,03 "," Q 7.500,00 ", 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo, Si, No, Si,Autocompras
+Bryan David Vargas Rivas," Q 41.968,00 "," Q 19.000,00 ", 18 - 29 años,0, Dueño, 0-1 año, Soltero, Capital de trabajo, Si, No, Si,Autocompras
+Natalia María Sandoval Fuentes," Q 52.731,00 "," Q 5.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+María Cecilia De Matta Vega de Méndez," Q 14.875,84 "," Q 20.000,00 ", 40 - 49 años,1, Empleado, 1-5 años, Casado, Salud o Medico, Si, Si, Si,Sobre Vehículos
+Carlos Enrique Urruela Novella," Q 437.500,00 "," Q 100.000,00 ", 50 años o mas,3, Dueño, 5-10 años, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehículos
+Timoteo Estuardo Román Monzón," Q 48.980,00 "," Q 6.250,00 ", 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo, Si, Si, Si,Autocompras
+Pedro Rosales López," Q 253.977,00 "," Q 40.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Guillermo Alejandro Chavarría Sánchez," Q 86.000,00 "," Q 20.000,00 ", 40 - 49 años,2, Dueño, 1-5 años, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehículos
+Stephany Marioly García Gómez," Q 28.000,00 "," Q 11.000,00 ", 18 - 29 años,0,Dueño, 1-5 años, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehículos
+Rita Maria Regalado Oliva," Q 264.469,00 "," Q 40.000,00 ", 40 - 49 años,2, Dueño, 1-5 años, Casado, Consumo, Si, No, No,Autocompras
+Dairin Noemí González Pellecer," Q 73.276,00 "," Q 8.000,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Erick Fernando Sempé Rodríguez," Q 23.500,00 "," Q 20.000,00 ", 30 - 39 años,2, Dueño, 1-5 años, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehículos
+César Armando Portillo Lo," Q 205.576,00 "," Q 100.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+César Armando Portillo Lo," Q 206.086,00 "," Q 100.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Guillermo Alejandro Chavarría Sánchez," Q 35.000,00 "," Q 20.000,00 ", 40 - 49 años,2, Dueño, 1-5 años, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehículos
+Jorge Luis Rodriguez Garcia," Q 40.000,00 "," Q 5.400,00 ", 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo, No, Si, Si,Sobre Vehículos
+Mario Giovanni Fuentes Maldonado," Q 35.000,00 "," Q 5.000,00 ", 30 - 39 años,3, Empleado, 1-5 años, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehículos
+Maria Miguel Salaverria Corzantes," Q 54.156,21 "," Q 50.000,00 ", 30 - 39 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehículos
+Mario Gerardo Palencia Paiz," Q 39.900,00 "," Q 10.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo, No, No, No,Sobre Vehículos
+Francisco Jose Diaz-Perusina Fuentes," Q 45.350,00 "," Q 7.400,00 ", 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo, No, No, No,Sobre Vehículos
+Mario Aroldo Florian Lopez," Q 31.200,00 "," Q 5.000,00 ", 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Sobre Vehículos
+Eliot Jacob Fajardo Yaguaz," Q 45.600,00 "," Q 7.500,00 ", 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Sobre Vehículos
+Byron Enrique Guerrero Pineda," Q 49.750,00 "," Q 15.400,00 ", 50 años o mas,0, Empleado, 1-5 años, Soltero, Capital de trabajo, Si, No, No,Sobre Vehículos
+Byron Eduardo Gomez Pineda / Byron Estuardo Gomez Vasquez," Q 39.945,00 "," Q 5.000,00 ", 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Sobre Vehículos
+Reynaldo Esquivel Raymundo," Q 39.116,00 "," Q 10.000,00 ", 30 - 39 años,2, Dueño, 5-10 años, Soltero, Consumo, No, No, No,Sobre Vehículos
+Cintia Adelaida Meza CastañedaMeza," Q 31.795,00 "," Q 13.000,00 ", 18 - 29 años,2, Empleado, 0-1 año, Soltero, Consumo, Si, No, Si,Sobre Vehículos
+Rodrigo Alejandro Martinez Aragon," Q 19.500,00 "," Q 5.000,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehículos
+Rene Amilcar Orozco Martinez," Q 38.068,00 "," Q 5.710,00 ", 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo, Si, No, Si,Autocompras
+Fredy Aiyeser Velásquez Fuentes," Q 155.225,00 "," Q 20.000,00 ", 30 - 39 años,2, Dueño, 1-5 años, Soltero, Consumo, Si, Si, No,Sobre Vehículos
+Juan José Amado García," Q 44.688,00 "," Q 18.000,00 ", 30 - 39 años,0, Dueño, 5-10 años, Soltero, Consumo, Si, No, Si,Autocompras
+Saul Enrique Revolorio Chinchilla," Q 58.625,41 "," Q 7.000,00 ", 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo, Si, No, No,Autocompras
+David Isaac Jimenez Villatoro," Q 72.872,00 "," Q 12.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Luis Armando Mó Tiul," Q 38.027,00 "," Q 18.650,00 ", 30 - 39 años,0, Empleado, 5-10 años, Casado, Consumo, Si, No, No,Autocompras
+José Dimas Monterroso López," Q 56.687,00 "," Q 12.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Jimmy Paolo Herrera Gutiérrez," Q 17.810,00 "," Q 15.000,00 ", 30 - 39 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo, No, No, No,Autocompras
+Eduardo José González Auyon," Q 69.513,00 "," Q 10.000,00 ", 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo, Si, Si, Si,Autocompras
+Eduardo José González Auyon," Q 66.963,00 "," Q 10.000,00 ", 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Eduardo José González Auyon," Q 56.763,00 "," Q 10.000,00 ", 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Alison Dayana Hernández Fonsea de Marin," Q 111.328,00 "," Q 125.000,00 ", 18 - 29 años,2, Dueño, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Emilio Enrique Ardavin Villatoro," Q 13.000,00 "," Q 15.000,00 ", 50 años o mas,0, Dueño, 5-10 años, Casado, Consolidacion de deudas, Si, Si, No,Sobre Vehículos
+Joseph Abraham Santa Cruz Pérez," Q 59.971,00 "," Q 12.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Alison Dayana Hernández Fonsea de Marin," Q 139.378,00 "," Q 125.000,00 ", 18 - 29 años,2, Dueño, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Joseph Abraham Santa Cruz Pérez," Q 66.448,00 "," Q 12.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+José Fernando Rodas Paniagua," Q 71.038,00 "," Q 14.175,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+Miguel Angel Juárez Paredes," Q 63.294,00 "," Q 18.000,00 ", 40 - 49 años,3, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Byron Cecilio Bonilla Girón," Q 29.593,00 "," Q 9.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Darlin Yesmin Chay Lázaro," Q 12.000,00 "," Q 7.000,00 ", 18 - 29 años,1, Dueño, 1-5 años, Soltero, Capital de trabajo, No, Si, No,Sobre Vehículos
+María Beatriz Quezada Mac Donald de Díaz," Q 69.938,00 "," Q 75.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+Juan Diego Díaz Sierra," Q 195.183,00 "," Q 45.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+María Beatriz Quezada Mac Donald de Díaz," Q 198.263,00 "," Q 75.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Claudia Guisela Mendoza Cruz de Estrada," Q 97.263,00 "," Q 23.600,00 ", 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo, Si, No, Si,Autocompras
+José Salvador Robles," Q 38.628,00 "," Q 10.000,00 ", 40 - 49 años,2, Dueño, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Carlos René Contreras Chiyoque," Q 58.929,00 "," Q 10.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, Si,Autocompras
+Nelson Adolfo Vásquez Hernández," Q 241.956,00 "," Q 28.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, Si, No,Autocompras
+Héctor Daniel Rodriguez Pineda," Q 71.958,00 "," Q 80.000,00 ", 18 - 29 años,1, Dueño, 1-5 años, Soltero, Consumo, No, Si, Si,Autocompras
+Joshua Gabriel Iboy Taque," Q 20.500,00 "," Q 5.116,43 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehículos
+Beberly Roxana Matías Mendoza," Q 15.000,00 "," Q 4.200,00 ", 30 - 39 años,2, Empleado, 1-5 años, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehículos
+Diego Emanuel Sierra Barrientos," Q 23.548,00 "," Q 5.000,00 ", 30 - 39 años,2, Empleado, 5-10 años, Soltero, Salud o Medico, Si, Si, No,Sobre Vehículos
+Sofia Valentina Soria Martínez," Q 147.077,00 "," Q 10.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Gladys Elizabeth Ramírez Agustín," Q 67.366,00 "," Q 9.500,00 ", 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo, No, No, Si,Autocompras
+Edna Luz Velásquez Eguizabal," Q 30.000,00 "," Q 12.000,00 ", 50 años o mas,2, Empleado, 5-10 años, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehículos
+Ada Lis Grajeda De Paz," Q 17.800,00 "," Q 15.384,00 ", 50 años o mas,0, Empleado, 5-10 años, Soltero, Consumo, No, Si, Si,Sobre Vehículos
+Martín Humberto Martínez Fernández," Q 221.565,00 "," Q 30.000,00 ", 40 - 49 años,5, Dueño, 5-10 años, Casado, Consumo, Si, No, No,Autocompras
+Mario Carlos Girón Rodas," Q 70.630,00 "," Q 10.000,00 ", 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Luis Fernando Hernández Barrios," Q 52.250,00 "," Q 18.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo, Si, No, No,Autocompras
+Jessica Valeska Colocho Menjivar," Q 68.009,00 "," Q 10.000,00 ", 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Edson Fernando Gómez Barrera," Q 53.000,00 "," Q 20.000,00 ", 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehículos
+Oliver Rodolfo Barrientos Ricco," Q 62.997,00 "," Q 10.000,00 ", 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, No, No,Autocompras
+Manuel Arturo Castillo Calderón," Q 41.050,00 "," Q 16.000,00 ", 50 años o mas,0, Dueño, 1-5 años, Casado, Consumo, Si, No, No,Autocompras
+Carlos Eduardo Lémus Zepeda," Q 107.118,40 "," Q 100.000,00 ", 40 - 49 años,0, Dueño, 5-10 años, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehículos
+William Javier Navarro Díaz," Q 47.476,00 "," Q 6.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, No, No, Si,Autocompras
+Jairlen Manfredo Juarez Garza," Q 195.376,00 "," Q 50.000,00 ", 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Gustavo Adolfo Leche," Q 76.827,00 "," Q 17.000,00 ", 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo, No, No, Si,Autocompras
+Ana Eugenia Cabrera Vargas," Q 13.500,00 "," Q 7.050,00 ", 30 - 39 años,1, Empleado, 1-5 años, Soltero, Salud o Medico, No, Si, Si,Sobre Vehículos
+Ana Gabriela Quintanilla Izquierdo," Q 37.888,00 "," Q 4.000,00 ", 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+Keyla Mirella de los Angeles Morales Alfaro de Samayoa," Q 58.918,00 "," Q 9.500,00 ", 18 - 29 años,1, Empleado, 1-5 años, Casado, Consumo, Si, Si, Si,Autocompras
+Miguel Angel Méndez Cario," Q 64.244,00 "," Q 27.500,00 ", 50 años o mas,0, Dueño, 5-10 años, Casado, Consumo, Si, Si, Si,Autocompras
+Nancy Arabella Duque Ruiz," Q 41.917,00 "," Q 15.000,00 ", 50 años o mas,0, Dueño, 5-10 años, Soltero, Consumo, Si, Si, Si,Autocompras
+María Beatriz Quezada Mac Donald de Díaz," Q 177.628,00 "," Q 75.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Carla Maribel López Gracias De Pérez," Q 85.000,00 "," Q 6.000,00 ", 40 - 49 años,0, Empleado, 5-10 años, Casado, Capital de trabajo, No, Si, Si,Sobre Vehículos
+Nancy Arabella Duque Ruiz," Q 39.979,00 "," Q 15.000,00 ", 50 años o mas,0, Dueño, 5-10 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Jairlen Manfredo Juarez Garza," Q 23.812,00 "," Q 50.000,00 ", 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo, Si, No, Si,Autocompras
+María Celeste Orantes Martínez," Q 42.769,00 "," Q 12.000,00 ", 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo, Si, Si, Si,Autocompras
+Gelsing David Carreto López," Q 80.000,00 "," Q 15.000,00 ", 30 - 39 años,2, Dueño, 5-10 años, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehículos
+Edgar Josué Quiñonez Cardenas," Q 26.500,00 "," Q 10.200,00 ", 30 - 39 años,2, Empleado, 5-10 años, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehículos
+Ruth Esmirna Palma Soto," Q 13.000,00 "," Q 9.250,00 ", 18 - 29 años,0, Empleado, 5-10 años, Soltero, Estudios, Si, Si, Si,Sobre Vehículos
+Joshua Juan Luis Enmanuel Villatoro Duque," Q 43.976,00 "," Q 18.000,00 ", 30 - 39 años,1, Dueño, 5-10 años, Soltero, Consumo, Si, Si, No,Autocompras
+Jose Eduardo Alas Benitez," Q 29.400,00 "," Q 15.000,00 ", 50 años o mas,2, Dueño, 1-5 años, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehículos
+Axel Hernan Sarceño Orozco," Q 54.024,00 "," Q 25.000,00 ", 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo, Si, No, No,Autocompras

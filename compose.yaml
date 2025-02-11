@@ -8,7 +8,7 @@ services:
       - secrets/backend/.env
 
   landing-page:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:latest
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
     ports:
       - 4321:4321

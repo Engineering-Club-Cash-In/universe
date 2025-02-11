@@ -1,6 +1,6 @@
 services:
   backend:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:latest
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
     container_name: cci-backend
     ports:
       - 9000:9000

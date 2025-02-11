@@ -1,28 +1,16 @@
-FROM oven/bun:1.2.2 AS base
+FROM oven/bun:1.2.2 AS runtime
+WORKDIR /app
 
-WORKDIR /usr/src/app
-
-FROM base AS install 
-RUN mkdir -p /temp/dev 
-COPY bun.lock package.json /temp/dev/
-RUN cd /temp/dev && bun install
-
-RUN mkdir -p /temp/prod
-COPY bun.lock package.json /temp/prod/
-COPY package.json /temp/prod/
-RUN cd /temp/prod && bun install
-
-FROM base AS prerelease
-COPY --from=install /temp/dev/node_modules node_modules
 COPY . .
 
-# Test step
-# ENV NODE_ENV=TEST
-# RUN bun test
-RUN cd apps/landing && bun add astro && bun run build
+RUN bun install
+RUN cd apps/landing && bun install && bun run build
 
-USER bun
-ENV PORT=4321
+# Ensure the build output is in the correct directory
+# You might need to adjust the path if the build output is different
+COPY apps/landing/dist /app/dist
+
 ENV HOST=0.0.0.0
-EXPOSE 4321/tcp
-ENTRYPOINT ["bun", "run", "apps/landing/dist/server/entry.mjs"]
+ENV PORT=4321
+EXPOSE 4321
+CMD bun run /app/dist/server/entry.mjs

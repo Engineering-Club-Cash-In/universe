@@ -1,20 +1,26 @@
 services:
+  reverse-proxy:
+    image: traefik:v3.1
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker"
+    ports:
+      - 80:80
+      - 8080:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    container_name: cci-reverse-proxy
+
   backend:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
     container_name: cci-backend
-    ports:
-      - 9000:9000
     env_file:
       - secrets/backend/.env
 
   landing-page:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
-    ports:
-      - 4321:4321
 
   investment-calculator:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:latest
     container_name: cci-investment-calculator
-    ports:
-      - 80:80

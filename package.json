@@ -1,0 +1,8 @@
+{
+  "name": "@cci/universe",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}

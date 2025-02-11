@@ -1,0 +1,463 @@
+---
+import Section from "./Section.astro";
+import Card from "../ui/Card.astro";
+---
+
+<Section id="apply">
+  <div class="container mx-auto flex flex-col gap-5 px-4 mb-10 items-center">
+    <h1>¡Aplica con nosotros!</h1>
+    <div class="w-full md:w-1/2">
+      <Card isUnderline>
+        <div
+          id="form-container"
+          class="flex flex-col px-5 gap-5 justify-center items-center mt-2 mb-5"
+        >
+          <h2>Ingresa tus datos</h2>
+          <div class="flex flex-col gap-5 w-full">
+            <div class="grid grid-cols-[100px_1fr] gap-5 items-center">
+              <label for="dpi">DPI</label>
+              <input
+                type="text"
+                id="dpi"
+                class="w-full p-2 border border-black rounded-[14px] text-black outline-none text-center"
+                placeholder="0000 00000 0000"
+              />
+            </div>
+            <div class="grid grid-cols-[100px_1fr] gap-5 items-center">
+              <label for="amount">Monto</label>
+              <div class="relative w-full">
+                <span class="absolute left-3 top-1/2 transform -translate-y-1/2"
+                  >Q.</span
+                >
+                <input
+                  type="number"
+                  id="amount"
+                  class="w-full p-2 pl-8 border border-black rounded-[14px] text-black outline-none text-center"
+                  placeholder="0.00"
+                />
+              </div>
+            </div>
+            <div class="grid grid-cols-[100px_1fr] gap-5 items-center">
+              <label for="email">Email</label>
+              <input
+                type="email"
+                id="email"
+                class="w-full p-2 border border-black rounded-[14px] text-black outline-none text-center"
+                placeholder="correo@ejemplo.com"
+              />
+            </div>
+          </div>
+          <div class="flex flex-col gap-5 justify-center items-center w-full">
+            <button id="submit" type="submit" class="btn-primary w-full"
+              >Continuar</button
+            >
+          </div>
+        </div>
+
+        <div
+          id="loading-step-1"
+          class="hidden flex-col items-center justify-center p-10"
+        >
+          <div
+            class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"
+          >
+          </div>
+          <p class="mt-4">Verificando información...</p>
+        </div>
+
+        <div id="confirmation-container" class="hidden flex-col gap-5 p-5">
+          <h2 class="mb-5">Confirma tus datos</h2>
+          <div class="grid grid-cols-2 gap-4">
+            <p>Nombre completo:</p>
+            <p id="fullName"></p>
+            <p>DPI:</p>
+            <p id="dpiConfirm"></p>
+            <p>Fecha de nacimiento:</p>
+            <p id="birthDate"></p>
+            <p>Monto solicitado:</p>
+            <p id="amountConfirm"></p>
+          </div>
+          <div class="flex flex-col sm:flex-row gap-4 mt-4">
+            <button id="back" class="btn-secondary w-full">Regresar</button>
+            <button id="confirm" class="btn-primary w-full">Confirmar</button>
+          </div>
+        </div>
+
+        <div id="upload-container" class="hidden flex-col gap-5 p-5">
+          <h2 class="mb-5">Sube tus últimos 3 estados de cuenta bancarios</h2>
+          <div
+            id="dropzone"
+            class="border-4 border-dashed border-gray-300 rounded-lg p-12 text-center cursor-pointer transition-all duration-200 hover:bg-gray-50 hover:border-primary-600 hover:border-[6px] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <input
+              type="file"
+              id="file-input"
+              class="hidden"
+              accept=".pdf"
+              multiple
+            />
+            <div class="space-y-4">
+              <p class="text-lg">
+                Arrastra tus archivos aquí o haz clic para seleccionar
+              </p>
+              <p class="text-sm text-gray-500">Solo archivos PDF (máximo 3)</p>
+            </div>
+          </div>
+
+          <div id="file-list" class="mt-4 space-y-2"></div>
+
+          <div class="flex flex-col sm:flex-row gap-4 mt-6">
+            <button id="back-to-confirm" class="btn-secondary w-full"
+              >Regresar</button
+            >
+            <button id="submit-documents" class="btn-primary w-full"
+              >Enviar documentos</button
+            >
+          </div>
+        </div>
+
+        <div
+          id="loading-step-2"
+          class="hidden flex-col items-center justify-center p-10"
+        >
+          <div
+            class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"
+          >
+          </div>
+          <p class="mt-4">Procesando documentos...</p>
+        </div>
+
+        <div
+          id="results-container"
+          class="hidden flex-col gap-5 p-5 text-center"
+        >
+          <div class="bg-green-50 p-8 rounded-lg">
+            <h2 class="text-2xl font-bold text-green-700 mb-4">
+              ¡Solicitud Recibida!
+            </h2>
+            <p class="text-gray-700">
+              Tu solicitud de crédito se encuentra en proceso de aprobación. Nos
+              pondremos en contacto contigo pronto para informarte sobre el
+              resultado.
+            </p>
+          </div>
+          <div class="flex gap-4 mt-6">
+            <button id="finish" class="btn-primary w-full">Finalizar</button>
+          </div>
+        </div>
+      </Card>
+    </div>
+  </div>
+</Section>
+
+<script>
+  import { actions } from "astro:actions";
+
+  let leadId: number; // Declare at script level
+
+  const dpi = document.getElementById("dpi") as HTMLInputElement;
+  const amount = document.getElementById("amount") as HTMLInputElement;
+  const email = document.getElementById("email") as HTMLInputElement;
+  const button = document.getElementById("submit");
+  const formContainer = document.getElementById("form-container");
+  const loadingStep1 = document.getElementById("loading-step-1");
+  const loadingStep2 = document.getElementById("loading-step-2");
+  const confirmationContainer = document.getElementById(
+    "confirmation-container"
+  );
+  const backButton = document.getElementById("back");
+  const confirmButton = document.getElementById("confirm");
+
+  if (
+    button &&
+    dpi &&
+    amount &&
+    email &&
+    formContainer &&
+    confirmationContainer &&
+    loadingStep1
+  ) {
+    button.addEventListener("click", async () => {
+      formContainer.classList.add("hidden");
+      loadingStep1.classList.remove("hidden");
+
+      try {
+        // Get RENAP data
+        let renapResponse = await actions.getRenapData({
+          dpi: dpi.value,
+        });
+        console.log(renapResponse);
+        if (renapResponse.error) {
+          //throw new Error(renapResponse.error.message);
+          // use a mock user
+          renapResponse = {
+            data: {
+              message: "",
+              status: 200,
+              success: true,
+              error: null,
+              data: {
+                firstName: "Juan",
+                secondName: "Pablo",
+                thirdName: "",
+                firstLastName: "Gomez",
+                secondLastName: "Perez",
+                marriedLastName: "",
+                birthDate: "1990-01-01",
+                dpi: "0000 00000 0000",
+                gender: "M",
+                civil_status: "S",
+                nationality: "GUATEMALTECA",
+                borned_in: "GUATEMALA",
+                department_borned_in: "GUATEMALA",
+                municipality_borned_in: "GUATEMALA",
+                cedula_order: "",
+                picture: "",
+                cedula_register: "",
+                deathDate: "",
+                ocupation: "",
+                dpi_expiracy_date: "2030-01-01",
+              },
+            },
+            error: undefined,
+          };
+        }
+        if (!renapResponse.data) {
+          throw new Error("No data received from RENAP");
+        }
+        // Submit lead immediately
+        const { data, error } = await actions.submitLead({
+          name: `${renapResponse.data.data.firstName} ${renapResponse.data.data.secondName || ""} ${renapResponse.data.data.firstLastName} ${renapResponse.data.data.secondLastName}`,
+          email: email.value,
+          phone: "",
+          desiredAmount: parseFloat(amount.value),
+        });
+
+        if (error) {
+          throw new Error(error.message);
+        }
+        if (!data.success || !data.data) {
+          throw new Error(data.message);
+        }
+        leadId = data.data.id; // Store the ID here
+
+        // Update confirmation view with RENAP data
+        const fullName = document.getElementById("fullName");
+        const dpiConfirm = document.getElementById("dpiConfirm");
+        const birthDate = document.getElementById("birthDate");
+        const amountConfirm = document.getElementById("amountConfirm");
+
+        if (fullName && dpiConfirm && birthDate && amountConfirm) {
+          fullName.textContent = `${renapResponse.data.data.firstName} ${renapResponse.data.data.secondName || ""} ${renapResponse.data.data.firstLastName} ${renapResponse.data.data.secondLastName}`;
+          dpiConfirm.textContent = renapResponse.data.data.dpi;
+          birthDate.textContent = renapResponse.data.data.birthDate;
+          amountConfirm.textContent = amount.value;
+
+          loadingStep1.classList.add("hidden");
+          confirmationContainer.classList.remove("hidden");
+        }
+      } catch (error) {
+        console.error(error);
+        alert(
+          "Hubo un error procesando tu solicitud. Por favor intenta de nuevo."
+        );
+        formContainer.classList.remove("hidden");
+        loadingStep1.classList.add("hidden");
+      }
+    });
+
+    backButton?.addEventListener("click", () => {
+      formContainer.classList.remove("hidden");
+      confirmationContainer.classList.add("hidden");
+    });
+
+    confirmButton?.addEventListener("click", () => {
+      confirmationContainer?.classList.add("hidden");
+      uploadContainer?.classList.remove("hidden");
+    });
+  }
+
+  const uploadContainer = document.getElementById("upload-container");
+  const dropzone = document.getElementById("dropzone");
+  const fileInput = document.getElementById("file-input") as HTMLInputElement;
+  const fileList = document.getElementById("file-list");
+  let files: File[] = [];
+
+  if (dropzone && fileInput && fileList) {
+    dropzone.addEventListener("click", () => fileInput.click());
+
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropzone.classList.add("border-primary", "bg-gray-50", "scale-[1.02]");
+    });
+
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("border-primary", "bg-gray-50", "scale-[1.02]");
+    });
+
+    dropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("border-primary", "bg-gray-50", "scale-[1.02]");
+
+      const newFiles = Array.from(e.dataTransfer?.files || []).filter(
+        (file) => file.type === "application/pdf"
+      );
+
+      handleFiles(newFiles);
+    });
+
+    fileInput.addEventListener("change", () => {
+      const newFiles = Array.from(fileInput.files || []);
+      handleFiles(newFiles);
+    });
+
+    function handleFiles(newFiles: File[]) {
+      if (files.length + newFiles.length > 3) {
+        alert("Solo puedes subir 3 archivos");
+        return;
+      }
+
+      files = [...files, ...newFiles];
+      updateFileList();
+    }
+
+    function updateFileList() {
+      if (!fileList) {
+        console.error("File list not found");
+        alert("File list not found");
+        return;
+      }
+      fileList.innerHTML = "";
+      files.forEach((file, index) => {
+        const fileElement = document.createElement("div");
+        fileElement.className =
+          "flex justify-between items-center p-2 bg-gray-50 rounded";
+        fileElement.innerHTML = `
+          <span>${file.name}</span>
+          <button class="text-red-500 hover:text-red-700" data-index="${index}">
+            Eliminar
+          </button>
+        `;
+        fileList.appendChild(fileElement);
+      });
+
+      // Add event listeners for delete buttons
+      fileList.querySelectorAll("button").forEach((button) => {
+        button.addEventListener("click", (e) => {
+          const index = parseInt(
+            (e.currentTarget as HTMLButtonElement).dataset.index || "0"
+          );
+          files.splice(index, 1);
+          updateFileList();
+        });
+      });
+    }
+  }
+
+  document.getElementById("back-to-confirm")?.addEventListener("click", () => {
+    uploadContainer?.classList.add("hidden");
+    confirmationContainer?.classList.remove("hidden");
+  });
+
+  document
+    .getElementById("submit-documents")
+    ?.addEventListener("click", async () => {
+      if (files.length !== 3) {
+        alert("Por favor sube los 3 documentos requeridos");
+        return;
+      }
+
+      const uploadContainer = document.getElementById("upload-container");
+      uploadContainer?.classList.add("hidden");
+      loadingStep2?.classList.remove("hidden");
+
+      try {
+        const filesToSend = await Promise.all(
+          files.map(async (file, index) => {
+            return new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64String = reader.result as string;
+                resolve({
+                  [`file${index + 1}`]: base64String.split(",")[1],
+                });
+              };
+              reader.readAsDataURL(file);
+            });
+          })
+        );
+
+        const fileData = Object.assign({}, ...filesToSend);
+        const checkCreditRecordInput = {
+          leadId: leadId,
+          ...fileData,
+        };
+        const { data, error } = await actions.checkCreditRecord(
+          checkCreditRecordInput
+        );
+
+        if (error) {
+          throw new Error(error.message);
+        }
+        if (!data.success) {
+          throw new Error(data.message);
+        }
+
+        // Show success message
+        const resultsContainer = document.getElementById("results-container");
+        if (resultsContainer) {
+          resultsContainer.innerHTML = `
+            <div class="text-center p-8">
+              <h2 class="text-2xl font-bold text-green-700 mb-4">¡Documentos Recibidos!</h2>
+              <p class="text-gray-700 mb-6">
+                Tus documentos están siendo procesados. Te notificaremos por correo cuando tengamos una actualización.
+              </p>
+              <button id="poll-status" class="btn-primary">Verificar Estado (Debug)</button>
+            </div>
+          `;
+
+          // Add poll button listener (for debugging)
+          document
+            .getElementById("poll-status")
+            ?.addEventListener("click", async () => {
+              const pollResult = await actions.pollCreditRecord(new FormData());
+              alert(JSON.stringify(pollResult, null, 2));
+            });
+
+          loadingStep2?.classList.add("hidden");
+          resultsContainer?.classList.remove("hidden");
+        }
+      } catch (error) {
+        console.error("Error processing files:", error);
+        alert(
+          "Hubo un error procesando los archivos. Por favor intenta de nuevo."
+        );
+        uploadContainer?.classList.remove("hidden");
+        loadingStep2?.classList.add("hidden");
+      }
+    });
+
+  // Handle back button
+  document.getElementById("back-to-upload")?.addEventListener("click", () => {
+    document.getElementById("results-container")?.classList.add("hidden");
+    document.getElementById("upload-container")?.classList.remove("hidden");
+  });
+
+  // Handle finish button
+  document.getElementById("finish")?.addEventListener("click", () => {
+    window.location.href = "/"; // Or wherever you want to redirect
+  });
+</script>
+
+<style>
+  /* Remove arrows/spinners from number input */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
+  input[type="number"] {
+    -moz-appearance: textfield; /* Firefox */
+  }
+</style>

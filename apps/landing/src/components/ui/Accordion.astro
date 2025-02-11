@@ -1,0 +1,55 @@
+---
+import AccordionItem from "./AccordionItem.astro";
+
+const content = [
+  {
+    index: 1,
+    title: "Consulta Personalizada",
+    description:
+      "Durante nuestra primera consulta, analizaremos tus objetivos financieros y automotrices, además de conocer tus necesidades específicas, para ofrecerte las mejores opciones de financiamiento y/o inversión.",
+  },
+  {
+    index: 2,
+    title: "Evaluación de Opciones",
+    description:
+      "Evaluaremos las mejores opciones de financiamiento, compra y venta de vehículos, adaptadas a tu situación. Esto incluye la elección de tasas competitivas y opciones de pago flexibles.",
+  },
+  {
+    index: 3,
+    title: "Proceso de Financiamiento",
+    description:
+      "Te guiamos a través de un proceso de financiamiento rápido y sencillo, asegurándonos de que obtengas la tasa más conveniente y el préstamo adecuado para tu compra de carro.",
+  },
+  {
+    index: 4,
+    title: "Asesoría en Venta de Vehículos",
+    description:
+      "Te ayudamos a publicar y vender tu vehículo en línea de manera segura, con todo el respaldo legal y la garantía de que tu transacción será rápida y confiable.",
+  },
+  {
+    index: 5,
+    title: "Inversión Rentable",
+    description:
+      "Ofrecemos opciones de inversión con tasas de interés atractivas para que los inversionistas obtengan altos rendimientos, asegurando que tu capital crezca de forma segura y efectiva.",
+  },
+  {
+    index: 6,
+    title: "Seguimiento y Soporte Continuo",
+    description:
+      "Nuestro compromiso no termina con la transacción. Ofrecemos seguimiento continuo y soporte personalizado para asegurarnos de que tu experiencia con nosotros sea siempre satisfactoria.",
+  },
+];
+
+---
+
+{
+  content.map((item) => {
+    return (
+      <AccordionItem
+        index={item.index}
+        title={item.title}
+        description={item.description}
+      />
+    );
+  })
+}

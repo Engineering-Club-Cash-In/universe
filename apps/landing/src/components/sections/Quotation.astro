@@ -1,0 +1,267 @@
+---
+import Section from "./Section.astro";
+import type { Car } from "../../data/types";
+import cardb from "../../data/cardb.json";
+
+// Process the car database
+const cars = cardb as unknown as Car[];
+
+// Extract unique brands
+const brands = [...new Set(cars.map((car) => car.brand))].sort();
+
+// Get current year for the year dropdown
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: 31 }, (_, i) => currentYear - i);
+
+// Create price ranges
+const priceRanges = [
+  { value: "15000", label: "Hasta Q.15,000" },
+  { value: "20000", label: "Hasta Q.20,000" },
+  { value: "25000", label: "Hasta Q.25,000" },
+  { value: "30000", label: "Hasta Q.30,000" },
+  { value: "50000", label: "Hasta Q.50,000" },
+  { value: "100000", label: "Hasta Q.100,000" },
+  { value: "200000", label: "Hasta Q.200,000" },
+  { value: "300000", label: "Hasta Q.300,000" },
+  { value: "400000", label: "Hasta Q.400,000" },
+  { value: "500000", label: "Hasta Q.500,000" },
+];
+
+// Calculate total vehicles
+const totalVehicles = cars.length;
+const formattedTotal = totalVehicles.toLocaleString("es-GT");
+---
+
+<Section>
+  <div class="max-w-7xl mx-auto p-5">
+    <h1 class="text-4xl font-bold text-center mb-6">
+      Encuentra tu vehículo ideal
+    </h1>
+    <form
+      id="searchForm"
+      class="flex flex-col gap-4 border-2 border-gray-300 rounded-md p-4"
+      onsubmit="handleSearch(event)"
+    >
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <select
+          id="marca"
+          class="w-full p-2.5 bg-white border border-gray-300 rounded-md appearance-none cursor-pointer bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'%3e%3c/polyline%3e%3c/svg%3e')] bg-no-repeat bg-[length:1em] bg-[center_right_1rem]"
+        >
+          <option value="" disabled selected>Marca</option>
+          {
+            brands.map((brand) => (
+              <option value={brand.toLowerCase()}>{brand.toUpperCase()}</option>
+            ))
+          }
+        </select>
+
+        <select
+          id="modelo"
+          class="w-full p-2.5 bg-white border border-gray-300 rounded-md appearance-none cursor-pointer bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'%3e%3c/polyline%3e%3c/svg%3e')] bg-no-repeat bg-[length:1em] bg-[center_right_1rem]"
+        >
+          <option value="" disabled selected>Modelo</option>
+        </select>
+
+        <select
+          id="precio"
+          class="w-full p-2.5 bg-white border border-gray-300 rounded-md appearance-none cursor-pointer bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'%3e%3c/polyline%3e%3c/svg%3e')] bg-no-repeat bg-[length:1em] bg-[center_right_1rem]"
+        >
+          <option value="" disabled selected>Precio hasta (Q)</option>
+          {
+            priceRanges.map((range) => (
+              <option value={range.value}>{range.label}</option>
+            ))
+          }
+        </select>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <select
+          id="año"
+          class="w-full p-2.5 bg-white border border-gray-300 rounded-md appearance-none cursor-pointer bg-[url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' stroke-linecap=\'round\' stroke-linejoin=\'round\'%3e%3cpolyline points=\'6 9 12 15 18 9\'%3e%3c/polyline%3e%3c/svg%3e')] bg-no-repeat bg-[length:1em] bg-[center_right_1rem]"
+        >
+          <option value="" disabled selected>Año</option>
+          {years.map((year) => <option value={year}>{year}</option>)}
+        </select>
+
+        <input
+          type="text"
+          placeholder="Ciudad"
+          class="w-full p-2.5 bg-white border border-gray-300 rounded-md"
+        />
+
+        <div class="w-full p-2.5 bg-primary rounded-md text-center font-bold">
+          <button class="btn-primary w-full" type="submit">
+            Buscar <span id="vehicle-count">{formattedTotal} Vehículos</span>
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</Section>
+
+<script define:vars={{ cars }}>
+  const marcaSelect = document.getElementById("marca");
+  const modeloSelect = document.getElementById("modelo");
+  const precioSelect = document.getElementById("precio");
+  const añoSelect = document.getElementById("año");
+  const vehicleCount = document.getElementById("vehicle-count");
+  const searchForm = document.getElementById("searchForm");
+
+  function updateModelos(selectedBrand) {
+    modeloSelect.innerHTML =
+      '<option value="" disabled selected>Modelo</option>';
+
+    if (selectedBrand) {
+      const models = [
+        ...new Set(
+          cars
+            .filter(
+              (car) => car.brand.toLowerCase() === selectedBrand.toLowerCase()
+            )
+            .map((car) => car.model)
+        ),
+      ].sort();
+
+      models.forEach((model) => {
+        const option = document.createElement("option");
+        option.value = model;
+        option.textContent = model;
+        modeloSelect.appendChild(option);
+      });
+    }
+  }
+
+  function updateYears(selectedBrand, selectedModel) {
+    añoSelect.innerHTML = '<option value="">Año</option>';
+
+    if (selectedBrand && selectedModel) {
+      const years = [
+        ...new Set(
+          cars
+            .filter(
+              (car) =>
+                car.brand.toLowerCase() === selectedBrand.toLowerCase() &&
+                car.model === selectedModel
+            )
+            .map((car) => car.year)
+        ),
+      ].sort((a, b) => b - a);
+
+      years.forEach((year) => {
+        const option = document.createElement("option");
+        option.value = year;
+        option.textContent = year;
+        añoSelect.appendChild(option);
+      });
+    }
+  }
+
+  function updateVehicleCount() {
+    let filteredCars = cars;
+    const selectedMarca = marcaSelect.value;
+    const selectedModelo = modeloSelect.value;
+    const selectedPrecio = Number(precioSelect.value) || Infinity;
+    const selectedAño = Number(añoSelect.value);
+    const searchButton = document.querySelector(".btn-primary");
+
+    if (selectedMarca) {
+      filteredCars = filteredCars.filter(
+        (car) => car.brand.toLowerCase() === selectedMarca.toLowerCase()
+      );
+    }
+
+    if (selectedModelo) {
+      filteredCars = filteredCars.filter((car) => car.model === selectedModelo);
+    }
+
+    if (selectedAño) {
+      filteredCars = filteredCars.filter((car) => car.year === selectedAño);
+    }
+
+    if (selectedPrecio !== Infinity) {
+      filteredCars = filteredCars.filter((car) => car.price <= selectedPrecio);
+    }
+
+    const count = filteredCars.length;
+    vehicleCount.textContent = `${count.toLocaleString("es-GT")} Vehículos`;
+
+    if (searchButton) {
+      searchButton.disabled = count === 0;
+      searchButton.style.opacity = count === 0 ? "0.5" : "1";
+      searchButton.style.cursor = count === 0 ? "not-allowed" : "pointer";
+    }
+  }
+
+  // Update models when brand changes
+  marcaSelect?.addEventListener("change", () => {
+    updateModelos(marcaSelect.value);
+    updateVehicleCount();
+  });
+
+  // Add model change event listener
+  modeloSelect?.addEventListener("change", () => {
+    updateYears(marcaSelect.value, modeloSelect.value);
+    updateVehicleCount();
+  });
+
+  // Add year change event listener
+  añoSelect?.addEventListener("change", () => {
+    updateVehicleCount();
+  });
+
+  // Add price change event listener
+  precioSelect?.addEventListener("change", () => {
+    updateVehicleCount();
+  });
+
+  // Handle form submission
+  searchForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+
+    const marca = document.getElementById("marca");
+    const modelo = document.getElementById("modelo");
+    const precio = document.getElementById("precio");
+    const año = document.getElementById("año");
+    const ciudad = document.querySelector("input[type='text']");
+
+    const params = new URLSearchParams();
+
+    if (marca?.value) params.set("marca", marca.value);
+    if (modelo?.value) params.set("modelo", modelo.value);
+    if (precio?.value) params.set("precio", precio.value);
+    if (año?.value) params.set("año", año.value);
+    if (ciudad?.value) params.set("ciudad", ciudad.value);
+
+    window.location.href = `/cars?${params.toString()}`;
+  });
+
+  // Initialize on page load
+  window.addEventListener("DOMContentLoaded", () => {
+    if (marcaSelect.value) {
+      updateModelos(marcaSelect.value);
+      updateYears(marcaSelect.value, modeloSelect.value);
+    }
+    updateVehicleCount();
+  });
+
+  function handleSearch(event) {
+    event.preventDefault();
+
+    const marca = document.getElementById("marca");
+    const modelo = document.getElementById("modelo");
+    const precio = document.getElementById("precio");
+    const año = document.getElementById("año");
+    const ciudad = document.querySelector("input[type='text']");
+
+    const params = new URLSearchParams();
+
+    if (marca.value) params.set("marca", marca.value);
+    if (modelo.value) params.set("modelo", modelo.value);
+    if (precio.value) params.set("precio", precio.value);
+    if (año.value) params.set("año", año.value);
+    if (ciudad.value) params.set("ciudad", ciudad.value);
+
+    window.location.href = `/cars?${params.toString()}`;
+  }
+</script>

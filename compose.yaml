@@ -4,8 +4,8 @@ services:
     container_name: cci-backend
     ports:
       - 9000:9000
-    secrets:
-      - cci-backend-env
+    env_file:
+      - secrets/backend/.env
 
   landing-page:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:latest
@@ -18,7 +18,3 @@ services:
     container_name: cci-investment-calculator
     ports:
       - 80:80
-
-secrets:
-  cci-backend-env:
-    file: secrets/backend.env

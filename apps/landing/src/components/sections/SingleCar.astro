@@ -1,0 +1,134 @@
+---
+// Import Lucide icons for Astro
+import { MapPin, Calendar, Gauge, Zap, Shield } from "lucide-astro";
+import { Image } from "astro:assets";
+
+interface Props {
+  id: number;
+  brand: string;
+  model: string;
+  description: string;
+  image: string;
+  price: number;
+  location: string;
+  mileage: number;
+  year: number;
+  transmission: string;
+  fuel: string;
+  features: string[];
+  seller: string;
+}
+
+const {
+  id,
+  brand = "Tesla",
+  model = "Model S",
+  description = "High-performance electric luxury sedan",
+  image = "https://hebbkx1anhila5yf.public.blob.vercel-storage.com/image-x4MB3goFY7XPWhkTj2ynm2dnFLPhBT.png",
+  price = 85000,
+  location = "Charleston, SC",
+  mileage = 1000,
+  year = 2022,
+  transmission = "Automatic",
+  fuel = "Electric",
+  features = ["Autopilot", "Heated Seats", "Wireless Charging"],
+  seller = "Default Seller",
+} = Astro.props as Props;
+---
+
+<div class="w-full max-w-4xl overflow-hidden bg-white rounded-lg border">
+  <div class="grid md:grid-cols-2 gap-6">
+    <!-- Image Section -->
+    <div class="relative aspect-[4/3] overflow-hidden">
+      <Image
+        src={image || "/placeholder.svg"}
+        alt={model}
+        width={600}
+        height={450}
+        class="object-cover w-full h-full"
+      />
+    </div>
+
+    <!-- Details Section -->
+    <div class="p-6 space-y-6">
+      <div class="space-y-2">
+        <div class="flex items-start justify-between">
+          <div>
+            <h2 class="text-2xl font-bold">{model}</h2>
+            <p class="text-gray-500">{description}</p>
+          </div>
+          <span
+            class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium"
+          >
+            Super oferta
+          </span>
+        </div>
+        <div class="flex items-center text-gray-500 gap-2">
+          <MapPin class="w-4 h-4" />
+          <span>{location}</span>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between py-4">
+        <span class="text-3xl font-bold">{price.toLocaleString()} Q</span>
+      </div>
+
+      <div class="h-px bg-gray-200"></div>
+
+      <!-- Specifications Grid -->
+      <div class="grid grid-cols-2 gap-4">
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 text-gray-500">
+            <Gauge class="w-4 h-4" />
+            <span class="text-sm">Kilometraje</span>
+          </div>
+          <p class="font-medium">{mileage.toLocaleString()} km</p>
+        </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 text-gray-500">
+            <Calendar class="w-4 h-4" />
+            <span class="text-sm">Año</span>
+          </div>
+          <p class="font-medium">{year}</p>
+        </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 text-gray-500">
+            <Shield class="w-4 h-4" />
+            <span class="text-sm">Tipo de cambio</span>
+          </div>
+          <p class="font-medium">{transmission}</p>
+        </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2 text-gray-500">
+            <Zap class="w-4 h-4" />
+            <span class="text-sm">Combustible</span>
+          </div>
+          <p class="font-medium">{fuel}</p>
+        </div>
+      </div>
+
+      <div class="h-px bg-gray-200"></div>
+
+      <!-- Features -->
+      <div class="space-y-3">
+        <h3 class="font-semibold">Características</h3>
+        <div class="flex flex-wrap gap-2">
+          {
+            features.map((feature) => (
+              <span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-sm font-medium">
+                {feature}
+              </span>
+            ))
+          }
+        </div>
+      </div>
+
+      <!-- Contact Button -->
+      <button
+        class="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-medium py-3 px-4 rounded-lg transition-colors"
+      >
+        Mostrar número
+      </button>
+    </div>
+  </div>
+</div>

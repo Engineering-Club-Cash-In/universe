@@ -65,7 +65,7 @@ export default function InvestmentCalculator() {
     const monthlyPayment = calculateMonthlyPayment(capital, interestRate, term);
     let balance = capital;
 
-    for (let month = 1; month <= term; month++) {
+    for (let month = 1; month <= term * 12; month++) {
       const interest = balance * (interestRate / 100);
       const vat = interest * 0.12; // 12% VAT
       const interestPlusVat = interest + vat;

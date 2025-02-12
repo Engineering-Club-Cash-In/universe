@@ -20,6 +20,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - letsencrypt:/letsencrypt
     container_name: cci-reverse-proxy
+    networks:
+      - traefik-network
 
   backend:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:7f87c4a32135f5e471ce247120b65c5d6277e48b124f425cd333d24f8d0e3691
@@ -31,6 +33,8 @@ services:
       - "traefik.http.routers.backend.rule=Host(`backend.server.devteamatcci.site`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=myresolver"
+    networks:
+      - traefik-network
   landing-page:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
@@ -39,6 +43,8 @@ services:
       - "traefik.http.routers.landing-page.rule=Host(`landing.server.devteamatcci.site`)"
       - "traefik.http.routers.landing-page.entrypoints=websecure"
       - "traefik.http.routers.landing-page.tls.certresolver=myresolver"
+    networks:
+      - traefik-network
 
   investment-calculator:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:latest
@@ -48,6 +54,8 @@ services:
       - "traefik.http.routers.investment-calculator.rule=Host(`investment.server.devteamatcci.site`)"
       - "traefik.http.routers.investment-calculator.entrypoints=websecure"
       - "traefik.http.routers.investment-calculator.tls.certresolver=myresolver"
+    networks:
+      - traefik-network
 
 volumes:
   letsencrypt:

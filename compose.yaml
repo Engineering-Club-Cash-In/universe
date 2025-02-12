@@ -51,3 +51,6 @@ services:
 
 volumes:
   letsencrypt:
+networks:
+  traefik-network:
+    external: true

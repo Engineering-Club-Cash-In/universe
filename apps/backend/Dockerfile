@@ -6,7 +6,6 @@ FROM base AS install
 
 RUN mkdir -p /temp/prod
 COPY bun.lock package.json /temp/prod/
-COPY package.json /temp/prod/
 COPY . /temp/prod/
 RUN cd /temp/prod && bun install
 

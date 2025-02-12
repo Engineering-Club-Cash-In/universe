@@ -13,7 +13,7 @@ services:
     container_name: cci-reverse-proxy
 
   backend:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:7f87c4a32135f5e471ce247120b65c5d6277e48b124f425cd333d24f8d0e3691
     container_name: cci-backend
     env_file:
       - secrets/backend/.env

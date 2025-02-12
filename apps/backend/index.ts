@@ -22,5 +22,7 @@ export type AppRouter = typeof appRouter;
 const server = createHTTPServer({
   router: appRouter,
 });
-
+server.on("listening", () => {
+  console.log("Server is listening on port 9000");
+});
 server.listen(9000);

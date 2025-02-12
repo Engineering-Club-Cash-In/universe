@@ -5,10 +5,10 @@ on:
     branches: ["main"]
 
 env:
-  AWS_REGION: us-east-1 # set this to your preferred AWS region, e.g. us-west-1
-  ECR_BACKEND_REPOSITORY: cci/backend # set this to your Amazon ECR repository name
-  ECR_LANDING_REPOSITORY: cci/landing # set this to your Amazon ECR repository name
-  ECR_INVESTMENT_REPOSITORY: cci/investment # set this to your Amazon ECR repository name
+  AWS_REGION: us-east-1
+  ECR_BACKEND_REPOSITORY: cci/backend
+  ECR_LANDING_REPOSITORY: cci/landing
+  ECR_INVESTMENT_REPOSITORY: cci/investment
 
 permissions:
   contents: read

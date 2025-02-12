@@ -42,7 +42,7 @@ interface AmortizationRow {
 export default function InvestmentCalculator() {
   const [capital, setCapital] = useState<number>(7591.11);
   const [interestRate, setInterestRate] = useState<number>(1.5);
-  const [term, setTerm] = useState<number>(12);
+  const [term, setTerm] = useState<number>(1);
   const [investorPercentage, setInvestorPercentage] = useState<number>(70);
 
   // Calculate monthly payment using PMT formula
@@ -52,9 +52,10 @@ export default function InvestmentCalculator() {
     term: number
   ) => {
     const monthlyRate = (rate * 1.12) / 100;
+    const totalMonths = term * 12; // Convert years to months
     return (
-      (principal * monthlyRate * Math.pow(1 + monthlyRate, term)) /
-      (Math.pow(1 + monthlyRate, term) - 1)
+      (principal * monthlyRate * Math.pow(1 + monthlyRate, totalMonths)) /
+      (Math.pow(1 + monthlyRate, totalMonths) - 1)
     );
   };
 
@@ -130,7 +131,7 @@ export default function InvestmentCalculator() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="term">Plazo (Meses)</Label>
+              <Label htmlFor="term">Plazo (Años)</Label>
               <Select
                 value={term.toString()}
                 onValueChange={(value) => setTerm(Number(value))}
@@ -139,8 +140,13 @@ export default function InvestmentCalculator() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="12">12</SelectItem>
-                  <SelectItem value="24">24</SelectItem>
+                  <SelectItem value="1">1</SelectItem>
+                  <SelectItem value="2">2</SelectItem>
+                  <SelectItem value="3">3</SelectItem>
+                  <SelectItem value="4">4</SelectItem>
+                  <SelectItem value="5">5</SelectItem>
+                  <SelectItem value="6">6</SelectItem>
+                  <SelectItem value="7">7</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -199,9 +205,6 @@ export default function InvestmentCalculator() {
                 <TableRow>
                   <TableHead>Mes</TableHead>
                   <TableHead className="text-right">Saldo inicial</TableHead>
-                  <TableHead className="text-right">Intereses</TableHead>
-                  <TableHead className="text-right">IVA</TableHead>
-                  <TableHead className="text-right">Interés + IVA</TableHead>
                   <TableHead className="text-right">Cuota</TableHead>
                   <TableHead className="text-right">Interés + IVA</TableHead>
                   <TableHead className="text-right">Amortización</TableHead>
@@ -214,15 +217,6 @@ export default function InvestmentCalculator() {
                     <TableCell>{row.month}</TableCell>
                     <TableCell className="text-right">
                       Q {row.initialBalance.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      Q {row.interest.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      Q {row.vat.toFixed(2)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      Q {row.interestPlusVat.toFixed(2)}
                     </TableCell>
                     <TableCell className="text-right">
                       Q {row.payment.toFixed(2)}

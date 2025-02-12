@@ -14,4 +14,6 @@ FROM base AS runner
 COPY --from=install /temp/prod/node_modules node_modules
 COPY . .
 
+EXPOSE 9000
+
 ENTRYPOINT ["bun", "run", "apps/backend/index.ts"]

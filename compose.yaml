@@ -1,12 +1,13 @@
 services:
   reverse-proxy:
-    image: traefik:v3.1
+    image: traefik:v3.3
     command:
       - "--api.insecure=true"
       - "--providers.docker"
+      - "--log.level=DEBUG"
     ports:
-      - 80:80
-      - 8080:8080
+      - "80:80"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     container_name: cci-reverse-proxy
@@ -17,16 +18,16 @@ services:
     env_file:
       - secrets/backend/.env
     labels:
-      - traefik.http.routers.backend.rule=Host(`api.server.devteamatcci.site`)
+      - "traefik.http.routers.backend.rule=Host(`backend.server.devteamatcci.site`)"
 
   landing-page:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
     labels:
-      - traefik.http.routers.landing-page.rule=Host(`landing.server.devteamatcci.site`)
+      - "traefik.http.routers.landing-page.rule=Host(`landing.server.devteamatcci.site`)"
 
   investment-calculator:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:latest
     container_name: cci-investment-calculator
     labels:
-      - traefik.http.routers.investment-calculator.rule=Host(`investment-calculator.server.devteamatcci.site`)
+      - "traefik.http.routers.investment-calculator.rule=Host(`investment-calculator.server.devteamatcci.site`)"

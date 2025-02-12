@@ -100,7 +100,7 @@ export default function InvestmentCalculator() {
       <Card className="mb-8">
         <CardHeader>
           <CardTitle className="text-4xl font-bold">
-            Detalle de Inversionista
+            Calculadora de Inversión - Club Cash In
           </CardTitle>
           <CardDescription>
             *El interés siempre es calculado sobre saldo

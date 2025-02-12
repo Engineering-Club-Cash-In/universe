@@ -1,6 +1,6 @@
 services:
   watchtower:
-    image: containrrr/watchtower:latest
+    image: containrrr/watchtower:1.7.1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     command:
@@ -16,7 +16,7 @@ services:
     image: traefik:v3.3
     command:
       - "--providers.docker"
-      - "--log.level=ERROR"
+      - "--log.level=WARN"
       - "--providers.docker.exposedbydefault=false"
       - "--entryPoints.websecure.address=:443"
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"

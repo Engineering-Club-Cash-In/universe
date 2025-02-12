@@ -53,7 +53,7 @@ jobs:
           fi
 
           if [[ "${{ steps.changed-files.outputs.all_changed_files }}" == *apps/backend/* ]]; then
-            docker build -f apps/backend/Dockerfile . -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG
+            docker build -f apps/backend/Dockerfile . -t $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG --no-cache
             docker tag $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:production
             docker push $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:$IMAGE_TAG
             docker push $ECR_REGISTRY/$ECR_BACKEND_REPOSITORY:production
@@ -61,7 +61,7 @@ jobs:
           fi
 
           if [[ "${{ steps.changed-files.outputs.all_changed_files }}" == *apps/landing/* ]]; then
-            docker build -f apps/landing/Dockerfile . -t $ECR_REGISTRY/$ECR_LANDING_REPOSITORY:$IMAGE_TAG
+            docker build -f apps/landing/Dockerfile . -t $ECR_REGISTRY/$ECR_LANDING_REPOSITORY:$IMAGE_TAG --no-cache
             docker tag $ECR_REGISTRY/$ECR_LANDING_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_LANDING_REPOSITORY:production
             docker push $ECR_REGISTRY/$ECR_LANDING_REPOSITORY:$IMAGE_TAG
             docker push $ECR_REGISTRY/$ECR_LANDING_REPOSITORY:production
@@ -70,7 +70,7 @@ jobs:
 
           if [[ "${{ steps.changed-files.outputs.all_changed_files }}" == *apps/investment-calculator/* ]]; then
             cd apps/investment-calculator
-            docker build . -t $ECR_REGISTRY/$ECR_INVESTMENT_REPOSITORY:$IMAGE_TAG
+            docker build . -t $ECR_REGISTRY/$ECR_INVESTMENT_REPOSITORY:$IMAGE_TAG --no-cache
             docker tag $ECR_REGISTRY/$ECR_INVESTMENT_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_INVESTMENT_REPOSITORY:production
             docker push $ECR_REGISTRY/$ECR_INVESTMENT_REPOSITORY:$IMAGE_TAG
             docker push $ECR_REGISTRY/$ECR_INVESTMENT_REPOSITORY:production

@@ -5,11 +5,17 @@ services:
       - "--api.insecure=true"
       - "--providers.docker"
       - "--log.level=DEBUG"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entryPoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=luis.r@clubcashin.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
     ports:
-      - "80:80"
+      - "443:443"
       - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - letsencrypt:/letsencrypt
     container_name: cci-reverse-proxy
 
   backend:
@@ -18,8 +24,10 @@ services:
     env_file:
       - secrets/backend/.env
     labels:
+      - "traefik.enable=true"
       - "traefik.http.routers.backend.rule=Host(`backend.server.devteamatcci.site`)"
-
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls.certresolver=myresolver"
   landing-page:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
@@ -31,3 +39,6 @@ services:
     container_name: cci-investment-calculator
     labels:
       - "traefik.http.routers.investment-calculator.rule=Host(`investment.server.devteamatcci.site`)"
+
+volumes:
+  letsencrypt:

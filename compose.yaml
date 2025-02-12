@@ -32,13 +32,19 @@ services:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
     container_name: cci-landing
     labels:
+      - "traefik.enable=true"
       - "traefik.http.routers.landing-page.rule=Host(`landing.server.devteamatcci.site`)"
+      - "traefik.http.routers.landing-page.entrypoints=websecure"
+      - "traefik.http.routers.landing-page.tls.certresolver=myresolver"
 
   investment-calculator:
     image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:latest
     container_name: cci-investment-calculator
     labels:
+      - "traefik.enable=true"
       - "traefik.http.routers.investment-calculator.rule=Host(`investment.server.devteamatcci.site`)"
+      - "traefik.http.routers.investment-calculator.entrypoints=websecure"
+      - "traefik.http.routers.investment-calculator.tls.certresolver=myresolver"
 
 volumes:
   letsencrypt:

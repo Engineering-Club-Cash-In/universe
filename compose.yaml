@@ -1,9 +1,22 @@
 services:
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - "--label-enable"
+      - "--interval"
+      - "30"
+    networks:
+      - traefik-network
+    restart: always
+    container_name: cci-watchtower
+
   reverse-proxy:
     image: traefik:v3.3
     command:
       - "--providers.docker"
-      - "--log.level=DEBUG"
+      - "--log.level=WARN"
       - "--providers.docker.exposedbydefault=false"
       - "--entryPoints.websecure.address=:443"
       - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
@@ -24,7 +37,7 @@ services:
       - traefik-network
 
   backend:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:7f87c4a32135f5e471ce247120b65c5d6277e48b124f425cd333d24f8d0e3691
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/backend:production
     container_name: cci-backend
     env_file:
       - secrets/backend/.env
@@ -33,27 +46,31 @@ services:
       - "traefik.http.routers.backend.rule=Host(`backend.server.devteamatcci.site`)"
       - "traefik.http.routers.backend.entrypoints=websecure"
       - "traefik.http.routers.backend.tls.certresolver=myresolver"
+      - "com.centurylinklabs.watchtower.enable=true"
     networks:
       - traefik-network
   landing-page:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:6d8f10e7cd49193716de53333799712b864811d9c90aac9e5ff12bc6ecc28330
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/landing:production
     container_name: cci-landing
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.landing-page.rule=Host(`landing.server.devteamatcci.site`)"
       - "traefik.http.routers.landing-page.entrypoints=websecure"
       - "traefik.http.routers.landing-page.tls.certresolver=myresolver"
+      - "com.centurylinklabs.watchtower.enable=true"
+
     networks:
       - traefik-network
 
   investment-calculator:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:latest
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:production
     container_name: cci-investment-calculator
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.investment-calculator.rule=Host(`investment.server.devteamatcci.site`)"
       - "traefik.http.routers.investment-calculator.entrypoints=websecure"
       - "traefik.http.routers.investment-calculator.tls.certresolver=myresolver"
+      - "com.centurylinklabs.watchtower.enable=true"
     networks:
       - traefik-network
 

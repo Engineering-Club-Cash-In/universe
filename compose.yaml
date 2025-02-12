@@ -58,6 +58,7 @@ services:
       - "traefik.http.routers.landing-page.entrypoints=websecure"
       - "traefik.http.routers.landing-page.tls.certresolver=myresolver"
       - "com.centurylinklabs.watchtower.enable=true"
+
     networks:
       - traefik-network
 

@@ -7,6 +7,7 @@ import {
   submitContactFormRouter,
   submitLeadRouter,
 } from "./routers/landing";
+import cors from "cors";
 
 const appRouter = router({
   hello: publicProcedureWithLogger.query(() => "Hello World"),
@@ -21,6 +22,7 @@ export type AppRouter = typeof appRouter;
 
 const server = createHTTPServer({
   router: appRouter,
+  middleware: cors(),
 });
 server.on("listening", () => {
   console.log("Server is listening on port 9000");

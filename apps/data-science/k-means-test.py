@@ -4,158 +4,183 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import silhouette_score
+import re
 
-# Load the data
-file_path = "data.csv"  # Replace with your file path
-data = pd.read_csv(file_path)
+# --------------------
+# Load and Preprocess Data
+# --------------------
 
-# Remove completely empty rows
-data.dropna(how='all', inplace=True)
+# Use 'big_data.csv' with appropriate parameters (as in random-forest.py)
+def load_and_preprocess_data(file_path="big_data.csv"):
+    with open(file_path, 'r', encoding='utf-8') as file:
+        content = file.read()
+    # Revised regex to include the "Q " in the match
+    pattern = r'(Q\s\d{1,3}(?:,\d{3})*(?:\.\d{2})?)'
+    
+    # Enclose the entire matched currency string in quotes
+    processed_content = re.sub(pattern, r'"\1"', content)
 
-# Cleaning currency and categorical values
+    # Write the processed content back to a temporary file
+    temp_file_path = 'processed_' + file_path
+    with open(temp_file_path, 'w', encoding='utf-8') as file:
+        file.write(processed_content)
+    # Load data with proper handling of quoted fields
+    data = pd.read_csv(temp_file_path, delimiter=',', quotechar='"', skipinitialspace=True, usecols=range(13))
+    # Rename columns to fix any encoding issues
+    data.rename(columns={'EDAD (RANGO DE EDAD EN A+ANE-OS)': 'EDAD (RANGO DE EDAD EN AÑOS)'}, inplace=True)
+    # Drop rows where all elements are NaN
+    data.dropna(how='all', inplace=True)
+    return data
+
 def clean_currency(value):
-    """Convert currency formatted strings (Q xx.xxx,xx) to float."""
+    """Convert currency formatted strings (e.g., 'Q 66,908.00') to float."""
     try:
-        # Remove 'Q' and spaces
-        value = value.replace('Q', '').strip()
-        # Replace points with temporary character
-        value = value.replace('.', '@')
-        # Replace comma with point
-        value = value.replace(',', '.')
-        # Replace temporary character with empty string (was thousand separator)
-        value = value.replace('@', '')
-        return float(value)
+        # Remove the currency symbol and any spaces
+        value = re.sub(r'[^\d.,]', '', value)  # Remove non-numeric characters except '.' and ','
+        # Replace comma with nothing and convert to float
+        return float(value.replace(',', ''))
     except (ValueError, AttributeError):
-        return None
+        return np.nan  # Return np.nan instead of None for better handling with pandas
+    
+data = load_and_preprocess_data()
 
+# Drop extra columns not needed for clustering
+if 'CLIENTE' in data.columns:
+    data = data.drop(['CLIENTE'], axis=1)
+if 'Cuotas pendientes actual' in data.columns:
+    data = data.drop(['Cuotas pendientes actual'], axis=1)
+
+
+# Clean the currency columns
 data['PRECIO PRODUCTO'] = data['PRECIO PRODUCTO'].apply(clean_currency)
 data['SUELDO'] = data['SUELDO'].apply(clean_currency)
+print(data['PRECIO PRODUCTO'].head())
 
-# Strip leading and trailing spaces from categorical columns
+# Fill NaN values with the mean
+data['PRECIO PRODUCTO'] = data['PRECIO PRODUCTO'].fillna(data['PRECIO PRODUCTO'].mean())
+data['SUELDO'] = data['SUELDO'].fillna(data['SUELDO'].mean())
+
+# Ensure the data types are correct
+data = data.infer_objects()
+
+# Strip extra spaces from key categorical fields
 data['EDAD (RANGO DE EDAD EN AÑOS)'] = data['EDAD (RANGO DE EDAD EN AÑOS)'].str.strip()
-data['ANTIGÜEDAD'] = data['ANTIGÜEDAD'].str.strip()
+data['ANTIGUEDAD'] = data['ANTIGUEDAD'].str.strip()
 data['ESTADO CIVIL'] = data['ESTADO CIVIL'].str.strip()
+data['OCUPACION'] = data['OCUPACION'].str.strip()
+data['TIPO DE COMPRAS'] = data['TIPO DE COMPRAS'].str.strip()
 
+# Convert DEPENDIENTES ECONOMICOS to numeric
+data['DEPENDIENTES ECONOMICOS'] = pd.to_numeric(data['DEPENDIENTES ECONOMICOS'], errors='coerce')
+data['DEPENDIENTES ECONOMICOS'] = data['DEPENDIENTES ECONOMICOS'].fillna(data['DEPENDIENTES ECONOMICOS'].mean())
 
-# Map categorical features for encoding
+# --------------------
+# Mapping Categorical Features
+# --------------------
+
+# Map the age-range
 data['EDAD (RANGO DE EDAD EN AÑOS)'] = data['EDAD (RANGO DE EDAD EN AÑOS)'].map({
-    '18 - 29 años': 0, '30 - 39 años': 1, '40 - 49 años': 2, '50 años o mas': 3
+    '18-29': 0,
+    '30-39': 1,
+    '40-49': 2,
+    '50': 3
 })
-data['OCUPACIÓN'] = data['OCUPACIÓN'].map({'Dueño': 1, 'Empleado': 0})
-data['ANTIGÜEDAD'] = data['ANTIGÜEDAD'].map({
-    '0-1 año': 0, '1-5 años': 1, '5-10 años': 2, '10 años o más': 3
+
+# For OCUPACION, handle possible variations
+data['OCUPACION'] = data['OCUPACION'].apply(lambda x: 1 if "Due" in str(x) else (0 if "Empl" in str(x) else np.nan))
+
+# Map the ANTIGUEDAD values
+data['ANTIGUEDAD'] = data['ANTIGUEDAD'].map({
+    '0-1': 0, '0-1 año': 0,
+    '1-5': 1, '1-5 años': 1,
+    '5-10': 2, '5-10 años': 2,
+    '10 años o más': 3, '10+': 3
 })
-data['ESTADO CIVIL'] = data['ESTADO CIVIL'].map({'Soltero': 0, 'Casado': 1, 'Divorciado': 2})
+
+# Map ESTADO CIVIL
+data['ESTADO CIVIL'] = data['ESTADO CIVIL'].map({
+    'Soltero': 0,
+    'Casado': 1
+})
+
+# Map UTILIZACION DINERO
 data['UTILIZACION DINERO'] = data['UTILIZACION DINERO'].apply(lambda x: 1 if x == 'Consumo' else 0)
+
+# Map VIVIENDA PROPIA, VEHICULO PROPIO, TARJETA DE CREDITO
 data['VIVIENDA PROPIA'] = data['VIVIENDA PROPIA'].apply(lambda x: 1 if x == 'Si' else 0)
 data['VEHICULO PROPIO'] = data['VEHICULO PROPIO'].apply(lambda x: 1 if x == 'Si' else 0)
 data['TARJETA DE CREDITO'] = data['TARJETA DE CREDITO'].apply(lambda x: 1 if x == 'Si' else 0)
-data['TIPO DE COMPRAS'] = data['TIPO DE COMPRAS'].map({'Autocompras': 0, 'Sobre Vehículos': 1})
 
-# Drop client name and handle missing values
-data_clean = data.drop(['CLIENTE'], axis=1)
+# Map TIPO DE COMPRAS
+data['TIPO DE COMPRAS'] = data['TIPO DE COMPRAS'].map({
+    'Autocompras': 0,
+    'Sobre Vehículos': 1,
+    'Sobre Vehiculos': 1
+})
 
-# Fill missing values in categorical columns with a placeholder or mode
-categorical_cols = data_clean.select_dtypes(include=['object']).columns
-data_clean[categorical_cols] = data_clean[categorical_cols].fillna('Unknown')
+# Fill any remaining missing values for object-type columns
+categorical_cols = data.select_dtypes(include=['object']).columns
+data[categorical_cols] = data[categorical_cols].fillna('Unknown')
 
-# Fill missing values only in numeric columns
-numeric_cols = data_clean.select_dtypes(include=[np.number]).columns
-data_clean[numeric_cols] = data_clean[numeric_cols].fillna(data_clean[numeric_cols].mean())
+# For numeric columns, fill any missing values with the column means
+numeric_cols = data.select_dtypes(include=[np.number]).columns
+data[numeric_cols] = data[numeric_cols].fillna(data[numeric_cols].mean())
 
-# Check for NaN values and print details
-nan_columns = data_clean.columns[data_clean.isnull().any()].tolist()
-if nan_columns:
-    print(f"Columns with NaN values: {nan_columns}")
-    print("Rows with NaN values:")
-    print(data_clean[data_clean.isnull().any(axis=1)])
-    raise ValueError("There are still NaN values in the data_clean DataFrame.")
+# --------------------
+# Scaling, Clustering & Visualization
+# --------------------
 
-# Scaling the features
+# Scale all features
 scaler = StandardScaler()
-X_scaled = scaler.fit_transform(data_clean)
+X_scaled = scaler.fit_transform(data)
 
-# Verify no NaN values exist after scaling
+# Ensure no NaN values remain after scaling
 if np.isnan(X_scaled).any():
     raise ValueError("NaN values found in X_scaled after scaling.")
 
-# Train K-Means with 4 clusters instead of 3
+# Train K-Means with 4 clusters
 kmeans = KMeans(n_clusters=4, random_state=42)
-data_clean['CLUSTER'] = kmeans.fit_predict(X_scaled)
+data['CLUSTER'] = kmeans.fit_predict(X_scaled)
 
-# Example new client data
+""" # Example new client data (using the same cleaned/encoded format)
 nuevo_cliente = {
     'PRECIO PRODUCTO': 150000,
     'SUELDO': 20000,
-    'EDAD (RANGO DE EDAD EN AÑOS)': 0,
+    'EDAD (RANGO DE EDAD EN AÑOS)': 0,         # (encoded value: 0 for 18-29)
     'DEPENDIENTES ECONOMICOS': 0,
-    'OCUPACIÓN': 0,
-    'ANTIGÜEDAD': 0,
-    'ESTADO CIVIL': 0,
+    'OCUPACION': 0,                          # 0 means "Empleado"
+    'ANTIGUEDAD': 0,
+    'ESTADO CIVIL': 0,                       # 0 means "Soltero"
     'UTILIZACION DINERO': 1,
     'VIVIENDA PROPIA': 1,
     'VEHICULO PROPIO': 1,
     'TARJETA DE CREDITO': 1,
-    'TIPO DE COMPRAS': 0
+    'TIPO DE COMPRAS': 0                     # 0 means "Autocompras"
 }
 
-# Convert the dictionary to DataFrame
+# Convert the new client into a DataFrame and scale it using the same scaler
 nuevo_cliente_df = pd.DataFrame([nuevo_cliente])
-
-# Scale the new client
 nuevo_cliente_scaled = scaler.transform(nuevo_cliente_df)
 
-# Predict the cluster for the new client
-cluster_asignado = kmeans.predict(nuevo_cliente_scaled)
-print(f"El nuevo cliente pertenece al clúster: {cluster_asignado[0]}")
-
-# Find similar clients
-clientes_similares = data_clean[data_clean['CLUSTER'] == cluster_asignado[0]]
-
-# Calculate the average price in the cluster
-precio_promedio = clientes_similares['PRECIO PRODUCTO'].mean()
-print(f"El precio promedio para clientes similares es: {precio_promedio} Quetzales")
-
-# Compare the new client's price with the cluster's average
-diferencia_precio = abs(nuevo_cliente['PRECIO PRODUCTO'] - precio_promedio)
-print(f"La diferencia con el precio promedio es de: {diferencia_precio} Quetzales")
-
-# Calculate average values for each cluster
-cluster_means = data_clean.groupby('CLUSTER').mean()
-print("\nCaracterísticas promedio por cluster:")
-print(cluster_means)
-
-# Plotting clusters with new client visualization
-plt.figure(figsize=(12, 8))
-
-# Create scatter plot
-scatter = plt.scatter(X_scaled[:, 0], X_scaled[:, 1], 
-                     c=data_clean['CLUSTER'], 
-                     cmap='viridis',
-                     label='Clientes existentes')
-
-# Add new client
+# Plot clusters using the first two (scaled) features (e.g., Precio and Sueldo)
+plt.figure(figsize=(10, 6))
+scatter = plt.scatter(X_scaled[:, 0], X_scaled[:, 1], c=data['CLUSTER'], cmap='viridis', label='Clientes existentes')
 plt.scatter(nuevo_cliente_scaled[:, 0], nuevo_cliente_scaled[:, 1], 
-           color='red', marker='X', s=200, 
-           label='Nuevo Cliente')
-
-# Add title and labels
+            color='red', marker='X', s=200, label='Nuevo Cliente')
 plt.title('Segmentación de Clientes por Precio y Sueldo')
 plt.xlabel('Precio Producto (normalizado)')
 plt.ylabel('Sueldo (normalizado)')
-
-# Add colorbar
-colorbar = plt.colorbar(scatter)
-colorbar.set_label('Número de Cluster')
-
-# Add legend
+cbar = plt.colorbar(scatter)
+cbar.set_label('Número de Cluster')
 plt.legend()
 plt.show()
 
-# Print detailed cluster analysis
+# --------------------
+# Detailed Cluster Analysis
+# --------------------
 print("\nAnálisis Detallado de Clusters:")
 for cluster in range(4):
-    cluster_data = data_clean[data_clean['CLUSTER'] == cluster]
+    cluster_data = data[data['CLUSTER'] == cluster]
     print(f"\nCluster {cluster}:")
     print(f"Número de clientes: {len(cluster_data)}")
     print("\nEstadísticas de Precio:")
@@ -176,60 +201,60 @@ for cluster in range(4):
     print(f"% con vehículo propio: {(cluster_data['VEHICULO PROPIO'].mean()*100):.1f}%")
     print(f"% con tarjeta de crédito: {(cluster_data['TARJETA DE CREDITO'].mean()*100):.1f}%")
     
-    # Mostrar distribución de tipos de compra
-    compras = cluster_data['TIPO DE COMPRAS'].value_counts(normalize=True) * 100
     print("\nDistribución de tipos de compra:")
+    compras = cluster_data['TIPO DE COMPRAS'].value_counts(normalize=True) * 100
     for tipo, porcentaje in compras.items():
         tipo_nombre = 'Autocompras' if tipo == 0 else 'Sobre Vehículos'
         print(f"{tipo_nombre}: {porcentaje:.1f}%")
 
-# Calculate silhouette score
+# Calculate the silhouette score for the clustering
 silhouette_avg = silhouette_score(X_scaled, kmeans.labels_)
 print(f"\nPuntuación de Silueta: {silhouette_avg:.3f}")
 
+# --------------------
 # Elbow Method
+# --------------------
 inertias = []
 K = range(1, 10)
-
 for k in K:
-    kmeans = KMeans(n_clusters=k, random_state=42)
-    kmeans.fit(X_scaled)
-    inertias.append(kmeans.inertia_)
+    km = KMeans(n_clusters=k, random_state=42)
+    km.fit(X_scaled)
+    inertias.append(km.inertia_)
 
-# Plot Elbow curve
 plt.figure(figsize=(10, 6))
 plt.plot(K, inertias, 'bx-')
 plt.xlabel('k')
-plt.ylabel('Inertia')
+plt.ylabel('Inercia')
 plt.title('Elbow Method For Optimal k')
 plt.show()
 
+# --------------------
 # Silhouette Analysis
+# --------------------
 silhouette_scores = []
 K = range(2, 10)
-
 for k in K:
-    kmeans = KMeans(n_clusters=k, random_state=42)
-    kmeans.fit(X_scaled)
-    score = silhouette_score(X_scaled, kmeans.labels_)
+    km = KMeans(n_clusters=k, random_state=42)
+    km.fit(X_scaled)
+    score = silhouette_score(X_scaled, km.labels_)
     silhouette_scores.append(score)
 
-# Plot Silhouette scores
 plt.figure(figsize=(10, 6))
 plt.plot(K, silhouette_scores, 'bx-')
 plt.xlabel('k')
-plt.ylabel('Silhouette Score')
+plt.ylabel('Puntuación de Silueta')
 plt.title('Silhouette Score vs k')
 plt.show()
 
-# Print detailed statistics for each cluster
+# Print detailed statistics for each cluster again (optional)
 print("\nEstadísticas detalladas por cluster:")
-for cluster in range(len(cluster_means)):
+for cluster in range(4):
+    cluster_data = data[data['CLUSTER'] == cluster]
     print(f"\nCluster {cluster}:")
     print("Estadísticas de precio:")
-    cluster_data = data_clean[data_clean['CLUSTER'] == cluster]
     print(f"Mínimo: Q{cluster_data['PRECIO PRODUCTO'].min():,.2f}")
     print(f"Máximo: Q{cluster_data['PRECIO PRODUCTO'].max():,.2f}")
     print(f"Promedio: Q{cluster_data['PRECIO PRODUCTO'].mean():,.2f}")
     print(f"Mediana: Q{cluster_data['PRECIO PRODUCTO'].median():,.2f}")
     print(f"Número de clientes: {len(cluster_data)}")
+ """

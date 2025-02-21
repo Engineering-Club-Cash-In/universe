@@ -4,6 +4,13 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/lralda/.docker/config.json:/config.json
+      - helper:/go/bin
+    environment:
+      - HOME=/
+      - PATH=$PATH:/go/bin
+      - AWS_REGION=us-east-1
+    env_file:
+      - secrets/watchtower/.env
     command:
       - "--label-enable"
       - "--interval"
@@ -76,6 +83,8 @@ services:
       - traefik-network
 
 volumes:
+  helper:
+    external: true
   letsencrypt:
 networks:
   traefik-network:

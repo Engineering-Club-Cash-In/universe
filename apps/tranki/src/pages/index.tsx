@@ -1,5 +1,3 @@
-"use client";
-
 import CCILogo from "/assets/landing/cci-logo.svg";
 import InstagramIcon from "/assets/landing/ig.svg";
 import FacebookIcon from "/assets/landing/fb.svg";

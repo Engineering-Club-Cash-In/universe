@@ -8,10 +8,12 @@ import FacebookLogo from "/assets/register/fb.svg";
 import LinkedInLogo from "/assets/register/in.svg";
 import YoutubeLogo from "/assets/register/yt.svg";
 
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-
+import { register } from "../services/eden";
+import { createCrmPerson, getRenapData } from "../services/eden";
 export default function Register() {
+  const navigate = useNavigate();
   const searchParams = new URLSearchParams(window.location.search);
   const initialDpi = searchParams.get("dpi") || "";
 
@@ -34,8 +36,13 @@ export default function Register() {
     password: "",
   });
 
-  const validateForm = (e: React.FormEvent) => {
+  const [isLoading, setIsLoading] = useState(false);
+  const [serverError, setServerError] = useState("");
+
+  const validateForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    setServerError("");
+
     const newErrors = {
       dpi: "",
       email: "",
@@ -62,8 +69,38 @@ export default function Register() {
 
     // If no errors, proceed with form submission
     if (!Object.values(newErrors).some((error) => error !== "")) {
-      // Handle form submission here
-      console.log("Form submitted:", formData);
+      try {
+        setIsLoading(true);
+        const result = await register(formData.email, formData.password);
+
+        if (!result) {
+          setServerError("Error al registrar usuario");
+          return;
+        }
+
+        if (result.success && result.user) {
+          // Store user ID instead, we'll use it for verification
+          localStorage.setItem("userId", result.user.id);
+          const renapData = await getRenapData(formData.dpi);
+          console.log("Renap Data:", renapData);
+          const crmPerson = await createCrmPerson(
+            formData.email,
+            renapData?.data.firstName || "",
+            renapData?.data.firstLastName || "",
+            renapData?.data.department_borned_in || "",
+            renapData?.data.picture || ""
+          );
+          console.log("CRM Person:", crmPerson);
+          navigate({ to: "/login" });
+        } else {
+          setServerError(result.error || "Error al registrar usuario");
+        }
+      } catch (error) {
+        console.error("Registration error:", error);
+        setServerError("Error al conectar con el servidor");
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -155,6 +192,13 @@ export default function Register() {
           <p className="w-full text-black text-lg">
             Para continuar el proceso, ingresa los siguientes datos:
           </p>
+
+          {serverError && (
+            <div className="w-full p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+              {serverError}
+            </div>
+          )}
+
           <form className="flex flex-col w-full gap-4" onSubmit={validateForm}>
             <div className="flex flex-col w-full gap-2">
               <label htmlFor="dpi" className="text-black text-lg">
@@ -221,9 +265,12 @@ export default function Register() {
             </div>
             <button
               type="submit"
-              className="bg-purple w-1/4 text-white text-lg font-bold px-4 py-2 rounded-full mt-8 hover:bg-purple/80 hover:scale-105 transition-all cursor-pointer"
+              disabled={isLoading}
+              className={`bg-purple w-1/4 text-white text-lg font-bold px-4 py-2 rounded-full mt-8 hover:bg-purple/80 hover:scale-105 transition-all ${
+                isLoading ? "opacity-70 cursor-not-allowed" : "cursor-pointer"
+              }`}
             >
-              Continuar
+              {isLoading ? "Procesando..." : "Continuar"}
             </button>
           </form>
         </div>

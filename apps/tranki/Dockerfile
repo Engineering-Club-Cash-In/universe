@@ -1,18 +1,13 @@
-FROM oven/bun:1.2.2 AS base
+FROM nginx:latest
 
-WORKDIR /app
+# Remove default nginx static assets
+RUN rm -rf /usr/share/nginx/html/*
 
-COPY package.json ./
+# Copy pre-built files to nginx html directory
+COPY dist/ /usr/share/nginx/html/
 
-RUN bun install
-
-COPY . .
-
-RUN bun run build
-
-FROM nginx:latest AS production
-
-COPY --from=base /app/dist /usr/share/nginx/html
+# If you have a custom nginx configuration
+COPY ngingx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
 

@@ -11,7 +11,7 @@ import YoutubeLogo from "/assets/register/yt.svg";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { register } from "../services/eden";
-import { createCrmPerson, getRenapData } from "../services/eden";
+import { getRenapData } from "../services/eden";
 export default function Register() {
   const navigate = useNavigate();
   const searchParams = new URLSearchParams(window.location.search);
@@ -83,14 +83,6 @@ export default function Register() {
           localStorage.setItem("userId", result.user.id);
           const renapData = await getRenapData(formData.dpi);
           console.log("Renap Data:", renapData);
-          const crmPerson = await createCrmPerson(
-            formData.email,
-            renapData?.data.firstName || "",
-            renapData?.data.firstLastName || "",
-            renapData?.data.department_borned_in || "",
-            renapData?.data.picture || ""
-          );
-          console.log("CRM Person:", crmPerson);
           navigate({ to: "/login" });
         } else {
           setServerError(result.error || "Error al registrar usuario");

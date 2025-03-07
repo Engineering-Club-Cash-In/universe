@@ -11,6 +11,7 @@ import { useNavigate } from "@tanstack/react-router";
 
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { login } from "../services/eden";
 
 export default function Login() {
   const images = [FirstImage, SecondImage, ThirdImage];
@@ -22,27 +23,33 @@ export default function Login() {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
-    dpi: "",
+    email: "",
     password: "",
   });
 
   const [errors, setErrors] = useState({
-    dpi: "",
+    email: "",
     password: "",
   });
 
+  const [isLoading, setIsLoading] = useState(false);
+  const [serverError, setServerError] = useState("");
+
   const validateForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    setServerError("");
+
     const newErrors = {
-      dpi: "",
+      email: "",
       password: "",
     };
 
-    // DPI validation
-    if (!formData.dpi.trim()) {
-      newErrors.dpi = "El DPI es requerido";
-    } else if (formData.dpi.length !== 13 || !/^\d+$/.test(formData.dpi)) {
-      newErrors.dpi = "El DPI debe tener 13 dígitos numéricos";
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!formData.email.trim()) {
+      newErrors.email = "El correo electrónico es requerido";
+    } else if (!emailRegex.test(formData.email)) {
+      newErrors.email = "Formato de correo electrónico inválido";
     }
 
     // Password validation
@@ -54,33 +61,40 @@ export default function Login() {
 
     // If no errors, proceed with login submission
     if (!Object.values(newErrors).some((error) => error !== "")) {
-      console.log("Login submitted:", formData);
-      // Mock login
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      alert("Login successful");
-      // Redirect to some page for now
-      navigate({ to: "/dashboard" }); // TODO: Redirect to dashboard
-    } else {
-      alert(JSON.stringify(newErrors));
+      try {
+        setIsLoading(true);
+        const result = await login(formData.email, formData.password);
+
+        if (!result) {
+          setServerError("Error al iniciar sesión");
+          return;
+        }
+
+        if (result.success && result.user) {
+          // Store the session token for authentication
+          localStorage.setItem("userId", result.user.id);
+          localStorage.setItem("authToken", result.token);
+
+          // Redirect to dashboard
+          navigate({ to: "/dashboard" });
+        } else {
+          setServerError(result.error || "Credenciales inválidas");
+        }
+      } catch (error) {
+        console.error("Login error:", error);
+        setServerError("Error al conectar con el servidor");
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-
-    if (name === "dpi") {
-      // Only allow numeric input for DPI
-      const numericValue = value.replace(/\D/g, "");
-      setFormData({
-        ...formData,
-        [name]: numericValue,
-      });
-    } else {
-      setFormData({
-        ...formData,
-        [name]: value,
-      });
-    }
+    setFormData({
+      ...formData,
+      [name]: value,
+    });
   };
 
   return (
@@ -151,23 +165,28 @@ export default function Login() {
           <p className="w-full text-black text-lg">
             Ingresa tus credenciales para acceder a tu cuenta:
           </p>
+
+          {serverError && (
+            <div className="w-full p-3 bg-red-100 border border-red-400 text-red-700 rounded">
+              {serverError}
+            </div>
+          )}
+
           <form className="flex flex-col w-full gap-4" onSubmit={validateForm}>
             <div className="flex flex-col w-full gap-2">
-              <label htmlFor="dpi" className="text-black text-lg">
-                DPI
+              <label htmlFor="email" className="text-black text-lg">
+                Correo electrónico
               </label>
               <input
-                type="text"
-                inputMode="numeric"
-                pattern="\d*"
-                id="dpi"
-                name="dpi"
-                value={formData.dpi}
+                type="email"
+                id="email"
+                name="email"
+                value={formData.email}
                 onChange={handleChange}
                 className="w-full h-[40px] border-2 border-purple px-4 py-2 rounded-full"
               />
-              {errors.dpi && (
-                <span className="text-red-500 text-sm">{errors.dpi}</span>
+              {errors.email && (
+                <span className="text-red-500 text-sm">{errors.email}</span>
               )}
             </div>
             <div className="flex flex-col w-full gap-2">
@@ -188,9 +207,12 @@ export default function Login() {
             </div>
             <button
               type="submit"
-              className="bg-purple w-1/4 text-white text-lg font-bold px-4 py-2 rounded-full mt-8 hover:bg-purple/80 hover:scale-105 transition-all cursor-pointer"
+              disabled={isLoading}
+              className={`bg-purple w-1/4 text-white text-lg font-bold px-4 py-2 rounded-full mt-8 hover:bg-purple/80 hover:scale-105 transition-all ${
+                isLoading ? "opacity-70 cursor-not-allowed" : "cursor-pointer"
+              }`}
             >
-              Iniciar Sesión
+              {isLoading ? "Iniciando sesión..." : "Iniciar Sesión"}
             </button>
           </form>
         </div>

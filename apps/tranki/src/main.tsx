@@ -8,6 +8,7 @@ import {
   createRouter,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/router-devtools";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import "./styles.css";
 import reportWebVitals from "./reportWebVitals.ts";
@@ -16,6 +17,9 @@ import App from "./pages/index.tsx";
 import Register from "./pages/register.tsx";
 import Login from "./pages/login.tsx";
 import Dashboard from "./pages/dashboard.tsx";
+import Marketplace from "./pages/marketplace.tsx";
+// Create a client
+const queryClient = new QueryClient();
 
 const rootRoute = createRootRoute({
   component: () => (
@@ -50,11 +54,18 @@ const dashboardRoute = createRoute({
   component: Dashboard,
 });
 
+const marketplaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/marketplace",
+  component: Marketplace,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   registerRoute,
   loginRoute,
   dashboardRoute,
+  marketplaceRoute,
 ]);
 
 const router = createRouter({
@@ -74,7 +85,9 @@ if (!rootElement.innerHTML) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <StrictMode>
-      <RouterProvider router={router} />
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
     </StrictMode>
   );
 }

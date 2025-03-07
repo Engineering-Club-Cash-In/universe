@@ -1,7 +1,7 @@
 import { getCreditScoreAndRecordByLeadEmail as getCreditScoreAndRecordByLeadEmailQuery } from "../database/queries/landing";
 import { DATA_SCIENCE_ENVIRONMENTS } from "../utils/constants";
 
-const environment = Bun.env.NODE_ENV || "DEV";
+const environment = process.env.NODE_ENV || "DEV";
 interface ClientData {
   PRECIO_PRODUCTO: number;
   SUELDO: number;

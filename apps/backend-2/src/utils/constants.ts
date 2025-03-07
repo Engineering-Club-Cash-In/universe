@@ -8,7 +8,7 @@ export const CLOUDFRONT_URL = "https://d2lr9bkbpuw8hs.cloudfront.net/";
 
 export const FRONTEND_ENVIRONMENTS = {
   DEV: "http://localhost:3000",
-  PROD: "https://tranki.server.devteamatcci.site",
+  PROD: "https://tranki.devteamatcci.site",
 };
 
 export const DATA_SCIENCE_ENVIRONMENTS = {

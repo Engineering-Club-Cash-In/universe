@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { FRONTEND_ENVIRONMENTS } from "../utils/constants";
 
-const environment = Bun.env.NODE_ENV || "DEV";
+const environment = process.env.NODE_ENV || "DEV";
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseApiKey = process.env.SUPABASE_API_KEY!;
 

@@ -26,12 +26,15 @@ import {
 } from "@/components/ui/select";
 import Logo from "@/assets/logo.png";
 import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
+import { Download, Settings } from "lucide-react";
+import { Toaster } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -54,8 +57,18 @@ export default function InvestmentCalculator() {
   const [capital, setCapital] = useState<string>("7591.11");
   const [interestRate, setInterestRate] = useState<number>(1.5);
   const [term, setTerm] = useState<number>(1);
-  const [investorPercentage, _setInvestorPercentage] = useState<number>(70);
+  const [investorPercentage, setInvestorPercentage] = useState<number>(70);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  // Admin related state
+  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+  const [isLoginDialogOpen, setIsLoginDialogOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [adminInterestRate, setAdminInterestRate] = useState<number>(1.5);
+  const [adminInvestorPercentage, setAdminInvestorPercentage] =
+    useState<number>(70);
 
   // New shared state for the selected schedule type
   const [activeTab, setActiveTab] = useState("standard");
@@ -537,17 +550,64 @@ export default function InvestmentCalculator() {
     setIsDialogOpen(false);
   };
 
+  // Admin login functionality
+  const handleLogin = () => {
+    // Simple hardcoded credentials for demo purposes
+    if (username === "admin" && password === "admin") {
+      setIsAdminLoggedIn(true);
+      setIsLoginDialogOpen(false);
+      setUsername("");
+      setPassword("");
+      // Initialize admin settings with current values
+      setAdminInterestRate(interestRate);
+      setAdminInvestorPercentage(investorPercentage);
+      // Open admin panel after successful login
+      setIsAdminPanelOpen(true);
+    } else {
+      alert("Invalid credentials. Try admin/admin");
+    }
+  };
+
+  const handleSaveAdminSettings = () => {
+    // Apply the admin settings to the actual calculator
+    setInterestRate(adminInterestRate);
+    setInvestorPercentage(adminInvestorPercentage);
+    setIsAdminPanelOpen(false);
+    toast.success("Settings updated successfully!");
+  };
+
   return (
     <div className="container mx-auto py-8">
       <Card className="mb-8">
         <CardHeader>
           <CardTitle className="text-4xl font-bold flex justify-between items-center gap-4">
             Calculadora de Inversión
-            <img
-              src={Logo}
-              alt="Club Cash In Logo"
-              className="w-full max-w-xs h-auto"
-            />
+            <div className="flex items-center gap-4">
+              <img
+                src={Logo}
+                alt="Club Cash In Logo"
+                className="w-full max-w-xs h-auto"
+              />
+              {isAdminLoggedIn ? (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsAdminPanelOpen(true)}
+                  title="Admin Panel"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setIsLoginDialogOpen(true)}
+                  title="Admin Login"
+                >
+                  <Settings className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </CardTitle>
           <CardDescription>
             *El interés siempre es calculado sobre saldo
@@ -940,7 +1000,7 @@ export default function InvestmentCalculator() {
 
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
-          <DialogTitle>Depósito a Plazo Fijo</DialogTitle>
+          <DialogTitle>Inversión con Club Cash In</DialogTitle>
           <DialogDescription>
             <div className="space-y-4 p-4 rounded-md">
               <div className="flex justify-between text-lg font-semibold">
@@ -961,7 +1021,9 @@ export default function InvestmentCalculator() {
               <Separator />
               <div className="flex justify-between text-lg font-semibold">
                 <p>Tasa de Interés:</p>
-                <span className="text-black">{interestRate.toFixed(1)}%</span>
+                <span className="text-black">
+                  {(interestRate * investorPercentage).toFixed(1)}%
+                </span>
               </div>
               <Separator />
               <div className="flex justify-between text-lg font-semibold">
@@ -970,7 +1032,7 @@ export default function InvestmentCalculator() {
                   {activeTab === "compound"
                     ? "Interés Compuesto"
                     : activeTab === "interest-only"
-                    ? "Sin devolución mensual"
+                    ? "Al vencimiento"
                     : "Estándar"}
                 </span>
               </div>
@@ -1014,10 +1076,13 @@ export default function InvestmentCalculator() {
                 <p>Total a Recibir:</p>
                 <span className="text-black">
                   Q
-                  {totalToReceive.toLocaleString("en-US", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
+                  {(totalToReceive - summaryTotalInterest).toLocaleString(
+                    "en-US",
+                    {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    }
+                  )}
                 </span>
               </div>
             </div>
@@ -1031,6 +1096,93 @@ export default function InvestmentCalculator() {
           <Button onClick={handleCloseDialog}>Cerrar</Button>
         </DialogContent>
       </Dialog>
+
+      {/* Admin Login Dialog */}
+      <Dialog open={isLoginDialogOpen} onOpenChange={setIsLoginDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogTitle>Admin Login</DialogTitle>
+          <DialogDescription>
+            Ingrese sus credenciales de administrador
+          </DialogDescription>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="username" className="text-right">
+                Usuario
+              </Label>
+              <Input
+                id="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="password" className="text-right">
+                Contraseña
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" onClick={handleLogin}>
+              Ingresar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Settings Panel */}
+      <Dialog open={isAdminPanelOpen} onOpenChange={setIsAdminPanelOpen}>
+        <DialogContent className="z-[100]">
+          <DialogTitle>Configuración de Administrador</DialogTitle>
+          <DialogDescription>
+            Ajuste los parámetros de la calculadora
+          </DialogDescription>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="adminInterestRate" className="text-right">
+                Tasa de interés (%)
+              </Label>
+              <Input
+                id="adminInterestRate"
+                type="number"
+                value={adminInterestRate}
+                onChange={(e) => setAdminInterestRate(Number(e.target.value))}
+                step="0.1"
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="adminInvestorPercentage" className="text-right">
+                Porcentaje del inversionista (%)
+              </Label>
+              <Input
+                id="adminInvestorPercentage"
+                type="number"
+                value={adminInvestorPercentage}
+                onChange={(e) =>
+                  setAdminInvestorPercentage(Number(e.target.value))
+                }
+                min="1"
+                max="100"
+                className="col-span-3"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="submit" onClick={handleSaveAdminSettings}>
+              Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Toaster />
     </div>
   );
 }

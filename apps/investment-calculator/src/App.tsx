@@ -569,9 +569,13 @@ export default function InvestmentCalculator() {
   };
 
   const handleSaveAdminSettings = () => {
-    // Apply the admin settings to the actual calculator
+    // Apply the admin settings to the actual calculator with validation
     setInterestRate(adminInterestRate);
-    setInvestorPercentage(adminInvestorPercentage);
+
+    // Ensure investor percentage is within range before saving
+    const validPercentage = Math.min(Math.max(adminInvestorPercentage, 70), 90);
+    setInvestorPercentage(validPercentage);
+
     setIsAdminPanelOpen(false);
     toast.success("Settings updated successfully!");
   };
@@ -1022,7 +1026,7 @@ export default function InvestmentCalculator() {
               <div className="flex justify-between text-lg font-semibold">
                 <p>Tasa de Interés:</p>
                 <span className="text-black">
-                  {(interestRate * investorPercentage).toFixed(1)}%
+                  {(interestRate * (investorPercentage / 100)).toFixed(2)}%
                 </span>
               </div>
               <Separator />
@@ -1076,13 +1080,10 @@ export default function InvestmentCalculator() {
                 <p>Total a Recibir:</p>
                 <span className="text-black">
                   Q
-                  {(totalToReceive - summaryTotalInterest).toLocaleString(
-                    "en-US",
-                    {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }
-                  )}
+                  {totalToReceive.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </span>
               </div>
             </div>
@@ -1166,11 +1167,21 @@ export default function InvestmentCalculator() {
                 id="adminInvestorPercentage"
                 type="number"
                 value={adminInvestorPercentage}
-                onChange={(e) =>
-                  setAdminInvestorPercentage(Number(e.target.value))
-                }
-                min="1"
-                max="100"
+                onChange={(e) => {
+                  // Allow typing any value temporarily
+                  setAdminInvestorPercentage(Number(e.target.value));
+                }}
+                onBlur={(e) => {
+                  // Enforce the range when the input loses focus
+                  const value = Number(e.target.value);
+                  if (value < 70) {
+                    setAdminInvestorPercentage(70);
+                  } else if (value > 90) {
+                    setAdminInvestorPercentage(90);
+                  }
+                }}
+                min="70"
+                max="90"
                 className="col-span-3"
               />
             </div>

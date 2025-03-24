@@ -18,6 +18,8 @@ import Register from "./pages/register.tsx";
 import Login from "./pages/login.tsx";
 import Dashboard from "./pages/dashboard.tsx";
 import Marketplace from "./pages/marketplace.tsx";
+import VehicleInspection from "./pages/vehicle-inspection.tsx";
+import VehiclesDashboard from "./pages/vehicles-dashboard.tsx";
 // Create a client
 const queryClient = new QueryClient();
 
@@ -60,12 +62,26 @@ const marketplaceRoute = createRoute({
   component: Marketplace,
 });
 
+const vehicleInspectionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vehicle-inspection",
+  component: VehicleInspection,
+});
+
+const vehiclesDashboardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/vehicles-dashboard",
+  component: VehiclesDashboard,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   registerRoute,
   loginRoute,
   dashboardRoute,
   marketplaceRoute,
+  vehicleInspectionRoute,
+  vehiclesDashboardRoute,
 ]);
 
 const router = createRouter({

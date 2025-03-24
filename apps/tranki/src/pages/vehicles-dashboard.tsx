@@ -9,7 +9,6 @@ import {
   Search,
   FileText,
   Camera,
-  Edit,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -20,7 +19,6 @@ import {
   CardDescription,
   CardHeader,
   CardTitle,
-  CardFooter,
 } from "@/components/ui/card";
 import {
   Table,
@@ -960,7 +958,7 @@ export default function VehiclesDashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-4">
             {mockPhotos
               .slice(0, selectedVehicle?.photos || 0)
-              .map((photo, index) => (
+              .map((_photo, index) => (
                 <div
                   key={index}
                   className="relative aspect-square bg-muted rounded-md overflow-hidden border"

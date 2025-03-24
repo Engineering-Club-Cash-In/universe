@@ -277,6 +277,7 @@ export const checkCreditRecord = async (creditRecord: CreditRecord) => {
   } else {
     method1Availability = "low";
   }
+  console.log("Method 1 availability:", method1Availability);
   // Method 2: Based on income
   const maxDebtRatio = 0.2;
   const maxAmountOfDebt = maxDebtRatio * (guaranteedIncome * 0.5);

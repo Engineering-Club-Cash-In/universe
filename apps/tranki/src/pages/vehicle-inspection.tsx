@@ -43,7 +43,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
+import { createVehicle } from "../services/eden";
 const formSchema = z.object({
   // Section 1
   technicianName: z.string().min(1, { message: "El nombre es requerido" }),
@@ -136,8 +136,28 @@ export default function VehicleInspectionForm() {
     }
   }, [formSubmitted]);
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
+  async function onSubmit(values: z.infer<typeof formSchema>) {
     console.log(values);
+    const vehicle = {
+      name:
+        values.vehicleMake +
+        " " +
+        values.vehicleModel +
+        " " +
+        values.vehicleYear,
+      marca: values.vehicleMake,
+      modelo: parseInt(values.vehicleModel),
+      ano: parseInt(values.vehicleYear),
+      revisor: {
+        firstName: values.technicianName,
+        lastName: values.technicianName,
+      },
+      detalles: {
+        ...values,
+      },
+    };
+    const response = await createVehicle(vehicle);
+    console.log(response);
     // Here you would typically send the data to your backend
     toast.success("Formulario enviado con éxito!");
 

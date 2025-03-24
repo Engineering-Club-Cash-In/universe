@@ -10,7 +10,7 @@ import YoutubeLogo from "/assets/register/yt.svg";
 
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { register } from "../services/eden";
+import { createCrmPerson, register } from "../services/eden";
 import { getRenapData } from "../services/eden";
 export default function Register() {
   const navigate = useNavigate();
@@ -71,6 +71,18 @@ export default function Register() {
     if (!Object.values(newErrors).some((error) => error !== "")) {
       try {
         setIsLoading(true);
+        const lead = await createCrmPerson(
+          formData.email,
+          "Luis",
+          "Ralda",
+          "Guatemala",
+          "https://i.pravatar.cc/150?img=1"
+        );
+        if (!lead?.success) {
+          console.error("Error al crear persona en CRM", lead);
+        } else {
+          console.log("Persona creada en CRM", lead.person);
+        }
         const result = await register(formData.email, formData.password);
 
         if (!result) {

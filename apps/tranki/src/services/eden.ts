@@ -142,3 +142,17 @@ export const sendDocumentsForSignature = async (emails: string[]) => {
   });
   return response.data;
 };
+
+interface Vehicle {
+  name: string;
+  marca: string;
+  modelo: number;
+  ano: number;
+  revisor: { firstName: string; lastName: string };
+  detalles: Record<string, any>;
+}
+
+export const createVehicle = async (vehicle: Vehicle) => {
+  const response = await client.crm["create-vehicle"].post(vehicle);
+  return response.data;
+};

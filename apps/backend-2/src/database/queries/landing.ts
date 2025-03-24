@@ -7,7 +7,6 @@ import {
   type InsertLead,
   type InsertCreditRecordResult,
   type CreditRecord,
-  type MissingPayments,
   creditScoresTable,
 } from "../schemas/landing";
 import { eq, isNull } from "drizzle-orm";

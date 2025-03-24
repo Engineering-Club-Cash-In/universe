@@ -21,7 +21,9 @@ import { BACKEND_ENVIRONMENTS } from "../utils/constants";
 const environment = process.env.NODE_ENV || "DEV";
 console.log("environment", environment);
 const client = treaty<App>(
-  environment === "PROD" ? BACKEND_ENVIRONMENTS.PROD : BACKEND_ENVIRONMENTS.DEV
+  environment === "production"
+    ? BACKEND_ENVIRONMENTS.PROD
+    : BACKEND_ENVIRONMENTS.DEV
 );
 
 export const healthCheck = async () => {
@@ -146,7 +148,7 @@ export const sendDocumentsForSignature = async (emails: string[]) => {
 interface Vehicle {
   name: string;
   marca: string;
-  modelo: number;
+  modelo: string;
   ano: number;
   revisor: { firstName: string; lastName: string };
   detalles: Record<string, any>;

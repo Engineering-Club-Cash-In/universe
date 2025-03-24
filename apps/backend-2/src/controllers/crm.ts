@@ -132,7 +132,7 @@ export async function createTask(
 export async function createVehicle(
   name: string,
   marca: string,
-  modelo: number,
+  modelo: string,
   ano: number,
   nombreRevisor: { firstName: string; lastName: string } = {
     firstName: "Técnico",

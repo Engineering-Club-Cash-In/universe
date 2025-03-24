@@ -95,7 +95,7 @@ const crmRouter = new Elysia({
       body: t.Object({
         name: t.String(),
         marca: t.String(),
-        modelo: t.Number(),
+        modelo: t.String(),
         ano: t.Number(),
         revisor: t.Object({
           firstName: t.String(),

@@ -146,7 +146,7 @@ export default function VehicleInspectionForm() {
         " " +
         values.vehicleYear,
       marca: values.vehicleMake,
-      modelo: parseInt(values.vehicleModel),
+      modelo: values.vehicleModel,
       ano: parseInt(values.vehicleYear),
       revisor: {
         firstName: values.technicianName,

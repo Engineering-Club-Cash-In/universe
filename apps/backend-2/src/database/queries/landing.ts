@@ -8,6 +8,10 @@ import {
   type InsertCreditRecordResult,
   type CreditRecord,
   creditScoresTable,
+  investorLeadsTable,
+  type InsertInvestorLead,
+  clientLeadsTable,
+  type InsertClientLead,
 } from "../schemas/landing";
 import { eq, isNull } from "drizzle-orm";
 
@@ -170,4 +174,26 @@ export const getCreditScoreAndRecordByLeadEmail = async (email: string) => {
     creditRecord: creditRecord[0],
     creditRecordResult: result[0],
   };
+};
+
+export const createInvestorLead = async (lead: InsertInvestorLead) => {
+  return db.insert(investorLeadsTable).values(lead).returning();
+};
+
+// New query to get all investor leads
+export const getAllInvestorLeads = async () => {
+  return db
+    .select()
+    .from(investorLeadsTable)
+    .orderBy(investorLeadsTable.createdAt);
+};
+
+// New query function for client leads
+export const createClientLead = async (lead: InsertClientLead) => {
+  return db.insert(clientLeadsTable).values(lead).returning();
+};
+
+// New query to get all client leads
+export const getAllClientLeads = async () => {
+  return db.select().from(clientLeadsTable).orderBy(clientLeadsTable.createdAt);
 };

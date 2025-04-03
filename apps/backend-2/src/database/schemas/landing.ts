@@ -73,3 +73,45 @@ export const creditScoresTable = pgTable("credit_scores", {
 
 export type CreditScore = typeof creditScoresTable.$inferSelect;
 export type InsertCreditScore = typeof creditScoresTable.$inferInsert;
+
+// New schema for investor leads
+export const investorLeadsTable = pgTable("investor_leads", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  fullName: text("full_name").notNull(),
+  phoneNumber: text("phone_number").notNull(),
+  email: text("email").notNull(),
+  hasInvested: boolean("has_invested").notNull(),
+  hasBankAccount: boolean("has_bank_account").notNull(),
+  investmentRange: text("investment_range").notNull(),
+  contactMethod: text("contact_method").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type InvestorLead = typeof investorLeadsTable.$inferSelect;
+export type InsertInvestorLead = typeof investorLeadsTable.$inferInsert;
+
+// New schema for client leads from Clients.tsx
+export const clientLeadsTable = pgTable("client_leads", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  ready: boolean("ready").notNull(), // From the 'si'/'no' radio
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  phoneNumber: text("phone_number").notNull(),
+  loanType: text("loan_type").notNull(), // 'carLoan' or 'vehicleLoan'
+
+  // Fields specific to carLoan
+  carLoanInfoAction: text("car_loan_info_action"), // 'continue' or 'cancel'
+  hasStatements: boolean("has_statements"), // Nullable if not carLoan or if cancelled
+
+  // Fields specific to vehicleLoan
+  vehicleLoanInfoAction: text("vehicle_loan_info_action"), // 'continue' or 'cancel'
+  vehicleDetails: text("vehicle_details"), // Nullable if not vehicleLoan or if cancelled
+  loanAmount: text("loan_amount"), // Storing as text as it's entered, can be parsed later. Nullable.
+
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type ClientLead = typeof clientLeadsTable.$inferSelect;
+export type InsertClientLead = typeof clientLeadsTable.$inferInsert;

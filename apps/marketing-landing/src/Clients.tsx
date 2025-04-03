@@ -10,6 +10,8 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import LogoCashIn from "/public/logo_cashin_azul.svg";
 import CarCouple from "@/assets/car_couple.jpg";
+import { saveClientLead } from "./services/eden";
+import AvatarPlaceholder from "@/assets/avatar_placeholder.svg";
 
 // Define question interface types
 interface BaseQuestion {
@@ -78,14 +80,17 @@ export default function LandingPage() {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setIsSubmitting(true);
-    // Simulate form submission
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      const response = await saveClientLead(formData);
+      console.log(response);
       setIsSubmitted(true);
-      console.log("Form submitted:", formData);
-    }, 1500);
+    } catch (error: any) {
+      console.error("Error submitting form:", error);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const getQuestions = (): Question[] => {
@@ -242,22 +247,28 @@ export default function LandingPage() {
 
   const testimonials = [
     {
-      name: "Carlos Méndez",
-      text: "El proceso fue súper rápido. En menos de 24 horas ya tenía mi préstamo aprobado y pude comprar el carro que tanto quería.",
+      name: "Eduardo López O.",
+      text: "Excelente servicio, atención, muy amable nuestra asesora y sobre todo rapidez para la entrega de nuestro nuevo vehículo, súper encantados 🤝",
       rating: 5,
-      avatar: "/placeholder.svg?height=60&width=60",
+      avatar: AvatarPlaceholder,
     },
     {
-      name: "Ana Gutiérrez",
-      text: "Me sorprendió lo fácil que fue solicitar un préstamo sobre mi vehículo. El equipo fue muy profesional y las cuotas se ajustan perfectamente a mi presupuesto.",
+      name: "Jose Ortiz",
+      text: "Atención al 100, muy amables y atentos muy buena disposición de vehículos y gracias a mi asesor por el tiempo y la dedicación del caso",
       rating: 5,
-      avatar: "/placeholder.svg?height=60&width=60",
+      avatar: AvatarPlaceholder,
     },
     {
-      name: "Roberto Sánchez",
-      text: "Excelente servicio y atención personalizada. Recomiendo 100% a cualquiera que necesite financiamiento para un vehículo.",
-      rating: 4,
-      avatar: "/placeholder.svg?height=60&width=60",
+      name: "Carlos Morales",
+      text: "Una atención increíble departe de todos en oficina, especialmente en la Srita. Gabriela Cabrera, ella me facilitó TODO el proceso, muy eficiente y cuando llegue a oficinas, todos muy amables e hicieron del trámite una bonita experiencia y porsupuesto muy contento de tener mi nuevo vehículo.. Muchas gracias por todo Club Cash In, de mi parte SUPER recomendados.",
+      rating: 5,
+      avatar: AvatarPlaceholder,
+    },
+    {
+      name: "Fernando Torres",
+      text: "Excelente empresa, me brindaron toda la ayuda para adquirir mi carro, y lo mejor en la cuota mensual va incluido todo. Gracias amigos. 👍",
+      rating: 5,
+      avatar: AvatarPlaceholder,
     },
   ];
 
@@ -298,7 +309,7 @@ export default function LandingPage() {
           <img
             src={CarCouple}
             alt="Persona en un carro"
-            className="w-full h-full object-cover object-center"
+            className="w-full h-full object-cover object-[center_25%]"
           />
         </div>
         <div className="container mx-auto px-4 py-12 md:py-16 relative z-10">
@@ -541,7 +552,7 @@ export default function LandingPage() {
                 <div className="flex items-center gap-4 mb-4">
                   <div className="w-12 h-12 rounded-full overflow-hidden bg-blue-200">
                     <img
-                      src={testimonial.avatar || "/placeholder.svg"}
+                      src={testimonial.avatar || AvatarPlaceholder}
                       alt={testimonial.name}
                       className="w-full h-full object-cover"
                     />

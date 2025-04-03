@@ -15,14 +15,17 @@
     "@tanstack/react-query": "^5.67.1",
     "drizzle-orm": "^0.40.0",
     "elysia": "latest",
-    "postgres": "^3.4.5"
+    "openai": "^4.90.0",
+    "postgres": "^3.4.5",
+    "resend": "^4.2.0"
   },
   "devDependencies": {
     "bun-types": "latest",
     "drizzle": "^1.4.0"
   },
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./schemas": "./src/database/schemas/landing.ts"
   },
   "module": "src/index.js"
 }

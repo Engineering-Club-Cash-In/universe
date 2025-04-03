@@ -266,7 +266,10 @@ export default function InvestmentCalculator() {
     summary.appendChild(createSummaryRow("Plazo:", `${term * 12} Meses`));
 
     summary.appendChild(
-      createSummaryRow("Tasa de Interés:", `${interestRate.toFixed(1)}%`)
+      createSummaryRow(
+        "Tasa de Interés Mensual:",
+        `${interestRate.toFixed(1)}%`
+      )
     );
 
     summary.appendChild(
@@ -316,7 +319,10 @@ export default function InvestmentCalculator() {
     summary.appendChild(
       createSummaryRow(
         "Total a Recibir:",
-        `Q ${totalToReceive.toLocaleString("en-US", {
+        `Q ${(
+          totalToReceive -
+          summaryTotalInterest * 0.12 * (investorPercentage / 100)
+        ).toLocaleString("en-US", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
         })}`
@@ -452,13 +458,13 @@ export default function InvestmentCalculator() {
     summaryCell2.style.textAlign = "right";
 
     const summaryCell3 = document.createElement("td");
-    summaryCell3.textContent = `Total a Recibir: Q ${totalToReceive.toLocaleString(
-      "en-US",
-      {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }
-    )}`;
+    summaryCell3.textContent = `Total a Recibir: Q ${(
+      totalToReceive -
+      summaryTotalInterest * 0.12 * (investorPercentage / 100)
+    ).toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
     summaryCell3.style.padding = "8px";
     summaryCell3.style.border = "1px solid #ddd";
     summaryCell3.style.textAlign = "right";
@@ -694,7 +700,10 @@ export default function InvestmentCalculator() {
               <CardContent>
                 <p className="text-2xl font-bold">
                   Q{" "}
-                  {totalToReceive.toLocaleString("en-US", {
+                  {(
+                    totalToReceive -
+                    summaryTotalInterest * 0.12 * (investorPercentage / 100)
+                  ).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -808,7 +817,10 @@ export default function InvestmentCalculator() {
                     </TableCell>
                     <TableCell colSpan={2} className="text-right">
                       Total a Recibir: Q{" "}
-                      {totalToReceive.toLocaleString("en-US", {
+                      {(
+                        totalToReceive -
+                        summaryTotalInterest * 0.12 * (investorPercentage / 100)
+                      ).toLocaleString("en-US", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -898,7 +910,10 @@ export default function InvestmentCalculator() {
                     </TableCell>
                     <TableCell colSpan={2} className="text-right">
                       Total a Recibir: Q{" "}
-                      {totalToReceive.toLocaleString("en-US", {
+                      {(
+                        totalToReceive -
+                        summaryTotalInterest * 0.12 * (investorPercentage / 100)
+                      ).toLocaleString("en-US", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -988,7 +1003,10 @@ export default function InvestmentCalculator() {
                     </TableCell>
                     <TableCell colSpan={2} className="text-right">
                       Total a Recibir: Q{" "}
-                      {totalToReceive.toLocaleString("en-US", {
+                      {(
+                        totalToReceive -
+                        summaryTotalInterest * 0.12 * (investorPercentage / 100)
+                      ).toLocaleString("en-US", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1024,7 +1042,7 @@ export default function InvestmentCalculator() {
               </div>
               <Separator />
               <div className="flex justify-between text-lg font-semibold">
-                <p>Tasa de Interés:</p>
+                <p>Tasa de Interés Mensual:</p>
                 <span className="text-black">
                   {(interestRate * (investorPercentage / 100)).toFixed(2)}%
                 </span>
@@ -1080,7 +1098,10 @@ export default function InvestmentCalculator() {
                 <p>Total a Recibir:</p>
                 <span className="text-black">
                   Q
-                  {totalToReceive.toLocaleString("en-US", {
+                  {(
+                    totalToReceive -
+                    summaryTotalInterest * 0.12 * (investorPercentage / 100)
+                  ).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}

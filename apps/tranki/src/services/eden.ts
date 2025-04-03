@@ -1,6 +1,5 @@
 import { treaty } from "@elysiajs/eden";
 import type { App } from "@repo/backend-2";
-import type { Lead } from "@repo/backend/landingSchemas";
 import { Buffer } from "buffer";
 
 interface ClientData {
@@ -19,7 +18,6 @@ interface ClientData {
 }
 import { BACKEND_ENVIRONMENTS } from "../utils/constants";
 const environment = process.env.NODE_ENV || "DEV";
-console.log("environment", environment);
 const client = treaty<App>(
   environment === "production"
     ? BACKEND_ENVIRONMENTS.PROD
@@ -54,12 +52,22 @@ export const getLanding = async () => {
   return response.data;
 };
 
-export const submitLead = async (lead: Lead) => {
+export const submitLead = async ({
+  email,
+  phone,
+  name,
+  desiredAmount,
+}: {
+  email: string;
+  phone: string;
+  name: string;
+  desiredAmount: number;
+}) => {
   const response = await client.landing["submit-lead"].post({
-    email: lead.email || undefined,
-    phone: lead.phone || undefined,
-    name: lead.name || "",
-    desiredAmount: lead.desiredAmount || 0,
+    email,
+    phone,
+    name,
+    desiredAmount,
   });
   return response.data;
 };

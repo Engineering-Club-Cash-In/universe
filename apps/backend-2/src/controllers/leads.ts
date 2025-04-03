@@ -1,4 +1,8 @@
-import type { InsertLead } from "../database/schemas/landing";
+import type {
+  InsertLead,
+  InsertInvestorLead,
+  InsertClientLead,
+} from "../database/schemas/landing";
 import {
   createLead,
   getLeads,
@@ -8,10 +12,22 @@ import {
   deleteLead,
   deleteLeadByPhone,
   deleteLeadByEmail,
+  createInvestorLead,
+  getAllInvestorLeads,
+  createClientLead,
+  getAllClientLeads,
 } from "../database/queries/landing";
 
 export const saveLead = async (lead: InsertLead) => {
   return createLead(lead);
+};
+
+export const saveInvestorLead = async (lead: InsertInvestorLead) => {
+  return createInvestorLead(lead);
+};
+
+export const saveClientLead = async (lead: InsertClientLead) => {
+  return createClientLead(lead);
 };
 
 export const updateLead = async (lead: InsertLead) => {
@@ -44,4 +60,12 @@ export const removeLeadByPhone = async (phone: string) => {
 
 export const removeLeadByEmail = async (email: string) => {
   return deleteLeadByEmail(email);
+};
+
+export const listAllInvestorLeads = async () => {
+  return getAllInvestorLeads();
+};
+
+export const listAllClientLeads = async () => {
+  return getAllClientLeads();
 };

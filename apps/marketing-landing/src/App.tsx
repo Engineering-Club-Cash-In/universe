@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import HeroMan from "/public/hero_man.png";
+import HeroMan from "@/assets/hero_man.png";
 import LogoCashIn from "/public/logo_cashin_blanco.svg";
+import { saveInvestorLead } from "./services/eden";
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState(0);
@@ -78,14 +79,30 @@ export default function App() {
     }
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     setIsSubmitting(true);
-    // Simulate form submission
-    setTimeout(() => {
+    try {
+      // Call the backend API using the treaty client
+      const response = await saveInvestorLead(formData);
+
+      if (response.data?.success) {
+        console.log("Form submitted successfully:", response.data);
+        setIsSubmitted(true);
+      } else {
+        // Handle potential backend errors
+        console.error("Submission failed:", response.data?.error);
+        // Optionally show an error message to the user
+        alert(
+          `Error submitting form: ${response.data?.error || "Unknown error"}`
+        );
+      }
+    } catch (error) {
+      console.error("Error submitting form:", error);
+      // Handle network errors or other issues
+      alert("An error occurred while submitting the form. Please try again.");
+    } finally {
       setIsSubmitting(false);
-      setIsSubmitted(true);
-      console.log("Form submitted:", formData);
-    }, 1500);
+    }
   };
 
   const questions = [
@@ -165,19 +182,19 @@ export default function App() {
 
   const testimonials = [
     {
-      name: "María González",
-      text: "Invertir con esta plataforma ha sido una de las mejores decisiones financieras que he tomado. El proceso fue sencillo y los rendimientos superaron mis expectativas.",
+      name: "Juan José Rodríguez",
+      text: "Una inversión muy segura, han cumplido con los pagos a la fecha",
       rating: 5,
     },
     {
-      name: "Carlos Rodríguez",
-      text: "El equipo de asesores me guió durante todo el proceso. Me explicaron claramente todas mis opciones y me ayudaron a elegir la inversión que mejor se adaptaba a mis necesidades.",
+      name: "Fernando España",
+      text: "Muy buena atención, han resuelto todas mis dudas y los pagos se han efectuado en tiempo",
       rating: 5,
     },
     {
-      name: "Ana Martínez",
-      text: "Comencé con una inversión pequeña y al ver los resultados, decidí aumentar mi capital. La plataforma es muy intuitiva y el servicio al cliente es excelente.",
-      rating: 4,
+      name: "Gabriel Carrera",
+      text: "Llevo ya año y medio invirtiendo con cash in, bastante rentable y seguro, excelente atención y seguimiento",
+      rating: 5,
     },
   ];
 

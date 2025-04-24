@@ -22,6 +22,7 @@ import VehicleInspection from "./pages/vehicle-inspection.tsx";
 import VehiclesDashboard from "./pages/vehicles-dashboard.tsx";
 import VehicleInspectionWizard from "./pages/vehicle-pictures.tsx";
 import Booking from "./pages/booking.tsx";
+import NewLandingPage from "./pages/new_landing.tsx";
 // Create a client
 const queryClient = new QueryClient();
 
@@ -88,6 +89,12 @@ const bookingRoute = createRoute({
   component: Booking,
 });
 
+const newLandingRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/new-landing",
+  component: NewLandingPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   registerRoute,
@@ -98,6 +105,7 @@ const routeTree = rootRoute.addChildren([
   vehiclesDashboardRoute,
   vehiclePicturesRoute,
   bookingRoute,
+  newLandingRoute,
 ]);
 
 const router = createRouter({

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { ChevronDown, Star, Award, Users, DollarSign } from "lucide-react";
+import {
+  ChevronDown,
+  ChartNoAxesCombined,
+  Users,
+  DollarSign,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -180,7 +185,7 @@ export default function App() {
     return !!currentQuestion.value;
   };
 
-  const testimonials = [
+  /* const testimonials = [
     {
       name: "Juan José Rodríguez",
       text: "Una inversión muy segura, han cumplido con los pagos a la fecha",
@@ -196,7 +201,7 @@ export default function App() {
       text: "Llevo ya año y medio invirtiendo con cash in, bastante rentable y seguro, excelente atención y seguimiento",
       rating: 5,
     },
-  ];
+  ]; */
 
   const stats = [
     {
@@ -206,13 +211,13 @@ export default function App() {
     },
     {
       icon: <Users className="h-8 w-8" />,
-      value: "5,000+",
+      value: "100+",
       label: "Inversionistas activos",
     },
     {
-      icon: <Award className="h-8 w-8" />,
-      value: "15+",
-      label: "Premios de excelencia",
+      icon: <ChartNoAxesCombined className="h-8 w-8" />,
+      value: "+12%",
+      label: "Rendimientos anuales",
     },
   ];
 
@@ -232,7 +237,7 @@ export default function App() {
           <div className="text-white text-left">
             <h1 className="text-4xl md:text-6xl font-bold mb-6 leading-tight">
               Invierte en tu futuro con{" "}
-              <span className="text-[#d8e710]">confianza</span>
+              <span className="text-[#4d56f2]">respaldo</span>
             </h1>
             <p className="text-xl md:text-2xl mb-8 text-gray-300 max-w-xl">
               Garantía que protege tu inversión
@@ -279,7 +284,7 @@ export default function App() {
                 <p className="text-sm text-gray-400">Rendimiento promedio</p>
               </div>
               <div className="text-center">
-                <p className="text-3xl font-bold text-[#d8e710]">5K+</p>
+                <p className="text-3xl font-bold text-[#d8e710]">100+</p>
                 <p className="text-sm text-gray-400">Inversionistas</p>
               </div>
               <div className="text-center">
@@ -353,8 +358,8 @@ export default function App() {
                         currentStep === index
                           ? "opacity-100 translate-x-0"
                           : currentStep > index
-                          ? "opacity-0 -translate-x-full"
-                          : "opacity-0 translate-x-full"
+                            ? "opacity-0 -translate-x-full"
+                            : "opacity-0 translate-x-full"
                       )}
                     >
                       <h3 className="text-xl md:text-2xl font-semibold mb-6 text-[#1d1d1d]">
@@ -486,7 +491,7 @@ export default function App() {
       </section>
 
       {/* Testimonials Section */}
-      <section
+      {/* <section
         ref={reviewsRef}
         id="reviews"
         className="min-h-[calc(var(--vh,1vh)*100)] py-16 md:py-24 flex items-center justify-center bg-[#f8f8f8]"
@@ -520,7 +525,7 @@ export default function App() {
             ))}
           </div>
         </div>
-      </section>
+      </section> */}
 
       {/* Stats Section */}
       <section className="min-h-[calc(var(--vh,1vh)*100)] py-16 md:py-24 flex items-center justify-center bg-[#4d56f2] text-white">

@@ -12,45 +12,14 @@ import {
   pollCreditRecords,
   createCreditScore,
 } from "../controllers/credit-record";
-import { cron } from "@elysiajs/cron";
 import { predictMissingPayments } from "../controllers/credit-score";
 import { getCreditScoreAndRecordByLeadEmail } from "../controllers/credit-score";
 // Import the missing type
 import type { InsertClientLead } from "../database/schemas/landing";
 
-declare global {
-  var isPollingCreditRecords: boolean;
-}
-
-// Initialize the global lock
-global.isPollingCreditRecords = false;
-
 const landingRouter = new Elysia({
   prefix: "/landing",
 })
-  .use(
-    cron({
-      name: "poll-credit-records",
-      pattern: "*/30 * * * * *", // Every 30 seconds
-      run: async () => {
-        // Use a simple locking mechanism
-        if (global.isPollingCreditRecords) {
-          console.log("Credit records polling already in progress, skipping");
-          return;
-        }
-
-        try {
-          global.isPollingCreditRecords = true;
-          console.log("Polling credit records");
-          await pollCreditRecords();
-        } catch (error) {
-          console.error("Error polling credit records:", error);
-        } finally {
-          global.isPollingCreditRecords = false;
-        }
-      },
-    })
-  )
   .get("/", () => "Hello World from landing router")
   .post(
     "/submit-lead",

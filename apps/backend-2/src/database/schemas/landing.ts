@@ -1,4 +1,4 @@
-import type { Root } from "@cci/ts-schemas";
+import type { Root } from "@repo/ts-schemas";
 import {
   integer,
   real,

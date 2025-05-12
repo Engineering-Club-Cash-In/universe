@@ -2,7 +2,7 @@ import { getCreditScoreAndRecordByLeadEmail as getCreditScoreAndRecordByLeadEmai
 import { DATA_SCIENCE_ENVIRONMENTS } from "../utils/constants";
 
 const environment = process.env.NODE_ENV || "DEV";
-interface ClientData {
+export interface ClientData {
   PRECIO_PRODUCTO: number;
   SUELDO: number;
   EDAD: number;

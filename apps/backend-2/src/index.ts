@@ -6,6 +6,8 @@ import landingRouter from "./routers/landing";
 import authRouter from "./routers/auth";
 import crmRouter from "./routers/crm";
 import signaturesRouter from "./routers/signatures";
+import simpletechRouter from "./routers/simpletech";
+
 const app = new Elysia()
   .use(opentelemetry())
   .use(cors())
@@ -18,6 +20,7 @@ const app = new Elysia()
   .use(authRouter)
   .use(crmRouter)
   .use(signaturesRouter)
+  .use(simpletechRouter)
   .get("/", () => "Hello Elysia")
   .listen(9000);
 

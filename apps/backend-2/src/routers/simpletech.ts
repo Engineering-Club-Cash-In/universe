@@ -9,7 +9,6 @@ import {
   createCreditProfile,
   updateCompletedRuns,
 } from "../controllers/simpletech";
-import { saveLead } from "../controllers/leads";
 
 import { cron } from "@elysiajs/cron";
 
@@ -24,7 +23,7 @@ const simpletechRouter = new Elysia({ prefix: "simpletech" })
   .use(
     jwt({
       name: "jwt",
-      secret: Bun.env.JWT_SECRET ?? "secret",
+      secret: process.env.JWT_SECRET ?? "secret",
     })
   )
   .use(
@@ -129,7 +128,14 @@ const simpletechRouter = new Elysia({ prefix: "simpletech" })
         leadId,
         name,
         age,
-        civilStatus,
+        civilStatus:
+          civilStatus === "SINGLE"
+            ? "SOLTERO"
+            : civilStatus === "MARRIED"
+              ? "CASADO"
+              : civilStatus === "DIVORCED"
+                ? "DIVORCIADO"
+                : "VIUDO",
         economicDependents,
         documentNumber,
         monthlyIncome,

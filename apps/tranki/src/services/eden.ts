@@ -17,7 +17,7 @@ interface ClientData {
   TIPO_DE_COMPRAS: number;
 }
 import { BACKEND_ENVIRONMENTS } from "../utils/constants";
-const environment = process.env.NODE_ENV || "DEV";
+const environment = import.meta.env.APP_ENV || "DEV";
 const client = treaty<App>(
   environment === "production"
     ? BACKEND_ENVIRONMENTS.PROD
@@ -25,7 +25,7 @@ const client = treaty<App>(
 );
 
 export const healthCheck = async () => {
-  const response = await client.index.get();
+  const response = await client.landing.get();
   return response.data;
 };
 
@@ -48,7 +48,7 @@ export const verifyToken = async (token: string) => {
 
 // Landing
 export const getLanding = async () => {
-  const response = await client.landing.index.get();
+  const response = await client.landing.get();
   return response.data;
 };
 

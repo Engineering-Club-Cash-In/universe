@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import joblib
 from pydantic import BaseModel
+from contextlib import asynccontextmanager
 
 # --------------------
 # Data Loading & Cleaning (and training functions)
@@ -126,8 +127,55 @@ class ClientData(BaseModel):
 # Initialize model variable globally
 rf = None
 
+# Lifespan context manager to load the model on startup
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global rf
+    print("Application startup: Loading model...")
+    # Ensure the .joblib file is copied into your Docker image (or train if not found)
+    model_path = 'random_forest_model.joblib'
+    if os.path.exists(model_path):
+        print(f"Loading existing model from {model_path}...")
+        rf = joblib.load(model_path)
+        print("Model loaded successfully.")
+    else:
+        # This part is a fallback. Ideally, you pre-train and ensure the .joblib file is present.
+        print(f"Model file not found at {model_path}. Training new model...")
+        print("WARNING: Training model on application startup. This can be slow.")
+        data = load_and_preprocess_data() # Assumes big_data.csv is present
+        rf = train_and_save_model(data)   # This will also save it as random_forest_model.joblib
+        print("Model training complete and saved.")
+    
+    if rf is None:
+        print("CRITICAL: Model could not be loaded or trained. RF is None.")
+        # You might want to raise an error here to prevent the app from starting
+        # or handle it in a way that /predict returns a specific error.
+    else:
+        print("RF model is ready.")
+    
+    yield # Application runs here
+
+    # Clean up resources if needed on shutdown
+    print("Application shutdown.")
+    rf = None
+
+
+app = FastAPI(lifespan=lifespan) # Pass the lifespan manager
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.post("/predict")
 async def predict(client: ClientData):
+    global rf
+    if rf is None:
+        print("Error in /predict: Model (rf) is not loaded.")
+        raise HTTPException(status_code=503, detail="Model not available. Please try again later.")
     try:
         input_data = [[
             client.PRECIO_PRODUCTO,
@@ -150,22 +198,14 @@ async def predict(client: ClientData):
             "probability": float(probability[0][1])
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        print(f"Exception during prediction: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --------------------
-# Main Execution Block
-# --------------------
+# The if __name__ == "__main__": block is NOT needed for model loading when using lifespan
+# but can be kept for running uvicorn directly for local testing if you wish.
+# However, the `uvicorn.run` in it will ALSO trigger the lifespan events.
 if __name__ == "__main__":
-    # Decide whether to train the model or load an existing model
-    if not os.path.exists('random_forest_model.joblib'):
-        print("Training new model...")
-        data = load_and_preprocess_data()
-        rf = train_and_save_model(data)
-    else:
-        print("Loading existing model...")
-        rf = joblib.load('random_forest_model.joblib')
-    
-    # Start the API server
-    print("Starting API server...")
+    print("Starting API server using __main__ (for local dev)...")
     import uvicorn
+    # When run this way, uvicorn will also pick up the lifespan events.
     uvicorn.run(app, host="0.0.0.0", port=8000)

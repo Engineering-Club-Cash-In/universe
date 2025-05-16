@@ -18,6 +18,7 @@ import {
   pollCreditRecords,
   queueCreditRecord,
 } from "../lib/openai";
+import { uploadFromSupabaseUrl } from "../lib/twenty-graphql";
 interface CreateOnePersonaResponse {
   data: {
     createPersona: {
@@ -85,7 +86,7 @@ interface DuplicatePersonaResponse {
   };
 }
 
-const API_KEY = Bun.env.CRM_API_KEY;
+const API_KEY = process.env.CRM_API_KEY;
 
 export const createLead = async (phone: string): Promise<string | Error> => {
   try {
@@ -286,6 +287,12 @@ export const createCreditProfile = async (
     if (!firstStatementPath || !secondStatementPath || !thirdStatementPath) {
       throw new Error("Failed to upload statements");
     }
+    // Upload the files to the CRM
+    const firstCRMUrl = uploadFromSupabaseUrl(firstStatementPath);
+    const secondCRMUrl = uploadFromSupabaseUrl(secondStatementPath);
+    const thirdCRMUrl = uploadFromSupabaseUrl(thirdStatementPath);
+    const [firstCRMUrlResponse, secondCRMUrlResponse, thirdCRMUrlResponse] =
+      await Promise.all([firstCRMUrl, secondCRMUrl, thirdCRMUrl]);
     // Upload the attachments in the CRM
     const promises = [];
     for (let i = 0; i < 3; i++) {
@@ -298,15 +305,14 @@ export const createCreditProfile = async (
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            name: `statement_${i + 1}_${lead[0].documentNumber}_${Date.now()}`,
-            fullPath: `https://api.devteamatcci.site/storage/download/${
+            name: `estado_de_cuenta_${i + 1}_${lead[0].documentNumber}`,
+            fullPath:
               i === 0
-                ? firstStatementPath
+                ? firstCRMUrlResponse
                 : i === 1
-                  ? secondStatementPath
-                  : thirdStatementPath
-            }`,
-            type: "string",
+                  ? secondCRMUrlResponse
+                  : thirdCRMUrlResponse,
+            type: "TextDocument",
             authorId: "f81dd5cd-3335-4f95-bf51-c58069d55b16",
             personaId: lead[0].crmId,
           }),
@@ -326,9 +332,9 @@ export const createCreditProfile = async (
     }
     await insertCreditProfile({
       leadId: lead[0].id,
-      firstStatementUrl: firstStatementPath,
-      secondStatementUrl: secondStatementPath,
-      thirdStatementUrl: thirdStatementPath,
+      firstStatementUrl: firstStatementPath.split("?")[0],
+      secondStatementUrl: secondStatementPath.split("?")[0],
+      thirdStatementUrl: thirdStatementPath.split("?")[0],
     });
     // Queue the credit profile for analysis
     const queueResponse = await queueCreditRecord(
@@ -414,7 +420,7 @@ const mapLeadToClientData = (lead: Lead) => {
   return {
     ANTIGUEDAD:
       lead.workTime === "ONETOFIVE" ? 0 : lead.workTime === "FIVETOTEN" ? 1 : 2,
-    EDAD: lead.age,
+    EDAD: lead.age >= 50 ? 3 : lead.age >= 40 ? 2 : lead.age >= 30 ? 1 : 0,
     DEPENDIENTES_ECONOMICOS: lead.economicDependents,
     OCUPACION: lead.occupation === "PROPIETARIO" ? 1 : 0,
     SUELDO: lead.monthlyIncome,

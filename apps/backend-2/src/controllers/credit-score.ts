@@ -1,7 +1,7 @@
 import { getCreditScoreAndRecordByLeadEmail as getCreditScoreAndRecordByLeadEmailQuery } from "../database/queries/landing";
 import { DATA_SCIENCE_ENVIRONMENTS } from "../utils/constants";
 
-const environment = process.env.NODE_ENV || "DEV";
+const environment = process.env.APP_ENV || "DEV";
 export interface ClientData {
   PRECIO_PRODUCTO: number;
   SUELDO: number;
@@ -23,6 +23,7 @@ interface CreditScoreResponse {
 
 export const predictMissingPayments = async (data: ClientData) => {
   try {
+    console.log(data);
     const response = await fetch(
       environment === "PROD"
         ? DATA_SCIENCE_ENVIRONMENTS.PROD + "/predict"

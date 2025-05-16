@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = Bun.env.SUPABASE_URL;
-const supabaseKey = Bun.env.SUPABASE_API_KEY;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_API_KEY;
 if (!supabaseUrl || !supabaseKey) {
   throw new Error("SUPABASE_URL and SUPABASE_API_KEY must be set");
 }
@@ -22,6 +22,14 @@ export const uploadFile = async (file: File) => {
 
   console.log("Uploaded file path:", data?.path);
   return data?.path;
+};
+export const downloadFile = async (path: string) => {
+  const { data, error } = await supabase.storage.from("storage").download(path);
+  if (error) {
+    console.error("Download error:", error);
+    return null;
+  }
+  return data;
 };
 export const getSignedUrl = async (path: string, expiresIn: number) => {
   const { data, error } = await supabase.storage

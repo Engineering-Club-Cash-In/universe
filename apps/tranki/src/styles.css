@@ -6,117 +6,117 @@
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Regular.ttf");
+  src: url("../fonts/Urbanist-Regular.ttf");
   font-weight: normal;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Bold.ttf");
+  src: url("../fonts/Urbanist-Bold.ttf");
   font-weight: bold;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Italic.ttf");
+  src: url("../fonts/Urbanist-Italic.ttf");
   font-weight: normal;
   font-style: italic;
 }
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Light.ttf");
+  src: url("../fonts/Urbanist-Light.ttf");
   font-weight: 300;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-LightItalic.ttf");
+  src: url("../fonts/Urbanist-LightItalic.ttf");
   font-weight: 300;
   font-style: italic;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Regular.ttf");
+  src: url("../fonts/Urbanist-Regular.ttf");
   font-weight: normal;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Italic.ttf");
+  src: url("../fonts/Urbanist-Italic.ttf");
   font-weight: normal;
   font-style: italic;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Medium.ttf");
+  src: url("../fonts/Urbanist-Medium.ttf");
   font-weight: 500;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-MediumItalic.ttf");
+  src: url("../fonts/Urbanist-MediumItalic.ttf");
   font-weight: 500;
   font-style: italic;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-SemiBold.ttf");
+  src: url("../fonts/Urbanist-SemiBold.ttf");
   font-weight: 600;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-SemiBoldItalic.ttf");
+  src: url("../fonts/Urbanist-SemiBoldItalic.ttf");
   font-weight: 600;
   font-style: italic;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Bold.ttf");
+  src: url("../fonts/Urbanist-Bold.ttf");
   font-weight: bold;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-BoldItalic.ttf");
+  src: url("../fonts/Urbanist-BoldItalic.ttf");
   font-weight: bold;
   font-style: italic;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-ExtraBold.ttf");
+  src: url("../fonts/Urbanist-ExtraBold.ttf");
   font-weight: 800;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-ExtraBoldItalic.ttf");
+  src: url("../fonts/Urbanist-ExtraBoldItalic.ttf");
   font-weight: 800;
   font-style: italic;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-Black.ttf");
+  src: url("../fonts/Urbanist-Black.ttf");
   font-weight: 900;
   font-style: normal;
 }
 
 @font-face {
   font-family: "Urbanist";
-  src: url("../public/fonts/Urbanist-BlackItalic.ttf");
+  src: url("../fonts/Urbanist-BlackItalic.ttf");
   font-weight: 900;
   font-style: italic;
 }

@@ -8,6 +8,7 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY random-forest.py .
+COPY random_forest_model.joblib .
 
 EXPOSE 8000
 

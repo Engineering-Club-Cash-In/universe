@@ -1,0 +1,874 @@
+PRECIO PRODUCTO,SUELDO,EDAD (RANGO DE EDAD EN AÑOS),DEPENDIENTES ECONOMICOS,OCUPACION,ANTIGUEDAD,ESTADO CIVIL,UTILIZACION DINERO,VIVIENDA PROPIA,VEHICULO PROPIO,TARJETA DE CREDITO,TIPO DE COMPRAS,Cuotas pendientes actual
+66908.00,60000.00,50,1,Dueño,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+74664.00,7303.75 -,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,6
+32618.00,7350.00,30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+10000.00,12000.00,50,0, Empleado,1-5, Casado, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,0
+43118.00,7820.00,30-39,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+38118.00,5000.00,30-39,1, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+66858.00,23800.00,40-49,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+41153.00,54000.00,40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+84578.00,9000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+23985.00,9600.00,30-39,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+103563.00,15500.00,18-29,0, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,0
+76300.00,15000.00,30-39,0,Dueño,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+41658.00,5000.00,18-29,0, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,3
+860000.00,100000.00,40-49,5,Dueño,1-5, Casado, Capital de trabajo, Si, Si, Si,Hipotecarios,0
+122680.00,80000.00,40-49,2,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+52616.00,15000.00,40-49,0,Dueño,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+109530.00,34500.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+107308.00,13000.00,30-39,1,Dueño,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+152770.00,80000.00,40-49,2,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+35603.00,12000.00,30-39,2, Empleado,0-1, Casado, Consumo, Si, Si, No,Autocompras,0
+89229.00,40000.00,30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,2
+65898.00,12000.00,18-29,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+47617.00,13000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+33982.00,19000.00,18-29,0,Dueño,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+32500.00,27000.00,40-49,2, Empleado,5-10, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+52116.00,25000.00,30-39,1,Dueño,1-5, Casado, Consumo, No, No, Si,Autocompras,3
+40648.00,17000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+199506.00,28000.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+48728.00,11500.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+61964.00,20000.00,40-49,0, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+47718.00,12000.00,30-39,4,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+61858.00,15000.00,30-39,3, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+51758.00,10000.00,30-39,2,Dueño,5-10, Casado, Consumo, Si, No, Si,Autocompras,1
+54010.00,6000.00,30-39,1, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+130033.00,10800.00,18-29,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+71958.00,25000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,2
+30000.00,4000.00,18-29,0, Empleado,1-5, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+150718.00,9000.00,40-49,3, Empleado,5-10, Casado, Consumo, Si, Si, No,Autocompras,0
+16500.00,54000.00,40-49,3, Empleado,1-5, Casado, Salud o Medico, Si, Si, Si,Sobre Vehiculos,0
+39436.00,6500.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, No,Autocompras,0
+119428.00,25000.00,30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+143092.00,5000.00,30-39,4, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+268862.00,250000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+68901.00,17500.00,30-39,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+44421.00,30000.00,30-39,0,Dueño,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+42500.00,5500.00,30-39,4, Empleado,5-10, Casado, Mejora Inmueble, Si, Si, No,Sobre Vehiculos,0
+143871.00,35000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,9
+42070.00,17000.00,50,0,Dueño,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+30000.00,12000.00,30-39,1, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+36250.00,3100.00,18-29,1, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+195580.00,50000.00,40-49,2, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+69284.00,18190.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+40846.00,6500.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+31309.00,9000.00,40-49,2, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+79713.00,23450.00,18-29,0,Dueño,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+52270.00,25000.00,30-39,2, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+76750.00,38000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+91540.00,60000.00,30-39,0,Dueño,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+40000.00,5000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, No, Si, Si,Autocompras,0
+48593.00,10000.00,40-49,3,Dueño,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+77974.00,60000.00,50,1,Dueño,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+10000.00,3100.00,18-29,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+146008.00,30000.00,40-49,2,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+34216.00,10000.00,18-29,1,Dueño,5-10, Soltero, Capital de trabajo, No, No, Si,Autocompras,0
+69355.00,35000.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+21500.00,10000.00,30-39,2, Empleado,1-5, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+121936.00,60000.00,50,1,Dueño,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+57753.00,12600.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+20000.00,25000.00,40-49,3,Dueño,5-10, Casado, Capital de trabajo, Si, Si, Si,Prendario,0
+80000.00,3700.00,18-29,0, Empleado,0-1, Soltero, Mejora Inmueble, Si, No, No,Hipotecarios,0
+83074.00,8250.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+159676.00,71428.57 -,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+62000.00,80000.00,18-29,0,Dueño,1-5, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+114388.00,25000.00,50,0,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+74608.00,35000.00,30-39,3,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+40000.00,15000.00,18-29,0,Dueño,1-5, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,2
+54034.94 -,11000.00,30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+88888.00,100000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+18508.00,3416.00,40-49,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,2
+91948.00,15500.00,30-39,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+30891.00,8000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,2
+46869.00,5000.00,30-39,2, Empleado,0-1, Casado, Capital de trabajo, No, No, No,Autocompras,0
+170550.00,25500.00,50,2, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+60000.00,9000.00,40-49,2,Dueño,5-10, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,0
+65000.00,32000.00,30-39,1,Dueño,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+21045.00,7000.00,18-29,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+50000.00,6250.00,40-49,1, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,7
+102607.00,100000.00,18-29,0,Dueño,5-10, Soltero, Consumo, No, No, No,Autocompras,0
+71956.00,30000.00,40-49,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+31972.00,4800.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+47374.00,25000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,2
+62043.96 -,4000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+60000.00,4000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,1
+53851.00,6000.00,40-49,1,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+19885.00,12000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+38811.00,7000.00,40-49,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+245356.00,60000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+99751.00,50000.00,30-39,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+41973.00,15000.00,30-39,0,Dueño,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+650000.00,30000.00,50,2, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, No,Hipotecarios,0
+48972.00,12500.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+59890.00,10000.00,40-49,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+212784.21 -,40000.00,18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+80974.00,8500.00,30-39,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+37852.46 -,5500.00,30-39,2, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,2
+144659.00,15000.00,40-49,2,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,9
+79975.00,20000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,7
+46500.00,15000.00,30-39,1,Dueño,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+100060.00,7500.00,50,0,Dueño,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+61726.03 -,7500.00,18-29,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+41968.00,19000.00,18-29,0,Dueño,0-1, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+52731.00,5000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+14875.84 -,20000.00,40-49,1, Empleado,1-5, Casado, Salud o Medico, Si, Si, Si,Sobre Vehiculos,0
+437500.00,100000.00,50,3,Dueño,5-10, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+48980.00,6250.00,30-39,2, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,7
+253977.00,40000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,8
+86000.00,20000.00,40-49,2,Dueño,1-5, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehiculos,2
+28000.00,11000.00,18-29,0,,1-5, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,8
+264469.00,40000.00,40-49,2,Dueño,1-5, Casado, Consumo, Si, No, No,Autocompras,2
+73276.00,8000.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,10
+23500.00,20000.00,30-39,2,Dueño,1-5, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+205576.00,100000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,5
+206086.00,100000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,5
+35000.00,20000.00,40-49,2,Dueño,1-5, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehiculos,2
+40000.00,5400.00,18-29,0, Empleado,5-10, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,16
+35000.00,5000.00,30-39,3, Empleado,1-5, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+54156.21 -,50000.00,30-39,1, Empleado,5-10, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,5
+39900.00,10000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, No,Sobre Vehiculos,7
+45350.00,7400.00,40-49,2, Empleado,5-10, Casado, Consumo, No, No, No,Sobre Vehiculos,24
+31200.00,5000.00,30-39,4, Empleado,1-5, Soltero, Consumo, No, No, Si,Sobre Vehiculos,30
+45600.00,7500.00,30-39,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Sobre Vehiculos,5
+49750.00,15400.00,50,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Sobre Vehiculos,8
+39945.00,5000.00,40-49,1, Empleado,1-5, Soltero, Consumo, Si, No, No,Sobre Vehiculos,16
+39116.00,10000.00,30-39,2,Dueño,5-10, Soltero, Consumo, No, No, No,Sobre Vehiculos,14
+31795.00,13000.00,18-29,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Sobre Vehiculos,5
+19500.00,5000.00,30-39,1, Empleado,1-5, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,26
+38068.00,5710.00,30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,5
+155225.00,20000.00,30-39,2,Dueño,1-5, Soltero, Consumo, Si, Si, No,Sobre Vehiculos,18
+44688.00,18000.00,30-39,0,Dueño,5-10, Soltero, Consumo, Si, No, Si,Autocompras,9
+58625.41 -,7000.00,30-39,3, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,5
+72872.00,12000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,5
+38027.00,18650.00,30-39,0, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,17
+56687.00,12000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,5
+17810.00,15000.00,30-39,0,Dueño,1-5, Soltero, Capital de trabajo, No, No, No,Autocompras,15
+69513.00,10000.00,18-29,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,5
+66963.00,10000.00,18-29,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,5
+56763.00,10000.00,18-29,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,5
+111328.00,125000.00,18-29,2,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,11
+13000.00,15000.00,50,0,Dueño,5-10, Casado, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,11
+59971.00,12000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+139378.00,125000.00,18-29,2,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,11
+66448.00,12000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+71038.00,14175.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,12
+63294.00,18000.00,40-49,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+29593.00,9000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,4
+12000.00,7000.00,18-29,1,Dueño,1-5, Soltero, Capital de trabajo, No, Si, No,Sobre Vehiculos,1
+69938.00,75000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+195183.00,45000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+198263.00,75000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+97263.00,23600.00,50,0, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+38628.00,10000.00,40-49,2,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,12
+58929.00,10000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+241956.00,28000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, Si, No,Autocompras,19
+71958.00,80000.00,18-29,1,Dueño,1-5, Soltero, Consumo, No, Si, Si,Autocompras,2
+20500.00,5116.43 -,18-29,0, Empleado,1-5, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+15000.00,4200.00,30-39,2, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,2
+23548.00,5000.00,30-39,2, Empleado,5-10, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,0
+147077.00,10000.00,18-29,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,2
+67366.00,9500.00,30-39,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+30000.00,12000.00,50,2, Empleado,5-10, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,0
+17800.00,15384.00,50,0, Empleado,5-10, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,1
+221565.00,30000.00,40-49,5,Dueño,5-10, Casado, Consumo, Si, No, No,Autocompras,1
+70630.00,10000.00,30-39,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+52250.00,18000.00,30-39,2, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,8
+68009.00,10000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+53000.00,20000.00,40-49,0, Empleado,1-5, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,10
+62997.00,10000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+41050.00,16000.00,50,0,Dueño,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+107118.40 -,100000.00,40-49,0,Dueño,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,1
+47476.00,6000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,6
+195376.00,50000.00,40-49,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,10
+76827.00,17000.00,30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,10
+13500.00,7050.00,30-39,1, Empleado,1-5, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,1
+37888.00,4000.00,30-39,2, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,10
+58918.00,9500.00,18-29,1, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,13
+64244.00,27500.00,50,0,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,2
+41917.00,15000.00,50,0,Dueño,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+177628.00,75000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+85000.00,6000.00,40-49,0, Empleado,5-10, Casado, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+39979.00,15000.00,50,0,Dueño,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+23812.00,50000.00,40-49,0, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,10
+42769.00,12000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,15
+80000.00,15000.00,30-39,2,Dueño,5-10, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,1
+26500.00,10200.00,30-39,2, Empleado,5-10, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehiculos,8
+13000.00,9250.00,18-29,0, Empleado,5-10, Soltero, Estudios, Si, Si, Si,Sobre Vehiculos,0
+43976.00,18000.00,30-39,1,Dueño,5-10, Soltero, Consumo, Si, Si, No,Autocompras,5
+29400.00,15000.00,50,2,Dueño,1-5, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+54024.00,25000.00,40-49,3,Dueño,1-5, Casado, Consumo, Si, No, No,Autocompras,3
+69576.00,68000.00,40-49,3,Dueño,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,
+24908.00,90000.00,30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,8
+82264.00,7000.00,40-49,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+35516.00,90000.00,30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+39962.00,8000.00,40-49,3,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+61984.00,7500.00,30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+39343.38 -,10000.00,30-39,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+38688.00,7800.00,30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+49626.68 -,9000.00,30-39,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+60995.00,15000.00,30-39,0, Empleado,1-5, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,0
+358476.21 -,50000.00,50,3,Dueño,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+49984.88 -,6000.00,18-29,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+10450.00,7000.00,40-49,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+30363.00,7000.00,30-39,3, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,0
+96720.00,11415.20 -,30-39,3, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+58968.00,14000.00,30-39,2,,, Casado, Consumo, No, Si, Si,Autocompras,2
+61932.00,25000.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+69000.00,,40-49,,,, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,3
+4504.49 -,4000.00,40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+61776.00,18000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,4
+59769.00,6500.00,30-39,3, Empleado,5-10, Divorciado, Consumo, Si, No, Si,Autocompras,0
+100672.00,20000.00,50,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+46306.00,10000.00,40-49,3, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+81529.48 -,30000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+144248.00,47050.00,40-49,4, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+40997.00,11000.00,18-29,3,Dueño,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+45968.00,118000.00,40-49,2, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+73000.00,15000.00,30-39,5, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+43940.00,7000.00,30-39,3, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+136308.00,34000.00,30-39,, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+15840.96 -,25000.00,40-49,4, Empleado,5-10, Casado, Capital de trabajo,,,,Sobre Vehiculos,10
+64480.00,12000.00,50,2,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+46904.00,120000.00,40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+39936.00,14000.00,50,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+80808.00,6500.00,18-29,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+39676.00,240000.00,30-39,2,Dueño,0-1,, Capital de trabajo, Si, No, No,Autocompras,1
+58500.00,15000.00,30-39,2,Dueño,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+110000.00,25000.00,50,4,Dueño,5-10, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+84968.00,28000.00,40-49,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+90116.00,9000.00,30-39,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+59270.00,12500.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+34944.00,10000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+40550.00,10000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+31689.00,4600.00,18-29,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+8691.58 -,17687.00,50,1, Empleado,1-5,, Consumo,,,,Sobre Vehiculos,1
+73476.00,15000.00,30-39,2,Dueño,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+39745.88 -,8000.00,30-39,2, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,3
+27000.00,6000.00,40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+48000.00,7000.00,18-29,, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,2
+52832.00,10000.00,50,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+155999.25 -,27500.00,30-39,2,Dueño,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+57304.00,12000.00,18-29,2, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+65988.00,18000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,4
+35828.00,20475.00,40-49,3, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+45003.31 -,7216.00,30-39,3, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+121046.00,22000.00,30-39,0, Empleado,, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+211848.00,48000.00,40-49,4,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+44928.00,22000.00,30-39,2,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+153920.00,50000.00,30-39,4,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+90959.36 -,18000.00,18-29,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,8
+40768.00,7600.00,18-29,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+81120.00,,30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,1
+103896.00,15000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+81246.62 -,13000.00,18-29,,Dueño,1-5,, Capital de trabajo, Si, No, Si,Autocompras,1
+63908.00,12000.00,18-29,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+45916.00,9500.00,30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+22800.00,10000.00,30-39,,Dueño,1-5, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+142678.00,25000.00,30-39,4, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+111696.00,300000.00,18-29,1,Dueño,, Soltero, Consumo, Si, No, Si,Autocompras,1
+65780.00,18000.00,30-39,3, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+54990.00,18000.00,40-49,3,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+112008.00,20000.00,40-49,3, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,1
+154994.93 -,15000.00,18-29,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,4
+86840.00,8750.00,18-29,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+131463.40 -,60000.00,30-39,3,Dueño,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+36556.00,22000.00,30-39,, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+53710.00,5000.00,30-39,2,,, Soltero, Consumo, Si, Si, Si,Autocompras,2
+54946.00,11012.50 -,40-49,4, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+47839.00,8500.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+94910.00, 15.00 ,18-29,1,Dueño,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+57830.00,18000.00,18-29,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+48843.00,18063.19 -,30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, Si, Si,Autocompras,0
+65761.00,4000.00,30-39,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+70808.00,22500.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+34363.16 -,11000.00,18-29,0,Dueño,, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+20540.00,3416.38 -,18-29,0, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,0
+43930.00,6000.00,30-39,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+29500.00,8000.00,30-39,2, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+111500.00,10000.00,50,0, Empleado,5-10,, Capital de trabajo, Si, Si, No,Hipotecarios,0
+56290.00,5000.00,40-49,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+53911.00,20000.00,30-39,1,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+49229.00,5000.00,30-39,1, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,0
+27960.00,8000.00,30-39,3, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+61950.00,12000.00,30-39,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,1
+67914.00,15000.00,40-49,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+80840.00,11000.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+64000.00,15000.00,40-49,1, Empleado,5-10, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+65864.00,180000.00,30-39,3,Dueño,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+47942.00,5785.00,30-39,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+34977.00,5000.00,30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+44400.00,4250.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,1
+37951.00,10000.00,40-49,1, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,1
+117570.00,21000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+60843.00,6800.00,30-39,4, Empleado,, Casado, Consumo, Si, Si, Si,Autocompras,0
+40994.00,1700.00,50,1, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,1
+33934.00,4200.00,18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,4
+32955.00,7000.00,40-49,1, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, Si,Autocompras,0
+42998.00,3212.62 -,18-29,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+39810.00,2000.00,50,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+51985.00,1800.00,18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+33934.00,5000.00,40-49,4, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+53916.00,10000.00,50,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+37745.00,12100.00,30-39,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+42848.00,7000.00,30-39,1, Empleado,0-1, Soltero, Consumo, No, Si, Si,Autocompras,5
+14000.00,15000.00,18-29,1, Empleado,1-5, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,0
+134997.00,15000.00,30-39,2, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+71967.00,3500.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+57933.00,8000.00,50,1, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,0
+55924.00,,40-49,0, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,1
+30998.00,2000.00,40-49,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+90300.00,8000.00,30-39,2, Empleado,0-1, Casado, Consolidacion de deudas, Si, No, Si,Hipotecarios,
+47633.00,2600.00,18-29,3, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,2
+124491.00,20000.00,40-49,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+121999.00,8500.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+39702.00,,18-29,,,, Soltero, Consumo, No, No, Si,Autocompras,0
+76370.00,9000.00,40-49,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+31977.00,8800.00,40-49,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+98500.00,40000.00,40-49,0, Empleado,, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,9
+38260.00,3500.00,30-39,1, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+75000.00,65000.00,50,1, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,1
+5485.00,3416.00,50,2, Empleado,5-10, Casado, Consumo, No, Si, Si,Autocompras,0
+21545.00,3000.00,30-39,0,Dueño,1-5, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,0
+335467.00,120000.00,40-49,3,Dueño,1-5,, Capital de trabajo, Si, Si, Si,Autocompras,0
+110000.00,20000.00,50,0, Empleado,5-10, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+29021.05 -,,18-29,,,, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+64937.00,3000.00,18-29,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,1
+39100.00,25000.00,40-49,0, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+56491.00,9500.00,30-39,4, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+160835.00,25000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+43899.00,2000.00,40-49,1, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+23000.00,11000.00,30-39,0, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+36869.00,2800.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+45000.00,2000.00,18-29,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+32909.00,4500.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, No,Autocompras,0
+397992.00,45000.00,50,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+19000.00,2500.00,30-39,1, Empleado,0-1, Casado, Salud o Medico, No, Si, Si,Sobre Vehiculos,1
+49899.00,5500.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+42998.00,6000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+19800.00,2225.00,50,1, Empleado,1-5,, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+232940.00,50000.00,50,0, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,8
+155165.00,3500.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+49500.00,25000.00,50,1,,, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+32698.00,2000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+17500.00,4500.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+65416.00,10000.00,40-49,2,Dueño,5-10, Casado, Capital de trabajo,, Si, Si,Autocompras,10
+39000.00,4500.00,30-39,0, Empleado,5-10, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,1
+84713.00,4200.00,18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+42637.00,45000.00,30-39,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+45000.00,8500.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+52989.00,3000.00,50,0,Dueño,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,3
+35994.00,7000.00,40-49,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,2
+48560.00,8000.00,50,0, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+48920.00,10000.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+93000.00,14000.00,18-29,0,Dueño,1-5,, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+107064.00,120000.00,40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+41906.00,10000.00,30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,3
+65890.00,120000.00,30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+38826.00,8000.00,30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,3
+62000.00,7500.00,30-39,3, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+17000.00,4500.00,30-39,2, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,2
+37899.00,2800.00,30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,8
+165500.00,25000.00,40-49,,Dueño,5-10,, Capital de trabajo, No, Si, No,Sobre Vehiculos,0
+32909.00,12000.00,18-29,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,10
+60920.00,5000.00,30-39,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+52000.00,3000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+12000.00,4400.00,30-39,1, Empleado,5-10, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+79460.00,2500.00,30-39,2,Dueño,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+46706.00,1000.00,18-29,0,,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+76885.00,4500.00,18-29,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,9
+47942.00,4500.00,18-29,0,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+41350.00,4000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,7
+35994.00,2500.00,30-39,2, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,4
+38672.00,3000.00,30-39,1,Dueño,0-1, Casado, Capital de trabajo, Si, Si, No,Autocompras,1
+24875.00, 299.00 ,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,3
+48560.00,8000.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+58139.00,4000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,3
+56805.00,22000.00,30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,1
+37384.00,8000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+10000.00,4000.00,40-49,3, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,1
+142800.00,1500.00,30-39,0, Empleado,1-5,, Consumo, No, No, Si,Autocompras,0
+128900.00,13000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,12
+102600.00,2000.00,18-29,0, Empleado,0-1, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+142032.00,4000.00,30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+40000.00,2000.00,30-39,2, Empleado,5-10, Soltero, Capital de trabajo, No, No, Si,Sobre Vehiculos,0
+59225.00,18500.00,40-49,2,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+34608.00,3000.00,18-29,2, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,1
+43873.00,2500.00,18-29,3,Dueño,0-1, Casado, Consumo,,,,Autocompras,0
+43976.00,3000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+15000.00,3000.00,18-29,0, Empleado,0-1, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+44000.00,20000.00,40-49,1, Empleado,5-10, Casado, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+81422.00,22000.00,40-49,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+27991.00,4500.00,18-29,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,9
+113450.00,25000.00,50,3,Dueño,5-10, Casado, Consumo, Si, No, Si,Autocompras,1
+54740.00,25000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+46963.00,4000.00,30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,2
+34608.00,4500.00,30-39,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+29845.00,8000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+55255.00,1250.00,18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+37750.00,9000.00,18-29,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+57984.00,3500.00,40-49,2, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,1
+105215.00,8000.00,30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,4
+53143.00,6500.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, Si,Autocompras,0
+73718.00,3000.00,30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+31000.00,4000.00,18-29,2, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,6
+68954.00,15000.00,50,5, Empleado,, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+36617.00,6500.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, No, No, Si,Autocompras,0
+139359.00,6000.00,40-49,3,,, Casado, Consumo, Si, Si, Si,Autocompras,0
+46000.00,8000.00,40-49,2, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,1
+34258.00,6000.00,40-49,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,3
+96460.00,10000.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+79465.00,3500.00,50,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+40994.00,7000.00,40-49,3, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,0
+31874.00,6000.00,50,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+31570.00,3000.00,50,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+40891.00,8800.00,40-49,3,Dueño,1-5, Casado, Capital de trabajo, No, No, Si,Autocompras,
+43878.00,12000.00,40-49,1, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+24900.00,12080.00,50,3, Empleado,5-10, Soltero, Consolidacion de deudas, Si, No, Si,Sobre Vehiculos,1
+126510.00,48000.00,30-39,2,,, Soltero, Consumo, No, No, Si,Autocompras,1
+89657.00,3500.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+14000.00,2000.00,40-49,0, Empleado,1-5, Casado, Consumo, No, Si, Si,Sobre Vehiculos,1
+35000.00,11500.00,30-39,3, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+167015.00,1500.00,30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+79465.00,25000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+70499.00,40000.00,40-49,2, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+57938.00,11000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,1
+55723.00,8500.00,40-49,2, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,0
+47993.00,56000.00,50,0, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+39676.00,240000.00,30-39,2,Dueño,0-1,, Capital de trabajo, Si, No, No,Autocompras,1
+39211.44 -,37000.00,30-39,3, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+27150.94 -,4500.00,40-49,1,Dueño,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+96150.95 -,10000.00,30-39,,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+46923.25 -,19750.00,30-39,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+46306.00,10000.00,40-49,3, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+49626.68 -,9000.00,30-39,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+31500.00,13000.00,40-49,1, Empleado,5-10, Casado, Estudios, Si, Si, No,Sobre Vehiculos,0
+60995.00,15000.00,30-39,0, Empleado,1-5, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,0
+144248.00,47050.00,40-49,4, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+21500.00,5500.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,1
+59270.00,12500.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+61226.75 -,5600.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+48000.00,7000.00,18-29,, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,2
+61776.00,18000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,4
+90116.00,9000.00,30-39,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+65780.00,18000.00,30-39,3, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+54102.61 -,15000.00,30-39,1,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+31689.00,4600.00,18-29,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+51863.70 -,9000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+146974.90 -,15000.00,18-29,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+39962.00,8000.00,40-49,3,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+65988.00,18000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,4
+53927.75 -,9000.00,30-39,2, Empleado,5-10, Casado, Consumo, No, No, No,Autocompras,0
+49984.88 -,6000.00,18-29,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+61984.00,7500.00,30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+45224.59 -,10000.00,40-49,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+36556.00,22000.00,30-39,, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+131463.40 -,60000.00,30-39,3,Dueño,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+154994.93 -,15000.00,18-29,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,4
+61932.00,25000.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+211848.00,48000.00,40-49,4,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+81246.62 -,13000.00,18-29,,Dueño,1-5,, Capital de trabajo, Si, No, Si,Autocompras,1
+56627.68 -,5000.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,4
+40997.00,11000.00,18-29,3,Dueño,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+87583.62 -,10720.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+119925.27 -,75000.00,18-29,,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+66423.64 -,15000.00,30-39,0, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,4
+38688.00,7800.00,30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+58968.00,14000.00,30-39,2,,, Casado, Consumo, No, Si, Si,Autocompras,2
+52832.00,10000.00,50,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+92772.12 -,17500.00,30-39,2, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,1
+110294.23 -,22000.00,30-39,1, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+73000.00,15000.00,30-39,5, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+71060.12 -,13500.00,30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+40550.00,10000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+21725.52 -,8500.00,30-39,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+24910.37 -,8500.00,30-39,1,Dueño,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+8691.58 -,17687.00,50,1, Empleado,1-5,, Consumo,,,,Sobre Vehiculos,1
+63670.09 -,15000.00,30-39,4, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,2
+142374.25 -,25000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,3
+110000.00,25000.00,50,4,Dueño,5-10, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+34293.90 -,37000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+47638.59 -,15000.00,30-39,3, Empleado,5-10, Soltero, Consumo, No, Si, No,Autocompras,0
+216304.50 -,15000.00,30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+10450.00,7000.00,40-49,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+40768.00,7600.00,18-29,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+50885.66 -,7000.00,30-39,2, Empleado,5-10, Casado, Consumo, No, No, No,Autocompras,1
+132786.39 -,70000.00,40-49,2,Dueño,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+44928.00,22000.00,30-39,2,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+30363.00,7000.00,30-39,3, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,0
+50000.00,4800.00,30-39,3, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+46904.00,120000.00,40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+81529.48 -,30000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+24908.00,90000.00,30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,8
+64916.64 -,11000.00,30-39,3, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,0
+4504.49 -,4000.00,40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+90959.36 -,18000.00,18-29,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,8
+43955.59 -,24000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,2
+124275.44 -,,18-29,,,, Soltero, Consumo, No, No, Si,Autocompras,2
+22800.00,10000.00,30-39,,Dueño,1-5, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+86840.00,8750.00,18-29,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+58500.00,15000.00,30-39,2,Dueño,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+64015.38 -,,18-29,,,, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+60870.64 -,13500.00,18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+15000.00,13900.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+78881.61 -,45000.00,30-39,1,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+97224.93 -,25000.00,40-49,2, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+59769.00,6500.00,30-39,3, Empleado,5-10, Divorciado, Consumo, Si, No, Si,Autocompras,0
+73476.00,15000.00,30-39,2,Dueño,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+142678.00,25000.00,30-39,4, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+95160.00,500000.00,18-29,0,Dueño,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,1
+50000.00,30000.00,30-39,3, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+40264.89 -,7000.00,18-29,,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+358476.21 -,50000.00,50,3,Dueño,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+111696.00,300000.00,18-29,1,Dueño,, Soltero, Consumo, Si, No, Si,Autocompras,1
+153920.00,50000.00,30-39,4,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+74544.61 -,15695.00,40-49,2, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,2
+50837.25 -,10000.00,30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+167984.91 -,32000.00,40-49,, Empleado,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+45916.00,9500.00,30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+85489.86 -,35000.00,40-49,, Empleado,, Soltero, Consumo, No, Si, No,Autocompras,0
+68500.00,45000.00,18-29,,Dueño,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+75297.81 -,45000.00,50,1,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+111965.27 -,20000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,1
+41998.59 -,3210.00,40-49,1, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+121046.00,22000.00,30-39,0, Empleado,, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+54990.00,18000.00,40-49,3,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+87837.95 -,35000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+15840.96 -,25000.00,40-49,4, Empleado,5-10, Casado, Capital de trabajo,,,,Sobre Vehiculos,10
+155622.58 -,50000.00,30-39,4, Empleado,1-5, Casado, Consumo, Si, Si, No,Autocompras,3
+96720.00,11415.20 -,30-39,3, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+131717.93 -,17000.00,30-39,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+64480.00,12000.00,50,2,Dueño,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+47981.25 -,13000.00,40-49,1, Empleado,1-5, Casado, Consumo, No, No, No,Autocompras,0
+100672.00,20000.00,50,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+80808.00,6500.00,18-29,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+31268.44 -,10000.00,40-49,1,,, Soltero, Consumo, Si, Si, No,Autocompras,0
+55619.75 -,15000.00,40-49,1, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+69576.00,68000.00,40-49,3,Dueño,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,
+81120.00,,30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,1
+49817.73 -,7200.00,18-29,, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,2
+31000.00,27000.00,40-49,2, Empleado,5-10, Casado, Consumo, No, Si, Si,Sobre Vehiculos,0
+45902.64 -,6200.00,30-39,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+42950.59 -,12000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+35461.34 -,25000.00,30-39,4, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,4
+42983.25 -,15000.00,40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+57304.00,12000.00,18-29,2, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+10000.00,4200.00,18-29,2, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+22200.00,8500.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+82264.00,7000.00,40-49,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+27000.00,15000.00,50,4,Dueño,1-5, Soltero, Consolidacion de deudas,,, No,Sobre Vehiculos,0
+45968.00,118000.00,40-49,2, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+60314.64 -,35000.00,50,1,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+27000.00,6000.00,40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+66066.35 -,20000.00,30-39,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+69000.00,,40-49,, Empleado,, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,3
+194688.00,35000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,9
+55207.07 -,12000.00,30-39,0, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,2
+112008.00,20000.00,40-49,3, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,1
+39936.00,14000.00,50,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+84968.00,28000.00,40-49,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+39745.88 -,8000.00,30-39,2, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,3
+63908.00,12000.00,18-29,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+39343.38 -,10000.00,30-39,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+6198.95 -,14000.00,40-49,1, Empleado,5-10, Soltero, Consumo,,,,Autocompras,3
+136308.00,34000.00,30-39,, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+34944.00,10000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+103896.00,15000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+35516.00,90000.00,30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+100000.00,14000.00,18-29,0,Dueño,1-5,, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+44907.59 -,8000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,5
+155999.25 -,27500.00,30-39,2,Dueño,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+45003.31 -,7216.00,30-39,3, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+43940.00,7000.00,30-39,3, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+35828.00,20475.00,40-49,3, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+39541.75 -,6500.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+49975.73 -,10000.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+41945.59 -,8000.00,30-39,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+41945.59 -,6000.00,30-39,0, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+67904.64 -,18000.00,40-49,3,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+46070.46 -,7000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+47275.87 -,60000.00,18-29,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,2
+175986.71 -,20000.00,18-29,,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+82811.86 -,34500.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+30356.59 -,12000.00,30-39,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, Si,Autocompras,1
+36000.00,9000.00,30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+42129.02 -,8000.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, No,Autocompras,0
+110112.60 -,20000.00,18-29,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+29972.44 -,11200.00,30-39,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+45816.59 -,3500.00,18-29,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+40993.59 -,15000.00,40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+51456.73 -,12500.00,30-39,1,Dueño,0-1, Soltero, Consumo, No, Si, Si,Autocompras,3
+79939.61 -,18150.00,30-39,2, Empleado,1-5, Casado, Consumo, Si, Si, No,Autocompras,1
+68198.95 -,20000.00,40-49,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,1
+95807.27 -,12000.00,30-39,3,Dueño,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+34488.59 -,15000.00,50,0, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+84415.12 -,34000.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+35975.44 -,11000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+29998.44 -,7000.00,18-29,, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+70985.35 -,7300.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+117886.25 -,23000.00,50,0, Empleado,5-10, Casado, Capital de trabajo, Si,, No,Autocompras,2
+40993.59 -,7500.00,18-29,,Dueño,0-1, Soltero, Consumo, No, Si, No,Autocompras,1
+49235.73 -,8000.00,30-39,2, Empleado,0-1, Casado, Consumo, No, Si, Si,Autocompras,0
+38983.59 -,9000.00,30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,2
+80283.35 -,17000.00,40-49,1, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,1
+113948.27 -,25000.00,30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,2
+33991.44 -,7000.00,30-39,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+42051.59 -,7500.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+68800.09 -,16500.00,30-39,3, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+69995.61 -,12000.00,18-29,,Dueño,5-10, Soltero, Capital de trabajo, Si, Si, Si,Autocompras,1
+102995.30 -,7000.00,18-29,3, Empleado,5-10, Casado, Consumo, No,, Si,Autocompras,0
+124592.44 -,15000.00,40-49,,Dueño,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+7239.60 -,78000.00,40-49,2,Dueño,5-10,,,,,,Autocompras,1
+47276.59 -,15000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+58876.25 -,12500.00,30-39,4, Empleado, Q -   , Soltero, Consumo, No, No, No,Autocompras,1
+127474.76 -,30000.00,30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,1
+46585.00,40000.00,50,2, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+105288.78 -,27000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Sobre Vehiculos,0
+56895.86 -,18000.00,50,1, Empleado,0-1,, Consumo, Si, No, No,Autocompras,0
+57818.25 -,20000.00,40-49,3, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+103908.78 -,20000.00,18-29,1, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+25328.64 -,18000.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+122912.60 -,10000.00,50,4, Empleado,5-10, Casado, Consumo, No, Si, Si,Autocompras,0
+51895.25 -,60000.00,30-39,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+50000.00,65000.00,40-49,0,Dueño,5-10, Soltero, mejora de algo en inmueble o v, No, Si, Si,Sobre Vehiculos,0
+449893.73 -,50000.00,30-39,4, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+47710.59 -,8125.00,18-29,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+68486.64 -,14000.00,40-49,4, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+77628.86 -,35000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,2
+40676.59 -,10000.00,30-39,1,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,2
+76399.78 -,35000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+67814.76 -,9500.00,18-29,0, Empleado,1-5,, Consumo, No, No, Si,Autocompras,0
+67814.76 -,9500.00,18-29,0, Empleado,1-5,, Consumo, No, No, Si,Autocompras,0
+64664.75 -,15000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+73820.86 -,9000.00,40-49,1, Empleado,0-1, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+99324.95 -,14000.00,30-39,4, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+141383.41 -,8000.00,30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,1
+111979.11 -,,30-39,,, Q -   , Casado, Consumo, Si, Si, Si,Autocompras,0
+80008.51 -,15000.00,30-39,3, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+58000.00,5750.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,2
+56299.62 -,20000.00,30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+50625.25 -,,30-39,,, Q -   , Soltero, Consumo, No, No, Si,Autocompras,1
+55157.28 -,32000.00,50,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+32960.44 -,2500.00,18-29,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+54777.25 -,6000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+44167.59 -,,40-49,1, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+72979.09 -,70000.00,40-49,3,Dueño,5-10, Casado, Consumo, No, Si, Si,Autocompras,2
+60459.75 -,8500.00,40-49,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+36424.44 -,6500.00,18-29,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,1
+5082.75 -,10000.00,30-39,2, Empleado,1-5, Soltero,,,,,Sobre Vehiculos,0
+5442.80 -,10000.00,30-39,0, Empleado,1-5, Soltero,,,,,Autocompras,0
+40789.11 -,20000.00,18-29,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+37006.44 -,9000.00,40-49,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+42639.25 -,10000.00,30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+63934.09 -,,50,3, Empleado, Q -   , Casado,, Si, No, No,Autocompras,0
+38719.59 -,5000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+73947.35 -,17250.00,30-39,1, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,1
+35922.44 -,10000.00,18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+45383.59 -,7000.00,30-39,0, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+83816.86 -,13500.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+34277.44 -,6000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+64903.35 -,9000.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+44067.25 -,29000.00,40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,1
+235889.30 -,110000.00,30-39,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+40035.59 -,5000.00,30-39,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+108474.95 -,20000.00,18-29,1, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+77945.86 -,13000.00,30-39,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+61250.96 -,15000.00,30-39,1,, Q -   , Soltero, Capital de trabajo, Si, Si, Si,Autocompras,0
+53662.75 -,15000.00,40-49,1, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+161000.00,60000.00,30-39,3,Dueño,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+29893.44 -,1600.00,30-39,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+62601.75 -,10000.00,18-29,0,Dueño,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+33383.44 -,8000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+58242.25 -,16000.00,18-29,1, Empleado,0-1, Casado,,, No, No,Autocompras,1
+51911.75 -,25000.00,30-39,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+50520.25 -,9000.00,40-49,4, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+62072.75 -,6000.00,30-39,3,Dueño,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+105420.11 -,50000.00,40-49,3, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+54715.00,3400.00,18-29,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+80996.61 -,15000.00,30-39,2, Empleado,0-1, Casado, Consumo, Si, Si, No,Autocompras,0
+62971.75 -,10000.00,30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+34441.44 -,11500.00,30-39,0, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,0
+194924.52 -,13386.11 -,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+180493.39 -,4200.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, Si, Si,Autocompras,0
+228364.91 -,50000.00,40-49,1,Dueño,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+94123.78 -,15000.00,40-49,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+43009.25 -,8000.00,40-49,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+96211.43 -,25000.00,30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,1
+79994.62 -,100000.00,30-39,2, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+64374.35 -,8500.00,18-29,1, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+53957.25 -,5000.00,18-29,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+75777.86 -,18500.00,40-49,3, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+67615.61 -,9000.00,40-49,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+72608.09 -,21000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+116059.23 -,90000.00,30-39,2,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,1
+36886.61 -,20000.00,40-49,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+46388.59 -,12000.00,30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+90973.12 -,9000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+51472.25 -,17000.00,30-39,3, Empleado,0-1, Casado, Consumo, No, Si, Si,Autocompras,1
+41460.73 -,8000.00,30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+50927.73 -,9000.00,30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+126931.60 -,20000.00,18-29,2,Dueño,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+80046.62 -,50000.00,18-29,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+38613.59 -,14000.00,18-29,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+65680.09 -,11500.00,30-39,3,, Q -   , Casado, Consumo, No, No, Si,Autocompras,1
+59904.75 -,35000.00,30-39,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+61777.35 -,15000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,2
+44748.59 -,13000.00,30-39,2, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,1
+174437.91 -,35000.00,30-39,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+101150.62 -,9500.00,30-39,1, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,0
+133780.93 -,83000.00,50,0,Dueño,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+66952.64 -,15000.00,18-29,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+70615.35 -,10000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+52403.73 -,8000.00,40-49,2, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+168922.55 -,5000.00,30-39,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+68906.09 -,7500.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+78140.61 -,25000.00,18-29,2,Dueño,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+63077.75 -,20000.00,50,1, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+43279.57 -,7500.00,40-49,3, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+75058.35 -,16000.00,30-39,0, Empleado,0-1, Soltero, Consumo, Si, Si, No,Autocompras,0
+42897.59 -,6250.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,1
+62932.64 -,30000.00,40-49,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+5775.00,4500.00,18-29,0, Empleado,0-1, Soltero, mejora de algo en inmueble o v, No, Si, Si,Sobre Vehiculos,0
+59812.64 -,7600.00,30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+12000.00,5000.00,30-39,3, Empleado,1-5, Soltero,,,,,Autocompras,1
+162034.30 -,30000.00,30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+73009.93 -,12000.00,40-49,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+60999.61 -,35000.00,40-49,2,Dueño,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+49960.75 -,35000.00,40-49,0, Empleado,0-1, Casado, Consumo, No, Si, Si,Autocompras,0
+72503.09 -,10000.00,18-29,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+60146.25 -,6800.00,18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+74877.86 -,6000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+40987.59 -,9000.00,30-39,0,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+44702.25 -,6000.00,18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,1
+47387.67 -,8000.00,30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+61067.75 -,12000.00,30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, Si,Autocompras,1
+130697.08 -,20000.00,30-39,2,Dueño,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,2
+290405.67 -,25000.00,30-39,3, Empleado,5-10, Casado, Consumo, Si, Si, No,Autocompras,0
+46902.64 -,6000.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+74906.37 -,6530.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+61702.75 -,25000.00,30-39,3, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+80532.86 -,7000.00,30-39,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+108144.78 -,12000.00,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+79638.86 -,12000.00,18-29,2, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+153336.41 -,20000.00,30-39,1,Dueño,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+71741.61 -,8000.00,30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+110318.18 -,35000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,1
+243369.96 -,125000.00,50,1,,5-10, Soltero, Consumo,, Si, Si,Autocompras,0
+360128.47 -,,40-49,,,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+26000.00,15000.00,50,2, Empleado,0-1, Casado, Salud o Medico, Si, Si, Si,Sobre Vehiculos,0
+47340.59 -,,30-39,,, Q -   , Casado, Consumo, No, No, Si,Autocompras,0
+31902.44 -,7100.00,30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+75968.38 -,14000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+241198.30 -,6000.00,40-49,3,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+78897.86 -,8000.00,40-49,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,3
+38672.44 -,10000.00,30-39,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+193536.26 -,20000.00,30-39,2, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+56942.75 -,12000.00,30-39,2,Dueño,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,1
+102617.11 -,25000.00,18-29,1, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+194941.71 -,15486.00,30-39,3, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+66790.09 -,20000.00,30-39,0, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+96939.38 -,8000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+333447.06 -,65000.00,50,3,Dueño,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+71514.35 -,35000.00,18-29,1, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+40405.59 -,8500.00,18-29,1,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+81960.86 -,15000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+72851.61 -,18500.00,18-29,0,Dueño,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+72957.61 -,43000.00,30-39,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+166012.42 -,,18-29,,, Q -   , Soltero, Consumo, Si, No, Si,Autocompras,0
+60976.64 -,10000.00,50,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+46335.59 -,5000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+121821.74 -,16000.00,30-39,1,Dueño,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+66000.64 -,35000.00,30-39,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+61596.75 -,10500.00,40-49,2, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+43532.59 -,70000.00,40-49,3, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,1
+107137.42 -,25000.00,18-29,3, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+66484.35 -,45000.00,18-29,0, Empleado,1-5,, Consumo, No, Si, No,Autocompras,0
+52937.73 -,12000.00,30-39,1, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+41675.59 -,5000.00,40-49,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+231239.10 -,12000.00,30-39,3, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,2
+171101.07 -,30000.00,18-29,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Autocompras,1
+290468.49 -,35000.00,30-39,2, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+46752.59 -,4200.00,30-39,3, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+75957.35 -,15000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+80849.86 -,30000.00,40-49,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+203732.30 -,25000.00,18-29,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+138963.93 -,15000.00,18-29,0,, Q -   , Soltero, Consumo, Si, No, Si,Autocompras,0
+134520.93 -,80000.00,50,2,Dueño,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+136597.09 -,15000.00,18-29,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+59918.64 -,15000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+250000.00,60000.00,30-39,3,Dueño,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+67878.64 -,5000.00,18-29,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+79956.12 -,6000.00,30-39,4, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+49191.59 -,,30-39,,, Q -   , Casado, Capital de trabajo, Si, No, No,Autocompras,2
+73084.09 -,8000.00,30-39,0, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+17800.00,20000.00,50,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,1
+131129.58 -,10500.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+39407.59 -,3400.00,18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+170219.90 -,18400.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+74000.00,125000.00,30-39,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+453077.06 -,75000.00,40-49,4,,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+98302.78 -,50000.00,30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+68327.64 -,7800.00,40-49,3, Empleado,1-5, Casado, Consumo, Si, Si, No,Autocompras,1
+212480.71 -,25000.00,40-49,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+50566.59 -,,30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+56919.25 -,10500.00,30-39,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+97825.44 -,20000.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+63898.35 -,10000.00,18-29,2,Dueño,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+35400.00,14500.00,50,1, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+147716.25 -,25000.00,50,1, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+46000.00,37000.00,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, No,Sobre Vehiculos,0
+24999.44 -,17000.00,40-49,1,Dueño,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+66476.64 -,10000.00,18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+62760.75 -,17231.00,40-49,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+134661.76 -,15000.00,40-49,2, Empleado,0-1, Casado, Consumo, Si, No, No,Autocompras,0
+165961.90 -,25000.00,30-39,1,Dueño,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+50806.75 -,12000.00,40-49,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+43579.59 -,10000.00,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+179964.39 -,12000.00,30-39,4, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+41939.59 -,8600.00,30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+39148.44 -,,18-29,,, Q -   , Soltero, Consumo, No, No, Si,Autocompras,0
+66448.38 -,18000.00,40-49,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+50399.73 -,14000.00,30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+85200.00,30000.00,30-39,1, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+53921.75 -,9550.00,18-29,0, Empleado,0-1, Soltero, Consumo, Si, Si, No,Autocompras,0
+59400.00,30000.00,30-39,1, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+40517.59 -,15000.00,40-49,0,Dueño,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+69625.61 -,12000.00,50,0, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+62932.64 -,4500.00,18-29,0, Empleado,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+79844.86 -,22000.00,50,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+90333.12 -,18000.00,40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+42468.59 -,5000.00,18-29,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+66397.64 -,10000.00,30-39,3,, Q -   , Soltero, Consumo, No, Si, Si,Autocompras,0
+70000.00,22000.00,30-39,2, Empleado,0-1, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,1
+59427.75 -,20000.00,50,1,Dueño,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+56655.25 -,10000.00,40-49,3, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+189301.32 -,19650.00,30-39,3, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+85000.00,10000.00,50,0,Dueño,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+102644.78 -,,40-49,,, Q -   , Casado, Consumo, Si, No, Si,Autocompras,0
+63606.75 -,14000.00,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,1
+140929.09 -,15000.00,30-39,0, Empleado,1-5, Soltero, Capital de trabajo, No, No, Si,Autocompras,0
+47754.73 -,6930.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+177095.23 -,40000.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,1
+168077.90 -,15300.00,30-39,4, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+85931.86 -,15000.00,30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+137027.25 -,9000.00,50,0, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+54413.73 -,3600.00,30-39,4, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+51630.25 -,7500.00,18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+71233.09 -,15000.00,30-39,2,Dueño,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+65889.64 -,7000.00,18-29,0, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+69187.35 -,9000.00,18-29,3, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+84885.12 -,45000.00,40-49,5, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+116474.11 -,15000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+105869.44 -,17000.00,30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+51388.75 -,35000.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Autocompras,0
+119607.27 -,20000.00,30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+65326.35 -,18250.00,30-39,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+51659.09 -,4200.00,30-39,3, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+51774.73 -,9000.00,30-39,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+54683.73 -,16000.00,30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Autocompras,0
+50859.75 -,6000.00,50,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+46541.59 -,37000.00,30-39,2, Empleado, Q -   , Casado, Consumo, Si, No, Si,Autocompras,0
+62888.35 -,,40-49,3,, Q -   , Soltero, Consumo, Si, No, Si,Autocompras,0
+76866.61 -,15000.00,40-49,2,Dueño,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+28500.00,20000.00,40-49,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,0
+194844.19 -,6000.00,30-39,4, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+115000.00, Q -   ,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,

@@ -506,4 +506,4 @@ if __name__ == '__main__':
     llm_provider_name = "OpenAI" if USE_OPENAI else "Deepseek"
     print(f"Using LLM Provider: {llm_provider_name}")
     # ...
-    app.run(debug=True, port=5000, threaded=True) # threaded=True can help with concurrent requests/streams
+    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True) # threaded=True can help with concurrent requests/streams

@@ -1,0 +1,143 @@
+---
+description: 
+globs: *.tsx
+alwaysApply: false
+---
+# Cursor Rule File: Preventing `useEffect` Overuse (Based on React Docs)
+
+This file outlines rules and guidelines to avoid common misuses of the `useEffect` Hook in React, inspired by the article "You Might Not Need an Effect" from the React team. [1]
+
+## Core Principle:
+Effects are for synchronizing with external systems. If there's no external system involved (e.g., you're updating component state based on other props/state), you likely don't need an Effect. [1]
+
+---
+
+### 1. Transforming Data for Rendering
+   - **🚫 AVOID:** Using `useEffect` to update state that's merely a transformation of other props or state for rendering. This leads to inefficient render cycles. [1]
+     ```javascript
+     // Avoid: Redundant state and unnecessary Effect for derived data
+     function Form({ firstName, lastName }) {
+       const [fullName, setFullName] = useState('');
+       useEffect(() => {
+         setFullName(firstName + ' ' + lastName);
+       }, [firstName, lastName]);
+       // ...
+     }
+     ```
+   - **✅ PREFER:** Calculate/transform data directly during rendering. [1]
+     ```javascript
+     // Good: Calculated during rendering
+     function Form({ firstName, lastName }) {
+       const fullName = firstName + ' ' + lastName;
+       // ...
+     }
+     ```
+
+### 2. Caching Expensive Calculations
+   - **🚫 AVOID:** Using `useEffect` and `useState` to cache the result of an expensive calculation that depends on props or state. [1]
+   - **✅ PREFER:** Use the `useMemo` Hook to memoize expensive calculations. `useMemo` runs during rendering but only re-computes if its dependencies change. [1]
+     ```javascript
+     // Avoid: Redundant state and Effect for caching
+     // const [visibleTodos, setVisibleTodos] = useState([]);
+     // useEffect(() => {
+     //   setVisibleTodos(getFilteredTodos(todos, filter));
+     // }, [todos, filter]);
+
+     // Good: Cache with useMemo
+     // const visibleTodos = useMemo(() => getFilteredTodos(todos, filter), [todos, filter]);
+     ```
+
+### 3. Resetting State When a Prop Changes
+   - **🚫 AVOID:** Using `useEffect` to reset a component's entire state (or parts of it) when a specific prop changes (e.g., `userId`). This causes an initial render with stale state, then a re-render. [1]
+   - **✅ PREFER (for full state reset):** Pass a `key` prop to the inner component. When the `key` changes, React will unmount the old component and mount a new one, naturally resetting its state. [1]
+     ```javascript
+     // Avoid
+     // useEffect(() => { setComment(''); }, [userId]);
+
+     // Good
+     // export default function ProfilePage({ userId }) {
+     //   return <Profile userId={userId} key={userId} />;
+     // }
+     // function Profile({ userId }) { /* state will reset if userId changes */ }
+     ```
+   - **🚫 AVOID (for adjusting *some* state):** Using `useEffect` to adjust only a part of the state when a prop changes. [1]
+   - **✅ PREFER (for adjusting *some* state, if necessary):** Adjust state directly during rendering (carefully, to avoid infinite loops, often by tracking the previous prop value). Or, better yet, try to derive the state directly during rendering if possible (e.g., compute `selectedItem` from `items` and `selectedId` rather than clearing `selectedItem` when `items` change). [1]
+
+### 4. Handling User Events
+   - **🚫 AVOID:** Placing logic specific to a user event (e.g., showing a notification after a product is added to cart via a button click) inside an `useEffect` that triggers based on a state change caused by that event. [1]
+   - **✅ PREFER:** Put event-specific logic directly in the corresponding event handlers. If logic is shared, extract it to a regular function called by these handlers. [1]
+     ```javascript
+     // Avoid: Event-specific logic (notification) in an Effect
+     // useEffect(() => {
+     //   if (product.isInCart) { showNotification(...); }
+     // }, [product]);
+     // function handleBuyClick() { addToCart(product); }
+
+     // Good: Event-specific logic in event handler (or function called by it)
+     // function buyProduct() {
+     //   addToCart(product);
+     //   showNotification(...);
+     // }
+     // function handleBuyClick() { buyProduct(); }
+     ```
+
+### 5. Sending POST Requests
+   - **🚫 AVOID:** Using `useEffect` to send a POST request that is a direct result of a user interaction (e.g., form submission). [1]
+   - **✅ PREFER:** Send POST requests tied to specific interactions directly within the event handler. [1]
+   - **ℹ️ NOTE:** `useEffect` *is* appropriate for POST requests that should run because the component was displayed (e.g., an analytics event on component mount). [1]
+
+### 6. Chains of Computations
+   - **🚫 AVOID:** Creating chains of `useEffect`s where one effect sets state, triggering another effect that sets state, and so on. This is inefficient and hard to debug. [1]
+   - **✅ PREFER:** Calculate what you can during rendering. Consolidate state updates in event handlers. For complex state logic, `useReducer` can be a good alternative. [1]
+
+### 7. Application Initialization
+   - **🚫 AVOID:** Placing logic that must run *only once per application load* in a `useEffect` in the top-level component without safeguards, as Strict Mode will run it twice in development. [1]
+   - **✅ PREFER:** Use a module-scope flag to ensure the logic runs only once, or run it during module initialization (outside any component, before the app renders). [1]
+     ```javascript
+     // Good: Only runs once per app load
+     // let didInit = false;
+     // function App() {
+     //   useEffect(() => {
+     //     if (!didInit) {
+     //       didInit = true;
+     //       loadDataFromLocalStorage();
+     //       checkAuthToken();
+     //     }
+     //   }, []);
+     // }
+     ```
+
+### 8. Notifying Parent Components About State Changes
+   - **🚫 AVOID:** Using `useEffect` in a child to watch its internal state and then call an `onChange` prop (passed from the parent) when that state changes. This creates a delayed update. [1]
+   - **✅ PREFER:** Call the parent's `onChange` prop directly in the same event handler that updates the child's state. This allows React to batch updates. Alternatively, consider "lifting state up." [1]
+
+### 9. Passing Data to the Parent
+   - **🚫 AVOID:** Having a child component fetch or derive data and then pass it *up* to a parent component using a callback in an `useEffect`. [1]
+   - **✅ PREFER:** Data should flow from parent to child. The parent component should own/fetch the data and pass it down as props. [1]
+
+### 10. Subscribing to External Stores
+    - **🚫 AVOID (often):** Manually implementing subscriptions to external stores (like browser APIs or third-party libraries) using `useEffect` and `useState`. [1]
+    - **✅ PREFER:** Use the `useSyncExternalStore` Hook, which is specifically designed for this purpose and handles edge cases correctly. [1]
+
+### 11. Fetching Data
+    - **ℹ️ CONTEXT:** `useEffect` is often used for data fetching when a component needs to synchronize with data from a network based on its props or state (e.g., search query, page number). [1]
+    - **🚫 AVOID:** Fetching data in `useEffect` without implementing a cleanup function to handle race conditions (where older requests resolve after newer ones). [1]
+    - **✅ PREFER:** Always include a cleanup mechanism in data-fetching effects to ignore stale responses. [1]
+      ```javascript
+      // Good: Fetching with cleanup to prevent race conditions
+      // useEffect(() => {
+      //   let ignore = false;
+      //   fetchResults(query, page).then(json => {
+      //     if (!ignore) {
+      //       setResults(json);
+      //     }
+      //   });
+      //   return () => { // Cleanup function
+      //     ignore = true;
+      //   };
+      // }, [query, page]);
+      ```
+    - **💡 CONSIDER:** Extracting data fetching logic into custom Hooks for better reusability, maintainability, and to make it easier to adopt more efficient data fetching strategies later. [1]
+
+---
+Remember: These guidelines are to help write more efficient, readable, and maintainable React code by using `useEffect` only when it's the most appropriate tool for synchronization with external systems. [1]

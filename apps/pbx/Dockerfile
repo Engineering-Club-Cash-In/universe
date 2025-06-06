@@ -27,9 +27,6 @@ COPY session_manager.py .
 COPY faq_knowledge_base.py .
 COPY conversation_logger.py .
 
-# Copy Google Cloud credentials
-COPY google_credentials.json .
-
 # Copy templates directory
 COPY templates/ ./templates/
 

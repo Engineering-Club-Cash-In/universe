@@ -1,0 +1,8 @@
+Flask
+numpy
+openai
+whisper-openai
+supabase
+google-cloud-speech
+google-cloud-texttospeech
+dotenv

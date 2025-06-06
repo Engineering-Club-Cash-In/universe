@@ -1,0 +1,732 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Voice Chat Agent (Real-Time)</title>
+    <style>
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Oxygen,
+          Ubuntu,
+          Cantarell,
+          "Open Sans",
+          "Helvetica Neue",
+          sans-serif;
+        max-width: 700px;
+        margin: 20px auto;
+        padding: 20px;
+        background-color: #f0f2f5;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        color: #333;
+      }
+      h1 {
+        text-align: center;
+        color: #1a73e8;
+        font-weight: 600;
+      }
+      #controls {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 25px;
+        gap: 15px;
+      }
+      #controls button {
+        padding: 12px 25px;
+        font-size: 16px;
+        cursor: pointer;
+        background-image: linear-gradient(to right, #1a73e8, #4285f4);
+        color: white;
+        border: none;
+        border-radius: 25px;
+        transition: all 0.3s ease;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      #controls button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        background-image: linear-gradient(to right, #4285f4, #1a73e8);
+      }
+      #controls button:disabled {
+        background-image: none;
+        background-color: #ccc;
+        cursor: not-allowed;
+        transform: none;
+        box-shadow: none;
+      }
+      #status {
+        text-align: center;
+        margin-bottom: 20px;
+        font-size: 1.05em;
+        color: #5f6368;
+        min-height: 22px;
+        font-weight: 500;
+      }
+      #messages {
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+        min-height: 250px;
+        max-height: 450px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .message {
+        padding: 12px 18px;
+        border-radius: 18px;
+        line-height: 1.5;
+        max-width: 85%;
+        word-wrap: break-word;
+      }
+      .user-message {
+        background-color: #e3f2fd;
+        color: #0d47a1;
+        align-self: flex-end;
+        border-bottom-right-radius: 5px;
+      }
+      .ai-message {
+        background-color: #f1f3f4;
+        color: #3c4043;
+        align-self: flex-start;
+        border-bottom-left-radius: 5px;
+      }
+      .ai-message audio {
+        display: block;
+        margin-top: 10px;
+        width: 100%;
+        height: 40px;
+      }
+      .error-message {
+        background-color: #fdecea;
+        color: #c53929;
+        border: 1px solid #f4c7c3;
+      }
+      .message p:first-child {
+        margin-top: 0;
+      }
+      .message p:last-child {
+        margin-bottom: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🏦 Ana - Tu Asistente Virtual de Club Cash In</h1>
+    <div id="controls">
+      <button id="toggleButton">🎙️ Hablar con Ana</button>
+    </div>
+    <div id="status">
+      ¡Hola! Soy Ana. Haz clic en "Hablar con Ana" para comenzar...
+    </div>
+    <div
+      id="voiceIndicator"
+      style="
+        text-align: center;
+        margin-bottom: 15px;
+        font-size: 24px;
+        display: none;
+      "
+    >
+      <span id="voiceIcon">🎤</span>
+      <span id="voiceText">Listening...</span>
+    </div>
+    <div id="messages">
+      <!-- Chat messages will appear here -->
+    </div>
+
+    <script>
+      let mediaRecorder;
+      let audioChunks = [];
+      let sessionId = localStorage.getItem("chatSessionId") || generateUUID();
+      localStorage.setItem("chatSessionId", sessionId);
+
+      const toggleButton = document.getElementById("toggleButton");
+      const statusDiv = document.getElementById("status");
+      const messagesDiv = document.getElementById("messages");
+      const voiceIndicator = document.getElementById("voiceIndicator");
+      const voiceIcon = document.getElementById("voiceIcon");
+      const voiceText = document.getElementById("voiceText");
+
+      let currentAiMessageDiv = null; // To hold the current AI message bubble
+      let currentAiTextElement = null; // To hold the <p> tag for AI text
+      let audioQueue = [];
+      let isPlayingAudio = false;
+      let eventSource = null;
+
+      // Voice Activity Detection variables
+      let isVoiceChatEnabled = false;
+      let audioContext = null;
+      let analyzer = null;
+      let microphone = null;
+      let isCurrentlyRecording = false;
+      let silenceTimer = null;
+      let vadCheckInterval = null;
+      let recordingStartTime = null;
+      let lastVoiceActivityTime = null;
+
+      // VAD Configuration - Balanced for quality and speed
+      const VOLUME_THRESHOLD = 25; // Slightly higher threshold to avoid noise
+      const SILENCE_DURATION = 750; // 1 second of silence
+      const VAD_CHECK_INTERVAL = 75; // Check every 75ms (balanced)
+      const MIN_RECORDING_TIME = 1200; // Minimum 1.2s recording for valid speech
+
+      // Initialize Voice Activity Detection
+      async function initializeVAD() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              googEchoCancellation: true,
+              googNoiseSuppression: true,
+              googAutoGainControl: true,
+              googHighpassFilter: true,
+              mozEchoCancellation: true,
+              mozNoiseSuppression: true,
+              mozAutoGainControl: true,
+            },
+          });
+
+          // Set up Web Audio API for volume analysis
+          audioContext = new (window.AudioContext ||
+            window.webkitAudioContext)();
+          analyzer = audioContext.createAnalyser();
+          microphone = audioContext.createMediaStreamSource(stream);
+
+          analyzer.fftSize = 128; // Smaller for faster processing
+          analyzer.smoothingTimeConstant = 0.1; // More responsive
+          microphone.connect(analyzer);
+
+          // Set up MediaRecorder for actual recording
+          const options = { mimeType: "audio/webm; codecs=opus" };
+          if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            console.warn(
+              `${options.mimeType} is not supported, using default.`
+            );
+            mediaRecorder = new MediaRecorder(stream);
+          } else {
+            mediaRecorder = new MediaRecorder(stream, options);
+          }
+
+          mediaRecorder.ondataavailable = (event) => {
+            console.log(`📥 Audio chunk received: ${event.data.size} bytes`);
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            } else {
+              console.warn("⚠️ Received empty audio chunk");
+            }
+          };
+
+          mediaRecorder.onstop = processAndSendAudioData;
+
+          mediaRecorder.onstart = () => {
+            console.log("🎙️ MediaRecorder started");
+          };
+
+          mediaRecorder.onerror = (event) => {
+            console.error("❌ MediaRecorder error:", event.error);
+          };
+
+          // Start voice activity detection loop
+          vadCheckInterval = setInterval(
+            checkVoiceActivity,
+            VAD_CHECK_INTERVAL
+          );
+
+          return true;
+        } catch (err) {
+          console.error("Error setting up VAD:", err);
+          statusDiv.textContent = "Error: Could not access microphone.";
+          addMessageToUI(
+            "Error: Could not access microphone. Check browser permissions.",
+            "error-message"
+          );
+          return false;
+        }
+      }
+
+      // Check for voice activity - Optimized for faster response
+      function checkVoiceActivity() {
+        if (!analyzer) return;
+
+        const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+        analyzer.getByteFrequencyData(dataArray);
+
+        // Calculate average volume
+        const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        const currentTime = Date.now();
+
+        // Update visual indicator based on voice activity
+        if (average > VOLUME_THRESHOLD) {
+          lastVoiceActivityTime = currentTime;
+          voiceIcon.textContent = "🔊";
+          voiceText.textContent = isCurrentlyRecording
+            ? "Recording..."
+            : "Voice detected";
+
+          // Start recording if not already recording
+          if (!isCurrentlyRecording && !isPlayingAudio) {
+            startRecording();
+          } else if (isPlayingAudio) {
+            console.log("🔇 Voice detected but Ana is speaking - ignoring");
+          }
+
+          // Clear silence timer if voice is detected
+          if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+          }
+        } else {
+          voiceIcon.textContent = "🎤";
+          voiceText.textContent = isCurrentlyRecording
+            ? "Recording..."
+            : "Listening...";
+
+          // Smart silence detection - only stop if minimum recording time met
+          if (isCurrentlyRecording && !silenceTimer) {
+            const recordingDuration = currentTime - recordingStartTime;
+            const silenceToUse =
+              recordingDuration >= MIN_RECORDING_TIME
+                ? SILENCE_DURATION
+                : SILENCE_DURATION * 1.5;
+
+            silenceTimer = setTimeout(() => {
+              const finalRecordingDuration = Date.now() - recordingStartTime;
+              if (finalRecordingDuration >= MIN_RECORDING_TIME) {
+                console.log(
+                  `⚡ Smart stop: ${finalRecordingDuration}ms recording, ${SILENCE_DURATION}ms silence`
+                );
+                stopRecording();
+              } else {
+                console.log(
+                  `⏳ Recording too short (${finalRecordingDuration}ms), continuing...`
+                );
+                silenceTimer = null; // Reset and continue
+              }
+            }, silenceToUse);
+          }
+        }
+      }
+
+      // Start recording when voice is detected
+      function startRecording() {
+        if (isCurrentlyRecording || isPlayingAudio) return;
+
+        recordingStartTime = Date.now();
+        console.log("🎙️ Voice detected - starting recording");
+        audioChunks = [];
+        mediaRecorder.start(250); // Record in 250ms chunks for better quality
+        isCurrentlyRecording = true;
+
+        voiceIcon.textContent = "🔴";
+        voiceText.textContent = "Recording...";
+        statusDiv.textContent = "Recording your voice...";
+      }
+
+      // Stop recording after silence detected
+      function stopRecording() {
+        if (!isCurrentlyRecording) return;
+
+        const totalRecordingTime = Date.now() - recordingStartTime;
+        console.log(
+          `🔇 Silence detected - stopping recording (${totalRecordingTime}ms total)`
+        );
+        mediaRecorder.stop();
+        isCurrentlyRecording = false;
+
+        voiceIcon.textContent = "⚡";
+        voiceText.textContent = "Processing...";
+        statusDiv.textContent = `Processing ${(totalRecordingTime / 1000).toFixed(1)}s of audio...`;
+
+        if (silenceTimer) {
+          clearTimeout(silenceTimer);
+          silenceTimer = null;
+        }
+      }
+
+      // Toggle voice chat on/off
+      toggleButton.onclick = async () => {
+        if (!isVoiceChatEnabled) {
+          // Enable voice chat
+          const success = await initializeVAD();
+          if (success) {
+            isVoiceChatEnabled = true;
+            toggleButton.textContent = "🛑 Terminar Conversación";
+            toggleButton.style.backgroundColor = "#dc3545";
+            voiceIndicator.style.display = "block";
+            statusDiv.textContent =
+              "🎙️ Ana está escuchando - ¡habla naturalmente!";
+            console.log("✅ Voice chat enabled");
+          }
+        } else {
+          // Disable voice chat
+          isVoiceChatEnabled = false;
+
+          // Clean up
+          if (vadCheckInterval) {
+            clearInterval(vadCheckInterval);
+            vadCheckInterval = null;
+          }
+          if (silenceTimer) {
+            clearTimeout(silenceTimer);
+            silenceTimer = null;
+          }
+          if (isCurrentlyRecording) {
+            stopRecording();
+          }
+          if (audioContext) {
+            audioContext.close();
+            audioContext = null;
+          }
+
+          toggleButton.textContent = "🎙️ Hablar con Ana";
+          toggleButton.style.backgroundColor = "";
+          voiceIndicator.style.display = "none";
+          statusDiv.textContent =
+            "Conversación terminada. ¡Gracias por hablar con Ana!";
+          console.log("🛑 Voice chat disabled");
+        }
+      };
+
+      function processAndSendAudioData() {
+        console.log(`📊 Processing audio: ${audioChunks.length} chunks`);
+
+        if (audioChunks.length === 0) {
+          console.warn("⚠️ No audio chunks recorded");
+          statusDiv.textContent = "No audio recorded - please try again.";
+          if (isVoiceChatEnabled) {
+            statusDiv.textContent = "🎙️ Listening for your voice...";
+            voiceIcon.textContent = "🎤";
+            voiceText.textContent = "Listening...";
+          }
+          return;
+        }
+
+        const audioBlob = new Blob(audioChunks, {
+          type: mediaRecorder.mimeType || "audio/webm",
+        });
+
+        console.log(
+          `📊 Audio blob size: ${audioBlob.size} bytes, type: ${audioBlob.type}`
+        );
+
+        // Validate audio blob size
+        if (audioBlob.size < 1000) {
+          // Less than 1KB suggests empty/invalid audio
+          console.warn(
+            `⚠️ Audio blob too small (${audioBlob.size} bytes) - likely empty recording`
+          );
+          statusDiv.textContent = "Recording too short - please speak longer.";
+          if (isVoiceChatEnabled) {
+            setTimeout(() => {
+              statusDiv.textContent = "🎙️ Listening for your voice...";
+              voiceIcon.textContent = "🎤";
+              voiceText.textContent = "Listening...";
+            }, 2000);
+          }
+          return;
+        }
+
+        // Close any existing EventSource
+        if (eventSource) {
+          eventSource.close();
+          eventSource = null;
+        }
+        audioQueue = []; // Clear previous audio queue
+        isPlayingAudio = false;
+
+        const formData = new FormData();
+        // Server expects .wav for user_audio filename hint, but blob type is correct.
+        formData.append(
+          "audio_data",
+          audioBlob,
+          `user_audio_${sessionId}.webm`
+        );
+        formData.append("session_id", sessionId);
+
+        statusDiv.textContent = "Connecting to AI...";
+
+        // Create a simple placeholder for the AI's response (audio only)
+        currentAiMessageDiv = createMessageDiv("ai-message");
+        currentAiTextElement = document.createElement("p");
+        currentAiTextElement.textContent = "🤖 AI is responding...";
+        currentAiMessageDiv.appendChild(currentAiTextElement);
+        messagesDiv.appendChild(currentAiMessageDiv);
+        scrollToBottom();
+
+        // Use EventSource to connect to the /chat endpoint (which now streams SSE)
+        // We need to send FormData via POST, then handle SSE.
+        // This requires a bit of a workaround or a two-step process.
+        // For now, let's assume the browser/server can handle SSE on a POST response
+        // (this is non-standard but might work with some setups or if Flask handles it gracefully).
+        // A more robust way is initial POST for upload, get a job_id, then EventSource to GET /stream?job_id=...
+        // However, let's try to make the existing structure work by reading the stream from fetch:
+
+        fetch("/chat", {
+          method: "POST",
+          body: formData,
+        })
+          .then((response) => {
+            if (!response.ok) {
+              return response.json().then((err) => {
+                throw new Error(
+                  err.error || `Server error: ${response.status}`
+                );
+              });
+            }
+            if (!response.body) {
+              throw new Error("Response has no body for streaming.");
+            }
+            statusDiv.textContent = "AI is responding...";
+            return readStream(response.body); // Function to read the stream
+          })
+          .catch((error) => {
+            console.error("Error processing chat:", error);
+            statusDiv.textContent = `Error: ${error.message}`;
+            if (currentAiMessageDiv) currentAiMessageDiv.remove(); // Remove placeholder on error
+            addMessageToUI(`Error: ${error.message}`, "error-message");
+          })
+          .finally(() => {
+            audioChunks = [];
+            if (isVoiceChatEnabled) {
+              statusDiv.textContent = "🎙️ Listening for your voice...";
+              voiceIcon.textContent = "🎤";
+              voiceText.textContent = "Listening...";
+            }
+          });
+      }
+
+      async function readStream(stream) {
+        const reader = stream.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedTextForAI = ""; // Accumulates AI text deltas
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) {
+            console.log("Stream finished.");
+            if (currentAiTextElement && accumulatedTextForAI === "") {
+              // If no text deltas came
+              currentAiTextElement.textContent =
+                "AI: (No text content received)";
+            }
+            break;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          const sseMessages = chunk
+            .split("\n\n")
+            .filter((msg) => msg.trim() !== "");
+
+          for (const sseMessage of sseMessages) {
+            if (sseMessage.startsWith("data:")) {
+              const jsonData = sseMessage.substring(5).trim();
+              try {
+                const data = JSON.parse(jsonData);
+                handleStreamData(data);
+              } catch (e) {
+                console.error("Error parsing JSON from stream:", jsonData, e);
+              }
+            }
+          }
+        }
+      }
+
+      function handleStreamData(data) {
+        // console.log("SSE Data:", data);
+        if (data.type === "user_text_final") {
+          addMessageToUI(
+            `You: ${data.text || "(No transcription)"}`,
+            "user-message"
+          );
+          if (data.session_id) sessionId = data.session_id; // Update session_id if server sends it early
+        } else if (data.type === "ai_text_delta") {
+          // Ignore text deltas - we only care about audio
+          // Just update the status to show AI is working
+          if (currentAiTextElement.textContent === "🤖 AI is responding...") {
+            currentAiTextElement.textContent = "🎵 Generating speech...";
+          }
+        } else if (data.type === "ai_audio_chunk") {
+          console.log(
+            `🎵 Audio chunk received: ${data.text_spoken.substring(0, 30)}... (Queue: ${audioQueue.length})`
+          );
+
+          // Update status to show we're playing audio
+          if (currentAiTextElement) {
+            currentAiTextElement.textContent = "🔊 Playing response...";
+          }
+
+          audioQueue.push({ url: data.url, text: data.text_spoken });
+          if (!isPlayingAudio) {
+            console.log("🎵 Starting audio playback...");
+            isPlayingAudio = true; // Set immediately to prevent recording during playback
+            playNextAudioChunk();
+          } else {
+            console.log("🎵 Audio chunk queued");
+          }
+        } else if (data.type === "end_of_stream") {
+          // Simple completion - no text needed
+          if (currentAiTextElement) {
+            currentAiTextElement.textContent =
+              audioQueue.length > 0 || isPlayingAudio
+                ? "🔊 Playing response..."
+                : "✅ Response complete";
+          }
+          statusDiv.textContent = isVoiceChatEnabled
+            ? "🎙️ Listening for your voice..."
+            : "Ready.";
+          voiceIcon.textContent = "🎤";
+          voiceText.textContent = "Listening...";
+          // If audio queue isn't empty, ensure it continues playing
+          if (audioQueue.length > 0 && !isPlayingAudio) {
+            playNextAudioChunk();
+          }
+        } else if (data.type === "error") {
+          console.error("Stream error from server:", data.message);
+          if (currentAiMessageDiv && currentAiTextElement) {
+            currentAiTextElement.textContent = `AI Error: ${data.message}`;
+            currentAiMessageDiv.classList.add("error-message");
+          } else {
+            addMessageToUI(`Server Error: ${data.message}`, "error-message");
+          }
+          statusDiv.textContent = "Error occurred.";
+        }
+      }
+
+      function playNextAudioChunk() {
+        if (audioQueue.length === 0) {
+          isPlayingAudio = false;
+          console.log("🎤 Audio queue finished - Recording re-enabled");
+
+          // Update UI to show completion
+          if (currentAiTextElement) {
+            currentAiTextElement.textContent = "✅ Response complete";
+            // Hide the message after a short delay
+            setTimeout(() => {
+              if (currentAiMessageDiv) {
+                currentAiMessageDiv.style.opacity = "0.5";
+              }
+            }, 1000);
+          }
+          return;
+        }
+
+        const audioInfo = audioQueue.shift();
+        console.log(
+          `🎵 Playing chunk: "${audioInfo.text.substring(0, 30)}..." (${audioQueue.length} remaining)`
+        );
+
+        isPlayingAudio = true;
+        console.log(
+          "🔇 Setting isPlayingAudio = true - Recording disabled during AI speech"
+        );
+
+        // Create a NEW audio element for each chunk to avoid event handler conflicts
+        const audioPlayer = new Audio();
+        audioPlayer.controls = true;
+        audioPlayer.src = audioInfo.url;
+
+        // Set up event handlers BEFORE adding to DOM
+        audioPlayer.onended = () => {
+          console.log(`✅ Chunk finished, playing next...`);
+          // Small delay to ensure clean transition
+          setTimeout(() => {
+            playNextAudioChunk();
+          }, 50);
+        };
+
+        audioPlayer.onerror = (e) => {
+          console.error("❌ Audio player error:", e);
+          console.log("🎤 Audio error - Recording re-enabled");
+          isPlayingAudio = false;
+          // Try next chunk after error
+          setTimeout(() => {
+            playNextAudioChunk();
+          }, 100);
+        };
+
+        audioPlayer.onloadstart = () => {
+          console.log(`📥 Loading audio chunk...`);
+        };
+
+        audioPlayer.oncanplay = () => {
+          console.log(`🎵 Audio ready to play`);
+        };
+
+        // Replace previous audio element or add new one
+        const existingAudio = currentAiMessageDiv.querySelector("audio");
+        if (existingAudio) {
+          currentAiMessageDiv.removeChild(existingAudio);
+        }
+        currentAiMessageDiv.appendChild(audioPlayer);
+
+        // Start playing
+        audioPlayer
+          .play()
+          .then(() => {
+            console.log(`🔊 Successfully started playing chunk`);
+          })
+          .catch((e) => {
+            console.warn("⚠️ Audio play error or autoplay prevented:", e);
+            console.log("🎤 Audio play failed - Recording re-enabled");
+            isPlayingAudio = false;
+            // Try next chunk with delay
+            setTimeout(() => {
+              playNextAudioChunk();
+            }, 200);
+          });
+      }
+
+      function createMessageDiv(className) {
+        const messageElement = document.createElement("div");
+        messageElement.classList.add("message", className);
+        return messageElement;
+      }
+
+      function addMessageToUI(text, className) {
+        // For user messages, keep them simple
+        if (className === "user-message") {
+          const messageElement = createMessageDiv(className);
+          const textP = document.createElement("p");
+          textP.textContent = text;
+          messageElement.appendChild(textP);
+          messagesDiv.appendChild(messageElement);
+          scrollToBottom();
+          return messageElement;
+        } else {
+          // For other messages (errors, etc.)
+          const messageElement = createMessageDiv(className);
+          const textP = document.createElement("p");
+          textP.textContent = text;
+          messageElement.appendChild(textP);
+          messagesDiv.appendChild(messageElement);
+          scrollToBottom();
+          return messageElement;
+        }
+      }
+
+      function generateUUID() {
+        return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) =>
+          (
+            c ^
+            (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))
+          ).toString(16)
+        );
+      }
+
+      function scrollToBottom() {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      }
+      statusDiv.textContent = `Ready. Session ID: ${sessionId.substring(0, 8)}...`;
+    </script>
+  </body>
+</html>

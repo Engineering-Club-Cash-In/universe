@@ -37,13 +37,19 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "YOUR_SUPABASE_URL_HERE")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", os.environ.get("SUPABASE_API_KEY", "YOUR_SUPABASE_SERVICE_KEY_HERE"))
 
 # Google Cloud credentials setup
-GOOGLE_CREDENTIALS_PATH = os.environ["GOOGLE_CREDENTIALS_PATH"]
-if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-    if os.path.exists(GOOGLE_CREDENTIALS_PATH):
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GOOGLE_CREDENTIALS_PATH
-        print(f"✅ Set Google Cloud credentials: {GOOGLE_CREDENTIALS_PATH}")
+if "GOOGLE_CREDENTIALS_JSON" in os.environ:
+    creds_path = "/tmp/google_credentials.json"
+    with open(creds_path, "w") as f:
+        f.write(os.environ["GOOGLE_CREDENTIALS_JSON"])
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+    print(f"✅ Set Google Cloud credentials from environment variable")
+elif os.environ.get("GOOGLE_CREDENTIALS_PATH"):
+    creds_path = os.environ["GOOGLE_CREDENTIALS_PATH"]
+    if os.path.exists(creds_path):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
+        print(f"✅ Set Google Cloud credentials: {creds_path}")
     else:
-        print(f"⚠️  Google Cloud credentials not found at: {GOOGLE_CREDENTIALS_PATH}")
+        print(f"⚠️  Google Cloud credentials not found at: {creds_path}")
         print("   STT may not work properly without valid credentials.")
 
 # LLM Configuration - Set USE_OPENAI=True to use OpenAI instead of Deepseek

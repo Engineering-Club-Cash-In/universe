@@ -2,8 +2,6 @@
 from google.cloud import texttospeech
 import os
 import time
-import json
-from google.oauth2 import service_account
 
 client = None
 google_voice = None
@@ -15,21 +13,14 @@ def initialize_tts():
     print("🚀 Initializing Google Cloud Text-to-Speech...")
     
     try:
-        # Path to the service account credentials
-        credentials_path = "google_credentials.json"
+        # Check if Google Cloud credentials are set up (should be done by app.py)
+        if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
+            print("⚠️  GOOGLE_APPLICATION_CREDENTIALS not set. Trying to use Application Default Credentials...")
         
-        if not os.path.exists(credentials_path):
-            raise Exception(f"Google credentials file not found: {credentials_path}")
-        
-        # Load credentials from service account file
-        credentials = service_account.Credentials.from_service_account_file(
-            credentials_path,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"]
-        )
-        
-        # Initialize the client
+        # Initialize the client using Application Default Credentials
+        # This will use the credentials set up by app.py via environment variables
         start_time = time.time()
-        client = texttospeech.TextToSpeechClient(credentials=credentials)
+        client = texttospeech.TextToSpeechClient()
         
         # Set up voice configuration - using high-quality Spanish voice
         google_voice = texttospeech.VoiceSelectionParams(
@@ -70,10 +61,11 @@ def initialize_tts():
     except Exception as e:
         print(f"❌ Error initializing Google Cloud TTS: {e}")
         print("💡 Troubleshooting:")
-        print("   - Check google_credentials.json exists and is valid")
+        print("   - Check GOOGLE_CREDENTIALS_JSON or GOOGLE_CREDENTIALS_PATH environment variables are set")
         print("   - Verify Google Cloud Text-to-Speech API is enabled")
         print("   - Ensure billing is set up in Google Cloud Console")
         print("   - Check internet connection")
+        print("   - Make sure app.py credentials setup ran before TTS initialization")
         raise
 
 def generate_speech(text, output_filename="output.wav", speaker_wav=None, speed_mode=True, ultra_fast=False):

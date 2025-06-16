@@ -400,6 +400,32 @@ export const updateCompletedRuns = async () => {
     // todo: create the task for the oportunity
   }
 };
+type LeadStage =
+  | "NUEVO"
+  | "CONTACTADO"
+  | "REUNIDO"
+  | "FIRMANDO_DOCUMENTOS"
+  | "CLIENTE";
+
+export const getLeadStageByCrmId = async (
+  crmId: string
+): Promise<LeadStage | null> => {
+  const opportunities = await fetch(
+    `https://crm.devteamatcci.site/rest/opportunities?filter=leadId[eq]:${crmId}`,
+    {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${API_KEY}`,
+      },
+    }
+  );
+  const opportunitiesData = await opportunities.json();
+  if (opportunitiesData.data.opportunities.length === 0) {
+    return null;
+  }
+  return opportunitiesData.data.opportunities[0].stage as LeadStage | null;
+};
 const mapLeadToClientData = (lead: Lead) => {
   if (
     lead.workTime === null ||

@@ -8,6 +8,7 @@ import {
   createLeadCreditScore,
   createCreditProfile,
   updateCompletedRuns,
+  getLeadStageByCrmId,
 } from "../controllers/simpletech";
 
 import { cron } from "@elysiajs/cron";
@@ -266,6 +267,50 @@ const simpletechRouter = new Elysia({ prefix: "simpletech" })
           data: t.Object({ leadId: t.String() }),
         }),
         401: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+      },
+    }
+  )
+  .get(
+    "/get-lead-stage/:crmId",
+    async ({ jwt, params, headers, set }) => {
+      const validation = jwt.verify(headers.authorization);
+      if (!validation) {
+        set.status = 401;
+        return {
+          success: false,
+          message: "Unauthorized",
+        };
+      }
+      const { crmId } = params;
+      const leadStage = await getLeadStageByCrmId(crmId);
+      if (leadStage === null) {
+        set.status = 404;
+        return {
+          success: false,
+          message: "Lead stage not found",
+        };
+      }
+      return {
+        success: true,
+        message: "Lead stage retrieved successfully",
+        data: { leadStage },
+      };
+    },
+    {
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          data: t.Object({ leadStage: t.String() }),
+        }),
+        401: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+        404: t.Object({
           success: t.Boolean(),
           message: t.String(),
         }),

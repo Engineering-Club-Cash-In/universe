@@ -1,0 +1,44 @@
+{
+  "name": "cartera-automatization",
+  "version": "1.0.50",
+  "scripts": {
+    "devTest": "RUST_LOG=error NODE_ENV=DEV bun test ",
+    "dev": "RUST_LOG=error   bun run --watch src/index.ts",
+    "devStart": "RUST_LOG=error NODE_ENV=DEV bun run src/index.ts",
+    "generate": "bunx drizzle-kit generate",
+    "migrate": "NODE_ENV=LOCAL bunx drizzle-kit push"
+  },
+  "dependencies": {
+    "@elysiajs/cookie": "^0.8.0",
+    "@elysiajs/cors": "^0.8.0",
+    "@elysiajs/jwt": "^0.8.0",
+    "@elysiajs/swagger": "^0.8.5",
+    "@grotto/logysia": "^0.1.1",
+    "@libsql/client": "0.14.0",
+    "@tanstack/react-query": "^5.81.2",
+    "@tanstack/react-query-devtools": "^5.81.2",
+    "@types/big.js": "^6.2.2",
+    "@types/react-query": "^1.2.9",
+    "@vercel/postgres": "^0.10.0",
+    "axios": "^1.6.7",
+    "big.js": "^7.0.1",
+    "date-fns": "^3.3.1",
+    "drizzle-orm": "^0.36.4",
+    "elysia": "^1.1.22",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1",
+    "postgres": "^3.4.7",
+    "uuid": "^10.0.0",
+    "valibot": "^0.42.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@types/uuid": "^9.0.8",
+    "bun-types": "latest",
+    "drizzle-kit": "^0.28.1"
+  },
+  "module": "src/index.ts"
+}

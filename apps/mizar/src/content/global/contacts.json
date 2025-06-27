@@ -1,0 +1,21 @@
+{
+	"phone": "1234 5678",
+	"mail": "info@clubcashin.com",
+	"socials": [
+		{
+			"title": "Facebook",
+			"link": "https://facebook.com",
+			"icon": "ic:baseline-facebook"
+		},
+		{
+			"title": "Instagram",
+			"link": "https://www.instagram.com/",
+			"icon": "mdi:instagram"
+		},
+		{
+			"title": "Youtube",
+			"link": "https://www.youtube.com/",
+			"icon": "mdi:youtube"
+		}
+	]
+}

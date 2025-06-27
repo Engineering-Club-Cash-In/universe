@@ -1,0 +1,49 @@
+---
+import Link from "@/components/primitives/Link.astro";
+
+interface Props {
+  title: string;
+  subtitle?: string;
+  buttons: {
+    title: string;
+    href: string;
+    style: string;
+    icon?: string;
+    description?: string;
+  }[];
+}
+
+const { title, subtitle, buttons } = Astro.props;
+---
+
+<div class="pt-36 pb-20" id="final-cta">
+  <div class="text-center">
+    <p class="text-[2.13rem] leading-9 font-semibold mb-4" set:html={title} />
+    {
+      subtitle && (
+        <p class="text-xl text-neutral-600 mb-12 font-medium">{subtitle}</p>
+      )
+    }
+    <div
+      class="flex flex-col md:flex-row gap-6 justify-center items-center max-w-4xl mx-auto"
+    >
+      {
+        buttons.map(({ title, href, style, icon, description }) => (
+          <div class="flex-1 text-center">
+            <Link
+              href={href}
+              style={style as "primary" | "button" | "outline" | "buttonLight"}
+              icon={icon}
+              class="mb-3 w-full"
+            >
+              {title}
+            </Link>
+            {description && (
+              <p class="text-sm text-neutral-600 mt-2">{description}</p>
+            )}
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>

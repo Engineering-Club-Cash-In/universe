@@ -1,0 +1,10 @@
+{
+	"title": "¿Tienes cualquier duda?<br/> ¡No dudés en escribirnos!",
+	"copyright": "© 2024 Your Company",
+	"buttons": [
+		{
+			"text": "Contactanos",
+			"url": "/contact"
+		}
+	]
+}

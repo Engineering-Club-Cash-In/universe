@@ -1,0 +1,204 @@
+---
+import { getLangFromUrl, useTranslations, useTranslatedPath } from "@i18n/utils";
+
+const { class: className } = Astro.props;
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+const translatePath = useTranslatedPath(lang);
+---
+
+<section id="investment-simulator" class:list={["section investment-simulator-section relative bg-white text-black", className]}>
+	<div class="wrapper col-span-12 flex w-full flex-col items-center justify-center py-20 md:py-32">
+		<div class="mx-auto max-w-4xl text-center">
+			<div class="mb-8 inline-flex items-center gap-4">
+				<div class="hidden h-1 w-20 bg-black md:block"></div>
+				<span class="font-mono text-xs font-semibold uppercase tracking-wide text-zinc-600">
+					{t("simulator.tagline")}
+				</span>
+			</div>
+
+			<h2 class="mb-8 font-display text-3xl font-extrabold md:text-5xl lg:text-7xl">
+				{t("simulator.title")}
+			</h2>
+
+			<p class="mb-12 text-lg text-zinc-600 md:text-xl">
+				{t("simulator.subtitle")}
+			</p>
+
+			<div class="mx-auto max-w-2xl rounded-2xl bg-zinc-100 p-8 shadow-lg md:p-12">
+				<div class="space-y-8">
+					<!-- Monto Input -->
+					<div class="text-left">
+						<label for="amount" class="mb-3 block text-lg font-semibold text-zinc-800">
+							{t("simulator.amount")}
+						</label>
+						<div class="relative">
+							<span class="absolute left-4 top-1/2 -translate-y-1/2 text-xl font-bold text-zinc-600">Q</span>
+							<input
+								type="number"
+								id="amount"
+								min="1000"
+								step="100"
+								value="5000"
+								class="w-full rounded-xl border-2 border-zinc-300 bg-white px-12 py-4 text-xl font-semibold focus:border-yellow-400 focus:outline-none focus:ring-0"
+								placeholder="5,000"
+							/>
+						</div>
+					</div>
+
+					<!-- Plazo Input -->
+					<div class="text-left">
+						<label for="months" class="mb-3 block text-lg font-semibold text-zinc-800">
+							{t("simulator.months")}
+						</label>
+						<div class="relative">
+							<input
+								type="number"
+								id="months"
+								min="3"
+								max="24"
+								value="12"
+								class="w-full rounded-xl border-2 border-zinc-300 bg-white px-4 py-4 text-xl font-semibold focus:border-yellow-400 focus:outline-none focus:ring-0"
+								placeholder="12"
+							/>
+							<span class="absolute right-4 top-1/2 -translate-y-1/2 text-lg font-medium text-zinc-600">meses</span>
+						</div>
+					</div>
+
+					<!-- Tasa Display -->
+					<div class="text-left">
+						<label class="mb-3 block text-lg font-semibold text-zinc-800">
+							{t("simulator.rate")}
+						</label>
+						<div class="rounded-xl border-2 border-zinc-300 bg-zinc-200 px-4 py-4">
+							<span id="rate-display" class="text-xl font-bold text-zinc-800">18.0%</span>
+							<span class="ml-2 text-sm text-zinc-600">{t("simulator.rate.annual")}</span>
+						</div>
+					</div>
+
+					<!-- Resultado -->
+					<div class="rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-500 p-6 text-center">
+						<h3 class="mb-2 text-lg font-semibold text-black">
+							{t("simulator.result")}
+						</h3>
+						<div id="result-display" class="text-3xl font-bold text-black md:text-4xl">Q5,900</div>
+						<div class="mt-2 text-sm text-black/80">
+							<span>{t("simulator.result.monthly")}:</span>
+							<span id="monthly-display" class="font-semibold">Q75</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="mt-8">
+					<div class="squircle-bg rounded-lg bg-zinc-800 transition-all hover:bg-zinc-700">
+						<a
+							class="flex h-12 w-full items-center justify-center px-6 py-3 text-lg font-semibold text-white transition-all hover:text-gray-200"
+							href={translatePath("/contact/")}>
+							{t("simulator.button")} →
+						</a>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.investment-simulator-section {
+		--simulator-clip: 0;
+		--simulator-radius: 0;
+		clip-path: inset(var(--simulator-clip) round var(--simulator-radius));
+		margin-top: -1px;
+	}
+
+	/* Hide number input spin buttons */
+	#investment-simulator input[type="number"]::-webkit-outer-spin-button,
+	#investment-simulator input[type="number"]::-webkit-inner-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+
+	#investment-simulator input[type="number"] {
+		-moz-appearance: textfield;
+	}
+</style>
+
+<script>
+	import { gsap } from "gsap";
+	import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+	gsap.registerPlugin(ScrollTrigger);
+
+	function init() {
+		gsap.to("#investment-simulator", {
+			scrollTrigger: {
+				trigger: "#investment-simulator",
+				start: "bottom center",
+				end: "bottom top",
+				scrub: 1,
+				markers: false,
+			},
+			"--simulator-clip": "2vw",
+			"--simulator-radius": "5rem",
+		});
+
+		// Animation for the simulator container
+		gsap.fromTo(
+			"#investment-simulator .bg-zinc-100",
+			{
+				opacity: 0,
+				y: 40,
+				scale: 0.95,
+			},
+			{
+				opacity: 1,
+				y: 0,
+				scale: 1,
+				duration: 1,
+				ease: "power2.out",
+				scrollTrigger: {
+					trigger: "#investment-simulator",
+					start: "top 80%",
+					end: "center center",
+					toggleActions: "play none none reverse",
+				},
+			}
+		);
+
+		// Calculator functionality
+		const amountInput = document.getElementById("amount") as HTMLInputElement;
+		const monthsInput = document.getElementById("months") as HTMLInputElement;
+		const rateDisplay = document.getElementById("rate-display");
+		const resultDisplay = document.getElementById("result-display");
+		const monthlyDisplay = document.getElementById("monthly-display");
+
+		function calculateInvestment() {
+			const amount = parseFloat(amountInput?.value || "0");
+			const months = parseInt(monthsInput?.value || "0");
+
+			// Tasa variable según el plazo
+			let rate = 0.16; // 16% base
+			if (months >= 12) rate = 0.18; // 18% para 12+ meses
+			if (months >= 18) rate = 0.2; // 20% para 18+ meses
+
+			const monthlyRate = rate / 12;
+			const totalReturn = amount * (1 + (rate * months) / 12);
+			const monthlyReturn = (totalReturn - amount) / months;
+
+			if (rateDisplay) rateDisplay.textContent = `${(rate * 100).toFixed(1)}%`;
+			if (resultDisplay) resultDisplay.textContent = `Q${totalReturn.toLocaleString("es-GT", { maximumFractionDigits: 0 })}`;
+			if (monthlyDisplay) monthlyDisplay.textContent = `Q${monthlyReturn.toLocaleString("es-GT", { maximumFractionDigits: 0 })}`;
+		}
+
+		// Initial calculation
+		calculateInvestment();
+
+		// Event listeners
+		amountInput?.addEventListener("input", calculateInvestment);
+		monthsInput?.addEventListener("input", calculateInvestment);
+	}
+
+	document.removeEventListener("DOMContentLoaded", init);
+	document.addEventListener("DOMContentLoaded", init);
+</script>

@@ -1,18 +1,6 @@
-FROM oven/bun:latest AS base
+FROM nginx:latest
 
-WORKDIR /app
-
-COPY package.json ./
-
-RUN bun install
-
-COPY . .
-
-RUN bun run build
-
-FROM nginx:latest AS production
-
-COPY --from=base /app/dist /usr/share/nginx/html
+COPY dist /usr/share/nginx/html
 
 EXPOSE 80
 

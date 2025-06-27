@@ -1,0 +1,26 @@
+---
+title: Contáctanos
+type: informational
+lastUpdateDate: 2024-03-09
+hideTitle: false
+seo:
+  title: "Contáctanos: Contáctanos para obtener información sobre inversiones"
+  description: "Ponte en contacto con Club Cash Invest para obtener información sobre inversiones."
+  author: Your company
+---
+
+{% Container %}
+
+{% Contact
+  title="Contáctanos"
+  fields=[
+    {title: "Nombre completo", placeholder: "Juan Pérez", required: true, type: "text"},
+    {title: "Email", placeholder: "juan.perez@gmail.com", required: true, type: "email"},
+    {title: "Teléfono", placeholder: "8765-4321", type: "tel"},
+    {title: "Horario de atención", placeholder: "10:00 AM a 4:00 PM", type: "text"},
+    {title: "Mensaje", placeholder: "Escribe tu mensaje aquí", type: "textarea", width: 2},
+    {title: "Contáctanos", type: "submit", width: 2}
+  ]
+/%}
+
+{% /Container %}

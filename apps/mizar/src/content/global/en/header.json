@@ -1,0 +1,28 @@
+{
+	"logo": {
+		"imagePath": "/src/assets/global/navigation/logo.svg"
+	},
+	"pages": [
+		{
+			"title": "Home",
+			"link": "/"
+		},
+		{
+			"title": "Acerca de",
+			"link": "/about"
+		},
+		{
+			"title": "Proyectos",
+			"link": "/works"
+		},
+		{
+			"title": "Noticias",
+			"link": "/news"
+		},
+		{
+			"title": "Contáctanos",
+			"link": "/contact"
+		}
+	],
+	"actions": []
+}

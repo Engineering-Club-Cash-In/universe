@@ -1,0 +1,55 @@
+---
+import PerformanceChart from "@/components/primitives/PerformanceChart.tsx";
+
+interface Props {
+	title: string;
+	subtitle: string;
+	data: {
+		year: number;
+		cashIn: string;
+		sp500: string;
+		bankCD: string;
+		treasury: string;
+	}[];
+}
+
+const { title, subtitle, data } = Astro.props;
+---
+
+<div class="py-20">
+	<h2 class="text-4xl lg:text-[2.13rem] leading-9 font-semibold text-center mx-auto mb-3">
+		{title}
+	</h2>
+	<p class="text-center text-lg mb-8 max-w-4xl mx-auto">
+		{subtitle}
+	</p>
+	
+	<div class="overflow-x-auto">
+		<table class="w-full max-w-6xl mx-auto bg-white rounded-lg shadow-lg">
+			<thead class="bg-gray-100">
+				<tr>
+					<th class="px-6 py-4 text-left font-semibold">Año</th>
+					<th class="px-6 py-4 text-left font-semibold text-green-600">Cash In (14.11%)</th>
+					<th class="px-6 py-4 text-left font-semibold">S&P 500 (10.44%)</th>
+					<th class="px-6 py-4 text-left font-semibold">CD Banco (5.5%)</th>
+					<th class="px-6 py-4 text-left font-semibold">Bono Tesoro GT (7%)</th>
+				</tr>
+			</thead>
+			<tbody>
+				{data.map((row, index) => (
+					<tr class={`border-b ${index % 2 === 1 ? 'bg-gray-50' : ''}`}>
+						<td class="px-6 py-4 font-medium">{row.year}</td>
+						<td class="px-6 py-4 text-green-600 font-medium">{row.cashIn}</td>
+						<td class="px-6 py-4">{row.sp500}</td>
+						<td class="px-6 py-4">{row.bankCD}</td>
+						<td class="px-6 py-4">{row.treasury}</td>
+					</tr>
+				))}
+			</tbody>
+		</table>
+	</div>
+	
+	<div class="mt-12 mb-8">
+		<PerformanceChart data={data} client:load />
+	</div>
+</div>

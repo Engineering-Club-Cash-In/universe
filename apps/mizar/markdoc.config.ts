@@ -174,5 +174,13 @@ export default defineMarkdocConfig({
 			},
 			render: component("./src/components/sections/FinalCTA.astro"),
 		},
+		ComparisonTable: {
+			attributes: {
+				title: { type: String, render: "title", required: true },
+				subtitle: { type: String, render: "subtitle", required: true },
+				data: { type: Array, render: "data", required: true },
+			},
+			render: component("./src/components/sections/ComparisonTable.astro"),
+		},
 	},
 });

@@ -290,26 +290,6 @@ const images = import.meta.glob<{ default: ImageMetadata }>(
 						</a>
 					))
 				}
-				<div class="flex gap-8 pt-10 pl-16 md:pl-0">
-					{
-						locales.map((locale) => (
-							<a
-								href={getTranslatedUrl(locale)}
-								class:list={[
-									"items-center justify-start flex overflow-hidden gap-4 relative cursor-pointer",
-									isActiveLocale(locale) && "active-locale",
-								]}
-							>
-								<span
-									data-nav-text-reveal
-									class="overflow-hidden text-md xs:text-lg md:text-xl !leading-[1.15] text-black"
-								>
-									<span>{locale}</span>
-								</span>
-							</a>
-						))
-					}
-				</div>
 			</div>
 		</div>
 	</nav>

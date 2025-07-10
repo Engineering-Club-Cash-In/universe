@@ -21,12 +21,22 @@ function RouteComponent() {
   });
 
   useEffect(() => {
+    // Only redirect if we're absolutely sure there's no session
+    // Wait a bit longer to ensure session has time to update after sign-in
     if (!session && !isPending) {
-      navigate({
-        to: "/login",
-      });
+      const timer = setTimeout(() => {
+        // Re-check the current session state
+        const currentSession = authClient.useSession();
+        if (!currentSession.data && !currentSession.isPending) {
+          navigate({
+            to: "/login",
+          });
+        }
+      }, 1000); // Increased delay to 1 second
+      
+      return () => clearTimeout(timer);
     }
-  }, [session, isPending]);
+  }, [session, isPending, navigate]);
 
   if (isPending || userProfile.isPending) {
     return <div>Loading...</div>;

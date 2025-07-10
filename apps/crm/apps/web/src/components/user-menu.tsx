@@ -13,6 +13,8 @@ import { Skeleton } from "./ui/skeleton";
 import { Link } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useQuery } from "@tanstack/react-query";
+import { Badge } from "./ui/badge";
+import { Shield, User } from "lucide-react";
 
 export default function UserMenu() {
   const navigate = useNavigate();
@@ -35,17 +37,23 @@ export default function UserMenu() {
   }
 
   const userRole = userProfile.data?.role;
-  const roleColor = userRole === 'admin' ? 'text-red-600' : 'text-blue-600';
+  const getRoleBadgeColor = (role: string) => {
+    return role === 'admin' ? 'bg-red-100 text-red-800' : 'bg-blue-100 text-blue-800';
+  };
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline">
+        <Button variant="outline" className="flex items-center space-x-2">
           <span>{session.user.name}</span>
           {userRole && (
-            <span className={`ml-2 text-xs ${roleColor}`}>
-              ({userRole})
-            </span>
+            <Badge className={getRoleBadgeColor(userRole)} variant="outline">
+              {userRole === 'admin' ? (
+                <><Shield className="w-3 h-3 mr-1" /> Admin</>
+              ) : (
+                <><User className="w-3 h-3 mr-1" /> Sales</>
+              )}
+            </Badge>
           )}
         </Button>
       </DropdownMenuTrigger>
@@ -55,7 +63,13 @@ export default function UserMenu() {
         <DropdownMenuItem>{session.user.email}</DropdownMenuItem>
         {userRole && (
           <DropdownMenuItem>
-            <span className={roleColor}>Role: {userRole}</span>
+            <Badge className={getRoleBadgeColor(userRole)} variant="outline">
+              {userRole === 'admin' ? (
+                <><Shield className="w-3 h-3 mr-1" /> Admin</>
+              ) : (
+                <><User className="w-3 h-3 mr-1" /> Sales</>
+              )}
+            </Badge>
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />

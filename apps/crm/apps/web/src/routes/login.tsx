@@ -1,18 +1,34 @@
 import SignInForm from "@/components/sign-in-form";
-import SignUpForm from "@/components/sign-up-form";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { authClient } from "@/lib/auth-client";
+import { useEffect } from "react";
 
 export const Route = createFileRoute("/login")({
   component: RouteComponent,
 });
 
 function RouteComponent() {
-  const [showSignIn, setShowSignIn] = useState(false);
+  const { data: session, isPending } = authClient.useSession();
+  const navigate = Route.useNavigate();
 
-  return showSignIn ? (
-    <SignInForm onSwitchToSignUp={() => setShowSignIn(false)} />
-  ) : (
-    <SignUpForm onSwitchToSignIn={() => setShowSignIn(true)} />
-  );
+  useEffect(() => {
+    // Redirect to dashboard if already logged in
+    if (session && !isPending) {
+      navigate({
+        to: "/dashboard",
+      });
+    }
+  }, [session, isPending, navigate]);
+
+  // Show loading while checking session
+  if (isPending) {
+    return <div>Loading...</div>;
+  }
+
+  // Don't render login form if user is already logged in
+  if (session) {
+    return null;
+  }
+
+  return <SignInForm />;
 }

@@ -15,6 +15,13 @@
       "when": 1752168386030,
       "tag": "0001_married_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1752177187504,
+      "tag": "0002_smiling_mad_thinker",
+      "breakpoints": true
     }
   ]
 }

@@ -20,8 +20,8 @@ const { title, features } = Astro.props;
       class="auto-cols-fr grid-cols-1 md:grid-cols-2 grid-rows-[auto] grid gap-8"
     >
       {
-        features.map(({ text, icon }) => (
-          <div class="flex items-start space-x-4 p-6 bg-green-50 rounded-xl">
+        features.map(({ text, icon }, index) => (
+          <div class={`flex items-start space-x-4 p-6 bg-green-50 rounded-xl ${features.length % 2 === 1 && index === features.length - 1 ? 'md:col-span-2 md:max-w-lg md:mx-auto' : ''}`}>
             <div class="flex-shrink-0 w-8 h-8 bg-green-500 rounded-full flex items-center justify-center">
               <span class="text-white text-lg">{icon}</span>
             </div>

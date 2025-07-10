@@ -12,7 +12,7 @@ const { title } = Astro.props;
     set:html={title}
   />
   <p class="text-lg text-neutral-600 mb-8 text-center">
-    Ingresá un monto y plazo para estimar tus ganancias:
+    Descubrí cuánto podes ganar con nuestro rendimiento promedio del 14.11% anual:
   </p>
   <div class="mt-16">
     <div class="bg-neutral-50 rounded-xl p-8 max-w-2xl mx-auto">
@@ -24,7 +24,8 @@ const { title } = Astro.props;
           <input
             type="number"
             id="amount-input"
-            placeholder="1,000"
+            placeholder="100,000"
+            value="100000"
             class="w-full px-4 py-3 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
           />
         </div>
@@ -38,9 +39,10 @@ const { title } = Astro.props;
           >
             <option value="6">6 meses</option>
             <option value="9">9 meses</option>
-            <option value="12">12 meses</option>
+            <option value="12" selected>12 meses</option>
             <option value="18">18 meses</option>
             <option value="24">24 meses</option>
+            <option value="36">36 meses</option>
           </select>
         </div>
       </div>
@@ -53,7 +55,7 @@ const { title } = Astro.props;
           <div class="px-4 py-3 bg-white border border-neutral-300 rounded-lg">
             <span
               id="projected-rate"
-              class="text-lg font-semibold text-green-600">16%</span
+              class="text-lg font-semibold text-green-600">14.11%</span
             >
           </div>
         </div>
@@ -73,12 +75,12 @@ const { title } = Astro.props;
 
       <div class="text-center">
         <div class="text-sm text-neutral-600 mb-4">
-          Accedé al simulador completo en tu perfil
+          *Cálculo estimado basado en rendimiento histórico promedio
         </div>
         <button
-          class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+          class="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
         >
-          Crear cuenta gratis
+          Empezar a invertir ahora
         </button>
       </div>
     </div>
@@ -96,16 +98,16 @@ const { title } = Astro.props;
         ?.value || "12"
     );
 
-    // Simple rate calculation based on duration
-    let rate = 0.16; // 16% base rate
-    if (duration >= 18) rate = 0.18; // 18% for longer terms
-    if (duration <= 6) rate = 0.14; // 14% for shorter terms
+    // Rate calculation based on duration using PDF data
+    let rate = 0.1411; // 14.11% base rate as per PDF
+    if (duration >= 24) rate = 0.16; // Higher rate for longer terms
+    if (duration >= 36) rate = 0.18; // Maximum rate for longest terms
 
     const projectedRateElement = document.getElementById("projected-rate");
     const estimatedProfitElement = document.getElementById("estimated-profit");
 
     if (projectedRateElement && estimatedProfitElement) {
-      projectedRateElement.textContent = `${(rate * 100).toFixed(0)}%`;
+      projectedRateElement.textContent = `${(rate * 100).toFixed(2)}%`;
 
       const monthlyRate = rate / 12;
       const totalProfit = amount * monthlyRate * duration;

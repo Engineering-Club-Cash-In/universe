@@ -1,0 +1,32 @@
+{
+  "name": "crm",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "check": "biome check --write .",
+    "dev": "bun run --filter '*' dev",
+    "build": "bun run --filter '*' build",
+    "check-types": "bun run --filter '*' check-types",
+    "dev:native": "bun run --filter native dev",
+    "dev:web": "bun run --filter web dev",
+    "dev:server": "bun run --filter server dev",
+    "db:push": "bun run --filter server db:push",
+    "db:studio": "bun run --filter server db:studio",
+    "db:generate": "bun run --filter server db:generate",
+    "db:migrate": "bun run --filter server db:migrate"
+  },
+  "dependencies": {
+    "@orpc/client": "^1.6.6",
+    "@orpc/server": "^1.6.6",
+    "@orpc/tanstack-query": "^1.6.6",
+    "better-auth": "^1.2.12",
+    "radix-ui": "^1.4.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.0.0"
+  },
+  "packageManager": "bun@1.2.16"
+}

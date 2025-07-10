@@ -40,5 +40,29 @@ const requireAdmin = o.middleware(async ({ context, next }) => {
   });
 });
 
+const requireCrmAccess = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED");
+  }
+  
+  const userId = context.session.user.id;
+  const userData = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+  const userRole = userData[0]?.role;
+  
+  if (!userRole || !['admin', 'sales'].includes(userRole)) {
+    throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
+  }
+  
+  return next({
+    context: {
+      session: context.session,
+      user: userData[0],
+      userId,
+      userRole,
+    },
+  });
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
+export const crmProcedure = publicProcedure.use(requireCrmAccess);

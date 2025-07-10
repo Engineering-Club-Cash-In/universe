@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Users, Building, Target, HandshakeIcon, TrendingUp, DollarSign } from "lucide-react";
 
 export const Route = createFileRoute("/dashboard")({
   component: RouteComponent,
@@ -18,6 +20,18 @@ function RouteComponent() {
   const adminData = useQuery({
     ...orpc.adminOnlyData.queryOptions(),
     enabled: userProfile.data?.role === 'admin',
+  });
+  
+  // CRM Dashboard Stats
+  const crmStats = useQuery({
+    ...orpc.getDashboardStats.queryOptions(),
+    enabled: !!userProfile.data?.role && ['admin', 'sales'].includes(userProfile.data.role),
+  });
+
+  // Sales Stages for funnel
+  const salesStages = useQuery({
+    ...orpc.getSalesStages.queryOptions(),
+    enabled: !!userProfile.data?.role && ['admin', 'sales'].includes(userProfile.data.role),
   });
 
   useEffect(() => {
@@ -47,99 +61,167 @@ function RouteComponent() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Dashboard</h1>
+        <h1 className="text-3xl font-bold">CRM Dashboard</h1>
         <p className="text-muted-foreground">Welcome back, {session?.user.name}</p>
         <div className="inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 mt-2">
           Role: {userRole}
         </div>
       </div>
 
-      {userRole === 'admin' && (
+      {/* CRM Metrics */}
+      {userRole === 'admin' && crmStats.data && (
         <div className="space-y-4">
-          <h2 className="text-2xl font-semibold text-red-600">Admin Panel</h2>
-          <div className="grid gap-4 md:grid-cols-3">
+          <h2 className="text-2xl font-semibold">Global CRM Overview</h2>
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Leads</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{crmStats.data.totalLeads || 0}</div>
+                <p className="text-xs text-muted-foreground">Active prospects</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Opportunities</CardTitle>
+                <Target className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{crmStats.data.totalOpportunities || 0}</div>
+                <p className="text-xs text-muted-foreground">In pipeline</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Clients</CardTitle>
+                <HandshakeIcon className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{crmStats.data.totalClients || 0}</div>
+                <p className="text-xs text-muted-foreground">Paying customers</p>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+                <Building className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{adminData.data?.adminStats.totalUsers || 0}</div>
-                <p className="text-xs text-muted-foreground">Registered users</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{adminData.data?.adminStats.totalSales || 0}</div>
-                <p className="text-xs text-muted-foreground">Completed transactions</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Revenue</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{adminData.data?.adminStats.revenue || "$0"}</div>
-                <p className="text-xs text-muted-foreground">Total revenue</p>
+                <p className="text-xs text-muted-foreground">System users</p>
               </CardContent>
             </Card>
           </div>
         </div>
       )}
 
-      {userRole === 'sales' && (
+      {userRole === 'sales' && crmStats.data && (
         <div className="space-y-4">
-          <h2 className="text-2xl font-semibold text-blue-600">Sales Dashboard</h2>
-          <div className="grid gap-4 md:grid-cols-2">
+          <h2 className="text-2xl font-semibold text-blue-600">My Sales Performance</h2>
+          <div className="grid gap-4 md:grid-cols-3">
             <Card>
-              <CardHeader>
-                <CardTitle>My Sales Performance</CardTitle>
-                <CardDescription>Your personal sales metrics</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">My Leads</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">12</div>
-                <p className="text-xs text-muted-foreground">Sales this month</p>
+                <div className="text-2xl font-bold">{crmStats.data.myLeads || 0}</div>
+                <p className="text-xs text-muted-foreground">Assigned to me</p>
               </CardContent>
             </Card>
             <Card>
-              <CardHeader>
-                <CardTitle>My Commission</CardTitle>
-                <CardDescription>Your earnings this month</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">My Opportunities</CardTitle>
+                <Target className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">$3,240</div>
-                <p className="text-xs text-muted-foreground">Commission earned</p>
+                <div className="text-2xl font-bold">{crmStats.data.myOpportunities || 0}</div>
+                <p className="text-xs text-muted-foreground">In my pipeline</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">My Clients</CardTitle>
+                <HandshakeIcon className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{crmStats.data.myClients || 0}</div>
+                <p className="text-xs text-muted-foreground">Managed by me</p>
               </CardContent>
             </Card>
           </div>
         </div>
       )}
 
+      {/* Sales Funnel Visualization */}
+      {salesStages.data && salesStages.data.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5" />
+              Sales Pipeline Stages
+            </CardTitle>
+            <CardDescription>
+              Track opportunities through the sales process
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {salesStages.data.map((stage) => (
+                <div key={stage.id} className="flex items-center justify-between p-3 rounded-lg border">
+                  <div className="flex items-center gap-3">
+                    <Badge 
+                      style={{ backgroundColor: stage.color, color: 'white' }}
+                      className="min-w-[60px] justify-center"
+                    >
+                      {stage.closurePercentage}%
+                    </Badge>
+                    <div>
+                      <p className="font-medium">{stage.name}</p>
+                      {stage.description && (
+                        <p className="text-sm text-muted-foreground">{stage.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-medium">Stage {stage.order}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {stage.closurePercentage}% closure rate
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quick Actions */}
       <Card>
         <CardHeader>
-          <CardTitle>Recent Activity</CardTitle>
-          <CardDescription>Your latest actions in the system</CardDescription>
+          <CardTitle>Quick Actions</CardTitle>
+          <CardDescription>Common CRM tasks and shortcuts</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span>Logged in</span>
-              <span className="text-muted-foreground">Just now</span>
-            </div>
-            {userRole === 'admin' && (
-              <div className="flex justify-between">
-                <span>Reviewed user permissions</span>
-                <span className="text-muted-foreground">2 hours ago</span>
-              </div>
-            )}
-            {userRole === 'sales' && (
-              <div className="flex justify-between">
-                <span>Updated lead status</span>
-                <span className="text-muted-foreground">1 hour ago</span>
-              </div>
-            )}
+          <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+            <button className="flex items-center gap-2 p-3 rounded-lg border hover:bg-accent transition-colors">
+              <Users className="h-4 w-4" />
+              <span className="text-sm">Add New Lead</span>
+            </button>
+            <button className="flex items-center gap-2 p-3 rounded-lg border hover:bg-accent transition-colors">
+              <Target className="h-4 w-4" />
+              <span className="text-sm">Create Opportunity</span>
+            </button>
+            <button className="flex items-center gap-2 p-3 rounded-lg border hover:bg-accent transition-colors">
+              <Building className="h-4 w-4" />
+              <span className="text-sm">Add Company</span>
+            </button>
+            <button className="flex items-center gap-2 p-3 rounded-lg border hover:bg-accent transition-colors">
+              <DollarSign className="h-4 w-4" />
+              <span className="text-sm">View Reports</span>
+            </button>
           </div>
         </CardContent>
       </Card>

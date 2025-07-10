@@ -1,5 +1,8 @@
 import { ORPCError, os } from "@orpc/server";
 import type { Context } from "./context";
+import { db } from "../db";
+import { user } from "../db/schema/auth";
+import { eq } from "drizzle-orm";
 
 export const o = os.$context<Context>();
 
@@ -16,4 +19,26 @@ const requireAuth = o.middleware(async ({ context, next }) => {
   });
 });
 
+const requireAdmin = o.middleware(async ({ context, next }) => {
+  if (!context.session?.user) {
+    throw new ORPCError("UNAUTHORIZED");
+  }
+  
+  const userId = context.session.user.id;
+  const userData = await db.select().from(user).where(eq(user.id, userId)).limit(1);
+  const userRole = userData[0]?.role;
+  
+  if (userRole !== 'admin') {
+    throw new ORPCError("FORBIDDEN", { message: "Admin role required" });
+  }
+  
+  return next({
+    context: {
+      session: context.session,
+      user: userData[0],
+    },
+  });
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
+export const adminProcedure = publicProcedure.use(requireAdmin);

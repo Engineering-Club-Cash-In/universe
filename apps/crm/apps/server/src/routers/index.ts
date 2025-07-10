@@ -15,6 +15,7 @@ export const appRouter = {
   getAllUsers: adminRouter.getAllUsers,
   updateUserRole: adminRouter.updateUserRole,
   deleteUser: adminRouter.deleteUser,
+  createUser: adminRouter.createUser,
 };
 
 export type AppRouter = typeof appRouter;

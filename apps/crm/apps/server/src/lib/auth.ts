@@ -1,16 +1,46 @@
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin } from "better-auth/plugins";
+import { createAccessControl } from "better-auth/plugins/access";
 import { db } from "../db";
 import * as schema from "../db/schema/auth";
+
+// Create access control for custom roles
+const statement = {
+  user: ["read", "update"],
+  lead: ["create", "read", "update", "delete"],
+  report: ["read", "export"],
+} as const;
+
+const ac = createAccessControl(statement);
+
+export const adminRole = ac.newRole({
+  user: ["read", "update"],
+  lead: ["create", "read", "update", "delete"],
+  report: ["read", "export"],
+});
+
+export const salesRole = ac.newRole({
+  user: ["read", "update"],
+  lead: ["create", "read", "update"],
+  report: ["read"],
+});
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, {
     provider: "pg",
-    
-    
     schema: schema,
   }),
+  plugins: [
+    admin({
+      ac,
+      roles: {
+        admin: adminRole,
+        sales: salesRole,
+      }
+    })
+  ],
   trustedOrigins: [
     process.env.CORS_ORIGIN || "",
   ],

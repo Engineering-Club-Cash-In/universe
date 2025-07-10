@@ -1,0 +1,84 @@
+import { adminProcedure } from "../lib/orpc";
+import { db } from "../db";
+import { user } from "../db/schema/auth";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
+
+export const adminRouter = {
+  getStats: adminProcedure.handler(async ({ context }) => {
+    const totalUsers = await db.select().from(user);
+    
+    return {
+      message: "This is admin-only data",
+      adminStats: {
+        totalUsers: totalUsers.length,
+        totalSales: 150,
+        revenue: "$50,000"
+      }
+    };
+  }),
+  
+  // User CRUD operations
+  getAllUsers: adminProcedure.handler(async ({ context }) => {
+    const users = await db.select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      emailVerified: user.emailVerified,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    }).from(user);
+    
+    return users;
+  }),
+  
+  updateUserRole: adminProcedure
+    .input(z.object({
+      userId: z.string(),
+      role: z.enum(['admin', 'sales']),
+    }))
+    .handler(async ({ input, context }) => {
+      // Prevent changing own role
+      if (input.userId === context.session?.user?.id) {
+        throw new Error("Cannot change your own role");
+      }
+      
+      const updatedUser = await db
+        .update(user)
+        .set({ 
+          role: input.role,
+          updatedAt: new Date(),
+        })
+        .where(eq(user.id, input.userId))
+        .returning();
+        
+      if (updatedUser.length === 0) {
+        throw new Error("User not found");
+      }
+      
+      return updatedUser[0];
+    }),
+    
+  deleteUser: adminProcedure
+    .input(z.object({
+      userId: z.string(),
+    }))
+    .handler(async ({ input, context }) => {
+      // Prevent deleting own account
+      if (input.userId === context.session?.user?.id) {
+        throw new Error("Cannot delete your own account");
+      }
+      
+      const deletedUser = await db
+        .delete(user)
+        .where(eq(user.id, input.userId))
+        .returning();
+        
+      if (deletedUser.length === 0) {
+        throw new Error("User not found");
+      }
+      
+      return { success: true, deletedUser: deletedUser[0] };
+    }),
+};

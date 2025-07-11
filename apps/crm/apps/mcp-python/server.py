@@ -138,16 +138,50 @@ async def getTopLeads(
         return records_to_list(records)
 
 @mcp.tool()
-async def searchLeads(filters: LeadFilters) -> List[Dict[str, Any]]:
+async def searchLeads(
+    firstName: Optional[str] = None,
+    lastName: Optional[str] = None,
+    email: Optional[str] = None,
+    companyId: Optional[str] = None,
+    source: Optional[str] = None,
+    status: Optional[str] = None,
+    assignedTo: Optional[str] = None,
+    createdBy: Optional[str] = None,
+    createdAfter: Optional[str] = None,
+    createdBefore: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Search leads with various filters.
     
     Args:
-        filters: Filter criteria for searching leads.
+        firstName: Filter by first name (partial match).
+        lastName: Filter by last name (partial match).
+        email: Filter by email (partial match).
+        companyId: Filter by company ID.
+        source: Filter by source (website, referral, cold_call, email, social_media, event, other).
+        status: Filter by status (new, contacted, qualified, unqualified, converted).
+        assignedTo: Filter by assigned user.
+        createdBy: Filter by creator.
+        createdAfter: Filter by creation date after (ISO format).
+        createdBefore: Filter by creation date before (ISO format).
     
     Returns:
         List of leads matching the filters.
     """
-    logger.info(f">>> Tool: 'searchLeads' called with filters: {filters}")
+    # Create a filters dict from the parameters
+    filters_dict = {
+        "firstName": firstName,
+        "lastName": lastName,
+        "email": email,
+        "companyId": companyId,
+        "source": source,
+        "status": status,
+        "assignedTo": assignedTo,
+        "createdBy": createdBy,
+        "createdAfter": createdAfter,
+        "createdBefore": createdBefore
+    }
+    
+    logger.info(f">>> Tool: 'searchLeads' called with filters: {filters_dict}")
     pool = await get_db_connection()
     
     conditions = []
@@ -165,7 +199,7 @@ async def searchLeads(filters: LeadFilters) -> List[Dict[str, Any]]:
         "createdBefore": "created_at"
     }
     
-    for field, value in filters.model_dump(exclude_none=True).items():
+    for field, value in filters_dict.items():
         if value is not None:
             param_count += 1
             db_field = field_mapping.get(field, field)
@@ -246,16 +280,44 @@ async def getTopOpportunities(
         return records_to_list(records)
 
 @mcp.tool()
-async def searchOpportunities(filters: OpportunityFilters) -> List[Dict[str, Any]]:
+async def searchOpportunities(
+    title: Optional[str] = None,
+    companyId: Optional[str] = None,
+    minValue: Optional[float] = None,
+    maxValue: Optional[float] = None,
+    status: Optional[str] = None,
+    assignedTo: Optional[str] = None,
+    expectedCloseAfter: Optional[str] = None,
+    expectedCloseBefore: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Search opportunities with various filters.
     
     Args:
-        filters: Filter criteria for searching opportunities.
+        title: Filter by title (partial match).
+        companyId: Filter by company ID.
+        minValue: Filter by minimum value.
+        maxValue: Filter by maximum value.
+        status: Filter by status (open, won, lost, on_hold).
+        assignedTo: Filter by assigned user.
+        expectedCloseAfter: Filter by expected close date after (ISO format).
+        expectedCloseBefore: Filter by expected close date before (ISO format).
     
     Returns:
         List of opportunities matching the filters.
     """
-    logger.info(f">>> Tool: 'searchOpportunities' called with filters: {filters}")
+    # Create a filters dict from the parameters
+    filters_dict = {
+        "title": title,
+        "companyId": companyId,
+        "minValue": minValue,
+        "maxValue": maxValue,
+        "status": status,
+        "assignedTo": assignedTo,
+        "expectedCloseAfter": expectedCloseAfter,
+        "expectedCloseBefore": expectedCloseBefore
+    }
+    
+    logger.info(f">>> Tool: 'searchOpportunities' called with filters: {filters_dict}")
     pool = await get_db_connection()
     
     conditions = []
@@ -270,7 +332,7 @@ async def searchOpportunities(filters: OpportunityFilters) -> List[Dict[str, Any
         "expectedCloseBefore": "expected_close_date"
     }
     
-    for field, value in filters.model_dump(exclude_none=True).items():
+    for field, value in filters_dict.items():
         if value is not None:
             param_count += 1
             db_field = field_mapping.get(field, field)
@@ -389,16 +451,35 @@ async def getTopCompaniesByClientCount(limit: int = 3) -> List[Dict[str, Any]]:
         return records_to_list(records)
 
 @mcp.tool()
-async def searchCompanies(filters: CompanyFilters) -> List[Dict[str, Any]]:
+async def searchCompanies(
+    name: Optional[str] = None,
+    industry: Optional[str] = None,
+    size: Optional[str] = None,
+    createdAfter: Optional[str] = None,
+    createdBefore: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Search companies with various filters.
     
     Args:
-        filters: Filter criteria for searching companies.
+        name: Filter by name (partial match).
+        industry: Filter by industry (partial match).
+        size: Filter by size.
+        createdAfter: Filter by creation date after (ISO format).
+        createdBefore: Filter by creation date before (ISO format).
     
     Returns:
         List of companies matching the filters.
     """
-    logger.info(f">>> Tool: 'searchCompanies' called with filters: {filters}")
+    # Create a filters dict from the parameters
+    filters_dict = {
+        "name": name,
+        "industry": industry,
+        "size": size,
+        "createdAfter": createdAfter,
+        "createdBefore": createdBefore
+    }
+    
+    logger.info(f">>> Tool: 'searchCompanies' called with filters: {filters_dict}")
     pool = await get_db_connection()
     
     conditions = []
@@ -411,7 +492,7 @@ async def searchCompanies(filters: CompanyFilters) -> List[Dict[str, Any]]:
         "createdBefore": "created_at"
     }
     
-    for field, value in filters.model_dump(exclude_none=True).items():
+    for field, value in filters_dict.items():
         if value is not None:
             param_count += 1
             db_field = field_mapping.get(field, field)
@@ -490,16 +571,44 @@ async def getTopClientsByContractValue(
         return records_to_list(records)
 
 @mcp.tool()
-async def searchClients(filters: ClientFilters) -> List[Dict[str, Any]]:
+async def searchClients(
+    companyId: Optional[str] = None,
+    contactPerson: Optional[str] = None,
+    minContractValue: Optional[float] = None,
+    maxContractValue: Optional[float] = None,
+    status: Optional[str] = None,
+    assignedTo: Optional[str] = None,
+    startAfter: Optional[str] = None,
+    startBefore: Optional[str] = None
+) -> List[Dict[str, Any]]:
     """Search clients with various filters.
     
     Args:
-        filters: Filter criteria for searching clients.
+        companyId: Filter by company ID.
+        contactPerson: Filter by contact person (partial match).
+        minContractValue: Filter by minimum contract value.
+        maxContractValue: Filter by maximum contract value.
+        status: Filter by status (active, inactive, churned).
+        assignedTo: Filter by assigned user.
+        startAfter: Filter by start date after (ISO format).
+        startBefore: Filter by start date before (ISO format).
     
     Returns:
         List of clients matching the filters.
     """
-    logger.info(f">>> Tool: 'searchClients' called with filters: {filters}")
+    # Create a filters dict from the parameters
+    filters_dict = {
+        "companyId": companyId,
+        "contactPerson": contactPerson,
+        "minContractValue": minContractValue,
+        "maxContractValue": maxContractValue,
+        "status": status,
+        "assignedTo": assignedTo,
+        "startAfter": startAfter,
+        "startBefore": startBefore
+    }
+    
+    logger.info(f">>> Tool: 'searchClients' called with filters: {filters_dict}")
     pool = await get_db_connection()
     
     conditions = []
@@ -517,7 +626,7 @@ async def searchClients(filters: ClientFilters) -> List[Dict[str, Any]]:
         "startBefore": "start_date"
     }
     
-    for field, value in filters.model_dump(exclude_none=True).items():
+    for field, value in filters_dict.items():
         if value is not None:
             param_count += 1
             db_field = field_mapping.get(field, field)
@@ -566,11 +675,12 @@ def sayHello(name: str) -> str:
 
 if __name__ == "__main__":
     logger.info(f"CCI CRM MCP server started on port {os.getenv('PORT', 8080)}")
-    # Using streamable-http transport with host="0.0.0.0" for Cloud Run
+    # Using sse transport with host="0.0.0.0" for Cloud Run
     asyncio.run(
         mcp.run_async(
-            transport="streamable-http", 
+            transport="sse", 
             host="0.0.0.0", 
             port=int(os.getenv("PORT", 8080)),
+            path="/mcp"
         )
     )

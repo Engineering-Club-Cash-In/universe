@@ -7,8 +7,17 @@ async def test_server():
     # Default to local testing, but support Google Cloud Run URL via env var
     server_url = os.getenv("MCP_SERVER_URL", "http://localhost:8080/mcp")
     print(f"Testing MCP server at: {server_url}")
+
+    client_config = {
+        "mcpServers": {
+            "crm_server": {
+                "transport": "sse",
+                "url": server_url,
+            }
+        }
+    }
     
-    async with Client(server_url) as client:
+    async with Client(client_config) as client:
         print("\n=== Testing CCI CRM MCP Server ===\n")
         
         # List available tools
@@ -85,18 +94,31 @@ async def test_server():
         except Exception as e:
             print(f"Error: {e}")
         
-        # Test searchLeads with filters
+        # Test searchLeads with filters (new format)
         print("\n>>> Testing searchLeads with status filter...")
         try:
             result = await client.call_tool("searchLeads", {
-                "filters": {
-                    "status": "new"
-                }
+                "status": "new"
             })
             leads_data = result[0].text
             import json
             leads_list = json.loads(leads_data) if leads_data else []
             print(f"<<<  Found {len(leads_list)} leads with status 'new'")
+        except Exception as e:
+            print(f"Error: {e}")
+        
+        # Test searchLeads with source filter (referral)
+        print("\n>>> Testing searchLeads with source filter (referral)...")
+        try:
+            result = await client.call_tool("searchLeads", {
+                "source": "referral"
+            })
+            leads_data = result[0].text
+            import json
+            leads_list = json.loads(leads_data) if leads_data else []
+            print(f"<<<  Found {len(leads_list)} leads with source 'referral'")
+            for lead in leads_list:
+                print(f"     - {lead.get('first_name', '')} {lead.get('last_name', '')} from {lead.get('email', '')}")
         except Exception as e:
             print(f"Error: {e}")
         

@@ -478,6 +478,71 @@ async function seedClients(adminUserId: string, companiesList: any[]) {
   }
 }
 
+// Sample users data
+const usersData = [
+  {
+    id: "admin-user-1",
+    name: "Admin User",
+    email: "admin@crm.com",
+    emailVerified: true,
+    image: null,
+    role: "admin" as const,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    id: "sales-user-1",
+    name: "Carlos Rodriguez",
+    email: "carlos@crm.com",
+    emailVerified: true,
+    image: null,
+    role: "sales" as const,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    id: "sales-user-2",
+    name: "Maria Garcia",
+    email: "maria@crm.com",
+    emailVerified: true,
+    image: null,
+    role: "sales" as const,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  },
+  {
+    id: "sales-user-3",
+    name: "Javier Martinez",
+    email: "javier@crm.com",
+    emailVerified: true,
+    image: null,
+    role: "sales" as const,
+    createdAt: new Date(),
+    updatedAt: new Date()
+  }
+];
+
+async function seedUsers() {
+  console.log("Seeding users...");
+  
+  try {
+    const existingUsers = await db.select().from(user);
+    
+    if (existingUsers.length > 0) {
+      console.log("Users already exist, skipping seed...");
+      return existingUsers;
+    }
+
+    const insertedUsers = await db.insert(user).values(usersData).returning();
+    
+    console.log("✅ Users seeded successfully!");
+    return insertedUsers;
+  } catch (error) {
+    console.error("❌ Error seeding users:", error);
+    return [];
+  }
+}
+
 async function getOrCreateAdminUser() {
   try {
     // Look for an admin user
@@ -507,6 +572,9 @@ async function getOrCreateAdminUser() {
 async function main() {
   console.log("🌱 Starting CRM database seeding...");
   
+  // Seed users first
+  const usersList = await seedUsers();
+  
   // Get admin user
   const adminUserId = await getOrCreateAdminUser();
   if (!adminUserId) {
@@ -524,6 +592,7 @@ async function main() {
   const clientsList = await seedClients(adminUserId, companiesList);
   
   console.log("\n🎉 CRM database seeding completed!");
+  console.log(`✅ ${usersList.length} users`);
   console.log(`✅ ${stagesList.length} sales stages`);
   console.log(`✅ ${companiesList.length} companies`);
   console.log(`✅ ${leadsList.length} leads`);

@@ -1,436 +1,586 @@
-import { crmProcedure, adminProcedure } from "../lib/orpc";
-import { db } from "../db";
-import { companies, leads, opportunities, clients, salesStages, activities } from "../db/schema/crm";
-import { eq, and, or, count } from "drizzle-orm";
+import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "../db";
+import {
+	activities,
+	clients,
+	companies,
+	leads,
+	opportunities,
+	salesStages,
+} from "../db/schema/crm";
+import { adminProcedure, crmProcedure } from "../lib/orpc";
 
 export const crmRouter = {
-  // Sales Stages (read-only for all CRM users)
-  getSalesStages: crmProcedure.handler(async ({ context }) => {
-    const stages = await db.select().from(salesStages).orderBy(salesStages.order);
-    return stages;
-  }),
+	// Sales Stages (read-only for all CRM users)
+	getSalesStages: crmProcedure.handler(async ({ context }) => {
+		const stages = await db
+			.select()
+			.from(salesStages)
+			.orderBy(salesStages.order);
+		return stages;
+	}),
 
-  // Companies
-  getCompanies: crmProcedure.handler(async ({ context }) => {
-    // Admin can see all companies, sales can only see companies they created or are assigned to
-    if (context.userRole === 'admin') {
-      return await db.select().from(companies).orderBy(companies.createdAt);
-    } else {
-      return await db.select().from(companies)
-        .where(eq(companies.createdBy, context.userId))
-        .orderBy(companies.createdAt);
-    }
-  }),
+	// Companies
+	getCompanies: crmProcedure.handler(async ({ context }) => {
+		// Admin can see all companies, sales can only see companies they created or are assigned to
+		if (context.userRole === "admin") {
+			return await db.select().from(companies).orderBy(companies.createdAt);
+		}
+		return await db
+			.select()
+			.from(companies)
+			.where(eq(companies.createdBy, context.userId))
+			.orderBy(companies.createdAt);
+	}),
 
-  createCompany: crmProcedure
-    .input(z.object({
-      name: z.string().min(1, "Company name is required"),
-      industry: z.string().optional(),
-      size: z.string().optional(),
-      website: z.string().optional(),
-      address: z.string().optional(),
-      phone: z.string().optional(),
-      email: z.string().email().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const newCompany = await db.insert(companies).values({
-        ...input,
-        createdBy: context.userId,
-        updatedAt: new Date(),
-      }).returning();
-      return newCompany[0];
-    }),
+	createCompany: crmProcedure
+		.input(
+			z.object({
+				name: z.string().min(1, "Company name is required"),
+				industry: z.string().optional(),
+				size: z.string().optional(),
+				website: z.string().optional(),
+				address: z.string().optional(),
+				phone: z.string().optional(),
+				email: z.string().email().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const newCompany = await db
+				.insert(companies)
+				.values({
+					...input,
+					createdBy: context.userId,
+					updatedAt: new Date(),
+				})
+				.returning();
+			return newCompany[0];
+		}),
 
-  updateCompany: crmProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-      name: z.string().min(1, "Company name is required").optional(),
-      industry: z.string().optional(),
-      size: z.string().optional(),
-      website: z.string().optional(),
-      address: z.string().optional(),
-      phone: z.string().optional(),
-      email: z.string().email().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const { id, ...updateData } = input;
-      
-      // Sales users can only update companies they created
-      const whereClause = context.userRole === 'admin' 
-        ? eq(companies.id, id)
-        : and(eq(companies.id, id), eq(companies.createdBy, context.userId));
+	updateCompany: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				name: z.string().min(1, "Company name is required").optional(),
+				industry: z.string().optional(),
+				size: z.string().optional(),
+				website: z.string().optional(),
+				address: z.string().optional(),
+				phone: z.string().optional(),
+				email: z.string().email().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { id, ...updateData } = input;
 
-      const updatedCompany = await db.update(companies)
-        .set({ ...updateData, updatedAt: new Date() })
-        .where(whereClause)
-        .returning();
+			// Sales users can only update companies they created
+			const whereClause =
+				context.userRole === "admin"
+					? eq(companies.id, id)
+					: and(eq(companies.id, id), eq(companies.createdBy, context.userId));
 
-      if (updatedCompany.length === 0) {
-        throw new Error("Company not found or you don't have permission to update it");
-      }
+			const updatedCompany = await db
+				.update(companies)
+				.set({ ...updateData, updatedAt: new Date() })
+				.where(whereClause)
+				.returning();
 
-      return updatedCompany[0];
-    }),
+			if (updatedCompany.length === 0) {
+				throw new Error(
+					"Company not found or you don't have permission to update it",
+				);
+			}
 
-  // Leads
-  getLeads: crmProcedure.handler(async ({ context }) => {
-    // Admin can see all leads, sales can only see leads assigned to them
-    if (context.userRole === 'admin') {
-      return await db.select({
-        id: leads.id,
-        firstName: leads.firstName,
-        lastName: leads.lastName,
-        email: leads.email,
-        phone: leads.phone,
-        jobTitle: leads.jobTitle,
-        source: leads.source,
-        status: leads.status,
-        assignedTo: leads.assignedTo,
-        notes: leads.notes,
-        createdAt: leads.createdAt,
-        updatedAt: leads.updatedAt,
-        company: {
-          id: companies.id,
-          name: companies.name,
-        }
-      })
-      .from(leads)
-      .leftJoin(companies, eq(leads.companyId, companies.id))
-      .orderBy(leads.createdAt);
-    } else {
-      return await db.select({
-        id: leads.id,
-        firstName: leads.firstName,
-        lastName: leads.lastName,
-        email: leads.email,
-        phone: leads.phone,
-        jobTitle: leads.jobTitle,
-        source: leads.source,
-        status: leads.status,
-        assignedTo: leads.assignedTo,
-        notes: leads.notes,
-        createdAt: leads.createdAt,
-        updatedAt: leads.updatedAt,
-        company: {
-          id: companies.id,
-          name: companies.name,
-        }
-      })
-      .from(leads)
-      .leftJoin(companies, eq(leads.companyId, companies.id))
-      .where(eq(leads.assignedTo, context.userId))
-      .orderBy(leads.createdAt);
-    }
-  }),
+			return updatedCompany[0];
+		}),
 
-  createLead: crmProcedure
-    .input(z.object({
-      firstName: z.string().min(1, "First name is required"),
-      lastName: z.string().min(1, "Last name is required"),
-      email: z.string().email("Valid email is required"),
-      phone: z.string().optional(),
-      jobTitle: z.string().optional(),
-      companyId: z.string().uuid().optional(),
-      source: z.enum(['website', 'referral', 'cold_call', 'email', 'social_media', 'event', 'other']),
-      assignedTo: z.string().uuid().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      // If no assignedTo specified, assign to current user
-      // Admin can assign to anyone, sales can only assign to themselves
-      const assignedTo = input.assignedTo || context.userId;
-      
-      if (context.userRole === 'sales' && assignedTo !== context.userId) {
-        throw new Error("Sales users can only assign leads to themselves");
-      }
+	// Leads
+	getLeads: crmProcedure.handler(async ({ context }) => {
+		// Admin can see all leads, sales can only see leads assigned to them
+		if (context.userRole === "admin") {
+			return await db
+				.select({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					jobTitle: leads.jobTitle,
+					source: leads.source,
+					status: leads.status,
+					assignedTo: leads.assignedTo,
+					notes: leads.notes,
+					createdAt: leads.createdAt,
+					updatedAt: leads.updatedAt,
+					company: {
+						id: companies.id,
+						name: companies.name,
+					},
+				})
+				.from(leads)
+				.leftJoin(companies, eq(leads.companyId, companies.id))
+				.orderBy(leads.createdAt);
+		}
+		return await db
+			.select({
+				id: leads.id,
+				firstName: leads.firstName,
+				lastName: leads.lastName,
+				email: leads.email,
+				phone: leads.phone,
+				jobTitle: leads.jobTitle,
+				source: leads.source,
+				status: leads.status,
+				assignedTo: leads.assignedTo,
+				notes: leads.notes,
+				createdAt: leads.createdAt,
+				updatedAt: leads.updatedAt,
+				company: {
+					id: companies.id,
+					name: companies.name,
+				},
+			})
+			.from(leads)
+			.leftJoin(companies, eq(leads.companyId, companies.id))
+			.where(eq(leads.assignedTo, context.userId))
+			.orderBy(leads.createdAt);
+	}),
 
-      const newLead = await db.insert(leads).values({
-        ...input,
-        assignedTo,
-        createdBy: context.userId,
-        updatedAt: new Date(),
-      }).returning();
-      return newLead[0];
-    }),
+	createLead: crmProcedure
+		.input(
+			z.object({
+				firstName: z.string().min(1, "First name is required"),
+				lastName: z.string().min(1, "Last name is required"),
+				email: z.string().email("Valid email is required"),
+				phone: z.string().optional(),
+				jobTitle: z.string().optional(),
+				companyId: z.string().uuid().optional(),
+				source: z.enum([
+					"website",
+					"referral",
+					"cold_call",
+					"email",
+					"social_media",
+					"event",
+					"other",
+				]),
+				assignedTo: z.string().uuid().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// If no assignedTo specified, assign to current user
+			// Admin can assign to anyone, sales can only assign to themselves
+			const assignedTo = input.assignedTo || context.userId;
 
-  updateLead: crmProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-      firstName: z.string().min(1, "First name is required").optional(),
-      lastName: z.string().min(1, "Last name is required").optional(),
-      email: z.string().email("Valid email is required").optional(),
-      phone: z.string().optional(),
-      jobTitle: z.string().optional(),
-      companyId: z.string().uuid().optional(),
-      source: z.enum(['website', 'referral', 'cold_call', 'email', 'social_media', 'event', 'other']).optional(),
-      status: z.enum(['new', 'contacted', 'qualified', 'unqualified', 'converted']).optional(),
-      assignedTo: z.string().uuid().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const { id, assignedTo, ...updateData } = input;
-      
-      // Sales users can only update leads assigned to them
-      const whereClause = context.userRole === 'admin' 
-        ? eq(leads.id, id)
-        : and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
+			if (context.userRole === "sales" && assignedTo !== context.userId) {
+				throw new Error("Sales users can only assign leads to themselves");
+			}
 
-      // Sales users cannot reassign leads
-      if (context.userRole === 'sales' && assignedTo && assignedTo !== context.userId) {
-        throw new Error("Sales users cannot reassign leads");
-      }
+			const newLead = await db
+				.insert(leads)
+				.values({
+					...input,
+					assignedTo,
+					createdBy: context.userId,
+					updatedAt: new Date(),
+				})
+				.returning();
+			return newLead[0];
+		}),
 
-      const updatedLead = await db.update(leads)
-        .set({ 
-          ...updateData, 
-          ...(assignedTo && { assignedTo }),
-          updatedAt: new Date() 
-        })
-        .where(whereClause)
-        .returning();
+	updateLead: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				firstName: z.string().min(1, "First name is required").optional(),
+				lastName: z.string().min(1, "Last name is required").optional(),
+				email: z.string().email("Valid email is required").optional(),
+				phone: z.string().optional(),
+				jobTitle: z.string().optional(),
+				companyId: z.string().uuid().optional(),
+				source: z
+					.enum([
+						"website",
+						"referral",
+						"cold_call",
+						"email",
+						"social_media",
+						"event",
+						"other",
+					])
+					.optional(),
+				status: z
+					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
+					.optional(),
+				assignedTo: z.string().uuid().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { id, assignedTo, ...updateData } = input;
 
-      if (updatedLead.length === 0) {
-        throw new Error("Lead not found or you don't have permission to update it");
-      }
+			// Sales users can only update leads assigned to them
+			const whereClause =
+				context.userRole === "admin"
+					? eq(leads.id, id)
+					: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
 
-      return updatedLead[0];
-    }),
+			// Sales users cannot reassign leads
+			if (
+				context.userRole === "sales" &&
+				assignedTo &&
+				assignedTo !== context.userId
+			) {
+				throw new Error("Sales users cannot reassign leads");
+			}
 
-  // Opportunities
-  getOpportunities: crmProcedure.handler(async ({ context }) => {
-    if (context.userRole === 'admin') {
-      return await db.select({
-        id: opportunities.id,
-        title: opportunities.title,
-        value: opportunities.value,
-        probability: opportunities.probability,
-        expectedCloseDate: opportunities.expectedCloseDate,
-        status: opportunities.status,
-        assignedTo: opportunities.assignedTo,
-        notes: opportunities.notes,
-        createdAt: opportunities.createdAt,
-        updatedAt: opportunities.updatedAt,
-        company: {
-          id: companies.id,
-          name: companies.name,
-        },
-        stage: {
-          id: salesStages.id,
-          name: salesStages.name,
-          order: salesStages.order,
-          closurePercentage: salesStages.closurePercentage,
-          color: salesStages.color,
-        }
-      })
-      .from(opportunities)
-      .leftJoin(companies, eq(opportunities.companyId, companies.id))
-      .leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-      .orderBy(opportunities.createdAt);
-    } else {
-      return await db.select({
-        id: opportunities.id,
-        title: opportunities.title,
-        value: opportunities.value,
-        probability: opportunities.probability,
-        expectedCloseDate: opportunities.expectedCloseDate,
-        status: opportunities.status,
-        assignedTo: opportunities.assignedTo,
-        notes: opportunities.notes,
-        createdAt: opportunities.createdAt,
-        updatedAt: opportunities.updatedAt,
-        company: {
-          id: companies.id,
-          name: companies.name,
-        },
-        stage: {
-          id: salesStages.id,
-          name: salesStages.name,
-          order: salesStages.order,
-          closurePercentage: salesStages.closurePercentage,
-          color: salesStages.color,
-        }
-      })
-      .from(opportunities)
-      .leftJoin(companies, eq(opportunities.companyId, companies.id))
-      .leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-      .where(eq(opportunities.assignedTo, context.userId))
-      .orderBy(opportunities.createdAt);
-    }
-  }),
+			const updatedLead = await db
+				.update(leads)
+				.set({
+					...updateData,
+					...(assignedTo && { assignedTo }),
+					updatedAt: new Date(),
+				})
+				.where(whereClause)
+				.returning();
 
-  createOpportunity: crmProcedure
-    .input(z.object({
-      title: z.string().min(1, "Title is required"),
-      leadId: z.string().uuid().optional(),
-      companyId: z.string().uuid().optional(),
-      value: z.string().optional(), // Will be converted to decimal
-      stageId: z.string().uuid(),
-      probability: z.number().min(0).max(100).optional(),
-      expectedCloseDate: z.string().optional(), // ISO date string
-      assignedTo: z.string().uuid().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const assignedTo = input.assignedTo || context.userId;
-      
-      if (context.userRole === 'sales' && assignedTo !== context.userId) {
-        throw new Error("Sales users can only assign opportunities to themselves");
-      }
+			if (updatedLead.length === 0) {
+				throw new Error(
+					"Lead not found or you don't have permission to update it",
+				);
+			}
 
-      const newOpportunity = await db.insert(opportunities).values({
-        ...input,
-        assignedTo,
-        expectedCloseDate: input.expectedCloseDate ? new Date(input.expectedCloseDate) : undefined,
-        createdBy: context.userId,
-        updatedAt: new Date(),
-      }).returning();
-      return newOpportunity[0];
-    }),
+			return updatedLead[0];
+		}),
 
-  // Clients
-  getClients: crmProcedure.handler(async ({ context }) => {
-    if (context.userRole === 'admin') {
-      return await db.select({
-        id: clients.id,
-        contactPerson: clients.contactPerson,
-        contractValue: clients.contractValue,
-        startDate: clients.startDate,
-        endDate: clients.endDate,
-        status: clients.status,
-        assignedTo: clients.assignedTo,
-        notes: clients.notes,
-        createdAt: clients.createdAt,
-        updatedAt: clients.updatedAt,
-        company: {
-          id: companies.id,
-          name: companies.name,
-        }
-      })
-      .from(clients)
-      .leftJoin(companies, eq(clients.companyId, companies.id))
-      .orderBy(clients.createdAt);
-    } else {
-      return await db.select({
-        id: clients.id,
-        contactPerson: clients.contactPerson,
-        contractValue: clients.contractValue,
-        startDate: clients.startDate,
-        endDate: clients.endDate,
-        status: clients.status,
-        assignedTo: clients.assignedTo,
-        notes: clients.notes,
-        createdAt: clients.createdAt,
-        updatedAt: clients.updatedAt,
-        company: {
-          id: companies.id,
-          name: companies.name,
-        }
-      })
-      .from(clients)
-      .leftJoin(companies, eq(clients.companyId, companies.id))
-      .where(eq(clients.assignedTo, context.userId))
-      .orderBy(clients.createdAt);
-    }
-  }),
+	// Opportunities
+	getOpportunities: crmProcedure.handler(async ({ context }) => {
+		if (context.userRole === "admin") {
+			return await db
+				.select({
+					id: opportunities.id,
+					title: opportunities.title,
+					value: opportunities.value,
+					probability: opportunities.probability,
+					expectedCloseDate: opportunities.expectedCloseDate,
+					status: opportunities.status,
+					assignedTo: opportunities.assignedTo,
+					notes: opportunities.notes,
+					createdAt: opportunities.createdAt,
+					updatedAt: opportunities.updatedAt,
+					company: {
+						id: companies.id,
+						name: companies.name,
+					},
+					stage: {
+						id: salesStages.id,
+						name: salesStages.name,
+						order: salesStages.order,
+						closurePercentage: salesStages.closurePercentage,
+						color: salesStages.color,
+					},
+				})
+				.from(opportunities)
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
+				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.orderBy(opportunities.createdAt);
+		}
+		return await db
+			.select({
+				id: opportunities.id,
+				title: opportunities.title,
+				value: opportunities.value,
+				probability: opportunities.probability,
+				expectedCloseDate: opportunities.expectedCloseDate,
+				status: opportunities.status,
+				assignedTo: opportunities.assignedTo,
+				notes: opportunities.notes,
+				createdAt: opportunities.createdAt,
+				updatedAt: opportunities.updatedAt,
+				company: {
+					id: companies.id,
+					name: companies.name,
+				},
+				stage: {
+					id: salesStages.id,
+					name: salesStages.name,
+					order: salesStages.order,
+					closurePercentage: salesStages.closurePercentage,
+					color: salesStages.color,
+				},
+			})
+			.from(opportunities)
+			.leftJoin(companies, eq(opportunities.companyId, companies.id))
+			.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+			.where(eq(opportunities.assignedTo, context.userId))
+			.orderBy(opportunities.createdAt);
+	}),
 
-  createClient: crmProcedure
-    .input(z.object({
-      companyId: z.string().uuid(),
-      contactPerson: z.string().min(1, "Contact person is required"),
-      contractValue: z.string().optional(),
-      startDate: z.string().optional(), // ISO date string
-      endDate: z.string().optional(), // ISO date string
-      assignedTo: z.string().uuid().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const assignedTo = input.assignedTo || context.userId;
-      
-      if (context.userRole === 'sales' && assignedTo !== context.userId) {
-        throw new Error("Sales users can only assign clients to themselves");
-      }
+	createOpportunity: crmProcedure
+		.input(
+			z.object({
+				title: z.string().min(1, "Title is required"),
+				leadId: z.string().uuid().optional(),
+				companyId: z.string().uuid().optional(),
+				value: z.string().optional(), // Will be converted to decimal
+				stageId: z.string().uuid(),
+				probability: z.number().min(0).max(100).optional(),
+				expectedCloseDate: z.string().optional(), // ISO date string
+				assignedTo: z.string().uuid().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const assignedTo = input.assignedTo || context.userId;
 
-      const newClient = await db.insert(clients).values({
-        ...input,
-        assignedTo,
-        startDate: input.startDate ? new Date(input.startDate) : undefined,
-        endDate: input.endDate ? new Date(input.endDate) : undefined,
-        createdBy: context.userId,
-        updatedAt: new Date(),
-      }).returning();
-      return newClient[0];
-    }),
+			if (context.userRole === "sales" && assignedTo !== context.userId) {
+				throw new Error(
+					"Sales users can only assign opportunities to themselves",
+				);
+			}
 
-  updateClient: crmProcedure
-    .input(z.object({
-      id: z.string().uuid(),
-      companyId: z.string().uuid().optional(),
-      contactPerson: z.string().min(1, "Contact person is required").optional(),
-      contractValue: z.string().optional(),
-      startDate: z.string().optional(),
-      endDate: z.string().optional(),
-      status: z.enum(['active', 'inactive', 'churned']).optional(),
-      assignedTo: z.string().uuid().optional(),
-      notes: z.string().optional(),
-    }))
-    .handler(async ({ input, context }) => {
-      const { id, ...updateData } = input;
-      
-      // Sales users can only update clients assigned to them
-      const whereClause = context.userRole === 'admin' 
-        ? eq(clients.id, id)
-        : and(eq(clients.id, id), eq(clients.assignedTo, context.userId));
+			const newOpportunity = await db
+				.insert(opportunities)
+				.values({
+					...input,
+					assignedTo,
+					expectedCloseDate: input.expectedCloseDate
+						? new Date(input.expectedCloseDate)
+						: undefined,
+					createdBy: context.userId,
+					updatedAt: new Date(),
+				})
+				.returning();
+			return newOpportunity[0];
+		}),
 
-      const updatedClient = await db.update(clients)
-        .set({ 
-          ...updateData, 
-          startDate: updateData.startDate ? new Date(updateData.startDate) : undefined,
-          endDate: updateData.endDate ? new Date(updateData.endDate) : undefined,
-          updatedAt: new Date() 
-        })
-        .where(whereClause)
-        .returning();
+	updateOpportunity: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				title: z.string().min(1, "Title is required").optional(),
+				leadId: z.string().uuid().optional(),
+				companyId: z.string().uuid().optional(),
+				value: z.string().optional(),
+				stageId: z.string().uuid().optional(),
+				probability: z.number().min(0).max(100).optional(),
+				expectedCloseDate: z.string().optional(),
+				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+				assignedTo: z.string().uuid().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { id, assignedTo, ...updateData } = input;
 
-      if (updatedClient.length === 0) {
-        throw new Error("Client not found or you don't have permission to update it");
-      }
+			// Sales users can only update opportunities assigned to them
+			const whereClause =
+				context.userRole === "admin"
+					? eq(opportunities.id, id)
+					: and(
+							eq(opportunities.id, id),
+							eq(opportunities.assignedTo, context.userId),
+						);
 
-      return updatedClient[0];
-    }),
+			// Sales users cannot reassign opportunities
+			if (
+				context.userRole === "sales" &&
+				assignedTo &&
+				assignedTo !== context.userId
+			) {
+				throw new Error("Sales users cannot reassign opportunities");
+			}
 
-  // Dashboard stats
-  getDashboardStats: crmProcedure.handler(async ({ context }) => {
-    if (context.userRole === 'admin') {
-      // Admin gets global stats
-      const [totalLeads] = await db.select({ count: count() }).from(leads);
-      const [totalOpportunities] = await db.select({ count: count() }).from(opportunities);
-      const [totalClients] = await db.select({ count: count() }).from(clients);
-      
-      return {
-        totalLeads: totalLeads?.count || 0,
-        totalOpportunities: totalOpportunities?.count || 0,
-        totalClients: totalClients?.count || 0,
-      };
-    } else {
-      // Sales users get their own stats
-      const [myLeads] = await db.select({ count: count() })
-        .from(leads)
-        .where(eq(leads.assignedTo, context.userId));
-      const [myOpportunities] = await db.select({ count: count() })
-        .from(opportunities)
-        .where(eq(opportunities.assignedTo, context.userId));
-      const [myClients] = await db.select({ count: count() })
-        .from(clients)
-        .where(eq(clients.assignedTo, context.userId));
-      
-      return {
-        myLeads: myLeads?.count || 0,
-        myOpportunities: myOpportunities?.count || 0,
-        myClients: myClients?.count || 0,
-      };
-    }
-  }),
+			const updatedOpportunity = await db
+				.update(opportunities)
+				.set({
+					...updateData,
+					...(assignedTo && { assignedTo }),
+					expectedCloseDate: updateData.expectedCloseDate
+						? new Date(updateData.expectedCloseDate)
+						: undefined,
+					updatedAt: new Date(),
+				})
+				.where(whereClause)
+				.returning();
+
+			if (updatedOpportunity.length === 0) {
+				throw new Error(
+					"Opportunity not found or you don't have permission to update it",
+				);
+			}
+
+			return updatedOpportunity[0];
+		}),
+
+	// Clients
+	getClients: crmProcedure.handler(async ({ context }) => {
+		if (context.userRole === "admin") {
+			return await db
+				.select({
+					id: clients.id,
+					contactPerson: clients.contactPerson,
+					contractValue: clients.contractValue,
+					startDate: clients.startDate,
+					endDate: clients.endDate,
+					status: clients.status,
+					assignedTo: clients.assignedTo,
+					notes: clients.notes,
+					createdAt: clients.createdAt,
+					updatedAt: clients.updatedAt,
+					company: {
+						id: companies.id,
+						name: companies.name,
+					},
+				})
+				.from(clients)
+				.leftJoin(companies, eq(clients.companyId, companies.id))
+				.orderBy(clients.createdAt);
+		}
+		return await db
+			.select({
+				id: clients.id,
+				contactPerson: clients.contactPerson,
+				contractValue: clients.contractValue,
+				startDate: clients.startDate,
+				endDate: clients.endDate,
+				status: clients.status,
+				assignedTo: clients.assignedTo,
+				notes: clients.notes,
+				createdAt: clients.createdAt,
+				updatedAt: clients.updatedAt,
+				company: {
+					id: companies.id,
+					name: companies.name,
+				},
+			})
+			.from(clients)
+			.leftJoin(companies, eq(clients.companyId, companies.id))
+			.where(eq(clients.assignedTo, context.userId))
+			.orderBy(clients.createdAt);
+	}),
+
+	createClient: crmProcedure
+		.input(
+			z.object({
+				companyId: z.string().uuid(),
+				contactPerson: z.string().min(1, "Contact person is required"),
+				contractValue: z.string().optional(),
+				startDate: z.string().optional(), // ISO date string
+				endDate: z.string().optional(), // ISO date string
+				assignedTo: z.string().uuid().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const assignedTo = input.assignedTo || context.userId;
+
+			if (context.userRole === "sales" && assignedTo !== context.userId) {
+				throw new Error("Sales users can only assign clients to themselves");
+			}
+
+			const newClient = await db
+				.insert(clients)
+				.values({
+					...input,
+					assignedTo,
+					startDate: input.startDate ? new Date(input.startDate) : undefined,
+					endDate: input.endDate ? new Date(input.endDate) : undefined,
+					createdBy: context.userId,
+					updatedAt: new Date(),
+				})
+				.returning();
+			return newClient[0];
+		}),
+
+	updateClient: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				companyId: z.string().uuid().optional(),
+				contactPerson: z
+					.string()
+					.min(1, "Contact person is required")
+					.optional(),
+				contractValue: z.string().optional(),
+				startDate: z.string().optional(),
+				endDate: z.string().optional(),
+				status: z.enum(["active", "inactive", "churned"]).optional(),
+				assignedTo: z.string().uuid().optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { id, ...updateData } = input;
+
+			// Sales users can only update clients assigned to them
+			const whereClause =
+				context.userRole === "admin"
+					? eq(clients.id, id)
+					: and(eq(clients.id, id), eq(clients.assignedTo, context.userId));
+
+			const updatedClient = await db
+				.update(clients)
+				.set({
+					...updateData,
+					startDate: updateData.startDate
+						? new Date(updateData.startDate)
+						: undefined,
+					endDate: updateData.endDate
+						? new Date(updateData.endDate)
+						: undefined,
+					updatedAt: new Date(),
+				})
+				.where(whereClause)
+				.returning();
+
+			if (updatedClient.length === 0) {
+				throw new Error(
+					"Client not found or you don't have permission to update it",
+				);
+			}
+
+			return updatedClient[0];
+		}),
+
+	// Dashboard stats
+	getDashboardStats: crmProcedure.handler(async ({ context }) => {
+		if (context.userRole === "admin") {
+			// Admin gets global stats
+			const [totalLeads] = await db.select({ count: count() }).from(leads);
+			const [totalOpportunities] = await db
+				.select({ count: count() })
+				.from(opportunities);
+			const [totalClients] = await db.select({ count: count() }).from(clients);
+
+			return {
+				totalLeads: totalLeads?.count || 0,
+				totalOpportunities: totalOpportunities?.count || 0,
+				totalClients: totalClients?.count || 0,
+			};
+		}
+		// Sales users get their own stats
+		const [myLeads] = await db
+			.select({ count: count() })
+			.from(leads)
+			.where(eq(leads.assignedTo, context.userId));
+		const [myOpportunities] = await db
+			.select({ count: count() })
+			.from(opportunities)
+			.where(eq(opportunities.assignedTo, context.userId));
+		const [myClients] = await db
+			.select({ count: count() })
+			.from(clients)
+			.where(eq(clients.assignedTo, context.userId));
+
+		return {
+			myLeads: myLeads?.count || 0,
+			myOpportunities: myOpportunities?.count || 0,
+			myClients: myClients?.count || 0,
+		};
+	}),
 };

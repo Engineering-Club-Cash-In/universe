@@ -95,3 +95,7 @@ apps/
 - **Components**: shadcn/ui patterns with class-variance-authority
 - **Imports**: Organized imports enabled via Biome
 - **Path Aliases**: Use `@/` for `src/` in web app
+
+## Utilities
+- Always use zsh as the default shell
+- All texts must be in spanish when facing client side

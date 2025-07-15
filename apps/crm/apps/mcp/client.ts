@@ -1,22 +1,22 @@
 // bun-ai-chat.ts - Native Bun server with MCP integration
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 // Types
 interface ChatMessage {
-    role: 'user' | 'assistant' | 'system';
-    content: string;
+	role: "user" | "assistant" | "system";
+	content: string;
 }
 
 interface ChatRequest {
-    message: string;
-    history?: ChatMessage[];
+	message: string;
+	history?: ChatMessage[];
 }
 
 interface ToolCall {
-    name: string;
-    result?: string;
-    error?: string;
+	name: string;
+	result?: string;
+	error?: string;
 }
 
 // Global MCP client
@@ -25,119 +25,127 @@ let availableTools: any[] = [];
 
 // Initialize MCP connection
 async function initMCP() {
-    try {
-        const transport = new StdioClientTransport({
-            command: 'bun',
-            args: ['--bun', 'apps/mcp/server.ts']
-        });
+	try {
+		const transport = new StdioClientTransport({
+			command: "bun",
+			args: ["--bun", "apps/mcp/server.ts"],
+		});
 
-        mcpClient = new Client({
-            name: "bun-ai-chat",
-            version: "1.0.0"
-        }, {
-            capabilities: { tools: {} }
-        });
+		mcpClient = new Client(
+			{
+				name: "bun-ai-chat",
+				version: "1.0.0",
+			},
+			{
+				capabilities: { tools: {} },
+			},
+		);
 
-        await mcpClient.connect(transport);
+		await mcpClient.connect(transport);
 
-        // Get available tools
-        const tools = await mcpClient.listTools();
-        availableTools = tools.tools || [];
+		// Get available tools
+		const tools = await mcpClient.listTools();
+		availableTools = tools.tools || [];
 
-        console.log('✅ MCP Server connected');
-        console.log('🔧 Available tools:', availableTools.map(t => t.name));
-    } catch (error) {
-        console.error('❌ Failed to connect to MCP server:', error);
-    }
+		console.log("✅ MCP Server connected");
+		console.log(
+			"🔧 Available tools:",
+			availableTools.map((t) => t.name),
+		);
+	} catch (error) {
+		console.error("❌ Failed to connect to MCP server:", error);
+	}
 }
 
 // Simple AI logic (you can replace with OpenAI/Anthropic/etc)
-async function processWithAI(message: string, history: ChatMessage[]): Promise<{ response: string; toolCalls: ToolCall[] }> {
-    const toolCalls: ToolCall[] = [];
-    let response = '';
+async function processWithAI(
+	message: string,
+	history: ChatMessage[],
+): Promise<{ response: string; toolCalls: ToolCall[] }> {
+	const toolCalls: ToolCall[] = [];
+	let response = "";
 
-    // Simple intent detection and tool calling
-    const lowerMessage = message.toLowerCase();
+	// Simple intent detection and tool calling
+	const lowerMessage = message.toLowerCase();
 
-    if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-        try {
-            const result = await mcpClient.callTool({
-                name: 'sayHello',
-                arguments: { name: 'User' }
-            });
+	if (lowerMessage.includes("hello") || lowerMessage.includes("hi")) {
+		try {
+			const result = await mcpClient.callTool({
+				name: "sayHello",
+				arguments: { name: "User" },
+			});
 
-            toolCalls.push({ name: 'sayHello', result: result.content[0].text });
-            response = result.content[0].text;
-        } catch (error) {
-            toolCalls.push({ name: 'sayHello', error: error.message });
-            response = 'Hello! How can I help you with your CRM data?';
-        }
-    }
-    else if (lowerMessage.includes('lead')) {
-        try {
-            const result = await mcpClient.callTool({
-                name: 'getAllLeads',
-                arguments: {}
-            });
+			toolCalls.push({ name: "sayHello", result: result.content[0].text });
+			response = result.content[0].text;
+		} catch (error) {
+			toolCalls.push({ name: "sayHello", error: error.message });
+			response = "Hello! How can I help you with your CRM data?";
+		}
+	} else if (lowerMessage.includes("lead")) {
+		try {
+			const result = await mcpClient.callTool({
+				name: "getAllLeads",
+				arguments: {},
+			});
 
-            const leads = JSON.parse(result.content[0].text);
-            toolCalls.push({ name: 'getAllLeads', result: `Found ${leads.length} leads` });
+			const leads = JSON.parse(result.content[0].text);
+			toolCalls.push({
+				name: "getAllLeads",
+				result: `Found ${leads.length} leads`,
+			});
 
-            response = `I found ${leads.length} leads in your CRM. Here are the first few:\n\n`;
-            leads.slice(0, 5).forEach((lead: any, index: number) => {
-                response += `${index + 1}. **${lead.firstName} ${lead.lastName}**\n`;
-                response += `   📧 ${lead.email}\n`;
-                response += `   📞 ${lead.phone}\n`;
-                response += `   🏢 ${lead.jobTitle}\n`;
-                response += `   📊 Status: ${lead.status}\n`;
-                response += `   📝 ${lead.notes}\n\n`;
-            });
+			response = `I found ${leads.length} leads in your CRM. Here are the first few:\n\n`;
+			leads.slice(0, 5).forEach((lead: any, index: number) => {
+				response += `${index + 1}. **${lead.firstName} ${lead.lastName}**\n`;
+				response += `   📧 ${lead.email}\n`;
+				response += `   📞 ${lead.phone}\n`;
+				response += `   🏢 ${lead.jobTitle}\n`;
+				response += `   📊 Status: ${lead.status}\n`;
+				response += `   📝 ${lead.notes}\n\n`;
+			});
 
-            if (leads.length > 5) {
-                response += `... and ${leads.length - 5} more leads.`;
-            }
-        } catch (error) {
-            toolCalls.push({ name: 'getAllLeads', error: error.message });
-            response = 'Sorry, I had trouble accessing your leads data.';
-        }
-    }
-    else if (lowerMessage.includes('search') && lowerMessage.includes('lead')) {
-        // Extract search term (simple approach)
-        const searchTerm = message.split(' ').pop() || '';
+			if (leads.length > 5) {
+				response += `... and ${leads.length - 5} more leads.`;
+			}
+		} catch (error) {
+			toolCalls.push({ name: "getAllLeads", error: error.message });
+			response = "Sorry, I had trouble accessing your leads data.";
+		}
+	} else if (lowerMessage.includes("search") && lowerMessage.includes("lead")) {
+		// Extract search term (simple approach)
+		const searchTerm = message.split(" ").pop() || "";
 
-        try {
-            const result = await mcpClient.callTool({
-                name: 'searchLeads',
-                arguments: { query: searchTerm }
-            });
+		try {
+			const result = await mcpClient.callTool({
+				name: "searchLeads",
+				arguments: { query: searchTerm },
+			});
 
-            toolCalls.push({ name: 'searchLeads', result: 'Search completed' });
-            response = `Search results for "${searchTerm}":\n\n${result.content[0].text}`;
-        } catch (error) {
-            toolCalls.push({ name: 'searchLeads', error: error.message });
-            response = `Sorry, I couldn't search for "${searchTerm}".`;
-        }
-    }
-    else if (lowerMessage.includes('tools') || lowerMessage.includes('help')) {
-        response = `I have access to these CRM tools:\n\n`;
-        availableTools.forEach(tool => {
-            response += `🔧 **${tool.name}**\n`;
-            response += `   ${tool.description || 'No description available'}\n\n`;
-        });
-        response += `Try asking:\n`;
-        response += `• "Show me leads" - Get all leads\n`;
-        response += `• "Search leads for John" - Search for specific leads\n`;
-        response += `• "Say hello" - Test greeting\n`;
-    }
-    else {
-        response = `I understand you said: "${message}"\n\n`;
-        response += `I can help you with your CRM data. Try asking:\n`;
-        response += `• "Show me leads"\n`;
-        response += `• "Search leads for [name]"\n`;
-        response += `• "What tools do you have?"\n`;
-    }
+			toolCalls.push({ name: "searchLeads", result: "Search completed" });
+			response = `Search results for "${searchTerm}":\n\n${result.content[0].text}`;
+		} catch (error) {
+			toolCalls.push({ name: "searchLeads", error: error.message });
+			response = `Sorry, I couldn't search for "${searchTerm}".`;
+		}
+	} else if (lowerMessage.includes("tools") || lowerMessage.includes("help")) {
+		response = "I have access to these CRM tools:\n\n";
+		availableTools.forEach((tool) => {
+			response += `🔧 **${tool.name}**\n`;
+			response += `   ${tool.description || "No description available"}\n\n`;
+		});
+		response += "Try asking:\n";
+		response += `• "Show me leads" - Get all leads\n`;
+		response += `• "Search leads for John" - Search for specific leads\n`;
+		response += `• "Say hello" - Test greeting\n`;
+	} else {
+		response = `I understand you said: "${message}"\n\n`;
+		response += "I can help you with your CRM data. Try asking:\n";
+		response += `• "Show me leads"\n`;
+		response += `• "Search leads for [name]"\n`;
+		response += `• "What tools do you have?"\n`;
+	}
 
-    return { response, toolCalls };
+	return { response, toolCalls };
 }
 
 // HTML interface
@@ -360,60 +368,66 @@ const HTML_INTERFACE = `
 
 // Create Bun server
 const server = Bun.serve({
-    port: process.env.PORT || 9001,
+	port: process.env.PORT || 9001,
 
-    async fetch(req: Request): Promise<Response> {
-        const url = new URL(req.url);
+	async fetch(req: Request): Promise<Response> {
+		const url = new URL(req.url);
 
-        // Handle chat API
-        if (url.pathname === '/api/chat' && req.method === 'POST') {
-            try {
-                const body = await req.json() as ChatRequest;
-                const { message, history = [] } = body;
+		// Handle chat API
+		if (url.pathname === "/api/chat" && req.method === "POST") {
+			try {
+				const body = (await req.json()) as ChatRequest;
+				const { message, history = [] } = body;
 
-                const { response, toolCalls } = await processWithAI(message, history);
+				const { response, toolCalls } = await processWithAI(message, history);
 
-                return new Response(JSON.stringify({
-                    message: response,
-                    toolCalls
-                }), {
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            } catch (error) {
-                return new Response(JSON.stringify({
-                    error: error.message
-                }), {
-                    status: 500,
-                    headers: { 'Content-Type': 'application/json' }
-                });
-            }
-        }
+				return new Response(
+					JSON.stringify({
+						message: response,
+						toolCalls,
+					}),
+					{
+						headers: { "Content-Type": "application/json" },
+					},
+				);
+			} catch (error) {
+				return new Response(
+					JSON.stringify({
+						error: error.message,
+					}),
+					{
+						status: 500,
+						headers: { "Content-Type": "application/json" },
+					},
+				);
+			}
+		}
 
-        // Serve main page
-        if (url.pathname === '/' || url.pathname === '/index.html') {
-            return new Response(HTML_INTERFACE, {
-                headers: { 'Content-Type': 'text/html' }
-            });
-        }
+		// Serve main page
+		if (url.pathname === "/" || url.pathname === "/index.html") {
+			return new Response(HTML_INTERFACE, {
+				headers: { "Content-Type": "text/html" },
+			});
+		}
 
-        // Handle 404
-        return new Response('Not Found', { status: 404 });
-    },
+		// Handle 404
+		return new Response("Not Found", { status: 404 });
+	},
 });
 
 // Initialize and start
 async function start() {
-    console.log('🚀 Starting Bun AI Chat Server...');
-    await initMCP();
-    console.log(`✅ Server running at http://localhost:${server.port}`);
-    console.log('🌐 Open your browser and start chatting!');
+	console.log("🚀 Starting Bun AI Chat Server...");
+	await initMCP();
+	console.log(`✅ Server running at http://localhost:${server.port}`);
+	console.log("🌐 Open your browser and start chatting!");
 }
 
 start().catch(console.error);
 
 // Graceful shutdown
-process.on('SIGINT', () => {
-    console.log('\\n👋 Shutting down gracefully...');
-    server.stop();
-    process.exit(0);
+process.on("SIGINT", () => {
+	console.log("\\n👋 Shutting down gracefully...");
+	server.stop();
+	process.exit(0);
 });

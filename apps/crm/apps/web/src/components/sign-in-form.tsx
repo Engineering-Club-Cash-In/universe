@@ -39,7 +39,7 @@ export default function SignInForm() {
 								navigate({
 									to: "/dashboard",
 								});
-								toast.success("Sign in successful");
+								toast.success("Sesión iniciada exitosamente");
 								setIsSigningIn(false);
 								return;
 							}
@@ -51,7 +51,7 @@ export default function SignInForm() {
 						navigate({
 							to: "/dashboard",
 						});
-						toast.success("Sign in successful");
+						toast.success("Sesión iniciada exitosamente");
 						setIsSigningIn(false);
 					},
 					onError: (error) => {
@@ -63,8 +63,10 @@ export default function SignInForm() {
 		},
 		validators: {
 			onSubmit: z.object({
-				email: z.string().email("Invalid email address"),
-				password: z.string().min(8, "Password must be at least 8 characters"),
+				email: z.string().email("Dirección de correo inválida"),
+				password: z
+					.string()
+					.min(8, "La contraseña debe tener al menos 8 caracteres"),
 			}),
 		},
 	});
@@ -75,7 +77,7 @@ export default function SignInForm() {
 				<Loader />
 				{isSigningIn && (
 					<p className="mt-4 text-muted-foreground text-sm">
-						Signing you in...
+						Iniciando sesión...
 					</p>
 				)}
 			</div>
@@ -84,7 +86,7 @@ export default function SignInForm() {
 
 	return (
 		<div className="mx-auto mt-10 w-full max-w-md p-6">
-			<h1 className="mb-6 text-center font-bold text-3xl">Welcome Back</h1>
+			<h1 className="mb-6 text-center font-bold text-3xl">Bienvenido</h1>
 
 			<div className="space-y-4">
 				<Button
@@ -122,7 +124,7 @@ export default function SignInForm() {
 							d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
 						/>
 					</svg>
-					Continue with Google
+					Continuar con Google
 				</Button>
 
 				<div className="relative">
@@ -131,7 +133,7 @@ export default function SignInForm() {
 					</div>
 					<div className="relative flex justify-center text-xs uppercase">
 						<span className="bg-background px-2 text-muted-foreground">
-							Or continue with
+							O continuar con
 						</span>
 					</div>
 				</div>
@@ -149,7 +151,7 @@ export default function SignInForm() {
 					<form.Field name="email">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Email</Label>
+								<Label htmlFor={field.name}>Correo</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -172,7 +174,7 @@ export default function SignInForm() {
 					<form.Field name="password">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Password</Label>
+								<Label htmlFor={field.name}>Contraseña</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -198,7 +200,7 @@ export default function SignInForm() {
 							className="w-full"
 							disabled={!state.canSubmit || state.isSubmitting}
 						>
-							{state.isSubmitting ? "Submitting..." : "Sign In"}
+							{state.isSubmitting ? "Enviando..." : "Iniciar Sesión"}
 						</Button>
 					)}
 				</form.Subscribe>

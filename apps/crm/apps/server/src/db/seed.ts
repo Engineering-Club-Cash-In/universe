@@ -369,7 +369,7 @@ const clientsData = [
 	},
 ];
 
-async function seedCompanies(adminUserId: string) {
+async function seedCompanies(usersList: any[]) {
 	console.log("Seeding companies...");
 
 	try {
@@ -380,11 +380,14 @@ async function seedCompanies(adminUserId: string) {
 			return existingCompanies;
 		}
 
-		const companiesWithUser = companiesData.map((company) => ({
-			...company,
-			createdBy: adminUserId,
-			updatedAt: new Date(),
-		}));
+		const companiesWithUser = companiesData.map((company, index) => {
+			const createdByUser = usersList[index % usersList.length];
+			return {
+				...company,
+				createdBy: createdByUser.id,
+				updatedAt: new Date(),
+			};
+		});
 
 		const insertedCompanies = await db
 			.insert(companies)
@@ -399,7 +402,7 @@ async function seedCompanies(adminUserId: string) {
 	}
 }
 
-async function seedLeads(adminUserId: string, companiesList: any[]) {
+async function seedLeads(usersList: any[], companiesList: any[]) {
 	console.log("Seeding leads...");
 
 	try {
@@ -410,13 +413,16 @@ async function seedLeads(adminUserId: string, companiesList: any[]) {
 			return existingLeads;
 		}
 
-		const leadsWithRelations = leadsData.map((lead, index) => ({
-			...lead,
-			companyId: companiesList[index % companiesList.length]?.id || null,
-			assignedTo: adminUserId,
-			createdBy: adminUserId,
-			updatedAt: new Date(),
-		}));
+		const leadsWithRelations = leadsData.map((lead, index) => {
+			const assignedUser = usersList[index % usersList.length];
+			return {
+				...lead,
+				companyId: companiesList[index % companiesList.length]?.id || null,
+				assignedTo: assignedUser.id,
+				createdBy: assignedUser.id,
+				updatedAt: new Date(),
+			};
+		});
 
 		const insertedLeads = await db
 			.insert(leads)
@@ -432,9 +438,10 @@ async function seedLeads(adminUserId: string, companiesList: any[]) {
 }
 
 async function seedOpportunities(
-	adminUserId: string,
+	usersList: any[],
 	companiesList: any[],
 	stagesList: any[],
+	leadsList: any[],
 ) {
 	console.log("Seeding opportunities...");
 
@@ -446,16 +453,20 @@ async function seedOpportunities(
 			return existingOpportunities;
 		}
 
-		const opportunitiesWithRelations = opportunitiesData.map((opp, index) => ({
-			...opp,
-			companyId: companiesList[index % companiesList.length]?.id || null,
-			stageId:
-				stagesList[Math.floor(Math.random() * stagesList.length)]?.id ||
-				stagesList[0]?.id,
-			assignedTo: adminUserId,
-			createdBy: adminUserId,
-			updatedAt: new Date(),
-		}));
+		const opportunitiesWithRelations = opportunitiesData.map((opp, index) => {
+			const assignedUser = usersList[index % usersList.length];
+			return {
+				...opp,
+				companyId: companiesList[index % companiesList.length]?.id || null,
+				leadId: leadsList[index % leadsList.length]?.id || null,
+				stageId:
+					stagesList[Math.floor(Math.random() * stagesList.length)]?.id ||
+					stagesList[0]?.id,
+				assignedTo: assignedUser.id,
+				createdBy: assignedUser.id,
+				updatedAt: new Date(),
+			};
+		});
 
 		const insertedOpportunities = await db
 			.insert(opportunities)
@@ -470,7 +481,7 @@ async function seedOpportunities(
 	}
 }
 
-async function seedClients(adminUserId: string, companiesList: any[]) {
+async function seedClients(usersList: any[], companiesList: any[]) {
 	console.log("Seeding clients...");
 
 	try {
@@ -481,14 +492,18 @@ async function seedClients(adminUserId: string, companiesList: any[]) {
 			return existingClients;
 		}
 
-		const clientsWithRelations = clientsData.map((client, index) => ({
-			...client,
-			companyId:
-				companiesList[index % companiesList.length]?.id || companiesList[0]?.id,
-			assignedTo: adminUserId,
-			createdBy: adminUserId,
-			updatedAt: new Date(),
-		}));
+		const clientsWithRelations = clientsData.map((client, index) => {
+			const assignedUser = usersList[index % usersList.length];
+			return {
+				...client,
+				companyId:
+					companiesList[index % companiesList.length]?.id ||
+					companiesList[0]?.id,
+				assignedTo: assignedUser.id,
+				createdBy: assignedUser.id,
+				updatedAt: new Date(),
+			};
+		});
 
 		const insertedClients = await db
 			.insert(clients)
@@ -606,7 +621,7 @@ async function main() {
 	// Seed users first
 	const usersList = await seedUsers();
 
-	// Get admin user
+	// Get admin user (still needed for fallback)
 	const adminUserId = await getOrCreateAdminUser();
 	if (!adminUserId) {
 		console.log("❌ Cannot seed without a user. Please sign up first.");
@@ -617,14 +632,15 @@ async function main() {
 	await seedSalesStages();
 	const stagesList = await db.select().from(salesStages);
 
-	const companiesList = await seedCompanies(adminUserId);
-	const leadsList = await seedLeads(adminUserId, companiesList);
+	const companiesList = await seedCompanies(usersList);
+	const leadsList = await seedLeads(usersList, companiesList);
 	const opportunitiesList = await seedOpportunities(
-		adminUserId,
+		usersList,
 		companiesList,
 		stagesList,
+		leadsList,
 	);
-	const clientsList = await seedClients(adminUserId, companiesList);
+	const clientsList = await seedClients(usersList, companiesList);
 
 	console.log("\n🎉 CRM database seeding completed!");
 	console.log(`✅ ${usersList.length} users`);

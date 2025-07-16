@@ -22,7 +22,7 @@ function RouteComponent() {
 
 	// Show loading while checking session
 	if (isPending) {
-		return <div>Loading...</div>;
+		return <div>Cargando...</div>;
 	}
 
 	// Don't render login form if user is already logged in

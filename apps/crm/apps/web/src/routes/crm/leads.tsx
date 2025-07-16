@@ -56,6 +56,11 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
+import {
+	formatGuatemalaDate,
+	getSourceLabel,
+	getStatusLabel,
+} from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/leads")({
@@ -67,6 +72,8 @@ function RouteComponent() {
 	const navigate = Route.useNavigate();
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+	const [selectedLead, setSelectedLead] = useState<any>(null);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -75,13 +82,17 @@ function RouteComponent() {
 		...orpc.getLeads.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 	});
 	const companiesQuery = useQuery({
 		...orpc.getCompanies.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
 
 	const createLeadForm = useForm({
@@ -102,6 +113,35 @@ function RouteComponent() {
 				| "other",
 			assignedTo: "",
 			notes: "",
+		},
+		validators: {
+			onSubmit: ({ value }) => {
+				const errors: Record<string, string> = {};
+
+				if (!value.firstName.trim()) {
+					errors.firstName = "El nombre es requerido";
+				}
+
+				if (!value.lastName.trim()) {
+					errors.lastName = "El apellido es requerido";
+				}
+
+				if (!value.email.trim()) {
+					errors.email = "El correo electrónico es requerido";
+				} else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+					errors.email = "El correo electrónico no es válido";
+				}
+
+				if (!value.source) {
+					errors.source = "La fuente del lead es requerida";
+				}
+
+				if (Object.keys(errors).length > 0) {
+					return errors;
+				}
+
+				return undefined;
+			},
 		},
 		onSubmit: async ({ value }) => {
 			createLeadMutation.mutate({
@@ -139,7 +179,9 @@ function RouteComponent() {
 			notes?: string;
 		}) => client.createLead(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getLeads"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+			});
 			toast.success("Lead creado exitosamente");
 			setIsCreateDialogOpen(false);
 			createLeadForm.reset();
@@ -171,7 +213,9 @@ function RouteComponent() {
 			notes?: string;
 		}) => client.updateLead(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getLeads"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+			});
 			toast.success("Lead actualizado exitosamente");
 		},
 		onError: (error: any) => {
@@ -249,6 +293,11 @@ function RouteComponent() {
 				| "unqualified"
 				| "converted",
 		});
+	};
+
+	const handleLeadClick = (lead: any) => {
+		setSelectedLead(lead);
+		setIsDetailsDialogOpen(true);
 	};
 
 	// Filter leads based on search and status
@@ -369,10 +418,28 @@ function RouteComponent() {
 								>
 									<div className="grid grid-cols-2 gap-4">
 										<div>
-											<createLeadForm.Field name="firstName">
+											<createLeadForm.Field
+												name="firstName"
+												validators={{
+													onChange: ({ value }) => {
+														if (!value.trim()) {
+															return "El nombre es requerido";
+														}
+														return undefined;
+													},
+													onBlur: ({ value }) => {
+														if (!value.trim()) {
+															return "El nombre es requerido";
+														}
+														return undefined;
+													},
+												}}
+											>
 												{(field) => (
 													<div className="space-y-2">
-														<Label htmlFor={field.name}>Nombre</Label>
+														<Label htmlFor={field.name}>
+															Nombre <span className="text-red-500">*</span>
+														</Label>
 														<Input
 															id={field.name}
 															name={field.name}
@@ -380,6 +447,11 @@ function RouteComponent() {
 															onBlur={field.handleBlur}
 															onChange={(e) =>
 																field.handleChange(e.target.value)
+															}
+															className={
+																field.state.meta.errors.length > 0
+																	? "border-red-500"
+																	: ""
 															}
 														/>
 														{field.state.meta.errors.map((error, index) => (
@@ -392,10 +464,28 @@ function RouteComponent() {
 											</createLeadForm.Field>
 										</div>
 										<div>
-											<createLeadForm.Field name="lastName">
+											<createLeadForm.Field
+												name="lastName"
+												validators={{
+													onChange: ({ value }) => {
+														if (!value.trim()) {
+															return "El apellido es requerido";
+														}
+														return undefined;
+													},
+													onBlur: ({ value }) => {
+														if (!value.trim()) {
+															return "El apellido es requerido";
+														}
+														return undefined;
+													},
+												}}
+											>
 												{(field) => (
 													<div className="space-y-2">
-														<Label htmlFor={field.name}>Apellido</Label>
+														<Label htmlFor={field.name}>
+															Apellido <span className="text-red-500">*</span>
+														</Label>
 														<Input
 															id={field.name}
 															name={field.name}
@@ -403,6 +493,11 @@ function RouteComponent() {
 															onBlur={field.handleBlur}
 															onChange={(e) =>
 																field.handleChange(e.target.value)
+															}
+															className={
+																field.state.meta.errors.length > 0
+																	? "border-red-500"
+																	: ""
 															}
 														/>
 														{field.state.meta.errors.map((error, index) => (
@@ -418,11 +513,34 @@ function RouteComponent() {
 
 									<div className="grid grid-cols-2 gap-4">
 										<div>
-											<createLeadForm.Field name="email">
+											<createLeadForm.Field
+												name="email"
+												validators={{
+													onChange: ({ value }) => {
+														if (!value.trim()) {
+															return "El correo electrónico es requerido";
+														}
+														if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+															return "El correo electrónico no es válido";
+														}
+														return undefined;
+													},
+													onBlur: ({ value }) => {
+														if (!value.trim()) {
+															return "El correo electrónico es requerido";
+														}
+														if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+															return "El correo electrónico no es válido";
+														}
+														return undefined;
+													},
+												}}
+											>
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Correo Electrónico
+															Correo Electrónico{" "}
+															<span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
@@ -432,6 +550,11 @@ function RouteComponent() {
 															onBlur={field.handleBlur}
 															onChange={(e) =>
 																field.handleChange(e.target.value)
+															}
+															className={
+																field.state.meta.errors.length > 0
+																	? "border-red-500"
+																	: ""
 															}
 														/>
 														{field.state.meta.errors.map((error, index) => (
@@ -518,10 +641,29 @@ function RouteComponent() {
 									</div>
 
 									<div>
-										<createLeadForm.Field name="source">
+										<createLeadForm.Field
+											name="source"
+											validators={{
+												onChange: ({ value }) => {
+													if (!value) {
+														return "La fuente del lead es requerida";
+													}
+													return undefined;
+												},
+												onBlur: ({ value }) => {
+													if (!value) {
+														return "La fuente del lead es requerida";
+													}
+													return undefined;
+												},
+											}}
+										>
 											{(field) => (
 												<div className="space-y-2">
-													<Label htmlFor={field.name}>Fuente del Lead</Label>
+													<Label htmlFor={field.name}>
+														Fuente del Lead{" "}
+														<span className="text-red-500">*</span>
+													</Label>
 													<Select
 														value={field.state.value}
 														onValueChange={(value) =>
@@ -537,7 +679,13 @@ function RouteComponent() {
 															)
 														}
 													>
-														<SelectTrigger>
+														<SelectTrigger
+															className={
+																field.state.meta.errors.length > 0
+																	? "border-red-500"
+																	: ""
+															}
+														>
 															<SelectValue placeholder="Seleccionar fuente" />
 														</SelectTrigger>
 														<SelectContent>
@@ -665,7 +813,10 @@ function RouteComponent() {
 									<TableRow key={lead.id}>
 										<TableCell>
 											<div>
-												<div className="font-medium">
+												<div 
+													className="font-medium text-primary hover:underline cursor-pointer"
+													onClick={() => handleLeadClick(lead)}
+												>
 													{lead.firstName} {lead.lastName}
 												</div>
 												{lead.jobTitle && (
@@ -706,7 +857,7 @@ function RouteComponent() {
 												className={getSourceBadgeColor(lead.source)}
 												variant="outline"
 											>
-												{lead.source.replace("_", " ")}
+												{getSourceLabel(lead.source)}
 											</Badge>
 										</TableCell>
 										<TableCell>
@@ -714,12 +865,10 @@ function RouteComponent() {
 												className={getStatusBadgeColor(lead.status)}
 												variant="outline"
 											>
-												{lead.status}
+												{getStatusLabel(lead.status)}
 											</Badge>
 										</TableCell>
-										<TableCell>
-											{new Date(lead.createdAt).toLocaleDateString()}
-										</TableCell>
+										<TableCell>{formatGuatemalaDate(lead.createdAt)}</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>
 												<DropdownMenuTrigger asChild>
@@ -774,6 +923,103 @@ function RouteComponent() {
 					)}
 				</CardContent>
 			</Card>
+
+			{/* Lead Details Dialog */}
+			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+				<DialogContent className="max-w-2xl">
+					<DialogHeader>
+						<DialogTitle>Detalles del Lead</DialogTitle>
+					</DialogHeader>
+					{selectedLead && (
+						<div className="space-y-6">
+							{/* Personal Information */}
+							<div className="space-y-4">
+								<h3 className="font-semibold text-lg">Información Personal</h3>
+								<div className="grid grid-cols-2 gap-4">
+									<div>
+										<Label className="text-sm font-medium">Nombre</Label>
+										<p className="text-sm">{selectedLead.firstName} {selectedLead.lastName}</p>
+									</div>
+									<div>
+										<Label className="text-sm font-medium">Cargo</Label>
+										<p className="text-sm">{selectedLead.jobTitle || "No especificado"}</p>
+									</div>
+								</div>
+							</div>
+
+							{/* Contact Information */}
+							<div className="space-y-4">
+								<h3 className="font-semibold text-lg">Información de Contacto</h3>
+								<div className="space-y-3">
+									<div>
+										<Label className="text-sm font-medium">Correo Electrónico</Label>
+										<p className="text-sm">{selectedLead.email}</p>
+									</div>
+									<div>
+										<Label className="text-sm font-medium">Teléfono</Label>
+										<div className="flex items-center gap-2">
+											<Phone className="h-4 w-4" />
+											<p className="text-sm">{selectedLead.phone || "No especificado"}</p>
+										</div>
+									</div>
+								</div>
+							</div>
+
+							{/* Company Information */}
+							<div className="space-y-4">
+								<h3 className="font-semibold text-lg">Información de la Empresa</h3>
+								<div>
+									<Label className="text-sm font-medium">Empresa</Label>
+									<div className="flex items-center gap-2">
+										<Building className="h-4 w-4" />
+										<p className="text-sm">{selectedLead.company?.name || "Sin empresa"}</p>
+									</div>
+								</div>
+							</div>
+
+							{/* Lead Status */}
+							<div className="space-y-4">
+								<h3 className="font-semibold text-lg">Estado del Lead</h3>
+								<div className="grid grid-cols-2 gap-4">
+									<div>
+										<Label className="text-sm font-medium">Fuente</Label>
+										<Badge className={getSourceBadgeColor(selectedLead.source)} variant="outline">
+											{getSourceLabel(selectedLead.source)}
+										</Badge>
+									</div>
+									<div>
+										<Label className="text-sm font-medium">Estado</Label>
+										<Badge className={getStatusBadgeColor(selectedLead.status)} variant="outline">
+											{getStatusLabel(selectedLead.status)}
+										</Badge>
+									</div>
+								</div>
+							</div>
+
+							{/* Additional Information */}
+							<div className="space-y-4">
+								<h3 className="font-semibold text-lg">Información Adicional</h3>
+								<div className="grid grid-cols-2 gap-4">
+									<div>
+										<Label className="text-sm font-medium">Asignado a</Label>
+										<p className="text-sm">{selectedLead.assignedUser?.name || "No asignado"}</p>
+									</div>
+									<div>
+										<Label className="text-sm font-medium">Fecha de Creación</Label>
+										<p className="text-sm">{formatGuatemalaDate(selectedLead.createdAt)}</p>
+									</div>
+								</div>
+								{selectedLead.notes && (
+									<div>
+										<Label className="text-sm font-medium">Notas</Label>
+										<p className="text-sm bg-muted p-3 rounded-md">{selectedLead.notes}</p>
+									</div>
+								)}
+							</div>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

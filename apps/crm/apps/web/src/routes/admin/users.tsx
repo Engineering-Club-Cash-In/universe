@@ -173,9 +173,9 @@ function RouteComponent() {
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
-				<h1 className="font-bold text-3xl">User Management</h1>
+				<h1 className="font-bold text-3xl">Gestión de usuarios</h1>
 				<p className="text-muted-foreground">
-					Manage users and their roles across the organization
+					Gestionar usuarios y sus roles en toda la organización
 				</p>
 			</div>
 
@@ -183,9 +183,10 @@ function RouteComponent() {
 				<CardHeader>
 					<div className="flex items-center justify-between">
 						<div>
-							<CardTitle>Organization Users</CardTitle>
+							<CardTitle>Usuarios de la organización</CardTitle>
 							<CardDescription>
-								All users with @clubcashin.com email addresses
+								Todos los usuarios con direcciones de correo electrónico
+								@clubcashin.com
 							</CardDescription>
 						</div>
 						<Dialog
@@ -201,12 +202,12 @@ function RouteComponent() {
 							<DialogTrigger asChild>
 								<Button>
 									<Plus className="mr-2 h-4 w-4" />
-									Create User
+									Crear usuario
 								</Button>
 							</DialogTrigger>
 							<DialogContent>
 								<DialogHeader>
-									<DialogTitle>Create New User</DialogTitle>
+									<DialogTitle>Crear nuevo usuario</DialogTitle>
 								</DialogHeader>
 								<form
 									onSubmit={(e) => {
@@ -220,7 +221,7 @@ function RouteComponent() {
 										<createUserForm.Field name="name">
 											{(field) => (
 												<div className="space-y-2">
-													<Label htmlFor={field.name}>Name</Label>
+													<Label htmlFor={field.name}>Nombre</Label>
 													<Input
 														id={field.name}
 														name={field.name}
@@ -246,7 +247,7 @@ function RouteComponent() {
 										<createUserForm.Field name="email">
 											{(field) => (
 												<div className="space-y-2">
-													<Label htmlFor={field.name}>Email</Label>
+													<Label htmlFor={field.name}>Correo electrónico</Label>
 													<Input
 														id={field.name}
 														name={field.name}
@@ -272,7 +273,7 @@ function RouteComponent() {
 										<createUserForm.Field name="password">
 											{(field) => (
 												<div className="space-y-2">
-													<Label htmlFor={field.name}>Password</Label>
+													<Label htmlFor={field.name}>Contraseña</Label>
 													<div className="relative">
 														<Input
 															id={field.name}
@@ -314,7 +315,7 @@ function RouteComponent() {
 										<createUserForm.Field name="role">
 											{(field) => (
 												<div className="space-y-2">
-													<Label htmlFor={field.name}>Role</Label>
+													<Label htmlFor={field.name}>Rol</Label>
 													<Select
 														value={field.state.value}
 														onValueChange={(value) =>
@@ -322,11 +323,13 @@ function RouteComponent() {
 														}
 													>
 														<SelectTrigger>
-															<SelectValue placeholder="Select role" />
+															<SelectValue placeholder="Seleccionar rol" />
 														</SelectTrigger>
 														<SelectContent>
-															<SelectItem value="sales">Sales</SelectItem>
-															<SelectItem value="admin">Admin</SelectItem>
+															<SelectItem value="sales">Ventas</SelectItem>
+															<SelectItem value="admin">
+																Administrador
+															</SelectItem>
 														</SelectContent>
 													</Select>
 													{field.state.meta.errors.map((error) => (
@@ -354,8 +357,8 @@ function RouteComponent() {
 												}
 											>
 												{state.isSubmitting || createUserMutation.isPending
-													? "Creating..."
-													: "Create User"}
+													? "Creando..."
+													: "Crear usuario"}
 											</Button>
 										)}
 									</createUserForm.Subscribe>
@@ -366,21 +369,21 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					{usersQuery.isPending ? (
-						<div>Loading users...</div>
+						<div>Cargando usuarios...</div>
 					) : usersQuery.error ? (
 						<div className="text-red-500">
-							Error loading users: {usersQuery.error.message}
+							Error al cargar los usuarios: {usersQuery.error.message}
 						</div>
 					) : (
 						<Table>
 							<TableHeader>
 								<TableRow>
-									<TableHead>Name</TableHead>
-									<TableHead>Email</TableHead>
-									<TableHead>Role</TableHead>
-									<TableHead>Status</TableHead>
-									<TableHead>Joined</TableHead>
-									<TableHead className="text-right">Actions</TableHead>
+									<TableHead>Nombre</TableHead>
+									<TableHead>Correo electrónico</TableHead>
+									<TableHead>Rol</TableHead>
+									<TableHead>Estado</TableHead>
+									<TableHead>Se unió</TableHead>
+									<TableHead className="text-right">Acciones</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
@@ -392,11 +395,11 @@ function RouteComponent() {
 											<Badge className={getRoleBadgeColor(user.role)}>
 												{user.role === "admin" ? (
 													<>
-														<Shield className="mr-1 h-3 w-3" /> Admin
+														<Shield className="mr-1 h-3 w-3" /> Administrador
 													</>
 												) : (
 													<>
-														<User className="mr-1 h-3 w-3" /> Sales
+														<User className="mr-1 h-3 w-3" /> Ventas
 													</>
 												)}
 											</Badge>
@@ -405,7 +408,7 @@ function RouteComponent() {
 											<Badge
 												variant={user.emailVerified ? "default" : "secondary"}
 											>
-												{user.emailVerified ? "Verified" : "Pending"}
+												{user.emailVerified ? "Verificado" : "Pendiente"}
 											</Badge>
 										</TableCell>
 										<TableCell>
@@ -415,12 +418,12 @@ function RouteComponent() {
 											<DropdownMenu>
 												<DropdownMenuTrigger asChild>
 													<Button variant="ghost" className="h-8 w-8 p-0">
-														<span className="sr-only">Open menu</span>
+														<span className="sr-only">Abrir menú</span>
 														<MoreHorizontal className="h-4 w-4" />
 													</Button>
 												</DropdownMenuTrigger>
 												<DropdownMenuContent align="end">
-													<DropdownMenuLabel>Actions</DropdownMenuLabel>
+													<DropdownMenuLabel>Acciones</DropdownMenuLabel>
 													<DropdownMenuSeparator />
 													<DropdownMenuItem
 														onClick={() =>
@@ -434,12 +437,12 @@ function RouteComponent() {
 														{user.role === "admin" ? (
 															<>
 																<User className="mr-2 h-4 w-4" />
-																Change to Sales
+																Cambiar a Ventas
 															</>
 														) : (
 															<>
 																<Shield className="mr-2 h-4 w-4" />
-																Change to Admin
+																Cambiar a Administrador
 															</>
 														)}
 													</DropdownMenuItem>
@@ -450,7 +453,7 @@ function RouteComponent() {
 														className="text-red-600"
 													>
 														<Trash2 className="mr-2 h-4 w-4" />
-														Delete User
+														Eliminar usuario
 													</DropdownMenuItem>
 												</DropdownMenuContent>
 											</DropdownMenu>

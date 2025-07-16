@@ -27,12 +27,12 @@ function RouteComponent() {
 			navigate({ to: "/login" });
 		} else if (session && userProfile.data?.role !== "admin") {
 			navigate({ to: "/dashboard" });
-			toast.error("Access denied: Admin role required");
+			toast.error("Acceso denegado: se requiere rol de administrador");
 		}
 	}, [session, isPending, userProfile.data?.role]);
 
 	if (isPending || userProfile.isPending) {
-		return <div>Loading...</div>;
+		return <div>Cargando...</div>;
 	}
 
 	if (userProfile.data?.role !== "admin") {
@@ -42,20 +42,20 @@ function RouteComponent() {
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
-				<h1 className="font-bold text-3xl">Reports & Analytics</h1>
+				<h1 className="font-bold text-3xl">Reportes y Analíticas</h1>
 				<p className="text-muted-foreground">
-					View detailed analytics and generate reports
+					Ver análisis detallados y generar reportes
 				</p>
 			</div>
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Reports</CardTitle>
-					<CardDescription>Analytics and reporting dashboard</CardDescription>
+					<CardTitle>Reportes</CardTitle>
+					<CardDescription>Panel de análisis y reportes</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<p className="text-muted-foreground">
-						Reports dashboard coming soon...
+						El panel de reportes estará disponible próximamente...
 					</p>
 				</CardContent>
 			</Card>

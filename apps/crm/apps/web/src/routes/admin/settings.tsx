@@ -27,12 +27,12 @@ function RouteComponent() {
 			navigate({ to: "/login" });
 		} else if (session && userProfile.data?.role !== "admin") {
 			navigate({ to: "/dashboard" });
-			toast.error("Access denied: Admin role required");
+			toast.error("Acceso denegado: se requiere rol de administrador");
 		}
 	}, [session, isPending, userProfile.data?.role]);
 
 	if (isPending || userProfile.isPending) {
-		return <div>Loading...</div>;
+		return <div>Cargando...</div>;
 	}
 
 	if (userProfile.data?.role !== "admin") {
@@ -42,19 +42,23 @@ function RouteComponent() {
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
-				<h1 className="font-bold text-3xl">System Settings</h1>
+				<h1 className="font-bold text-3xl">Configuración del sistema</h1>
 				<p className="text-muted-foreground">
-					Configure system-wide settings and preferences
+					Configurar los ajustes y preferencias de todo el sistema
 				</p>
 			</div>
 
 			<Card>
 				<CardHeader>
-					<CardTitle>Settings</CardTitle>
-					<CardDescription>System configuration options</CardDescription>
+					<CardTitle>Configuración</CardTitle>
+					<CardDescription>
+						Opciones de configuración del sistema
+					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<p className="text-muted-foreground">Settings panel coming soon...</p>
+					<p className="text-muted-foreground">
+						El panel de configuración estará disponible próximamente...
+					</p>
 				</CardContent>
 			</Card>
 		</div>

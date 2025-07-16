@@ -1,6 +1,7 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import { user } from "../db/schema/auth";
 import {
 	activities,
 	clients,
@@ -119,9 +120,14 @@ export const crmRouter = {
 						id: companies.id,
 						name: companies.name,
 					},
+					assignedUser: {
+						id: user.id,
+						name: user.name,
+					},
 				})
 				.from(leads)
 				.leftJoin(companies, eq(leads.companyId, companies.id))
+				.leftJoin(user, eq(leads.assignedTo, user.id))
 				.orderBy(leads.createdAt);
 		}
 		return await db
@@ -142,9 +148,14 @@ export const crmRouter = {
 					id: companies.id,
 					name: companies.name,
 				},
+				assignedUser: {
+					id: user.id,
+					name: user.name,
+				},
 			})
 			.from(leads)
 			.leftJoin(companies, eq(leads.companyId, companies.id))
+			.leftJoin(user, eq(leads.assignedTo, user.id))
 			.where(eq(leads.assignedTo, context.userId))
 			.orderBy(leads.createdAt);
 	}),
@@ -276,6 +287,12 @@ export const crmRouter = {
 						id: companies.id,
 						name: companies.name,
 					},
+					lead: {
+						id: leads.id,
+						firstName: leads.firstName,
+						lastName: leads.lastName,
+						email: leads.email,
+					},
 					stage: {
 						id: salesStages.id,
 						name: salesStages.name,
@@ -283,10 +300,16 @@ export const crmRouter = {
 						closurePercentage: salesStages.closurePercentage,
 						color: salesStages.color,
 					},
+					assignedUser: {
+						id: user.id,
+						name: user.name,
+					},
 				})
 				.from(opportunities)
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.leftJoin(user, eq(opportunities.assignedTo, user.id))
 				.orderBy(opportunities.createdAt);
 		}
 		return await db
@@ -305,6 +328,12 @@ export const crmRouter = {
 					id: companies.id,
 					name: companies.name,
 				},
+				lead: {
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+				},
 				stage: {
 					id: salesStages.id,
 					name: salesStages.name,
@@ -312,10 +341,16 @@ export const crmRouter = {
 					closurePercentage: salesStages.closurePercentage,
 					color: salesStages.color,
 				},
+				assignedUser: {
+					id: user.id,
+					name: user.name,
+				},
 			})
 			.from(opportunities)
 			.leftJoin(companies, eq(opportunities.companyId, companies.id))
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
 			.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+			.leftJoin(user, eq(opportunities.assignedTo, user.id))
 			.where(eq(opportunities.assignedTo, context.userId))
 			.orderBy(opportunities.createdAt);
 	}),
@@ -343,10 +378,24 @@ export const crmRouter = {
 				);
 			}
 
+			// If a lead is provided, get the company from the lead
+			let companyId = input.companyId;
+			if (input.leadId) {
+				const lead = await db
+					.select()
+					.from(leads)
+					.where(eq(leads.id, input.leadId))
+					.limit(1);
+				if (lead.length > 0 && lead[0].companyId) {
+					companyId = lead[0].companyId;
+				}
+			}
+
 			const newOpportunity = await db
 				.insert(opportunities)
 				.values({
 					...input,
+					companyId,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)

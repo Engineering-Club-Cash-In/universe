@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Skeleton } from "./ui/skeleton";
@@ -30,7 +31,7 @@ export default function UserMenu() {
 	if (!session) {
 		return (
 			<Button variant="outline" asChild>
-				<Link to="/login">Sign In</Link>
+				<Link to="/login">Iniciar Sesión</Link>
 			</Button>
 		);
 	}
@@ -42,11 +43,35 @@ export default function UserMenu() {
 			: "bg-blue-100 text-blue-800";
 	};
 
+	const getInitials = (name: string) => {
+		return name
+			.split(" ")
+			.map(n => n[0])
+			.join("")
+			.toUpperCase()
+			.slice(0, 2);
+	};
+
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
-				<Button variant="outline" className="flex items-center space-x-2">
-					<span>{session.user.name}</span>
+				<Button variant="outline" size="sm">
+					Mi Perfil
+				</Button>
+			</DropdownMenuTrigger>
+			<DropdownMenuContent className="w-72 bg-card p-4">
+				<div className="flex flex-col items-center space-y-4">
+					<Avatar className="h-16 w-16">
+						<AvatarImage src={session.user.image || ""} alt={session.user.name || ""} />
+						<AvatarFallback className="text-lg font-medium">
+							{getInitials(session.user.name || "U")}
+						</AvatarFallback>
+					</Avatar>
+					
+					<h3 className="font-medium text-lg text-center">{session.user.name}</h3>
+					
+					<p className="text-muted-foreground text-sm text-center">{session.user.email}</p>
+					
 					{userRole && (
 						<Badge className={getRoleBadgeColor(userRole)} variant="outline">
 							{userRole === "admin" ? (
@@ -55,36 +80,14 @@ export default function UserMenu() {
 								</>
 							) : (
 								<>
-									<User className="mr-1 h-3 w-3" /> Sales
+									<User className="mr-1 h-3 w-3" /> Ventas
 								</>
 							)}
 						</Badge>
 					)}
-				</Button>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent className="bg-card">
-				<DropdownMenuLabel>My Account</DropdownMenuLabel>
-				<DropdownMenuSeparator />
-				<DropdownMenuItem>{session.user.email}</DropdownMenuItem>
-				{userRole && (
-					<DropdownMenuItem>
-						<Badge className={getRoleBadgeColor(userRole)} variant="outline">
-							{userRole === "admin" ? (
-								<>
-									<Shield className="mr-1 h-3 w-3" /> Admin
-								</>
-							) : (
-								<>
-									<User className="mr-1 h-3 w-3" /> Sales
-								</>
-							)}
-						</Badge>
-					</DropdownMenuItem>
-				)}
-				<DropdownMenuSeparator />
-				<DropdownMenuItem asChild>
+					
 					<Button
-						variant="destructive"
+						variant="outline"
 						className="w-full"
 						onClick={() => {
 							authClient.signOut({
@@ -98,9 +101,9 @@ export default function UserMenu() {
 							});
 						}}
 					>
-						Sign Out
+						Cerrar Sesión
 					</Button>
-				</DropdownMenuItem>
+				</div>
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

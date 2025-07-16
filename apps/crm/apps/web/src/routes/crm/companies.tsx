@@ -80,25 +80,33 @@ function RouteComponent() {
 		...orpc.getCompanies.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
 	const leadsQuery = useQuery({
 		...orpc.getLeads.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 	});
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getOpportunities", session?.user?.id, userProfile.data?.role],
 	});
 	const clientsQuery = useQuery({
 		...orpc.getClients.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
 	});
 
 	const createCompanyForm = useForm({
@@ -111,6 +119,17 @@ function RouteComponent() {
 			phone: "",
 			address: "",
 			notes: "",
+		},
+		validators: {
+			onChange: ({ value }) => {
+				if (!value.name || value.name.trim() === "") {
+					return { form: "El nombre de la empresa es requerido" };
+				}
+				if (value.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+					return { form: "El correo electrónico no es válido" };
+				}
+				return undefined;
+			},
 		},
 		onSubmit: async ({ value }) => {
 			createCompanyMutation.mutate({
@@ -141,7 +160,9 @@ function RouteComponent() {
 			notes?: string;
 		}) => client.createCompany(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getCompanies"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
+			});
 			toast.success("Empresa creada exitosamente");
 			setIsCreateDialogOpen(false);
 			createCompanyForm.reset();
@@ -164,7 +185,9 @@ function RouteComponent() {
 			notes?: string;
 		}) => client.updateCompany(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getCompanies"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
+			});
 			toast.success("Empresa actualizada exitosamente");
 		},
 		onError: (error: any) => {
@@ -382,7 +405,8 @@ function RouteComponent() {
 											{(field) => (
 												<div className="space-y-2">
 													<Label htmlFor={field.name}>
-														Nombre de la Empresa
+														Nombre de la Empresa{" "}
+														<span className="text-red-500">*</span>
 													</Label>
 													<Input
 														id={field.name}

@@ -35,13 +35,15 @@ export default function Header() {
 
 					<NavigationMenu>
 						<NavigationMenuList>
-							<NavigationMenuItem>
-								<Link to="/">
-									<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-										Inicio
-									</NavigationMenuLink>
-								</Link>
-							</NavigationMenuItem>
+							{!session && (
+								<NavigationMenuItem>
+									<Link to="/">
+										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
+											Inicio
+										</NavigationMenuLink>
+									</Link>
+								</NavigationMenuItem>
+							)}
 
 							{session && (
 								<NavigationMenuItem>
@@ -87,7 +89,7 @@ export default function Header() {
 								</>
 							)}
 
-							{userRole === "admin" && (
+							{session && userRole === "admin" && (
 								<>
 									<NavigationMenuItem>
 										<Link to="/admin/users">

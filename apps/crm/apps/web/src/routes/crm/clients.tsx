@@ -56,6 +56,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
+import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/clients")({
@@ -75,13 +76,17 @@ function RouteComponent() {
 		...orpc.getClients.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
 	});
 	const companiesQuery = useQuery({
 		...orpc.getCompanies.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
 
 	const createClientForm = useForm({
@@ -93,6 +98,17 @@ function RouteComponent() {
 			endDate: "",
 			assignedTo: "",
 			notes: "",
+		},
+		validators: {
+			onChange: ({ value }) => {
+				if (!value.companyId || value.companyId === "") {
+					return { form: "La empresa es requerida" };
+				}
+				if (!value.contactPerson || value.contactPerson.trim() === "") {
+					return { form: "La persona de contacto es requerida" };
+				}
+				return undefined;
+			},
 		},
 		onSubmit: async ({ value }) => {
 			createClientMutation.mutate({
@@ -118,7 +134,9 @@ function RouteComponent() {
 			notes?: string;
 		}) => client.createClient(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getClients"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
+			});
 			toast.success("Cliente creado exitosamente");
 			setIsCreateDialogOpen(false);
 			createClientForm.reset();
@@ -141,7 +159,9 @@ function RouteComponent() {
 			notes?: string;
 		}) => client.updateClient(input),
 		onSuccess: () => {
-			queryClient.invalidateQueries({ queryKey: ["getClients"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
+			});
 			toast.success("Cliente actualizado exitosamente");
 		},
 		onError: (error: any) => {
@@ -332,7 +352,9 @@ function RouteComponent() {
 											<createClientForm.Field name="companyId">
 												{(field) => (
 													<div className="space-y-2">
-														<Label htmlFor={field.name}>Empresa</Label>
+														<Label htmlFor={field.name}>
+															Empresa <span className="text-red-500">*</span>
+														</Label>
 														<Select
 															value={field.state.value}
 															onValueChange={(value) =>
@@ -362,7 +384,8 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Persona de Contacto
+															Persona de Contacto{" "}
+															<span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
@@ -592,15 +615,13 @@ function RouteComponent() {
 												{clientData.startDate && (
 													<div className="flex items-center gap-1 text-sm">
 														<Calendar className="h-3 w-3" />
-														{new Date(
-															clientData.startDate,
-														).toLocaleDateString()}
+														{formatGuatemalaDate(clientData.startDate)}
 													</div>
 												)}
 												{clientData.endDate && (
 													<div className="flex items-center gap-1 text-muted-foreground text-sm">
 														<Calendar className="h-3 w-3" />
-														{new Date(clientData.endDate).toLocaleDateString()}
+														{formatGuatemalaDate(clientData.endDate)}
 													</div>
 												)}
 												{!clientData.startDate && !clientData.endDate && (
@@ -615,13 +636,13 @@ function RouteComponent() {
 												className={getStatusBadgeColor(clientData.status)}
 												variant="outline"
 											>
-												{clientData.status}
+												{getStatusLabel(clientData.status)}
 											</Badge>
 										</TableCell>
 										<TableCell>
 											<div className="flex items-center gap-1 text-sm">
 												<Calendar className="h-3 w-3" />
-												{new Date(clientData.createdAt).toLocaleDateString()}
+												{formatGuatemalaDate(clientData.createdAt)}
 											</div>
 										</TableCell>
 										<TableCell className="text-right">

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	Building,
 	DollarSign,
@@ -33,44 +33,40 @@ function RouteComponent() {
 	const adminData = useQuery({
 		...orpc.adminOnlyData.queryOptions(),
 		enabled: userProfile.data?.role === "admin",
-	});
+	})
 
 	// CRM Dashboard Stats
 	const crmStats = useQuery({
 		...orpc.getDashboardStats.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
-	});
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getDashboardStats", session?.user?.id, userProfile.data?.role],
+	})
 
 	// Sales Stages for funnel
 	const salesStages = useQuery({
 		...orpc.getSalesStages.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role),
-	});
+			["admin", "sales"].includes(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
+	})
 
 	useEffect(() => {
-		// Only redirect if we're absolutely sure there's no session
-		// Wait a bit longer to ensure session has time to update after sign-in
 		if (!session && !isPending) {
-			const timer = setTimeout(() => {
-				// Re-check the current session state
-				const currentSession = authClient.useSession();
-				if (!currentSession.data && !currentSession.isPending) {
-					navigate({
-						to: "/login",
-					});
-				}
-			}, 1000); // Increased delay to 1 second
-
-			return () => clearTimeout(timer);
+			navigate({ to: "/login" });
 		}
 	}, [session, isPending, navigate]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;
+	}
+
+	if (!session) {
+		return null;
 	}
 
 	const userRole = userProfile.data?.role;
@@ -189,7 +185,9 @@ function RouteComponent() {
 								<div className="font-bold text-2xl">
 									{crmStats.data.myOpportunities || 0}
 								</div>
-								<p className="text-muted-foreground text-xs">En mis oportunidades</p>
+								<p className="text-muted-foreground text-xs">
+									En mis oportunidades
+								</p>
 							</CardContent>
 						</Card>
 						<Card>
@@ -211,6 +209,50 @@ function RouteComponent() {
 					</div>
 				</div>
 			)}
+
+			{/* Quick Actions */}
+			<Card>
+				<CardHeader>
+					<CardTitle>Acciones Rápidas</CardTitle>
+					<CardDescription>Tareas comunes de CRM y atajos</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
+						{(userRole === "admin" || userRole === "sales") && (
+							<Link to="/crm/leads">
+								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+									<Users className="h-4 w-4" />
+									<span className="text-sm">Agregar Nuevo Prospecto</span>
+								</button>
+							</Link>
+						)}
+						{(userRole === "admin" || userRole === "sales") && (
+							<Link to="/crm/opportunities">
+								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+									<Target className="h-4 w-4" />
+									<span className="text-sm">Crear Oportunidad</span>
+								</button>
+							</Link>
+						)}
+						{(userRole === "admin" || userRole === "sales") && (
+							<Link to="/crm/companies">
+								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+									<Building className="h-4 w-4" />
+									<span className="text-sm">Agregar Empresa</span>
+								</button>
+							</Link>
+						)}
+						{userRole === "admin" && (
+							<Link to="/admin/reports">
+								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
+									<DollarSign className="h-4 w-4" />
+									<span className="text-sm">Ver Reportes</span>
+								</button>
+							</Link>
+						)}
+					</div>
+				</CardContent>
+			</Card>
 
 			{/* Sales Funnel Visualization */}
 			{salesStages.data && salesStages.data.length > 0 && (
@@ -259,34 +301,6 @@ function RouteComponent() {
 					</CardContent>
 				</Card>
 			)}
-
-			{/* Quick Actions */}
-			<Card>
-				<CardHeader>
-					<CardTitle>Acciones Rápidas</CardTitle>
-					<CardDescription>Tareas comunes de CRM y atajos</CardDescription>
-				</CardHeader>
-				<CardContent>
-					<div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
-						<button className="flex items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
-							<Users className="h-4 w-4" />
-							<span className="text-sm">Agregar Nuevo Prospecto</span>
-						</button>
-						<button className="flex items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
-							<Target className="h-4 w-4" />
-							<span className="text-sm">Crear Oportunidad</span>
-						</button>
-						<button className="flex items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
-							<Building className="h-4 w-4" />
-							<span className="text-sm">Agregar Empresa</span>
-						</button>
-						<button className="flex items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
-							<DollarSign className="h-4 w-4" />
-							<span className="text-sm">Ver Reportes</span>
-						</button>
-					</div>
-				</CardContent>
-			</Card>
 		</div>
-	);
+	)
 }

@@ -14,34 +14,48 @@ export interface InvestmentResult {
   totalToReceive: number;
 }
 
-// Model 1: Compound interest with monthly reinvestment (70% of gain)
+// Model 1: Compound interest with monthly reinvestment
+// Reinvests only the investor's net portion (70% of net interest)
 export function calculateCompoundInvestment(params: InvestmentParams): InvestmentResult {
   const { capital, interestRate, termMonths, investorPercentage, vatRate } = params;
   
-  // The effective rate for the investor after considering their 70% share
-  const effectiveMonthlyRate = (interestRate / 100) * (investorPercentage / 100);
-  
-  // Calculate compound growth with the effective rate
+  // Calculate compound growth month by month
   let balance = capital;
+  let totalInvestorGross = 0;
+  let totalInvestorNet = 0;
+  
   for (let month = 1; month <= termMonths; month++) {
-    balance = balance * (1 + effectiveMonthlyRate);
+    // Monthly interest on current balance
+    const monthlyInterest = balance * (interestRate / 100);
+    
+    // VAT on full interest
+    const monthlyVat = monthlyInterest * vatRate;
+    
+    // Net interest after VAT
+    const netMonthlyInterest = monthlyInterest - monthlyVat;
+    
+    // Investor's portion
+    const investorGross = (monthlyInterest + monthlyVat) * (investorPercentage / 100);
+    const investorNet = netMonthlyInterest * (investorPercentage / 100);
+    
+    // Add only investor's net portion to balance for compound effect
+    balance += investorNet;
+    
+    totalInvestorGross += investorGross;
+    totalInvestorNet += investorNet;
   }
   
-  // The gross profit before VAT
-  const grossProfit = balance - capital;
-  
-  // VAT is calculated on the gross profit
-  const vatPaid = grossProfit * vatRate;
-  
-  // Net profit after VAT
-  const netProfit = grossProfit - vatPaid;
+  // Calculate gross profit and VAT from totals
+  // totalInvestorGross includes VAT, so we need to extract the base amount
+  const investorGrossProfit = totalInvestorGross / (1 + vatRate);
+  const investorVatPaid = totalInvestorGross - investorGrossProfit;
   
   return {
     finalCapital: balance,
-    grossProfit: grossProfit,
-    vatPaid: vatPaid,
-    netProfit: netProfit,
-    totalToReceive: capital + netProfit
+    grossProfit: investorGrossProfit,
+    vatPaid: investorVatPaid,
+    netProfit: totalInvestorNet,
+    totalToReceive: capital + totalInvestorNet
   };
 }
 

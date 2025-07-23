@@ -6,12 +6,11 @@ import {
   insertCreditScore,
   insertCreditProfile,
   updateCreditProfile,
-  getCreditProfileByLeadId,
   getLead,
 } from "../database/queries/simpletech";
-import { Lead } from "../database/schemas/simpletech";
+import { type Lead } from "../database/schemas/simpletech";
 import { predictMissingPayments } from "./credit-score";
-import { uploadFile, getSignedUrl } from "../lib/supabase";
+import { uploadFile } from "../lib/supabase";
 import { urlToFile } from "../utils/files";
 import {
   checkCreditRecord,
@@ -19,72 +18,6 @@ import {
   queueCreditRecord,
 } from "../lib/openai";
 import { uploadFromSupabaseUrl } from "../lib/twenty-graphql";
-interface CreateOnePersonaResponse {
-  data: {
-    createPersona: {
-      id: string;
-      name: string;
-      createdAt: string;
-      updatedAt: string;
-      deletedAt: string;
-      createdBy: {
-        source: string;
-      };
-      position: number;
-      edad: string;
-      estadoCivil: string;
-      dependientesEconomicos: number;
-      ingresosNominales: number;
-      montoAFinanciar: number;
-      ocupacion: "PROPIETARIO" | "COLABORADOR";
-      tiempoEnElTrabajo: "ONETOFIVE" | "FIVETOTEN" | "TENPLUS";
-      utilizacionDelDinero: "PERSONAL" | "TRABAJO";
-      viviendaPropia: boolean;
-      vehiculoPropio: boolean;
-      tarjetaDeCredito: boolean;
-      timelineActivities: Array<object>;
-      taskTargets: Array<object>;
-      favorites: Array<object>;
-      noteTargets: Array<object>;
-      attachments: Array<object>;
-    };
-  };
-}
-interface DuplicatePersonaResponse {
-  data: {
-    totalCount: number;
-    pageInfo: {
-      hasNextPage: boolean;
-      startCursor: string;
-      endCursor: string;
-    };
-    companyDuplicates: {
-      id: string;
-      name: string;
-      createdAt: string;
-      updatedAt: string;
-      deletedAt: string;
-      createdBy: {
-        source: string;
-      };
-      position: number;
-      edad: string;
-      estadoCivil: string;
-      dependientesEconomicos: number;
-      ingresosNominales: number;
-      montoAFinanciar: number;
-      ocupacion: "PROPIETARIO" | "COLABORADOR";
-      tiempoEnElTrabajo: "ONETOFIVE" | "FIVETOTEN" | "TENPLUS";
-      utilizacionDelDinero: "PERSONAL" | "TRABAJO";
-      viviendaPropia: boolean;
-      vehiculoPropio: boolean;
-      tarjetaDeCredito: boolean;
-      numeroDeTelefono: {
-        dpi: string;
-      };
-    }[];
-  };
-}
 
 const API_KEY = process.env.CRM_API_KEY;
 
@@ -153,37 +86,6 @@ interface FillPersonaFields {
   ownsVehicle: boolean;
   hasCreditCard: boolean;
 }
-interface FillPersonaFieldsResponse {
-  data: {
-    updatePersona: {
-      id: string;
-      name: string;
-      createdAt: string;
-      updatedAt: string;
-      deletedAt: string | null;
-      createdBy: {
-        position: number;
-      };
-      edad: string;
-      estadoCivil: string;
-      dependientesEconomicos: number;
-      ingresosNominales: number;
-      montoAFinanciar: number;
-      ocupacion: "PROPIETARIO" | "COLABORADOR";
-      tiempoEnElTrabajo: "ONETOFIVE" | "FIVETOTEN" | "TENPLUS";
-      utilizacionDelDinero: "PERSONAL" | "TRABAJO";
-      viviendaPropia: boolean;
-      vehiculoPropio: boolean;
-      tarjetaDeCredito: boolean;
-      numeroDeTelefono: {
-        additionalPhones: string[];
-        primaryPhoneCountryCode: string;
-        primaryPhoneCallingCode: string;
-        primaryPhoneNumber: string;
-      };
-    };
-  };
-}
 export const fillPersonaFields = async ({
   leadId,
   name,
@@ -201,7 +103,7 @@ export const fillPersonaFields = async ({
   hasCreditCard,
 }: FillPersonaFields): Promise<String | Error> => {
   try {
-    const response = await fetch(
+    await fetch(
       `https://crm.devteamatcci.site/rest/personas/${leadId}`,
       {
         method: "PATCH",

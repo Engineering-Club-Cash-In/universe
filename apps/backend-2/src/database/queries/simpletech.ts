@@ -1,14 +1,12 @@
 import { db } from "../index";
 import {
   leadsTable,
-  InsertLead,
-  Lead,
+  type InsertLead,
+  type Lead,
   creditScoresTable,
-  InsertCreditScore,
-  CreditScore,
-  InsertCreditProfile,
+  type InsertCreditScore,
+  type InsertCreditProfile,
   creditProfilesTable,
-  CreditProfile,
 } from "../schemas/simpletech";
 import { eq } from "drizzle-orm";
 

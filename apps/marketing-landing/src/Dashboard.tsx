@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { InvestorLead, ClientLead } from "backend-2/schemas";
+import type { InvestorLead, ClientLead } from "@repo/backend-2/schemas";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -52,13 +52,11 @@ const investorColumns = [
   }),
   investorColumnHelper.accessor("hasInvested", {
     header: "¿Ha Invertido?",
-    cell: (info: CellContext<InvestorLead, boolean>) =>
-      info.getValue() ? "Sí" : "No",
+    cell: (info: CellContext<InvestorLead, boolean>) => (info.getValue() ? "Sí" : "No"),
   }),
   investorColumnHelper.accessor("hasBankAccount", {
     header: "¿Tiene Cuenta Bancaria?",
-    cell: (info: CellContext<InvestorLead, boolean>) =>
-      info.getValue() ? "Sí" : "No",
+    cell: (info: CellContext<InvestorLead, boolean>) => (info.getValue() ? "Sí" : "No"),
   }),
   investorColumnHelper.accessor("investmentRange", {
     header: "Rango de Inversión",
@@ -95,15 +93,12 @@ const clientColumns = [
   }),
   clientColumnHelper.accessor("ready", {
     header: "¿Listo para Proceder?",
-    cell: (info: CellContext<ClientLead, boolean>) =>
-      info.getValue() ? "Sí" : "No",
+    cell: (info: CellContext<ClientLead, boolean>) => (info.getValue() ? "Sí" : "No"),
   }),
   clientColumnHelper.accessor("loanType", {
     header: "Tipo de Préstamo",
     cell: (info: CellContext<ClientLead, string>) =>
-      info.getValue() === "carLoan"
-        ? "Préstamo Vehicular"
-        : "Préstamo Prendario",
+      info.getValue() === "carLoan" ? "Préstamo Vehicular" : "Préstamo Prendario",
   }),
   clientColumnHelper.accessor("createdAt", {
     header: "Fecha de Creación",
@@ -141,16 +136,12 @@ const LeadsTable = <TData,>({ data, columns }: LeadsTableProps<TData>) => {
                 <TableHead
                   key={header.id}
                   style={{
-                    width:
-                      header.getSize() !== 150 ? header.getSize() : undefined,
+                    width: header.getSize() !== 150 ? header.getSize() : undefined,
                   }}
                 >
                   {header.isPlaceholder
                     ? null
-                    : flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
-                      )}
+                    : flexRender(header.column.columnDef.header, header.getContext())}
                 </TableHead>
               ))}
             </TableRow>
@@ -159,10 +150,7 @@ const LeadsTable = <TData,>({ data, columns }: LeadsTableProps<TData>) => {
         <TableBody>
           {table.getRowModel().rows?.length ? (
             table.getRowModel().rows.map((row: Row<TData>) => (
-              <TableRow
-                key={row.id}
-                data-state={row.getIsSelected() && "selected"}
-              >
+              <TableRow key={row.id} data-state={row.getIsSelected() && "selected"}>
                 {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (
                   <TableCell key={cell.id}>
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -183,8 +171,7 @@ const LeadsTable = <TData,>({ data, columns }: LeadsTableProps<TData>) => {
         <span className="flex items-center gap-1">
           <div>Página</div>
           <strong>
-            {table.getState().pagination.pageIndex + 1} de{" "}
-            {table.getPageCount()}
+            {table.getState().pagination.pageIndex + 1} de {table.getPageCount()}
           </strong>
         </span>
         <Button
@@ -238,20 +225,14 @@ export default function Dashboard() {
 
   // --- Memoized Data ---
   const investorLeads = useMemo<InvestorLead[]>(() => {
-    if (
-      investorLeadsResult?.data?.success &&
-      Array.isArray(investorLeadsResult.data.data)
-    ) {
+    if (investorLeadsResult?.data?.success && Array.isArray(investorLeadsResult.data.data)) {
       return investorLeadsResult.data.data as InvestorLead[];
     }
     return [];
   }, [investorLeadsResult]);
 
   const clientLeads = useMemo<ClientLead[]>(() => {
-    if (
-      clientLeadsResult?.data?.success &&
-      Array.isArray(clientLeadsResult.data.data)
-    ) {
+    if (clientLeadsResult?.data?.success && Array.isArray(clientLeadsResult.data.data)) {
       return clientLeadsResult.data.data as ClientLead[];
     }
     return [];
@@ -274,9 +255,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-center min-h-screen bg-gray-100">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl text-center">
-              Iniciar Sesión
-            </CardTitle>
+            <CardTitle className="text-2xl text-center">Iniciar Sesión</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
@@ -302,9 +281,7 @@ export default function Dashboard() {
                   placeholder="contraseña"
                 />
               </div>
-              {loginError && (
-                <p className="text-sm text-red-500 text-center">{loginError}</p>
-              )}
+              {loginError && <p className="text-sm text-red-500 text-center">{loginError}</p>}
               <Button type="submit" className="w-full">
                 Ingresar
               </Button>
@@ -326,12 +303,8 @@ export default function Dashboard() {
   if (investorError || clientError) {
     return (
       <div className="p-4 text-red-500">
-        {investorError && (
-          <p>Error al cargar leads de inversores: {investorError.message}</p>
-        )}
-        {clientError && (
-          <p>Error al cargar leads de clientes: {clientError.message}</p>
-        )}
+        {investorError && <p>Error al cargar leads de inversores: {investorError.message}</p>}
+        {clientError && <p>Error al cargar leads de clientes: {clientError.message}</p>}
       </div>
     );
   }
@@ -348,9 +321,7 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 mb-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total de Leads de Inversores
-            </CardTitle>
+            <CardTitle className="text-sm font-medium">Total de Leads de Inversores</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalInvestorLeads}</div>
@@ -358,9 +329,7 @@ export default function Dashboard() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total de Leads de Clientes
-            </CardTitle>
+            <CardTitle className="text-sm font-medium">Total de Leads de Clientes</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{totalClientLeads}</div>
@@ -375,10 +344,7 @@ export default function Dashboard() {
           <TabsTrigger value="client">Leads de Clientes</TabsTrigger>
         </TabsList>
         <TabsContent value="investor" className="mt-4">
-          <LeadsTable<InvestorLead>
-            data={investorLeads}
-            columns={investorColumns}
-          />
+          <LeadsTable<InvestorLead> data={investorLeads} columns={investorColumns} />
         </TabsContent>
         <TabsContent value="client" className="mt-4">
           <LeadsTable<ClientLead> data={clientLeads} columns={clientColumns} />

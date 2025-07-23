@@ -4,10 +4,7 @@ import {
   getAllPendingOpenaiRuns,
   setOpenaiRunCompleted,
 } from "../database/queries/openai";
-import { validateCreditRecordWithDesiredCredit } from "../controllers/credit-record";
-import { InsertCreditRecordResult } from "../database/schemas/landing";
 import { PV } from "../utils/math";
-import { createCreditRecordResult } from "../database/queries/landing";
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -330,6 +327,7 @@ export const checkCreditRecord = async (creditRecord: CreditRecord) => {
   } else {
     method1Availability = "low";
   }
+  console.log("Method 1 availability:", method1Availability);
   // Method 2: Based on income
   const maxDebtRatio = 0.2;
   const maxAmountOfDebt = maxDebtRatio * (guaranteedIncome * 0.5);

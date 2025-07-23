@@ -217,7 +217,7 @@ export default function App() {
     {
       icon: <ChartNoAxesCombined className="h-8 w-8" />,
       value: "+12%",
-      label: "Rendimientos anuales",
+      label: "Rendimiento anual",
     },
   ];
 
@@ -280,8 +280,8 @@ export default function App() {
             {/* Stats preview */}
             <div className="mt-12 grid grid-cols-3 gap-4">
               <div className="text-center">
-                <p className="text-3xl font-bold text-[#d8e710]">12%</p>
-                <p className="text-sm text-gray-400">Rendimiento promedio</p>
+                <p className="text-3xl font-bold text-[#d8e710]">+12%</p>
+                <p className="text-sm text-gray-400">Rendimiento anual</p>
               </div>
               <div className="text-center">
                 <p className="text-3xl font-bold text-[#d8e710]">100+</p>

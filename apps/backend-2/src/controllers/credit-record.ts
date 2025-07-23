@@ -289,6 +289,9 @@ export const checkCreditRecord = async (creditRecord: CreditRecord) => {
   } else {
     method1Availability = "low";
   }
+  console.log(
+    `Método 1: Free flux availability is ${method1Availability} (${percentageOfFreeFlux})`
+  );
   // Method 2: Based on income
   const maxDebtRatio = 0.2;
   const maxAmountOfDebt = maxDebtRatio * (guaranteedIncome * 0.5);

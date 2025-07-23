@@ -53,6 +53,7 @@ interface AmortizationRow {
   finalBalance: number;
 }
 
+// Main investment calculator component
 export default function InvestmentCalculator() {
   const [mainTab, setMainTab] = useState("calculator"); // 'calculator' or 'goal'
   const [capital, setCapital] = useState<string>("7591.11");

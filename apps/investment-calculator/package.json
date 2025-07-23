@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "precommit": "bun test:run && bun run build"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.6",

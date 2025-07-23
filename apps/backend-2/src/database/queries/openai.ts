@@ -1,5 +1,5 @@
 import { db } from "../index";
-import { InsertOpenaiRun, openaiRunsTable } from "../schemas/openai";
+import { type InsertOpenaiRun, openaiRunsTable } from "../schemas/openai";
 import { eq } from "drizzle-orm";
 export const createOpenaiRun = async (run: InsertOpenaiRun) => {
   return await db.insert(openaiRunsTable).values(run);

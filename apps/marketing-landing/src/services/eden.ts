@@ -1,4 +1,4 @@
-import type { App } from "backend-2";
+import type { App } from "@repo/backend-2";
 import { BACKEND_ENVIRONMENTS } from "@/lib/utils";
 import { treaty } from "@elysiajs/eden";
 

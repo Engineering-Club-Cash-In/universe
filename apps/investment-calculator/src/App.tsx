@@ -242,12 +242,15 @@ export default function InvestmentCalculator() {
 
   // Calculate total to receive - different logic for compound interest
   let totalToReceive;
+  let compoundTaxes = 0;
   if (activeTab === "compound") {
-    // For compound interest, use the final accumulated balance
+    // For compound interest, use the final accumulated balance minus taxes
     const finalBalance =
       compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance ||
       displayCapital;
-    totalToReceive = finalBalance;
+    // Calculate taxes on the total interest earned
+    compoundTaxes = summaryTotalInterest * getVatRate();
+    totalToReceive = finalBalance - compoundTaxes;
   } else {
     // For standard and interest-only, use the traditional formula
     totalToReceive = displayCapital + summaryNetProfit;
@@ -271,6 +274,13 @@ export default function InvestmentCalculator() {
     title.textContent = "Calculadora de Inversión";
     title.style.fontSize = "28px"; // Aumentar tamaño de fuente
     header.appendChild(title);
+
+    // Agregar el logo
+    const logo = document.createElement("img");
+    logo.src = Logo;
+    logo.style.height = "60px";
+    logo.style.width = "auto";
+    header.appendChild(logo);
 
     // Agregar el resumen
     const summary = document.createElement("div");
@@ -348,7 +358,7 @@ export default function InvestmentCalculator() {
         "Intereses Ganados:",
         `Q ${
           activeTab === "compound"
-            ? (totalToReceive - displayCapital).toLocaleString("en-US", {
+            ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })
@@ -513,7 +523,7 @@ export default function InvestmentCalculator() {
     const summaryCell2 = document.createElement("td");
     summaryCell2.textContent = `Total Intereses: Q ${
       activeTab === "compound"
-        ? (totalToReceive - displayCapital).toLocaleString("en-US", {
+        ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString("en-US", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })
@@ -958,7 +968,7 @@ export default function InvestmentCalculator() {
                 <p className="text-2xl font-bold">
                   Q{" "}
                   {activeTab === "compound"
-                    ? (totalToReceive - displayCapital).toLocaleString(
+                    ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString(
                         "en-US",
                         {
                           minimumFractionDigits: 2,
@@ -1098,7 +1108,7 @@ export default function InvestmentCalculator() {
                     <TableCell className="text-right">
                       Total Intereses: Q{" "}
                       {activeTab === "compound"
-                        ? (totalToReceive - displayCapital).toLocaleString(
+                        ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString(
                             "en-US",
                             {
                               minimumFractionDigits: 2,
@@ -1206,7 +1216,7 @@ export default function InvestmentCalculator() {
                     <TableCell className="text-right">
                       Total Intereses: Q{" "}
                       {activeTab === "compound"
-                        ? (totalToReceive - displayCapital).toLocaleString(
+                        ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString(
                             "en-US",
                             {
                               minimumFractionDigits: 2,
@@ -1312,7 +1322,7 @@ export default function InvestmentCalculator() {
                     <TableCell className="text-right">
                       Total Intereses: Q{" "}
                       {activeTab === "compound"
-                        ? (totalToReceive - displayCapital).toLocaleString(
+                        ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString(
                             "en-US",
                             {
                               minimumFractionDigits: 2,
@@ -1396,7 +1406,7 @@ export default function InvestmentCalculator() {
                 <span className="text-black">
                   Q
                   {activeTab === "compound"
-                    ? (totalToReceive - displayCapital).toLocaleString(
+                    ? ((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital).toLocaleString(
                         "en-US",
                         {
                           minimumFractionDigits: 2,

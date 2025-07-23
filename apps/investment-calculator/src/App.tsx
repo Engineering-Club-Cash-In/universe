@@ -570,18 +570,18 @@ export default function InvestmentCalculator() {
       backgroundColor: "#ffffff", // Asegurar fondo blanco
       allowTaint: true,
     }).then((canvas) => {
-      // Crear PDF en formato landscape con mejor calidad
+      // Crear PDF en formato portrait con mejor calidad
       const imgData = canvas.toDataURL("image/png", 1.0); // Calidad máxima
       const pdf = new jsPDF({
-        orientation: "landscape",
+        orientation: "portrait",
         unit: "mm",
         format: "a4",
         compress: false, // Desactivar compresión para mejor calidad
       });
 
-      // Calcular dimensiones para ajustar al tamaño A4 landscape
-      const imgWidth = 297; // A4 landscape width in mm
-      const pageHeight = 210; // A4 landscape height in mm
+      // Calcular dimensiones para ajustar al tamaño A4 portrait
+      const imgWidth = 210; // A4 portrait width in mm
+      const pageHeight = 297; // A4 portrait height in mm
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       let heightLeft = imgHeight;
       let position = 0;

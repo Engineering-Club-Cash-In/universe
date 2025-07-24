@@ -14,12 +14,15 @@ import {
 	Calendar,
 	Clock,
 	DollarSign,
+	FileText,
 	Filter,
 	History,
 	Mail,
 	Plus,
 	Target,
+	Trash2,
 	TrendingUp,
+	Upload,
 	Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -1083,8 +1086,9 @@ function RouteComponent() {
 						</DialogHeader>
 						{selectedOpportunity && (
 							<Tabs defaultValue="details" className="w-full">
-								<TabsList className="grid w-full grid-cols-2">
+								<TabsList className="grid w-full grid-cols-3">
 									<TabsTrigger value="details">Detalles</TabsTrigger>
+									<TabsTrigger value="documents">Documentos</TabsTrigger>
 									<TabsTrigger value="history">Historial</TabsTrigger>
 								</TabsList>
 								
@@ -1314,6 +1318,10 @@ function RouteComponent() {
 											</div>
 										)}
 									</div>
+								</TabsContent>
+								
+								<TabsContent value="documents" className="space-y-4 mt-6">
+									<DocumentsManager opportunityId={selectedOpportunity.id} />
 								</TabsContent>
 							</Tabs>
 						)}
@@ -1653,6 +1661,274 @@ function RouteComponent() {
 					),
 				)}
 			</div>
+		</div>
+	);
+}
+
+// Documents Manager Component
+function DocumentsManager({ opportunityId }: { opportunityId: string }) {
+	const [selectedFile, setSelectedFile] = useState<File | null>(null);
+	const [description, setDescription] = useState("");
+	const [documentType, setDocumentType] = useState<string>("identification");
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const { data: session } = authClient.useSession();
+	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+	const queryClient = useQueryClient();
+
+	// Query for documents
+	const documentsQuery = useQuery({
+		...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),
+		enabled: !!opportunityId,
+	});
+
+	// Upload mutation
+	const uploadMutation = useMutation({
+		mutationFn: async () => {
+			if (!selectedFile) return;
+
+			const formData = new FormData();
+			formData.append("file", selectedFile);
+			formData.append("opportunityId", opportunityId);
+			formData.append("documentType", documentType);
+			if (description) {
+				formData.append("description", description);
+			}
+
+			// Use fetch directly for file upload
+			const response = await fetch(`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`, {
+				method: "POST",
+				body: formData,
+				credentials: "include",
+			});
+
+			if (!response.ok) {
+				const error = await response.json();
+				throw new Error(error.message || "Error al subir el archivo");
+			}
+
+			return response.json();
+		},
+		onSuccess: () => {
+			toast.success("Documento subido exitosamente");
+			setSelectedFile(null);
+			setDescription("");
+			setDocumentType("identification");
+			if (fileInputRef.current) {
+				fileInputRef.current.value = "";
+			}
+			queryClient.invalidateQueries({ queryKey: ["getOpportunityDocuments", opportunityId] });
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al subir el documento");
+		},
+	});
+
+	// Delete mutation
+	const deleteMutation = useMutation({
+		mutationFn: (documentId: string) => 
+			client.deleteOpportunityDocument({ documentId }),
+		onSuccess: () => {
+			toast.success("Documento eliminado exitosamente");
+			queryClient.invalidateQueries({ queryKey: ["getOpportunityDocuments", opportunityId] });
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al eliminar el documento");
+		},
+	});
+
+	const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (file) {
+			// Validate file
+			const allowedTypes = [
+				'application/pdf',
+				'image/jpeg',
+				'image/jpg',
+				'image/png',
+				'image/webp',
+				'application/msword',
+				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+			];
+
+			if (!allowedTypes.includes(file.type)) {
+				toast.error("Tipo de archivo no permitido. Solo se permiten PDF, imágenes y documentos Word.");
+				return;
+			}
+
+			const maxSize = 10 * 1024 * 1024; // 10MB
+			if (file.size > maxSize) {
+				toast.error("El archivo es demasiado grande. El tamaño máximo permitido es 10MB.");
+				return;
+			}
+
+			setSelectedFile(file);
+		}
+	};
+
+	const documentTypeOptions = [
+		{ value: "identification", label: "Identificación (DPI/Pasaporte)" },
+		{ value: "income_proof", label: "Comprobante de Ingresos" },
+		{ value: "bank_statement", label: "Estado de Cuenta Bancario" },
+		{ value: "business_license", label: "Patente de Comercio" },
+		{ value: "property_deed", label: "Escrituras de Propiedad" },
+		{ value: "vehicle_title", label: "Tarjeta de Circulación" },
+		{ value: "credit_report", label: "Reporte Crediticio" },
+		{ value: "other", label: "Otro" },
+	];
+
+	const getDocumentIcon = (mimeType: string) => {
+		if (mimeType.includes("pdf")) return "📄";
+		if (mimeType.includes("image")) return "🖼️";
+		if (mimeType.includes("word")) return "📝";
+		return "📎";
+	};
+
+	return (
+		<div className="space-y-6">
+			{/* Upload Section */}
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-lg flex items-center gap-2">
+						<Upload className="h-5 w-5" />
+						Subir Documento
+					</CardTitle>
+				</CardHeader>
+				<CardContent className="space-y-4">
+					<div className="space-y-2">
+						<Label htmlFor="documentType">Tipo de Documento</Label>
+						<Select value={documentType} onValueChange={setDocumentType}>
+							<SelectTrigger>
+								<SelectValue />
+							</SelectTrigger>
+							<SelectContent>
+								{documentTypeOptions.map((type) => (
+									<SelectItem key={type.value} value={type.value}>
+										{type.label}
+									</SelectItem>
+								))}
+							</SelectContent>
+						</Select>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="description">Descripción (opcional)</Label>
+						<Input
+							id="description"
+							value={description}
+							onChange={(e) => setDescription(e.target.value)}
+							placeholder="Descripción del documento..."
+						/>
+					</div>
+
+					<div className="space-y-2">
+						<Label htmlFor="file">Archivo</Label>
+						<Input
+							ref={fileInputRef}
+							id="file"
+							type="file"
+							onChange={handleFileSelect}
+							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+						/>
+						<p className="text-xs text-muted-foreground">
+							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX. Tamaño máximo: 10MB
+						</p>
+					</div>
+
+					{selectedFile && (
+						<div className="bg-muted rounded-lg p-3 flex items-center justify-between">
+							<div className="flex items-center gap-2">
+								<FileText className="h-4 w-4 text-muted-foreground" />
+								<span className="text-sm">{selectedFile.name}</span>
+								<span className="text-xs text-muted-foreground">
+									({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+								</span>
+							</div>
+							<Button
+								size="sm"
+								variant="ghost"
+								onClick={() => {
+									setSelectedFile(null);
+									if (fileInputRef.current) {
+										fileInputRef.current.value = "";
+									}
+								}}
+							>
+								<Trash2 className="h-4 w-4" />
+							</Button>
+						</div>
+					)}
+
+					<Button
+						className="w-full"
+						disabled={!selectedFile || uploadMutation.isPending}
+						onClick={() => uploadMutation.mutate()}
+					>
+						{uploadMutation.isPending ? "Subiendo..." : "Subir Documento"}
+					</Button>
+				</CardContent>
+			</Card>
+
+			{/* Documents List */}
+			<Card>
+				<CardHeader>
+					<CardTitle className="text-lg flex items-center gap-2">
+						<FileText className="h-5 w-5" />
+						Documentos Subidos
+					</CardTitle>
+				</CardHeader>
+				<CardContent>
+					{documentsQuery.isLoading ? (
+						<p className="text-center text-muted-foreground py-4">Cargando documentos...</p>
+					) : documentsQuery.data?.length === 0 ? (
+						<p className="text-center text-muted-foreground py-4">No hay documentos subidos</p>
+					) : (
+						<div className="space-y-3">
+							{documentsQuery.data?.map((doc) => (
+								<div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg">
+									<div className="flex items-center gap-3 flex-1">
+										<span className="text-2xl">{getDocumentIcon(doc.mimeType)}</span>
+										<div className="flex-1">
+											<div className="flex items-center gap-2">
+												<span className="font-medium text-sm">{doc.originalName}</span>
+												<Badge variant="outline" className="text-xs">
+													{documentTypeOptions.find(t => t.value === doc.documentType)?.label || doc.documentType}
+												</Badge>
+											</div>
+											{doc.description && (
+												<p className="text-xs text-muted-foreground mt-1">{doc.description}</p>
+											)}
+											<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+												<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
+												<span>Subido por {doc.uploadedBy?.name || "Usuario desconocido"}</span>
+												<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
+											</div>
+										</div>
+									</div>
+									<div className="flex items-center gap-2">
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() => window.open(doc.url, "_blank")}
+										>
+											Ver
+										</Button>
+										{(userProfile.data?.role === "admin" || doc.uploadedBy?.id === session?.user?.id) && (
+											<Button
+												size="sm"
+												variant="ghost"
+												onClick={() => deleteMutation.mutate(doc.id)}
+												disabled={deleteMutation.isPending}
+											>
+												<Trash2 className="h-4 w-4" />
+											</Button>
+										)}
+									</div>
+								</div>
+							))}
+						</div>
+					)}
+				</CardContent>
+			</Card>
 		</div>
 	);
 }

@@ -51,6 +51,8 @@ function AnalysisPage() {
 	const [isApproving, setIsApproving] = useState(true);
 	const [reason, setReason] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
+	const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
+	const [selectedOpportunityForDocs, setSelectedOpportunityForDocs] = useState<OpportunityForAnalysis | null>(null);
 	
 	// Check authentication and role
 	useEffect(() => {
@@ -82,6 +84,11 @@ function AnalysisPage() {
 		setIsApproving(approve);
 		setReason("");
 		setIsApprovalDialogOpen(true);
+	};
+
+	const handleViewDocuments = (opportunity: OpportunityForAnalysis) => {
+		setSelectedOpportunityForDocs(opportunity);
+		setIsDocumentsDialogOpen(true);
 	};
 
 	const handleSubmitApproval = async () => {
@@ -201,6 +208,14 @@ function AnalysisPage() {
 											<div className="flex gap-2">
 												<Button
 													size="sm"
+													variant="default"
+													onClick={() => handleViewDocuments(opportunity)}
+												>
+													<FileText className="h-4 w-4 mr-1" />
+													Ver Documentos
+												</Button>
+												<Button
+													size="sm"
 													variant="outline"
 													onClick={() => handleApprovalClick(opportunity, true)}
 												>
@@ -282,6 +297,119 @@ function AnalysisPage() {
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
+
+			{/* Dialog de documentos */}
+			<Dialog open={isDocumentsDialogOpen} onOpenChange={setIsDocumentsDialogOpen}>
+				<DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>
+							Documentos de la Oportunidad
+						</DialogTitle>
+						<DialogDescription>
+							{selectedOpportunityForDocs && (
+								<div className="mt-2">
+									<p className="font-medium">{selectedOpportunityForDocs.title}</p>
+									{selectedOpportunityForDocs.lead && (
+										<p className="text-sm">
+											Lead: {selectedOpportunityForDocs.lead.firstName} {selectedOpportunityForDocs.lead.lastName}
+										</p>
+									)}
+								</div>
+							)}
+						</DialogDescription>
+					</DialogHeader>
+					<div className="py-4">
+						{selectedOpportunityForDocs && (
+							<DocumentsViewer opportunityId={selectedOpportunityForDocs.id} />
+						)}
+					</div>
+				</DialogContent>
+			</Dialog>
+		</div>
+	);
+}
+
+// Component to view documents
+function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
+	const documentsQuery = useQuery({
+		...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),
+		enabled: !!opportunityId,
+	});
+
+	const documentTypeLabels: Record<string, string> = {
+		identification: "Identificación (DPI/Pasaporte)",
+		income_proof: "Comprobante de Ingresos",
+		bank_statement: "Estado de Cuenta Bancario",
+		business_license: "Patente de Comercio",
+		property_deed: "Escrituras de Propiedad",
+		vehicle_title: "Tarjeta de Circulación",
+		credit_report: "Reporte Crediticio",
+		other: "Otro",
+	};
+
+	const getDocumentIcon = (mimeType: string) => {
+		if (mimeType.includes("pdf")) return "📄";
+		if (mimeType.includes("image")) return "🖼️";
+		if (mimeType.includes("word")) return "📝";
+		return "📎";
+	};
+
+	if (documentsQuery.isLoading) {
+		return (
+			<div className="flex items-center justify-center py-8">
+				<p className="text-muted-foreground">Cargando documentos...</p>
+			</div>
+		);
+	}
+
+	if (!documentsQuery.data || documentsQuery.data.length === 0) {
+		return (
+			<Alert>
+				<AlertCircle className="h-4 w-4" />
+				<AlertDescription>
+					No hay documentos subidos para esta oportunidad.
+				</AlertDescription>
+			</Alert>
+		);
+	}
+
+	return (
+		<div className="space-y-4">
+			{documentsQuery.data.map((doc) => (
+				<Card key={doc.id}>
+					<CardContent className="p-4">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-3 flex-1">
+								<span className="text-2xl">{getDocumentIcon(doc.mimeType)}</span>
+								<div className="flex-1">
+									<div className="flex items-center gap-2">
+										<span className="font-medium">{doc.originalName}</span>
+										<Badge variant="outline" className="text-xs">
+											{documentTypeLabels[doc.documentType] || doc.documentType}
+										</Badge>
+									</div>
+									{doc.description && (
+										<p className="text-sm text-muted-foreground mt-1">{doc.description}</p>
+									)}
+									<div className="flex items-center gap-4 text-xs text-muted-foreground mt-2">
+										<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
+										<span>Subido por {doc.uploadedBy?.name || "Usuario desconocido"}</span>
+										<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
+									</div>
+								</div>
+							</div>
+							<Button
+								size="sm"
+								variant="default"
+								onClick={() => window.open(doc.url, "_blank")}
+							>
+								<FileText className="h-4 w-4 mr-1" />
+								Ver Documento
+							</Button>
+						</div>
+					</CardContent>
+				</Card>
+			))}
 		</div>
 	);
 }

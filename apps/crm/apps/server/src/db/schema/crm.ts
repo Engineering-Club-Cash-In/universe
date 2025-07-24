@@ -27,6 +27,22 @@ export const leadSourceEnum = pgEnum("lead_source", [
 	"event",
 	"other",
 ]);
+export const maritalStatusEnum = pgEnum("marital_status", [
+	"single",
+	"married",
+	"divorced",
+	"widowed",
+]);
+export const occupationTypeEnum = pgEnum("occupation_type", [
+	"owner",
+	"employee",
+]);
+export const workTimeEnum = pgEnum("work_time", [
+	"1_to_5",
+	"5_to_10",
+	"10_plus",
+]);
+export const loanPurposeEnum = pgEnum("loan_purpose", ["personal", "business"]);
 export const opportunityStatusEnum = pgEnum("opportunity_status", [
 	"open",
 	"won",
@@ -87,7 +103,19 @@ export const leads = pgTable("leads", {
 	firstName: text("first_name").notNull(),
 	lastName: text("last_name").notNull(),
 	email: text("email").notNull(),
-	phone: text("phone"),
+	phone: text("phone").notNull(),
+	age: integer("age"),
+	dpi: text("dpi"),
+	maritalStatus: maritalStatusEnum("marital_status"),
+	dependents: integer("dependents").default(0),
+	monthlyIncome: decimal("monthly_income", { precision: 12, scale: 2 }),
+	loanAmount: decimal("loan_amount", { precision: 12, scale: 2 }),
+	occupation: occupationTypeEnum("occupation"),
+	workTime: workTimeEnum("work_time"),
+	loanPurpose: loanPurposeEnum("loan_purpose"),
+	ownsHome: boolean("owns_home").default(false),
+	ownsVehicle: boolean("owns_vehicle").default(false),
+	hasCreditCard: boolean("has_credit_card").default(false),
 	jobTitle: text("job_title"),
 	companyId: uuid("company_id").references(() => companies.id),
 	source: leadSourceEnum("source").notNull().default("other"),
@@ -97,6 +125,38 @@ export const leads = pgTable("leads", {
 		.references(() => user.id),
 	notes: text("notes"),
 	convertedAt: timestamp("converted_at"),
+	score: decimal("score", { precision: 3, scale: 2 }),
+	fit: boolean("fit").default(false),
+	scoredAt: timestamp("scored_at"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	createdBy: text("created_by")
+		.notNull()
+		.references(() => user.id),
+});
+
+// Credit Analysis table - Análisis de capacidad de pago
+export const creditAnalysis = pgTable("credit_analysis", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	leadId: uuid("lead_id")
+		.notNull()
+		.references(() => leads.id)
+		.unique(),
+	// Resumen de análisis completo (JSON)
+	fullAnalysis: text("full_analysis"), // JSON string with complete bank analysis
+	// Promedios mensuales
+	monthlyFixedIncome: decimal("monthly_fixed_income", { precision: 12, scale: 2 }),
+	monthlyVariableIncome: decimal("monthly_variable_income", { precision: 12, scale: 2 }),
+	monthlyFixedExpenses: decimal("monthly_fixed_expenses", { precision: 12, scale: 2 }),
+	monthlyVariableExpenses: decimal("monthly_variable_expenses", { precision: 12, scale: 2 }),
+	economicAvailability: decimal("economic_availability", { precision: 12, scale: 2 }),
+	// Cálculos de capacidad de pago
+	minPayment: decimal("min_payment", { precision: 12, scale: 2 }),
+	maxPayment: decimal("max_payment", { precision: 12, scale: 2 }),
+	adjustedPayment: decimal("adjusted_payment", { precision: 12, scale: 2 }),
+	maxCreditAmount: decimal("max_credit_amount", { precision: 12, scale: 2 }),
+	// Metadata
+	analyzedAt: timestamp("analyzed_at").notNull().defaultNow(),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 	createdBy: text("created_by")

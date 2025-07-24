@@ -26,6 +26,7 @@ export const appRouter = {
 	getLeads: crmRouter.getLeads,
 	createLead: crmRouter.createLead,
 	updateLead: crmRouter.updateLead,
+	getCreditAnalysisByLeadId: crmRouter.getCreditAnalysisByLeadId,
 	getOpportunities: crmRouter.getOpportunities,
 	createOpportunity: crmRouter.createOpportunity,
 	updateOpportunity: crmRouter.updateOpportunity,

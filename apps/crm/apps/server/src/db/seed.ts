@@ -4,6 +4,7 @@ import { user } from "./schema/auth";
 import {
 	clients,
 	companies,
+	creditAnalysis,
 	leads,
 	opportunities,
 	salesStages,
@@ -187,81 +188,201 @@ const leadsData = [
 		firstName: "Carlos",
 		lastName: "Rodriguez",
 		email: "carlos.rodriguez@techcorp.com",
-		phone: "+34 91 123 4567",
+		phone: "+502 5555 0101",
+		age: 35,
+		dpi: "2987654321001",
+		maritalStatus: "married" as const,
+		dependents: 2,
+		monthlyIncome: "35000.00",
+		loanAmount: "150000.00",
+		occupation: "employee" as const,
+		workTime: "5_to_10" as const,
+		loanPurpose: "business" as const,
+		ownsHome: true,
+		ownsVehicle: true,
+		hasCreditCard: true,
 		jobTitle: "CTO",
 		source: "website" as const,
 		status: "new" as const,
 		notes: "Interested in our enterprise solutions",
+		score: "0.85",
+		fit: true,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Maria",
 		lastName: "Garcia",
 		email: "maria.garcia@globalfinance.es",
-		phone: "+34 93 987 6543",
+		phone: "+502 5555 0202",
+		age: 42,
+		dpi: "3876543210101",
+		maritalStatus: "single" as const,
+		dependents: 0,
+		monthlyIncome: "45000.00",
+		loanAmount: "200000.00",
+		occupation: "owner" as const,
+		workTime: "10_plus" as const,
+		loanPurpose: "business" as const,
+		ownsHome: true,
+		ownsVehicle: true,
+		hasCreditCard: true,
 		jobTitle: "Finance Director",
 		source: "referral" as const,
 		status: "contacted" as const,
 		notes: "Referred by existing client",
+		score: "0.92",
+		fit: true,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Javier",
 		lastName: "Martinez",
 		email: "javier.martinez@healthplus.es",
-		phone: "+34 96 555 0123",
+		phone: "+502 5555 0303",
+		age: 28,
+		dpi: "4765432101201",
+		maritalStatus: "single" as const,
+		dependents: 0,
+		monthlyIncome: "18000.00",
+		loanAmount: "50000.00",
+		occupation: "employee" as const,
+		workTime: "1_to_5" as const,
+		loanPurpose: "personal" as const,
+		ownsHome: false,
+		ownsVehicle: true,
+		hasCreditCard: true,
 		jobTitle: "Operations Manager",
 		source: "cold_call" as const,
 		status: "qualified" as const,
 		notes: "Looking for workflow automation",
+		score: "0.45",
+		fit: false,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Ana",
 		lastName: "Lopez",
 		email: "ana.lopez@retailmax.com",
-		phone: "+34 95 444 5678",
+		phone: "+502 5555 0404",
+		age: 39,
+		dpi: "5654321012301",
+		maritalStatus: "divorced" as const,
+		dependents: 1,
+		monthlyIncome: "28000.00",
+		loanAmount: "80000.00",
+		occupation: "employee" as const,
+		workTime: "5_to_10" as const,
+		loanPurpose: "personal" as const,
+		ownsHome: true,
+		ownsVehicle: false,
+		hasCreditCard: true,
 		jobTitle: "IT Director",
 		source: "email" as const,
 		status: "new" as const,
 		notes: "E-commerce integration needs",
+		score: "0.68",
+		fit: false,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Pedro",
 		lastName: "Sanchez",
 		email: "pedro.sanchez@startupinnovate.io",
-		phone: "+34 94 333 9876",
+		phone: "+502 5555 0505",
+		age: 31,
+		dpi: "6543210123401",
+		maritalStatus: "married" as const,
+		dependents: 3,
+		monthlyIncome: "22000.00",
+		loanAmount: "60000.00",
+		occupation: "owner" as const,
+		workTime: "1_to_5" as const,
+		loanPurpose: "business" as const,
+		ownsHome: false,
+		ownsVehicle: true,
+		hasCreditCard: false,
 		jobTitle: "CEO",
 		source: "social_media" as const,
 		status: "contacted" as const,
 		notes: "Startup looking for scalable solutions",
+		score: "0.33",
+		fit: false,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Laura",
 		lastName: "Fernandez",
 		email: "laura.fernandez@manufacturingpro.es",
-		phone: "+34 97 222 1234",
+		phone: "+502 5555 0606",
+		age: 45,
+		dpi: "7432101234501",
+		maritalStatus: "widowed" as const,
+		dependents: 2,
+		monthlyIncome: "32000.00",
+		loanAmount: "120000.00",
+		occupation: "employee" as const,
+		workTime: "10_plus" as const,
+		loanPurpose: "personal" as const,
+		ownsHome: true,
+		ownsVehicle: true,
+		hasCreditCard: true,
 		jobTitle: "Production Manager",
 		source: "event" as const,
 		status: "qualified" as const,
 		notes: "Met at industry conference",
+		score: "0.77",
+		fit: true,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Miguel",
 		lastName: "Torres",
 		email: "miguel.torres@educonsulting.es",
-		phone: "+34 95 888 7777",
+		phone: "+502 5555 0707",
+		age: 52,
+		dpi: "8321012345601",
+		maritalStatus: "married" as const,
+		dependents: 4,
+		monthlyIncome: "15000.00",
+		loanAmount: "30000.00",
+		occupation: "employee" as const,
+		workTime: "10_plus" as const,
+		loanPurpose: "personal" as const,
+		ownsHome: true,
+		ownsVehicle: false,
+		hasCreditCard: false,
 		jobTitle: "Director",
 		source: "referral" as const,
 		status: "unqualified" as const,
 		notes: "Budget constraints identified",
+		score: "0.25",
+		fit: false,
+		scoredAt: new Date(),
 	},
 	{
 		firstName: "Isabel",
 		lastName: "Ruiz",
 		email: "isabel.ruiz@consultingexperts.com",
-		phone: "+34 95 111 2222",
+		phone: "+502 5555 0808",
+		age: 36,
+		dpi: "9210123456701",
+		maritalStatus: "single" as const,
+		dependents: 0,
+		monthlyIncome: "40000.00",
+		loanAmount: "100000.00",
+		occupation: "owner" as const,
+		workTime: "5_to_10" as const,
+		loanPurpose: "business" as const,
+		ownsHome: true,
+		ownsVehicle: true,
+		hasCreditCard: true,
 		jobTitle: "Senior Consultant",
 		source: "website" as const,
 		status: "converted" as const,
 		notes: "Successfully converted to opportunity",
+		score: "0.88",
+		fit: true,
+		scoredAt: new Date(),
 	},
 ];
 
@@ -368,6 +489,154 @@ const clientsData = [
 		notes: "Switched to competitor due to pricing",
 	},
 ];
+
+// Credit Analysis sample data
+const creditAnalysisData = [
+	{
+		// Carlos Rodriguez - High income, good capacity
+		monthlyFixedIncome: "35000.00",
+		monthlyVariableIncome: "5000.00",
+		monthlyFixedExpenses: "15000.00",
+		monthlyVariableExpenses: "8000.00",
+		economicAvailability: "17000.00",
+		minPayment: "3000.00",
+		maxPayment: "8500.00",
+		adjustedPayment: "5500.00",
+		maxCreditAmount: "350000.00",
+		fullAnalysis: JSON.stringify({
+			datos_generales: {
+				nombre_cuentahabiente: "Carlos Rodriguez",
+				numero_cuenta: "****1234",
+				tipo_cuenta: "Monetaria",
+			},
+			resumen_mensual: [
+				{
+					mes: "Enero 2024",
+					saldo_inicial: 45000,
+					total_debitos: 23000,
+					total_creditos: 40000,
+					saldo_final: 62000,
+					ingresos: { fijos: 35000, variables: 5000 },
+					gastos: { fijos: 15000, variables: 8000 },
+				},
+			],
+			promedio_mensual: {
+				promedio_ingresos_fijos: 35000,
+				promedio_ingresos_variables: 5000,
+				promedio_gastos_fijos: 15000,
+				promedio_gastos_variables: 8000,
+				disponibilidad_economica: 17000,
+			},
+		}),
+	},
+	{
+		// Maria Garcia - Very high income, excellent capacity
+		monthlyFixedIncome: "45000.00",
+		monthlyVariableIncome: "10000.00",
+		monthlyFixedExpenses: "18000.00",
+		monthlyVariableExpenses: "12000.00",
+		economicAvailability: "25000.00",
+		minPayment: "5000.00",
+		maxPayment: "12500.00",
+		adjustedPayment: "8000.00",
+		maxCreditAmount: "500000.00",
+		fullAnalysis: JSON.stringify({
+			datos_generales: {
+				nombre_cuentahabiente: "Maria Garcia",
+				numero_cuenta: "****5678",
+				tipo_cuenta: "Monetaria",
+			},
+			resumen_mensual: [],
+			promedio_mensual: {
+				promedio_ingresos_fijos: 45000,
+				promedio_ingresos_variables: 10000,
+				promedio_gastos_fijos: 18000,
+				promedio_gastos_variables: 12000,
+				disponibilidad_economica: 25000,
+			},
+		}),
+	},
+	{
+		// Laura Fernandez - Moderate income, decent capacity
+		monthlyFixedIncome: "32000.00",
+		monthlyVariableIncome: "3000.00",
+		monthlyFixedExpenses: "20000.00",
+		monthlyVariableExpenses: "5000.00",
+		economicAvailability: "10000.00",
+		minPayment: "2000.00",
+		maxPayment: "5000.00",
+		adjustedPayment: "3500.00",
+		maxCreditAmount: "200000.00",
+		fullAnalysis: JSON.stringify({
+			datos_generales: {
+				nombre_cuentahabiente: "Laura Fernandez",
+				numero_cuenta: "****9012",
+				tipo_cuenta: "Ahorro",
+			},
+		}),
+	},
+	{
+		// Isabel Ruiz - Good income, strong capacity
+		monthlyFixedIncome: "40000.00",
+		monthlyVariableIncome: "8000.00",
+		monthlyFixedExpenses: "22000.00",
+		monthlyVariableExpenses: "8000.00",
+		economicAvailability: "18000.00",
+		minPayment: "3500.00",
+		maxPayment: "9000.00",
+		adjustedPayment: "6000.00",
+		maxCreditAmount: "400000.00",
+		fullAnalysis: JSON.stringify({
+			datos_generales: {
+				nombre_cuentahabiente: "Isabel Ruiz",
+				numero_cuenta: "****3456",
+				tipo_cuenta: "Monetaria",
+			},
+		}),
+	},
+];
+
+async function seedCreditAnalysis(usersList: any[], leadsList: any[]) {
+	console.log("Seeding credit analysis...");
+
+	try {
+		const existingAnalyses = await db.select().from(creditAnalysis);
+
+		if (existingAnalyses.length > 0) {
+			console.log("Credit analyses already exist, skipping seed...");
+			return existingAnalyses;
+		}
+
+		// Only seed for leads that are qualified or converted
+		const qualifiedLeads = leadsList.filter(
+			(lead) => lead.score && Number(lead.score) >= 0.7 && lead.fit === true
+		);
+
+		const analysisWithRelations = creditAnalysisData
+			.slice(0, qualifiedLeads.length)
+			.map((analysis, index) => {
+				const createdByUser = usersList[index % usersList.length];
+				return {
+					...analysis,
+					leadId: qualifiedLeads[index].id,
+					createdBy: createdByUser.id,
+					analyzedAt: new Date(),
+					updatedAt: new Date(),
+				};
+			});
+
+		const insertedAnalyses = await db
+			.insert(creditAnalysis)
+			.values(analysisWithRelations)
+			.returning();
+
+		console.log("✅ Credit analyses seeded successfully!");
+		return insertedAnalyses;
+	} catch (error) {
+		console.error("❌ Error seeding credit analyses:", error);
+		return [];
+	}
+}
 
 async function seedCompanies(usersList: any[]) {
 	console.log("Seeding companies...");
@@ -641,6 +910,7 @@ async function main() {
 		leadsList,
 	);
 	const clientsList = await seedClients(usersList, companiesList);
+	const creditAnalysisList = await seedCreditAnalysis(usersList, leadsList);
 
 	console.log("\n🎉 CRM database seeding completed!");
 	console.log(`✅ ${usersList.length} users`);
@@ -649,6 +919,7 @@ async function main() {
 	console.log(`✅ ${leadsList.length} leads`);
 	console.log(`✅ ${opportunitiesList.length} opportunities`);
 	console.log(`✅ ${clientsList.length} clients`);
+	console.log(`✅ ${creditAnalysisList.length} credit analyses`);
 
 	process.exit(0);
 }

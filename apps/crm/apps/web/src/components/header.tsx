@@ -89,6 +89,17 @@ export default function Header() {
 								</>
 							)}
 
+							{/* Analyst Navigation */}
+							{session && userRole && ["admin", "analyst"].includes(userRole) && (
+								<NavigationMenuItem>
+									<Link to="/crm/analysis">
+										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
+											Análisis
+										</NavigationMenuLink>
+									</Link>
+								</NavigationMenuItem>
+							)}
+
 							{session && userRole === "admin" && (
 								<>
 									<NavigationMenuItem>

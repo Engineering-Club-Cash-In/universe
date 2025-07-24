@@ -12,8 +12,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Building,
 	Calendar,
+	Clock,
 	DollarSign,
 	Filter,
+	History,
 	Mail,
 	Plus,
 	Target,
@@ -49,6 +51,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+} from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
@@ -276,6 +285,9 @@ function RouteComponent() {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<any>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
+	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
+	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+	const [stageChangeReason, setStageChangeReason] = useState<string>("");
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		updateOpportunityMutation.mutate({
@@ -284,9 +296,21 @@ function RouteComponent() {
 		});
 	};
 
-	const handleOpportunityClick = (opportunity: any) => {
+	const handleOpportunityClick = async (opportunity: any) => {
 		setSelectedOpportunity(opportunity);
 		setIsDetailsDialogOpen(true);
+		
+		// Load opportunity history
+		setIsLoadingHistory(true);
+		try {
+			const history = await client.getOpportunityHistory({ opportunityId: opportunity.id });
+			setOpportunityHistory(history);
+		} catch (error) {
+			console.error("Error loading opportunity history:", error);
+			setOpportunityHistory([]);
+		} finally {
+			setIsLoadingHistory(false);
+		}
 	};
 
 	const handleEditOpportunity = () => {
@@ -472,6 +496,7 @@ function RouteComponent() {
 			probability?: number;
 			expectedCloseDate?: string;
 			notes?: string;
+			stageChangeReason?: string;
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -523,10 +548,20 @@ function RouteComponent() {
 			// Return a context object with the snapshotted value
 			return { previousOpportunities };
 		},
-		onSuccess: () => {
+		onSuccess: async (data, variables) => {
 			toast.success("Oportunidad actualizada exitosamente");
 			setIsEditDialogOpen(false);
 			setIsChangeStageDialogOpen(false);
+			
+			// Reload history if we're viewing this opportunity and stage changed
+			if (selectedOpportunity?.id === variables.id && variables.stageId) {
+				try {
+					const history = await client.getOpportunityHistory({ opportunityId: variables.id });
+					setOpportunityHistory(history);
+				} catch (error) {
+					console.error("Error reloading history:", error);
+				}
+			}
 		},
 		onError: (error: any, variables, context) => {
 			// If the mutation fails, use the context returned from onMutate to roll back
@@ -1046,47 +1081,53 @@ function RouteComponent() {
 							<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 						</DialogHeader>
 						{selectedOpportunity && (
-							<div className="space-y-6">
-								{/* Header with title and status */}
-								<div className="flex items-start justify-between">
-									<div>
-										<h3 className="font-semibold text-lg">
-											{selectedOpportunity.title}
-										</h3>
-										<div className="mt-1 flex items-center gap-2">
-											<Badge
-												className={`${getStatusBadgeColor(selectedOpportunity.status)}`}
-												variant="outline"
-											>
-												{getStatusLabel(selectedOpportunity.status)}
-											</Badge>
-											{selectedOpportunity.stage && (
+							<Tabs defaultValue="details" className="w-full">
+								<TabsList className="grid w-full grid-cols-2">
+									<TabsTrigger value="details">Detalles</TabsTrigger>
+									<TabsTrigger value="history">Historial</TabsTrigger>
+								</TabsList>
+								
+								<TabsContent value="details" className="space-y-6 mt-6">
+									{/* Header with title and status */}
+									<div className="flex items-start justify-between">
+										<div>
+											<h3 className="font-semibold text-lg">
+												{selectedOpportunity.title}
+											</h3>
+											<div className="mt-1 flex items-center gap-2">
 												<Badge
-													style={{
-														backgroundColor: selectedOpportunity.stage.color,
-														color: "white",
-													}}
+													className={`${getStatusBadgeColor(selectedOpportunity.status)}`}
+													variant="outline"
 												>
-													{selectedOpportunity.stage.name}
+													{getStatusLabel(selectedOpportunity.status)}
 												</Badge>
-											)}
+												{selectedOpportunity.stage && (
+													<Badge
+														style={{
+															backgroundColor: selectedOpportunity.stage.color,
+															color: "white",
+														}}
+													>
+														{selectedOpportunity.stage.name}
+													</Badge>
+												)}
+											</div>
+										</div>
+										<div className="text-right">
+											<div className="font-bold text-2xl text-green-600">
+												$
+												{Number.parseFloat(
+													selectedOpportunity.value || "0",
+												).toLocaleString()}
+											</div>
+											<div className="text-muted-foreground text-sm">
+												{selectedOpportunity.probability ||
+													selectedOpportunity.stage?.closurePercentage ||
+													0}
+												% probabilidad
+											</div>
 										</div>
 									</div>
-									<div className="text-right">
-										<div className="font-bold text-2xl text-green-600">
-											$
-											{Number.parseFloat(
-												selectedOpportunity.value || "0",
-											).toLocaleString()}
-										</div>
-										<div className="text-muted-foreground text-sm">
-											{selectedOpportunity.probability ||
-												selectedOpportunity.stage?.closurePercentage ||
-												0}
-											% probabilidad
-										</div>
-									</div>
-								</div>
 
 								{/* Details Grid */}
 								<div className="grid grid-cols-2 gap-6">
@@ -1211,7 +1252,69 @@ function RouteComponent() {
 										Cambiar Etapa
 									</Button>
 								</div>
-							</div>
+								</TabsContent>
+								
+								<TabsContent value="history" className="space-y-4 mt-6">
+									<div className="space-y-4">
+										<div className="flex items-center gap-2 mb-4">
+											<History className="h-5 w-5 text-muted-foreground" />
+											<h3 className="font-semibold text-lg">Historial de Cambios</h3>
+										</div>
+										
+										{isLoadingHistory ? (
+											<div className="flex items-center justify-center py-8">
+												<p className="text-muted-foreground">Cargando historial...</p>
+											</div>
+										) : opportunityHistory.length === 0 ? (
+											<div className="rounded-lg border bg-muted/30 p-4 text-center">
+												<p className="text-muted-foreground">No hay cambios registrados</p>
+											</div>
+										) : (
+											<div className="space-y-3">
+												{opportunityHistory.map((change) => (
+													<div key={change.id} className="rounded-lg border bg-card p-4">
+														<div className="flex items-start justify-between">
+															<div className="flex-1 space-y-2">
+																<div className="flex items-center gap-2">
+																	{change.isOverride && (
+																		<Badge variant="outline" className="bg-orange-100 border-orange-300 text-orange-700">
+																			Override
+																		</Badge>
+																	)}
+																	<span className="font-medium">
+																		{change.fromStage?.name || "Inicio"} → {change.toStage?.name}
+																	</span>
+																</div>
+																{change.reason && (
+																	<p className="text-sm text-muted-foreground">{change.reason}</p>
+																)}
+																<div className="flex items-center gap-4 text-xs text-muted-foreground">
+																	<div className="flex items-center gap-1">
+																		<Clock className="h-3 w-3" />
+																		{new Date(change.changedAt).toLocaleString()}
+																	</div>
+																	<div className="flex items-center gap-1">
+																		<Users className="h-3 w-3" />
+																		{change.changedBy?.name || "Usuario desconocido"}
+																		{change.changedBy?.role && (
+																			<Badge variant="outline" className="ml-1 text-xs">
+																				{change.changedBy.role === "admin" ? "Admin" : 
+																				 change.changedBy.role === "sales" ? "Ventas" : 
+																				 change.changedBy.role === "analyst" ? "Analista" : 
+																				 change.changedBy.role}
+																			</Badge>
+																		)}
+																	</div>
+																</div>
+															</div>
+														</div>
+													</div>
+												))}
+											</div>
+										)}
+									</div>
+								</TabsContent>
+							</Tabs>
 						)}
 					</DialogContent>
 				</Dialog>
@@ -1482,12 +1585,25 @@ function RouteComponent() {
 										</SelectContent>
 									</Select>
 								</div>
+								<div className="space-y-2">
+									<Label htmlFor="stageChangeReason">Razón del cambio (opcional)</Label>
+									<Textarea
+										id="stageChangeReason"
+										value={stageChangeReason}
+										onChange={(e) => setStageChangeReason(e.target.value)}
+										placeholder="Describe por qué se está cambiando la etapa..."
+										rows={3}
+									/>
+								</div>
 								<div className="flex gap-3 pt-4">
 									<Button
 										type="button"
 										variant="outline"
 										className="flex-1"
-										onClick={() => setIsChangeStageDialogOpen(false)}
+										onClick={() => {
+											setIsChangeStageDialogOpen(false);
+											setStageChangeReason("");
+										}}
 									>
 										Cancelar
 									</Button>
@@ -1498,8 +1614,10 @@ function RouteComponent() {
 												updateOpportunityMutation.mutate({
 													id: selectedOpportunity.id,
 													stageId: selectedStage,
+													stageChangeReason: stageChangeReason || undefined,
 												});
 												setIsChangeStageDialogOpen(false);
+												setStageChangeReason("");
 											}
 										}}
 										disabled={

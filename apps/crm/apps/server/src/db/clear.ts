@@ -2,6 +2,7 @@ import { db } from "./index";
 import {
 	clients,
 	companies,
+	creditAnalysis,
 	leads,
 	opportunities,
 	salesStages,
@@ -17,6 +18,9 @@ async function clearAllCRMData() {
 
 		await db.delete(opportunities);
 		console.log("✅ Opportunities cleared");
+
+		await db.delete(creditAnalysis);
+		console.log("✅ Credit analyses cleared");
 
 		await db.delete(leads);
 		console.log("✅ Leads cleared");

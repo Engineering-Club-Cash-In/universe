@@ -6,6 +6,7 @@ import {
 	activities,
 	clients,
 	companies,
+	creditAnalysis,
 	leads,
 	opportunities,
 	salesStages,
@@ -109,11 +110,26 @@ export const crmRouter = {
 					lastName: leads.lastName,
 					email: leads.email,
 					phone: leads.phone,
+					age: leads.age,
+					dpi: leads.dpi,
+					maritalStatus: leads.maritalStatus,
+					dependents: leads.dependents,
+					monthlyIncome: leads.monthlyIncome,
+					loanAmount: leads.loanAmount,
+					occupation: leads.occupation,
+					workTime: leads.workTime,
+					loanPurpose: leads.loanPurpose,
+					ownsHome: leads.ownsHome,
+					ownsVehicle: leads.ownsVehicle,
+					hasCreditCard: leads.hasCreditCard,
 					jobTitle: leads.jobTitle,
 					source: leads.source,
 					status: leads.status,
 					assignedTo: leads.assignedTo,
 					notes: leads.notes,
+					score: leads.score,
+					fit: leads.fit,
+					scoredAt: leads.scoredAt,
 					createdAt: leads.createdAt,
 					updatedAt: leads.updatedAt,
 					company: {
@@ -137,11 +153,26 @@ export const crmRouter = {
 				lastName: leads.lastName,
 				email: leads.email,
 				phone: leads.phone,
+				age: leads.age,
+				dpi: leads.dpi,
+				maritalStatus: leads.maritalStatus,
+				dependents: leads.dependents,
+				monthlyIncome: leads.monthlyIncome,
+				loanAmount: leads.loanAmount,
+				occupation: leads.occupation,
+				workTime: leads.workTime,
+				loanPurpose: leads.loanPurpose,
+				ownsHome: leads.ownsHome,
+				ownsVehicle: leads.ownsVehicle,
+				hasCreditCard: leads.hasCreditCard,
 				jobTitle: leads.jobTitle,
 				source: leads.source,
 				status: leads.status,
 				assignedTo: leads.assignedTo,
 				notes: leads.notes,
+				score: leads.score,
+				fit: leads.fit,
+				scoredAt: leads.scoredAt,
 				createdAt: leads.createdAt,
 				updatedAt: leads.updatedAt,
 				company: {
@@ -166,7 +197,21 @@ export const crmRouter = {
 				firstName: z.string().min(1, "First name is required"),
 				lastName: z.string().min(1, "Last name is required"),
 				email: z.string().email("Valid email is required"),
-				phone: z.string().optional(),
+				phone: z.string().min(1, "Phone is required"),
+				age: z.number().int().positive().optional(),
+				dpi: z.string().optional(),
+				maritalStatus: z
+					.enum(["single", "married", "divorced", "widowed"])
+					.optional(),
+				dependents: z.number().int().min(0).default(0),
+				monthlyIncome: z.number().positive().optional(),
+				loanAmount: z.number().positive().optional(),
+				occupation: z.enum(["owner", "employee"]).optional(),
+				workTime: z.enum(["1_to_5", "5_to_10", "10_plus"]).optional(),
+				loanPurpose: z.enum(["personal", "business"]).optional(),
+				ownsHome: z.boolean().default(false),
+				ownsVehicle: z.boolean().default(false),
+				hasCreditCard: z.boolean().default(false),
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z.enum([
@@ -195,6 +240,8 @@ export const crmRouter = {
 				.insert(leads)
 				.values({
 					...input,
+					monthlyIncome: input.monthlyIncome?.toString(),
+					loanAmount: input.loanAmount?.toString(),
 					assignedTo,
 					createdBy: context.userId,
 					updatedAt: new Date(),
@@ -211,6 +258,20 @@ export const crmRouter = {
 				lastName: z.string().min(1, "Last name is required").optional(),
 				email: z.string().email("Valid email is required").optional(),
 				phone: z.string().optional(),
+				age: z.number().int().positive().optional(),
+				dpi: z.string().optional(),
+				maritalStatus: z
+					.enum(["single", "married", "divorced", "widowed"])
+					.optional(),
+				dependents: z.number().int().min(0).optional(),
+				monthlyIncome: z.number().positive().optional(),
+				loanAmount: z.number().positive().optional(),
+				occupation: z.enum(["owner", "employee"]).optional(),
+				workTime: z.enum(["1_to_5", "5_to_10", "10_plus"]).optional(),
+				loanPurpose: z.enum(["personal", "business"]).optional(),
+				ownsHome: z.boolean().optional(),
+				ownsVehicle: z.boolean().optional(),
+				hasCreditCard: z.boolean().optional(),
 				jobTitle: z.string().optional(),
 				companyId: z.string().uuid().optional(),
 				source: z
@@ -229,6 +290,8 @@ export const crmRouter = {
 					.optional(),
 				assignedTo: z.string().uuid().optional(),
 				notes: z.string().optional(),
+				score: z.number().min(0).max(1).optional(),
+				fit: z.boolean().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -253,7 +316,11 @@ export const crmRouter = {
 				.update(leads)
 				.set({
 					...updateData,
+					monthlyIncome: updateData.monthlyIncome?.toString(),
+					loanAmount: updateData.loanAmount?.toString(),
+					score: updateData.score?.toString(),
 					...(assignedTo && { assignedTo }),
+					...(updateData.score !== undefined && { scoredAt: new Date() }),
 					updatedAt: new Date(),
 				})
 				.where(whereClause)
@@ -266,6 +333,38 @@ export const crmRouter = {
 			}
 
 			return updatedLead[0];
+		}),
+
+	// Credit Analysis
+	getCreditAnalysisByLeadId: crmProcedure
+		.input(z.object({ leadId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Check if user has access to the lead
+			const lead = await db
+				.select()
+				.from(leads)
+				.where(eq(leads.id, input.leadId))
+				.limit(1);
+
+			if (lead.length === 0) {
+				throw new Error("Lead not found");
+			}
+
+			// Sales users can only see analysis for their assigned leads
+			if (
+				context.userRole === "sales" &&
+				lead[0].assignedTo !== context.userId
+			) {
+				throw new Error("You don't have permission to view this analysis");
+			}
+
+			const analysis = await db
+				.select()
+				.from(creditAnalysis)
+				.where(eq(creditAnalysis.leadId, input.leadId))
+				.limit(1);
+
+			return analysis[0] || null;
 		}),
 
 	// Opportunities

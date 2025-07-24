@@ -46,7 +46,7 @@ export default function UserMenu() {
 	const getInitials = (name: string) => {
 		return name
 			.split(" ")
-			.map(n => n[0])
+			.map((n) => n[0])
 			.join("")
 			.toUpperCase()
 			.slice(0, 2);
@@ -62,16 +62,23 @@ export default function UserMenu() {
 			<DropdownMenuContent className="w-72 bg-card p-4">
 				<div className="flex flex-col items-center space-y-4">
 					<Avatar className="h-16 w-16">
-						<AvatarImage src={session.user.image || ""} alt={session.user.name || ""} />
-						<AvatarFallback className="text-lg font-medium">
+						<AvatarImage
+							src={session.user.image || ""}
+							alt={session.user.name || ""}
+						/>
+						<AvatarFallback className="font-medium text-lg">
 							{getInitials(session.user.name || "U")}
 						</AvatarFallback>
 					</Avatar>
-					
-					<h3 className="font-medium text-lg text-center">{session.user.name}</h3>
-					
-					<p className="text-muted-foreground text-sm text-center">{session.user.email}</p>
-					
+
+					<h3 className="text-center font-medium text-lg">
+						{session.user.name}
+					</h3>
+
+					<p className="text-center text-muted-foreground text-sm">
+						{session.user.email}
+					</p>
+
 					{userRole && (
 						<Badge className={getRoleBadgeColor(userRole)} variant="outline">
 							{userRole === "admin" ? (
@@ -85,7 +92,7 @@ export default function UserMenu() {
 							)}
 						</Badge>
 					)}
-					
+
 					<Button
 						variant="outline"
 						className="w-full"

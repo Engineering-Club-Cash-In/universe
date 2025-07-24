@@ -33,7 +33,7 @@ function RouteComponent() {
 	const adminData = useQuery({
 		...orpc.adminOnlyData.queryOptions(),
 		enabled: userProfile.data?.role === "admin",
-	})
+	});
 
 	// CRM Dashboard Stats
 	const crmStats = useQuery({
@@ -43,7 +43,7 @@ function RouteComponent() {
 			["admin", "sales"].includes(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getDashboardStats", session?.user?.id, userProfile.data?.role],
-	})
+	});
 
 	// Sales Stages for funnel
 	const salesStages = useQuery({
@@ -53,7 +53,7 @@ function RouteComponent() {
 			["admin", "sales"].includes(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
-	})
+	});
 
 	useEffect(() => {
 		if (!session && !isPending) {
@@ -302,5 +302,5 @@ function RouteComponent() {
 				</Card>
 			)}
 		</div>
-	)
+	);
 }

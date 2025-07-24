@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
+import { PERMISSIONS, ROLES, getRoleLabel } from "server/src/types/roles";
 
 export const Route = createFileRoute("/dashboard")({
 	component: RouteComponent,
@@ -32,7 +33,7 @@ function RouteComponent() {
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const adminData = useQuery({
 		...orpc.adminOnlyData.queryOptions(),
-		enabled: userProfile.data?.role === "admin",
+		enabled: userProfile.data?.role === ROLES.ADMIN,
 	});
 
 	// CRM Dashboard Stats
@@ -40,7 +41,7 @@ function RouteComponent() {
 		...orpc.getDashboardStats.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getDashboardStats", session?.user?.id, userProfile.data?.role],
 	});
@@ -50,7 +51,7 @@ function RouteComponent() {
 		...orpc.getSalesStages.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
 	});
@@ -79,12 +80,12 @@ function RouteComponent() {
 					Bienvenido de vuelta, {session?.user.name}
 				</p>
 				<div className="mt-2 inline-flex items-center rounded-full border px-2.5 py-0.5 font-semibold text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
-					Rol: {userRole}
+					Rol: {getRoleLabel(userRole || "")}
 				</div>
 			</div>
 
 			{/* CRM Metrics */}
-			{userRole === "admin" && crmStats.data && (
+			{userRole === ROLES.ADMIN && crmStats.data && (
 				<div className="space-y-4">
 					<h2 className="font-semibold text-2xl">Resumen Global del CRM</h2>
 					<div className="grid gap-4 md:grid-cols-4">
@@ -154,7 +155,7 @@ function RouteComponent() {
 				</div>
 			)}
 
-			{userRole === "sales" && crmStats.data && (
+			{userRole === ROLES.SALES && crmStats.data && (
 				<div className="space-y-4">
 					<h2 className="font-semibold text-2xl text-blue-600">
 						Mi Rendimiento de Ventas
@@ -218,7 +219,7 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent>
 					<div className="grid gap-2 md:grid-cols-2 lg:grid-cols-4">
-						{(userRole === "admin" || userRole === "sales") && (
+						{userRole && PERMISSIONS.canAccessCRM(userRole) && (
 							<Link to="/crm/leads">
 								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
 									<Users className="h-4 w-4" />
@@ -226,7 +227,7 @@ function RouteComponent() {
 								</button>
 							</Link>
 						)}
-						{(userRole === "admin" || userRole === "sales") && (
+						{userRole && PERMISSIONS.canAccessCRM(userRole) && (
 							<Link to="/crm/opportunities">
 								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
 									<Target className="h-4 w-4" />
@@ -234,7 +235,7 @@ function RouteComponent() {
 								</button>
 							</Link>
 						)}
-						{(userRole === "admin" || userRole === "sales") && (
+						{userRole && PERMISSIONS.canAccessCRM(userRole) && (
 							<Link to="/crm/companies">
 								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
 									<Building className="h-4 w-4" />
@@ -242,7 +243,7 @@ function RouteComponent() {
 								</button>
 							</Link>
 						)}
-						{userRole === "admin" && (
+						{userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 							<Link to="/admin/reports">
 								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
 									<DollarSign className="h-4 w-4" />

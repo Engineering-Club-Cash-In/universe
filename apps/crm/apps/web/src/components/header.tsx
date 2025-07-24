@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
+import { PERMISSIONS } from "server/src/types/roles";
 
 import { ModeToggle } from "./mode-toggle";
 import {
@@ -56,7 +57,7 @@ export default function Header() {
 							)}
 
 							{/* CRM Navigation for both admin and sales */}
-							{session && userRole && ["admin", "sales"].includes(userRole) && (
+							{session && userRole && PERMISSIONS.canAccessCRM(userRole) && (
 								<>
 									<NavigationMenuItem>
 										<Link to="/crm/leads">
@@ -90,7 +91,7 @@ export default function Header() {
 							)}
 
 							{/* Analyst Navigation */}
-							{session && userRole && ["admin", "analyst"].includes(userRole) && (
+							{session && userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
 								<NavigationMenuItem>
 									<Link to="/crm/analysis">
 										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
@@ -100,7 +101,7 @@ export default function Header() {
 								</NavigationMenuItem>
 							)}
 
-							{session && userRole === "admin" && (
+							{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 								<>
 									<NavigationMenuItem>
 										<Link to="/admin/users">

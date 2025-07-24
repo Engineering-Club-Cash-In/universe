@@ -9,9 +9,10 @@ import {
 	creditAnalysis,
 	leads,
 	opportunities,
+	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { adminProcedure, crmProcedure } from "../lib/orpc";
+import { adminProcedure, analystProcedure, crmProcedure } from "../lib/orpc";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -520,10 +521,22 @@ export const crmRouter = {
 				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
 				assignedTo: z.string().uuid().optional(),
 				notes: z.string().optional(),
+				stageChangeReason: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, assignedTo, ...updateData } = input;
+			const { id, assignedTo, stageChangeReason, ...updateData } = input;
+
+			// Get current opportunity to check for stage changes
+			const currentOpportunity = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, id))
+				.limit(1);
+
+			if (!currentOpportunity[0]) {
+				throw new Error("Opportunity not found");
+			}
 
 			// Sales users can only update opportunities assigned to them
 			const whereClause =
@@ -541,6 +554,23 @@ export const crmRouter = {
 				assignedTo !== context.userId
 			) {
 				throw new Error("Sales users cannot reassign opportunities");
+			}
+
+			// Check if this is a stage change
+			const isStageChange = input.stageId && input.stageId !== currentOpportunity[0].stageId;
+			
+			// Check if this is an override (sales moving from analysis stage)
+			let isOverride = false;
+			if (isStageChange && context.userRole === "sales") {
+				const analysisStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
+					.limit(1);
+				
+				if (analysisStage[0] && currentOpportunity[0].stageId === analysisStage[0].id) {
+					isOverride = true;
+				}
 			}
 
 			const updatedOpportunity = await db
@@ -562,7 +592,210 @@ export const crmRouter = {
 				);
 			}
 
+			// Record stage history if stage changed
+			if (isStageChange && input.stageId) {
+				await db.insert(opportunityStageHistory).values({
+					opportunityId: id,
+					fromStageId: currentOpportunity[0].stageId,
+					toStageId: input.stageId,
+					changedBy: context.userId,
+					reason: stageChangeReason || (isOverride ? "Ventas movió la oportunidad desde análisis" : "Cambio de etapa"),
+					isOverride,
+				});
+			}
+
 			return updatedOpportunity[0];
+		}),
+
+	// Analyst specific endpoints
+	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context }) => {
+		// Get the stage ID for "Recepción de documentación y traslado a análisis"
+		const analysisStage = await db
+			.select()
+			.from(salesStages)
+			.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
+			.limit(1);
+
+		if (!analysisStage[0]) {
+			throw new Error("Analysis stage not found");
+		}
+
+		// Get all opportunities in the analysis stage
+		return await db
+			.select({
+				id: opportunities.id,
+				title: opportunities.title,
+				value: opportunities.value,
+				probability: opportunities.probability,
+				expectedCloseDate: opportunities.expectedCloseDate,
+				status: opportunities.status,
+				notes: opportunities.notes,
+				createdAt: opportunities.createdAt,
+				updatedAt: opportunities.updatedAt,
+				lead: {
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+				},
+				company: {
+					id: companies.id,
+					name: companies.name,
+				},
+			})
+			.from(opportunities)
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.leftJoin(companies, eq(opportunities.companyId, companies.id))
+			.where(eq(opportunities.stageId, analysisStage[0].id))
+			.orderBy(opportunities.createdAt);
+	}),
+
+	approveOpportunityAnalysis: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				approved: z.boolean(),
+				reason: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get current opportunity with stage info
+			const opportunity = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity[0]) {
+				throw new Error("Opportunity not found");
+			}
+
+			// Get the analysis stage
+			const analysisStage = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
+				.limit(1);
+
+			if (opportunity[0].stageId !== analysisStage[0].id) {
+				throw new Error("Opportunity is not in analysis stage");
+			}
+
+			// Get the next stage
+			const nextStage = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.order, 5)) // "Cierre de propuesta"
+				.limit(1);
+
+			if (!nextStage[0]) {
+				throw new Error("Next stage not found");
+			}
+
+			// Update opportunity stage if approved
+			const newStageId = input.approved ? nextStage[0].id : opportunity[0].stageId;
+			
+			if (input.approved || input.reason) {
+				// Update opportunity
+				await db
+					.update(opportunities)
+					.set({
+						stageId: newStageId,
+						notes: input.reason 
+							? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
+							: opportunity[0].notes,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
+
+				// Record stage history
+				await db.insert(opportunityStageHistory).values({
+					opportunityId: input.opportunityId,
+					fromStageId: opportunity[0].stageId,
+					toStageId: newStageId,
+					changedBy: context.userId,
+					reason: input.reason || (input.approved ? "Documentación aprobada" : "Documentación rechazada"),
+					isOverride: false,
+				});
+			}
+
+			return { success: true, approved: input.approved };
+		}),
+
+	getOpportunityHistory: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Check if user has access to the opportunity
+			const opportunity = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity[0]) {
+				throw new Error("Opportunity not found");
+			}
+
+			// For sales users, check if they are assigned to the opportunity
+			if (
+				context.userRole === "sales" &&
+				opportunity[0].assignedTo !== context.userId
+			) {
+				throw new Error("You don't have permission to view this opportunity");
+			}
+
+			// Get stage history with user and stage details
+			const history = await db
+				.select({
+					id: opportunityStageHistory.id,
+					changedAt: opportunityStageHistory.changedAt,
+					reason: opportunityStageHistory.reason,
+					isOverride: opportunityStageHistory.isOverride,
+					changedById: opportunityStageHistory.changedBy,
+					fromStageId: opportunityStageHistory.fromStageId,
+					toStageId: opportunityStageHistory.toStageId,
+				})
+				.from(opportunityStageHistory)
+				.where(eq(opportunityStageHistory.opportunityId, input.opportunityId))
+				.orderBy(opportunityStageHistory.changedAt);
+
+			// Get all unique user IDs and stage IDs
+			const userIds = [...new Set(history.map(h => h.changedById))];
+			const stageIds = [...new Set(history.flatMap(h => [h.fromStageId, h.toStageId].filter(Boolean)))];
+
+			// Fetch users and stages
+			const users = userIds.length > 0 
+				? await db.select().from(user).where(or(...userIds.map(id => eq(user.id, id))))
+				: [];
+			const stages = stageIds.length > 0
+				? await db.select().from(salesStages).where(or(...stageIds.filter((id): id is string => id !== null).map(id => eq(salesStages.id, id))))
+				: [];
+
+			// Map users and stages
+			const userMap = new Map(users.map(u => [u.id, u]));
+			const stageMap = new Map(stages.map(s => [s.id, s]));
+
+			// Return formatted history
+			return history.map(h => ({
+				id: h.id,
+				changedAt: h.changedAt,
+				reason: h.reason,
+				isOverride: h.isOverride,
+				changedBy: userMap.get(h.changedById) ? {
+					id: userMap.get(h.changedById)!.id,
+					name: userMap.get(h.changedById)!.name,
+					role: userMap.get(h.changedById)!.role,
+				} : null,
+				fromStage: h.fromStageId && stageMap.get(h.fromStageId) ? {
+					id: stageMap.get(h.fromStageId)!.id,
+					name: stageMap.get(h.fromStageId)!.name,
+				} : null,
+				toStage: stageMap.get(h.toStageId) ? {
+					id: stageMap.get(h.toStageId)!.id,
+					name: stageMap.get(h.toStageId)!.name,
+				} : null,
+			}));
 		}),
 
 	// Clients

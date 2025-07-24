@@ -16,6 +16,7 @@ import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
+import { Route as CrmAnalysisRouteImport } from './routes/crm/analysis'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminReportsRouteImport } from './routes/admin/reports'
@@ -55,6 +56,11 @@ const CrmClientsRoute = CrmClientsRouteImport.update({
   path: '/crm/clients',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CrmAnalysisRoute = CrmAnalysisRouteImport.update({
+  id: '/crm/analysis',
+  path: '/crm/analysis',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/admin/users',
   path: '/admin/users',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/crm/analysis': typeof CrmAnalysisRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/crm/analysis': typeof CrmAnalysisRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/crm/analysis': typeof CrmAnalysisRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
@@ -117,6 +126,7 @@ export interface FileRouteTypes {
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/users'
+    | '/crm/analysis'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/users'
+    | '/crm/analysis'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
@@ -141,6 +152,7 @@ export interface FileRouteTypes {
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/users'
+    | '/crm/analysis'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
@@ -154,6 +166,7 @@ export interface RootRouteChildren {
   AdminReportsRoute: typeof AdminReportsRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  CrmAnalysisRoute: typeof CrmAnalysisRoute
   CrmClientsRoute: typeof CrmClientsRoute
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
@@ -211,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmClientsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/analysis': {
+      id: '/crm/analysis'
+      path: '/crm/analysis'
+      fullPath: '/crm/analysis'
+      preLoaderRoute: typeof CrmAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/users': {
       id: '/admin/users'
       path: '/admin/users'
@@ -242,6 +262,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminReportsRoute: AdminReportsRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
+  CrmAnalysisRoute: CrmAnalysisRoute,
   CrmClientsRoute: CrmClientsRoute,
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,

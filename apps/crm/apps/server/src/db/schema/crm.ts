@@ -212,6 +212,24 @@ export const clients = pgTable("clients", {
 		.references(() => user.id),
 });
 
+// Opportunity Stage History table - Tracks all stage movements
+export const opportunityStageHistory = pgTable("opportunity_stage_history", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	opportunityId: uuid("opportunity_id")
+		.notNull()
+		.references(() => opportunities.id, { onDelete: "cascade" }),
+	fromStageId: uuid("from_stage_id").references(() => salesStages.id),
+	toStageId: uuid("to_stage_id")
+		.notNull()
+		.references(() => salesStages.id),
+	changedBy: text("changed_by")
+		.notNull()
+		.references(() => user.id),
+	changedAt: timestamp("changed_at").notNull().defaultNow(),
+	reason: text("reason"), // For tracking why the change was made
+	isOverride: boolean("is_override").default(false), // True if sales overrode analyst decision
+});
+
 // Activities table
 export const activities = pgTable("activities", {
 	id: uuid("id").primaryKey().defaultRandom(),

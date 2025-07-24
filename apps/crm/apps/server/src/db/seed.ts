@@ -722,15 +722,28 @@ async function seedOpportunities(
 			return existingOpportunities;
 		}
 
+		// Find the analysis stage
+		const analysisStage = stagesList.find(
+			stage => stage.name === "Recepción de documentación y traslado a análisis"
+		);
+
 		const opportunitiesWithRelations = opportunitiesData.map((opp, index) => {
 			const assignedUser = usersList[index % usersList.length];
+			
+			// Put first 3 opportunities in analysis stage
+			let stageId;
+			if (index < 3 && analysisStage) {
+				stageId = analysisStage.id;
+			} else {
+				stageId = stagesList[Math.floor(Math.random() * stagesList.length)]?.id ||
+					stagesList[0]?.id;
+			}
+			
 			return {
 				...opp,
 				companyId: companiesList[index % companiesList.length]?.id || null,
 				leadId: leadsList[index % leadsList.length]?.id || null,
-				stageId:
-					stagesList[Math.floor(Math.random() * stagesList.length)]?.id ||
-					stagesList[0]?.id,
+				stageId,
 				assignedTo: assignedUser.id,
 				createdBy: assignedUser.id,
 				updatedAt: new Date(),
@@ -826,6 +839,16 @@ const usersData = [
 		emailVerified: true,
 		image: null,
 		role: "sales" as const,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+	},
+	{
+		id: "analyst-user-1",
+		name: "Ana Morales",
+		email: "ana@crm.com",
+		emailVerified: true,
+		image: null,
+		role: "analyst" as const,
 		createdAt: new Date(),
 		updatedAt: new Date(),
 	},

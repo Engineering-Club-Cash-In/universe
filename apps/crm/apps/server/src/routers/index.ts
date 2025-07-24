@@ -37,6 +37,11 @@ export const appRouter = {
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
+	
+	// Document Management
+	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
+	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
+	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
 };
 
 export type AppRouter = typeof appRouter;

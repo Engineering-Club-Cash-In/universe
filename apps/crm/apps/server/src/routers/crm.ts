@@ -12,7 +12,15 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
+import { opportunityDocuments } from "../db/schema/documents";
 import { adminProcedure, analystProcedure, crmProcedure } from "../lib/orpc";
+import { 
+	uploadFileToR2, 
+	getFileUrl, 
+	deleteFileFromR2, 
+	generateUniqueFilename,
+	validateFile 
+} from "../lib/storage";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -964,4 +972,190 @@ export const crmRouter = {
 			myClients: myClients?.count || 0,
 		};
 	}),
+
+	// Document Management
+	getOpportunityDocuments: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Verificar que el usuario tenga acceso a la oportunidad
+			const opportunity = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity[0]) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Para ventas, verificar que sea su oportunidad
+			if (
+				context.userRole === "sales" &&
+				opportunity[0].assignedTo !== context.userId
+			) {
+				throw new Error("No tienes permiso para ver estos documentos");
+			}
+
+			// Obtener documentos con información del usuario que los subió
+			const documents = await db
+				.select({
+					id: opportunityDocuments.id,
+					filename: opportunityDocuments.filename,
+					originalName: opportunityDocuments.originalName,
+					mimeType: opportunityDocuments.mimeType,
+					size: opportunityDocuments.size,
+					documentType: opportunityDocuments.documentType,
+					description: opportunityDocuments.description,
+					uploadedAt: opportunityDocuments.uploadedAt,
+					filePath: opportunityDocuments.filePath,
+					uploadedBy: {
+						id: user.id,
+						name: user.name,
+					},
+				})
+				.from(opportunityDocuments)
+				.leftJoin(user, eq(opportunityDocuments.uploadedBy, user.id))
+				.where(eq(opportunityDocuments.opportunityId, input.opportunityId))
+				.orderBy(opportunityDocuments.uploadedAt);
+
+			// Generar URLs firmadas para cada documento
+			const documentsWithUrls = await Promise.all(
+				documents.map(async (doc) => {
+					const url = await getFileUrl(doc.filePath);
+					return {
+						...doc,
+						url,
+					};
+				})
+			);
+
+			return documentsWithUrls;
+		}),
+
+	uploadOpportunityDocument: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				documentType: z.enum([
+					"identification",
+					"income_proof",
+					"bank_statement",
+					"business_license",
+					"property_deed",
+					"vehicle_title",
+					"credit_report",
+					"other",
+				]),
+				description: z.string().optional(),
+				// En un endpoint real, el archivo vendría como multipart/form-data
+				// Aquí asumimos que ya tenemos los datos del archivo
+				file: z.object({
+					name: z.string(),
+					type: z.string(),
+					size: z.number(),
+					data: z.string(), // Base64 o Buffer
+				}),
+			})
+		)
+		.handler(async ({ input, context }) => {
+			// Verificar acceso a la oportunidad
+			const opportunity = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity[0]) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Solo admin y sales pueden subir documentos
+			if (!["admin", "sales"].includes(context.userRole)) {
+				throw new Error("No tienes permiso para subir documentos");
+			}
+
+			// Para sales, verificar que sea su oportunidad
+			if (
+				context.userRole === "sales" &&
+				opportunity[0].assignedTo !== context.userId
+			) {
+				throw new Error("No tienes permiso para subir documentos a esta oportunidad");
+			}
+
+			// Crear un File/Blob desde los datos
+			const fileBuffer = Buffer.from(input.file.data, 'base64');
+			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+			
+			// Validar archivo
+			const validation = validateFile({
+				type: input.file.type,
+				size: input.file.size,
+			} as File);
+			
+			if (!validation.valid) {
+				throw new Error(validation.error);
+			}
+
+			// Generar nombre único
+			const uniqueFilename = generateUniqueFilename(input.file.name);
+			
+			// Subir a R2
+			const { key } = await uploadFileToR2(
+				fileBlob,
+				uniqueFilename,
+				input.opportunityId
+			);
+
+			// Guardar en base de datos
+			const [newDocument] = await db
+				.insert(opportunityDocuments)
+				.values({
+					opportunityId: input.opportunityId,
+					filename: uniqueFilename,
+					originalName: input.file.name,
+					mimeType: input.file.type,
+					size: input.file.size,
+					documentType: input.documentType,
+					description: input.description,
+					uploadedBy: context.userId,
+					filePath: key,
+				})
+				.returning();
+
+			return newDocument;
+		}),
+
+	deleteOpportunityDocument: crmProcedure
+		.input(
+			z.object({
+				documentId: z.string().uuid(),
+			})
+		)
+		.handler(async ({ input, context }) => {
+			// Obtener el documento
+			const [document] = await db
+				.select()
+				.from(opportunityDocuments)
+				.where(eq(opportunityDocuments.id, input.documentId))
+				.limit(1);
+
+			if (!document) {
+				throw new Error("Documento no encontrado");
+			}
+
+			// Verificar permisos
+			if (context.userRole === "admin" || document.uploadedBy === context.userId) {
+				// Eliminar de R2
+				await deleteFileFromR2(document.filePath);
+				
+				// Eliminar de la base de datos
+				await db
+					.delete(opportunityDocuments)
+					.where(eq(opportunityDocuments.id, input.documentId));
+				
+				return { success: true };
+			} else {
+				throw new Error("No tienes permiso para eliminar este documento");
+			}
+		}),
 };

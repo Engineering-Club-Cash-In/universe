@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Eye,
 	EyeOff,
+	FileText,
 	MoreHorizontal,
 	Plus,
 	Shield,
@@ -14,6 +15,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
+import { ROLES, ROLE_CONFIG, ALL_ROLES, getRoleColor, getRoleLabel } from "server/src/types/roles";
+import type { UserRole } from "server/src/types/roles";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -72,7 +75,7 @@ function RouteComponent() {
 	const usersQuery = useQuery(orpc.getAllUsers.queryOptions());
 
 	const updateRoleMutation = useMutation({
-		mutationFn: (input: { userId: string; role: "admin" | "sales" }) =>
+		mutationFn: (input: { userId: string; role: UserRole }) =>
 			client.updateUserRole(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getAllUsers"] });
@@ -99,7 +102,7 @@ function RouteComponent() {
 			name: string;
 			email: string;
 			password: string;
-			role: "admin" | "sales";
+			role: UserRole;
 		}) => client.createUser(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({ queryKey: ["getAllUsers"] });
@@ -130,7 +133,7 @@ function RouteComponent() {
 		return null;
 	}
 
-	const handleRoleChange = (userId: string, newRole: "admin" | "sales") => {
+	const handleRoleChange = (userId: string, newRole: UserRole) => {
 		updateRoleMutation.mutate({ userId, role: newRole });
 	};
 
@@ -144,18 +147,13 @@ function RouteComponent() {
 		}
 	};
 
-	const getRoleBadgeColor = (role: string) => {
-		return role === "admin"
-			? "bg-red-100 text-red-800"
-			: "bg-blue-100 text-blue-800";
-	};
 
 	const createUserForm = useForm({
 		defaultValues: {
 			name: "",
 			email: "",
 			password: "",
-			role: "sales" as "admin" | "sales",
+			role: ROLES.SALES as UserRole,
 		},
 		onSubmit: async ({ value }) => {
 			createUserMutation.mutate(value);
@@ -165,7 +163,7 @@ function RouteComponent() {
 				name: z.string().min(1, "Name is required"),
 				email: z.string().email("Invalid email address"),
 				password: z.string().min(8, "Password must be at least 8 characters"),
-				role: z.enum(["admin", "sales"]),
+				role: z.enum(ALL_ROLES as [UserRole, ...UserRole[]]),
 			}),
 		},
 	});
@@ -319,17 +317,18 @@ function RouteComponent() {
 													<Select
 														value={field.state.value}
 														onValueChange={(value) =>
-															field.handleChange(value as "admin" | "sales")
+															field.handleChange(value as UserRole)
 														}
 													>
 														<SelectTrigger>
 															<SelectValue placeholder="Seleccionar rol" />
 														</SelectTrigger>
 														<SelectContent>
-															<SelectItem value="sales">Ventas</SelectItem>
-															<SelectItem value="admin">
-																Administrador
-															</SelectItem>
+															{ALL_ROLES.map((role: string) => (
+																<SelectItem key={role} value={role}>
+																	{getRoleLabel(role)}
+																</SelectItem>
+															))}
 														</SelectContent>
 													</Select>
 													{field.state.meta.errors.map((error) => (
@@ -392,14 +391,18 @@ function RouteComponent() {
 										<TableCell className="font-medium">{user.name}</TableCell>
 										<TableCell>{user.email}</TableCell>
 										<TableCell>
-											<Badge className={getRoleBadgeColor(user.role)}>
-												{user.role === "admin" ? (
+											<Badge className={getRoleColor(user.role)}>
+												{user.role === ROLES.ADMIN ? (
 													<>
-														<Shield className="mr-1 h-3 w-3" /> Administrador
+														<Shield className="mr-1 h-3 w-3" /> {getRoleLabel(user.role)}
+													</>
+												) : user.role === ROLES.ANALYST ? (
+													<>
+														<FileText className="mr-1 h-3 w-3" /> {getRoleLabel(user.role)}
 													</>
 												) : (
 													<>
-														<User className="mr-1 h-3 w-3" /> Ventas
+														<User className="mr-1 h-3 w-3" /> {getRoleLabel(user.role)}
 													</>
 												)}
 											</Badge>

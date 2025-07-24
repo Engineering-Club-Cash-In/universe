@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { PERMISSIONS } from "server/src/types/roles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -76,7 +77,7 @@ function RouteComponent() {
 		...orpc.getClients.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
 	});
@@ -84,7 +85,7 @@ function RouteComponent() {
 		...orpc.getCompanies.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
@@ -175,7 +176,7 @@ function RouteComponent() {
 		} else if (
 			session &&
 			userProfile.data?.role &&
-			!["admin", "sales"].includes(userProfile.data.role)
+			!PERMISSIONS.canAccessCRM(userProfile.data.role)
 		) {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
@@ -188,7 +189,7 @@ function RouteComponent() {
 
 	if (
 		!userProfile.data?.role ||
-		!["admin", "sales"].includes(userProfile.data.role)
+		!PERMISSIONS.canAccessCRM(userProfile.data.role)
 	) {
 		return null;
 	}

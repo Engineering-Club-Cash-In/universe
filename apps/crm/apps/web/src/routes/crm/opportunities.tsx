@@ -61,6 +61,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
+import { PERMISSIONS } from "server/src/types/roles";
 
 // Simple draggable opportunity card component
 function DraggableOpportunityCard({
@@ -363,7 +364,7 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getOpportunities", session?.user?.id, userProfile.data?.role],
 	});
@@ -371,7 +372,7 @@ function RouteComponent() {
 		...orpc.getSalesStages.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
 	});
@@ -379,7 +380,7 @@ function RouteComponent() {
 		...orpc.getLeads.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 	});
@@ -591,7 +592,7 @@ function RouteComponent() {
 		} else if (
 			session &&
 			userProfile.data?.role &&
-			!["admin", "sales"].includes(userProfile.data.role)
+			!PERMISSIONS.canAccessCRM(userProfile.data.role)
 		) {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
@@ -604,7 +605,7 @@ function RouteComponent() {
 
 	if (
 		!userProfile.data?.role ||
-		!["admin", "sales"].includes(userProfile.data.role)
+		!PERMISSIONS.canAccessCRM(userProfile.data.role)
 	) {
 		return null;
 	}

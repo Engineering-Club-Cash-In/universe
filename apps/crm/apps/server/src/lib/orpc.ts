@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import type { Context } from "./context";
+import { ROLES, PERMISSIONS } from "./roles";
 
 export const o = os.$context<Context>();
 
@@ -32,7 +33,7 @@ const requireAdmin = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
-	if (userRole !== "admin") {
+	if (!PERMISSIONS.canAccessAdmin(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "Admin role required" });
 	}
 
@@ -57,7 +58,7 @@ const requireCrmAccess = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
-	if (!userRole || !["admin", "sales", "analyst"].includes(userRole)) {
+	if (!userRole || ![ROLES.ADMIN, ROLES.SALES, ROLES.ANALYST].includes(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "CRM access role required" });
 	}
 
@@ -84,7 +85,7 @@ const requireAnalyst = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
-	if (!userRole || !["admin", "analyst"].includes(userRole)) {
+	if (!userRole || !PERMISSIONS.canAccessAnalysis(userRole)) {
 		throw new ORPCError("FORBIDDEN", { message: "Analyst role required" });
 	}
 

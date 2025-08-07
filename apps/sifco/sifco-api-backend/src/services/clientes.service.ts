@@ -1,70 +1,198 @@
 import { BaseService, ServiceResponse } from './base.service';
 
 export interface Cliente {
-  id?: string;
-  tipoIdentificacion: string;
-  numeroIdentificacion: string;
-  primerNombre: string;
-  segundoNombre?: string;
-  primerApellido: string;
-  segundoApellido?: string;
-  fechaNacimiento?: string;
-  genero?: string;
-  estadoCivil?: string;
-  direccion?: string;
-  telefono?: string;
-  celular?: string;
-  email?: string;
-  ocupacion?: string;
-  ingresos?: number;
-  activo?: boolean;
-  fechaIngreso?: string;
-  sucursal?: string;
+  CodigoCliente?: number;
+  TipoDePersona?: string; // N = Natural, J = Juridica
+  TipoIdentificacion: number;
+  DocumentoIdentificacionPais?: number;
+  DocumentoIdentificacionDepartamento?: number;
+  DocumentoIdentificacionMunicipio?: number;
+  NumeroIdentificacion: string;
+  PrimerNombre: string;
+  SegundoNombre?: string;
+  PrimeApellido: string;
+  SegundoApellido?: string;
+  ApellidoCasada?: string;
+  Sexo?: string;
+  FechaNacimiento?: string;
+  EstadoCivil?: number;
+  NombreJuridico?: string;
+  RepresentanteLegal?: string;
+  NumeroRegistroMercantil?: string;
+  FechaConstitucion?: string;
+  Grupo?: number;
+  NumeroIdentificacionTributaria?: string;
+  Promotor?: string;
+  AfectoAImpuestos?: string;
+  EstadoCliente?: string;
+  CodigoReferencia?: string;
+  ActividadEconomica?: number;
+  DireccionEMailPrincipal?: string;
+  DireccionEMailSecundario?: string;
+  ExcluirDeMensajesDeCorreo?: number;
+  ProfesionUOficio?: string;
+  Prestamos?: any[];
+  CuentasAhorro?: any[];
+  CalificadoresAdicionales?: any[];
+  CuentasBancarias?: any[];
+  Telefonos?: any[];
+  Direcciones?: any[];
+  RefPersonales?: any[];
 }
 
-export interface BusquedaClienteParams {
-  tipoIdentificacion?: string;
-  numeroIdentificacion?: string;
-  nombre?: string;
-  apellido?: string;
-  email?: string;
-  telefono?: string;
-  sucursal?: string;
-  limite?: number;
-  pagina?: number;
+export interface WSIngresarClientesRequest {
+  Modo: 'DSP' | 'INS' | 'UPD'; // DSP=Display/Consulta, INS=Insert, UPD=Update
+  ConsultaFormaIdentificar: number; // 1=Por código, 2=Por identificación
+  ConsultaValorIdentificador: string;
+  WSCliente: Cliente;
+}
+
+export interface WSIngresarClientesResponse {
+  CodigoCliente: string;
+  ConsultaResultados: Cliente[];
+  Messages: Array<{
+    Id: string;
+    Type: number;
+    Description: string;
+  }>;
+  Result: string;
 }
 
 export class ClientesService extends BaseService {
   /**
-   * Obtener información de un cliente por ID
+   * Obtener información de un cliente por ID o identificación
    */
-  async obtenerCliente(clienteId: string): Promise<ServiceResponse<Cliente>> {
-    console.log(`📋 Fetching client: ${clienteId}`);
-    return this.request<Cliente>('GET', `WSClientes/${clienteId}`);
+  async obtenerCliente(identificador: string, porCodigo: boolean = true): Promise<ServiceResponse<Cliente>> {
+    console.log(`📋 Fetching client: ${identificador}`);
+    
+    const requestBody: WSIngresarClientesRequest = {
+      Modo: 'DSP',
+      ConsultaFormaIdentificar: porCodigo ? 1 : 2,
+      ConsultaValorIdentificador: identificador,
+      WSCliente: {} as Cliente
+    };
+    
+    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
+    
+    if (response.success && response.data) {
+      const cliente = response.data.ConsultaResultados?.[0];
+      return {
+        success: !!cliente,
+        data: cliente,
+        error: cliente ? undefined : 'Cliente no encontrado'
+      };
+    }
+    
+    return response as any;
   }
 
   /**
-   * Buscar clientes según criterios
+   * Buscar clientes por número de identificación
    */
-  async buscarClientes(criterios: BusquedaClienteParams): Promise<ServiceResponse<Cliente[]>> {
-    console.log('🔍 Searching clients with criteria:', criterios);
-    return this.request<Cliente[]>('POST', 'WSClientesBusqueda', criterios);
+  async buscarClientes(numeroIdentificacion: string): Promise<ServiceResponse<Cliente[]>> {
+    console.log('🔍 Searching clients by identification:', numeroIdentificacion);
+    
+    const requestBody: WSIngresarClientesRequest = {
+      Modo: 'DSP',
+      ConsultaFormaIdentificar: 2, // Por identificación
+      ConsultaValorIdentificador: numeroIdentificacion,
+      WSCliente: {} as Cliente
+    };
+    
+    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
+    
+    if (response.success && response.data) {
+      return {
+        success: true,
+        data: response.data.ConsultaResultados || [],
+        statusCode: response.statusCode
+      };
+    }
+    
+    return response as any;
   }
 
   /**
-   * Obtener lista de todos los clientes (con paginación)
+   * Listar todos los clientes
+   * Probamos el patrón similar a WSClGruposLista
    */
   async listarClientes(limite: number = 50, pagina: number = 1): Promise<ServiceResponse<Cliente[]>> {
-    console.log(`📑 Listing clients - Page: ${pagina}, Limit: ${limite}`);
-    return this.request<Cliente[]>('GET', 'WSClientes', null, { limite, pagina });
+    console.log(`📑 Attempting to list clients - Page: ${pagina}, Limit: ${limite}`);
+    
+    // Probar WSClClientesLista (siguiendo el patrón de WSClGruposLista)
+    try {
+      console.log('Trying wsclclienteslista endpoint...');
+      const response = await this.request<any>('POST', 'wsclclienteslista', {});
+      
+      if (response.success && response.data) {
+        // Puede ser ClientesLista siguiendo el patrón de GruposLista
+        const clientes = response.data.ClientesLista || response.data.clientes || response.data;
+        if (Array.isArray(clientes)) {
+          console.log(`✅ Found ${clientes.length} clients`);
+          return {
+            success: true,
+            data: clientes,
+            statusCode: response.statusCode
+          };
+        }
+      }
+    } catch (error) {
+      console.log('wsclclienteslista not available');
+    }
+    
+    // Probar WSClientesLista (sin el prefijo Cl)
+    try {
+      console.log('Trying wsclienteslista endpoint...');
+      const response = await this.request<any>('POST', 'wsclienteslista', {});
+      
+      if (response.success && response.data) {
+        const clientes = response.data.ClientesLista || response.data.clientes || response.data;
+        if (Array.isArray(clientes)) {
+          console.log(`✅ Found ${clientes.length} clients`);
+          return {
+            success: true,
+            data: clientes,
+            statusCode: response.statusCode
+          };
+        }
+      }
+    } catch (error) {
+      console.log('wsclienteslista not available');
+    }
+    
+    // Si no hay endpoint de listado, retornar mensaje informativo
+    return {
+      success: true,
+      data: [],
+      error: 'No se encontró un endpoint para listar todos los clientes. Use /api/clientes/buscar para búsquedas específicas.'
+    };
   }
 
   /**
    * Crear un nuevo cliente
    */
   async crearCliente(datosCliente: Cliente): Promise<ServiceResponse<Cliente>> {
-    console.log('➕ Creating new client:', datosCliente.numeroIdentificacion);
-    return this.request<Cliente>('POST', 'WSClientesCrear', datosCliente);
+    console.log('➕ Creating new client:', datosCliente.NumeroIdentificacion);
+    
+    const requestBody: WSIngresarClientesRequest = {
+      Modo: 'INS',
+      ConsultaFormaIdentificar: 0,
+      ConsultaValorIdentificador: '',
+      WSCliente: datosCliente
+    };
+    
+    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
+    
+    if (response.success && response.data) {
+      const cliente = response.data.ConsultaResultados?.[0];
+      return {
+        success: response.data.Result === 'OK',
+        data: cliente,
+        error: response.data.Messages?.[0]?.Description
+      };
+    }
+    
+    return response as any;
   }
 
   /**
@@ -75,7 +203,41 @@ export class ClientesService extends BaseService {
     datosActualizacion: Partial<Cliente>
   ): Promise<ServiceResponse<Cliente>> {
     console.log(`✏️ Updating client: ${clienteId}`);
-    return this.request<Cliente>('PUT', `WSClientesActualizar/${clienteId}`, datosActualizacion);
+    
+    // Primero obtenemos el cliente actual
+    const clienteActual = await this.obtenerCliente(clienteId, true);
+    if (!clienteActual.success || !clienteActual.data) {
+      return {
+        success: false,
+        error: 'Cliente no encontrado'
+      };
+    }
+    
+    // Merge de datos
+    const clienteActualizado = {
+      ...clienteActual.data,
+      ...datosActualizacion,
+      CodigoCliente: parseInt(clienteId)
+    };
+    
+    const requestBody: WSIngresarClientesRequest = {
+      Modo: 'UPD',
+      ConsultaFormaIdentificar: 1,
+      ConsultaValorIdentificador: clienteId,
+      WSCliente: clienteActualizado
+    };
+    
+    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
+    
+    if (response.success && response.data) {
+      return {
+        success: response.data.Result === 'OK',
+        data: clienteActualizado,
+        error: response.data.Messages?.[0]?.Description
+      };
+    }
+    
+    return response as any;
   }
 
   /**
@@ -98,22 +260,21 @@ export class ClientesService extends BaseService {
    * Validar si un cliente existe por identificación
    */
   async validarCliente(
-    tipoIdentificacion: string,
+    tipoIdentificacion: number,
     numeroIdentificacion: string
   ): Promise<ServiceResponse<{ existe: boolean; cliente?: Cliente }>> {
     console.log(`✔️ Validating client: ${tipoIdentificacion} - ${numeroIdentificacion}`);
-    const response = await this.buscarClientes({
-      tipoIdentificacion,
-      numeroIdentificacion,
-      limite: 1,
-    });
+    
+    const response = await this.buscarClientes(numeroIdentificacion);
 
     if (response.success && response.data && response.data.length > 0) {
+      // Filtrar por tipo de identificación si es necesario
+      const cliente = response.data.find(c => c.TipoIdentificacion === tipoIdentificacion) || response.data[0];
       return {
         success: true,
         data: {
           existe: true,
-          cliente: response.data[0],
+          cliente,
         },
       };
     }

@@ -67,7 +67,19 @@ export async function handleClientesRoute(request: Request, path: string[]): Pro
   // POST /api/clientes/buscar
   if (method === 'POST' && path.length === 3 && path[2] === 'buscar') {
     const body = await request.json();
-    const result = await clientesService.buscarClientes(body);
+    const { numeroIdentificacion } = body;
+    
+    if (!numeroIdentificacion) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'numeroIdentificacion es requerido'
+      }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    
+    const result = await clientesService.buscarClientes(numeroIdentificacion);
     
     return new Response(JSON.stringify(result), {
       status: result.success ? 200 : 400,
@@ -80,11 +92,14 @@ export async function handleClientesRoute(request: Request, path: string[]): Pro
     const body = await request.json();
     const { tipoIdentificacion, numeroIdentificacion } = body;
     
-    if (!tipoIdentificacion || !numeroIdentificacion) {
+    if (tipoIdentificacion === undefined || !numeroIdentificacion) {
       throw new AppError('tipoIdentificacion and numeroIdentificacion are required', 400);
     }
     
-    const result = await clientesService.validarCliente(tipoIdentificacion, numeroIdentificacion);
+    const result = await clientesService.validarCliente(
+      typeof tipoIdentificacion === 'string' ? parseInt(tipoIdentificacion) : tipoIdentificacion,
+      numeroIdentificacion
+    );
     
     return new Response(JSON.stringify(result), {
       status: result.success ? 200 : 400,

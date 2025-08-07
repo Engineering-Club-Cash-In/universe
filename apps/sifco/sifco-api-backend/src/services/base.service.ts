@@ -26,14 +26,24 @@ export class BaseService {
   ): Promise<ServiceResponse<T>> {
     try {
       const headers = await this.auth.getAuthHeaders();
+      const url = `${this.baseURL}/rest/${endpoint}`;
+      
+      console.log(`🌐 SIFCO Request: ${method} ${url}`);
+      if (params) console.log('   Query params:', params);
+      if (data) console.log('   Body:', data);
+      console.log('   Headers:', headers);
       
       const response = await axios({
         method,
-        url: `${this.baseURL}/rest/${endpoint}`,
+        url,
         headers,
         data,
         params,
+        timeout: 25000,
       });
+      
+      console.log(`✅ SIFCO Response: ${response.status}`);
+      console.log('   Data:', response.data);
 
       return {
         success: true,
@@ -106,6 +116,13 @@ export class BaseService {
       }
     } else if (error.request) {
       errorMessage = 'Network error: Unable to reach SIFCO server';
+      console.error('Request details:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        timeout: error.config?.timeout,
+        code: error.code,
+        message: error.message
+      });
     } else {
       errorMessage = error.message;
     }

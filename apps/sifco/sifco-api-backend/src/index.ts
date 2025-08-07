@@ -22,9 +22,30 @@ if (!validateConfig()) {
 }
 
 
-// Main server using Bun's recommended pattern
-const server = Bun.serve({
+// Main server configuration (exported for Bun.serve to use)
+
+console.log(`
+🚀 Server running at http://localhost:${PORT}
+📚 API Documentation: http://localhost:${PORT}/api
+🏥 Health Check: http://localhost:${PORT}/health
+
+Environment: ${config.server.env}
+SIFCO Base URL: ${config.sifco.baseURL}
+
+Available endpoints:
+- POST /api/auth/test - Test SIFCO authentication
+- GET  /api/clientes - List clients
+- POST /api/clientes/buscar - Search clients
+- GET  /api/creditos - List credits
+- POST /api/creditos/simular - Simulate credit
+- POST /api/creditos/pago - Register payment
+
+Press Ctrl+C to stop the server
+`);
+
+export default {
   port: PORT,
+  idleTimeout: 30,
   
   async fetch(request: Request): Promise<Response> {
     const startTime = Date.now();
@@ -62,25 +83,4 @@ const server = Bun.serve({
       message: error.message,
     }, 500);
   },
-});
-
-console.log(`
-🚀 Server running at http://localhost:${PORT}
-📚 API Documentation: http://localhost:${PORT}/api
-🏥 Health Check: http://localhost:${PORT}/health
-
-Environment: ${config.server.env}
-SIFCO Base URL: ${config.sifco.baseURL}
-
-Available endpoints:
-- POST /api/auth/test - Test SIFCO authentication
-- GET  /api/clientes - List clients
-- POST /api/clientes/buscar - Search clients
-- GET  /api/creditos - List credits
-- POST /api/creditos/simular - Simulate credit
-- POST /api/creditos/pago - Register payment
-
-Press Ctrl+C to stop the server
-`);
-
-export default server;
+};

@@ -13,6 +13,7 @@ import {
 	vehicles,
 	vehicleInspections,
 	vehiclePhotos,
+	inspectionChecklistItems,
 } from "./schema/vehicles";
 
 const salesStagesData = [
@@ -986,6 +987,130 @@ async function seedVehicles(companiesList: any[]) {
 	return insertedVehicles;
 }
 
+async function seedVehiclePhotos(vehiclesList: any[]) {
+	console.log("📸 Seeding vehicle photos...");
+
+	const photoData = [
+		{ category: "exterior", photoType: "front-view", label: "Frontal" },
+		{ category: "exterior", photoType: "rear-view", label: "Trasera" },
+		{ category: "exterior", photoType: "side-view", label: "Lateral" },
+		{ category: "interior", photoType: "dashboard", label: "Tablero" },
+		{ category: "interior", photoType: "seats", label: "Asientos" },
+		{ category: "engine", photoType: "engine-bay", label: "Motor" },
+		{ category: "wheels", photoType: "front-wheels", label: "Ruedas delanteras" },
+		{ category: "damage", photoType: "scratches", label: "Detalles" }
+	];
+	
+	const baseGithubUrl = "https://raw.githubusercontent.com/EkdeepSLubana/raw_dataset/master/ISP_processed/";
+	
+	const insertedPhotos = [];
+	let photoNumber = 1;
+	
+	for (const vehicle of vehiclesList) {
+		// Cada vehículo tendrá entre 4 y 8 fotos
+		const numberOfPhotos = Math.floor(Math.random() * 5) + 4;
+		
+		for (let i = 0; i < numberOfPhotos; i++) {
+			const photo = photoData[i % photoData.length];
+			const photoUrl = `${baseGithubUrl}${photoNumber}.jpg`;
+			
+			const [insertedPhoto] = await db
+				.insert(vehiclePhotos)
+				.values({
+					vehicleId: vehicle.id,
+					url: photoUrl,
+					title: `${vehicle.make} ${vehicle.model} - ${photo.label}`,
+					description: `Fotografía ${photo.label.toLowerCase()} del vehículo ${vehicle.make} ${vehicle.model} ${vehicle.year}`,
+					category: photo.category,
+					photoType: photo.photoType,
+				})
+				.returning();
+			
+			insertedPhotos.push(insertedPhoto);
+			
+			// Incrementar el número de foto, reiniciar si llegamos a 225
+			photoNumber = (photoNumber % 225) + 1;
+		}
+	}
+	
+	console.log(`✅ ${insertedPhotos.length} vehicle photos seeded`);
+	return insertedPhotos;
+}
+
+async function seedInspectionChecklists(inspectionsList: any[]) {
+	console.log("📋 Seeding inspection checklists...");
+
+	const checklistTemplates = [
+		// Documentos
+		{ category: "documentos", label: "Tarjeta de circulación", isRejectionCriteria: true },
+		{ category: "documentos", label: "Título de propiedad", isRejectionCriteria: true },
+		{ category: "documentos", label: "Seguro vigente", isRejectionCriteria: false },
+		{ category: "documentos", label: "Historial de mantenimiento", isRejectionCriteria: false },
+		
+		// Carrocería
+		{ category: "carroceria", label: "Sin daños estructurales", isRejectionCriteria: true },
+		{ category: "carroceria", label: "Pintura en buen estado", isRejectionCriteria: false },
+		{ category: "carroceria", label: "Sin óxido visible", isRejectionCriteria: false },
+		{ category: "carroceria", label: "Puertas funcionan correctamente", isRejectionCriteria: false },
+		
+		// Interior
+		{ category: "interior", label: "Asientos en buen estado", isRejectionCriteria: false },
+		{ category: "interior", label: "Tablero sin daños", isRejectionCriteria: false },
+		{ category: "interior", label: "Aire acondicionado funcional", isRejectionCriteria: false },
+		{ category: "interior", label: "Sistema eléctrico operativo", isRejectionCriteria: true },
+		
+		// Motor
+		{ category: "motor", label: "Motor sin fugas", isRejectionCriteria: true },
+		{ category: "motor", label: "Niveles de fluidos correctos", isRejectionCriteria: false },
+		{ category: "motor", label: "Sin ruidos anormales", isRejectionCriteria: true },
+		{ category: "motor", label: "Sistema de enfriamiento funcional", isRejectionCriteria: false },
+		
+		// Transmisión
+		{ category: "transmision", label: "Cambios suaves", isRejectionCriteria: true },
+		{ category: "transmision", label: "Embrague funcional", isRejectionCriteria: true },
+		{ category: "transmision", label: "Sin vibraciones", isRejectionCriteria: false },
+		
+		// Frenos
+		{ category: "frenos", label: "Frenos responden bien", isRejectionCriteria: true },
+		{ category: "frenos", label: "Discos/tambores en buen estado", isRejectionCriteria: true },
+		{ category: "frenos", label: "Líquido de frenos al nivel", isRejectionCriteria: false },
+	];
+
+	const insertedChecklists = [];
+	
+	for (const inspection of inspectionsList) {
+		// Para cada inspección, crear items del checklist con valores aleatorios
+		for (const template of checklistTemplates) {
+			// Generar valor basado en el estado de la inspección
+			let value = 'yes';
+			
+			// Si la inspección fue rechazada, algunos criterios críticos deben ser 'no'
+			if (inspection.status === 'rejected' && template.isRejectionCriteria && Math.random() > 0.5) {
+				value = 'no';
+			} else if (Math.random() > 0.85) {
+				// 15% de probabilidad de que sea 'no' o 'n/a'
+				value = Math.random() > 0.5 ? 'no' : 'n/a';
+			}
+			
+			const [insertedItem] = await db
+				.insert(inspectionChecklistItems)
+				.values({
+					inspectionId: inspection.id,
+					category: template.category,
+					item: template.label,
+					checked: value === 'yes',
+					severity: template.isRejectionCriteria ? 'critical' : 'warning',
+				})
+				.returning();
+			
+			insertedChecklists.push(insertedItem);
+		}
+	}
+
+	console.log(`✅ ${insertedChecklists.length} checklist items seeded`);
+	return insertedChecklists;
+}
+
 async function seedVehicleInspections(vehiclesList: any[]) {
 	console.log("🔍 Seeding vehicle inspections...");
 
@@ -1158,9 +1283,11 @@ async function main() {
 	const clientsList = await seedClients(usersList, companiesList);
 	const creditAnalysisList = await seedCreditAnalysis(usersList, leadsList);
 	
-	// Seed vehicles and inspections
+	// Seed vehicles, inspections, checklists and photos
 	const vehiclesList = await seedVehicles(companiesList);
 	const inspectionsList = await seedVehicleInspections(vehiclesList);
+	const checklistsList = await seedInspectionChecklists(inspectionsList);
+	const photosList = await seedVehiclePhotos(vehiclesList);
 
 	console.log("\n🎉 CRM database seeding completed!");
 	console.log(`✅ ${usersList.length} users`);
@@ -1172,6 +1299,8 @@ async function main() {
 	console.log(`✅ ${creditAnalysisList.length} credit analyses`);
 	console.log(`✅ ${vehiclesList.length} vehicles`);
 	console.log(`✅ ${inspectionsList.length} vehicle inspections`);
+	console.log(`✅ ${checklistsList.length} checklist items`);
+	console.log(`✅ ${photosList.length} vehicle photos`);
 
 	process.exit(0);
 }

@@ -7,11 +7,30 @@ import {
 	opportunities,
 	salesStages,
 } from "./schema/crm";
+import {
+	vehicles,
+	vehicleInspections,
+	vehiclePhotos,
+	inspectionChecklistItems,
+} from "./schema/vehicles";
 
 async function clearAllCRMData() {
 	console.log("🗑️ Clearing all CRM data...");
 
 	try {
+		// Delete vehicle data first (they depend on companies)
+		await db.delete(inspectionChecklistItems);
+		console.log("✅ Inspection checklist items cleared");
+
+		await db.delete(vehiclePhotos);
+		console.log("✅ Vehicle photos cleared");
+
+		await db.delete(vehicleInspections);
+		console.log("✅ Vehicle inspections cleared");
+
+		await db.delete(vehicles);
+		console.log("✅ Vehicles cleared");
+
 		// Delete in reverse order of dependencies
 		await db.delete(clients);
 		console.log("✅ Clients cleared");

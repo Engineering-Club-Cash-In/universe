@@ -33,7 +33,7 @@ export class SIFCOAuthService {
       const formData = new URLSearchParams({
         client_id: config.sifco.clientId,
         client_secret: config.sifco.clientSecret,
-        granttype: 'password',
+        grant_type: 'password',
         scope: 'FullControl',
         username: config.sifco.username,
         password: config.sifco.password,
@@ -56,6 +56,9 @@ export class SIFCOAuthService {
       this.tokenExpiry = new Date(Date.now() + expiresIn * 1000);
       
       console.log('✅ Authentication successful');
+      console.log('   Token:', this.token.substring(0, 20) + '...');
+      console.log('   Expires in:', expiresIn, 'seconds');
+      console.log('   Full response:', response.data);
       return this.token;
     } catch (error) {
       const axiosError = error as AxiosError;

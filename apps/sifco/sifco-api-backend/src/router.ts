@@ -153,6 +153,18 @@ const routes: Route[] = [
       return addCorsHeaders(response);
     },
   },
+  
+  // Groups routes
+  {
+    method: 'GET',
+    pattern: /^\/api\/grupos$/,
+    handler: async () => {
+      const { GruposService } = await import('./services/grupos.service');
+      const gruposService = new GruposService();
+      const result = await gruposService.listarGrupos();
+      return jsonResponse(result.data || [], result.success ? 200 : 400);
+    },
+  },
 
   // Credit routes
   {

@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
+import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities'
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
@@ -34,6 +36,16 @@ const DashboardRoute = DashboardRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VehiclesIndexRoute = VehiclesIndexRouteImport.update({
+  id: '/vehicles/',
+  path: '/vehicles/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
+  id: '/vehicles/inspection',
+  path: '/vehicles/inspection',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CrmOpportunitiesRoute = CrmOpportunitiesRouteImport.update({
@@ -89,6 +101,8 @@ export interface FileRoutesByFullPath {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
+  '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles': typeof VehiclesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -102,6 +116,8 @@ export interface FileRoutesByTo {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
+  '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles': typeof VehiclesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -116,6 +132,8 @@ export interface FileRoutesById {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
+  '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/vehicles/': typeof VehiclesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -131,6 +149,8 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
+    | '/vehicles/inspection'
+    | '/vehicles'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -144,6 +164,8 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
+    | '/vehicles/inspection'
+    | '/vehicles'
   id:
     | '__root__'
     | '/'
@@ -157,6 +179,8 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
+    | '/vehicles/inspection'
+    | '/vehicles/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -171,6 +195,8 @@ export interface RootRouteChildren {
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
   CrmOpportunitiesRoute: typeof CrmOpportunitiesRoute
+  VehiclesInspectionRoute: typeof VehiclesInspectionRoute
+  VehiclesIndexRoute: typeof VehiclesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -194,6 +220,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vehicles/': {
+      id: '/vehicles/'
+      path: '/vehicles'
+      fullPath: '/vehicles'
+      preLoaderRoute: typeof VehiclesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vehicles/inspection': {
+      id: '/vehicles/inspection'
+      path: '/vehicles/inspection'
+      fullPath: '/vehicles/inspection'
+      preLoaderRoute: typeof VehiclesInspectionRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/opportunities': {
@@ -267,6 +307,8 @@ const rootRouteChildren: RootRouteChildren = {
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,
   CrmOpportunitiesRoute: CrmOpportunitiesRoute,
+  VehiclesInspectionRoute: VehiclesInspectionRoute,
+  VehiclesIndexRoute: VehiclesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

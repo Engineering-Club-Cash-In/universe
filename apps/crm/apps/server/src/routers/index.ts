@@ -2,6 +2,7 @@ import { publicProcedure } from "../lib/orpc";
 import { adminRouter } from "./admin";
 import { authRouter } from "./auth";
 import { crmRouter } from "./crm";
+import { vehiclesRouter } from "./vehicles";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -42,6 +43,20 @@ export const appRouter = {
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
 	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
 	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
+
+	// Vehicles routes
+	getVehicles: vehiclesRouter.getAll,
+	getVehicleById: vehiclesRouter.getById,
+	createVehicle: vehiclesRouter.create,
+	updateVehicle: vehiclesRouter.update,
+	deleteVehicle: vehiclesRouter.delete,
+	searchVehicles: vehiclesRouter.search,
+	createVehicleInspection: vehiclesRouter.createInspection,
+	updateVehicleInspection: vehiclesRouter.updateInspection,
+	uploadVehiclePhoto: vehiclesRouter.uploadPhoto,
+	deleteVehiclePhoto: vehiclesRouter.deletePhoto,
+	getVehicleInspectionById: vehiclesRouter.getInspectionById,
+	getVehicleStatistics: vehiclesRouter.getStatistics,
 };
 
 export type AppRouter = typeof appRouter;

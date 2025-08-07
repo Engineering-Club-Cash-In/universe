@@ -9,6 +9,11 @@ import {
 	opportunities,
 	salesStages,
 } from "./schema/crm";
+import {
+	vehicles,
+	vehicleInspections,
+	vehiclePhotos,
+} from "./schema/vehicles";
 
 const salesStagesData = [
 	{
@@ -875,6 +880,224 @@ async function seedUsers() {
 	}
 }
 
+// Vehicles sample data
+const vehiclesData = [
+	{
+		make: "Toyota",
+		model: "Corolla",
+		year: 2020,
+		licensePlate: "P-789ABC",
+		vinNumber: "1HGCM82633A123456",
+		color: "Blanco",
+		vehicleType: "Sedan",
+		kmMileage: 45000,
+		origin: "Agencia",
+		cylinders: "4",
+		engineCC: "1800",
+		fuelType: "Gasolina",
+		transmission: "Automático",
+		status: "available",
+	},
+	{
+		make: "Honda",
+		model: "CR-V",
+		year: 2018,
+		licensePlate: "P-456DEF",
+		vinNumber: "2HKRW7H8XJH234567",
+		color: "Gris",
+		vehicleType: "SUV",
+		kmMileage: 72000,
+		origin: "Rodado",
+		cylinders: "4",
+		engineCC: "2400",
+		fuelType: "Gasolina",
+		transmission: "Automático",
+		status: "pending",
+	},
+	{
+		make: "Nissan",
+		model: "Sentra",
+		year: 2017,
+		licensePlate: "P-123GHI",
+		vinNumber: "3N1AB7AP7HY345678",
+		color: "Azul",
+		vehicleType: "Sedan",
+		kmMileage: 95000,
+		origin: "Rodado",
+		cylinders: "4",
+		engineCC: "1600",
+		fuelType: "Gasolina",
+		transmission: "Manual",
+		status: "available",
+	},
+	{
+		make: "Ford",
+		model: "Escape",
+		year: 2019,
+		licensePlate: "P-789JKL",
+		vinNumber: "1FMCU0F73KUA456789",
+		color: "Rojo",
+		vehicleType: "SUV",
+		kmMileage: 55000,
+		origin: "Agencia",
+		cylinders: "4",
+		engineCC: "2000",
+		fuelType: "Gasolina",
+		transmission: "Automático",
+		status: "available",
+	},
+	{
+		make: "Mazda",
+		model: "CX-5",
+		year: 2020,
+		licensePlate: "P-456MNO",
+		vinNumber: "JM3KFBDL9L0567890",
+		color: "Negro",
+		vehicleType: "SUV",
+		kmMileage: 32000,
+		origin: "Agencia",
+		cylinders: "4",
+		engineCC: "2500",
+		fuelType: "Gasolina",
+		transmission: "Automático",
+		status: "available",
+	},
+];
+
+async function seedVehicles(companiesList: any[]) {
+	console.log("🚗 Seeding vehicles...");
+
+	const insertedVehicles = [];
+	for (let i = 0; i < vehiclesData.length; i++) {
+		const vehicleData = vehiclesData[i];
+		const company = companiesList[i % companiesList.length];
+
+		const [insertedVehicle] = await db
+			.insert(vehicles)
+			.values({
+				...vehicleData,
+				companyId: company?.id || null,
+			})
+			.returning();
+		insertedVehicles.push(insertedVehicle);
+	}
+
+	console.log(`✅ ${insertedVehicles.length} vehicles seeded`);
+	return insertedVehicles;
+}
+
+async function seedVehicleInspections(vehiclesList: any[]) {
+	console.log("🔍 Seeding vehicle inspections...");
+
+	const inspectionsData = [
+		{
+			technicianName: "Carlos Rodríguez",
+			inspectionDate: new Date("2024-01-15"),
+			inspectionResult: "Vehículo en excelentes condiciones. Motor en buen estado, carrocería sin daños relevantes.",
+			vehicleRating: "Comercial",
+			marketValue: "220000.00",
+			suggestedCommercialValue: "205000.00",
+			bankValue: "200000.00",
+			currentConditionValue: "195000.00",
+			vehicleEquipment: "Aire acondicionado, sistema de audio, bolsas de aire frontales y laterales",
+			importantConsiderations: "Mantenimiento al día según bitácora",
+			scannerUsed: true,
+			airbagWarning: false,
+			testDrive: true,
+			status: "approved",
+			alerts: [],
+		},
+		{
+			technicianName: "Ana Martínez",
+			inspectionDate: new Date("2024-01-18"),
+			inspectionResult: "Vehículo en buenas condiciones. Presenta desgaste normal por uso. Requiere cambio de frenos próximamente.",
+			vehicleRating: "Comercial",
+			marketValue: "250000.00",
+			suggestedCommercialValue: "230000.00",
+			bankValue: "225000.00",
+			currentConditionValue: "215000.00",
+			vehicleEquipment: "Full equipo, navegación GPS, cámara de reversa",
+			importantConsiderations: "Próximo cambio de frenos recomendado",
+			scannerUsed: true,
+			airbagWarning: false,
+			testDrive: true,
+			status: "pending",
+			alerts: ["Frenos"],
+		},
+		{
+			technicianName: "Roberto Sánchez",
+			inspectionDate: new Date("2024-01-20"),
+			inspectionResult: "Vehículo con múltiples problemas. Transmisión con fallos, sistema eléctrico requiere revisión.",
+			vehicleRating: "No comercial",
+			marketValue: "150000.00",
+			suggestedCommercialValue: "135000.00",
+			bankValue: "130000.00",
+			currentConditionValue: "120000.00",
+			vehicleEquipment: "Equipamiento básico",
+			importantConsiderations: "Requiere reparaciones mayores",
+			scannerUsed: true,
+			airbagWarning: true,
+			missingAirbag: "Airbag lateral izquierdo",
+			testDrive: false,
+			noTestDriveReason: "Falla en transmisión impide manejo seguro",
+			status: "rejected",
+			alerts: ["Airbag", "Transmisión", "Sistema eléctrico"],
+		},
+		{
+			technicianName: "María López",
+			inspectionDate: new Date("2024-01-22"),
+			inspectionResult: "Vehículo en muy buenas condiciones. Mantenimiento al día según bitácora.",
+			vehicleRating: "Comercial",
+			marketValue: "270000.00",
+			suggestedCommercialValue: "255000.00",
+			bankValue: "250000.00",
+			currentConditionValue: "245000.00",
+			vehicleEquipment: "Full equipo, asientos de cuero, techo panorámico",
+			importantConsiderations: "Excelente estado general",
+			scannerUsed: true,
+			airbagWarning: false,
+			testDrive: true,
+			status: "approved",
+			alerts: [],
+		},
+		{
+			technicianName: "Javier Mendoza",
+			inspectionDate: new Date("2024-01-25"),
+			inspectionResult: "Vehículo en excelentes condiciones. Sin problemas detectados.",
+			vehicleRating: "Comercial",
+			marketValue: "290000.00",
+			suggestedCommercialValue: "280000.00",
+			bankValue: "275000.00",
+			currentConditionValue: "275000.00",
+			vehicleEquipment: "Full equipo premium, sistema de sonido Bose",
+			importantConsiderations: "Vehículo prácticamente nuevo",
+			scannerUsed: true,
+			airbagWarning: false,
+			testDrive: true,
+			status: "approved",
+			alerts: [],
+		},
+	];
+
+	const insertedInspections = [];
+	for (let i = 0; i < vehiclesList.length && i < inspectionsData.length; i++) {
+		const vehicle = vehiclesList[i];
+		const inspectionData = inspectionsData[i];
+
+		const [insertedInspection] = await db
+			.insert(vehicleInspections)
+			.values({
+				...inspectionData,
+				vehicleId: vehicle.id,
+			})
+			.returning();
+		insertedInspections.push(insertedInspection);
+	}
+
+	console.log(`✅ ${insertedInspections.length} vehicle inspections seeded`);
+	return insertedInspections;
+}
+
 async function getOrCreateAdminUser() {
 	try {
 		// Look for an admin user
@@ -934,6 +1157,10 @@ async function main() {
 	);
 	const clientsList = await seedClients(usersList, companiesList);
 	const creditAnalysisList = await seedCreditAnalysis(usersList, leadsList);
+	
+	// Seed vehicles and inspections
+	const vehiclesList = await seedVehicles(companiesList);
+	const inspectionsList = await seedVehicleInspections(vehiclesList);
 
 	console.log("\n🎉 CRM database seeding completed!");
 	console.log(`✅ ${usersList.length} users`);
@@ -943,6 +1170,8 @@ async function main() {
 	console.log(`✅ ${opportunitiesList.length} opportunities`);
 	console.log(`✅ ${clientsList.length} clients`);
 	console.log(`✅ ${creditAnalysisList.length} credit analyses`);
+	console.log(`✅ ${vehiclesList.length} vehicles`);
+	console.log(`✅ ${inspectionsList.length} vehicle inspections`);
 
 	process.exit(0);
 }

@@ -1,0 +1,317 @@
+
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dashboard Ejecutivo - Análisis de Clientes Julio 2025</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                line-height: 1.6;
+                color: #333;
+                background-color: #f5f5f5;
+            }
+            
+            .header {
+                background: linear-gradient(135deg, #2c3e50, #3498db);
+                color: white;
+                padding: 30px 0;
+                text-align: center;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }
+            
+            .header h1 {
+                font-size: 2.5em;
+                margin-bottom: 10px;
+                font-weight: 300;
+            }
+            
+            .header p {
+                font-size: 1.2em;
+                opacity: 0.9;
+            }
+            
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            
+            .metrics-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 20px;
+                margin: 30px 0;
+            }
+            
+            .metric-card {
+                background: white;
+                padding: 25px;
+                border-radius: 10px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                text-align: center;
+                transition: transform 0.3s ease;
+                position: relative;
+            }
+            
+            .metric-card:hover {
+                transform: translateY(-5px);
+            }
+            
+            .metric-number {
+                font-size: 2.2em;
+                font-weight: bold;
+                color: #2c3e50;
+                margin-bottom: 10px;
+            }
+            
+            .metric-label {
+                font-size: 1em;
+                color: #7f8c8d;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            
+            .metric-change {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                font-size: 0.9em;
+                font-weight: bold;
+                padding: 5px 10px;
+                border-radius: 15px;
+            }
+            
+            .metric-change.positive {
+                color: #27ae60;
+                background: #e8f8f5;
+            }
+            
+            .metric-change.negative {
+                color: #e74c3c;
+                background: #fdeaea;
+            }
+            
+            .section {
+                background: white;
+                margin: 30px 0;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            }
+            
+            .section h2 {
+                color: #2c3e50;
+                font-size: 1.8em;
+                margin-bottom: 20px;
+                border-bottom: 3px solid #3498db;
+                padding-bottom: 10px;
+            }
+            
+            .alert {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                color: #856404;
+                padding: 15px;
+                border-radius: 5px;
+                margin: 20px 0;
+            }
+            
+            .comparison-table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 20px;
+            }
+            
+            .comparison-table th,
+            .comparison-table td {
+                padding: 12px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }
+            
+            .comparison-table th {
+                background-color: #f8f9fa;
+                font-weight: 600;
+                color: #2c3e50;
+            }
+            
+            .comparison-table tr:hover {
+                background-color: #f8f9fa;
+            }
+            
+            .insights-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                gap: 20px;
+                margin: 20px 0;
+            }
+            
+            .insight-card {
+                background: #f8f9fa;
+                padding: 20px;
+                border-radius: 8px;
+                border-left: 4px solid #3498db;
+            }
+            
+            .insight-card h3 {
+                color: #2c3e50;
+                margin-bottom: 10px;
+                font-size: 1.1em;
+            }
+            
+            .insight-card p {
+                color: #555;
+                line-height: 1.5;
+            }
+            
+            .fecha {
+                text-align: center;
+                color: #7f8c8d;
+                margin: 20px 0;
+                font-style: italic;
+            }
+            
+            .highlight {
+                background-color: #fffacd;
+                padding: 2px 5px;
+                border-radius: 3px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Dashboard Ejecutivo - Julio 2025</h1>
+            <p>Análisis Integral de Clientes - Actualización Semestral</p>
+        </div>
+        
+        <div class="container">
+    
+            <div class="alert">
+                <strong>📊 Datos Actualizados:</strong> Este dashboard presenta el análisis de los datos de clientes 
+                correspondientes a julio 2025, permitiendo una comparación semestral con los datos anteriores.
+            </div>
+    
+            <section id="metricas" class="section">
+                <h2>📊 Métricas Principales - Julio 2025</h2>
+                <div class="metrics-grid">
+                    <div class="metric-card">
+                        <div class="metric-number">1,107</div>
+                        <div class="metric-label">Total Clientes</div>
+    <div class="metric-change positive">+26.8%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-number">14.4%</div>
+                        <div class="metric-label">Tasa de Morosidad</div>
+    <div class="metric-change positive">-2.7pp</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-number">Q81,266</div>
+                        <div class="metric-label">Precio Promedio Producto</div>
+    <div class="metric-change positive">+7.2%</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="metric-number">Q21,421</div>
+                        <div class="metric-label">Sueldo Promedio</div>
+    <div class="metric-change negative">-1.8%</div>
+                    </div>
+                </div>
+            </section>
+    
+            <section class="section">
+                <h2>📈 Comparación Semestral</h2>
+                <table class="comparison-table">
+                    <thead>
+                        <tr>
+                            <th>Métrica</th>
+                            <th>Datos Anteriores</th>
+                            <th>Julio 2025</th>
+                            <th>Cambio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Total de Clientes</td>
+                            <td>873</td>
+                            <td>1,107</td>
+                            <td class="highlight">+26.8%</td>
+                        </tr>
+                        <tr>
+                            <td>Tasa de Morosidad</td>
+                            <td>17.1%</td>
+                            <td>14.4%</td>
+                            <td class="highlight">-2.7pp</td>
+                        </tr>
+                        <tr>
+                            <td>Precio Promedio Producto</td>
+                            <td>Q75,837</td>
+                            <td>Q81,266</td>
+                            <td>+7.2%</td>
+                        </tr>
+                        <tr>
+                            <td>Sueldo Promedio</td>
+                            <td>Q21,814</td>
+                            <td>Q21,421</td>
+                            <td>-1.8%</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+        
+            <section class="section">
+                <h2>🎯 Análisis de Datos - Julio 2025</h2>
+                <div class="insights-grid">
+                    <div class="insight-card">
+                        <h3>📊 Distribución de Clientes</h3>
+                        <p>Total de registros analizados: <strong>1,107</strong><br>
+                        Clientes al día: <strong>948</strong> (85.6%)<br>
+                        Clientes morosos: <strong>159</strong> (14.4%)</p>
+                    </div>
+                    <div class="insight-card">
+                        <h3>💰 Análisis Financiero</h3>
+                        <p>Relación Precio/Sueldo: <strong>3.8x</strong><br>
+                        Monto total en productos: <strong>Q89,961,144</strong><br>
+                        Monto promedio morosos: <strong>Q73,143</strong></p>
+                    </div>
+    
+                    <div class="insight-card">
+                        <h3>🏠 Perfil de Propiedad</h3>
+                        <p>Con vivienda propia: <strong>63.3%</strong><br>
+        Morosidad con vivienda: <strong>13.7%</strong><br>Morosidad sin vivienda: <strong>15.1%</strong></p></div>
+                </div>
+            </section>
+    
+            <section class="section">
+                <h2>💡 Recomendaciones Basadas en la Evolución Semestral</h2>
+                <div class="insights-grid">
+        
+                    <div class="insight-card">
+                        <h3>✅ Mejora en Morosidad</h3>
+                        <p>Excelente reducción en la tasa de morosidad. Las estrategias implementadas están funcionando. 
+                        Considere documentar y mantener estas prácticas.</p>
+                    </div>
+            
+                    <div class="insight-card">
+                        <h3>📈 Crecimiento de Base</h3>
+                        <p>Crecimiento significativo en la base de clientes. Asegúrese de mantener la calidad del servicio 
+                        y monitorear de cerca los nuevos clientes para prevenir morosidad.</p>
+                    </div>
+            
+                </div>
+            </section>
+        
+            <div class="fecha">
+                Dashboard generado el 06 de August de 2025 a las 21:57<br>
+                <small>Datos correspondientes a Julio 2025</small>
+            </div>
+        </div>
+    </body>
+    </html>
+    

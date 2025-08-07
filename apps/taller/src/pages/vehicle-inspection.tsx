@@ -5,9 +5,6 @@ import { useInspection } from "../contexts/InspectionContext";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
-import { CalendarIcon } from "lucide-react";
 import { toast, Toaster } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -29,12 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar } from "@/components/ui/calendar";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { DatePicker } from "@/components/ui/date-picker";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import {
@@ -125,7 +117,6 @@ export default function VehicleInspectionForm({
 }: VehicleInspectionFormProps) {
   const { formData, setFormData } = useInspection();
   const [scannerFile, setScannerFile] = useState<File | null>(null);
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
 
@@ -244,43 +235,16 @@ export default function VehicleInspectionForm({
                 render={({ field }) => (
                   <FormItem className="flex flex-col">
                     <FormLabel>Fecha de revisión</FormLabel>
-                    <Popover
-                      open={datePickerOpen}
-                      onOpenChange={setDatePickerOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant={"outline"}
-                            className={cn(
-                              "w-full pl-3 text-left font-normal",
-                              !field.value && "text-muted-foreground"
-                            )}
-                          >
-                            {field.value ? (
-                              format(field.value, "PPP", { locale: es })
-                            ) : (
-                              <span>Seleccione una fecha</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={(date) => {
-                            field.onChange(date);
-                            setDatePickerOpen(false);
-                          }}
-                          disabled={(date) =>
-                            date > new Date() || date < new Date("1900-01-01")
-                          }
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
+                    <FormControl>
+                      <DatePicker
+                        date={field.value}
+                        onDateChange={field.onChange}
+                        placeholder="Seleccione una fecha"
+                        disabled={(date) =>
+                          date > new Date() || date < new Date("1900-01-01")
+                        }
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}

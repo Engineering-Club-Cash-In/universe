@@ -253,14 +253,15 @@ export default function InspectionChecklist({
     }> = [];
     inspectionCategories.forEach((category) => {
       category.items.forEach((item) => {
-        if (items[item.id]) {
-          checklistData.push({
-            category: category.title,
-            item: item.label,
-            checked: true,
-            severity: item.critical ? 'critical' : 'warning',
-          });
-        }
+        // Always include the item in the checklist data
+        // checked: false means the item has issues (doesn't comply)
+        // checked: true means the item is OK (complies)
+        checklistData.push({
+          category: category.id,
+          item: item.label,
+          checked: !items[item.id], // Inverted: if marked in UI means it has issues
+          severity: item.critical ? 'critical' : 'warning',
+        });
       });
     });
     setChecklistItems(checklistData);
@@ -518,29 +519,67 @@ export default function InspectionChecklist({
 
       {/* Wizard Mode Confirmation */}
       {isWizardMode && (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex justify-between items-center">
-              <div>
-                <div className="text-sm text-muted-foreground">
-                  Basado en los criterios evaluados, el vehículo se considera:
-                </div>
-                <div className="mt-2">
-                  <Badge
-                    variant={hasRejectionCriteria ? "destructive" : "default"}
-                    className="text-base px-3 py-1"
-                  >
-                    {hasRejectionCriteria ? "RECHAZADO" : "APROBADO"}
-                  </Badge>
-                </div>
+        <Card className="border-2">
+          <CardContent className="py-8">
+            <div className="flex flex-col items-center text-center space-y-6">
+              {/* Status Icon */}
+              <div className={cn(
+                "w-20 h-20 rounded-full flex items-center justify-center",
+                hasRejectionCriteria ? "bg-red-100" : "bg-green-100"
+              )}>
+                {hasRejectionCriteria ? (
+                  <XCircle className="w-12 h-12 text-red-600" />
+                ) : (
+                  <CheckCircle className="w-12 h-12 text-green-600" />
+                )}
               </div>
+              
+              {/* Status Text */}
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">
+                  Evaluación de Criterios Completada
+                </h3>
+                <p className="text-muted-foreground">
+                  Basado en los criterios evaluados, el vehículo se considera:
+                </p>
+              </div>
+              
+              {/* Status Badge */}
+              <Badge
+                variant={hasRejectionCriteria ? "destructive" : "default"}
+                className="text-xl px-6 py-2"
+              >
+                {hasRejectionCriteria ? "RECHAZADO" : "APROBADO"}
+              </Badge>
+              
+              {/* Rejection Reasons if any */}
+              {hasRejectionCriteria && (
+                <div className="w-full max-w-md bg-red-50 border border-red-200 rounded-lg p-4">
+                  <p className="text-sm font-medium text-red-900 mb-2">
+                    Criterios de rechazo encontrados:
+                  </p>
+                  <ul className="text-sm text-red-700 space-y-1">
+                    {checklistItems
+                      .filter(item => item.value === 'no' && item.isRejectionCriteria)
+                      .map((item, index) => (
+                        <li key={index} className="flex items-start">
+                          <span className="mr-2">•</span>
+                          <span>{item.label}</span>
+                        </li>
+                      ))}
+                  </ul>
+                </div>
+              )}
+              
+              {/* Action Button */}
               <Button
                 onClick={onComplete}
-                variant="outline"
                 size="lg"
+                className="mt-4"
+                variant={hasRejectionCriteria ? "destructive" : "default"}
               >
-                <CheckCircle className="mr-2 h-4 w-4" />
-                Confirmar Evaluación
+                <CheckCircle className="mr-2 h-5 w-5" />
+                Confirmar Evaluación y Continuar
               </Button>
             </div>
           </CardContent>

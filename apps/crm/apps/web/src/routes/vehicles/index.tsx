@@ -11,7 +11,6 @@ import {
   Search,
   FileText,
   Camera,
-  Plus,
   Car,
 } from "lucide-react";
 
@@ -74,27 +73,11 @@ function VehiclesDashboard() {
   const [filterStatus, setFilterStatus] = useState("all");
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [isPhotosOpen, setIsPhotosOpen] = useState(false);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("general");
 
   // Fetch vehicles
   const { data: vehicles, isLoading } = useQuery(orpc.getVehicles.queryOptions());
   const { data: statistics } = useQuery(orpc.getVehicleStatistics.queryOptions());
-
-  // Mutations
-  const updateInspectionMutation = useMutation({
-    mutationFn: async (params: { id: string; data: any }) => {
-      return await client.updateVehicleInspection(params);
-    },
-    onSuccess: () => {
-      toast.success("Inspección actualizada correctamente");
-      setIsEditOpen(false);
-    },
-    onError: () => {
-      toast.error("Error al actualizar la inspección");
-    },
-  });
 
   // Filter vehicles based on search term and filter status
   const filteredVehicles = vehicles?.filter((vehicle: any) => {
@@ -175,10 +158,6 @@ function VehiclesDashboard() {
     <div className="flex flex-col p-6 gap-4">
       <div className="flex justify-between items-center w-full">
         <h1 className="text-4xl font-bold">Panel de Vehículos</h1>
-        <Button onClick={() => navigate({ to: "/vehicles/inspection" })}>
-          <Plus className="mr-2 h-4 w-4" />
-          Nueva Inspección
-        </Button>
       </div>
 
       {/* Stats Cards */}
@@ -387,38 +366,45 @@ function VehiclesDashboard() {
                                   <DropdownMenuItem
                                     onClick={() => {
                                       setSelectedVehicle(vehicle);
+                                      setActiveTab("general");
                                       setIsDetailsOpen(true);
                                     }}
                                   >
-                                    Ver detalles
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedVehicle(vehicle);
-                                      setIsEditOpen(true);
-                                    }}
-                                  >
-                                    Editar inspección
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    Ver detalles completos
                                   </DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem
                                     onClick={() => {
                                       setSelectedVehicle(vehicle);
-                                      setIsPhotosOpen(true);
+                                      setActiveTab("photos");
+                                      setIsDetailsOpen(true);
                                     }}
                                   >
-                                    Ver fotos
+                                    <Camera className="mr-2 h-4 w-4" />
+                                    Ver fotografías
                                   </DropdownMenuItem>
-                                  {latestInspection?.scannerUsed && (
+                                  {latestInspection?.scannerUsed && latestInspection?.scannerResultUrl && (
                                     <DropdownMenuItem
                                       onClick={() => {
-                                        setSelectedVehicle(vehicle);
-                                        setIsScannerOpen(true);
+                                        window.open(latestInspection.scannerResultUrl, '_blank');
                                       }}
                                     >
+                                      <FileText className="mr-2 h-4 w-4" />
                                       Ver reporte de scanner
                                     </DropdownMenuItem>
                                   )}
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      // Copy VIN to clipboard
+                                      navigator.clipboard.writeText(vehicle.vinNumber);
+                                      toast.success("VIN copiado al portapapeles");
+                                    }}
+                                  >
+                                    <FileText className="mr-2 h-4 w-4" />
+                                    Copiar VIN
+                                  </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
                             </TableCell>
@@ -435,87 +421,302 @@ function VehiclesDashboard() {
       </Tabs>
 
       {/* Vehicle Details Dialog */}
-      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-5xl">
+      <Dialog open={isDetailsOpen} onOpenChange={(open) => {
+        setIsDetailsOpen(open);
+        if (!open) {
+          setActiveTab("general"); // Reset tab when closing
+        }
+      }}>
+        <DialogContent className="min-w-[90vw] max-w-7xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalles del Vehículo</DialogTitle>
             <DialogDescription>
               Información completa del vehículo {selectedVehicle?.make}{" "}
-              {selectedVehicle?.model}
+              {selectedVehicle?.model} {selectedVehicle?.year}
             </DialogDescription>
           </DialogHeader>
 
           {selectedVehicle && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold">Información General</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="text-sm font-medium">Marca:</div>
-                    <div className="text-sm">{selectedVehicle.make}</div>
-                    <div className="text-sm font-medium">Modelo:</div>
-                    <div className="text-sm">{selectedVehicle.model}</div>
-                    <div className="text-sm font-medium">Año:</div>
-                    <div className="text-sm">{selectedVehicle.year}</div>
-                    <div className="text-sm font-medium">Placa:</div>
-                    <div className="text-sm">{selectedVehicle.licensePlate}</div>
-                    <div className="text-sm font-medium">VIN:</div>
-                    <div className="text-sm">{selectedVehicle.vinNumber}</div>
-                    <div className="text-sm font-medium">Color:</div>
-                    <div className="text-sm">{selectedVehicle.color}</div>
-                    <div className="text-sm font-medium">Kilometraje:</div>
-                    <div className="text-sm">{selectedVehicle.kmMileage} km</div>
-                    <div className="text-sm font-medium">Tipo:</div>
-                    <div className="text-sm">{selectedVehicle.vehicleType}</div>
-                    <div className="text-sm font-medium">Combustible:</div>
-                    <div className="text-sm">{selectedVehicle.fuelType}</div>
-                  </div>
-                </div>
-              </div>
-
-              {selectedVehicle.inspections?.[0] && (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <h3 className="text-lg font-semibold">Valoración</h3>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="text-sm font-medium">Calificación:</div>
-                      <div
-                        className={
-                          selectedVehicle.inspections[0].vehicleRating === "Comercial"
-                            ? "text-sm font-semibold text-green-500"
-                            : "text-sm font-semibold text-red-500"
-                        }
-                      >
-                        {selectedVehicle.inspections[0].vehicleRating}
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="general">Información General</TabsTrigger>
+                <TabsTrigger value="inspections">Inspecciones</TabsTrigger>
+                <TabsTrigger value="photos">Fotografías</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="general" className="space-y-4 mt-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Datos del Vehículo</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="text-sm font-medium">Marca:</div>
+                        <div className="text-sm">{selectedVehicle.make}</div>
+                        <div className="text-sm font-medium">Modelo:</div>
+                        <div className="text-sm">{selectedVehicle.model}</div>
+                        <div className="text-sm font-medium">Año:</div>
+                        <div className="text-sm">{selectedVehicle.year}</div>
+                        <div className="text-sm font-medium">Placa:</div>
+                        <div className="text-sm">{selectedVehicle.licensePlate}</div>
+                        <div className="text-sm font-medium">VIN:</div>
+                        <div className="text-sm">{selectedVehicle.vinNumber}</div>
+                        <div className="text-sm font-medium">Color:</div>
+                        <div className="text-sm">{selectedVehicle.color}</div>
+                        <div className="text-sm font-medium">Tipo:</div>
+                        <div className="text-sm">{selectedVehicle.vehicleType}</div>
                       </div>
-                      <div className="text-sm font-medium">Valor de mercado:</div>
-                      <div className="text-sm">
-                        Q{Number(selectedVehicle.inspections[0].marketValue).toLocaleString(
-                          "es-GT"
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Especificaciones Técnicas</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="text-sm font-medium">Kilometraje:</div>
+                        <div className="text-sm">{selectedVehicle.kmMileage?.toLocaleString()} km</div>
+                        {selectedVehicle.milesMileage && (
+                          <>
+                            <div className="text-sm font-medium">Millaje:</div>
+                            <div className="text-sm">{selectedVehicle.milesMileage?.toLocaleString()} mi</div>
+                          </>
                         )}
+                        <div className="text-sm font-medium">Origen:</div>
+                        <div className="text-sm">{selectedVehicle.origin}</div>
+                        <div className="text-sm font-medium">Cilindros:</div>
+                        <div className="text-sm">{selectedVehicle.cylinders}</div>
+                        <div className="text-sm font-medium">Motor (CC):</div>
+                        <div className="text-sm">{selectedVehicle.engineCC}</div>
+                        <div className="text-sm font-medium">Combustible:</div>
+                        <div className="text-sm">{selectedVehicle.fuelType}</div>
+                        <div className="text-sm font-medium">Transmisión:</div>
+                        <div className="text-sm">{selectedVehicle.transmission}</div>
                       </div>
-                      <div className="text-sm font-medium">
-                        Valor comercial sugerido:
-                      </div>
-                      <div className="text-sm">
-                        Q{Number(
-                          selectedVehicle.inspections[0].suggestedCommercialValue
-                        ).toLocaleString("es-GT")}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <h3 className="text-lg font-semibold">
-                      Resultado de la inspección
-                    </h3>
-                    <p className="text-sm border rounded-md p-3 bg-muted/50">
-                      {selectedVehicle.inspections[0].inspectionResult}
-                    </p>
-                  </div>
+                    </CardContent>
+                  </Card>
                 </div>
-              )}
-            </div>
+              </TabsContent>
+
+              <TabsContent value="inspections" className="space-y-4 mt-4">
+                {selectedVehicle.inspections && selectedVehicle.inspections.length > 0 ? (
+                  <div className="space-y-4">
+                    {selectedVehicle.inspections.map((inspection: any, index: number) => {
+                      console.log('Inspection data:', inspection);
+                      return (
+                      <Card key={inspection.id || index}>
+                        <CardHeader>
+                          <div className="flex justify-between items-center">
+                            <CardTitle className="text-lg">
+                              Inspección #{index + 1}
+                            </CardTitle>
+                            <Badge variant={
+                              inspection.status === 'approved' ? 'default' :
+                              inspection.status === 'rejected' ? 'destructive' : 'secondary'
+                            }>
+                              {inspection.status === 'approved' ? 'Aprobada' :
+                               inspection.status === 'rejected' ? 'Rechazada' : 'Pendiente'}
+                            </Badge>
+                          </div>
+                          <CardDescription>
+                            Realizada por {inspection.technicianName} el{" "}
+                            {inspection.inspectionDate ? format(new Date(inspection.inspectionDate), "PPP", { locale: es }) : "N/A"}
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-4">
+                              <div>
+                                <h4 className="font-semibold mb-2">Valoración</h4>
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div className="font-medium">Calificación:</div>
+                                  <div className={
+                                    inspection.vehicleRating === "Comercial"
+                                      ? "font-semibold text-green-600"
+                                      : "font-semibold text-red-600"
+                                  }>
+                                    {inspection.vehicleRating}
+                                  </div>
+                                  <div className="font-medium">Valor de mercado:</div>
+                                  <div>Q{Number(inspection.marketValue).toLocaleString("es-GT")}</div>
+                                  <div className="font-medium">Valor comercial:</div>
+                                  <div>Q{Number(inspection.suggestedCommercialValue).toLocaleString("es-GT")}</div>
+                                  <div className="font-medium">Valor bancario:</div>
+                                  <div>Q{Number(inspection.bankValue).toLocaleString("es-GT")}</div>
+                                  <div className="font-medium">Valor actual:</div>
+                                  <div>Q{Number(inspection.currentConditionValue).toLocaleString("es-GT")}</div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <h4 className="font-semibold mb-2">Diagnóstico</h4>
+                                <div className="grid grid-cols-2 gap-2 text-sm">
+                                  <div className="font-medium">Escáner usado:</div>
+                                  <div>{inspection.scannerUsed ? "Sí" : "No"}</div>
+                                  <div className="font-medium">Testigo airbag:</div>
+                                  <div>{inspection.airbagWarning ? "Sí" : "No"}</div>
+                                  {inspection.missingAirbag && (
+                                    <>
+                                      <div className="font-medium">Airbag faltante:</div>
+                                      <div>{inspection.missingAirbag}</div>
+                                    </>
+                                  )}
+                                  <div className="font-medium">Prueba de manejo:</div>
+                                  <div>{inspection.testDrive ? "Sí" : "No"}</div>
+                                  {inspection.noTestDriveReason && (
+                                    <>
+                                      <div className="font-medium">Razón sin prueba:</div>
+                                      <div>{inspection.noTestDriveReason}</div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-4">
+                              <div>
+                                <h4 className="font-semibold mb-2">Equipamiento</h4>
+                                <p className="text-sm text-muted-foreground">
+                                  {inspection.vehicleEquipment || "No especificado"}
+                                </p>
+                              </div>
+
+                              <div>
+                                <h4 className="font-semibold mb-2">Consideraciones Importantes</h4>
+                                <p className="text-sm text-muted-foreground">
+                                  {inspection.importantConsiderations || "Sin observaciones adicionales"}
+                                </p>
+                              </div>
+
+                              <div>
+                                <h4 className="font-semibold mb-2">Resultado de Inspección</h4>
+                                <p className="text-sm bg-muted/50 p-3 rounded-md">
+                                  {inspection.inspectionResult}
+                                </p>
+                              </div>
+
+                              {inspection.alerts && inspection.alerts.length > 0 && (
+                                <div>
+                                  <h4 className="font-semibold mb-2 text-red-600">Alertas</h4>
+                                  <div className="space-y-1">
+                                    {inspection.alerts.map((alert: string, idx: number) => (
+                                      <Badge key={idx} variant="destructive" className="mr-2">
+                                        {alert}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          
+                          {/* Checklist Section */}
+                          {inspection.checklistItems && inspection.checklistItems.length > 0 && (
+                            <div className="mt-6 pt-6 border-t">
+                              <h4 className="font-semibold mb-4">Evaluación de Criterios</h4>
+                              <div className="space-y-4">
+                                {/* Group checklist items by category */}
+                                {Object.entries(
+                                  inspection.checklistItems.reduce((acc: any, item: any) => {
+                                    if (!acc[item.category]) {
+                                      acc[item.category] = [];
+                                    }
+                                    acc[item.category].push(item);
+                                    return acc;
+                                  }, {})
+                                ).map(([category, items]: [string, any]) => (
+                                  <div key={category} className="space-y-2">
+                                    <h5 className="text-sm font-medium text-muted-foreground capitalize">
+                                      {category.replace(/_/g, ' ')}
+                                    </h5>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                      {items.map((item: any, idx: number) => (
+                                        <div 
+                                          key={idx} 
+                                          className="flex items-center justify-between p-2 rounded-md border bg-muted/20"
+                                        >
+                                          <span className="text-sm">{item.item}</span>
+                                          <Badge 
+                                            variant={
+                                              item.checked ? 'default' : 
+                                              !item.checked && item.severity === 'critical' ? 'destructive' : 
+                                              'secondary'
+                                            }
+                                            className="text-xs"
+                                          >
+                                            {item.checked ? '✓ Cumple' : '✗ No cumple'}
+                                          </Badge>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                                
+                                {/* Summary of critical issues */}
+                                {inspection.checklistItems.some((item: any) => 
+                                  !item.checked && item.severity === 'critical'
+                                ) && (
+                                  <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
+                                    <h5 className="text-sm font-semibold text-red-900 mb-2">
+                                      Criterios Críticos de Rechazo
+                                    </h5>
+                                    <ul className="text-sm text-red-700 space-y-1">
+                                      {inspection.checklistItems
+                                        .filter((item: any) => !item.checked && item.severity === 'critical')
+                                        .map((item: any, idx: number) => (
+                                          <li key={idx} className="flex items-start">
+                                            <span className="mr-2">•</span>
+                                            <span>{item.item}</span>
+                                          </li>
+                                        ))}
+                                    </ul>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    )})}
+                  </div>
+                ) : (
+                  <Card>
+                    <CardContent className="text-center py-8">
+                      <p className="text-muted-foreground">No hay inspecciones registradas para este vehículo</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+
+              <TabsContent value="photos" className="space-y-4 mt-4">
+                {selectedVehicle.photos && selectedVehicle.photos.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {selectedVehicle.photos.map((photo: any, index: number) => (
+                      <Card key={photo.id || index}>
+                        <CardContent className="p-2">
+                          <img 
+                            src={photo.url || "/placeholder.svg"} 
+                            alt={photo.title || `Foto ${index + 1}`}
+                            className="w-full h-40 object-cover rounded-md"
+                          />
+                          <p className="text-sm font-medium mt-2">{photo.title}</p>
+                          <p className="text-xs text-muted-foreground">{photo.category}</p>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card>
+                    <CardContent className="text-center py-8">
+                      <Camera className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                      <p className="text-muted-foreground">No hay fotografías disponibles</p>
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+            </Tabs>
           )}
 
           <DialogFooter>

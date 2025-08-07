@@ -219,7 +219,14 @@ export default function VehicleInspectionWizard() {
             {currentStep === 0 && (
               <div>
                 <VehicleInspectionForm 
-                  onComplete={() => setBasicInfoCompleted(true)}
+                  onComplete={() => {
+                    setBasicInfoCompleted(true);
+                    // Avanzar automáticamente al siguiente paso
+                    if (currentStep < STEPS.length - 1) {
+                      setCurrentStep(currentStep + 1);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }
+                  }}
                   isWizardMode={true}
                 />
               </div>
@@ -228,7 +235,14 @@ export default function VehicleInspectionWizard() {
             {currentStep === 1 && (
               <div>
                 <InspectionChecklist 
-                  onComplete={() => setChecklistCompleted(true)}
+                  onComplete={() => {
+                    setChecklistCompleted(true);
+                    // Avanzar automáticamente al siguiente paso
+                    if (currentStep < STEPS.length - 1) {
+                      setCurrentStep(currentStep + 1);
+                      window.scrollTo({ top: 0, behavior: "smooth" });
+                    }
+                  }}
                   isWizardMode={true}
                 />
               </div>

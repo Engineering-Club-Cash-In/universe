@@ -14,7 +14,7 @@ import {
 import { publicProcedure, protectedProcedure } from "../lib/orpc";
 
 export const vehiclesRouter = {
-  // Get all vehicles with their latest inspection
+  // Get all vehicles with their latest inspection and photos
   getAll: protectedProcedure
     .handler(async () => {
       const result = await db
@@ -26,7 +26,43 @@ export const vehiclesRouter = {
         )
         .orderBy(desc(vehicles.createdAt));
 
-      // Group vehicles with their inspections
+      // Get all photos for all vehicles
+      const allPhotos = await db
+        .select()
+        .from(vehiclePhotos)
+        .orderBy(vehiclePhotos.category, vehiclePhotos.photoType);
+
+      // Group photos by vehicle ID
+      const photosByVehicle = new Map();
+      allPhotos.forEach(photo => {
+        if (!photosByVehicle.has(photo.vehicleId)) {
+          photosByVehicle.set(photo.vehicleId, []);
+        }
+        photosByVehicle.get(photo.vehicleId).push(photo);
+      });
+
+      // Get all checklist items for all inspections
+      const allInspectionIds = result
+        .filter(row => row.vehicle_inspections)
+        .map(row => row.vehicle_inspections.id);
+      
+      const allChecklistItems = allInspectionIds.length > 0 
+        ? await db
+            .select()
+            .from(inspectionChecklistItems)
+            .orderBy(inspectionChecklistItems.category)
+        : [];
+
+      // Group checklist items by inspection ID
+      const checklistByInspection = new Map();
+      allChecklistItems.forEach(item => {
+        if (!checklistByInspection.has(item.inspectionId)) {
+          checklistByInspection.set(item.inspectionId, []);
+        }
+        checklistByInspection.get(item.inspectionId).push(item);
+      });
+
+      // Group vehicles with their inspections and photos
       const vehiclesMap = new Map();
       
       result.forEach(row => {
@@ -35,12 +71,17 @@ export const vehiclesRouter = {
         if (!vehiclesMap.has(vehicleId)) {
           vehiclesMap.set(vehicleId, {
             ...row.vehicles,
-            inspections: []
+            inspections: [],
+            photos: photosByVehicle.get(vehicleId) || []
           });
         }
         
         if (row.vehicle_inspections) {
-          vehiclesMap.get(vehicleId).inspections.push(row.vehicle_inspections);
+          const inspectionWithChecklist = {
+            ...row.vehicle_inspections,
+            checklistItems: checklistByInspection.get(row.vehicle_inspections.id) || []
+          };
+          vehiclesMap.get(vehicleId).inspections.push(inspectionWithChecklist);
         }
       });
 
@@ -67,6 +108,22 @@ export const vehiclesRouter = {
         .where(eq(vehicleInspections.vehicleId, input.id))
         .orderBy(desc(vehicleInspections.createdAt));
 
+      // Get checklist items for each inspection
+      const inspectionsWithChecklist = await Promise.all(
+        inspections.map(async (inspection) => {
+          const checklistItems = await db
+            .select()
+            .from(inspectionChecklistItems)
+            .where(eq(inspectionChecklistItems.inspectionId, inspection.id))
+            .orderBy(inspectionChecklistItems.category);
+          
+          return {
+            ...inspection,
+            checklistItems
+          };
+        })
+      );
+
       const photos = await db
         .select()
         .from(vehiclePhotos)
@@ -75,7 +132,7 @@ export const vehiclesRouter = {
 
       return {
         ...vehicle,
-        inspections,
+        inspections: inspectionsWithChecklist,
         photos
       };
     }),

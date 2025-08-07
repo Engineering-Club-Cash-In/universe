@@ -57,6 +57,7 @@ export const appRouter = {
 	deleteVehiclePhoto: vehiclesRouter.deletePhoto,
 	getVehicleInspectionById: vehiclesRouter.getInspectionById,
 	getVehicleStatistics: vehiclesRouter.getStatistics,
+	createFullVehicleInspection: vehiclesRouter.createFullInspection,
 };
 
 export type AppRouter = typeof appRouter;

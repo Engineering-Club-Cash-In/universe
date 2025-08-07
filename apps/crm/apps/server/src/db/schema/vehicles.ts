@@ -17,7 +17,7 @@ export const vehicles = pgTable('vehicles', {
   // Technical details
   milesMileage: integer('miles_mileage'),
   kmMileage: integer('km_mileage').notNull(),
-  origin: text('origin').notNull(), // Agencia, Rodado
+  origin: text('origin').notNull(), // Nacional, Importado
   cylinders: text('cylinders').notNull(),
   engineCC: text('engine_cc').notNull(),
   fuelType: text('fuel_type').notNull(), // Gasolina, Diesel, Eléctrico, Híbrido
@@ -93,6 +93,19 @@ export const vehiclePhotos = pgTable('vehicle_photos', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+// Inspection Checklist Items table - for critical criteria evaluation
+export const inspectionChecklistItems = pgTable('inspection_checklist_items', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  inspectionId: uuid('inspection_id').references(() => vehicleInspections.id).notNull(),
+  
+  category: text('category').notNull(), // motor, transmision, suspension, etc.
+  item: text('item').notNull(), // description of the criterion
+  checked: boolean('checked').notNull().default(false),
+  severity: text('severity').notNull().default('critical'), // critical, warning, info
+  
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Relations
 export const vehiclesRelations = relations(vehicles, ({ many, one }) => ({
   inspections: many(vehicleInspections),
@@ -109,6 +122,7 @@ export const vehicleInspectionsRelations = relations(vehicleInspections, ({ one,
     references: [vehicles.id],
   }),
   photos: many(vehiclePhotos),
+  checklistItems: many(inspectionChecklistItems),
 }));
 
 export const vehiclePhotosRelations = relations(vehiclePhotos, ({ one }) => ({
@@ -122,6 +136,13 @@ export const vehiclePhotosRelations = relations(vehiclePhotos, ({ one }) => ({
   }),
 }));
 
+export const inspectionChecklistItemsRelations = relations(inspectionChecklistItems, ({ one }) => ({
+  inspection: one(vehicleInspections, {
+    fields: [inspectionChecklistItems.inspectionId],
+    references: [vehicleInspections.id],
+  }),
+}));
+
 // Export types for TypeScript
 export type Vehicle = typeof vehicles.$inferSelect;
 export type NewVehicle = typeof vehicles.$inferInsert;
@@ -131,3 +152,6 @@ export type NewVehicleInspection = typeof vehicleInspections.$inferInsert;
 
 export type VehiclePhoto = typeof vehiclePhotos.$inferSelect;
 export type NewVehiclePhoto = typeof vehiclePhotos.$inferInsert;
+
+export type InspectionChecklistItem = typeof inspectionChecklistItems.$inferSelect;
+export type NewInspectionChecklistItem = typeof inspectionChecklistItems.$inferInsert;

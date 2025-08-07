@@ -5,9 +5,11 @@ import {
   vehicles, 
   vehicleInspections, 
   vehiclePhotos,
+  inspectionChecklistItems,
   type NewVehicle,
   type NewVehicleInspection,
-  type NewVehiclePhoto
+  type NewVehiclePhoto,
+  type NewInspectionChecklistItem
 } from "../db/schema";
 import { publicProcedure, protectedProcedure } from "../lib/orpc";
 
@@ -368,5 +370,163 @@ export const vehiclesRouter = {
       };
 
       return stats;
+    }),
+
+  // Create full inspection with all data (vehicle + inspection + checklist)
+  createFullInspection: protectedProcedure
+    .input(z.object({
+      // Vehicle data
+      vehicle: z.object({
+        make: z.string(),
+        model: z.string(),
+        year: z.number(),
+        licensePlate: z.string(),
+        vinNumber: z.string(),
+        color: z.string(),
+        vehicleType: z.string(),
+        milesMileage: z.number().nullable().optional(),
+        kmMileage: z.number(),
+        origin: z.enum(["Nacional", "Importado"]),
+        cylinders: z.string(),
+        engineCC: z.string(),
+        fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"]),
+        transmission: z.enum(["Automático", "Manual"]),
+        companyId: z.string().nullable().optional(),
+      }),
+      // Inspection data
+      inspection: z.object({
+        technicianName: z.string(),
+        inspectionDate: z.date(),
+        inspectionResult: z.string(),
+        vehicleRating: z.enum(["Comercial", "No comercial"]),
+        marketValue: z.string(),
+        suggestedCommercialValue: z.string(),
+        bankValue: z.string(),
+        currentConditionValue: z.string(),
+        vehicleEquipment: z.string(),
+        importantConsiderations: z.string().optional(),
+        scannerUsed: z.boolean(),
+        scannerResultUrl: z.string().optional(),
+        airbagWarning: z.boolean(),
+        missingAirbag: z.string().optional(),
+        testDrive: z.boolean(),
+        noTestDriveReason: z.string().optional(),
+      }),
+      // Checklist items
+      checklistItems: z.array(z.object({
+        category: z.string(),
+        item: z.string(),
+        checked: z.boolean(),
+        severity: z.string().optional().default("critical"),
+      })),
+      // Photo URLs (optional, can be added later)
+      photos: z.array(z.object({
+        category: z.string(),
+        photoType: z.string(),
+        title: z.string(),
+        description: z.string().optional(),
+        url: z.string(),
+      })).optional(),
+    }))
+    .handler(async ({ input }) => {
+      // Start a transaction
+      return await db.transaction(async (tx) => {
+        // 1. Check if vehicle exists by VIN or create new
+        let vehicleId: string;
+        const existingVehicle = await tx
+          .select()
+          .from(vehicles)
+          .where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
+          .limit(1);
+
+        if (existingVehicle.length > 0) {
+          // Update existing vehicle
+          const [updated] = await tx
+            .update(vehicles)
+            .set({
+              ...input.vehicle,
+              updatedAt: new Date(),
+            })
+            .where(eq(vehicles.vinNumber, input.vehicle.vinNumber))
+            .returning();
+          vehicleId = updated.id;
+        } else {
+          // Create new vehicle
+          const [newVehicle] = await tx
+            .insert(vehicles)
+            .values({
+              ...input.vehicle,
+              status: "pending",
+            } as NewVehicle)
+            .returning();
+          vehicleId = newVehicle.id;
+        }
+
+        // 2. Create inspection
+        const [newInspection] = await tx
+          .insert(vehicleInspections)
+          .values({
+            vehicleId,
+            ...input.inspection,
+            status: "pending",
+            alerts: [],
+          } as NewVehicleInspection)
+          .returning();
+
+        // 3. Create checklist items
+        if (input.checklistItems.length > 0) {
+          await tx
+            .insert(inspectionChecklistItems)
+            .values(
+              input.checklistItems.map(item => ({
+                inspectionId: newInspection.id,
+                ...item,
+              } as NewInspectionChecklistItem))
+            );
+        }
+
+        // 4. Create photos if provided
+        if (input.photos && input.photos.length > 0) {
+          await tx
+            .insert(vehiclePhotos)
+            .values(
+              input.photos.map(photo => ({
+                vehicleId,
+                inspectionId: newInspection.id,
+                ...photo,
+              } as NewVehiclePhoto))
+            );
+        }
+
+        // 5. Update vehicle status based on checklist
+        const criticalIssues = input.checklistItems.filter(
+          item => item.checked && item.severity === "critical"
+        );
+        
+        if (criticalIssues.length > 0) {
+          await tx
+            .update(vehicles)
+            .set({ 
+              status: "maintenance",
+              updatedAt: new Date()
+            })
+            .where(eq(vehicles.id, vehicleId));
+            
+          await tx
+            .update(vehicleInspections)
+            .set({
+              status: "rejected",
+              alerts: criticalIssues.map(item => item.item),
+              updatedAt: new Date()
+            })
+            .where(eq(vehicleInspections.id, newInspection.id));
+        }
+
+        return {
+          vehicleId,
+          inspectionId: newInspection.id,
+          success: true,
+        };
+      });
     })
 };

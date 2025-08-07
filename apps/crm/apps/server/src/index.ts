@@ -13,7 +13,15 @@ app.use(logger());
 app.use(
 	"/*",
 	cors({
-		origin: process.env.CORS_ORIGIN || "",
+		origin: (origin) => {
+			// Allow multiple origins
+			const allowedOrigins = [
+				process.env.CORS_ORIGIN || "http://localhost:3002", // CRM frontend
+				"http://localhost:3001", // Taller frontend
+				"http://localhost:5173", // Vite default port (fallback)
+			];
+			return allowedOrigins.includes(origin || "") ? origin : allowedOrigins[0];
+		},
 		allowMethods: ["GET", "POST", "OPTIONS"],
 		allowHeaders: ["Content-Type", "Authorization"],
 		credentials: true,

@@ -1,0 +1,14 @@
+{
+  "projectName": "dashboard",
+  "mode": "code-router",
+  "typescript": true,
+  "tailwind": true,
+  "packageManager": "bun",
+  "git": true,
+  "version": 1,
+  "framework": "react-cra",
+  "chosenAddOns": [
+    "shadcn",
+    "tanstack-query"
+  ]
+}

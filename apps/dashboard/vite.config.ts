@@ -1,15 +1,36 @@
-import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import { defineConfig } from 'vite'
-import tsConfigPaths from 'vite-tsconfig-paths'
+import viteReact from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 
+import { resolve } from 'node:path'
+
+// https://vitejs.dev/config/
 export default defineConfig({
-  server: {
-    port: 3000,
+  plugins: [viteReact(), tailwindcss()],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),
+    },
   },
-  plugins: [
-    tsConfigPaths({
-      projects: ['./tsconfig.json'],
-    }),
-    tanstackStart(),
-  ],
+  server: {
+    proxy: {
+      '/api/jira': {
+        target: 'https://clubcashin.atlassian.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/jira/, ''),
+        configure: (proxy, _options) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            // Usar las credenciales del .env
+            const email = process.env.VITE_JIRA_EMAIL || ''
+            const token = process.env.VITE_JIRA_API_TOKEN || ''
+            const auth = Buffer.from(`${email}:${token}`).toString('base64')
+            
+            proxyReq.setHeader('Authorization', `Basic ${auth}`)
+            proxyReq.setHeader('Accept', 'application/json')
+            proxyReq.setHeader('Content-Type', 'application/json')
+          })
+        }
+      }
+    }
+  }
 })

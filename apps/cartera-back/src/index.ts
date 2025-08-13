@@ -11,6 +11,7 @@ app.use(cors())
 .use(routers.usersRouter)
 .use(routers.paymentRouter)
 .use(routers.creditRouter)
+.use(routers.uploadRouter)
 .listen(config.port)
 
 console.log (//vscode-app/usr/share/code/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html(

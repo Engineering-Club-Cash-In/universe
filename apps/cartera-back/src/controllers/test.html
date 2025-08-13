@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Reporte de Inversiones</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    /* Personaliza los colores y el logo si quieres */
+    body { background: #f8fafc; }
+    .logo { width: 200px; }
+    .title { color: #2b6cb0; font-size: 2rem; font-weight: bold; }
+    .summary-label { color: #64748b; font-weight: 500; }
+    .summary-value { font-size: 2rem; font-weight: bold; color: #222; }
+    .summary { border-radius: 16px; background: #fff; padding: 28px 24px; box-shadow: 0 1px 8px #d1d5db60; }
+    .table th { background: #0284c7; color: #fff; }
+    .table td, .table th { border: 1px solid #cbd5e1; padding: 6px 10px; font-size: 1rem;}
+    .table tr.total { font-weight: bold; background: #f0f9ff;}
+  </style>
+</head>
+<body class="px-10 pt-8 pb-16">
+  <div class="flex justify-between items-center mb-4">
+    <img src="https://i.ibb.co/Xy10svh/club-cashin-logo.png" class="logo" alt="Logo" />
+    <div class="flex flex-col items-end">
+      <span class="title">Aura Floridalma Rodriguez Mejicanos</span>
+      <span class="text-lg text-gray-600">No emite factura</span>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-4 gap-6 mb-8 summary">
+    <div class="text-center">
+      <div class="summary-label">Capital activo</div>
+      <div class="summary-value">Q99,932.77</div>
+    </div>
+    <div class="text-center">
+      <div class="summary-label">Abono capital</div>
+      <div class="summary-value">Q2,013.33</div>
+    </div>
+    <div class="text-center">
+      <div class="summary-label">Interés recibido</div>
+      <div class="summary-value">Q1,115.25</div>
+    </div>
+    <div class="text-center">
+      <div class="summary-label">Gran total a recibir</div>
+      <div class="summary-value">Q3,128.58</div>
+    </div>
+  </div>
+
+  <table class="table w-full mb-4">
+    <thead>
+      <tr>
+        <th>Meses en crédito</th>
+        <th>Nombre</th>
+        <th>Capital</th>
+        <th>%</th>
+        <th>% Inversionista</th>
+        <th>TASA DE INTERÉS INVERSOR</th>
+        <th>Cuota Inversionista</th>
+        <th>IVA Inversionista</th>
+        <th>ISR</th>
+        <th>Abono capital</th>
+        <th>% INVERSOR</th>
+        <th>Capital restante</th>
+        <th>CUOTA DE MES</th>
+        <th>NIT</th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- Ejemplo de fila, repite con tus datos reales -->
+      <tr>
+        <td>18</td>
+        <td>Gilberto Luciano Castañon Cinto</td>
+        <td>Q40,828.45</td>
+        <td>1.50 %</td>
+        <td>80.00 %</td>
+        <td>1.20 %</td>
+        <td>Q489.94</td>
+        <td>Q58.79</td>
+        <td>Q34.30</td>
+        <td>Q1,014.50</td>
+        <td>Q455.65</td>
+        <td>Q39,813.95</td>
+        <td>mayo</td>
+        <td>61471429</td>
+      </tr>
+      <!-- ... más filas aquí ... -->
+
+      <!-- Total -->
+      <tr class="total">
+        <td colspan="2">Total</td>
+        <td>Q99,932.77</td>
+        <td></td>
+        <td>30.00 %</td>
+        <td></td>
+        <td>Q1,199.19</td>
+        <td>Q143.90</td>
+        <td>Q83.94</td>
+        <td>Q2,013.33</td>
+        <td>Q1,115.25</td>
+        <td>Q97,919.44</td>
+        <td></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="text-xs text-gray-400 mt-12">
+    Generado por Club Cashin.com · {{fecha}}
+  </div>
+</body>
+</html>

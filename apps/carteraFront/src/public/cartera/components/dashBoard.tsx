@@ -8,53 +8,62 @@ import {
   SidebarMenuButton,
   SidebarRail,
 } from "@/components/ui/sidebar";
- 
-import { CreditForm } from "./formCredit";
-import { Banknote, CreditCard, ListOrdered } from "lucide-react"; // 👈 Íconos aquí
- 
-import { PagoForm } from "./PagoForm";
-import { ListaCreditosPagos } from "./CreditsPaymentsData";
-import { PaymentsTable } from "./paymentsTable";
-
+import { Banknote, CreditCard, ListOrdered } from "lucide-react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useState } from "react";
+import { Menu, X } from "lucide-react"; // Hamburguesa y cerrar
 const menuOptions = [
   {
     key: "registro-prestamo",
     label: "Registro Crédito",
     icon: <Banknote className="mr-2 h-5 w-5" />,
+    path: "/realizarCredito", // Ajusta la ruta según tus paths reales
   },
   {
     key: "registro-pago",
     label: "Registro Pago",
     icon: <CreditCard className="mr-2 h-5 w-5" />,
+    path: "/realizarPago",
   },
   {
     key: "total-prestamos",
-    label: "Prestamos",
+    label: "Créditos",
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/creditos",
   },
-   {
+  {
     key: "total-pagos",
     label: "Pagos",
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/Pagos",
+  },
+  {
+    key: "investors",
+    label: "Inversionistas",
+    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/inversionistas",
   },
 ];
 
 export function DashBoardCartera() {
-  const [selected, setSelected] = React.useState(menuOptions[0].key);
+  const navigate = useNavigate();
+  const location = useLocation();
+   const [menuOpen, setMenuOpen] = useState(false);
+ return (
+    <>
+      {/* HAMBURGUESA EN MOBILE */}
+      <button
+        className="fixed top-4 left-4 z-50 md:hidden p-2 rounded-full bg-white shadow-lg border border-blue-100"
+        onClick={() => setMenuOpen(true)}
+        aria-label="Abrir menú"
+      >
+        <Menu className="h-7 w-7 text-blue-700" />
+      </button>
 
-  return (
-    <div className="flex min-h-screen w-full bg-white">
-      {/* Sidebar gris claro, letras negras */}
-  <Sidebar className="
-  bg-[#f8fbff]
-  border-r-8 border-blue-600
-  rounded-2xl
-  shadow-lg
-  mr-8           // Solo margen derecho, para separar del main
-  min-w-[260px]
-  px-6 py-8
-  flex flex-col
-">
+      {/* SIDEBAR NORMAL EN DESKTOP */}
+      <Sidebar
+        className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg mr-8 min-w-[260px] px-6 py-8 flex-col"
+      >
         <SidebarHeader className="flex items-center justify-center py-4">
           <img
             src="/logo-cashin.png"
@@ -68,17 +77,17 @@ export function DashBoardCartera() {
             {menuOptions.map((opt) => (
               <SidebarMenuItem key={opt.key}>
                 <SidebarMenuButton
-                  isActive={selected === opt.key}
-                  onClick={() => setSelected(opt.key)}
+                  isActive={location.pathname === opt.path}
+                  onClick={() => navigate(opt.path)}
                   className={`w-full flex items-center text-left text-gray-900 font-medium rounded transition-all
-    ${
-      selected === opt.key
-        ? "bg-white border border-blue-600 shadow-md font-bold ring-2 ring-blue-100 ring-inset"
-        : "hover:bg-blue-50"
-    }`}
+                  ${
+                    location.pathname === opt.path
+                      ? "bg-white border border-blue-600 shadow-md font-bold ring-2 ring-blue-100 ring-inset"
+                      : "hover:bg-blue-50"
+                  }`}
                   style={
-                    selected === opt.key
-                      ? { borderLeftWidth: 6, borderLeftColor: "#2563eb" } // azul-600 tailwind
+                    location.pathname === opt.path
+                      ? { borderLeftWidth: 6, borderLeftColor: "#2563eb" }
                       : undefined
                   }
                 >
@@ -92,40 +101,64 @@ export function DashBoardCartera() {
         <SidebarRail />
       </Sidebar>
 
-      {/* Contenido totalmente blanco */}
-<main className="flex flex-col items-center mt-4 w-full">
-  {selected === "registro-prestamo" && (
-    <div className="flex items-center justify-center w-full">
-      {/* El CreditForm ahora ocupa hasta 5xl si hay espacio */}
-      <div className="w-full max-w-5xl">
-        <CreditForm />
-      </div>
-    </div>
-  )}
-  {selected === "registro-pago" && (
-    <div className="flex items-center justify-center w-full">
-      {/* El CreditForm ahora ocupa hasta 5xl si hay espacio */}
-      <div className="w-full max-w-5xl">
-      <PagoForm />
-      </div>
-    </div>
-  )}
- {selected === "total-prestamos" && (
-  <div className="flex items-center justify-center w-full  ">
-    <div className="w-full">
-      <ListaCreditosPagos   />
-    </div>
-  </div>
-)}
- {selected === "total-pagos" && (
-  <div className="flex items-center justify-center w-full  ">
-    <div className="w-full">
-      <PaymentsTable   />
-    </div>
-  </div>
-)}
-</main>
-
-    </div>
+      {/* DRAWER RESPONSIVO EN MOBILE */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 flex">
+          {/* Fondo oscuro semi-transparente */}
+          <div
+            className="fixed inset-0 bg-black bg-opacity-30"
+            onClick={() => setMenuOpen(false)}
+          />
+          {/* Drawer lateral */}
+          <aside className="relative bg-white w-72 max-w-full h-full shadow-xl border-r-4 border-blue-600 rounded-r-2xl flex flex-col px-6 py-8 animate-slideInLeft">
+            <button
+              className="absolute top-4 right-4 p-2 rounded-full bg-blue-50 hover:bg-blue-100 transition"
+              onClick={() => setMenuOpen(false)}
+              aria-label="Cerrar menú"
+            >
+              <X className="h-6 w-6 text-blue-600" />
+            </button>
+            <SidebarHeader className="flex items-center justify-center py-4">
+              <img
+                src="/logo-cashin.png"
+                alt="Club Cashin Logo"
+                className="h-10"
+                style={{ objectFit: "contain" }}
+              />
+            </SidebarHeader>
+            <SidebarContent>
+              <SidebarMenu>
+                {menuOptions.map((opt) => (
+                  <SidebarMenuItem key={opt.key}>
+                    <SidebarMenuButton
+                      isActive={location.pathname === opt.path}
+                      onClick={() => {
+                        navigate(opt.path);
+                        setMenuOpen(false); // Cierra el menú
+                      }}
+                      className={`w-full flex items-center text-left text-gray-900 font-medium rounded transition-all
+                      ${
+                        location.pathname === opt.path
+                          ? "bg-white border border-blue-600 shadow-md font-bold ring-2 ring-blue-100 ring-inset"
+                          : "hover:bg-blue-50"
+                      }`}
+                      style={
+                        location.pathname === opt.path
+                          ? { borderLeftWidth: 6, borderLeftColor: "#2563eb" }
+                          : undefined
+                      }
+                    >
+                      {opt.icon}
+                      {opt.label}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarContent>
+            <SidebarRail />
+          </aside>
+        </div>
+      )}
+    </>
   );
 }

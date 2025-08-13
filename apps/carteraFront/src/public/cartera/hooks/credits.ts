@@ -2,10 +2,11 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getCreditosPaginados, type GetCreditosResponse } from "../services/services";
 
-// Hook completamente autocontenible con filtro local de #SIFCO
+// Hook actualizado: el filtro por SIFCO se va al backend
 export function useCreditosPaginadosWithFilters() {
   // Opciones de meses y años
   const meses = [
+        { value: 0, label: "Seleccione mes " }, 
     { value: 1, label: "Enero" }, { value: 2, label: "Febrero" },
     { value: 3, label: "Marzo" }, { value: 4, label: "Abril" },
     { value: 5, label: "Mayo" }, { value: 6, label: "Junio" },
@@ -16,38 +17,67 @@ export function useCreditosPaginadosWithFilters() {
   const years = Array.from({ length: 10 }, (_, i) => 2021 + i);
 
   // States
-  const [mes, setMes] = useState(new Date().getMonth() + 1);
-  const [anio, setAnio] = useState(new Date().getFullYear());
+  const [mes, setMes] = useState(0);
+  const [anio, setAnio] = useState(2025);
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [creditoSifco, setCreditoSifco] = useState("");
+  const [estado, setEstado] = useState<"ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION">("ACTIVO");
 
-  // React Query solo depende de filtros reales de backend
-  const query = useQuery<GetCreditosResponse, Error>({
-    queryKey: ["creditos-paginados", mes, anio, page, perPage],
-    queryFn: () => getCreditosPaginados({ mes, anio, page, perPage }),
-    
-    staleTime: 1000 * 60,
-    refetchOnWindowFocus: false,
-  });
+  // React Query consulta filtrando por SIFCO directamente en el backend
+const query = useQuery<GetCreditosResponse, Error>({
+  queryKey: ["creditos-paginados", mes, anio, page, perPage, creditoSifco, estado], // 👈 estado aquí
+  queryFn: () =>
+    getCreditosPaginados({
+      mes,
+      anio,
+      page,
+      perPage,
+      numero_credito_sifco: creditoSifco.trim() !== "" ? creditoSifco : undefined,
+      estado: estado,
+    }),
+  staleTime: 1000 * 60,
+  refetchOnWindowFocus: false,
+});
+  const handleSifco = (valor: string) => {
+  setCreditoSifco(valor);
+  setPage(1);
+};
+const clearSifco = () => {
+  setCreditoSifco("");
+  setPage(1);
+  // Si usas ref, también podrías limpiar el input así:
+  // if (inputRef.current) inputRef.current.value = "";
+};
+const estados = [
+  { value: "ACTIVO", label: "Activo", color: "bg-green-200 text-green-800" },
+  { value: "CANCELADO", label: "Cancelado", color: "bg-red-200 text-red-800" },
+  { value: "INCOBRABLE", label: "Incobrable", color: "bg-yellow-100 text-yellow-700" },
+  { value: "PENDIENTE_CANCELACION", label: "Pendiente de Cancelación", color: "bg-blue-100 text-blue-800" },
+];
 
-  // Filtrado local por #Crédito SIFCO
-  let filteredData = query.data?.data ?? [];
-  if (creditoSifco.trim() !== "") {
-    filteredData = filteredData.filter((item) =>
-      item.creditos.numero_credito_sifco.toLowerCase().includes(creditoSifco.toLowerCase())
-    );
-  }
-
-  // Devuelve data filtrada
   return {
     ...query,
-    data: { ...query.data, data: filteredData }, // <-- la data de salida es la filtrada
-    mes, setMes, anio, setAnio, page, setPage, perPage, setPerPage, creditoSifco, setCreditoSifco,
+    mes, setMes, anio, setAnio, page, setPage, perPage, setPerPage,
+    creditoSifco, setCreditoSifco,
     meses, years,
-    handleMes: (e: React.ChangeEvent<HTMLSelectElement>) => { setMes(Number(e.target.value)); setPage(1); },
-    handleAnio: (e: React.ChangeEvent<HTMLSelectElement>) => { setAnio(Number(e.target.value)); setPage(1); },
-    handleSifco: (e: React.ChangeEvent<HTMLInputElement>) => { setCreditoSifco(e.target.value); setPage(1); },
-    handlePerPage: (e: React.ChangeEvent<HTMLSelectElement>) => { setPerPage(Number(e.target.value)); setPage(1); },
+    handleMes: (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setMes(Number(e.target.value));
+      setPage(1);
+    },
+    handleAnio: (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setAnio(Number(e.target.value));
+      setPage(1);
+    },
+  
+    handlePerPage: (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setPerPage(Number(e.target.value));
+      setPage(1);
+    },
+    clearSifco,
+    handleSifco,
+    setEstado,
+    estado,
+    estados,
   };
 }

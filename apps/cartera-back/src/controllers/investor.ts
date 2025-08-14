@@ -549,6 +549,66 @@ export async function resumeInvestor(
           p.inversionista_id === inv.inversionista_id
       );
 
+    for (const c of creditosParticipa) {
+      // Info del crédito
+      const [credito] = await db
+        .select({
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          nombre_usuario: usuarios.nombre,
+          nit_usuario: usuarios.nit,
+          capital: creditos.capital,
+          porcentaje_interes: creditos.porcentaje_interes,
+            meses_en_credito: sql<number>`
+      GREATEST(
+        0,
+        (
+          (DATE_PART('year', AGE(LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE), ${creditos.fecha_creacion}))::int * 12)
+          + DATE_PART('month', AGE(LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE), ${creditos.fecha_creacion}))::int
+          + CASE
+              -- Contar el mes actual solo si ya pasamos (o es) el "día de corte" del inicio
+              WHEN EXTRACT(DAY FROM LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE))
+                   >= EXTRACT(DAY FROM ${creditos.fecha_creacion})
+              THEN 1 ELSE 0
+            END
+        )
+      )
+    `.as('meses_en_credito'),
+          cuota_interes: creditos.cuota_interes,
+          iva12: creditos.iva_12,
+        })
+        .from(creditos)
+        .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .where(eq(creditos.credito_id, c.credito_id))
+        .limit(1);
+
+      // Pagos NO LIQUIDADOS
+      const pagos = await db
+        .select({
+          abono_capital: pagos_credito_inversionistas.abono_capital,
+          abono_interes: pagos_credito_inversionistas.abono_interes,
+          abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
+          fecha_pago: pagos_credito_inversionistas.fecha_pago,
+          porcentaje_participacion:
+            pagos_credito_inversionistas.porcentaje_participacion,
+          abonoGeneralInteres: pagos_credito.abono_interes,
+        })
+        .from(pagos_credito_inversionistas)
+        .innerJoin(
+          pagos_credito,
+          eq(pagos_credito_inversionistas.pago_id, pagos_credito.pago_id)
+        )
+        .where(
+          and(
+            eq(
+              pagos_credito_inversionistas.inversionista_id,
+              inv.inversionista_id
+            ),
+            eq(pagos_credito_inversionistas.credito_id, c.credito_id),
+            eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
+          )
+        );
+
+      // Totales de pagos de este crédito
       let total_abono_capital = new Big(0);
       let total_abono_interes = new Big(0);
       let total_abono_iva = new Big(0);
@@ -716,7 +776,7 @@ dayjs.locale("es");
 
 export function generarHTMLReporte(
   inversionista: InversionistaReporte,
-  logoUrl: string = import.meta.env.LOGO_URL || ""
+  logoUrl: string = import.meta.env.LOGO_URL || ''
 ): string {
   const {
     inversionista: nombre,

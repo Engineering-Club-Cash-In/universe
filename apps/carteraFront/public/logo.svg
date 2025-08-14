@@ -1,0 +1,17 @@
+<!-- favicon-cashin.svg -->
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="CASHIN icon">
+  <defs>
+    <style>
+      .bg{fill:#0b1240}
+      .white{fill:#ffffff}
+      .teal{fill:#10d6c4}
+      .cyan{fill:#22d6ff}
+    </style>
+  </defs>
+  <rect class="bg" x="0" y="0" width="64" height="64" rx="12"/>
+  <!-- C estilizada -->
+  <path class="white" d="M36 14c-10.5 0-19 8.5-19 19s8.5 19 19 19c6.2 0 11.6-2.5 15.3-6.9l-6.7-4.8c-2.3 2.9-5.4 4.5-8.6 4.5-7.1 0-12.8-5.7-12.8-12.8S29 18.2 36 18.2c3.2 0 6.3 1.3 8.6 4.2l6.7-4.8C47.6 16.5 42.2 14 36 14z"/>
+  <!-- puntitos -->
+  <circle class="teal" cx="24" cy="16.5" r="3.2"/>
+  <circle class="cyan" cx="48" cy="16.5" r="3.2"/>
+</svg>

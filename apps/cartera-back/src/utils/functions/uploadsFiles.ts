@@ -1,7 +1,7 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { v4 as uuidv4 } from "uuid";
 
-const s3 = new S3Client({
+export const s3 = new S3Client({
   endpoint: process.env.R2_ENDPOINT,
   region: "auto",
   credentials: {

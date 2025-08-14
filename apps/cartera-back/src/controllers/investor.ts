@@ -442,7 +442,21 @@ export async function resumeInvestor(
           nit_usuario: usuarios.nit,
           capital: creditos.capital,
           porcentaje_interes: creditos.porcentaje_interes,
-          meses_en_credito: creditos.plazo,
+            meses_en_credito: sql<number>`
+      GREATEST(
+        0,
+        (
+          (DATE_PART('year', AGE(LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE), ${creditos.fecha_creacion}))::int * 12)
+          + DATE_PART('month', AGE(LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE), ${creditos.fecha_creacion}))::int
+          + CASE
+              -- Contar el mes actual solo si ya pasamos (o es) el "día de corte" del inicio
+              WHEN EXTRACT(DAY FROM LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE))
+                   >= EXTRACT(DAY FROM ${creditos.fecha_creacion})
+              THEN 1 ELSE 0
+            END
+        )
+      )
+    `.as('meses_en_credito'),
           cuota_interes: creditos.cuota_interes,
           iva12: creditos.iva_12,
         })
@@ -629,7 +643,7 @@ dayjs.locale("es");
 
 export function generarHTMLReporte(
   inversionista: InversionistaReporte,
-  logoUrl: string = ""
+  logoUrl: string = import.meta.env.LOGO_URL || ''
 ): string {
   const {
     inversionista: nombre,

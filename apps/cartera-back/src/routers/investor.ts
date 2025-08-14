@@ -10,7 +10,8 @@ import {
   generarHTMLReporte,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import puppeteer from "puppeteer";
+import puppeteer from "puppeteer"; 
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
 export const inversionistasRouter = new Elysia()
   .post("/investor", insertInvestor)
@@ -101,85 +102,73 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
-  .get(
-    "/investor/pdf",
-    async ({ query, set }) => {
-      // Extraer los query params
-      const {
-        id,
-        page = "1",
-        perPage = "1",
-      } = query as Record<string, string | undefined>;
+.get("/investor/pdf", async ({ query, set }) => {
+  const { id, page = "1", perPage = "1" } = query as Record<string, string | undefined>;
 
-      // Validación de query params
-      const pageNum = Number(page);
-      const perPageNum = Number(perPage);
+  // Validaciones...
+  const pageNum = Number(page);
+  const perPageNum = Number(perPage);
 
-      if ((page && isNaN(pageNum)) || (perPage && isNaN(perPageNum))) {
-        set.status = 400;
-        return { message: "Parámetros 'page' y/o 'perPage' inválidos." };
-      }
+  if ((page && isNaN(pageNum)) || (perPage && isNaN(perPageNum))) {
+    set.status = 400;
+    return { message: "Parámetros 'page' y/o 'perPage' inválidos." };
+  }
 
-      if (!id || isNaN(Number(id))) {
-        set.status = 400;
-        return {
-          message: "El parámetro 'id' es obligatorio y debe ser numérico.",
-        };
-      }
+  if (!id || isNaN(Number(id))) {
+    set.status = 400;
+    return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+  }
 
-      // Obtener data del inversionista
-      const result: RespuestaReporte = await resumeInvestor(
-        Number(id),
-        pageNum,
-        perPageNum
-      );
+  const result: RespuestaReporte = await resumeInvestor(Number(id), pageNum, perPageNum);
 
-      if (!result.inversionistas.length) {
-        set.status = 404;
-        return { message: "Inversionista no encontrado." };
-      }
+  if (!result.inversionistas.length) {
+    set.status = 404;
+    return { message: "Inversionista no encontrado." };
+  }
 
-      const inversionista: InversionistaReporte = result.inversionistas[0];
+  const inversionista: InversionistaReporte = result.inversionistas[0];
 
-      // LOGO LOCAL — usa la ruta real donde Bun tenga acceso
-      const logoUrl =
-        "file:///mnt/data/d1000675-1063-46e9-bb11-938f40390ca6.png";
+  const logoUrl = import.meta.env.LOGO_URL || "";
+  const html = generarHTMLReporte(inversionista, logoUrl);
 
-      // Generar HTML y PDF
-      const html = generarHTMLReporte(inversionista, logoUrl);
+  const browser = await puppeteer.launch({ headless: true });
+  const pagePDF = await browser.newPage();
+  await pagePDF.setContent(html, { waitUntil: "networkidle0" });
 
-      const browser = await puppeteer.launch({ headless: true });
-      const pagePDF = await browser.newPage();
-      await pagePDF.setContent(html, { waitUntil: "networkidle0" });
+  const pdfBuffer = await pagePDF.pdf({
+    printBackground: true,
+    width: "2500px",
+    height: "980px",
+    landscape: false,
+    margin: { top: 20, bottom: 20, left: 8, right: 8 },
+  });
 
-      const pdfBuffer = await pagePDF.pdf({
-       
-        printBackground: true,
-        width: "2500px", // <-- O el ancho que necesite tu tabla
-        height: "980px", // <-- O más si tienes más filas
-        landscape: false,
-        margin: { top: 20, bottom: 20, left: 8, right: 8 },
-      });
+  await browser.close();
 
-      await browser.close();
-
-      set.headers = {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="reporte_inversionista_${id}.pdf"`,
-      };
-
-      return pdfBuffer;
+  /** 🚀 SUBIR A R2 */
+  const filename = `reporte_inversionista_${id}.pdf`;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
     },
-    {
-      // Tipado/validación de los query params
-      query: t.Object({
-        id: t.String(),
-        page: t.Optional(t.String()),
-        perPage: t.Optional(t.String()),
-      }),
-      detail: {
-        summary: "Descarga el PDF del reporte de un inversionista",
-        tags: ["Inversionistas"],
-      },
-    }
+  });
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: pdfBuffer,
+      ContentType: "application/pdf",
+    })
   );
+
+  const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+
+  return {
+    success: true,
+    url,
+    filename,
+  };
+});

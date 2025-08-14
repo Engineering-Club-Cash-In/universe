@@ -1,32 +1,23 @@
 import { useMutation } from "@tanstack/react-query";
 import { downloadInvestorPDFService } from "../services/services";
- 
+
+type Vars = { id: number; page?: number; perPage?: number };
+
 export function useDownloadInvestorPDF() {
   return useMutation({
-    mutationFn: async ({
-      id,
-      page = 1,
-      perPage = 1,
-    }: { id: number; page?: number; perPage?: number }) => {
+    mutationFn: async ({ id, page = 1, perPage = 1 }: Vars) => {
       return await downloadInvestorPDFService(id, page, perPage);
     },
-    onSuccess: (data, variables) => {
-      const url = window.URL.createObjectURL(data);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `reporte_inversionista_${variables.id}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      }, 100);
+    onSuccess: (data) => {
+      if (data?.url) {
+        // Abre el PDF hospedado en R2
+        window.open(data.url, "_blank");
+      } else {
+        alert("[ERROR] No se recibió la URL del PDF.");
+      }
     },
     onError: () => {
-       
-      alert("Error al descargar el PDF. Intenta de nuevo o contacta soporte.");
- 
-  
+      alert("Error al generar el PDF. Intenta de nuevo o contacta soporte.");
     },
   });
 }

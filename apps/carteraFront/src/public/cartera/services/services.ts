@@ -620,24 +620,32 @@ export async function liquidateByInvestorService(
   );
   return response.data;
 }
-
+type PdfUploadResponse = {
+  success: boolean;
+  url: string;
+  filename: string;
+};
 // Recibe los params y retorna un Blob del PDF
 export async function downloadInvestorPDFService(
   id: number,
   page: number = 1,
   perPage: number = 1
-): Promise<Blob> {
-  const BACK_URL = import.meta.env.VITE_BACK_URL || ""; // o tu ruta hardcodeada si lo preferís
+): Promise<PdfUploadResponse> {
+  const BACK_URL = import.meta.env.VITE_BACK_URL || "";
 
-  const response = await axios.get(
-    `${BACK_URL}/investor/pdf`,
-    {
-      params: { id, page, perPage },
-      responseType: "blob", // importante para recibir el PDF como Blob
-    }
-  );
+  const { data } = await axios.get<PdfUploadResponse>(`${BACK_URL}/investor/pdf`, {
+    params: { id, page, perPage },
+    // Asegura que el backend responda JSON (no blob)
+    headers: { Accept: "application/json" },
+    responseType: "json",
+    withCredentials: true,
+  });
 
-  return response.data; // esto será un Blob
+  if (!data?.url) {
+    throw new Error("[ERROR] La respuesta no contiene url del PDF subido.");
+  }
+
+  return data;
 }
 
 export async function uploadFileService(file: File | Blob): Promise<{ url: string; filename: string }> {

@@ -71,6 +71,92 @@ app.get("/", (c) => {
 
 // Vehicle photo upload endpoint  
 app.post("/api/upload-vehicle-photo", async (c) => {
+// Vehicle photo upload endpoint  
+app.post("/api/upload-vehicle-photo", async (c) => {
+	try {
+		// Get the context (optional for this endpoint)
+		const context = await createContext({ context: c });
+		
+		// Public endpoint - no auth required
+		// if (!context.session?.user?.id || !context.session?.user?.role) {
+		// 	return c.json({ error: "No autorizado" }, 401);
+		// }
+
+		// Parse multipart form data
+		const formData = await c.req.formData();
+		const file = formData.get("file") as File;
+		const vehicleId = formData.get("vehicleId") as string;
+		const category = formData.get("category") as string;
+		const photoType = formData.get("photoType") as string;
+		const title = formData.get("title") as string;
+		const description = formData.get("description") as string | null;
+
+		if (!file || !vehicleId || !category || !photoType || !title) {
+			console.error("Missing required fields:", {
+				hasFile: !!file,
+				vehicleId,
+				category,
+				photoType,
+				title
+			});
+			return c.json({ error: "Faltan campos requeridos" }, 400);
+		}
+
+		// Import necessary modules
+		const { validateFile, generateUniqueFilename, uploadVehiclePhotoToR2 } = await import("./lib/storage");
+
+		// Validate file
+		const validation = validateFile(file);
+		if (!validation.valid) {
+			console.error("File validation failed:", {
+				fileName: file.name,
+				fileType: file.type,
+				fileSize: file.size,
+				error: validation.error
+			});
+			return c.json({ error: validation.error }, 400);
+		}
+
+		// Generate unique filename
+		const uniqueFilename = generateUniqueFilename(file.name);
+
+		// Upload to R2
+		console.log("Uploading file:", {
+			fileName: uniqueFilename,
+			vehicleId,
+			category,
+			fileSize: file.size
+		});
+		
+		const { key, url } = await uploadVehiclePhotoToR2(
+			file,
+			uniqueFilename,
+			vehicleId,
+			category
+		);
+		
+		console.log("Upload successful:", { key, url });
+
+		return c.json({
+			success: true,
+			data: {
+				key,
+				url,
+				vehicleId,
+				category,
+				photoType,
+				title,
+				description,
+			}
+		});
+	} catch (error) {
+		console.error("Error uploading vehicle photo:", error);
+		return c.json({ error: "Error al subir la foto" }, 500);
+	}
+});
+
+// File upload endpoint
+app.post("/api/upload-opportunity-document", async (c) => {
 	try {
 		// Get the context (optional for this endpoint)
 		const context = await createContext({ context: c });

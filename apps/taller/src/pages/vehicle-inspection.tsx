@@ -7,7 +7,6 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast, Toaster } from "sonner";
 import { Sparkles } from "lucide-react";
-import { formatCurrency, handleCurrencyInput } from "../utils/currency";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -206,24 +205,57 @@ export default function VehicleInspectionForm({
   };
   
   // Function to fill form with dummy data
-  const handleOCRData = (ocrData: any) => {
-    console.log('OCR data received:', ocrData);
+  const fillWithDummyData = async () => {
+    const dummyData = {
+      technicianName: "Juan Pérez García",
+      inspectionDate: new Date(),
+      vehicleMake: "Toyota",
+      vehicleModel: "Corolla Cross",
+      vehicleYear: "2023",
+      licensePlate: "P-123ABC",
+      vinNumber: "JTMB34FV2ND123456",
+      milesMileage: "15000",
+      kmMileage: "24140",
+      origin: "Importado" as const,
+      vehicleType: "SUV",
+      color: "Blanco Perlado",
+      cylinders: "4",
+      engineCC: "2000",
+      fuelType: "Gasolina" as const,
+      transmission: "Automático" as const,
+      inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
+      vehicleRating: "Comercial" as const,
+      marketValue: "185000",
+      suggestedCommercialValue: "175000",
+      bankValue: "165000",
+      currentConditionValue: "170000",
+      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
+      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
+      scannerUsed: "Sí" as const,
+      airbagWarning: "No" as const,
+      testDrive: "Sí" as const,
+    };
     
-    // Map the OCR data to form fields
-    const mappedData: any = {};
+    // Use form.reset() to properly update all fields including selects
+    form.reset(dummyData);
     
-    if (ocrData.vehicleMake) mappedData.vehicleMake = ocrData.vehicleMake;
-    if (ocrData.vehicleModel) mappedData.vehicleModel = ocrData.vehicleModel;
-    if (ocrData.vehicleYear) mappedData.vehicleYear = ocrData.vehicleYear;
-    if (ocrData.licensePlate) mappedData.licensePlate = ocrData.licensePlate;
-    if (ocrData.vinNumber) mappedData.vinNumber = ocrData.vinNumber;
-    if (ocrData.color) mappedData.color = ocrData.color;
-    if (ocrData.cylinders) mappedData.cylinders = ocrData.cylinders;
-    if (ocrData.engineCC) mappedData.engineCC = ocrData.engineCC;
-    if (ocrData.vehicleType) mappedData.vehicleType = ocrData.vehicleType;
-    if (ocrData.origin) mappedData.origin = ocrData.origin;
-    if (ocrData.fuelType) mappedData.fuelType = ocrData.fuelType;
-    if (ocrData.transmission) mappedData.transmission = ocrData.transmission;
+    // Load and set the PDF file
+    try {
+      const response = await fetch('/sample.pdf');
+      const blob = await response.blob();
+      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
+      
+      setScannerFile(file);
+      form.setValue("scannerResult", file);
+    } catch (error) {
+      console.error('Error loading sample PDF:', error);
+    }
+    
+    // Save to context
+    setFormData(dummyData);
+    
+    toast.success("Formulario llenado con datos de prueba");
+  };
 
     // Update form with OCR data and trigger validation only for filled fields
     Object.keys(mappedData).forEach(key => {

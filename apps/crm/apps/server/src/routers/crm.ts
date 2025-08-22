@@ -11,17 +11,12 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import {
-	opportunityDocuments,
-	documentRequirements,
-	documentValidations,
-} from "../db/schema/documents";
-import { vehicles, vehicleInspections } from "../db/schema/vehicles";
+import { opportunityDocuments } from "../db/schema/documents";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
-import {
-	uploadFileToR2,
-	getFileUrl,
-	deleteFileFromR2,
+import { 
+	uploadFileToR2, 
+	getFileUrl, 
+	deleteFileFromR2, 
 	generateUniqueFilename,
 	validateFile,
 } from "../lib/storage";
@@ -638,19 +633,13 @@ export const crmRouter = {
 		}),
 
 	// Analyst specific endpoints
-	getOpportunitiesForAnalysis: analystProcedure.handler(
-		async ({ context: _ }) => {
-			// Get the stage ID for "Recepción de documentación y traslado a análisis"
-			const analysisStage = await db
-				.select()
-				.from(salesStages)
-				.where(
-					eq(
-						salesStages.name,
-						"Recepción de documentación y traslado a análisis",
-					),
-				)
-				.limit(1);
+	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context: _ }) => {
+		// Get the stage ID for "Recepción de documentación y traslado a análisis"
+		const analysisStage = await db
+			.select()
+			.from(salesStages)
+			.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
+			.limit(1);
 
 			if (!analysisStage[0]) {
 				throw new Error("Analysis stage not found");

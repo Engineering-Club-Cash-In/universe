@@ -34,7 +34,7 @@ export function generateUniqueFilename(originalName: string): string {
 	return `${timestamp}-${randomString}-${sanitizedBaseName}.${extension}`;
 }
 
-// Subir archivo a R2
+// Subir archivo a R2 (para oportunidades)
 export async function uploadFileToR2(
 	file: File | Blob,
 	filename: string,
@@ -58,6 +58,38 @@ export async function uploadFileToR2(
 	}), { expiresIn: 86400 }); // 24 horas
 	
 	return { key, url };
+}
+
+// Subir foto de vehículo a R2
+export async function uploadVehiclePhotoToR2(
+	file: File | Blob,
+	filename: string,
+	vehicleId: string,
+	category: string,
+): Promise<{ key: string; url: string }> {
+	const key = `vehicles/${vehicleId}/photos/${category}/${filename}`;
+	
+	const command = new PutObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+		Body: Buffer.from(await file.arrayBuffer()),
+		ContentType: file.type,
+	});
+	
+	await r2Client.send(command);
+	
+	// Si tienes un dominio personalizado configurado en R2, úsalo:
+	const R2_PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN; // ej: "images.tudominio.com"
+	
+	if (R2_PUBLIC_DOMAIN) {
+		// URL pública permanente con dominio personalizado
+		const publicUrl = `https://${R2_PUBLIC_DOMAIN}/${key}`;
+		return { key, url: publicUrl };
+	} else {
+		// Fallback: URL pública directa de R2 (requiere bucket público)
+		const publicUrl = `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+		return { key, url: publicUrl };
+	}
 }
 
 // Obtener URL firmada para un archivo
@@ -88,6 +120,7 @@ export const ALLOWED_DOCUMENT_TYPES = [
 	'image/jpg',
 	'image/png',
 	'image/webp',
+	'image/avif', // Agregado soporte para AVIF
 	'application/msword',
 	'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ];
@@ -100,7 +133,7 @@ export function validateFile(file: File): { valid: boolean; error?: string } {
 	if (!ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
 		return {
 			valid: false,
-			error: 'Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP) y documentos Word.',
+			error: 'Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF) y documentos Word.',
 		};
 	}
 	

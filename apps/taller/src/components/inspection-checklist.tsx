@@ -12,6 +12,7 @@ import {
   Shield,
   Zap,
   FileText,
+  Sparkles,
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { cn } from "@/lib/utils";
@@ -227,6 +228,9 @@ export default function InspectionChecklist({
     Record<string, boolean>
   >({});
   const [showOnlyCritical, setShowOnlyCritical] = useState(false);
+  
+  // Check if dev mode is enabled
+  const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
   // Toggle item check
   const toggleItem = (itemId: string) => {
@@ -254,12 +258,12 @@ export default function InspectionChecklist({
     inspectionCategories.forEach((category) => {
       category.items.forEach((item) => {
         // Always include the item in the checklist data
-        // checked: false means the item has issues (doesn't comply)
-        // checked: true means the item is OK (complies)
+        // In the UI: checked = true means the item has issues (doesn't comply)
+        // In the DB: checked = true means the issue is active/present
         checklistData.push({
           category: category.id,
           item: item.label,
-          checked: !items[item.id], // Inverted: if marked in UI means it has issues
+          checked: items[item.id] || false, // If marked in UI, it means there's an issue (true), otherwise false
           severity: item.critical ? 'critical' : 'warning',
         });
       });
@@ -310,6 +314,35 @@ export default function InspectionChecklist({
 
   const collapseAll = () => {
     setExpandedCategories({});
+  };
+  
+  // Function to fill checklist with dummy data
+  const fillWithDummyData = () => {
+    const dummyCheckedItems: Record<string, boolean> = {};
+    
+    // Randomly select some items to check (simulate issues found)
+    // Let's check a few items to simulate a realistic inspection
+    dummyCheckedItems['visible-leaks'] = true; // Minor oil leak
+    dummyCheckedItems['brake-issues'] = false; // Brakes OK
+    dummyCheckedItems['uneven-wear'] = true; // Uneven tire wear
+    dummyCheckedItems['front-left-wheel'] = false;
+    dummyCheckedItems['chassis-bent'] = false; // No structural damage
+    dummyCheckedItems['warning-lights'] = false; // No warning lights
+    
+    // Set most items as OK (not checked)
+    inspectionCategories.forEach((category) => {
+      category.items.forEach((item) => {
+        if (!(item.id in dummyCheckedItems)) {
+          dummyCheckedItems[item.id] = false; // Most items are OK
+        }
+      });
+    });
+    
+    setCheckedItems(dummyCheckedItems);
+    updateChecklistContext(dummyCheckedItems);
+    
+    // Expand all categories to show the results
+    expandAll();
   };
 
   return (
@@ -383,6 +416,17 @@ export default function InspectionChecklist({
             >
               {showOnlyCritical ? "Mostrar Todo" : "Solo Críticos"}
             </Button>
+            {isDevMode && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fillWithDummyData}
+                className="gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                Llenar con datos de prueba
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -559,12 +603,16 @@ export default function InspectionChecklist({
                     Criterios de rechazo encontrados:
                   </p>
                   <ul className="text-sm text-red-700 space-y-1">
-                    {checklistItems
-                      .filter(item => item.value === 'no' && item.isRejectionCriteria)
-                      .map((item, index) => (
+                    {inspectionCategories
+                      .flatMap(category => 
+                        category.items
+                          .filter(item => checkedItems[item.id] && item.critical)
+                          .map(item => item.label)
+                      )
+                      .map((label, index) => (
                         <li key={index} className="flex items-start">
                           <span className="mr-2">•</span>
-                          <span>{item.label}</span>
+                          <span>{label}</span>
                         </li>
                       ))}
                   </ul>

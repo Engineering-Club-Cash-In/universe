@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { protectedProcedure, publicProcedure } from "../lib/orpc";
+import { protectedProcedure } from "../lib/orpc";
 
 export const authRouter = {
 	getUserProfile: protectedProcedure.handler(async ({ context }) => {

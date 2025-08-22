@@ -1,61 +1,73 @@
-// Get the server URL from environment variables
-const SERVER_URL = import.meta.env.VITE_SERVER_URL || 'http://localhost:3000';
+import { createORPCClient } from "@orpc/client";
+import { RPCLink } from "@orpc/client/fetch";
+import type { RouterClient } from "@orpc/server";
+import { createTanstackQueryUtils } from "@orpc/tanstack-query";
+import { QueryCache, QueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import type { appRouter } from "../../../crm/apps/server/src/routers/index";
 
-// Simple fetch wrapper for API calls
-const apiCall = async (endpoint: string, data?: any) => {
-  const response = await fetch(`${SERVER_URL}/api/${endpoint}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      // Add auth token if exists
-      ...(localStorage.getItem('authToken') && {
-        Authorization: `Bearer ${localStorage.getItem('authToken')}`
-      })
-    },
-    body: JSON.stringify(data || {}),
-  });
-  
-  if (!response.ok) {
-    throw new Error(`API call failed: ${response.statusText}`);
-  }
-  
-  return response.json();
-};
+export const queryClient = new QueryClient({
+	queryCache: new QueryCache({
+		onError: (error) => {
+			toast.error(`Error: ${error.message}`, {
+				action: {
+					label: "retry",
+					onClick: () => {
+						queryClient.invalidateQueries();
+					},
+				},
+			});
+		},
+	}),
+});
 
-// Export individual methods for easier use
+export const link = new RPCLink({
+	url: `${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/rpc`,
+	fetch(url, options) {
+		return fetch(url, {
+			...options,
+			credentials: "include",
+		});
+	},
+});
+
+export const client: RouterClient<typeof appRouter> = createORPCClient(link);
+
+export const orpc = createTanstackQueryUtils(client);
+
+// Export individual methods for easier use (keeping the same interface)
 export const vehiclesApi = {
   // Get all vehicles
-  getAll: () => apiCall('getVehicles'),
+  getAll: () => client.getVehicles(),
   
   // Get vehicle by ID
-  getById: (id: string) => apiCall('getVehicleById', { id }),
+  getById: (id: string) => client.getVehicleById({ id }),
   
   // Create new vehicle
-  create: (data: any) => apiCall('createVehicle', data),
+  create: (data: Parameters<typeof client.createVehicle>[0]) => client.createVehicle(data),
   
   // Update vehicle
-  update: (id: string, data: any) => apiCall('updateVehicle', { id, data }),
+  update: (id: string, data: Parameters<typeof client.updateVehicle>[0]['data']) => 
+    client.updateVehicle({ id, data }),
   
   // Delete vehicle
-  delete: (id: string) => apiCall('deleteVehicle', { id }),
+  delete: (id: string) => client.deleteVehicle({ id }),
   
   // Search vehicles
-  search: (params: any) => apiCall('searchVehicles', params),
+  search: (params: Parameters<typeof client.searchVehicles>[0]) => client.searchVehicles(params),
   
   // Create full inspection (main method for Taller app)
-  createFullInspection: (data: {
-    vehicle: any;
-    inspection: any;
-    checklistItems: any[];
-    photos?: any[];
-  }) => apiCall('createFullVehicleInspection', data),
+  createFullInspection: (data: Parameters<typeof client.createFullVehicleInspection>[0]) => 
+    client.createFullVehicleInspection(data),
   
   // Create inspection only
-  createInspection: (data: any) => apiCall('createVehicleInspection', data),
+  createInspection: (data: Parameters<typeof client.createVehicleInspection>[0]) => 
+    client.createVehicleInspection(data),
   
   // Upload photo
-  uploadPhoto: (data: any) => apiCall('uploadVehiclePhoto', data),
+  uploadPhoto: (data: Parameters<typeof client.uploadVehiclePhoto>[0]) => 
+    client.uploadVehiclePhoto(data),
   
   // Get statistics
-  getStatistics: () => apiCall('getVehicleStatistics'),
+  getStatistics: () => client.getVehicleStatistics(),
 };

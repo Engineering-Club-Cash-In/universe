@@ -73,12 +73,18 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async () => {
-    if (!photosCompleted) {
-      toast.error("Por favor complete la captura de fotografías");
+  const handleCompleteInspection = async (photosFromPictures?: any[]) => {
+    // Usar las fotos pasadas directamente o las del contexto
+    const photosToUse = photosFromPictures || photos;
+    
+    // Verificar que las fotos estén disponibles
+    if (!photosToUse || photosToUse.length === 0) {
+      console.error("No hay fotos disponibles");
+      toast.error("Error: Las fotos no se cargaron correctamente. Intente nuevamente.");
       return;
     }
 
+    console.log("Enviando inspección con", photosToUse.length, "fotos");
     setIsSubmitting(true);
     
     try {
@@ -90,7 +96,7 @@ export default function VehicleInspectionWizard() {
         vehicleData,
         inspectionData,
         checklistItems,
-        photos
+        photosToUse
       );
       
       if (result.success) {
@@ -240,7 +246,10 @@ export default function VehicleInspectionWizard() {
                     // Avanzar automáticamente al siguiente paso
                     if (currentStep < STEPS.length - 1) {
                       setCurrentStep(currentStep + 1);
-                      window.scrollTo({ top: 0, behavior: "smooth" });
+                      // Usar setTimeout para asegurar que el DOM se actualice primero
+                      setTimeout(() => {
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }, 100);
                     }
                   }}
                   isWizardMode={true}
@@ -251,7 +260,11 @@ export default function VehicleInspectionWizard() {
             {currentStep === 2 && (
               <div>
                 <VehiclePictures 
-                  onComplete={() => setPhotosCompleted(true)}
+                  onComplete={(photosFromComponent) => {
+                    setPhotosCompleted(true);
+                    // Pasar las fotos directamente, sin delays
+                    handleCompleteInspection(photosFromComponent);
+                  }}
                   isWizardMode={true}
                 />
               </div>
@@ -278,20 +291,8 @@ export default function VehicleInspectionWizard() {
               </div>
 
               {currentStep === STEPS.length - 1 ? (
-                <Button
-                  onClick={handleCompleteInspection}
-                  className="bg-green-600 hover:bg-green-700 text-xs sm:text-sm"
-                  size="sm"
-                  disabled={isSubmitting}
-                >
-                  <CheckCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1 sm:mr-2" />
-                  <span className="hidden sm:inline">
-                    {isSubmitting ? "Guardando..." : "Completar Inspección"}
-                  </span>
-                  <span className="sm:hidden">
-                    {isSubmitting ? "..." : "Completar"}
-                  </span>
-                </Button>
+                // No mostrar botón aquí, el botón "Finalizar" en VehiclePictures lo maneja todo
+                null
               ) : (
                 <Button 
                   onClick={handleNextStep}

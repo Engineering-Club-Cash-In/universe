@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast, Toaster } from "sonner";
+import { Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -119,6 +120,9 @@ export default function VehicleInspectionForm({
   const [scannerFile, setScannerFile] = useState<File | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
+  
+  // Check if dev mode is enabled
+  const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -196,6 +200,59 @@ export default function VehicleInspectionForm({
       }
     }
   };
+  
+  // Function to fill form with dummy data
+  const fillWithDummyData = async () => {
+    const dummyData = {
+      technicianName: "Juan Pérez García",
+      inspectionDate: new Date(),
+      vehicleMake: "Toyota",
+      vehicleModel: "Corolla Cross",
+      vehicleYear: "2023",
+      licensePlate: "P-123ABC",
+      vinNumber: "JTMB34FV2ND123456",
+      milesMileage: "15000",
+      kmMileage: "24140",
+      origin: "Importado" as const,
+      vehicleType: "SUV",
+      color: "Blanco Perlado",
+      cylinders: "4",
+      engineCC: "2000",
+      fuelType: "Gasolina" as const,
+      transmission: "Automático" as const,
+      inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
+      vehicleRating: "Comercial" as const,
+      marketValue: "185000",
+      suggestedCommercialValue: "175000",
+      bankValue: "165000",
+      currentConditionValue: "170000",
+      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
+      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
+      scannerUsed: "Sí" as const,
+      airbagWarning: "No" as const,
+      testDrive: "Sí" as const,
+    };
+    
+    // Use form.reset() to properly update all fields including selects
+    form.reset(dummyData);
+    
+    // Load and set the PDF file
+    try {
+      const response = await fetch('/sample.pdf');
+      const blob = await response.blob();
+      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
+      
+      setScannerFile(file);
+      form.setValue("scannerResult", file);
+    } catch (error) {
+      console.error('Error loading sample PDF:', error);
+    }
+    
+    // Save to context
+    setFormData(dummyData);
+    
+    toast.success("Formulario llenado con datos de prueba");
+  };
 
   return (
     <div className={cn("flex flex-col gap-4", !isWizardMode && "p-4 sm:p-6")} ref={topRef}>
@@ -211,8 +268,22 @@ export default function VehicleInspectionForm({
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 sm:space-y-4">
           <Card>
             <CardHeader className="px-3 py-0.5 sm:px-6 sm:py-1">
-              <CardTitle className="text-xl sm:text-2xl">Información del Técnico</CardTitle>
-              <CardDescription className="text-sm sm:text-base">Datos del técnico valuador</CardDescription>
+              <div className="space-y-2">
+                <CardTitle className="text-xl sm:text-2xl">Información del Técnico</CardTitle>
+                <CardDescription className="text-sm sm:text-base">Datos del técnico valuador</CardDescription>
+                {isDevMode && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={fillWithDummyData}
+                    className="gap-2 w-fit"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Llenar con datos de prueba
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="px-3 py-2 sm:px-6 sm:py-3 space-y-4 sm:space-y-5">
               <FormField
@@ -377,7 +448,7 @@ export default function VehicleInspectionForm({
                     <FormLabel>Procedencia del vehículo</FormLabel>
                     <Select
                       onValueChange={field.onChange}
-                      defaultValue={field.value}
+                      value={field.value}
                     >
                       <FormControl>
                         <SelectTrigger className="w-full">
@@ -403,7 +474,7 @@ export default function VehicleInspectionForm({
                       <FormLabel>Tipo de vehículo</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
@@ -479,7 +550,7 @@ export default function VehicleInspectionForm({
                       <FormLabel>Combustible</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
@@ -506,7 +577,7 @@ export default function VehicleInspectionForm({
                       <FormLabel>Transmisión</FormLabel>
                       <Select
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                       >
                         <FormControl>
                           <SelectTrigger className="w-full">
@@ -562,7 +633,7 @@ export default function VehicleInspectionForm({
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                         className="flex flex-col space-y-1"
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -695,7 +766,7 @@ export default function VehicleInspectionForm({
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                         className="flex flex-col space-y-1"
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -755,7 +826,7 @@ export default function VehicleInspectionForm({
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                         className="flex flex-col space-y-1"
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
@@ -815,7 +886,7 @@ export default function VehicleInspectionForm({
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
-                        defaultValue={field.value}
+                        value={field.value}
                         className="flex flex-col space-y-1"
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">

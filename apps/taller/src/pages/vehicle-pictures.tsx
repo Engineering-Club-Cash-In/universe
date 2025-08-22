@@ -3,6 +3,7 @@
 import type React from "react";
 
 import { useState, useRef } from "react";
+import { useInspection } from "../contexts/InspectionContext";
 import {
   Camera,
   Check,
@@ -16,6 +17,7 @@ import {
   Wrench,
   AlertTriangle,
   CheckCircle2,
+  Sparkles,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -230,6 +232,9 @@ const inspectionSteps = [
 type PhotoData = {
   file: File;
   preview: string;
+  uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'failed';
+  serverUrl?: string;
+  uploadError?: string;
 };
 
 type PhotosState = {
@@ -239,7 +244,7 @@ type PhotosState = {
 };
 
 interface VehiclePicturesProps {
-  onComplete?: () => void;
+  onComplete?: (photos: any[]) => void;
   isWizardMode?: boolean;
 }
 
@@ -247,8 +252,12 @@ export default function VehiclePictures({
   onComplete, 
   isWizardMode = false 
 }: VehiclePicturesProps) {
+  const { setPhotos: setContextPhotos } = useInspection();
   const [activeStep, setActiveStep] = useState(inspectionSteps[0].id);
   const [photoIndex, setPhotoIndex] = useState(0);
+  
+  // Create a single temporary vehicle ID for this inspection session
+  const [tempVehicleId] = useState(() => 'temp-' + Date.now());
   const [photos, setPhotos] = useState<PhotosState>(() => {
     // Initialize the photos state with null values for all photos
     const initialState: PhotosState = {};
@@ -262,6 +271,9 @@ export default function VehiclePictures({
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  // Check if dev mode is enabled
+  const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
   // Get the current step and photo
   const currentStepIndex = inspectionSteps.findIndex(
@@ -300,25 +312,150 @@ export default function VehiclePictures({
     };
   });
 
-  // Handle file upload
+  // Function to upload photo to server optimistically
+  const uploadPhotoToServer = async (
+    file: File, 
+    stepId: string, 
+    photoId: string, 
+    title: string, 
+    description?: string
+  ) => {
+    try {
+      // Use the session's temporary vehicleId so all photos go to the same folder
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('vehicleId', tempVehicleId);
+      formData.append('category', stepId);
+      formData.append('photoType', photoId);
+      formData.append('title', title);
+      if (description) {
+        formData.append('description', description);
+      }
+
+      const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        // Get error details from server
+        let errorMessage = `Upload failed: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+          console.error('Upload error details:', errorData);
+        } catch (e) {
+          console.error('Failed to parse error response');
+        }
+        throw new Error(errorMessage);
+      }
+
+      const result = await response.json();
+      return result.data.url;
+    } catch (error) {
+      console.error('Upload error:', error);
+      throw error;
+    }
+  };
+
+  // Handle file upload with optimistic upload
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = () => {
+      const photoData: PhotoData = {
+        file,
+        preview: reader.result as string,
+        uploadStatus: 'pending',
+      };
+
+      // Set photo immediately for UI responsiveness
       setPhotos((prev) => ({
         ...prev,
         [activeStep]: {
           ...prev[activeStep],
-          [currentPhoto.id]: {
-            file,
-            preview: reader.result as string,
+          [currentPhoto.id]: photoData,
+        },
+      }));
+
+      // Start optimistic upload in background
+      const photo = currentStep.photos.find(p => p.id === currentPhoto.id);
+      if (photo) {
+        uploadOptimistically(file, activeStep, currentPhoto.id, photo.title, photo.description);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Optimistic upload function that runs in background
+  const uploadOptimistically = async (
+    file: File,
+    stepId: string,
+    photoId: string,
+    title: string,
+    description?: string
+  ) => {
+    // Update status to uploading
+    setPhotos((prev) => ({
+      ...prev,
+      [stepId]: {
+        ...prev[stepId],
+        [photoId]: {
+          ...prev[stepId][photoId]!,
+          uploadStatus: 'uploading',
+        },
+      },
+    }));
+
+    try {
+      const serverUrl = await uploadPhotoToServer(file, stepId, photoId, title, description);
+      
+      console.log(`✅ Upload successful for ${photoId}:`, {
+        stepId,
+        photoId,
+        serverUrl,
+        title
+      });
+      
+      // Update status to uploaded with server URL but keep blob preview for display
+      setPhotos((prev) => {
+        const updated = {
+          ...prev,
+          [stepId]: {
+            ...prev[stepId],
+            [photoId]: {
+              ...prev[stepId][photoId]!,
+              uploadStatus: 'uploaded',
+              serverUrl,
+              // Keep the blob URL for preview, serverUrl is for database
+            },
+          },
+        };
+        
+        console.log(`State updated for ${photoId}:`, updated[stepId][photoId]);
+        return updated;
+      });
+    } catch (error) {
+      // Update status to failed with error
+      setPhotos((prev) => ({
+        ...prev,
+        [stepId]: {
+          ...prev[stepId],
+          [photoId]: {
+            ...prev[stepId][photoId]!,
+            uploadStatus: 'failed',
+            uploadError: error instanceof Error ? error.message : 'Upload failed',
           },
         },
       }));
-    };
-    reader.readAsDataURL(file);
+      
+      // Show error toast but don't block UI
+      toast.error(`Error subiendo ${title}. Reintentará al finalizar.`);
+    }
   };
 
   // Navigation functions
@@ -360,22 +497,216 @@ export default function VehiclePictures({
       },
     }));
   };
-
-  const handleFinish = () => {
-    // Here you would typically submit the photos to your backend
-    console.log("Submitting all photos:", photos);
-
-    // Show success message
-    toast.success(
-      `Se enviaron exitosamente ${completedPhotos} fotos de la inspección del vehículo.`
-    );
-
-    // In wizard mode, call the onComplete callback
-    if (isWizardMode && onComplete) {
-      onComplete();
+  
+  // Function to fill all photos with dummy data
+  const fillWithDummyPhotos = async () => {
+    const newPhotos: PhotosState = {};
+    
+    // Sample images to cycle through
+    const sampleImages = ['/sample_1.avif', '/sample_2.jpg', '/sample_3.jpg'];
+    let imageIndex = 0;
+    
+    for (const step of inspectionSteps) {
+      newPhotos[step.id] = {};
+      
+      for (const photo of step.photos) {
+        try {
+          // Get the current sample image (cycle through the 3 images)
+          const currentImageUrl = sampleImages[imageIndex % sampleImages.length];
+          imageIndex++;
+          
+          // Fetch the sample image
+          const response = await fetch(currentImageUrl);
+          const blob = await response.blob();
+          
+          // Get file extension from the URL
+          const extension = currentImageUrl.split('.').pop();
+          const mimeType = extension === 'avif' ? 'image/avif' : 'image/jpeg';
+          
+          // Create File object
+          const file = new File([blob], `${photo.id}.${extension}`, { type: mimeType });
+          
+          // Create preview URL
+          const preview = URL.createObjectURL(blob);
+          
+          newPhotos[step.id][photo.id] = {
+            file,
+            preview,
+            uploadStatus: 'pending',
+          };
+        } catch (error) {
+          console.error(`Error loading sample image for ${photo.id}:`, error);
+          
+          // Fallback to canvas if image loading fails
+          const canvas = document.createElement('canvas');
+          canvas.width = 800;
+          canvas.height = 600;
+          const ctx = canvas.getContext('2d');
+          
+          if (ctx) {
+            ctx.fillStyle = '#f0f0f0';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#333';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('Imagen de prueba', canvas.width / 2, canvas.height / 2);
+          }
+          
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const file = new File([blob], `${photo.id}.jpg`, { type: 'image/jpeg' });
+              const preview = canvas.toDataURL('image/jpeg');
+              
+              newPhotos[step.id][photo.id] = {
+                file,
+                preview,
+                uploadStatus: 'pending',
+              };
+            }
+          }, 'image/jpeg', 0.9);
+        }
+      }
     }
     
-    // In a real application, you might redirect the user or show a success screen
+    setPhotos(newPhotos);
+    
+    // Show success message
+    toast.success('Se llenaron todas las fotos con datos de prueba');
+    
+    // Start uploading all photos in background with small delays to avoid overwhelming server
+    let delay = 0;
+    for (const step of inspectionSteps) {
+      for (const photo of step.photos) {
+        const photoData = newPhotos[step.id][photo.id];
+        if (photoData) {
+          // Start upload in background with staggered timing
+          setTimeout(() => {
+            uploadOptimistically(photoData.file, step.id, photo.id, photo.title, photo.description);
+          }, delay);
+          delay += 100; // 100ms delay between uploads
+        }
+      }
+    }
+    
+    // Don't auto-complete here, wait for uploads to finish
+  };
+
+  // Function to retry failed uploads
+  const retryFailedUploads = async (): Promise<boolean> => {
+    const failedPhotos = [];
+    
+    // Collect all failed photos
+    for (const [stepId, stepPhotos] of Object.entries(photos)) {
+      for (const [photoId, photoData] of Object.entries(stepPhotos)) {
+        if (photoData && photoData.uploadStatus === 'failed') {
+          const step = inspectionSteps.find(s => s.id === stepId);
+          const photo = step?.photos.find(p => p.id === photoId);
+          if (photo) {
+            failedPhotos.push({
+              file: photoData.file,
+              stepId,
+              photoId,
+              title: photo.title,
+              description: photo.description,
+            });
+          }
+        }
+      }
+    }
+
+    if (failedPhotos.length === 0) return true;
+
+    // Retry failed uploads
+    try {
+      await Promise.all(
+        failedPhotos.map(({ file, stepId, photoId, title, description }) =>
+          uploadOptimistically(file, stepId, photoId, title, description)
+        )
+      );
+      
+      // Wait a bit for uploads to complete
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Check if any still failed
+      const stillFailed = Object.values(photos).some(stepPhotos =>
+        Object.values(stepPhotos).some(photo => photo?.uploadStatus === 'failed')
+      );
+      
+      return !stillFailed;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  const handleFinish = async () => {
+    if (!isWizardMode) {
+      // When not in wizard mode, just show photos submitted message
+      console.log("Submitting all photos:", photos);
+      toast.success(
+        `Se enviaron exitosamente ${completedPhotos} fotos de la inspección del vehículo.`
+      );
+      return;
+    }
+
+    // In wizard mode, verify all uploads are complete
+    try {
+      // Check for failed uploads and retry
+      const allUploaded = await retryFailedUploads();
+      
+      if (!allUploaded) {
+        toast.error("Algunas fotos no se pudieron subir. Por favor, inténtelo de nuevo.");
+        return;
+      }
+
+      // Prepare photo data with server URLs for context
+      const photoDataForContext = [];
+      for (const [stepId, stepPhotos] of Object.entries(photos)) {
+        const step = inspectionSteps.find(s => s.id === stepId);
+        for (const [photoId, photoData] of Object.entries(stepPhotos)) {
+          if (photoData) {
+            const photo = step?.photos.find(p => p.id === photoId);
+            
+            // Debug: log what we're sending
+            console.log(`Photo ${photoId}:`, {
+              uploadStatus: photoData.uploadStatus,
+              hasServerUrl: !!photoData.serverUrl,
+              serverUrl: photoData.serverUrl,
+              preview: photoData.preview
+            });
+            
+            // Use serverUrl if available, otherwise skip this photo
+            if (photoData.uploadStatus === 'uploaded' && photoData.serverUrl) {
+              photoDataForContext.push({
+                category: stepId,
+                photoType: photoId,
+                title: photo?.title || '',
+                description: photo?.description,
+                url: photoData.serverUrl, // Use server URL from R2
+              });
+            } else if (photoData.uploadStatus === 'uploaded' && !photoData.serverUrl) {
+              console.error(`ERROR: Photo ${photoId} marked as uploaded but has no serverUrl!`);
+              console.error('This photo will use blob URL:', photoData.preview);
+              // This is the problem - photo is "uploaded" but no serverUrl
+              // DO NOT add this photo with blob URL
+            }
+          }
+        }
+      }
+      console.log('Final photos being sent to context:', photoDataForContext);
+      setContextPhotos(photoDataForContext);
+
+      // Automatically trigger completion when in wizard mode
+      if (onComplete) {
+        toast.success(`¡Fotos subidas exitosamente! Enviando inspección...`);
+        // Pasar las fotos directamente sin delay
+        onComplete(photoDataForContext);
+      } else {
+        toast.success(`Fotos subidas exitosamente (${completedPhotos}).`);
+      }
+    } catch (error) {
+      console.error("Error preparing photos:", error);
+      toast.error("Error al procesar las fotos");
+    }
   };
 
   // Calculate if we're at the first or last photo overall
@@ -403,27 +734,42 @@ export default function VehiclePictures({
             área requerida.
           </p>
 
-          <div className="flex items-center justify-between mt-4">
-            <div className="flex items-center gap-2">
-              <Progress value={progress} className="w-40 h-2" />
-              <span className="text-sm text-muted-foreground">
-                {completedPhotos}/{totalPhotos} fotos
-              </span>
-            </div>
-
+          {isDevMode && (
             <Button
-              onClick={handleFinish}
-              disabled={!isComplete}
-              className={cn(
-                "transition-all",
-                isComplete
-                  ? "bg-green-600 hover:bg-green-700 text-white"
-                  : "bg-muted text-muted-foreground"
-              )}
+              onClick={fillWithDummyPhotos}
+              variant="outline"
+              className="gap-2 w-fit"
             >
-              <CheckCircle2 className="mr-2 h-4 w-4" />
-              Finalizar Inspección
+              <Sparkles className="h-4 w-4" />
+              Llenar con fotos de prueba
             </Button>
+          )}
+
+          <div className="flex flex-col gap-4 mt-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Progress value={progress} className="w-40 h-2" />
+                <span className="text-sm text-muted-foreground">
+                  {completedPhotos}/{totalPhotos} fotos
+                </span>
+              </div>
+
+              <Button
+                onClick={handleFinish}
+                disabled={!isComplete}
+                size="sm"
+                className={cn(
+                  "transition-all",
+                  isComplete
+                    ? "bg-green-600 hover:bg-green-700 text-white"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <CheckCircle2 className="mr-1 h-3 w-3" />
+                <span className="hidden sm:inline">Completar y Enviar Inspección</span>
+                <span className="sm:hidden">Completar</span>
+              </Button>
+            </div>
           </div>
         </div>
 
@@ -527,14 +873,36 @@ export default function VehiclePictures({
                     alt={currentPhoto.title}
                     className="object-cover w-full h-full"
                   />
-                  <Button
-                    variant="destructive"
-                    size="icon"
-                    className="absolute top-2 right-2"
-                    onClick={removePhoto}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    {/* Upload status indicator */}
+                    <div className={cn(
+                      "rounded-full p-1",
+                      currentPhotoData.uploadStatus === 'uploaded' ? "bg-green-500" :
+                      currentPhotoData.uploadStatus === 'failed' ? "bg-red-500" :
+                      currentPhotoData.uploadStatus === 'uploading' ? "bg-yellow-500" :
+                      "bg-blue-500"
+                    )}>
+                      {currentPhotoData.uploadStatus === 'uploaded' ? (
+                        <Check className="h-3 w-3 text-white" />
+                      ) : currentPhotoData.uploadStatus === 'failed' ? (
+                        <X className="h-3 w-3 text-white" />
+                      ) : currentPhotoData.uploadStatus === 'uploading' ? (
+                        <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3 text-white" />
+                      )}
+                    </div>
+                    
+                    {/* Remove button */}
+                    <Button
+                      variant="destructive"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={removePhoto}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div
@@ -582,17 +950,8 @@ export default function VehiclePictures({
             >
               {currentPhotoData ? (
                 <>
-                  {isLastPhoto ? (
-                    <>
-                      <Check className="mr-2 h-4 w-4" />
-                      Completar
-                    </>
-                  ) : (
-                    <>
-                      <span className="sm:inline">Siguiente</span>
-                      <ChevronRight className="ml-2 h-4 w-4" />
-                    </>
-                  )}
+                  <span className="sm:inline">Siguiente</span>
+                  <ChevronRight className="ml-2 h-4 w-4" />
                 </>
               ) : (
                 <>
@@ -624,8 +983,22 @@ export default function VehiclePictures({
                       alt={photo.title}
                       className="object-cover w-full h-full"
                     />
-                    <div className="absolute top-1 right-1 bg-primary rounded-full p-0.5">
-                      <Check className="h-3 w-3 text-primary-foreground" />
+                    <div className={cn(
+                      "absolute top-1 right-1 rounded-full p-0.5",
+                      photoData.uploadStatus === 'uploaded' ? "bg-green-500" :
+                      photoData.uploadStatus === 'failed' ? "bg-red-500" :
+                      photoData.uploadStatus === 'uploading' ? "bg-yellow-500" :
+                      "bg-blue-500"
+                    )}>
+                      {photoData.uploadStatus === 'uploaded' ? (
+                        <Check className="h-3 w-3 text-white" />
+                      ) : photoData.uploadStatus === 'failed' ? (
+                        <X className="h-3 w-3 text-white" />
+                      ) : photoData.uploadStatus === 'uploading' ? (
+                        <div className="h-3 w-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3 text-white" />
+                      )}
                     </div>
                   </>
                 ) : (

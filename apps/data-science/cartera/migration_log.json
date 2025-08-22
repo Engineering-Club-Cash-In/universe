@@ -1,0 +1,586 @@
+{
+  "migration_timestamp": "2025-08-18T09:39:49.831464",
+  "source_file": "cartera.xlsx",
+  "target_file": "cartera_migrated.db",
+  "total_sheets": 97,
+  "total_rows_migrated": 36471,
+  "total_columns": 185,
+  "sheet_details": [
+    {
+      "sheet": "Junio 2018",
+      "rows_migrated": 4,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2018",
+      "rows_migrated": 6,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2018",
+      "rows_migrated": 10,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2018",
+      "rows_migrated": 12,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2018",
+      "rows_migrated": 21,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2018",
+      "rows_migrated": 24,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2018",
+      "rows_migrated": 28,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2019",
+      "rows_migrated": 28,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2019",
+      "rows_migrated": 30,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2019",
+      "rows_migrated": 29,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2019",
+      "rows_migrated": 32,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2019",
+      "rows_migrated": 38,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2019",
+      "rows_migrated": 40,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2019",
+      "rows_migrated": 49,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2019",
+      "rows_migrated": 51,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2019",
+      "rows_migrated": 52,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2019",
+      "rows_migrated": 53,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2019",
+      "rows_migrated": 56,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2019",
+      "rows_migrated": 57,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2020",
+      "rows_migrated": 56,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2020",
+      "rows_migrated": 59,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2020",
+      "rows_migrated": 58,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2020",
+      "rows_migrated": 57,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2020",
+      "rows_migrated": 60,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2020",
+      "rows_migrated": 58,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2020",
+      "rows_migrated": 61,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2020",
+      "rows_migrated": 59,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2020",
+      "rows_migrated": 62,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2020",
+      "rows_migrated": 61,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2020",
+      "rows_migrated": 62,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2020",
+      "rows_migrated": 66,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2021",
+      "rows_migrated": 65,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2021",
+      "rows_migrated": 63,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2021",
+      "rows_migrated": 66,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2021",
+      "rows_migrated": 68,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2021",
+      "rows_migrated": 73,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2021",
+      "rows_migrated": 75,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2021",
+      "rows_migrated": 80,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2021",
+      "rows_migrated": 90,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2021",
+      "rows_migrated": 108,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2021",
+      "rows_migrated": 121,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2021",
+      "rows_migrated": 132,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2021",
+      "rows_migrated": 141,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2022",
+      "rows_migrated": 154,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2022",
+      "rows_migrated": 163,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2022",
+      "rows_migrated": 187,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2022",
+      "rows_migrated": 190,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2022",
+      "rows_migrated": 204,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2022",
+      "rows_migrated": 215,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2022",
+      "rows_migrated": 233,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2022",
+      "rows_migrated": 246,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2022",
+      "rows_migrated": 255,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2022",
+      "rows_migrated": 266,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2022",
+      "rows_migrated": 274,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2022",
+      "rows_migrated": 280,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2023",
+      "rows_migrated": 294,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2023",
+      "rows_migrated": 293,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2023",
+      "rows_migrated": 314,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2023",
+      "rows_migrated": 334,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2023",
+      "rows_migrated": 350,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2023",
+      "rows_migrated": 364,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2023",
+      "rows_migrated": 371,
+      "columns_found": 63,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2023",
+      "rows_migrated": 401,
+      "columns_found": 70,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2023",
+      "rows_migrated": 421,
+      "columns_found": 71,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2023",
+      "rows_migrated": 445,
+      "columns_found": 71,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2023",
+      "rows_migrated": 469,
+      "columns_found": 71,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2023",
+      "rows_migrated": 483,
+      "columns_found": 71,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2024",
+      "rows_migrated": 503,
+      "columns_found": 71,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2024",
+      "rows_migrated": 521,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2024",
+      "rows_migrated": 542,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2024",
+      "rows_migrated": 557,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2024",
+      "rows_migrated": 602,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2024",
+      "rows_migrated": 996,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2024",
+      "rows_migrated": 950,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Hoja1",
+      "rows_migrated": 795,
+      "columns_found": 48,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2024",
+      "rows_migrated": 940,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2024",
+      "rows_migrated": 934,
+      "columns_found": 72,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2024",
+      "rows_migrated": 936,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2024",
+      "rows_migrated": 934,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2024",
+      "rows_migrated": 932,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Enero 2025",
+      "rows_migrated": 875,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Febrero 2025",
+      "rows_migrated": 926,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Marzo 2025",
+      "rows_migrated": 944,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Abril 2025",
+      "rows_migrated": 998,
+      "columns_found": 79,
+      "status": "success"
+    },
+    {
+      "sheet": "Mayo 2025",
+      "rows_migrated": 1495,
+      "columns_found": 82,
+      "status": "success"
+    },
+    {
+      "sheet": "Junio 2025",
+      "rows_migrated": 1518,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Julio 2025",
+      "rows_migrated": 1526,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Agosto 2025",
+      "rows_migrated": 1500,
+      "columns_found": 76,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2025",
+      "rows_migrated": 1498,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2025",
+      "rows_migrated": 1498,
+      "columns_found": 75,
+      "status": "success"
+    },
+    {
+      "sheet": "Facturacion inversionistas",
+      "rows_migrated": 93,
+      "columns_found": 16,
+      "status": "success"
+    },
+    {
+      "sheet": "Hoja2",
+      "rows_migrated": 79,
+      "columns_found": 19,
+      "status": "success"
+    },
+    {
+      "sheet": "Septiembre 2024_",
+      "rows_migrated": 938,
+      "columns_found": 65,
+      "status": "success"
+    },
+    {
+      "sheet": "Octubre 2024_",
+      "rows_migrated": 938,
+      "columns_found": 65,
+      "status": "success"
+    },
+    {
+      "sheet": "Noviembre 2024_",
+      "rows_migrated": 938,
+      "columns_found": 65,
+      "status": "success"
+    },
+    {
+      "sheet": "Diciembre 2024_",
+      "rows_migrated": 938,
+      "columns_found": 65,
+      "status": "success"
+    }
+  ]
+}

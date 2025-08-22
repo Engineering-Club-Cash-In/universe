@@ -3,7 +3,6 @@ import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
-	activities,
 	clients,
 	companies,
 	creditAnalysis,
@@ -13,7 +12,7 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
-import { adminProcedure, analystProcedure, crmProcedure } from "../lib/orpc";
+import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { 
 	uploadFileToR2, 
 	getFileUrl, 
@@ -24,7 +23,7 @@ import {
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
-	getSalesStages: crmProcedure.handler(async ({ context }) => {
+	getSalesStages: crmProcedure.handler(async ({ context: _ }) => {
 		const stages = await db
 			.select()
 			.from(salesStages)
@@ -616,7 +615,7 @@ export const crmRouter = {
 		}),
 
 	// Analyst specific endpoints
-	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context }) => {
+	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context: _ }) => {
 		// Get the stage ID for "Recepción de documentación y traslado a análisis"
 		const analysisStage = await db
 			.select()

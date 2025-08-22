@@ -11,11 +11,11 @@ import {
   type NewVehiclePhoto,
   type NewInspectionChecklistItem
 } from "../db/schema";
-import { publicProcedure, protectedProcedure } from "../lib/orpc";
+import { protectedProcedure, publicProcedure } from "../lib/orpc";
 
 export const vehiclesRouter = {
   // Get all vehicles with their latest inspection and photos
-  getAll: protectedProcedure
+  getAll: publicProcedure
     .handler(async () => {
       const result = await db
         .select()
@@ -44,7 +44,7 @@ export const vehiclesRouter = {
       // Get all checklist items for all inspections
       const allInspectionIds = result
         .filter(row => row.vehicle_inspections)
-        .map(row => row.vehicle_inspections.id);
+        .map(row => row.vehicle_inspections!.id);
       
       const allChecklistItems = allInspectionIds.length > 0 
         ? await db
@@ -407,7 +407,7 @@ export const vehiclesRouter = {
     }),
 
   // Get statistics
-  getStatistics: protectedProcedure
+  getStatistics: publicProcedure
     .handler(async () => {
       const allVehicles = await db.select().from(vehicles);
       const allInspections = await db.select().from(vehicleInspections);
@@ -430,7 +430,7 @@ export const vehiclesRouter = {
     }),
 
   // Create full inspection with all data (vehicle + inspection + checklist)
-  createFullInspection: protectedProcedure
+  createFullInspection: publicProcedure
     .input(z.object({
       // Vehicle data
       vehicle: z.object({

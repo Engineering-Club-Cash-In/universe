@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -11,6 +11,43 @@ import {
   Camera,
 } from "lucide-react";
 import { getAllVehicles, getVehicleStatistics } from "../services/vehicles";
+import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem } from "../../../crm/apps/server/src/db/schema/vehicles";
+
+// Type for what the getAll endpoint returns
+type VehicleWithRelations = Vehicle & {
+  inspections: (VehicleInspection & {
+    checklistItems: InspectionChecklistItem[];
+  })[];
+  photos: VehiclePhoto[];
+};
+
+// Type for what the dashboard table expects
+interface DashboardVehicle {
+  id: string;
+  technicianName: string;
+  inspectionDate: Date | string | null;
+  vehicleMake: string;
+  vehicleModel: string;
+  vehicleYear: string | number;
+  licensePlate: string;
+  vinNumber: string;
+  kmMileage: string | number;
+  origin: string;
+  vehicleType: string;
+  color: string;
+  fuelType: string;
+  vehicleRating: string;
+  marketValue: string;
+  suggestedCommercialValue: string;
+  currentConditionValue: string;
+  inspectionResult: string;
+  airbagWarning: string;
+  testDrive: string;
+  status: string;
+  photos: number;
+  hasScanner: boolean;
+  alerts: string[];
+}
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,14 +73,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
@@ -197,17 +226,52 @@ const sampleVehicles = [
   },
 ];
 
+const VehiclePhoto = ({ photo, index }: { photo: any; index: number }) => {
+  const [hasError, setHasError] = useState(false);
+
+  if (hasError) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+        <div className="text-center">
+          <svg className="h-10 w-10 mx-auto opacity-20" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M9 2C7.89 2 7 2.89 7 4V20C7 21.11 7.89 22 9 22H15C16.11 22 17 21.11 17 20V4C17 2.89 16.11 2 15 2H9Z"/>
+          </svg>
+          <span className="text-xs font-medium">Error cargando</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      key={photo.id || index}
+      className="relative aspect-square bg-muted rounded-md overflow-hidden border"
+    >
+      <img
+        src={photo.url}
+        alt={photo.title || `Foto ${index + 1}`}
+        className="w-full h-full object-cover"
+        onError={() => setHasError(true)}
+      />
+      <div className="absolute bottom-0 left-0 right-0 bg-black/60 p-1">
+        <p className="text-xs text-white truncate text-center">
+          {photo.title || `${photo.category} - ${photo.photoType}`}
+        </p>
+      </div>
+    </div>
+  );
+};
+
 export default function VehiclesDashboard() {
-  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<DashboardVehicle[]>([]);
+  const [rawVehiclesData, setRawVehiclesData] = useState<VehicleWithRelations[]>([]);
   const [, setStatistics] = useState<any>(null);
   const [, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
-  const [selectedVehicle, setSelectedVehicle] = useState<any | null>(null);
+  const [selectedVehicle, setSelectedVehicle] = useState<DashboardVehicle | null>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
-  const [isPhotosOpen, setIsPhotosOpen] = useState(false);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("details");
 
   // Load vehicles on mount
   useEffect(() => {
@@ -215,12 +279,48 @@ export default function VehiclesDashboard() {
     loadStatistics();
   }, []);
 
+
+  const transformVehicleData = (vehicle: VehicleWithRelations): DashboardVehicle => {
+    // Get the latest inspection if available
+    const latestInspection = vehicle.inspections?.[0] || null;
+    
+    return {
+      id: vehicle.id,
+      technicianName: latestInspection?.technicianName || 'N/A',
+      inspectionDate: latestInspection?.inspectionDate || vehicle.createdAt,
+      vehicleMake: vehicle.make || '',
+      vehicleModel: vehicle.model || '',
+      vehicleYear: vehicle.year?.toString() || '',
+      licensePlate: vehicle.licensePlate || '',
+      vinNumber: vehicle.vinNumber || '',
+      kmMileage: vehicle.kmMileage?.toString() || '',
+      origin: vehicle.origin || '',
+      vehicleType: vehicle.vehicleType || '',
+      color: vehicle.color || '',
+      fuelType: vehicle.fuelType || '',
+      vehicleRating: latestInspection?.vehicleRating || 'Pendiente',
+      marketValue: latestInspection?.marketValue || '0',
+      suggestedCommercialValue: latestInspection?.suggestedCommercialValue || '0',
+      currentConditionValue: latestInspection?.currentConditionValue || '0',
+      inspectionResult: latestInspection?.inspectionResult || 'Inspección pendiente',
+      airbagWarning: latestInspection?.airbagWarning ? 'Sí' : 'No',
+      testDrive: latestInspection?.testDrive ? 'Sí' : 'No',
+      status: latestInspection?.status || vehicle.status || 'pending',
+      photos: vehicle.photos?.length || 0,
+      hasScanner: latestInspection?.scannerUsed || false,
+      alerts: (latestInspection?.alerts as string[]) || [],
+    };
+  };
+
   const loadVehicles = async () => {
     setIsLoading(true);
     try {
       const result = await getAllVehicles();
       if (result.success) {
-        setVehicles(result.data || []);
+        const rawData = result.data || [];
+        setRawVehiclesData(rawData);
+        const transformedVehicles = rawData.map(transformVehicleData);
+        setVehicles(transformedVehicles);
       } else {
         console.error("Error loading vehicles:", result.error);
         // Fall back to sample data if API fails
@@ -247,18 +347,24 @@ export default function VehiclesDashboard() {
   };
 
   // Filter vehicles based on search term and filter status
-  const filteredVehicles = vehicles.filter((vehicle) => {
-    const matchesSearch =
-      (vehicle.make?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-      (vehicle.model?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-      (vehicle.licensePlate?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
-      (vehicle.vinNumber?.toLowerCase() || "").includes(searchTerm.toLowerCase());
+  const filteredVehicles = useMemo(() => {
+    return vehicles.filter((vehicle) => {
+      const matchesSearch =
+        (vehicle.vehicleMake?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+        (vehicle.vehicleModel?.toLowerCase() || "").includes(searchTerm.toLowerCase()) ||
+        (vehicle.licensePlate?.toLowerCase() || "").includes(
+          searchTerm.toLowerCase()
+        ) ||
+        (vehicle.vinNumber?.toLowerCase() || "").includes(
+          searchTerm.toLowerCase()
+        );
 
-    const matchesStatus =
-      filterStatus === "all" || vehicle.status === filterStatus;
+      const matchesStatus =
+        filterStatus === "all" || vehicle.status === filterStatus;
 
-    return matchesSearch && matchesStatus;
-  });
+      return matchesSearch && matchesStatus;
+    });
+  }, [vehicles, searchTerm, filterStatus]);
 
   // Function to render the status badge
   const renderStatusBadge = (status: string) => {
@@ -291,26 +397,18 @@ export default function VehiclesDashboard() {
 
   // Statistics calculation
   const stats = {
-    total: sampleVehicles.length,
-    approved: sampleVehicles.filter((v) => v.status === "approved").length,
-    pending: sampleVehicles.filter((v) => v.status === "pending").length,
-    rejected: sampleVehicles.filter((v) => v.status === "rejected").length,
-    commercial: sampleVehicles.filter((v) => v.vehicleRating === "Comercial")
+    total: vehicles.length,
+    approved: vehicles.filter((v) => v.status === "approved").length,
+    pending: vehicles.filter((v) => v.status === "pending").length,
+    rejected: vehicles.filter((v) => v.status === "rejected").length,
+    commercial: vehicles.filter((v) => v.vehicleRating === "Comercial")
       .length,
-    nonCommercial: sampleVehicles.filter(
+    nonCommercial: vehicles.filter(
       (v) => v.vehicleRating === "No comercial"
     ).length,
-    withAlerts: sampleVehicles.filter((v) => v.alerts.length > 0).length,
+    withAlerts: vehicles.filter((v) => v.alerts && v.alerts.length > 0).length,
   };
 
-  // Mock photos for the vehicle gallery
-  const mockPhotos = [
-    "/placeholder-car-1.jpg",
-    "/placeholder-car-2.jpg",
-    "/placeholder-car-3.jpg",
-    "/placeholder-car-4.jpg",
-    "/placeholder-car-5.jpg",
-  ];
 
   return (
     <div className="flex flex-col p-6 gap-4">
@@ -426,9 +524,9 @@ export default function VehiclesDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[50px]">ID</TableHead>
                       <TableHead>Vehículo</TableHead>
                       <TableHead>Placa</TableHead>
+                      <TableHead>Técnico</TableHead>
                       <TableHead>Valor Comercial</TableHead>
                       <TableHead>Fecha</TableHead>
                       <TableHead>Estado</TableHead>
@@ -446,9 +544,6 @@ export default function VehiclesDashboard() {
                     ) : (
                       filteredVehicles.map((vehicle) => (
                         <TableRow key={vehicle.id}>
-                          <TableCell className="font-medium">
-                            {vehicle.id}
-                          </TableCell>
                           <TableCell>
                             <div className="font-medium">
                               {vehicle.vehicleMake} {vehicle.vehicleModel}
@@ -458,6 +553,11 @@ export default function VehiclesDashboard() {
                             </div>
                           </TableCell>
                           <TableCell>{vehicle.licensePlate}</TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {vehicle.technicianName}
+                            </div>
+                          </TableCell>
                           <TableCell>
                             <div className="font-medium">
                               {Number(
@@ -481,15 +581,21 @@ export default function VehiclesDashboard() {
                             </div>
                           </TableCell>
                           <TableCell>
-                            {format(vehicle.inspectionDate, "dd MMM yyyy", {
-                              locale: es,
-                            })}
+                            {vehicle.inspectionDate ? 
+                              format(
+                                typeof vehicle.inspectionDate === 'string' 
+                                  ? new Date(vehicle.inspectionDate) 
+                                  : vehicle.inspectionDate, 
+                                "dd MMM yyyy", 
+                                { locale: es }
+                              ) : 'N/A'
+                            }
                           </TableCell>
                           <TableCell>
                             {renderStatusBadge(vehicle.status)}
                           </TableCell>
                           <TableCell>
-                            {vehicle.alerts.length > 0 ? (
+                            {(vehicle.alerts && vehicle.alerts.length > 0) ? (
                               <Badge
                                 variant="outline"
                                 className="bg-red-100 text-red-800 border-red-300"
@@ -509,52 +615,18 @@ export default function VehiclesDashboard() {
                             )}
                           </TableCell>
                           <TableCell className="text-right">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                  <span className="sr-only">Abrir menú</span>
-                                  <Eye className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedVehicle(vehicle);
-                                    setIsDetailsOpen(true);
-                                  }}
-                                >
-                                  Ver detalles
-                                </DropdownMenuItem>
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedVehicle(vehicle);
-                                    setIsEditOpen(true);
-                                  }}
-                                >
-                                  Editar inspección
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem
-                                  onClick={() => {
-                                    setSelectedVehicle(vehicle);
-                                    setIsPhotosOpen(true);
-                                  }}
-                                >
-                                  Ver fotos ({vehicle.photos})
-                                </DropdownMenuItem>
-                                {vehicle.hasScanner && (
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedVehicle(vehicle);
-                                      setIsScannerOpen(true);
-                                    }}
-                                  >
-                                    Ver reporte de scanner
-                                  </DropdownMenuItem>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
+                            <Button
+                              variant="ghost"
+                              className="h-8 w-8 p-0"
+                              onClick={() => {
+                                setSelectedVehicle(vehicle);
+                                setActiveTab("details");
+                                setIsDetailsOpen(true);
+                              }}
+                            >
+                              <span className="sr-only">Ver detalles</span>
+                              <Eye className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       ))
@@ -579,8 +651,8 @@ export default function VehiclesDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[50px]">ID</TableHead>
                       <TableHead>Vehículo</TableHead>
+                      <TableHead>Técnico</TableHead>
                       <TableHead>Alertas</TableHead>
                       <TableHead>Detalles</TableHead>
                       <TableHead>Estado</TableHead>
@@ -589,12 +661,9 @@ export default function VehiclesDashboard() {
                   </TableHeader>
                   <TableBody>
                     {sampleVehicles
-                      .filter((v) => v.alerts.length > 0)
+                      .filter((v) => v.alerts && v.alerts.length > 0)
                       .map((vehicle) => (
                         <TableRow key={vehicle.id}>
-                          <TableCell className="font-medium">
-                            {vehicle.id}
-                          </TableCell>
                           <TableCell>
                             <div className="font-medium">
                               {vehicle.vehicleMake} {vehicle.vehicleModel} (
@@ -605,8 +674,13 @@ export default function VehiclesDashboard() {
                             </div>
                           </TableCell>
                           <TableCell>
+                            <div className="text-sm">
+                              {vehicle.technicianName}
+                            </div>
+                          </TableCell>
+                          <TableCell>
                             <div className="flex flex-wrap gap-1">
-                              {vehicle.alerts.map((alert, index) => (
+                              {(vehicle.alerts || []).map((alert, index) => (
                                 <Badge
                                   key={index}
                                   variant="outline"
@@ -660,8 +734,8 @@ export default function VehiclesDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[50px]">ID</TableHead>
                       <TableHead>Vehículo</TableHead>
+                      <TableHead>Técnico</TableHead>
                       <TableHead>Valor Mercado</TableHead>
                       <TableHead>Valor Sugerido</TableHead>
                       <TableHead>Estado</TableHead>
@@ -673,9 +747,6 @@ export default function VehiclesDashboard() {
                       .filter((v) => v.vehicleRating === "Comercial")
                       .map((vehicle) => (
                         <TableRow key={vehicle.id}>
-                          <TableCell className="font-medium">
-                            {vehicle.id}
-                          </TableCell>
                           <TableCell>
                             <div className="font-medium">
                               {vehicle.vehicleMake} {vehicle.vehicleModel} (
@@ -683,6 +754,11 @@ export default function VehiclesDashboard() {
                             </div>
                             <div className="text-sm text-muted-foreground">
                               {vehicle.licensePlate}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {vehicle.technicianName}
                             </div>
                           </TableCell>
                           <TableCell>
@@ -744,8 +820,8 @@ export default function VehiclesDashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-[50px]">ID</TableHead>
                       <TableHead>Vehículo</TableHead>
+                      <TableHead>Técnico</TableHead>
                       <TableHead>Razones</TableHead>
                       <TableHead>Detalles</TableHead>
                       <TableHead className="text-right">Acciones</TableHead>
@@ -756,9 +832,6 @@ export default function VehiclesDashboard() {
                       .filter((v) => v.vehicleRating === "No comercial")
                       .map((vehicle) => (
                         <TableRow key={vehicle.id}>
-                          <TableCell className="font-medium">
-                            {vehicle.id}
-                          </TableCell>
                           <TableCell>
                             <div className="font-medium">
                               {vehicle.vehicleMake} {vehicle.vehicleModel} (
@@ -769,8 +842,13 @@ export default function VehiclesDashboard() {
                             </div>
                           </TableCell>
                           <TableCell>
+                            <div className="text-sm">
+                              {vehicle.technicianName}
+                            </div>
+                          </TableCell>
+                          <TableCell>
                             <div className="flex flex-wrap gap-1">
-                              {vehicle.alerts.map((alert, index) => (
+                              {(vehicle.alerts || []).map((alert, index) => (
                                 <Badge
                                   key={index}
                                   variant="outline"
@@ -809,371 +887,352 @@ export default function VehiclesDashboard() {
         </TabsContent>
       </Tabs>
 
-      {/* Vehicle Details Dialog */}
-      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-5xl">
+      {/* Unified Vehicle Details Dialog */}
+      <Dialog
+        open={isDetailsOpen}
+        onOpenChange={(open) => {
+          setIsDetailsOpen(open);
+          if (!open) {
+            setActiveTab("details"); // Reset to default tab when closing
+          }
+        }}
+      >
+        <DialogContent className="min-w-[90vw] max-w-7xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Detalles del Vehículo</DialogTitle>
+            <DialogTitle>
+              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel}
+            </DialogTitle>
             <DialogDescription>
-              Información completa del vehículo {selectedVehicle?.vehicleMake}{" "}
-              {selectedVehicle?.vehicleModel}
+              {selectedVehicle?.licensePlate} - {selectedVehicle?.vinNumber}
             </DialogDescription>
           </DialogHeader>
 
-          {selectedVehicle && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold">Información General</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="text-sm font-medium">Marca:</div>
-                    <div className="text-sm">{selectedVehicle.vehicleMake}</div>
-                    <div className="text-sm font-medium">Modelo:</div>
-                    <div className="text-sm">
-                      {selectedVehicle.vehicleModel}
-                    </div>
-                    <div className="text-sm font-medium">Año:</div>
-                    <div className="text-sm">{selectedVehicle.vehicleYear}</div>
-                    <div className="text-sm font-medium">Placa:</div>
-                    <div className="text-sm">
-                      {selectedVehicle.licensePlate}
-                    </div>
-                    <div className="text-sm font-medium">VIN:</div>
-                    <div className="text-sm">{selectedVehicle.vinNumber}</div>
-                    <div className="text-sm font-medium">Color:</div>
-                    <div className="text-sm">{selectedVehicle.color}</div>
-                    <div className="text-sm font-medium">Kilometraje:</div>
-                    <div className="text-sm">
-                      {selectedVehicle.kmMileage} km
-                    </div>
-                    <div className="text-sm font-medium">Tipo:</div>
-                    <div className="text-sm">{selectedVehicle.vehicleType}</div>
-                    <div className="text-sm font-medium">Combustible:</div>
-                    <div className="text-sm">{selectedVehicle.fuelType}</div>
-                  </div>
-                </div>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full pt-4">
+            <TabsList>
+              <TabsTrigger value="details">Detalles</TabsTrigger>
+              <TabsTrigger value="photos">Fotos ({selectedVehicle?.photos || 0})</TabsTrigger>
+              {selectedVehicle?.hasScanner && (
+                <TabsTrigger value="scanner">Scanner</TabsTrigger>
+              )}
+              <TabsTrigger value="edit">Editar</TabsTrigger>
+            </TabsList>
 
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold">Inspección</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="text-sm font-medium">Fecha:</div>
-                    <div className="text-sm">
-                      {format(selectedVehicle.inspectionDate, "dd/MM/yyyy", {
-                        locale: es,
-                      })}
+            <TabsContent value="details" className="mt-4">
+              {selectedVehicle && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
+                  {/* Primera columna */}
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold border-b pb-2">Información General</h3>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Marca:</span>
+                          <span className="text-sm font-medium">{selectedVehicle.vehicleMake}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Modelo:</span>
+                          <span className="text-sm font-medium">{selectedVehicle.vehicleModel}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Año:</span>
+                          <span className="text-sm">{selectedVehicle.vehicleYear}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Placa:</span>
+                          <span className="text-sm font-mono">{selectedVehicle.licensePlate}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">VIN:</span>
+                          <span className="text-xs font-mono break-all">{selectedVehicle.vinNumber}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Color:</span>
+                          <span className="text-sm">{selectedVehicle.color}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Kilometraje:</span>
+                          <span className="text-sm">{selectedVehicle.kmMileage} km</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Tipo:</span>
+                          <span className="text-sm">{selectedVehicle.vehicleType}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Combustible:</span>
+                          <span className="text-sm">{selectedVehicle.fuelType}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm font-medium">Técnico:</div>
-                    <div className="text-sm">
-                      {selectedVehicle.technicianName}
+
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold border-b pb-2">Inspección</h3>
+                      <div className="space-y-2">
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Fecha:</span>
+                          <span className="text-sm">
+                            {selectedVehicle.inspectionDate ? 
+                              format(
+                                typeof selectedVehicle.inspectionDate === 'string' 
+                                  ? new Date(selectedVehicle.inspectionDate) 
+                                  : selectedVehicle.inspectionDate, 
+                                "dd/MM/yyyy", 
+                                { locale: es }
+                              ) : 'N/A'
+                            }
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Técnico:</span>
+                          <span className="text-sm">{selectedVehicle.technicianName}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-muted-foreground">Estado:</span>
+                          {renderStatusBadge(selectedVehicle.status)}
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Prueba de manejo:</span>
+                          <span className="text-sm">{selectedVehicle.testDrive}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Testigo de airbag:</span>
+                          <span className="text-sm">{selectedVehicle.airbagWarning}</span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm font-medium">Estado:</div>
-                    <div className="text-sm">
-                      {renderStatusBadge(selectedVehicle.status)}
+                  </div>
+
+                  {/* Segunda columna */}
+                  <div className="space-y-4">
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold border-b pb-2">Valoración</h3>
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium text-muted-foreground">Calificación:</span>
+                          <span
+                            className={cn(
+                              "text-sm font-semibold px-2 py-1 rounded",
+                              selectedVehicle.vehicleRating === "Comercial"
+                                ? "text-green-700 bg-green-100"
+                                : "text-red-700 bg-red-100"
+                            )}
+                          >
+                            {selectedVehicle.vehicleRating}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Valor de mercado:</span>
+                          <span className="text-sm font-semibold">
+                            {Number(selectedVehicle.marketValue).toLocaleString("es-GT", {
+                              style: "currency",
+                              currency: "GTQ",
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Valor comercial:</span>
+                          <span className="text-sm font-semibold">
+                            {Number(selectedVehicle.suggestedCommercialValue).toLocaleString("es-GT", {
+                              style: "currency",
+                              currency: "GTQ",
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-sm font-medium text-muted-foreground">Valor actual:</span>
+                          <span className="text-sm font-semibold">
+                            {Number(selectedVehicle.currentConditionValue).toLocaleString("es-GT", {
+                              style: "currency",
+                              currency: "GTQ",
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 0,
+                            })}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm font-medium">Prueba de manejo:</div>
-                    <div className="text-sm">{selectedVehicle.testDrive}</div>
-                    <div className="text-sm font-medium">
-                      Testigo de airbag:
-                    </div>
-                    <div className="text-sm">
-                      {selectedVehicle.airbagWarning}
+
+                    {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 && (
+                      <div className="space-y-3">
+                        <h3 className="text-lg font-semibold text-red-600 border-b border-red-200 pb-2">
+                          Alertas
+                        </h3>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedVehicle.alerts.map((alert: string, index: number) => (
+                            <Badge
+                              key={index}
+                              variant="outline"
+                              className="bg-red-100 text-red-800 border-red-300"
+                            >
+                              {alert}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3">
+                      <h3 className="text-lg font-semibold border-b pb-2">Resultado de Inspección</h3>
+                      <div className="text-sm border rounded-md p-4 bg-muted/30 max-h-32 overflow-y-auto">
+                        {selectedVehicle.inspectionResult}
+                      </div>
                     </div>
                   </div>
                 </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="photos" className="mt-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-4">
+                {(() => {
+                  const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
+                  const vehiclePhotos = rawVehicle?.photos || [];
+                  
+                  if (vehiclePhotos.length === 0) {
+                    return (
+                      <div className="col-span-full text-center py-8">
+                        <Camera className="h-16 w-16 mx-auto text-muted-foreground opacity-50" />
+                        <p className="text-muted-foreground mt-2">No hay fotos disponibles para este vehículo</p>
+                      </div>
+                    );
+                  }
+
+                  return vehiclePhotos.map((photo: any, index: number) => (
+                    <VehiclePhoto photo={photo} index={index} key={photo.id || index} />
+                  ));
+                })()}
               </div>
+            </TabsContent>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold">Valoración</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="text-sm font-medium">Calificación:</div>
-                    <div
-                      className={cn(
-                        "text-sm font-semibold",
-                        selectedVehicle.vehicleRating === "Comercial"
-                          ? "text-green-500"
-                          : "text-red-500"
-                      )}
-                    >
-                      {selectedVehicle.vehicleRating}
-                    </div>
-                    <div className="text-sm font-medium">Valor de mercado:</div>
-                    <div className="text-sm">
-                      {Number(selectedVehicle.marketValue).toLocaleString(
-                        "es-GT",
-                        {
-                          style: "currency",
-                          currency: "GTQ",
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 0,
-                        }
-                      )}
-                    </div>
-                    <div className="text-sm font-medium">
-                      Valor comercial sugerido:
-                    </div>
-                    <div className="text-sm">
-                      {Number(
-                        selectedVehicle.suggestedCommercialValue
-                      ).toLocaleString("es-GT", {
-                        style: "currency",
-                        currency: "GTQ",
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })}
-                    </div>
-                    <div className="text-sm font-medium">
-                      Valor en condiciones actuales:
-                    </div>
-                    <div className="text-sm">
-                      {Number(
-                        selectedVehicle.currentConditionValue
-                      ).toLocaleString("es-GT", {
-                        style: "currency",
-                        currency: "GTQ",
-                        minimumFractionDigits: 0,
-                        maximumFractionDigits: 0,
-                      })}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-lg font-semibold">
-                    Resultado de la inspección
-                  </h3>
-                  <p className="text-sm border rounded-md p-3 bg-muted/50">
-                    {selectedVehicle.inspectionResult}
-                  </p>
-                </div>
-
-                {selectedVehicle.alerts.length > 0 && (
-                  <div className="space-y-2">
-                    <h3 className="text-lg font-semibold text-red-500">
-                      Alertas
+            <TabsContent value="scanner" className="mt-4">
+              <div className="py-4">
+                <div className="border rounded-md p-6 flex flex-col items-center justify-center gap-4 bg-muted/50">
+                  <FileText className="h-16 w-16 text-muted-foreground opacity-50" />
+                  <div className="text-center">
+                    <h3 className="font-medium">
+                      Reporte_Scanner_
+                      {selectedVehicle?.licensePlate.replace(/[-\s]/g, "")}.pdf
                     </h3>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedVehicle.alerts.map((alert: string, index: number) => (
-                        <Badge
-                          key={index}
-                          variant="outline"
-                          className="bg-red-100 text-red-800 border-red-300"
-                        >
-                          {alert}
-                        </Badge>
-                      ))}
+                    <p className="text-sm text-muted-foreground">
+                      Archivo PDF - 2.4 MB
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm">
+                    Descargar reporte
+                  </Button>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="edit" className="mt-4">
+              {selectedVehicle && (
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="vehicleRating">
+                        Calificación del vehículo
+                      </Label>
+                      <Select defaultValue={selectedVehicle.vehicleRating}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar calificación" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Comercial">Comercial</SelectItem>
+                          <SelectItem value="No comercial">No comercial</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="status">Estado</Label>
+                      <Select defaultValue={selectedVehicle.status}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar estado" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="approved">Aprobado</SelectItem>
+                          <SelectItem value="pending">Pendiente</SelectItem>
+                          <SelectItem value="rejected">Rechazado</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="marketValue">Valor de mercado</Label>
+                      <Input
+                        id="marketValue"
+                        defaultValue={selectedVehicle.marketValue}
+                        type="number"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="suggestedCommercialValue">
+                        Valor comercial sugerido
+                      </Label>
+                      <Input
+                        id="suggestedCommercialValue"
+                        defaultValue={selectedVehicle.suggestedCommercialValue}
+                        type="number"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="currentConditionValue">
+                        Valor en condiciones actuales
+                      </Label>
+                      <Input
+                        id="currentConditionValue"
+                        defaultValue={selectedVehicle.currentConditionValue}
+                        type="number"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="testDrive">Prueba de manejo</Label>
+                      <Select defaultValue={selectedVehicle.testDrive}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Seleccionar" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Sí">Sí</SelectItem>
+                          <SelectItem value="No">No</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                   </div>
-                )}
-              </div>
-            </div>
-          )}
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDetailsOpen(false)}>
-              Cerrar
-            </Button>
-            <Button
-              onClick={() => {
-                setIsDetailsOpen(false);
-                setIsEditOpen(true);
-              }}
-            >
-              Editar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Vehicle Photos Dialog */}
-      <Dialog open={isPhotosOpen} onOpenChange={setIsPhotosOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Fotografías del Vehículo</DialogTitle>
-            <DialogDescription>
-              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel} -{" "}
-              {selectedVehicle?.licensePlate}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-4">
-            {mockPhotos
-              .slice(0, selectedVehicle?.photos || 0)
-              .map((_photo, index) => (
-                <div
-                  key={index}
-                  className="relative aspect-square bg-muted rounded-md overflow-hidden border"
-                >
-                  <div className="w-full h-full flex items-center justify-center text-muted-foreground">
-                    <Camera className="h-10 w-10 opacity-20" />
-                    <span className="absolute inset-0 flex items-center justify-center font-medium">
-                      Foto {index + 1}
-                    </span>
+                  <div className="space-y-2">
+                    <Label htmlFor="inspectionResult">
+                      Resultado de la inspección
+                    </Label>
+                    <Textarea
+                      id="inspectionResult"
+                      defaultValue={selectedVehicle.inspectionResult}
+                      rows={5}
+                    />
                   </div>
                 </div>
-              ))}
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPhotosOpen(false)}>
-              Cerrar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Scanner Report Dialog */}
-      <Dialog open={isScannerOpen} onOpenChange={setIsScannerOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reporte de Scanner</DialogTitle>
-            <DialogDescription>
-              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel} -{" "}
-              {selectedVehicle?.licensePlate}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="py-4">
-            <div className="border rounded-md p-6 flex flex-col items-center justify-center gap-4 bg-muted/50">
-              <FileText className="h-16 w-16 text-muted-foreground opacity-50" />
-              <div className="text-center">
-                <h3 className="font-medium">
-                  Reporte_Scanner_
-                  {selectedVehicle?.licensePlate.replace(/[-\s]/g, "")}.pdf
-                </h3>
-                <p className="text-sm text-muted-foreground">
-                  Archivo PDF - 2.4 MB
-                </p>
-              </div>
-              <Button variant="outline" size="sm">
-                Descargar reporte
-              </Button>
-            </div>
-          </div>
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsScannerOpen(false)}>
-              Cerrar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Vehicle Dialog */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Editar Inspección</DialogTitle>
-            <DialogDescription>
-              {selectedVehicle?.vehicleMake} {selectedVehicle?.vehicleModel} -{" "}
-              {selectedVehicle?.licensePlate}
-            </DialogDescription>
-          </DialogHeader>
-
-          {selectedVehicle && (
-            <div className="grid gap-4 py-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="vehicleRating">
-                    Calificación del vehículo
-                  </Label>
-                  <Select defaultValue={selectedVehicle.vehicleRating}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar calificación" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Comercial">Comercial</SelectItem>
-                      <SelectItem value="No comercial">No comercial</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="status">Estado</Label>
-                  <Select defaultValue={selectedVehicle.status}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="approved">Aprobado</SelectItem>
-                      <SelectItem value="pending">Pendiente</SelectItem>
-                      <SelectItem value="rejected">Rechazado</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="marketValue">Valor de mercado</Label>
-                  <Input
-                    id="marketValue"
-                    defaultValue={selectedVehicle.marketValue}
-                    type="number"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="suggestedCommercialValue">
-                    Valor comercial sugerido
-                  </Label>
-                  <Input
-                    id="suggestedCommercialValue"
-                    defaultValue={selectedVehicle.suggestedCommercialValue}
-                    type="number"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="currentConditionValue">
-                    Valor en condiciones actuales
-                  </Label>
-                  <Input
-                    id="currentConditionValue"
-                    defaultValue={selectedVehicle.currentConditionValue}
-                    type="number"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="testDrive">Prueba de manejo</Label>
-                  <Select defaultValue={selectedVehicle.testDrive}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Sí">Sí</SelectItem>
-                      <SelectItem value="No">No</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="inspectionResult">
-                  Resultado de la inspección
-                </Label>
-                <Textarea
-                  id="inspectionResult"
-                  defaultValue={selectedVehicle.inspectionResult}
-                  rows={5}
-                />
-              </div>
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditOpen(false)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => {
-                // Here would be the logic to save the changes
-                setIsEditOpen(false);
-                // Show a success message
-              }}
-            >
-              Guardar cambios
-            </Button>
-          </DialogFooter>
+              )}
+              <DialogFooter className="pt-4">
+                <Button variant="outline" onClick={() => setActiveTab("details")}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => {
+                    // Here would be the logic to save the changes
+                    setIsDetailsOpen(false);
+                    // Show a success message
+                  }}
+                >
+                  Guardar cambios
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+          </Tabs>
         </DialogContent>
       </Dialog>
     </div>

@@ -6,7 +6,7 @@ import { auth } from "../lib/auth";
 import { adminProcedure } from "../lib/orpc";
 
 export const adminRouter = {
-	getStats: adminProcedure.handler(async ({ context }) => {
+	getStats: adminProcedure.handler(async ({ context: _ }) => {
 		const totalUsers = await db.select().from(user);
 
 		return {
@@ -20,7 +20,7 @@ export const adminRouter = {
 	}),
 
 	// User CRUD operations
-	getAllUsers: adminProcedure.handler(async ({ context }) => {
+	getAllUsers: adminProcedure.handler(async ({ context: _ }) => {
 		const users = await db
 			.select({
 				id: user.id,
@@ -98,7 +98,7 @@ export const adminRouter = {
 				role: z.enum(["admin", "sales", "analyst"]).default("sales"),
 			}),
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input, context: _ }) => {
 			// Check if email is from clubcashin.com domain
 			if (!input.email.endsWith("@clubcashin.com")) {
 				throw new Error("Only @clubcashin.com email addresses are allowed");

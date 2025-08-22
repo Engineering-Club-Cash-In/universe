@@ -45,7 +45,6 @@ export default function VehicleInspectionWizard() {
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -85,7 +84,6 @@ export default function VehicleInspectionWizard() {
     }
 
     console.log("Enviando inspección con", photosToUse.length, "fotos");
-    setIsSubmitting(true);
     
     try {
       // Prepare data for submission
@@ -116,7 +114,6 @@ export default function VehicleInspectionWizard() {
       console.error('Error submitting inspection:', error);
       toast.error("Error al procesar la inspección");
     } finally {
-      setIsSubmitting(false);
     }
   };
 

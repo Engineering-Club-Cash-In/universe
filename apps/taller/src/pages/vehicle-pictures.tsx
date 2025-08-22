@@ -429,7 +429,7 @@ export default function VehiclePictures({
             ...prev[stepId],
             [photoId]: {
               ...prev[stepId][photoId]!,
-              uploadStatus: 'uploaded',
+              uploadStatus: 'uploaded' as const,
               serverUrl,
               // Keep the blob URL for preview, serverUrl is for database
             },

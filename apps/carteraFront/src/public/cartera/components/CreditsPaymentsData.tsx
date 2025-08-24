@@ -75,8 +75,19 @@ export function ListaCreditosPagos() {
     () => estados.find((e) => e.value === estado),
     [estado]
   );
+  type CreditStatus =
+    | "ACTIVO"
+    | "PENDIENTE_CANCELACION"
+    | "CANCELADO"
+    | "INCOBRABLE";
+
+  // Helpers de permisos
+  const canEdit = (s: CreditStatus) => s === "ACTIVO";
+  const canCancel = (s: CreditStatus) => s === "ACTIVO";
+  const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
+  const canViewPayments = (_s: CreditStatus) => true;
   const handleOpenEdit = (credit: any, inversionistas: any) => {
-    console.log(inversionistas)
+    console.log(inversionistas);
     setCreditToEdit({
       capital: credit.capital,
       porcentaje_interes: credit.porcentaje_interes,
@@ -133,27 +144,27 @@ export function ListaCreditosPagos() {
   if (isError)
     return <div className="text-red-500">{(error as any)?.message}</div>;
 
- if (!data || data.data.length === 0) {
-  return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-      <span className="bg-blue-100 p-5 rounded-full mb-4 flex items-center justify-center shadow">
-        <Info className="text-blue-500 w-12 h-12" />
-      </span>
-      <p className="text-blue-700 text-xl font-bold text-center">
-        No se encontraron resultados.
-      </p>
-      <p className="text-gray-500 text-base mt-2 text-center">
-        Prueba cambiando los filtros o verifica tu búsqueda.
-      </p>
-      <button
-        onClick={() => window.location.reload()}
-        className="mt-8 flex items-center gap-2 px-6 py-2 rounded-xl bg-blue-600 text-white font-bold shadow hover:bg-blue-700 transition-all"
-      >
-        <RefreshCw className="w-5 h-5" /> Reintentar
-      </button>
-    </div>
-  );
-}
+  if (!data || data.data.length === 0) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+        <span className="bg-blue-100 p-5 rounded-full mb-4 flex items-center justify-center shadow">
+          <Info className="text-blue-500 w-12 h-12" />
+        </span>
+        <p className="text-blue-700 text-xl font-bold text-center">
+          No se encontraron resultados.
+        </p>
+        <p className="text-gray-500 text-base mt-2 text-center">
+          Prueba cambiando los filtros o verifica tu búsqueda.
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-8 flex items-center gap-2 px-6 py-2 rounded-xl bg-blue-600 text-white font-bold shadow hover:bg-blue-700 transition-all"
+        >
+          <RefreshCw className="w-5 h-5" /> Reintentar
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -287,21 +298,21 @@ export function ListaCreditosPagos() {
                     backgroundColor: est.color.includes("bg-green")
                       ? "#bbf7d0"
                       : est.color.includes("bg-red")
-                      ? "#fecaca"
-                      : est.color.includes("bg-yellow")
-                      ? "#fef9c3"
-                      : est.color.includes("bg-blue")
-                      ? "#dbeafe"
-                      : undefined,
+                        ? "#fecaca"
+                        : est.color.includes("bg-yellow")
+                          ? "#fef9c3"
+                          : est.color.includes("bg-blue")
+                            ? "#dbeafe"
+                            : undefined,
                     color: est.color.includes("text-green")
                       ? "#166534"
                       : est.color.includes("text-red")
-                      ? "#991b1b"
-                      : est.color.includes("text-yellow")
-                      ? "#a16207"
-                      : est.color.includes("text-blue")
-                      ? "#1e40af"
-                      : undefined,
+                        ? "#991b1b"
+                        : est.color.includes("text-yellow")
+                          ? "#a16207"
+                          : est.color.includes("text-blue")
+                            ? "#1e40af"
+                            : undefined,
                   }}
                 >
                   {est.label}
@@ -382,19 +393,20 @@ export function ListaCreditosPagos() {
                     item.creditos.statusCredit === "ACTIVO"
                       ? "text-green-600"
                       : item.creditos.statusCredit === "CANCELADO"
-                      ? "text-red-600"
-                      : item.creditos.statusCredit === "INCOBRABLE"
-                      ? "text-purple-700"
-                      : item.creditos.statusCredit === "PENDIENTE_CANCELACION"
-                      ? "text-yellow-500"
-                      : "text-gray-500"
+                        ? "text-red-600"
+                        : item.creditos.statusCredit === "INCOBRABLE"
+                          ? "text-purple-700"
+                          : item.creditos.statusCredit ===
+                              "PENDIENTE_CANCELACION"
+                            ? "text-yellow-500"
+                            : "text-gray-500"
                   }`}
                 >
                   {item.creditos.statusCredit === "PENDIENTE_CANCELACION"
                     ? "Pendiente de Cancelación"
                     : item.creditos.statusCredit === "INCOBRABLE"
-                    ? "Incobrable"
-                    : item.creditos.statusCredit}
+                      ? "Incobrable"
+                      : item.creditos.statusCredit}
                 </span>
               </p>
               <InfoCreditoEstado
@@ -402,95 +414,163 @@ export function ListaCreditosPagos() {
                 incobrable={item.incobrable}
               />
 
-              <div className="flex justify-end mt-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="w-10 h-10 flex items-center justify-center bg-blue-50 hover:bg-blue-100 border-blue-200"
+              {/* ✅ Reemplazo completo del bloque con Dropdown por acciones inline (responsive) */}
+              <div
+                className="flex justify-end mt-2"
+                // Evita que los clicks lleguen al TableRow (que expande/colapsa)
+                onPointerDownCapture={(e) => e.stopPropagation()}
+                onMouseDownCapture={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {(() => {
+                  type CreditStatus =
+                    | "ACTIVO"
+                    | "PENDIENTE_CANCELACION"
+                    | "CANCELADO"
+                    | "INCOBRABLE";
+                  const status = (item.creditos.statusCredit ||
+                    "ACTIVO") as CreditStatus;
+
+                  const onKey = (e: React.KeyboardEvent, fn: () => void) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      fn();
+                    }
+                  };
+
+                  const canEdit = status === "ACTIVO";
+                  const canCancel = status === "ACTIVO";
+                  const canActivate = status === "PENDIENTE_CANCELACION";
+                  const canViewPayments = true; // siempre
+
+                  return (
+                    <nav
+                      aria-label="Acciones de crédito"
+                      className="inline-flex flex-wrap items-center justify-end gap-2"
                     >
-                      <MoreVertical className="w-5 h-5 text-blue-600" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    className="bg-blue-50 border-blue-200 shadow-lg rounded-xl p-2 min-w-[180px]"
-                  >
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(
-                          `/pagos/${item.creditos.numero_credito_sifco}`
-                        );
-                      }}
-                      className="text-blue-700 font-bold focus:bg-blue-100"
-                    >
-                      <Eye className="mr-2 w-4 h-4" />
-                      Ver pagos
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenEdit(item.creditos, item.inversionistas);
-                      }}
-                      className="text-yellow-700 font-bold focus:bg-yellow-100"
-                    >
-                      <Pencil className="mr-2 w-4 h-4" />
-                      Editar crédito
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenModal(item.creditos.credito_id);
-                      }}
-                      className="text-red-700 font-bold focus:bg-red-100"
-                    >
-                      <XCircle className="mr-2 w-4 h-4" />
-                      Cancelar crédito
-                    </DropdownMenuItem>
-                    {item.creditos.statusCredit === "CANCELADO" && (
-                      <DropdownMenuItem
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          activateCreditMutation.mutate(
-                            {
-                              creditId: item.creditos.credito_id,
-                              accion: "ACTIVAR",
-                            },
-                            {
-                              onSuccess: (data) => {
-                                alert(
-                                  data.message ||
-                                    "Crédito activado correctamente"
-                                );
-                                queryClient.invalidateQueries({
-                                  queryKey: [
-                                    "creditos-paginados",
-                                    mes,
-                                    anio,
-                                    page,
-                                    perPage,
-                                  ],
-                                });
+                      {/* Ver pagos (siempre) */}
+                      {canViewPayments && (
+                        <a
+                          role="link"
+                          tabIndex={0}
+                          title="Ver pagos"
+                          onClick={() =>
+                            navigate(
+                              `/pagos/${item.creditos.numero_credito_sifco}`
+                            )
+                          }
+                          onKeyDown={(e) =>
+                            onKey(e, () =>
+                              navigate(
+                                `/pagos/${item.creditos.numero_credito_sifco}`
+                              )
+                            )
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 cursor-pointer"
+                        >
+                          <Eye className="w-4 h-4 shrink-0" />
+                          <span className="hidden sm:inline">Ver pagos</span>
+                        </a>
+                      )}
+
+                      {/* Editar (solo ACTIVO) */}
+                      {canEdit && (
+                        <a
+                          role="link"
+                          tabIndex={0}
+                          title="Editar crédito"
+                          onClick={() =>
+                            handleOpenEdit(item.creditos, item.inversionistas)
+                          }
+                          onKeyDown={(e) =>
+                            onKey(e, () =>
+                              handleOpenEdit(item.creditos, item.inversionistas)
+                            )
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-yellow-700 hover:bg-yellow-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300 cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4 shrink-0" />
+                          <span className="hidden sm:inline">Editar</span>
+                        </a>
+                      )}
+
+                      {/* Cancelar (solo ACTIVO) */}
+                      {canCancel && (
+                        <a
+                          role="link"
+                          tabIndex={0}
+                          title="Cancelar crédito"
+                          onClick={() =>
+                            handleOpenModal(item.creditos.credito_id)
+                          }
+                          onKeyDown={(e) =>
+                            onKey(e, () =>
+                              handleOpenModal(item.creditos.credito_id)
+                            )
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-red-700 hover:bg-red-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 cursor-pointer"
+                        >
+                          <XCircle className="w-4 h-4 shrink-0" />
+                          <span className="hidden sm:inline">Cancelar</span>
+                        </a>
+                      )}
+
+                      {/* Activar (solo PENDIENTE_CANCELACION) */}
+                      {canActivate && (
+                        <a
+                          role="link"
+                          tabIndex={0}
+                          title="Activar crédito"
+                          onClick={() =>
+                            activateCreditMutation.mutate(
+                              {
+                                creditId: item.creditos.credito_id,
+                                accion: "ACTIVAR",
                               },
-                              onError: (error) => {
-                                alert(
-                                  error.message ||
-                                    "No se pudo activar el crédito"
-                                );
-                              },
-                            }
-                          );
-                        }}
-                        className="text-green-700 font-bold focus:bg-green-100"
-                      >
-                        <RefreshCw className="mr-2 w-4 h-4" />
-                        Activar crédito
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                              {
+                                onSuccess: (data) => {
+                                  alert(
+                                    data.message ||
+                                      "Crédito activado correctamente"
+                                  );
+                                  queryClient.invalidateQueries({
+                                    queryKey: [
+                                      "creditos-paginados",
+                                      mes,
+                                      anio,
+                                      page,
+                                      perPage,
+                                    ],
+                                  });
+                                },
+                                onError: (error: any) => {
+                                  alert(
+                                    error.message ||
+                                      "No se pudo activar el crédito"
+                                  );
+                                },
+                              }
+                            )
+                          }
+                          onKeyDown={(e) =>
+                            onKey(e, () =>
+                              activateCreditMutation.mutate({
+                                creditId: item.creditos.credito_id,
+                                accion: "ACTIVAR",
+                              })
+                            )
+                          }
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-green-700 hover:bg-green-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 cursor-pointer"
+                        >
+                          <RefreshCw className="w-4 h-4 shrink-0" />
+                          <span className="hidden sm:inline">Activar</span>
+                        </a>
+                      )}
+                    </nav>
+                  );
+                })()}
               </div>
+
               {expandedRow === idx && (
                 <div className="mt-4">
                   <div className="space-y-4">
@@ -815,9 +895,9 @@ export function ListaCreditosPagos() {
                                 "Porcentaje Inversionista",
                                 `%${inv.porcentaje_participacion_inversionista}`,
                               ],
-                                 [
+                              [
                                 "cuota Inversionista",
-                                `%${inv.cuota_inversionista}`,
+                                `Q${inv.cuota_inversionista}`,
                               ],
                               [
                                 "Porcentaje Cash In",
@@ -919,98 +999,151 @@ export function ListaCreditosPagos() {
                         : "--"}
                     </TableCell>
 
-                    <TableCell className="text-center">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="outline"
-                            className="w-10 h-10 flex items-center justify-center bg-blue-50 hover:bg-blue-100 border-blue-200"
+                    <TableCell
+                      data-action-cell
+                      className="text-center"
+                      onPointerDownCapture={(e) => e.stopPropagation()}
+                      onMouseDownCapture={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {(() => {
+                        const status = (item.creditos.statusCredit ||
+                          "ACTIVO") as CreditStatus;
+
+                        return (
+                          <nav
+                            aria-label="Acciones de crédito"
+                            className="inline-flex flex-wrap items-center justify-center gap-2"
                           >
-                            <MoreVertical className="w-5 h-5 text-blue-600" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent
-                          align="center"
-                          className="bg-blue-50 border-blue-200 shadow-lg rounded-xl p-2 min-w-[180px]"
-                        >
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              navigate(
-                                `/pagos/${item.creditos.numero_credito_sifco}`
-                              );
-                            }}
-                            className="text-blue-700 font-bold focus:bg-blue-100"
-                          >
-                            <Eye className="mr-2 w-4 h-4" />
-                            Ver pagos
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenEdit(
-                                item.creditos,
-                                item.inversionistas
-                              );
-                            }}
-                            className="text-yellow-700 font-bold focus:bg-yellow-100"
-                          >
-                            <Pencil className="mr-2 w-4 h-4" />
-                            Editar crédito
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenModal(item.creditos.credito_id);
-                            }}
-                            className="text-red-700 font-bold focus:bg-red-100"
-                          >
-                            <XCircle className="mr-2 w-4 h-4" />
-                            Cancelar crédito
-                          </DropdownMenuItem>
-                          {item.creditos.statusCredit === "CANCELADO" && (
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                activateCreditMutation.mutate(
-                                  {
+                            {/* Ver pagos (siempre permitido) */}
+                            {canViewPayments(status) && (
+                              <a
+                                role="link"
+                                tabIndex={0}
+                                title="Ver pagos"
+                                onClick={() =>
+                                  navigate(
+                                    `/pagos/${item.creditos.numero_credito_sifco}`
+                                  )
+                                }
+                                onKeyDown={(e) =>
+                                  (e.key === "Enter" || e.key === " ") &&
+                                  navigate(
+                                    `/pagos/${item.creditos.numero_credito_sifco}`
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-blue-700 hover:bg-blue-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 cursor-pointer"
+                              >
+                                <Eye className="w-4 h-4" />
+                                <span className="hidden sm:inline">
+                                  Ver pagos
+                                </span>
+                              </a>
+                            )}
+
+                            {/* Editar (solo ACTIVO) */}
+                            {canEdit(status) && (
+                              <a
+                                role="link"
+                                tabIndex={0}
+                                title="Editar crédito"
+                                onClick={() =>
+                                  handleOpenEdit(
+                                    item.creditos,
+                                    item.inversionistas
+                                  )
+                                }
+                                onKeyDown={(e) =>
+                                  (e.key === "Enter" || e.key === " ") &&
+                                  handleOpenEdit(
+                                    item.creditos,
+                                    item.inversionistas
+                                  )
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-yellow-700 hover:bg-yellow-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300 cursor-pointer"
+                              >
+                                <Pencil className="w-4 h-4" />
+                                <span className="hidden sm:inline">Editar</span>
+                              </a>
+                            )}
+
+                            {/* Cancelar (solo ACTIVO) */}
+                            {canCancel(status) && (
+                              <a
+                                role="link"
+                                tabIndex={0}
+                                title="Cancelar crédito"
+                                onClick={() =>
+                                  handleOpenModal(item.creditos.credito_id)
+                                }
+                                onKeyDown={(e) =>
+                                  (e.key === "Enter" || e.key === " ") &&
+                                  handleOpenModal(item.creditos.credito_id)
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-red-700 hover:bg-red-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 cursor-pointer"
+                              >
+                                <XCircle className="w-4 h-4" />
+                                <span className="hidden sm:inline">
+                                  Cancelar
+                                </span>
+                              </a>
+                            )}
+
+                            {/* Activar (solo PENDIENTE_CANCELACION) */}
+                            {canActivate(status) && (
+                              <a
+                                role="link"
+                                tabIndex={0}
+                                title="Activar crédito"
+                                onClick={() =>
+                                  activateCreditMutation.mutate(
+                                    {
+                                      creditId: item.creditos.credito_id,
+                                      accion: "ACTIVAR",
+                                    },
+                                    {
+                                      onSuccess: (data) => {
+                                        alert(
+                                          data.message ||
+                                            "Crédito activado correctamente"
+                                        );
+                                        queryClient.invalidateQueries({
+                                          queryKey: [
+                                            "creditos-paginados",
+                                            mes,
+                                            anio,
+                                            page,
+                                            perPage,
+                                          ],
+                                        });
+                                      },
+                                      onError: (error: any) => {
+                                        alert(
+                                          error.message ||
+                                            "No se pudo activar el crédito"
+                                        );
+                                      },
+                                    }
+                                  )
+                                }
+                                onKeyDown={(e) =>
+                                  (e.key === "Enter" || e.key === " ") &&
+                                  activateCreditMutation.mutate({
                                     creditId: item.creditos.credito_id,
                                     accion: "ACTIVAR",
-                                  },
-                                  {
-                                    onSuccess: (data) => {
-                                      alert(
-                                        data.message ||
-                                          "Crédito activado correctamente"
-                                      );
-                                      // Puedes hacer un refetch, cerrar modales, etc.
-                                      queryClient.invalidateQueries({
-                                        queryKey: [
-                                          "creditos-paginados",
-                                          mes,
-                                          anio,
-                                          page,
-                                          perPage,
-                                        ],
-                                      });
-                                    },
-                                    onError: (error) => {
-                                      alert(
-                                        error.message ||
-                                          "No se pudo activar el crédito"
-                                      );
-                                    },
-                                  }
-                                );
-                              }}
-                              className="text-green-700 font-bold focus:bg-green-100"
-                            >
-                              <RefreshCw className="mr-2 w-4 h-4" />
-                              Activar crédito
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                                  })
+                                }
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-green-700 hover:bg-green-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 cursor-pointer"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                <span className="hidden sm:inline">
+                                  Activar
+                                </span>
+                              </a>
+                            )}
+                          </nav>
+                        );
+                      })()}
                     </TableCell>
                   </TableRow>
                   {/* Row expandida */}
@@ -1064,9 +1197,9 @@ export function ListaCreditosPagos() {
                             {/* Puedes agregar más estados si tienes otros */}
                           </div>
                           <InfoCreditoEstado
-  cancelacion={item.cancelacion}
-  incobrable={item.incobrable}
-/>
+                            cancelacion={item.cancelacion}
+                            incobrable={item.incobrable}
+                          />
                           {[
                             [
                               "Capital",
@@ -1387,10 +1520,9 @@ export function ListaCreditosPagos() {
                                       "Porcentaje Cash In",
                                       `%${inv.porcentaje_cash_in}`,
                                     ],
-                                       [
-                                "cuota Inversionista",
-                                `%${inv.cuota_inversionista}`,
-                              ],
+                                    [
+                                      "cuota Inversionista",
+                                    ],
                                   ].map(([label, value]) => (
                                     <div
                                       key={label}

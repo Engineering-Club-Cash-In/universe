@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { getPagosByMesAnio, type PagoResumen, type PagosPorMesAnioResponse } from "../services/services";
 
-export function usePagosByMesAnio(mes: number, anio: number, page: number, perPage: number) {
+export function usePagosByMesAnio(mes: number, anio: number, page: number, perPage: number, numero_credito_sifco:string) {
   const [pagos, setPagos] = useState<PagoResumen[]>([]);
   const [loading, setLoading] = useState(false);
   const [totalPages, setTotalPages] = useState(1);
@@ -12,7 +12,7 @@ export function usePagosByMesAnio(mes: number, anio: number, page: number, perPa
     if (!mes || !anio) return;
     setLoading(true);
     console.log()
-    getPagosByMesAnio({ mes, anio, page, perPage })
+    getPagosByMesAnio({ mes, anio, page, perPage,numero_credito_sifco })
       .then((res: PagosPorMesAnioResponse) => {
         console.log(res);
         setPagos(res.data || []);
@@ -22,7 +22,7 @@ export function usePagosByMesAnio(mes: number, anio: number, page: number, perPa
         setTotalItems(res.totalItems || 0);
       })
       .finally(() => setLoading(false));
-  }, [mes, anio, page, perPage]);
+  }, [mes, anio, page, perPage,numero_credito_sifco]);
 
   const meses = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",

@@ -521,7 +521,7 @@ export function PaymentsCredits() {
                                             Monto Aportado
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
-                                            IVA
+                                            IVA inversionista
                                           </TableHead>
                                           <TableHead className="font-bold text-blue-700">
                                             Detalles
@@ -598,7 +598,7 @@ export function PaymentsCredits() {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Cuota Inversionista:{" "}
+                                                          Cuota  :{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(
@@ -608,7 +608,7 @@ export function PaymentsCredits() {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Monto Inversionista:{" "}
+                                                          Cuota Interes Inversionista:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(
@@ -618,7 +618,7 @@ export function PaymentsCredits() {
                                                       </div>
                                                       <div>
                                                         <span className="font-bold text-blue-700">
-                                                          Monto Cash In:{" "}
+                                                          Cuota Interes Cash In:{" "}
                                                         </span>
                                                         <span className="font-semibold text-gray-900">
                                                           {formatCurrency(

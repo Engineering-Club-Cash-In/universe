@@ -1,0 +1,251 @@
+{
+	"info": {
+		"_postman_id": "9f749e26-186f-49d5-813e-8006275eaaae",
+		"name": "SIFCO",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "9622069"
+	},
+	"item": [
+		{
+			"name": "getPrestamos",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "e12cbbcf-0042-4e30-96b3-c66d356c742b!8cc2085a690676c477d54469fafb6f969ea769c6153e6e4f2b5c1169ef49123b305d72385d8cf4",
+						"type": "text"
+					},
+					{
+						"key": "GENEXUS-AGENT",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "client_id",
+							"value": "67a0ac9d43d84129b339370aa2c3889a",
+							"type": "text"
+						},
+						{
+							"key": "client_secret",
+							"value": "5f74579f71b2449eb5a36930b8156af2",
+							"type": "text"
+						},
+						{
+							"key": "grant_type",
+							"value": "passwordFullControl",
+							"type": "text"
+						},
+						{
+							"key": "scope",
+							"value": "FullControl",
+							"type": "text"
+						},
+						{
+							"key": "username",
+							"value": "lralda",
+							"type": "text"
+						},
+						{
+							"key": "password",
+							"value": "Iralda123$",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/TCrPrestamos/01010101000630",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"TCrPrestamos",
+						"01010101000630"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSClientesEmailConsulta",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "e12cbbcf-0042-4e30-96b3-c66d356c742b!7032b4d917e489cb85fb0a40387f16a741eaf6346805525a503c2d775ab0bd325a8e272638599a",
+						"type": "text"
+					},
+					{
+						"key": "GENEXUS-AGENT",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n   \"NumeroPrestamo\": \"01010101000630\"\r\n}"
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/WSVerCuotasPorPrestamo",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSVerCuotasPorPrestamo"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSVerPrestamosPorCliente",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!7032b4d917e489cb85fb0a40387f16a741eaf6346805525a503c2d775ab0bd325a8e272638599a",
+						"type": "text"
+					},
+					{
+						"key": "GENEXUS-AGENT",
+						"value": "SmartDevice Application",
+						"type": "text",
+						"disabled": true
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"ClCliCod\":19\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/WSVerPrestamosPorCliente",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSVerPrestamosPorCliente"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "token",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "urlencoded",
+					"urlencoded": [
+						{
+							"key": "client_id",
+							"value": "67a0ac9d43d84129b339370aa2c3889a",
+							"type": "text"
+						},
+						{
+							"key": "client_secret",
+							"value": "5f74579f71b2449eb5a36930b8156af2",
+							"type": "text"
+						},
+						{
+							"key": "grant_type",
+							"value": "passwordFullControl",
+							"type": "text"
+						},
+						{
+							"key": "scope",
+							"value": "FullControl",
+							"type": "text"
+						},
+						{
+							"key": "username",
+							"value": "lralda",
+							"type": "text"
+						},
+						{
+							"key": "password",
+							"value": "lralda123$",
+							"type": "text"
+						}
+					]
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/oauth/access_token",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"oauth",
+						"access_token"
+					],
+					"query": [
+						{
+							"key": "client_id",
+							"value": "67a0ac9d43d84129b339370aa2c3889a",
+							"disabled": true
+						},
+						{
+							"key": "client_secret",
+							"value": "5f74579f71b2449eb5a36930b8156af2",
+							"disabled": true
+						},
+						{
+							"key": "grant_type",
+							"value": "password",
+							"disabled": true
+						},
+						{
+							"key": "scope",
+							"value": "FullControl",
+							"disabled": true
+						},
+						{
+							"key": "username",
+							"value": "Iralda",
+							"disabled": true
+						},
+						{
+							"key": "password",
+							"value": "Iralda123$",
+							"disabled": true
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}

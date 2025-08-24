@@ -68,7 +68,8 @@ export function PaymentsTable() {
     mes,
     anio,
     page,
-    perPage
+    perPage,
+    sifcoFilter
   );
 
   // Filtro local por SIFCO

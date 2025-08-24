@@ -61,8 +61,8 @@ export function DashBoardCartera() {
       </button>
 
       {/* SIDEBAR NORMAL EN DESKTOP */}
-      <Sidebar
-        className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg mr-8 min-w-[260px] px-6 py-8 flex-col"
+    <Sidebar
+        className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg mr-8 min-w-[260px] px-6 py-8 flex-col h-screen"
       >
         <SidebarHeader className="flex items-center justify-center py-4">
           <img
@@ -80,11 +80,11 @@ export function DashBoardCartera() {
                   isActive={location.pathname === opt.path}
                   onClick={() => navigate(opt.path)}
                   className={`w-full flex items-center text-left text-gray-900 font-medium rounded transition-all
-                  ${
-                    location.pathname === opt.path
-                      ? "bg-white border border-blue-600 shadow-md font-bold ring-2 ring-blue-100 ring-inset"
-                      : "hover:bg-blue-50"
-                  }`}
+                    ${
+                      location.pathname === opt.path
+                        ? "bg-white border border-blue-600 shadow-md font-bold ring-2 ring-blue-100 ring-inset"
+                        : "hover:bg-blue-50"
+                    }`}
                   style={
                     location.pathname === opt.path
                       ? { borderLeftWidth: 6, borderLeftColor: "#2563eb" }

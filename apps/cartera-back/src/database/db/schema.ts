@@ -94,7 +94,7 @@ export const creditos = customSchema.table("creditos", {
 
   mora: numeric("mora", { precision: 18, scale: 2 }).notNull().default("0"),
   statusCredit: text("statusCredit", {
-    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE" , "PENDIENTE_CANCELACION"],
+    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION"],
   })
     .notNull()
     .default(StatusCredit.ACTIVO),
@@ -102,11 +102,13 @@ export const creditos = customSchema.table("creditos", {
 });
 export const cuotas_credito = customSchema.table("cuotas_credito", {
   cuota_id: serial("cuota_id").primaryKey(),
-  credito_id: integer("credito_id").references(() => creditos.credito_id).notNull(),
+  credito_id: integer("credito_id")
+    .references(() => creditos.credito_id)
+    .notNull(),
   numero_cuota: integer("numero_cuota").notNull(), // Ej: 1, 2, 3...
   fecha_vencimiento: date("fecha_vencimiento").notNull(),
   pagado: boolean("pagado").default(false),
-  createdAt: timestamp("createdat").defaultNow()
+  createdAt: timestamp("createdat").defaultNow(),
 });
 
 // 3. Pagos de crédito
@@ -116,7 +118,9 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   credito_id: integer("credito_id").references(() => creditos.credito_id), //inpujt
   cuota: numeric("cuota").notNull(), //esto viene del credito
   cuota_interes: numeric("cuota_interes").notNull(), //esto viene del credito
-  cuota_id:integer("cuota_id").references(() => cuotas_credito.cuota_id).notNull(),
+  cuota_id: integer("cuota_id")
+    .references(() => cuotas_credito.cuota_id)
+    .notNull(),
   fecha_pago: date("fecha_pago").notNull().defaultNow(), //esto viene del credito
   abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
@@ -165,9 +169,9 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   observaciones: text("observaciones"), //input
 
   paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
-  createdAt: timestamp("createdat").defaultNow(), 
+  createdAt: timestamp("createdat").defaultNow(),
 });
-export const boletas=customSchema.table ("boletas", {
+export const boletas = customSchema.table("boletas", {
   id: serial("id").primaryKey(),
   pago_id: integer("pago_id")
     .notNull()
@@ -239,7 +243,7 @@ export const creditos_inversionistas = customSchema.table(
     // Clave primaria compuesta (evita duplicados)
   }
 );
-export const credit_cancelations = pgTable("credit_cancelations", {
+export const credit_cancelations = customSchema.table("credit_cancelations", {
   id: serial("id").primaryKey(),
   credit_id: integer("credit_id")
     .notNull()
@@ -252,7 +256,8 @@ export const credit_cancelations = pgTable("credit_cancelations", {
     scale: 2,
   }).notNull(), // Monto total del crédito al momento de la cancelación
 });
-export const bad_debts = pgTable("bad_debts", {
+
+export const bad_debts = customSchema.table("bad_debts", {
   id: serial("id").primaryKey(),
   credit_id: integer("credit_id")
     .notNull()
@@ -264,6 +269,17 @@ export const bad_debts = pgTable("bad_debts", {
     precision: 18,
     scale: 2,
   }).notNull(),
+});
+
+export const montos_adicionales = customSchema.table("montos_adicionales", {
+  id: serial("id").primaryKey(),
+  credit_id: integer("credit_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+
+  concepto: varchar("concepto", { length: 100 }).notNull(), // Tipo de cargo adicional
+  monto: numeric("monto", { precision: 18, scale: 2 }).notNull(),
+  fecha_registro: timestamp("fecha_registro").defaultNow(),
 });
 export const estadoLiquidacionEnum = pgEnum("estado_liquidacion", [
   "NO_LIQUIDADO",

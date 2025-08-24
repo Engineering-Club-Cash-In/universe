@@ -9,7 +9,7 @@ import {
   boletas,
   cuotas_credito,
 } from "../database/db/schema";
-import { InferModel } from "drizzle-orm";
+import { desc, InferModel } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
@@ -301,7 +301,7 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
         )
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
-      console.log("cuotasPendientes", cuotasPendientes);
+    console.log("cuotasPendientes", cuotasPendientes);
     const inversionistasCredito = await db
       .select()
       .from(creditos_inversionistas)
@@ -358,18 +358,14 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
             .set({ mora: moraFinal })
             .where(eq(creditos.credito_id, credito_id));
         }
-        console.log("realiza el pago ?", pagoEspecial);
-
         pagosRealizados.push(pagoEspecial);
       }
-      // Puedes manejar aquí otros abonos directos a capital si aplica y no hay cuotas
-
-      // Terminar función aquí si no hay nada más que hacer,
       // o dejar que siga el flujo para saldo a favor si así lo prefieres.
     } else {
       for (const cuota of cuotasPendientes) {
+        console.log("CUOTA", cuota);
         const montoCuota = new Big(credito.cuota);
-
+        console.log("disponible", disponible.toString());
         if (disponible.gte(montoCuota)) {
           let abono_capital = new Big(0);
           let abono_interes = new Big(0);
@@ -383,7 +379,7 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
           let total_iva_cash_in = new Big(0);
           let total_monto_inversionista = new Big(0);
           let total_iva_inversionista = new Big(0);
-
+          console.log("🚀 Procesando pago para la cuota:", cuota.numero_cuota);
           inversionistasCredito.forEach(
             ({
               monto_cash_in,
@@ -405,12 +401,6 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
           abono_gps = new Big(credito.gps);
           abono_interes_ci = new Big(total_monto_cash_in);
           abono_iva_ci = new Big(total_iva_cash_in);
-          console.log("abono_interes_ci", abono_interes_ci.toString());
-          console.log("abono_iva_ci", abono_iva_ci.toString());
-          console.log("abono_interes", abono_interes.toString());
-          console.log("abono_iva_12", abono_iva_12.toString());
-          console.log("abono_seguro", abono_seguro.toString());
-          console.log("abono_gps", abono_gps.toString());
           abono_capital = montoCuota
             .minus(abono_interes)
             .minus(abono_iva_12)
@@ -431,19 +421,12 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
             )
             .where(
               and(
-    
                 eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
-                eq(pagos_credito.pagado, false)
+                eq(pagos_credito.pagado, false),
+                eq(pagos_credito.credito_id, credito.credito_id)
               )
-            ) 
+            )
             .limit(1);
-            console.log("existingPago", existingPago);
-          console.log(
-            `💰 Procesando cuota ${
-              cuota.numero_cuota
-            } de Q${montoCuota.toString()}`
-          );
-          console.log(`💰 Abono capital: Q${abono_capital.toString()}`);
 
           const capital_restante = new Big(credito.capital ?? 0)
             .minus(abono_capital)
@@ -492,7 +475,7 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
           };
           type PagoCredito = typeof pagos_credito.$inferSelect;
           let pagoInsertado: PagoCredito | undefined;
-          console.log("pago",existingPago)
+          console.log("pagoooooooooooooo", existingPago);
           if (existingPago) {
             [pagoInsertado] = await db
               .update(pagos_credito)
@@ -500,21 +483,21 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
               .from(cuotas_credito) // aquí solo pones la tabla que usas para join
               .where(
                 and(
- 
                   eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
                   eq(pagos_credito.pago_id, existingPago.pago.pago_id),
                   eq(pagos_credito.cuota_id, cuotas_credito.cuota_id) // join
                 )
               )
               .returning();
-              console.log("cuota_id:",cuota);
-              console.log("pagoInsertado:", pagoInsertado);
+            console.log("cuota_id:", cuota);
+            console.log("pagoInsertado:", pagoInsertado);
             if (
               pagoInsertado &&
               pagoInsertado.pago_id &&
               urlCompletas.length > 0
             ) {
-              await db.update(cuotas_credito)
+              await db
+                .update(cuotas_credito)
                 .set({ pagado: true })
                 .where(eq(cuotas_credito.numero_cuota, cuota.numero_cuota));
               await db.insert(boletas).values(
@@ -554,14 +537,15 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
                 cuota_interes: cuota_interes.toString(),
               })
               .where(eq(creditos.credito_id, credito_id));
-            await insertPagosCreditoInversionistas(
-              pagoInsertado.pago_id,
-              credito_id
-            );
-          } else{
-
+            if (!pagoInsertado.paymentFalse) {
+              await insertPagosCreditoInversionistas(
+                pagoInsertado.pago_id,
+                credito_id
+              );
+            }
+          } else {
             console.log("no se encontró un pago existente");
-            return{message: "no se encontró un pago existente"};
+            return { message: "no se encontró un pago existente" };
           }
 
           pagosRealizados.push(pagoInsertado);
@@ -790,7 +774,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         pago_id: pagos_credito.pago_id,
         credito_id: pagos_credito.credito_id,
         cuota_id: pagos_credito.cuota_id,
-        numero_cuota:cuotas_credito.numero_cuota,
+        numero_cuota: cuotas_credito.numero_cuota,
         cuota: pagos_credito.cuota,
         cuota_interes: pagos_credito.cuota_interes,
         abono_capital: pagos_credito.abono_capital,
@@ -837,7 +821,10 @@ export async function getAllPagosWithCreditAndInversionistas(
       .from(pagos_credito)
       .innerJoin(creditos, eq(pagos_credito.credito_id, creditos.credito_id))
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-      .innerJoin(cuotas_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
+      .innerJoin(
+        cuotas_credito,
+        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+      )
       .where(eq(creditos.numero_credito_sifco, credito_sifco))
       .orderBy(pagos_credito.fecha_pago);
 
@@ -945,7 +932,8 @@ export async function getPayments(
   mes: number,
   anio: number,
   page: number = 1,
-  perPage: number = 10
+  perPage: number = 10,
+  numero_credito_sifco: string
 ) {
   const offset = (page - 1) * perPage;
 
@@ -960,11 +948,16 @@ export async function getPayments(
     .where(
       and(
         sql`EXTRACT(MONTH FROM ${pagos_credito.fecha_pago}) = ${mes}`,
-        sql`EXTRACT(YEAR FROM ${pagos_credito.fecha_pago}) = ${anio}`
+        sql`EXTRACT(YEAR FROM ${pagos_credito.fecha_pago}) = ${anio}`,
+        numero_credito_sifco !== ""
+          ? eq(creditos.numero_credito_sifco, numero_credito_sifco)
+          : sql`true`,
+        eq(pagos_credito.pagado, true)
       )
     )
     .limit(perPage)
-    .offset(offset);
+    .offset(offset)
+    .orderBy(desc(pagos_credito.fecha_pago));
 
   // 2. Obtiene los ids de pago para traer los inversionistas de un solo golpe
   const pagoIds = rows.map((row) => row.pago.pago_id);
@@ -1017,10 +1010,13 @@ export async function getPayments(
     .where(
       and(
         sql`EXTRACT(MONTH FROM ${pagos_credito.fecha_pago}) = ${mes}`,
-        sql`EXTRACT(YEAR FROM ${pagos_credito.fecha_pago}) = ${anio}`
+        sql`EXTRACT(YEAR FROM ${pagos_credito.fecha_pago}) = ${anio}`,
+        numero_credito_sifco !== ""
+          ? eq(creditos.numero_credito_sifco, numero_credito_sifco)
+          : sql`true`,
+        eq(pagos_credito.pagado, true)
       )
     );
-
   return {
     data, // [{ pago, numero_credito_sifco, inversionistas: [...] }]
     page,
@@ -1068,7 +1064,7 @@ export async function insertPagosCreditoInversionistas(
     })
   );
   if (!inversionistasWithName.length) {
-    throw new Error("No se encontraron inversionistas con nombre");
+    throw new Error("No se encontraron inversionistas ");
   }
   const filteredInversionistas = excludeCube
     ? inversionistasWithName.filter(
@@ -1099,11 +1095,11 @@ export async function insertPagosCreditoInversionistas(
 
     const bigInteres = isCube
       ? new Big(inv.monto_cash_in ?? 0)
-      : new Big(inv.monto_inversionista).add(inv.monto_cash_in ?? 0);
+      : new Big(inv.monto_inversionista);
 
     const bigIVA = isCube
       ? new Big(inv.iva_cash_in ?? 0)
-      : new Big(inv.iva_inversionista).add(inv.iva_cash_in);
+      : new Big(inv.iva_inversionista);
 
     let abono_capital = isCube
       ? new Big(inv?.cuota_inversionista ?? 0)

@@ -46,7 +46,7 @@ export const paymentRouter = new Elysia()
     }
   })
   .get("/payments", async ({ query, set }) => {
-    const { mes, anio, page, perPage } = query;
+    const { mes, anio, page, perPage, numero_credito_sifco } = query;
 
     if (!mes || !anio) {
       set.status = 400;
@@ -58,7 +58,8 @@ export const paymentRouter = new Elysia()
         Number(mes),
         Number(anio),
         page ? Number(page) : 1,
-        perPage ? Number(perPage) : 10
+        perPage ? Number(perPage) : 10,
+        numero_credito_sifco
       );
       return result;
     } catch (error) {

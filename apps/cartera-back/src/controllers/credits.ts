@@ -8,6 +8,7 @@ import {
   creditos_inversionistas,
   cuotas_credito,
   inversionistas,
+  montos_adicionales,
   pagos_credito,
   pagos_credito_inversionistas,
   StatusCredit,
@@ -15,7 +16,18 @@ import {
 } from "../database/db/schema";
 import { z } from "zod";
 import Big from "big.js";
-import { and, desc, eq, sql, inArray, asc, lte, lt, gte, gt } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  sql,
+  inArray,
+  asc,
+  lte,
+  lt,
+  gte,
+  gt,
+} from "drizzle-orm";
 import { findOrCreateUserByName } from "./users";
 import { findOrCreateAdvisorByName } from "./advisor";
 import { getPagosDelMesActual } from "./payments";
@@ -106,15 +118,6 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
 
     // Redondea a dos decimales
     const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
-
-    console.log(
-      "Comparando cuota esperada y total cuota inversionista:",
-      "cuota:",
-      creditData.cuota,
-      "totalCuotaInversionista:",
-      totalCuotaInversionistaRedondeado.toString()
-    );
-
     if (
       Number(creditData.cuota) !== totalCuotaInversionistaRedondeado.toNumber()
     ) {
@@ -229,9 +232,6 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
         const newCuotaInteres = new Big(montoAportado ?? 0).times(
           interes.div(100)
         );
-
-        console.log("newCuotaInteres", newCuotaInteres.toString());
-        console.log("montoAportado", montoAportado.toString());
         // Montos proporcionales
         const montoInversionista = newCuotaInteres
           .times(porcentajeInversion)
@@ -241,9 +241,6 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
           .times(porcentajeCashIn)
           .div(100)
           .toFixed(2);
-        console.log(montoInversionista.toString());
-        console.log(montoCashIn.toString());
-
         // IVA respectivos
         const ivaInversionista =
           Number(montoInversionista) > 0
@@ -295,7 +292,7 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
       timeZone: "America/Guatemala",
     });
     fechas.push(fechaHoyGuate);
-     for (let i = 0; i < creditData.plazo; i++) {
+    for (let i = 0; i < creditData.plazo; i++) {
       const baseDate = new Date(startDate);
       baseDate.setMonth(baseDate.getMonth() + i + 1);
 
@@ -447,9 +444,11 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
 
     // 5️⃣ Insertar todos los pagos
     // Filtra pagos con cuota_id undefined para evitar errores de tipo
-    const pagosValidos = pagos.filter(p => p.cuota_id !== undefined) as typeof pagos;
+    const pagosValidos = pagos.filter(
+      (p) => p.cuota_id !== undefined
+    ) as typeof pagos;
     // Map to remove any undefined cuota_id (should not happen, but for type safety)
-    const pagosValidosSinUndefined = pagosValidos.map(p => ({
+    const pagosValidosSinUndefined = pagosValidos.map((p) => ({
       ...p,
       cuota_id: p.cuota_id as number, // force type, since we filtered undefined above
     }));
@@ -469,7 +468,8 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
 // All fields optional except credito_id
 export const creditUpdateSchema = z.object({
   credito_id: z.number().int().positive(),
-  cuota: z.number().min(0).optional(),
+  cuota: z.number().min(0) ,
+  plazo: z.number().min(0),
   mora: z.number().optional(),
   numero_credito_sifco: z.string().max(1000).optional(),
   inversionistas: z
@@ -483,20 +483,47 @@ export const creditUpdateSchema = z.object({
       })
     )
     .min(0),
-
+  capital: z.number().nonnegative(),
   porcentaje_interes: z.number().min(0).max(100),
   seguro_10_cuotas: z.number().min(0),
   membresias_pago: z.number().min(0),
   otros: z.number().min(0),
 });
 
-function calcularDeudaTotal({
+/**
+ * Calculates the debt summary including:
+ * - principal (capital)
+ * - interest (interes)
+ * - subtotal before VAT (subtotalSinIVA)
+ * - VAT amount (iva_12)
+ * - total debt (totalDeuda)
+ * - per-installment amount (cuota)
+ *
+ * Why Big.js?
+ * - Prevents floating-point precision errors from native JS numbers.
+ *
+ * Rounding:
+ * - All amounts are rounded to 2 decimals (Half Up).
+ *
+ * @param params.capital Principal amount.
+ * @param params.porcentaje_interes Interest rate as percentage (e.g., 24 for 24%).
+ * @param params.seguro_10_cuotas Insurance fee distributed over 10 installments.
+ * @param params.membresias_pago Membership/processing fees.
+ * @param params.otros Other additional fees.
+ * @param params.iva_12 VAT amount already calculated externally.
+ * @param numero_cuotas Number of installments for splitting the total (default = 10).
+ *
+ * @returns Object with all calculated fields as strings (rounded to 2 decimals).
+ */
+export function calcularDeudaTotal({
   capital,
   porcentaje_interes,
   seguro_10_cuotas,
   membresias_pago,
   otros,
-  iva_12,
+  gps,
+  cuota,
+  plazo,
 }: {
   capital: number;
   porcentaje_interes: number;
@@ -504,30 +531,44 @@ function calcularDeudaTotal({
   membresias_pago: number;
   otros: number;
   iva_12: number;
-}) {
-  console.log("[calcularDeudaTotal] ➡️ Entrando con valores:");
-  console.log("  capital:", capital);
-  console.log("  porcentaje_interes:", porcentaje_interes);
-  console.log("  seguro_10_cuotas:", seguro_10_cuotas);
-  console.log("  membresias_pago:", membresias_pago);
-  console.log("  otros:", otros);
+  gps: number;
+  cuota: number;
+  plazo: number;
+}): {
+  capital: string;
+  interes: string;
+  totalDeuda: string;
+  cuota: string;
+  iva_12: string;
+  plazo: string;
+  gps: string;
+} {
+  // Convert to Big for precision
+  const bigCapital = new Big(capital);
 
-  const interes = new Big(capital).times(new Big(porcentaje_interes).div(100));
-  console.log("  -> Interés calculado:", interes.toString());
-
-  let total = new Big(capital)
+  // --- Calculate interest ---
+  const interes = bigCapital.times(new Big(porcentaje_interes).div(100));
+  const iva_12 = interes.times(0.12).round(2);
+  // --- Subtotal without VAT (capital + interest + other fees) ---
+  const deudatotal = bigCapital
     .plus(interes)
-    .plus(seguro_10_cuotas)
-    .plus(membresias_pago)
-    .plus(otros)
-    .plus(iva_12);
+    .plus(iva_12)
+    .plus(seguro_10_cuotas ?? 0)
+    .plus(gps ?? 0)
+    .plus(membresias_pago ?? 0)
+    .plus(otros ?? 0);
 
-  total = total.round(2);
-
-  console.log("  -> Deuda total calculada:", total.toString());
-  return total.toString();
+  // Return structured response (all as strings for display/storage)
+  return {
+    capital: bigCapital.round(2).toString(),
+    interes: interes.round(2).toString(),
+    iva_12: new Big(iva_12).round(2).toString(),
+    totalDeuda: deudatotal.toString(),
+    cuota: cuota.toString(),
+    plazo: plazo.toString(),
+    gps: gps.toString(),
+  };
 }
-
 export const updateCredit = async ({
   body,
   set,
@@ -535,237 +576,279 @@ export const updateCredit = async ({
   body: unknown;
   set: any;
 }) => {
-  console.log("Updating credit with body:", body);
-  const parseResult = creditUpdateSchema.safeParse(body);
-  if (!parseResult.success) {
-    set.status = 400;
-    return {
-      message: "Validation failed",
-      errors: parseResult.error.flatten().fieldErrors,
-    };
-  }
-
-  const {
-    credito_id,
-    inversionistas = [],
-    mora,
-    cuota,
-    numero_credito_sifco,
-    ...fieldsToUpdate
-  } = parseResult.data;
-
-  // Buscar el crédito actual
-  const [current] = await db
-    .select()
-    .from(creditos)
-    .where(
-      and(
-        eq(creditos.credito_id, credito_id),
-        eq(creditos.statusCredit, "ACTIVO")
-      )
-    )
-    .limit(1);
-  if (!current) {
-    set.status = 400;
-    return { message: "Credit not found" };
-  }
-
-  // Campos que al modificarse requieren recalcular deuda_total
-  const camposQueModificanDeuda = [
-    "capital",
-    "porcentaje_interes",
-    "seguro_10_cuotas",
-    "membresias_pago",
-    "otros",
-  ];
-
-  // Arma el objeto de update con todos los campos nuevos
-  const updateFields: any = { ...fieldsToUpdate };
-  const formatCredit = inversionistas.some(
-    (inv) => Number(inv.porcentaje_inversion) > 0
-  )
-    ? "Pool"
-    : "Individual";
-  updateFields.formato_credito = formatCredit;
-  if (mora !== undefined) updateFields.mora = mora.toString();
-  if (cuota !== undefined) updateFields.cuota = cuota.toString();
-  if (numero_credito_sifco !== undefined)
-    updateFields.numero_credito_sifco = numero_credito_sifco;
-  console.log(fieldsToUpdate);
-  // Checa si cambió alguno de los campos relevantes para deuda_total
-  const changes = camposQueModificanDeuda.some((campo) => {
-    const nuevo = fieldsToUpdate[campo as keyof typeof fieldsToUpdate];
-    const actual = current[campo as keyof typeof current];
-    // Solo comparar si el campo fue enviado (no undefined)
-    // Big.js para precisión en decimales
-    // Solo comparar si ambos son string o number (no Date)
-    const isValidBigSource = (v: unknown): v is string | number =>
-      typeof v === "string" || typeof v === "number";
-    return (
-      nuevo !== undefined &&
-      isValidBigSource(nuevo) &&
-      isValidBigSource(actual) &&
-      !new Big(nuevo).eq(new Big(actual))
-    );
-  });
-  const otrosModificado =
-    fieldsToUpdate.otros !== undefined &&
-    !new Big(fieldsToUpdate.otros).eq(new Big(current.otros));
-
-  if (changes) {
-    console.log("Changes detected in fields that affect deuda_total:", changes);
-    // Calcula la nueva deuda_total usando los valores nuevos (o actuales si no se modificó ese campo)
-    const nuevaDeudaTotal = calcularDeudaTotal({
-      capital: new Big(current.capital).toNumber(),
-      porcentaje_interes:
-        fieldsToUpdate.porcentaje_interes ?? current.porcentaje_interes,
-      seguro_10_cuotas:
-        fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas,
-      membresias_pago:
-        fieldsToUpdate.membresias_pago ?? current.membresias_pago,
-      otros: fieldsToUpdate.otros ?? current.otros,
-      iva_12: new Big(current.iva_12).toNumber(),
-    });
-    updateFields.deudatotal = nuevaDeudaTotal;
-    if (otrosModificado) {
-      const cuotaInicial = await db
-        .select({ id: cuotas_credito.cuota_id })
-        .from(cuotas_credito)
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, credito_id),
-            eq(cuotas_credito.numero_cuota, 0)
-          )
-        );
-      if (cuotaInicial.length) {
-        await db
-          .update(pagos_credito)
-          .set({ otros: fieldsToUpdate.otros?.toString() })
-          .where(eq(pagos_credito.cuota_id, cuotaInicial[0].id));
-      }
-    }
-  }
-  updateFields.membresias =
-    fieldsToUpdate.membresias_pago ?? current.membresias_pago;
-  // Ahora sí, haz un solo update con todos los campos a la vez
-  const [updatedCredit] = await db
-    .update(creditos)
-    .set(updateFields)
-    .where(eq(creditos.credito_id, credito_id))
-    .returning();
-
-  // Validación: suma de cash in + inversión debe ser 100
-  for (const inv of inversionistas) {
-    const total =
-      Number(inv.porcentaje_cash_in) + Number(inv.porcentaje_inversion);
-    if (total !== 100) {
+  try {
+    console.log("Updating credit with body:", body);
+    const parseResult = creditUpdateSchema.safeParse(body);
+    if (!parseResult.success) {
       set.status = 400;
       return {
-        message: `El cash-in y la inversión para el inversionista con ID ${inv.inversionista_id} deben sumar 100%`,
-        detalle: { inversionista_id: inv.inversionista_id, total },
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
       };
     }
-  }
-  const totalCuotaInversionista = inversionistas.reduce(
-    (acc: Big, inv: any) => acc.plus(inv.cuota_inversionista ?? 0),
-    new Big(0)
-  );
-  const totalMontoAportado = inversionistas.reduce(
-    (acc: Big, inv: any) => acc.plus(inv.monto_aportado ?? 0),
-    new Big(0)
-  );
-  const totalMontoAportadoRedondeado = totalMontoAportado.round(2);
-  // Redondea a dos decimales
-  const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
+    
+    const {
+      credito_id,
+      inversionistas = [],
+      mora,
+      cuota,
+      numero_credito_sifco,
+      ...fieldsToUpdate
+    } = parseResult.data;
 
-  console.log(
-    "Comparando cuota esperada y total cuota inversionista:",
-    "cuota:",
-    current.cuota,
-    "totalCuotaInversionista:",
-    totalCuotaInversionistaRedondeado.toString()
-  );
+    // Buscar el crédito actual
+    const [current] = await db
+      .select()
+      .from(creditos)
+      .where(
+        and(
+          eq(creditos.credito_id, credito_id),
+          eq(creditos.statusCredit, "ACTIVO")
+        )
+      )
+      .limit(1);
+    if (!current) {
+      set.status = 400;
+      return { message: "Credit not found" };
+    }
+    // Validación: suma de cash in + inversión debe ser 100
+    for (const inv of inversionistas) {
+      const total =
+        Number(inv.porcentaje_cash_in) + Number(inv.porcentaje_inversion);
+      if (total !== 100) {
+        set.status = 400;
+        return {
+          message: `El cash-in y la inversión para el inversionista con ID ${inv.inversionista_id} deben sumar 100%`,
+          detalle: { inversionista_id: inv.inversionista_id, total },
+        };
+      }
+    }
+    const totalCuotaInversionista = inversionistas.reduce(
+      (acc: Big, inv: any) => acc.plus(inv.cuota_inversionista ?? 0),
+      new Big(0)
+    );
+    const totalMontoAportado = inversionistas.reduce(
+      (acc: Big, inv: any) => acc.plus(inv.monto_aportado ?? 0),
+      new Big(0)
+    );
+    const totalMontoAportadoRedondeado = totalMontoAportado.round(2);
+    // Redondea a dos decimales
+    const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
 
-  if (Number(current.cuota) !== totalCuotaInversionistaRedondeado.toNumber()) {
-    set.status = 400;
-    return {
-      message:
-        "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
-      cuotaEsperada: current.cuota,
-      totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
-    };
-  }
-  if (Number(current.capital) !== totalMontoAportadoRedondeado.toNumber()) {
-    set.status = 400;
-    return {
-      message:
-        "La suma de los montos aportados de   los inversionistas debe ser igual aal capital del crédito.",
-      cuotaEsperada: current.cuota,
-      totalCuotaInversionista: totalMontoAportadoRedondeado.toNumber(),
-    };
-  }
+    console.log(
+      "Comparando cuota esperada y total cuota inversionista:",
+      "cuota:",
+      current.cuota,
+      "totalCuotaInversionista:",
+      totalCuotaInversionistaRedondeado.toString()
+    );
 
-  // Si hay inversionistas, limpiar y actualizar
-  if (inversionistas.length > 0) {
-    await db
-      .delete(creditos_inversionistas)
-      .where(eq(creditos_inversionistas.credito_id, credito_id));
-
-    const creditosInversionistasData = inversionistas.map((inv: any) => {
-      const montoAportado = new Big(inv.monto_aportado);
-      const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-      const porcentajeInversion = new Big(inv.porcentaje_inversion);
-      const interes = new Big(
-        updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
-      );
-      const newCuotaInteres = new Big(montoAportado ?? 0)
-        .times(interes.div(100))
-        .round(2);
-
-      const montoInversionista = newCuotaInteres
-        .times(porcentajeInversion)
-        .div(100)
-        .round(2);
-      const montoCashIn = newCuotaInteres
-        .times(porcentajeCashIn)
-        .div(100)
-        .round(2);
-
-      // IVA respectivos
-      const ivaInversionista =
-        montoInversionista.toNumber() > 0
-          ? new Big(montoInversionista ?? "0").times(0.12).round(2)
-          : new Big(0);
-      const ivaCashIn =
-        montoCashIn.toNumber() > 0
-          ? new Big(montoCashIn ?? "0").times(0.12).round(2)
-          : new Big(0);
-
+    if (
+      Number( cuota) !== totalCuotaInversionistaRedondeado.toNumber()
+    ) {
+      set.status = 400;
       return {
-        credito_id: credito_id,
-        inversionista_id: inv.inversionista_id,
-        monto_aportado: montoAportado.toString(),
-        porcentaje_cash_in: porcentajeCashIn.toString(),
-        porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-        monto_inversionista: montoInversionista.toString(),
-        monto_cash_in: montoCashIn.toString(),
-        iva_inversionista: ivaInversionista.toString(),
-        iva_cash_in: ivaCashIn.toString(),
-        fecha_creacion: new Date(),
-        cuota_inversionista: inv.cuota_inversionista ?? "0",
-        numero_credito_sifco: numero_credito_sifco ?? undefined,
+        message:
+          "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
+        cuotaEsperada: current.cuota,
+        totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
       };
-    });
-
-    if (creditosInversionistasData.length > 0) {
-      await db
-        .insert(creditos_inversionistas)
-        .values(creditosInversionistasData);
     }
-  }
+    if (Number(fieldsToUpdate.capital) !== totalMontoAportadoRedondeado.toNumber()) {
+      set.status = 400;
+      return {
+        message:
+          "La suma de los montos aportados de   los inversionistas debe ser igual aal capital del crédito.",
+        cuotaEsperada: current.cuota,
+        totalCuotaInversionista: totalMontoAportadoRedondeado.toNumber(),
+      };
+    }
 
-  set.status = 200;
-  return updatedCredit;
+    // Campos que al modificarse requieren recalcular deuda_total
+    const camposQueModificanDeuda = [
+      "capital",
+      "porcentaje_interes",
+      "seguro_10_cuotas",
+      "membresias_pago",
+      "otros",
+      "capital",
+      "cuota",
+      "plazo",
+    ];
+
+    // Arma el objeto de update con todos los campos nuevos
+    const updateFields: any = { ...fieldsToUpdate };
+    const formatCredit = inversionistas.some(
+      (inv) => Number(inv.porcentaje_inversion) > 0
+    )
+      ? "Pool"
+      : "Individual";
+    updateFields.formato_credito = formatCredit;
+    if (mora !== undefined) updateFields.mora = mora.toString();
+    if (cuota !== undefined) updateFields.cuota = cuota.toString();
+    if (numero_credito_sifco !== undefined)
+      updateFields.numero_credito_sifco = numero_credito_sifco; // Checa si cambió alguno de los campos relevantes para deuda_total
+    const changes = camposQueModificanDeuda.some((campo) => {
+      const nuevo = fieldsToUpdate[campo as keyof typeof fieldsToUpdate];
+      const actual = current[campo as keyof typeof current];
+      // Solo comparar si el campo fue enviado (no undefined)
+      // Big.js para precisión en decimales
+      // Solo comparar si ambos son string o number (no Date)
+      const isValidBigSource = (v: unknown): v is string | number =>
+        typeof v === "string" || typeof v === "number";
+      return (
+        nuevo !== undefined &&
+        isValidBigSource(nuevo) &&
+        isValidBigSource(actual) &&
+        !new Big(nuevo).eq(new Big(actual))
+      );
+    });
+    const otrosModificado =
+      fieldsToUpdate.otros !== undefined &&
+      !new Big(fieldsToUpdate.otros).eq(new Big(current.otros));
+ console.log("Current credit data:", current);
+      console.log("cuotaaaaa", cuota);
+      const willChangeCuota = cuota !== undefined && 
+        !new Big(cuota).eq(new Big(current.cuota));
+      const willChangePlazo = fieldsToUpdate.plazo !== undefined && 
+        !new Big(fieldsToUpdate.plazo).eq(new Big(current.plazo));
+      if (willChangeCuota || willChangePlazo) {
+        console.log("Will change cuota or plazo");
+        await syncScheduleOnTermsChange({
+          creditoId: credito_id,
+          newCuota: Number(cuota ?? current.cuota),
+          newPlazo: Number(fieldsToUpdate.plazo ?? current.plazo),
+          preloadCredit: current, // para evitar otro roundtrip
+        });
+      }
+    if (changes) {
+      console.log(
+        "Changes detected in fields that affect deuda_total:",
+        changes
+      );
+     
+      // Calcula la nueva deuda_total usando los valores nuevos (o actuales si no se modificó ese campo)
+      const nuevaDeudaTotal = calcularDeudaTotal({
+        capital: fieldsToUpdate.capital ?? current.capital,
+        porcentaje_interes:
+          fieldsToUpdate.porcentaje_interes ?? current.porcentaje_interes,
+        seguro_10_cuotas:
+          fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas,
+        membresias_pago:
+          fieldsToUpdate.membresias_pago ?? current.membresias_pago,
+        otros: fieldsToUpdate.otros ?? current.otros,
+        iva_12: new Big(current.iva_12).toNumber(),
+        gps: new Big(current.gps).toNumber(),
+        cuota: cuota ?? current.cuota,
+        plazo: fieldsToUpdate.plazo ?? current.plazo,
+      });
+      updateFields.deudatotal = nuevaDeudaTotal.totalDeuda;
+      updateFields.cuota = nuevaDeudaTotal.cuota;
+      updateFields.plazo = fieldsToUpdate.plazo ?? current.plazo;
+      updateFields.otros = fieldsToUpdate.otros ?? current.otros;
+      updateFields.iva_12 = nuevaDeudaTotal.iva_12;
+      updateFields.gps = nuevaDeudaTotal.gps;
+      updateFields.cuota_interes = nuevaDeudaTotal.interes;
+      updateFields.membresias_pago = fieldsToUpdate.membresias_pago ?? current.membresias_pago;
+      updateFields.seguro_10_cuotas = fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas;
+
+
+      if (otrosModificado) {
+        const cuotaInicial = await db
+          .select({ id: cuotas_credito.cuota_id })
+          .from(cuotas_credito)
+          .where(
+            and(
+              eq(cuotas_credito.credito_id, credito_id),
+              eq(cuotas_credito.numero_cuota, 0)
+            )
+          );
+        if (cuotaInicial.length) {
+          await db
+            .update(pagos_credito)
+            .set({ otros: fieldsToUpdate.otros?.toString() })
+            .where(eq(pagos_credito.cuota_id, cuotaInicial[0].id));
+        }
+      }
+    }
+    updateFields.membresias =
+      fieldsToUpdate.membresias_pago ?? current.membresias_pago;
+    // Ahora sí, haz un solo update con todos los campos a la vez
+    const [updatedCredit] = await db
+      .update(creditos)
+      .set(updateFields)
+      .where(eq(creditos.credito_id, credito_id))
+      .returning();
+
+    
+
+    // Si hay inversionistas, limpiar y actualizar
+    if (inversionistas.length > 0) {
+      await db
+        .delete(creditos_inversionistas)
+        .where(eq(creditos_inversionistas.credito_id, credito_id));
+
+      const creditosInversionistasData = inversionistas.map((inv: any) => {
+        const montoAportado = new Big(inv.monto_aportado);
+        const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+        const porcentajeInversion = new Big(inv.porcentaje_inversion);
+        const interes = new Big(
+          updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
+        );
+        const newCuotaInteres = new Big(montoAportado ?? 0)
+          .times(interes.div(100))
+          .round(2);
+
+        const montoInversionista = newCuotaInteres
+          .times(porcentajeInversion)
+          .div(100)
+          .round(2);
+        const montoCashIn = newCuotaInteres
+          .times(porcentajeCashIn)
+          .div(100)
+          .round(2);
+
+        // IVA respectivos
+        const ivaInversionista =
+          montoInversionista.toNumber() > 0
+            ? new Big(montoInversionista ?? "0").times(0.12).round(2)
+            : new Big(0);
+        const ivaCashIn =
+          montoCashIn.toNumber() > 0
+            ? new Big(montoCashIn ?? "0").times(0.12).round(2)
+            : new Big(0);
+
+        return {
+          credito_id: credito_id,
+          inversionista_id: inv.inversionista_id,
+          monto_aportado: montoAportado.toString(),
+          porcentaje_cash_in: porcentajeCashIn.toString(),
+          porcentaje_participacion_inversionista:
+            porcentajeInversion.toString(),
+          monto_inversionista: montoInversionista.toString(),
+          monto_cash_in: montoCashIn.toString(),
+          iva_inversionista: ivaInversionista.toString(),
+          iva_cash_in: ivaCashIn.toString(),
+          fecha_creacion: new Date(),
+          cuota_inversionista: inv.cuota_inversionista ?? "0",
+          numero_credito_sifco: numero_credito_sifco ?? undefined,
+        };
+      });
+
+      if (creditosInversionistasData.length > 0) {
+        await db
+          .insert(creditos_inversionistas)
+          .values(creditosInversionistasData);
+      }
+    }
+
+    set.status = 200;
+    return updatedCredit;
+  } catch (error) {
+    console.error("Error al actualizar el crédito:", error);
+    set.status = 500;
+    return { message: "Error al actualizar el crédito" };
+  }
 };
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
@@ -1003,7 +1086,7 @@ export async function getCreditosWithUserByMesAnio(
       porcentaje_participacion_inversionista:
         creditos_inversionistas.porcentaje_participacion_inversionista,
       porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-      cuota_inversionista:creditos_inversionistas.cuota_inversionista
+      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
     })
     .from(creditos_inversionistas)
     .innerJoin(
@@ -1266,103 +1349,134 @@ export async function cancelCredit(creditId: number) {
   }
 }
 
-interface AccionCreditoParams {
-  creditId: number;
-  motivo?: string;
-  observaciones?: string;
-  monto_cancelacion?: number;
-  accion: "CANCELAR" | "ACTIVAR" | "INCOBRABLE" | "PENDIENTE_CANCELACION";
-}
+const MontoAdicionalSchema = z.object({
+  concepto: z.string().min(1),
+  monto: z.number(),                 // positivo suma / negativo descuenta
+ 
+});
+// Define the inferred type from the schema
+type MontoAdicional = z.infer<typeof MontoAdicionalSchema>;
+
+const AccionCreditoParamsSchema = z.object({
+  creditId: z.number(),
+  motivo: z.string().optional(),
+  observaciones: z.string().optional(),
+  monto_cancelacion: z.number().optional(),
+  accion: z.enum(["CANCELAR", "ACTIVAR", "INCOBRABLE", "PENDIENTE_CANCELACION"]),
+  montosAdicionales: z.array(MontoAdicionalSchema).optional()
+});
+
 const STATUS_MAP = {
   CANCELAR: "CANCELADO",
   PENDIENTE_CANCELACION: "PENDIENTE_CANCELACION",
   // Puedes agregar más acciones aquí si las necesitas
 };
+
 /**
  * Actualiza el estado de un crédito: cancela o activa según el parámetro 'accion'.
  */
-export async function actualizarEstadoCredito({
-  creditId,
-  motivo,
-  observaciones,
-  monto_cancelacion,
-  accion,
-}: AccionCreditoParams) {
-  if (accion === "CANCELAR" || accion === "PENDIENTE_CANCELACION") {
-    if (!motivo || !monto_cancelacion) {
-      return {
-        ok: false,
-        message:
-          "Para cancelar el crédito debes enviar motivo y monto_cancelacion.",
-      };
-    }
-    const newStatus =
-      STATUS_MAP[accion as keyof typeof STATUS_MAP] || "PENDIENTE_CANCELACION";
-    // Cambia el estado a CANCELADO
-    await db
-      .update(creditos)
-      .set({
-        statusCredit: newStatus as
-          | "CANCELADO"
-          | "ACTIVO"
-          | "INCOBRABLE"
-          | "PENDIENTE_CANCELACION",
-      })
-      .where(eq(creditos.credito_id, creditId));
+export type AccionCreditoParams = z.infer<typeof AccionCreditoParamsSchema>;
 
-    // Registra la cancelación
-    await db.insert(credit_cancelations).values({
-      credit_id: creditId,
-      motivo,
-      observaciones: observaciones ?? "",
-      monto_cancelacion: monto_cancelacion.toString(),
-    });
+export async function actualizarEstadoCredito(input: AccionCreditoParams) {
+  // Validate input
+  const {
+    creditId,
+    motivo,
+    observaciones,
+    monto_cancelacion,
+    accion,
+    montosAdicionales
+  } = AccionCreditoParamsSchema.parse(input);
 
-    return { ok: true, message: "Crédito cancelado correctamente" };
-  } else if (accion === "ACTIVAR") {
-    // Cambia el estado a ACTIVO
-    await db
-      .update(creditos)
-      .set({ statusCredit: "ACTIVO" })
-      .where(eq(creditos.credito_id, creditId));
-
-    // Elimina la cancelación
-    await db
-      .delete(credit_cancelations)
-      .where(eq(credit_cancelations.credit_id, creditId));
-
-    await db.delete(bad_debts).where(eq(bad_debts.credit_id, creditId));
-
-    return { ok: true, message: "Crédito reactivado y cancelación eliminada" };
-  } else if (accion === "INCOBRABLE") {
-    if (!motivo || !monto_cancelacion) {
-      return {
-        ok: false,
-        message:
-          "Para marcar el crédito como incobrable debes enviar motivo y monto_cancelacion.",
-      };
-    }
-
-    // Cambia el estado a INCOBRABLE
-    await db
-      .update(creditos)
-      .set({ statusCredit: "INCOBRABLE" })
-      .where(eq(creditos.credito_id, creditId));
-
-    // Registra el incobrable
-    await db.insert(bad_debts).values({
-      credit_id: creditId,
-      motivo,
-      observaciones: observaciones ?? "",
-      monto_incobrable: monto_cancelacion.toString(),
-    });
-
+  // Guard rails for actions that require motivo + monto
+  const needsReasonAndAmount = accion === "CANCELAR" || accion === "PENDIENTE_CANCELACION" || accion === "INCOBRABLE";
+  if (needsReasonAndAmount && (!motivo || monto_cancelacion == null)) {
     return {
-      ok: true,
-      message: "Crédito marcado como incobrable correctamente",
+      ok: false,
+      message:
+        "Debes enviar 'motivo' y 'monto_cancelacion' para esta acción.",
     };
-  } else {
-    return { ok: false, message: "Acción no válida" };
+  }
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      /** 1) OPCIONAL: insertar montos adicionales ANTES del cambio de estado */
+      if (montosAdicionales?.length) {
+        await tx.insert(montos_adicionales).values(
+          montosAdicionales.map((m) => ({
+            credit_id: creditId,
+            concepto: m.concepto,
+            monto: m.monto.toString(),                 // numeric -> string
+           
+          }))
+        );
+      }
+
+      /** 2) Cambios según acción */
+      if (accion === "CANCELAR" || accion === "PENDIENTE_CANCELACION") {
+        const newStatus =
+          STATUS_MAP[accion as keyof typeof STATUS_MAP] || "PENDIENTE_CANCELACION";
+
+        // a) Update credit status
+        await tx
+          .update(creditos)
+          .set({
+            statusCredit: newStatus as
+              | "CANCELADO"
+              | "ACTIVO"
+              | "INCOBRABLE"
+              | "PENDIENTE_CANCELACION",
+          })
+          .where(eq(creditos.credito_id, creditId));
+
+        // b) Register cancelation (idempotent insert; assume one row per credit)
+        await tx.insert(credit_cancelations).values({
+          credit_id: creditId,
+          motivo: motivo!, // validated above
+          observaciones: observaciones ?? "",
+          monto_cancelacion: monto_cancelacion!.toString(),
+        });
+
+        return { ok: true, message: `Crédito ${newStatus.toLowerCase().replace("_", " ")} correctamente` };
+      }
+
+      if (accion === "ACTIVAR") {
+        // a) Set ACTIVE
+        await tx
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(eq(creditos.credito_id, creditId));
+
+        // b) Remove cancelation & bad debt records
+        await tx.delete(credit_cancelations).where(eq(credit_cancelations.credit_id, creditId));
+        await tx.delete(bad_debts).where(eq(bad_debts.credit_id, creditId));
+        await tx.delete(montos_adicionales).where(eq(montos_adicionales.credit_id, creditId));
+
+        return { ok: true, message: "Crédito reactivado y registros de cierre eliminados" };
+      }
+
+      // accion === "INCOBRABLE"
+      // a) Set UNCOLLECTIBLE
+      await tx
+        .update(creditos)
+        .set({ statusCredit: "INCOBRABLE" })
+        .where(eq(creditos.credito_id, creditId));
+
+      // b) Register bad debt
+      await tx.insert(bad_debts).values({
+        credit_id: creditId,
+        motivo: motivo!, // validated above
+        observaciones: observaciones ?? "",
+        monto_incobrable: monto_cancelacion!.toString(),
+      });
+
+      return { ok: true, message: "Crédito marcado como incobrable correctamente" };
+    });
+
+    return result;
+  } catch (err) {
+    console.error("[ERROR] actualizarEstadoCredito:", err);
+    return { ok: false, message: "[ERROR] No fue posible actualizar el estado del crédito" };
   }
 }
 /**
@@ -1533,14 +1647,14 @@ export async function resetCredit({
       .select({ cuota_id: cuotas_credito.cuota_id })
       .from(cuotas_credito)
       .where(
-      and(
-        eq(cuotas_credito.credito_id, credito.credito_id),
-        eq(cuotas_credito.numero_cuota, cuota)
-      )
+        and(
+          eq(cuotas_credito.credito_id, credito.credito_id),
+          eq(cuotas_credito.numero_cuota, cuota)
+        )
       )
       .limit(1);
 
-    const cuotaId = cuotaEncontrada?.cuota_id  ;
+    const cuotaId = cuotaEncontrada?.cuota_id;
 
     // 5. Inserta el nuevo pago para el crédito reiniciado
     const [nuevoPago] = await db
@@ -1618,4 +1732,285 @@ export async function resetCredit({
     console.error("[ERROR] reiniciarCreditoYCrearPago:", error);
     throw new Error("Error al reiniciar el crédito y crear el pago.");
   }
+}
+
+type SyncTermsInput = {
+  creditoId: number;
+  newCuota: number; // incoming updated cuota
+  newPlazo: number; // incoming updated plazo (months)
+  // Optional: pass preloaded credit to save a roundtrip (if you already fetched it)
+  preloadCredit?: {
+    cuota: string | number;
+    plazo: number;
+    capital: string | number;
+    porcentaje_interes: string | number;
+    iva_12: string | number;
+    deudatotal: string | number;
+    seguro_10_cuotas: string | number;
+    gps: string | number;
+    membresias_pago: string | number;
+    formato_credito?: string | null;
+  };
+};
+
+export async function syncScheduleOnTermsChange({
+  creditoId,
+  newCuota,
+  newPlazo,
+  preloadCredit,
+}: SyncTermsInput) {
+  return await db.transaction(async (tx) => {
+    // 1) Load current credit
+    const [credit] = preloadCredit
+      ? [{ credito_id: creditoId, ...preloadCredit }]
+      : await tx
+          .select({
+            credito_id: creditos.credito_id,
+            cuota: creditos.cuota,
+            plazo: creditos.plazo,
+            capital: creditos.capital,
+            porcentaje_interes: creditos.porcentaje_interes,
+            iva_12: creditos.iva_12,
+            deudatotal: creditos.deudatotal,
+            seguro_10_cuotas: creditos.seguro_10_cuotas,
+            gps: creditos.gps,
+            membresias_pago: creditos.membresias_pago,
+            formato_credito: creditos.formato_credito,
+          })
+          .from(creditos)
+          .where(eq(creditos.credito_id, creditoId));
+
+    if (!credit) {
+      throw new Error("[ERROR] Credit not found");
+    }
+
+    const oldCuotaNum = Number(credit.cuota ?? 0);
+    const oldPlazoNum = Number(credit.plazo ?? 0);
+    const changedCuota = Number(newCuota) !== oldCuotaNum;
+    const changedPlazo = Number(newPlazo) !== oldPlazoNum;
+
+    if (!changedCuota && !changedPlazo) {
+      // Nothing to do
+      return { updated: false, reason: "No changes" };
+    }
+
+    // --- helper: generate due dates like your creation logic (30th or last day) ---
+    function generateNextDates(fromDateISO: string, count: number): string[] {
+      // fromDateISO = 'YYYY-MM-DD'
+      const [y, m, d] = fromDateISO.split("-").map((v) => Number(v));
+      const base = new Date(Date.UTC(y, m - 1, d, 12, 0, 0)); // noon UTC
+      const dates: string[] = [];
+
+      for (let i = 0; i < count; i++) {
+        const dt = new Date(base);
+        // move month + i + 1 (next months)
+        dt.setUTCMonth(dt.getUTCMonth() + i + 1);
+
+        const month = dt.getUTCMonth();
+        const year = dt.getUTCFullYear();
+        // last day of month
+        const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+        const day = lastDay < 30 ? lastDay : 30;
+
+        const final = new Date(Date.UTC(year, month, day, 12, 0, 0));
+        // Return in 'sv-SE' like your logic (YYYY-MM-DD)
+        const iso = final
+          .toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" })
+          .toString();
+        dates.push(iso);
+      }
+      return dates;
+    }
+
+    // --- 2) If only cuota changed: update cuota in UNPAID payments ---
+    if (changedCuota && !changedPlazo) {
+      await tx
+        .update(pagos_credito)
+        .set({
+          // only cuota changes, everything else stays as-is
+          cuota: new Big(newCuota).round(2).toString(),
+        })
+        .where(
+          and(
+            eq(pagos_credito.credito_id, creditoId),
+            eq(pagos_credito.pagado, false)
+          )
+        );
+
+      // Reflect new cuota in creditos row (keeping your other totals untouched)
+      await tx
+        .update(creditos)
+        .set({ cuota: new Big(newCuota).round(2).toString() })
+        .where(eq(creditos.credito_id, creditoId));
+
+      return { updated: true, changedCuota: true, changedPlazo: false };
+    }
+
+    // --- 3) If plazo changed: add/remove schedule, and also handle cuota change if applies ---
+    // Load current cuotas (excluding numero_cuota = 0 "cuota inicial")
+    const cuotasRows = await tx
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+      })
+      .from(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, creditoId));
+
+    const cuotasReal = cuotasRows.filter((c) => c.numero_cuota > 0);
+    const maxNumero = cuotasReal.reduce(
+      (acc, r) => Math.max(acc, Number(r.numero_cuota)),
+      0
+    );
+
+    // Update cuota for unpaid rows if cuota also changed
+    if (changedCuota) {
+      await tx
+        .update(pagos_credito)
+        .set({
+          cuota: new Big(newCuota).round(2).toString(),
+        })
+        .where(
+          and(
+            eq(pagos_credito.credito_id, creditoId),
+            eq(pagos_credito.pagado, false)
+          )
+        );
+    }
+
+    if (newPlazo > oldPlazoNum) {
+      // --- 3.a) Increase plazo: append missing cuotas & pagos ---
+      const toAppend = newPlazo - oldPlazoNum;
+
+      // last scheduled date to continue from:
+      const lastCuota = cuotasReal.sort(
+        (a, b) => a.numero_cuota - b.numero_cuota
+      )[cuotasReal.length - 1];
+      const lastDateISO = lastCuota
+        ? (lastCuota.fecha_vencimiento as string)
+        : // fallback: if for some reason there is no cuota > 0, base from today like insert
+          new Date()
+            .toLocaleDateString("sv-SE", { timeZone: "America/Guatemala" })
+            .toString();
+
+      const newDates = generateNextDates(lastDateISO, toAppend);
+
+      // Insert cuotas_credito batch
+      const newCuotasToInsert = newDates.map((fecha, idx) => ({
+        credito_id: creditoId,
+        numero_cuota: maxNumero + idx + 1,
+        fecha_vencimiento: fecha,
+        pagado: false,
+      }));
+
+      const insertedCuotas = await tx
+        .insert(cuotas_credito)
+        .values(newCuotasToInsert)
+        .returning({
+          cuota_id: cuotas_credito.cuota_id,
+          numero_cuota: cuotas_credito.numero_cuota,
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        });
+
+      // Build pagos for each new cuota, mirroring your creation template
+      const cuotaStr = new Big(changedCuota ? newCuota : oldCuotaNum)
+        .round(2)
+        .toString();
+
+      const pagosToInsert = insertedCuotas.map((c) => ({
+        credito_id: creditoId,
+        cuota: cuotaStr,
+        // keep interest per your credit row (unchanged here)
+        cuota_interes: new Big(credit.porcentaje_interes ?? 0)
+          .times(new Big(credit.capital ?? 0).div(100))
+          .round(2)
+          .toString(), // same formula you used on create (capital * rate%)
+        cuota_id: c.cuota_id,
+        fecha_pago: c.fecha_vencimiento,
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro:
+          Number(credit.seguro_10_cuotas ?? 0) > 0 ? "0" : undefined,
+        abono_gps: Number(credit.gps ?? 0) > 0 ? "0" : undefined,
+        pago_del_mes: "0",
+        monto_boleta: "0",
+        fecha_filtro: c.fecha_vencimiento,
+        renuevo_o_nuevo: "",
+        capital_restante: new Big(credit.capital ?? 0).toString(),
+        interes_restante: new Big(credit.porcentaje_interes ?? 0)
+          .times(new Big(credit.capital ?? 0).div(100))
+          .round(2)
+          .toString(),
+        iva_12_restante: new Big(credit.porcentaje_interes ?? 0)
+          .times(new Big(credit.capital ?? 0).div(100))
+          .times(0.12)
+          .round(2)
+          .toString(),
+        seguro_restante: new Big(credit.seguro_10_cuotas ?? 0).toString(),
+        gps_restante: new Big(credit.gps ?? 0).toString(),
+        total_restante: new Big(credit.deudatotal ?? 0).toString(),
+        membresias:
+          typeof credit.membresias_pago === "number"
+            ? credit.membresias_pago
+            : Number(credit.membresias_pago ?? 0),
+        membresias_pago: new Big(credit.membresias_pago ?? 0).toString(),
+        membresias_mes: new Big(credit.membresias_pago ?? 0).toString(),
+        otros: "",
+        mora: "0",
+        monto_boleta_cuota: "0",
+        seguro_total: new Big(credit.seguro_10_cuotas ?? 0).toString(),
+        pagado: false,
+        facturacion: "si",
+        mes_pagado: "",
+        seguro_facturado: new Big(credit.seguro_10_cuotas ?? 0).toString(),
+        gps_facturado: new Big(credit.gps ?? 0).toString(),
+        reserva: "0",
+        observaciones: "",
+        paymentFalse: false,
+      }));
+
+      await tx.insert(pagos_credito).values(pagosToInsert);
+    } else if (newPlazo < oldPlazoNum) {
+      // --- 3.b) Decrease plazo: remove extra unpaid quotas & their payments ---
+      const extra = cuotasReal.filter((c) => Number(c.numero_cuota) > newPlazo);
+
+      // Safety: if any of the "extra" are paid, abort
+      const paidExtra = extra.filter((c) => c.pagado);
+      if (paidExtra.length > 0) {
+        throw new Error(
+          "[ERROR] Cannot reduce plazo below a paid cuota. Please reverse or adjust paid cuotas first."
+        );
+      }
+
+      const extraCuotaIds = extra.map((c) => c.cuota_id);
+      if (extraCuotaIds.length > 0) {
+        // delete related pagos first
+        await tx
+          .delete(pagos_credito)
+          .where(inArray(pagos_credito.cuota_id, extraCuotaIds));
+        // then delete cuotas
+        await tx
+          .delete(cuotas_credito)
+          .where(inArray(cuotas_credito.cuota_id, extraCuotaIds));
+      }
+    }
+
+    // --- 4) Persist credit row fields actually changed (only cuota/plazo) ---
+    const updateSet: Record<string, any> = {};
+    if (changedCuota) updateSet.cuota = new Big(newCuota).round(2).toString();
+    if (changedPlazo) updateSet.plazo = Number(newPlazo);
+
+    if (Object.keys(updateSet).length > 0) {
+      await tx
+        .update(creditos)
+        .set(updateSet)
+        .where(eq(creditos.credito_id, creditoId));
+    }
+
+    return { updated: true, changedCuota, changedPlazo };
+  });
 }

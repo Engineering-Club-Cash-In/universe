@@ -588,14 +588,16 @@ export async function getPagosByMesAnio({
   anio,
   page = 1,
   perPage = 10,
+  numero_credito_sifco
 }: {
   mes: number;
   anio: number;
   page?: number;
   perPage?: number;
+  numero_credito_sifco?: string;
 }): Promise<PagosPorMesAnioResponse> {
   const { data } = await axios.get<PagosPorMesAnioResponse>(`${API_URL}/payments`, {
-    params: { mes, anio, page, perPage },
+    params: { mes, anio, page, perPage, numero_credito_sifco },
   });
   console.log("getPagosByMesAnio response:", data);
   return data;
@@ -701,6 +703,10 @@ export async function cancelCreditService(creditId: number): Promise<CancelCredi
 }
 
 export type CreditAction = "CANCELAR" | "ACTIVAR" | "INCOBRABLE" |"PENDIENTE_CANCELACION";
+export interface MontoAdicional {
+  concepto: string;
+  monto: number; // positivo = cargo, negativo = descuento
+}
 
 export interface CancelCreditPayload {
   creditId: number;
@@ -708,6 +714,7 @@ export interface CancelCreditPayload {
   motivo: string;
   observaciones?: string;
   monto_cancelacion: number;
+    montosAdicionales?: MontoAdicional[];
 }
 export interface PendingCancelCreditPayload {
   creditId: number;
@@ -715,6 +722,7 @@ export interface PendingCancelCreditPayload {
   motivo: string;
   observaciones?: string;
   monto_cancelacion: number;
+  montosAdicionales?: MontoAdicional[];
 }
 export interface ActivateCreditPayload {
   creditId: number;
@@ -726,6 +734,7 @@ export interface BadDebtCreditPayload {
   motivo: string;
   observaciones?: string;
   monto_cancelacion: number; // Puedes llamarlo monto_incobrable si quieres ser más explícito
+    montosAdicionales?: MontoAdicional[];
 }
 
 

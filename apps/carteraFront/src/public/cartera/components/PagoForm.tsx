@@ -62,7 +62,9 @@ export function PagoForm() {
     setOpenBadDebt,
     openBadDebt,
     montoBaseBadDebt,
-    handleResetCredito
+    handleResetCredito,
+    resetBuscador,
+    setResetBuscador
   } = usePagoForm();
  
   return (
@@ -114,11 +116,12 @@ export function PagoForm() {
         </CardHeader>
         <CardContent className="flex-1 flex flex-col items-center justify-center">
              <div className="mb-4 flex gap-2 items-center">
-      <BuscadorUsuarioSifco
-        onSelect={(sifco) => {
-          fetchCredito(sifco);
-        }}
-      />
+     <BuscadorUsuarioSifco
+  onSelect={(sifco) => fetchCredito(sifco)}
+  reset={resetBuscador}
+  onReset={() => setResetBuscador(false)}
+/>
+
     </div>
           {/* --- MINICARD --- */}
 

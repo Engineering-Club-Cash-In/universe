@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -18,9 +18,11 @@ type OpcionSifco = {
 
 interface BuscadorUsuarioSifcoProps {
   onSelect: (sifco: string) => void;
+  reset?: boolean;
+  onReset?: () => void;
 }
+export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuarioSifcoProps) {
 
-export function BuscadorUsuarioSifco({ onSelect }: BuscadorUsuarioSifcoProps) {
   const { data = [], isLoading } = useUsersWithSifco();
   const [search, setSearch] = useState<string>("");
   const [selectedSifco, setSelectedSifco] = useState<string | undefined>(undefined);
@@ -59,6 +61,12 @@ export function BuscadorUsuarioSifco({ onSelect }: BuscadorUsuarioSifcoProps) {
     setSearch("");
     onSelect(""); // O puedes pasar null si tu lógica lo soporta
   };
+  useEffect(() => {
+    if (reset) {
+      handleClear();
+      onReset?.();
+    }
+  }, [reset]);
 
   return (
     <div className="mb-4 w-full max-w-md flex flex-col gap-2">

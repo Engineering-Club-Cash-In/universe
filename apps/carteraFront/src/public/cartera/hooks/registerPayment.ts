@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { z } from "zod";
+import {   z } from "zod";
 import { useFormik } from "formik";
 import {
   createPago,
@@ -32,7 +32,7 @@ export const pagoSchema = z.object({
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
-
+ 
 function zodToFormikValidate(schema: z.ZodSchema<any>) {
   return (values: any) => {
     const result = schema.safeParse(values);
@@ -48,7 +48,7 @@ function zodToFormikValidate(schema: z.ZodSchema<any>) {
 export function usePagoForm() {
   
 const { mutate: resetCredit } = useResetCredit();
-
+const [resetBuscador, setResetBuscador] = useState(false);
   const [modalMode, setModalMode] = useState<"excedente" | "pagada">(
     "excedente"
   );
@@ -152,6 +152,7 @@ const { mutate: resetCredit } = useResetCredit();
         setCuotaActualInfo(null); // Reiniciar cuota actual
         setFileToUpload(null); // Reiniciar archivo a subir
         setArchivosParaSubir([]);
+        setResetBuscador(true);
       } catch (error: any) {
         const backendMessage =
           error?.response?.data?.message || "Error desconocido";
@@ -190,6 +191,7 @@ const { mutate: resetCredit } = useResetCredit();
         setCuotaSeleccionada(0);
         setSaldoAFavorUser(0);
         setArchivosParaSubir([]); // Limpia los archivos después del submit
+        setResetBuscador(true);
         // Si quieres, podrías resetear el form aquí si lo necesitas
         const today = new Date();
         const fechaHoy = today.toISOString().split("T")[0];
@@ -557,5 +559,7 @@ async function handleResetCredito() {
     archivosParaSubir,
     handleResetCredito,
     setArchivosParaSubir,
+    resetBuscador,
+    setResetBuscador
   };
 }

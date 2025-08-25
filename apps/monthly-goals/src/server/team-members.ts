@@ -124,11 +124,19 @@ export const getTeamMembersByArea = createServerFn()
         userName: users.name,
         userEmail: users.email,
         userRole: users.role,
+        areaId: teamMembers.areaId,
+        areaName: areas.name,
+        departmentId: areas.departmentId,
+        departmentName: departments.name,
         position: teamMembers.position,
         joinedAt: teamMembers.joinedAt,
+        createdAt: teamMembers.createdAt,
+        updatedAt: teamMembers.updatedAt,
       })
       .from(teamMembers)
       .leftJoin(users, eq(teamMembers.userId, users.id))
+      .leftJoin(areas, eq(teamMembers.areaId, areas.id))
+      .leftJoin(departments, eq(areas.departmentId, departments.id))
       .where(eq(teamMembers.areaId, data.areaId))
     
     return result

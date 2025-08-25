@@ -12,12 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PresentationsIndexRouteImport } from './routes/presentations/index'
 import { Route as GoalsIndexRouteImport } from './routes/goals/index'
 import { Route as GoalsConfigureRouteImport } from './routes/goals/configure'
 import { Route as AdminTeamsRouteImport } from './routes/admin/teams'
 import { Route as AdminGoalTemplatesRouteImport } from './routes/admin/goal-templates'
 import { Route as AdminDepartmentsRouteImport } from './routes/admin/departments'
 import { Route as AdminAreasRouteImport } from './routes/admin/areas'
+import { Route as PresentationsIdViewRouteImport } from './routes/presentations/$id.view'
+import { Route as PresentationsIdSubmitRouteImport } from './routes/presentations/$id.submit'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -32,6 +35,11 @@ const AdminRoute = AdminRouteImport.update({
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PresentationsIndexRoute = PresentationsIndexRouteImport.update({
+  id: '/presentations/',
+  path: '/presentations/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GoalsIndexRoute = GoalsIndexRouteImport.update({
@@ -64,6 +72,16 @@ const AdminAreasRoute = AdminAreasRouteImport.update({
   path: '/areas',
   getParentRoute: () => AdminRoute,
 } as any)
+const PresentationsIdViewRoute = PresentationsIdViewRouteImport.update({
+  id: '/presentations/$id/view',
+  path: '/presentations/$id/view',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PresentationsIdSubmitRoute = PresentationsIdSubmitRouteImport.update({
+  id: '/presentations/$id/submit',
+  path: '/presentations/$id/submit',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -75,6 +93,9 @@ export interface FileRoutesByFullPath {
   '/admin/teams': typeof AdminTeamsRoute
   '/goals/configure': typeof GoalsConfigureRoute
   '/goals': typeof GoalsIndexRoute
+  '/presentations': typeof PresentationsIndexRoute
+  '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
+  '/presentations/$id/view': typeof PresentationsIdViewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -86,6 +107,9 @@ export interface FileRoutesByTo {
   '/admin/teams': typeof AdminTeamsRoute
   '/goals/configure': typeof GoalsConfigureRoute
   '/goals': typeof GoalsIndexRoute
+  '/presentations': typeof PresentationsIndexRoute
+  '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
+  '/presentations/$id/view': typeof PresentationsIdViewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -98,6 +122,9 @@ export interface FileRoutesById {
   '/admin/teams': typeof AdminTeamsRoute
   '/goals/configure': typeof GoalsConfigureRoute
   '/goals/': typeof GoalsIndexRoute
+  '/presentations/': typeof PresentationsIndexRoute
+  '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
+  '/presentations/$id/view': typeof PresentationsIdViewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -111,6 +138,9 @@ export interface FileRouteTypes {
     | '/admin/teams'
     | '/goals/configure'
     | '/goals'
+    | '/presentations'
+    | '/presentations/$id/submit'
+    | '/presentations/$id/view'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -122,6 +152,9 @@ export interface FileRouteTypes {
     | '/admin/teams'
     | '/goals/configure'
     | '/goals'
+    | '/presentations'
+    | '/presentations/$id/submit'
+    | '/presentations/$id/view'
   id:
     | '__root__'
     | '/'
@@ -133,6 +166,9 @@ export interface FileRouteTypes {
     | '/admin/teams'
     | '/goals/configure'
     | '/goals/'
+    | '/presentations/'
+    | '/presentations/$id/submit'
+    | '/presentations/$id/view'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -141,6 +177,9 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   GoalsConfigureRoute: typeof GoalsConfigureRoute
   GoalsIndexRoute: typeof GoalsIndexRoute
+  PresentationsIndexRoute: typeof PresentationsIndexRoute
+  PresentationsIdSubmitRoute: typeof PresentationsIdSubmitRoute
+  PresentationsIdViewRoute: typeof PresentationsIdViewRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -164,6 +203,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/presentations/': {
+      id: '/presentations/'
+      path: '/presentations'
+      fullPath: '/presentations'
+      preLoaderRoute: typeof PresentationsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/goals/': {
@@ -208,6 +254,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAreasRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/presentations/$id/view': {
+      id: '/presentations/$id/view'
+      path: '/presentations/$id/view'
+      fullPath: '/presentations/$id/view'
+      preLoaderRoute: typeof PresentationsIdViewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/presentations/$id/submit': {
+      id: '/presentations/$id/submit'
+      path: '/presentations/$id/submit'
+      fullPath: '/presentations/$id/submit'
+      preLoaderRoute: typeof PresentationsIdSubmitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -233,6 +293,9 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   GoalsConfigureRoute: GoalsConfigureRoute,
   GoalsIndexRoute: GoalsIndexRoute,
+  PresentationsIndexRoute: PresentationsIndexRoute,
+  PresentationsIdSubmitRoute: PresentationsIdSubmitRoute,
+  PresentationsIdViewRoute: PresentationsIdViewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

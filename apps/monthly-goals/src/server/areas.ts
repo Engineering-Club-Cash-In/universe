@@ -30,7 +30,18 @@ async function requireRole(allowedRoles: string[]) {
   return session
 }
 
-export const getAreas = createServerFn().handler(async () => {
+export const getAreas = createServerFn().handler(async (): Promise<{
+  id: string
+  name: string
+  description: string | null
+  departmentId: string
+  departmentName: string | null
+  leadId: string | null
+  leadName: string | null
+  createdAt: Date
+  updatedAt: Date
+  membersCount: number
+}[]> => {
   const result = await db
     .select({
       id: areas.id,
@@ -109,12 +120,25 @@ export const getAreasByDepartment = createServerFn()
     }
     return input as { departmentId: string }
   })
-  .handler(async ({ data }) => {
+  .handler(async ({ data }): Promise<{
+    id: string
+    name: string
+    description: string | null
+    departmentId: string
+    departmentName: string | null
+    leadId: string | null
+    leadName: string | null
+    createdAt: Date
+    updatedAt: Date
+    membersCount: number
+  }[]> => {
     const result = await db
       .select({
         id: areas.id,
         name: areas.name,
         description: areas.description,
+        departmentId: areas.departmentId,
+        departmentName: departments.name,
         leadId: areas.leadId,
         leadName: users.name,
         createdAt: areas.createdAt,
@@ -122,10 +146,11 @@ export const getAreasByDepartment = createServerFn()
         membersCount: sql<number>`count(distinct ${teamMembers.id})`,
       })
       .from(areas)
+      .leftJoin(departments, eq(areas.departmentId, departments.id))
       .leftJoin(users, eq(areas.leadId, users.id))
       .leftJoin(teamMembers, eq(areas.id, teamMembers.areaId))
       .where(eq(areas.departmentId, data.departmentId))
-      .groupBy(areas.id, users.name)
+      .groupBy(areas.id, departments.name, users.name)
     
     return result
   })

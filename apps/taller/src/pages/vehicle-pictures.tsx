@@ -312,17 +312,19 @@ export default function VehiclePictures({
     };
   });
 
-  // Function to upload photo to server optimistically
+  // Function to upload photo to server with retry and timeout handling
   const uploadPhotoToServer = async (
     file: File, 
     stepId: string, 
     photoId: string, 
     title: string, 
-    description?: string
-  ) => {
+    description?: string,
+    retryCount = 0
+  ): Promise<string> => {
+    const maxRetries = 3;
+    const timeoutMs = 60000; // 60 seconds timeout for slow connections
+    
     try {
-      // Use the session's temporary vehicleId so all photos go to the same folder
-      
       const formData = new FormData();
       formData.append('file', file);
       formData.append('vehicleId', tempVehicleId);
@@ -333,14 +335,20 @@ export default function VehiclePictures({
         formData.append('description', description);
       }
 
+      // Create AbortController for timeout
+      const abortController = new AbortController();
+      const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+
       const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
+        signal: abortController.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        // Get error details from server
         let errorMessage = `Upload failed: ${response.statusText}`;
         try {
           const errorData = await response.json();
@@ -355,7 +363,23 @@ export default function VehiclePictures({
       const result = await response.json();
       return result.data.url;
     } catch (error) {
-      console.error('Upload error:', error);
+      console.error(`Upload error (attempt ${retryCount + 1}):`, error);
+      
+      // Check if it's a network error or timeout that we can retry
+      const isRetryableError = error instanceof Error && (
+        error.name === 'AbortError' ||
+        error.name === 'TypeError' ||
+        error.message.includes('Failed to fetch') ||
+        error.message.includes('NetworkError')
+      );
+      
+      if (isRetryableError && retryCount < maxRetries) {
+        console.log(`Retrying upload for ${photoId} (attempt ${retryCount + 2}/${maxRetries + 1})`);
+        // Wait progressively longer between retries
+        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
+        return uploadPhotoToServer(file, stepId, photoId, title, description, retryCount + 1);
+      }
+      
       throw error;
     }
   };

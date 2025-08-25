@@ -2,16 +2,57 @@ import { pgTable, uuid, varchar, text, timestamp, integer, decimal, pgEnum, uniq
 import { relations } from 'drizzle-orm'
 
 // Enums
-export const userRoleEnum = pgEnum('user_role', ['super_admin', 'manager', 'employee', 'viewer'])
+export const userRoleEnum = pgEnum('user_role', ['superAdmin', 'manager', 'employee', 'viewer'])
 export const goalStatusEnum = pgEnum('goal_status', ['pending', 'in_progress', 'completed'])
 export const presentationStatusEnum = pgEnum('presentation_status', ['draft', 'ready', 'presented'])
 
 // Users table (integrada con Better Auth)
 export const users = pgTable('users', {
-  id: uuid('id').primaryKey().defaultRandom(),
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
   email: varchar('email', { length: 255 }).notNull().unique(),
+  emailVerified: timestamp('email_verified'),
   name: varchar('name', { length: 255 }).notNull(),
+  image: text('image'),
   role: userRoleEnum('role').notNull().default('employee'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
+
+// Sessions table for Better Auth
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull().references(() => users.id),
+  token: text('token').notNull().unique(),
+  expiresAt: timestamp('expires_at').notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
+
+// Accounts table for OAuth providers and email/password auth
+export const accounts = pgTable('accounts', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  userId: text('user_id').notNull().references(() => users.id),
+  accountId: text('account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  accessTokenExpiresAt: timestamp('access_token_expires_at'),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at'),
+  scope: text('scope'),
+  idToken: text('id_token'),
+  password: text('password'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
+
+// Verification tokens for email verification, password reset, etc.
+export const verifications = pgTable('verifications', {
+  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: timestamp('expires_at').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
@@ -21,7 +62,7 @@ export const departments = pgTable('departments', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
-  managerId: uuid('manager_id').references(() => users.id),
+  managerId: text('manager_id').references(() => users.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
@@ -32,7 +73,7 @@ export const areas = pgTable('areas', {
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
   departmentId: uuid('department_id').notNull().references(() => departments.id),
-  leadId: uuid('lead_id').references(() => users.id),
+  leadId: text('lead_id').references(() => users.id),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 })
@@ -40,7 +81,7 @@ export const areas = pgTable('areas', {
 // Team Members
 export const teamMembers = pgTable('team_members', {
   id: uuid('id').primaryKey().defaultRandom(),
-  userId: uuid('user_id').notNull().references(() => users.id),
+  userId: text('user_id').notNull().references(() => users.id),
   areaId: uuid('area_id').notNull().references(() => areas.id),
   position: varchar('position', { length: 255 }),
   joinedAt: timestamp('joined_at').notNull().defaultNow(),
@@ -86,7 +127,7 @@ export const presentations = pgTable('presentations', {
   month: integer('month').notNull(), // 1-12
   year: integer('year').notNull(),
   status: presentationStatusEnum('status').notNull().default('draft'),
-  createdBy: uuid('created_by').notNull().references(() => users.id),
+  createdBy: text('created_by').notNull().references(() => users.id),
   presentedAt: timestamp('presented_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -98,7 +139,7 @@ export const goalSubmissions = pgTable('goal_submissions', {
   presentationId: uuid('presentation_id').notNull().references(() => presentations.id),
   monthlyGoalId: uuid('monthly_goal_id').notNull().references(() => monthlyGoals.id),
   submittedValue: decimal('submitted_value', { precision: 10, scale: 2 }),
-  submittedBy: uuid('submitted_by').notNull().references(() => users.id),
+  submittedBy: text('submitted_by').notNull().references(() => users.id),
   submittedAt: timestamp('submitted_at').notNull().defaultNow(),
   notes: text('notes'),
   createdAt: timestamp('created_at').notNull().defaultNow(),

@@ -1,13 +1,15 @@
 import { auth } from './config'
 import type { User } from './client'
+import { getWebRequest } from '@tanstack/start/server'
 
-export async function getServerSession(request: Request) {
+export async function getServerSession() {
+  const request = getWebRequest()
   const session = await auth.api.getSession({ headers: request.headers })
   return session
 }
 
-export async function requireAuth(request: Request) {
-  const session = await getServerSession(request)
+export async function requireAuth() {
+  const session = await getServerSession()
   
   if (!session) {
     throw new Response('Unauthorized', { status: 401 })
@@ -16,11 +18,8 @@ export async function requireAuth(request: Request) {
   return session
 }
 
-export async function requireRole(
-  request: Request, 
-  allowedRoles: Array<User['role']>
-) {
-  const session = await requireAuth(request)
+export async function requireRole(allowedRoles: Array<User['role']>) {
+  const session = await requireAuth()
   const userRole = ((session.user as { role?: string }).role || 'employee') as User['role']
   
   if (!allowedRoles.includes(userRole)) {

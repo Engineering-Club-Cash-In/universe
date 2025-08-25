@@ -12,7 +12,10 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as GoalsIndexRouteImport } from './routes/goals/index'
+import { Route as GoalsConfigureRouteImport } from './routes/goals/configure'
 import { Route as AdminTeamsRouteImport } from './routes/admin/teams'
+import { Route as AdminGoalTemplatesRouteImport } from './routes/admin/goal-templates'
 import { Route as AdminDepartmentsRouteImport } from './routes/admin/departments'
 import { Route as AdminAreasRouteImport } from './routes/admin/areas'
 
@@ -31,9 +34,24 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GoalsIndexRoute = GoalsIndexRouteImport.update({
+  id: '/goals/',
+  path: '/goals/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GoalsConfigureRoute = GoalsConfigureRouteImport.update({
+  id: '/goals/configure',
+  path: '/goals/configure',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminTeamsRoute = AdminTeamsRouteImport.update({
   id: '/teams',
   path: '/teams',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminGoalTemplatesRoute = AdminGoalTemplatesRouteImport.update({
+  id: '/goal-templates',
+  path: '/goal-templates',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminDepartmentsRoute = AdminDepartmentsRouteImport.update({
@@ -53,7 +71,10 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/admin/areas': typeof AdminAreasRoute
   '/admin/departments': typeof AdminDepartmentsRoute
+  '/admin/goal-templates': typeof AdminGoalTemplatesRoute
   '/admin/teams': typeof AdminTeamsRoute
+  '/goals/configure': typeof GoalsConfigureRoute
+  '/goals': typeof GoalsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -61,7 +82,10 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/admin/areas': typeof AdminAreasRoute
   '/admin/departments': typeof AdminDepartmentsRoute
+  '/admin/goal-templates': typeof AdminGoalTemplatesRoute
   '/admin/teams': typeof AdminTeamsRoute
+  '/goals/configure': typeof GoalsConfigureRoute
+  '/goals': typeof GoalsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,7 +94,10 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/admin/areas': typeof AdminAreasRoute
   '/admin/departments': typeof AdminDepartmentsRoute
+  '/admin/goal-templates': typeof AdminGoalTemplatesRoute
   '/admin/teams': typeof AdminTeamsRoute
+  '/goals/configure': typeof GoalsConfigureRoute
+  '/goals/': typeof GoalsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,7 +107,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin/areas'
     | '/admin/departments'
+    | '/admin/goal-templates'
     | '/admin/teams'
+    | '/goals/configure'
+    | '/goals'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -88,7 +118,10 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin/areas'
     | '/admin/departments'
+    | '/admin/goal-templates'
     | '/admin/teams'
+    | '/goals/configure'
+    | '/goals'
   id:
     | '__root__'
     | '/'
@@ -96,13 +129,18 @@ export interface FileRouteTypes {
     | '/login'
     | '/admin/areas'
     | '/admin/departments'
+    | '/admin/goal-templates'
     | '/admin/teams'
+    | '/goals/configure'
+    | '/goals/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRouteWithChildren
   LoginRoute: typeof LoginRoute
+  GoalsConfigureRoute: typeof GoalsConfigureRoute
+  GoalsIndexRoute: typeof GoalsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -128,11 +166,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/goals/': {
+      id: '/goals/'
+      path: '/goals'
+      fullPath: '/goals'
+      preLoaderRoute: typeof GoalsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/goals/configure': {
+      id: '/goals/configure'
+      path: '/goals/configure'
+      fullPath: '/goals/configure'
+      preLoaderRoute: typeof GoalsConfigureRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/teams': {
       id: '/admin/teams'
       path: '/teams'
       fullPath: '/admin/teams'
       preLoaderRoute: typeof AdminTeamsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/goal-templates': {
+      id: '/admin/goal-templates'
+      path: '/goal-templates'
+      fullPath: '/admin/goal-templates'
+      preLoaderRoute: typeof AdminGoalTemplatesRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/departments': {
@@ -155,12 +214,14 @@ declare module '@tanstack/react-router' {
 interface AdminRouteChildren {
   AdminAreasRoute: typeof AdminAreasRoute
   AdminDepartmentsRoute: typeof AdminDepartmentsRoute
+  AdminGoalTemplatesRoute: typeof AdminGoalTemplatesRoute
   AdminTeamsRoute: typeof AdminTeamsRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
   AdminAreasRoute: AdminAreasRoute,
   AdminDepartmentsRoute: AdminDepartmentsRoute,
+  AdminGoalTemplatesRoute: AdminGoalTemplatesRoute,
   AdminTeamsRoute: AdminTeamsRoute,
 }
 
@@ -170,6 +231,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   LoginRoute: LoginRoute,
+  GoalsConfigureRoute: GoalsConfigureRoute,
+  GoalsIndexRoute: GoalsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

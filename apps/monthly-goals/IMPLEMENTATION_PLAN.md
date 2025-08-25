@@ -290,16 +290,16 @@ monthly-goals/
 ### Fase 1: Configuración Base (2-3 días)
 - [x] Configurar Drizzle ORM con Neon
 - [x] Implementar esquema de base de datos
-- [ ] Configurar Better Auth
-- [ ] Setup de componentes UI base
+- [x] Configurar Better Auth
+- [x] Setup de componentes UI base
 - [x] Configurar TanStack Query (ya configurado en el proyecto)
 
 ### Fase 2: Gestión Organizacional (3-4 días)
-- [ ] CRUD de Departamentos
-- [ ] CRUD de Áreas
-- [ ] CRUD de Equipos
-- [ ] Gestión de usuarios y roles
-- [ ] Validación de permisos
+- [x] CRUD de Departamentos
+- [x] CRUD de Áreas
+- [x] CRUD de Equipos
+- [x] Gestión de usuarios y roles
+- [x] Validación de permisos
 
 ### Fase 3: Sistema de Metas (4-5 días)
 - [ ] Templates de metas

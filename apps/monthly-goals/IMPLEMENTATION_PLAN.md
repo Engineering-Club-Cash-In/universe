@@ -320,12 +320,20 @@ monthly-goals/
 - **Scripts**: check-all automatizado para build + tipos, getErrorMessage utilitario
 - **Autenticación**: Login redirect a home, validación de roles funcional
 
-### Fase 3: Sistema de Metas (4-5 días)
-- [ ] Templates de metas
-- [ ] Configuración mensual
-- [ ] Cálculo de porcentajes
-- [ ] Sistema de colores (semáforo)
-- [ ] Histórico de cumplimientos
+### ✅ Fase 3: Sistema de Metas (4-5 días)
+- [x] Templates de metas
+- [x] Configuración mensual
+- [x] Cálculo de porcentajes
+- [x] Sistema de colores (semáforo)
+- [x] Histórico de cumplimientos
+
+**Detalles de implementación:**
+- **Templates**: CRUD completo con umbrales configurables (éxito/advertencia), unidades, metas por defecto
+- **Configuración mensual**: Interfaz de asignación masiva, selector de período, validaciones
+- **Cálculo automático**: Función calculateGoalProgress, porcentajes objetivo vs logrado
+- **Sistema semáforo**: Verde (≥80%), Amarillo (≥50%), Rojo (<50%), umbrales configurables por template
+- **Visualización**: Tabla con filtros período, barras de progreso, badges de estado, información organizacional completa
+- **Navegación**: Sección "Metas" en header, sidebar dedicada, rutas protegidas por roles
 
 ### Fase 4: Presentaciones (3-4 días)
 - [ ] Creación de presentaciones

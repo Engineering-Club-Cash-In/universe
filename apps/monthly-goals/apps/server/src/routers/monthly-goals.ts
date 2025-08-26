@@ -6,7 +6,7 @@ import { teamMembers } from "../db/schema/team-members";
 import { user } from "../db/schema/auth";
 import { areas } from "../db/schema/areas";
 import { departments } from "../db/schema/departments";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 import * as z from "zod";
 
 const MonthlyGoalSchema = z.object({
@@ -240,4 +240,71 @@ export const calculateGoalProgress = protectedProcedure
 			target,
 			achieved,
 		};
+	});
+
+// Get goals for current user based on their role
+export const getMyGoals = protectedProcedure
+	.input(z.object({
+		month: z.number().int().min(1).max(12).optional(),
+		year: z.number().int().min(2020).optional(),
+	}))
+	.handler(async ({ input, context }) => {
+		if (!context.session?.user) {
+			throw new Error("Unauthorized");
+		}
+
+		const currentUser = context.session.user;
+		
+		let query = db
+			.select({
+				id: monthlyGoals.id,
+				month: monthlyGoals.month,
+				year: monthlyGoals.year,
+				targetValue: monthlyGoals.targetValue,
+				achievedValue: monthlyGoals.achievedValue,
+				description: monthlyGoals.description,
+				status: monthlyGoals.status,
+				createdAt: monthlyGoals.createdAt,
+				updatedAt: monthlyGoals.updatedAt,
+				// Goal template info
+				goalTemplateName: goalTemplates.name,
+				goalTemplateUnit: goalTemplates.unit,
+				successThreshold: goalTemplates.successThreshold,
+				warningThreshold: goalTemplates.warningThreshold,
+				// User and organizational info
+				userName: user.name,
+				userEmail: user.email,
+				userId: user.id,
+				areaName: areas.name,
+				departmentName: departments.name,
+			})
+			.from(monthlyGoals)
+			.leftJoin(goalTemplates, eq(monthlyGoals.goalTemplateId, goalTemplates.id))
+			.leftJoin(teamMembers, eq(monthlyGoals.teamMemberId, teamMembers.id))
+			.leftJoin(user, eq(teamMembers.userId, user.id))
+			.leftJoin(areas, eq(teamMembers.areaId, areas.id))
+			.leftJoin(departments, eq(areas.departmentId, departments.id));
+
+		// Apply role-based filtering
+		if (currentUser.role === "employee") {
+			// Employee: only their own goals
+			query = query.where(eq(user.id, currentUser.id)) as typeof query;
+		} else if (currentUser.role === "department_manager") {
+			// Department manager: goals from users in departments they manage
+			query = query.where(eq(departments.managerId, currentUser.id)) as typeof query;
+		} else if (currentUser.role === "area_lead") {
+			// Area lead: goals from users in areas they lead
+			query = query.where(eq(areas.leadId, currentUser.id)) as typeof query;
+		}
+		// Super admin and viewer: see all goals (no additional filter)
+
+		// Apply period filter if provided
+		if (input.month && input.year) {
+			query = query.where(and(
+				eq(monthlyGoals.month, input.month),
+				eq(monthlyGoals.year, input.year)
+			)) as typeof query;
+		}
+
+		return await query;
 	});

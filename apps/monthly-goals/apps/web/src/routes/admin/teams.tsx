@@ -27,6 +27,12 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+} from "@/components/ui/tabs";
 import { useState } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
@@ -41,8 +47,8 @@ function TeamsPage() {
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [editingTeamMember, setEditingTeamMember] = useState<any>(null);
 
-	// Queries
-	const teamMembers = useQuery(orpc.teams.list.queryOptions());
+	// Queries - Use filtered endpoint based on user role
+	const teamMembers = useQuery(orpc.teams.my.queryOptions());
 	const areas = useQuery(orpc.areas.list.queryOptions());
 	const availableUsers = useQuery(orpc.teams.availableUsers.queryOptions());
 
@@ -51,7 +57,13 @@ function TeamsPage() {
 		orpc.teams.create.mutationOptions({
 			onSuccess: () => {
 				queryClient.invalidateQueries({
+					queryKey: orpc.teams.my.key(),
+				});
+				queryClient.invalidateQueries({
 					queryKey: orpc.teams.list.key(),
+				});
+				queryClient.invalidateQueries({
+					queryKey: orpc.teams.availableUsers.key(),
 				});
 				setIsCreateDialogOpen(false);
 				toast.success("Miembro del equipo creado exitosamente");
@@ -62,9 +74,33 @@ function TeamsPage() {
 		})
 	);
 
+	const createUserAndAssignMutation = useMutation(
+		orpc.teams.createUserAndAssign.mutationOptions({
+			onSuccess: () => {
+				queryClient.invalidateQueries({
+					queryKey: orpc.teams.my.key(),
+				});
+				queryClient.invalidateQueries({
+					queryKey: orpc.teams.list.key(),
+				});
+				queryClient.invalidateQueries({
+					queryKey: orpc.teams.availableUsers.key(),
+				});
+				setIsCreateDialogOpen(false);
+				toast.success("Usuario y miembro del equipo creados exitosamente");
+			},
+			onError: (error) => {
+				toast.error(getErrorMessage(error, "Error al crear usuario y miembro del equipo"));
+			},
+		})
+	);
+
 	const updateMutation = useMutation(
 		orpc.teams.update.mutationOptions({
 			onSuccess: () => {
+				queryClient.invalidateQueries({
+					queryKey: orpc.teams.my.key(),
+				});
 				queryClient.invalidateQueries({
 					queryKey: orpc.teams.list.key(),
 				});
@@ -82,6 +118,9 @@ function TeamsPage() {
 		orpc.teams.delete.mutationOptions({
 			onSuccess: () => {
 				queryClient.invalidateQueries({
+					queryKey: orpc.teams.my.key(),
+				});
+				queryClient.invalidateQueries({
 					queryKey: orpc.teams.list.key(),
 				});
 				toast.success("Miembro del equipo eliminado exitosamente");
@@ -92,7 +131,7 @@ function TeamsPage() {
 		})
 	);
 
-	const handleCreateSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+	const handleCreateExistingSubmit = (e: React.FormEvent<HTMLFormElement>) => {
 		e.preventDefault();
 		const formData = new FormData(e.currentTarget);
 		const data = {
@@ -101,6 +140,19 @@ function TeamsPage() {
 			position: formData.get("position") as string,
 		};
 		createMutation.mutate(data);
+	};
+
+	const handleCreateNewSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+		e.preventDefault();
+		const formData = new FormData(e.currentTarget);
+		const data = {
+			name: formData.get("name") as string,
+			email: formData.get("email") as string,
+			role: ((formData.get("role") as string) || "employee") as "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer",
+			areaId: formData.get("areaId") as string,
+			position: formData.get("position") as string,
+		};
+		createUserAndAssignMutation.mutate(data);
 	};
 
 	const handleEditSubmit = (e: React.FormEvent<HTMLFormElement>) => {
@@ -134,57 +186,120 @@ function TeamsPage() {
 					<DialogTrigger asChild>
 						<Button>Agregar Miembro</Button>
 					</DialogTrigger>
-					<DialogContent>
+					<DialogContent className="space-y-6">
 						<DialogHeader>
 							<DialogTitle>Agregar Miembro al Equipo</DialogTitle>
 						</DialogHeader>
-						<form onSubmit={handleCreateSubmit} className="space-y-4">
-							<div>
-								<Label htmlFor="userId">Usuario</Label>
-								<Select name="userId" required>
-									<SelectTrigger>
-										<SelectValue placeholder="Selecciona un usuario" />
-									</SelectTrigger>
-									<SelectContent>
-										{availableUsers.isLoading ? (
-											<SelectItem value="" disabled>
-												Cargando usuarios...
-											</SelectItem>
-										) : availableUsers.data?.map((user: any) => (
-											<SelectItem key={user.id} value={user.id}>
-												{user.name} ({user.email})
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							</div>
-							<div>
-								<Label htmlFor="areaId">Área</Label>
-								<Select name="areaId" required>
-									<SelectTrigger>
-										<SelectValue placeholder="Selecciona un área" />
-									</SelectTrigger>
-									<SelectContent>
-										{areas.isLoading ? (
-											<SelectItem value="" disabled>
-												Cargando áreas...
-											</SelectItem>
-										) : areas.data?.map((area: any) => (
-											<SelectItem key={area.id} value={area.id}>
-												{area.name} - {area.departmentName}
-											</SelectItem>
-										))}
-									</SelectContent>
-								</Select>
-							</div>
-							<div>
-								<Label htmlFor="position">Posición</Label>
-								<Input id="position" name="position" />
-							</div>
-							<Button type="submit" disabled={createMutation.isPending}>
-								{createMutation.isPending ? "Agregando..." : "Agregar"}
-							</Button>
-						</form>
+						
+						<Tabs defaultValue="existing" className="space-y-6">
+							<TabsList className="grid w-full grid-cols-2">
+								<TabsTrigger value="existing">Usuario Existente</TabsTrigger>
+								<TabsTrigger value="new">Crear Usuario Nuevo</TabsTrigger>
+							</TabsList>
+
+							<TabsContent value="existing" className="space-y-6">
+								<form onSubmit={handleCreateExistingSubmit} className="space-y-6">
+									<div className="space-y-2">
+										<Label htmlFor="userId">Usuario</Label>
+										<Select name="userId" required>
+											<SelectTrigger>
+												<SelectValue placeholder="Selecciona un usuario" />
+											</SelectTrigger>
+											<SelectContent>
+												{availableUsers.isLoading ? (
+													<SelectItem value="" disabled>
+														Cargando usuarios...
+													</SelectItem>
+												) : availableUsers.data?.map((user: any) => (
+													<SelectItem key={user.id} value={user.id}>
+														{user.name} ({user.email})
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="areaId-existing">Área</Label>
+										<Select name="areaId" required>
+											<SelectTrigger>
+												<SelectValue placeholder="Selecciona un área" />
+											</SelectTrigger>
+											<SelectContent>
+												{areas.isLoading ? (
+													<SelectItem value="" disabled>
+														Cargando áreas...
+													</SelectItem>
+												) : areas.data?.map((area: any) => (
+													<SelectItem key={area.id} value={area.id}>
+														{area.name} - {area.departmentName}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="position-existing">Posición</Label>
+										<Input id="position-existing" name="position" />
+									</div>
+									<Button type="submit" disabled={createMutation.isPending}>
+										{createMutation.isPending ? "Agregando..." : "Agregar Usuario Existente"}
+									</Button>
+								</form>
+							</TabsContent>
+
+							<TabsContent value="new" className="space-y-6">
+								<form onSubmit={handleCreateNewSubmit} className="space-y-6">
+									<div className="space-y-2">
+										<Label htmlFor="name">Nombre Completo</Label>
+										<Input id="name" name="name" required />
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="email">Correo Electrónico</Label>
+										<Input id="email" name="email" type="email" required />
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="role">Rol</Label>
+										<Select name="role" defaultValue="employee">
+											<SelectTrigger>
+												<SelectValue />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="employee">Empleado</SelectItem>
+												<SelectItem value="area_lead">Jefe de Área</SelectItem>
+												<SelectItem value="department_manager">Gerente de Departamento</SelectItem>
+												<SelectItem value="viewer">Observador</SelectItem>
+											</SelectContent>
+										</Select>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="areaId-new">Área</Label>
+										<Select name="areaId" required>
+											<SelectTrigger>
+												<SelectValue placeholder="Selecciona un área" />
+											</SelectTrigger>
+											<SelectContent>
+												{areas.isLoading ? (
+													<SelectItem value="" disabled>
+														Cargando áreas...
+													</SelectItem>
+												) : areas.data?.map((area: any) => (
+													<SelectItem key={area.id} value={area.id}>
+														{area.name} - {area.departmentName}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="position-new">Posición</Label>
+										<Input id="position-new" name="position" />
+									</div>
+									<Button type="submit" disabled={createUserAndAssignMutation.isPending}>
+										{createUserAndAssignMutation.isPending ? "Creando..." : "Crear Usuario y Agregar al Equipo"}
+									</Button>
+								</form>
+							</TabsContent>
+						</Tabs>
 					</DialogContent>
 				</Dialog>
 			</div>

@@ -44,8 +44,8 @@ export default function SignInForm({
 		},
 		validators: {
 			onSubmit: z.object({
-				email: z.email("Invalid email address"),
-				password: z.string().min(8, "Password must be at least 8 characters"),
+				email: z.email("Correo electrónico inválido"),
+				password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
 			}),
 		},
 	});

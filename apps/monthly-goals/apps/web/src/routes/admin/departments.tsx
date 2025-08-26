@@ -14,6 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -37,6 +44,7 @@ function DepartmentsPage() {
 
 	// Queries
 	const departments = useQuery(orpc.departments.list.queryOptions());
+	const availableUsers = useQuery(orpc.teams.availableUsers.queryOptions());
 
 	// Mutations
 	const createMutation = useMutation(
@@ -90,6 +98,7 @@ function DepartmentsPage() {
 		const data = {
 			name: formData.get("name") as string,
 			description: formData.get("description") as string,
+			managerId: formData.get("managerId") as string || undefined,
 		};
 		createMutation.mutate(data);
 	};
@@ -100,6 +109,7 @@ function DepartmentsPage() {
 		const data = {
 			name: formData.get("name") as string,
 			description: formData.get("description") as string,
+			managerId: formData.get("managerId") as string || undefined,
 		};
 		updateMutation.mutate({
 			id: editingDepartment.id,
@@ -126,18 +136,37 @@ function DepartmentsPage() {
 					<DialogTrigger asChild>
 						<Button>Crear Departamento</Button>
 					</DialogTrigger>
-					<DialogContent>
+					<DialogContent className="space-y-6">
 						<DialogHeader>
 							<DialogTitle>Crear Departamento</DialogTitle>
 						</DialogHeader>
-						<form onSubmit={handleCreateSubmit} className="space-y-4">
-							<div>
+						<form onSubmit={handleCreateSubmit} className="space-y-6">
+							<div className="space-y-2">
 								<Label htmlFor="name">Nombre</Label>
 								<Input id="name" name="name" required />
 							</div>
-							<div>
+							<div className="space-y-2">
 								<Label htmlFor="description">Descripción</Label>
 								<Textarea id="description" name="description" />
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="managerId">Manager del Departamento</Label>
+								<Select name="managerId">
+									<SelectTrigger>
+										<SelectValue placeholder="Selecciona un manager (opcional)" />
+									</SelectTrigger>
+									<SelectContent>
+										{availableUsers.isLoading ? (
+											<SelectItem value="" disabled>
+												Cargando usuarios...
+											</SelectItem>
+										) : availableUsers.data?.filter((u: any) => u.role === "manager" || u.role === "super_admin").map((user: any) => (
+											<SelectItem key={user.id} value={user.id}>
+												{user.name} ({user.email})
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
 							</div>
 							<Button type="submit" disabled={createMutation.isPending}>
 								{createMutation.isPending ? "Creando..." : "Crear"}
@@ -205,12 +234,12 @@ function DepartmentsPage() {
 
 			{/* Edit Dialog */}
 			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-				<DialogContent>
+				<DialogContent className="space-y-6">
 					<DialogHeader>
 						<DialogTitle>Editar Departamento</DialogTitle>
 					</DialogHeader>
-					<form onSubmit={handleEditSubmit} className="space-y-4">
-						<div>
+					<form onSubmit={handleEditSubmit} className="space-y-6">
+						<div className="space-y-2">
 							<Label htmlFor="edit-name">Nombre</Label>
 							<Input
 								id="edit-name"
@@ -219,13 +248,32 @@ function DepartmentsPage() {
 								required
 							/>
 						</div>
-						<div>
+						<div className="space-y-2">
 							<Label htmlFor="edit-description">Descripción</Label>
 							<Textarea
 								id="edit-description"
 								name="description"
 								defaultValue={editingDepartment?.description}
 							/>
+						</div>
+						<div className="space-y-2">
+							<Label htmlFor="edit-managerId">Manager del Departamento</Label>
+							<Select name="managerId" defaultValue={editingDepartment?.managerId || ""}>
+								<SelectTrigger>
+									<SelectValue placeholder="Selecciona un manager (opcional)" />
+								</SelectTrigger>
+								<SelectContent>
+									{availableUsers.isLoading ? (
+										<SelectItem value="" disabled>
+											Cargando usuarios...
+										</SelectItem>
+									) : availableUsers.data?.filter((u: any) => u.role === "manager" || u.role === "super_admin").map((user: any) => (
+										<SelectItem key={user.id} value={user.id}>
+											{user.name} ({user.email})
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
 						</div>
 						<Button type="submit" disabled={updateMutation.isPending}>
 							{updateMutation.isPending ? "Actualizando..." : "Actualizar"}

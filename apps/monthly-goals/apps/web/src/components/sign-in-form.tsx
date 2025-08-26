@@ -32,9 +32,9 @@ export default function SignInForm({
 				{
 					onSuccess: () => {
 						navigate({
-							to: "/dashboard",
+							to: "/",
 						});
-						toast.success("Sign in successful");
+						toast.success("Inicio de sesión exitoso");
 					},
 					onError: (error) => {
 						toast.error(error.error.message || error.error.statusText);
@@ -56,7 +56,7 @@ export default function SignInForm({
 
 	return (
 		<div className="mx-auto w-full mt-10 max-w-md p-6">
-			<h1 className="mb-6 text-center text-3xl font-bold">Welcome Back</h1>
+			<h1 className="mb-6 text-center text-3xl font-bold">Bienvenido de Nuevo</h1>
 
 			<form
 				onSubmit={(e) => {
@@ -70,7 +70,7 @@ export default function SignInForm({
 					<form.Field name="email">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Email</Label>
+								<Label htmlFor={field.name}>Correo</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -93,7 +93,7 @@ export default function SignInForm({
 					<form.Field name="password">
 						{(field) => (
 							<div className="space-y-2">
-								<Label htmlFor={field.name}>Password</Label>
+								<Label htmlFor={field.name}>Contraseña</Label>
 								<Input
 									id={field.name}
 									name={field.name}
@@ -119,7 +119,7 @@ export default function SignInForm({
 							className="w-full"
 							disabled={!state.canSubmit || state.isSubmitting}
 						>
-							{state.isSubmitting ? "Submitting..." : "Sign In"}
+							{state.isSubmitting ? "Iniciando sesión..." : "Iniciar Sesión"}
 						</Button>
 					)}
 				</form.Subscribe>
@@ -131,7 +131,7 @@ export default function SignInForm({
 					onClick={onSwitchToSignUp}
 					className="text-indigo-600 hover:text-indigo-800"
 				>
-					Need an account? Sign Up
+					¿Necesitas una cuenta? Regístrate
 				</Button>
 			</div>
 		</div>

@@ -11,12 +11,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bun build` - Build all applications
 - `bun check` - Run oxlint linter
 - `bun check-types` - Check TypeScript types across all apps
+- `bun run check-all` - Complete build and type checking (regenerates ORPC types)
 
 ### Database
 - `bun db:push` - Push schema changes to database
 - `bun db:studio` - Open Drizzle Studio UI
 - `bun db:generate` - Generate migrations
 - `bun db:migrate` - Run migrations
+- `bun db:seed` - Create test users with different roles
+- `bun db:clear` - Clear all data from database
 
 ### Testing
 - Run a single test file: `bun test path/to/test.spec.ts`
@@ -82,3 +85,11 @@ This is a monorepo using Bun workspaces with two main applications:
 - Authentication flow: Better Auth handles signup/signin with database sessions
 - ORPC provides OpenAPI spec generation capability
 - Components follow shadcn/ui patterns in `apps/web/src/components/ui/`
+- **Type generation**: Use `bun run check-all` when ORPC types are not working correctly
+- **Parallel commands**: Build and check-types may fail when run together, use `check-all` script instead
+
+## Test Users (after running `bun db:seed`)
+- **Super Admin**: admin@company.com / Admin123!
+- **Manager**: manager.ventas@company.com / Manager123!  
+- **Employee**: empleado.ventas@company.com / Employee123!
+- **Viewer**: viewer@company.com / Viewer123!

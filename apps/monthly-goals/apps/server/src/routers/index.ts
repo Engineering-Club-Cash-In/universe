@@ -21,6 +21,8 @@ import {
 	updateTeamMember,
 	deleteTeamMember,
 	getAvailableUsers,
+	createUserAndAssignToTeam,
+	getMyTeamMembers,
 } from "./teams";
 import {
 	listGoalTemplates,
@@ -37,6 +39,7 @@ import {
 	updateMonthlyGoal,
 	deleteMonthlyGoal,
 	calculateGoalProgress,
+	getMyGoals,
 } from "./monthly-goals";
 
 export const appRouter = {
@@ -70,6 +73,8 @@ export const appRouter = {
 		update: updateTeamMember,
 		delete: deleteTeamMember,
 		availableUsers: getAvailableUsers,
+		createUserAndAssign: createUserAndAssignToTeam,
+		my: getMyTeamMembers,
 	},
 	goalTemplates: {
 		list: listGoalTemplates,
@@ -86,6 +91,7 @@ export const appRouter = {
 		update: updateMonthlyGoal,
 		delete: deleteMonthlyGoal,
 		calculateProgress: calculateGoalProgress,
+		my: getMyGoals,
 	},
 };
 export type AppRouter = typeof appRouter;

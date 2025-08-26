@@ -16,6 +16,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as GoalsIndexRouteImport } from './routes/goals/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as GoalsMyGoalsRouteImport } from './routes/goals/my-goals'
 import { Route as GoalsConfigureRouteImport } from './routes/goals/configure'
 import { Route as AdminTeamsRouteImport } from './routes/admin/teams'
 import { Route as AdminGoalTemplatesRouteImport } from './routes/admin/goal-templates'
@@ -57,6 +58,11 @@ const AdminIndexRoute = AdminIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AdminRoute,
 } as any)
+const GoalsMyGoalsRoute = GoalsMyGoalsRouteImport.update({
+  id: '/my-goals',
+  path: '/my-goals',
+  getParentRoute: () => GoalsRoute,
+} as any)
 const GoalsConfigureRoute = GoalsConfigureRouteImport.update({
   id: '/configure',
   path: '/configure',
@@ -94,6 +100,7 @@ export interface FileRoutesByFullPath {
   '/admin/goal-templates': typeof AdminGoalTemplatesRoute
   '/admin/teams': typeof AdminTeamsRoute
   '/goals/configure': typeof GoalsConfigureRoute
+  '/goals/my-goals': typeof GoalsMyGoalsRoute
   '/admin/': typeof AdminIndexRoute
   '/goals/': typeof GoalsIndexRoute
 }
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/admin/goal-templates': typeof AdminGoalTemplatesRoute
   '/admin/teams': typeof AdminTeamsRoute
   '/goals/configure': typeof GoalsConfigureRoute
+  '/goals/my-goals': typeof GoalsMyGoalsRoute
   '/admin': typeof AdminIndexRoute
   '/goals': typeof GoalsIndexRoute
 }
@@ -121,6 +129,7 @@ export interface FileRoutesById {
   '/admin/goal-templates': typeof AdminGoalTemplatesRoute
   '/admin/teams': typeof AdminTeamsRoute
   '/goals/configure': typeof GoalsConfigureRoute
+  '/goals/my-goals': typeof GoalsMyGoalsRoute
   '/admin/': typeof AdminIndexRoute
   '/goals/': typeof GoalsIndexRoute
 }
@@ -137,6 +146,7 @@ export interface FileRouteTypes {
     | '/admin/goal-templates'
     | '/admin/teams'
     | '/goals/configure'
+    | '/goals/my-goals'
     | '/admin/'
     | '/goals/'
   fileRoutesByTo: FileRoutesByTo
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/admin/goal-templates'
     | '/admin/teams'
     | '/goals/configure'
+    | '/goals/my-goals'
     | '/admin'
     | '/goals'
   id:
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/admin/goal-templates'
     | '/admin/teams'
     | '/goals/configure'
+    | '/goals/my-goals'
     | '/admin/'
     | '/goals/'
   fileRoutesById: FileRoutesById
@@ -226,6 +238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/goals/my-goals': {
+      id: '/goals/my-goals'
+      path: '/my-goals'
+      fullPath: '/goals/my-goals'
+      preLoaderRoute: typeof GoalsMyGoalsRouteImport
+      parentRoute: typeof GoalsRoute
+    }
     '/goals/configure': {
       id: '/goals/configure'
       path: '/configure'
@@ -284,11 +303,13 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface GoalsRouteChildren {
   GoalsConfigureRoute: typeof GoalsConfigureRoute
+  GoalsMyGoalsRoute: typeof GoalsMyGoalsRoute
   GoalsIndexRoute: typeof GoalsIndexRoute
 }
 
 const GoalsRouteChildren: GoalsRouteChildren = {
   GoalsConfigureRoute: GoalsConfigureRoute,
+  GoalsMyGoalsRoute: GoalsMyGoalsRoute,
   GoalsIndexRoute: GoalsIndexRoute,
 }
 

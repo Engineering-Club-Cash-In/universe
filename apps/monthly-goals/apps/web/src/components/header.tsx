@@ -6,30 +6,14 @@ import { authClient } from "@/lib/auth-client";
 export default function Header() {
 	const { data: session } = authClient.useSession();
 	
-	const baseLinks = [
-		{ to: "/", label: "Inicio" },
-		{ to: "/dashboard", label: "Dashboard" },
-		{ to: "/goals", label: "Metas" },
-	] as const;
-
-	const adminLinks = (session?.user.role === "super_admin" || session?.user.role === "manager") ? [
-		{ to: "/admin", label: "Administración" },
-	] : [];
-
-	const links = [...baseLinks, ...adminLinks];
-
 	return (
 		<div>
-			<div className="flex flex-row items-center justify-between px-2 py-1">
-				<nav className="flex gap-4 text-lg">
-					{links.map(({ to, label }) => {
-						return (
-							<Link key={to} to={to}>
-								{label}
-							</Link>
-						);
-					})}
-				</nav>
+			<div className="flex flex-row items-center justify-between px-6 py-3">
+				<Link to="/" className="flex items-center">
+					<h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+						CCI Sync
+					</h1>
+				</Link>
 				<div className="flex items-center gap-2">
 					<ModeToggle />
 					<UserMenu />

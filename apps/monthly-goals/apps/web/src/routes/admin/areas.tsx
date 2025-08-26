@@ -135,20 +135,20 @@ function AreasPage() {
 					<DialogTrigger asChild>
 						<Button>Crear Área</Button>
 					</DialogTrigger>
-					<DialogContent>
+					<DialogContent className="space-y-6">
 						<DialogHeader>
 							<DialogTitle>Crear Área</DialogTitle>
 						</DialogHeader>
-						<form onSubmit={handleCreateSubmit} className="space-y-4">
-							<div>
+						<form onSubmit={handleCreateSubmit} className="space-y-6">
+							<div className="space-y-2">
 								<Label htmlFor="name">Nombre</Label>
 								<Input id="name" name="name" required />
 							</div>
-							<div>
+							<div className="space-y-2">
 								<Label htmlFor="description">Descripción</Label>
 								<Textarea id="description" name="description" />
 							</div>
-							<div>
+							<div className="space-y-2">
 								<Label htmlFor="departmentId">Departamento</Label>
 								<Select name="departmentId" required>
 									<SelectTrigger>
@@ -233,12 +233,12 @@ function AreasPage() {
 
 			{/* Edit Dialog */}
 			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-				<DialogContent>
+				<DialogContent className="space-y-6">
 					<DialogHeader>
 						<DialogTitle>Editar Área</DialogTitle>
 					</DialogHeader>
-					<form onSubmit={handleEditSubmit} className="space-y-4">
-						<div>
+					<form onSubmit={handleEditSubmit} className="space-y-6">
+						<div className="space-y-2">
 							<Label htmlFor="edit-name">Nombre</Label>
 							<Input
 								id="edit-name"
@@ -247,7 +247,7 @@ function AreasPage() {
 								required
 							/>
 						</div>
-						<div>
+						<div className="space-y-2">
 							<Label htmlFor="edit-description">Descripción</Label>
 							<Textarea
 								id="edit-description"

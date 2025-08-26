@@ -90,6 +90,9 @@ This is a monorepo using Bun workspaces with two main applications:
 
 ## Test Users (after running `bun db:seed`)
 - **Super Admin**: admin@company.com / Admin123!
-- **Manager**: manager.ventas@company.com / Manager123!  
+- **Department Manager**: gerente.ventas@company.com / Manager123!
+- **Department Manager**: gerente.operaciones@company.com / Manager123!
+- **Area Lead**: lead.marketing@company.com / Lead123!
 - **Employee**: empleado.ventas@company.com / Employee123!
+- **Employee**: empleado.marketing@company.com / Employee123!
 - **Viewer**: viewer@company.com / Viewer123!

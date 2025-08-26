@@ -142,24 +142,24 @@ function GoalTemplatesPage() {
 					<DialogTrigger asChild>
 						<Button>Crear Template</Button>
 					</DialogTrigger>
-					<DialogContent className="max-w-md">
+					<DialogContent className="max-w-md space-y-6">
 						<DialogHeader>
 							<DialogTitle>Crear Template de Meta</DialogTitle>
 						</DialogHeader>
-						<form onSubmit={handleCreateSubmit} className="space-y-4">
-							<div>
+						<form onSubmit={handleCreateSubmit} className="space-y-6">
+							<div className="space-y-2">
 								<Label htmlFor="name">Nombre</Label>
 								<Input id="name" name="name" required />
 							</div>
-							<div>
+							<div className="space-y-2">
 								<Label htmlFor="description">Descripción</Label>
 								<Textarea id="description" name="description" />
 							</div>
-							<div>
+							<div className="space-y-2">
 								<Label htmlFor="unit">Unidad</Label>
 								<Input id="unit" name="unit" placeholder="ej: entregas, ventas, tickets" />
 							</div>
-							<div>
+							<div className="space-y-2">
 								<Label htmlFor="defaultTarget">Meta por Defecto</Label>
 								<Input id="defaultTarget" name="defaultTarget" type="number" step="0.01" />
 							</div>

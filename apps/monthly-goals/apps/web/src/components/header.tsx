@@ -9,7 +9,7 @@ export default function Header() {
 	return (
 		<div>
 			<div className="flex flex-row items-center justify-between px-6 py-3">
-				<Link to="/" className="flex items-center">
+				<Link to={session ? "/dashboard" : "/"} className="flex items-center">
 					<h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
 						CCI Sync
 					</h1>

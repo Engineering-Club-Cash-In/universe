@@ -19,6 +19,8 @@
 		"db:migrate": "bun run --filter server db:migrate",
 		"db:seed": "bun run --filter server db:seed",
 		"db:clear": "bun run --filter server db:clear",
+		"test": "bun run --filter server test",
+		"test:watch": "bun run --filter server test:watch",
 		"check-all": "./scripts/build-types.sh"
 	},
 	"dependencies": {},

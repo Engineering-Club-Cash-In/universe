@@ -1,50 +1,72 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { orpc } from "@/utils/orpc";
-import { useQuery } from "@tanstack/react-query";
+import { authClient } from "@/lib/auth-client";
+import { useEffect } from "react";
 
 export const Route = createFileRoute("/")({
 	component: HomeComponent,
 });
 
-const TITLE_TEXT = `
- ██████╗ ███████╗████████╗████████╗███████╗██████╗
- ██╔══██╗██╔════╝╚══██╔══╝╚══██╔══╝██╔════╝██╔══██╗
- ██████╔╝█████╗     ██║      ██║   █████╗  ██████╔╝
- ██╔══██╗██╔══╝     ██║      ██║   ██╔══╝  ██╔══██╗
- ██████╔╝███████╗   ██║      ██║   ███████╗██║  ██║
- ╚═════╝ ╚══════╝   ╚═╝      ╚═╝   ╚══════╝╚═╝  ╚═╝
-
- ████████╗    ███████╗████████╗ █████╗  ██████╗██╗  ██╗
- ╚══██╔══╝    ██╔════╝╚══██╔══╝██╔══██╗██╔════╝██║ ██╔╝
-    ██║       ███████╗   ██║   ███████║██║     █████╔╝
-    ██║       ╚════██║   ██║   ██╔══██║██║     ██╔═██╗
-    ██║       ███████║   ██║   ██║  ██║╚██████╗██║  ██╗
-    ╚═╝       ╚══════╝   ╚═╝   ╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝
- `;
-
 function HomeComponent() {
-	const healthCheck = useQuery(orpc.healthCheck.queryOptions());
+	const { data: session, isPending } = authClient.useSession();
+	const navigate = Route.useNavigate();
 
+	useEffect(() => {
+		if (!isPending && session) {
+			// If user is logged in, redirect to dashboard
+			navigate({ to: "/dashboard", replace: true });
+		}
+	}, [session, isPending, navigate]);
+
+	if (isPending) {
+		return (
+			<div className="flex items-center justify-center h-64">
+				<div className="text-lg">Cargando...</div>
+			</div>
+		);
+	}
+
+	if (session) {
+		return null; // Will redirect to dashboard
+	}
+
+	// Show landing page for non-authenticated users
 	return (
 		<div className="p-6">
-			<div className="container mx-auto max-w-3xl">
-				<pre className="overflow-x-auto font-mono text-sm">{TITLE_TEXT}</pre>
-				<div className="grid gap-6">
-					<section className="rounded-lg border p-4">
-						<h2 className="mb-2 font-medium">API Status</h2>
-						<div className="flex items-center gap-2">
-							<div
-								className={`h-2 w-2 rounded-full ${healthCheck.data ? "bg-green-500" : "bg-red-500"}`}
-							/>
-							<span className="text-sm text-muted-foreground">
-								{healthCheck.isLoading
-									? "Checking..."
-									: healthCheck.data
-										? "Connected"
-										: "Disconnected"}
-							</span>
-						</div>
-					</section>
+			<div className="max-w-4xl mx-auto text-center space-y-8">
+				<div className="space-y-4">
+					<h1 className="text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+						CCI Sync
+					</h1>
+					<p className="text-xl text-gray-600 dark:text-gray-400">
+						Sistema de Gestión de Metas Mensuales
+					</p>
+					<p className="text-lg text-gray-500 dark:text-gray-500">
+						Gestiona y presenta metas departamentales con seguimiento mensual, 
+						jerarquía organizacional completa y generación automática de presentaciones.
+					</p>
+				</div>
+
+				<div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-12">
+					<div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg">
+						<h3 className="text-lg font-semibold mb-2">Gestión Organizacional</h3>
+						<p className="text-gray-600 dark:text-gray-400">
+							Administra departamentos, áreas y equipos de trabajo con jerarquía completa.
+						</p>
+					</div>
+					
+					<div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg">
+						<h3 className="text-lg font-semibold mb-2">Tracking de Metas</h3>
+						<p className="text-gray-600 dark:text-gray-400">
+							Configuración y seguimiento mensual de objetivos individuales con sistema de semáforo.
+						</p>
+					</div>
+					
+					<div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg">
+						<h3 className="text-lg font-semibold mb-2">Presentaciones Automatizadas</h3>
+						<p className="text-gray-600 dark:text-gray-400">
+							Generación automática de dashboards interactivos para reuniones de seguimiento.
+						</p>
+					</div>
 				</div>
 			</div>
 		</div>

@@ -29,6 +29,15 @@ import {
 	updateGoalTemplate,
 	deleteGoalTemplate,
 } from "./goal-templates";
+import {
+	listMonthlyGoals,
+	getMonthlyGoal,
+	createMonthlyGoal,
+	bulkCreateMonthlyGoals,
+	updateMonthlyGoal,
+	deleteMonthlyGoal,
+	calculateGoalProgress,
+} from "./monthly-goals";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -68,6 +77,15 @@ export const appRouter = {
 		create: createGoalTemplate,
 		update: updateGoalTemplate,
 		delete: deleteGoalTemplate,
+	},
+	monthlyGoals: {
+		list: listMonthlyGoals,
+		get: getMonthlyGoal,
+		create: createMonthlyGoal,
+		bulkCreate: bulkCreateMonthlyGoals,
+		update: updateMonthlyGoal,
+		delete: deleteMonthlyGoal,
+		calculateProgress: calculateGoalProgress,
 	},
 };
 export type AppRouter = typeof appRouter;

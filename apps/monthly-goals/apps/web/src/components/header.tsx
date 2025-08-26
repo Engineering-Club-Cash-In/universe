@@ -9,6 +9,7 @@ export default function Header() {
 	const baseLinks = [
 		{ to: "/", label: "Inicio" },
 		{ to: "/dashboard", label: "Dashboard" },
+		{ to: "/goals", label: "Metas" },
 	] as const;
 
 	const adminLinks = (session?.user.role === "super_admin" || session?.user.role === "manager") ? [

@@ -7,7 +7,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { useState } from "react";
 import { createTanstackQueryUtils } from "@orpc/tanstack-query";
-import type { AppRouterClient } from "../../../server/src/types";
+import type { AppRouterClient } from "../../../server/src/routers/index";
 import { createORPCClient } from "@orpc/client";
 import {
 	HeadContent,

@@ -41,6 +41,10 @@ import {
 	calculateGoalProgress,
 	getMyGoals,
 } from "./monthly-goals";
+import {
+	getDashboardMetrics,
+	getHealthStatus,
+} from "./dashboard";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -92,6 +96,10 @@ export const appRouter = {
 		delete: deleteMonthlyGoal,
 		calculateProgress: calculateGoalProgress,
 		my: getMyGoals,
+	},
+	dashboard: {
+		metrics: getDashboardMetrics,
+		health: getHealthStatus,
 	},
 };
 export type AppRouter = typeof appRouter;

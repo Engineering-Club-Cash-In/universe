@@ -22,7 +22,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `bun db:clear` - Clear all data from database
 
 ### Testing
-- Run a single test file: `bun test path/to/test.spec.ts`
+- `bun test` - Run all backend tests
+- `bun test:watch` - Run tests in watch mode
+- `NODE_ENV=test bun test` - Run tests with test environment variables
+- Run single test file: `bun test src/routers/__tests__/departments.test.ts`
 
 ## Architecture
 

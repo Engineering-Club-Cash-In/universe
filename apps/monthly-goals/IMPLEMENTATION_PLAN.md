@@ -310,13 +310,15 @@ monthly-goals/
 - [x] Validación de permisos
 
 **Detalles de implementación:**
-- **CRUD Departamentos**: Server functions completas, interfaz con tabla y formularios modales
-- **CRUD Áreas**: Con relación a departamentos, selector en formulario, join para mostrar departamento
-- **CRUD Equipos**: Con relaciones múltiples (users, areas, departments), gestión de posiciones
-- **Navegación**: Menú lateral con rutas protegidas por roles (super_admin, manager)
-- **Type-safety**: End-to-end con ORPC, validación Zod en todos los endpoints
-- **UX**: Interfaces completamente en español, manejo de errores consistente
-- **Utilidades**: Función `getErrorMessage` para manejo consistente de errores
+- **CRUD Departamentos**: Server functions con ORPC + Zod, interfaz administrativa completa
+- **CRUD Áreas**: Join con departamentos, selector en formulario, validaciones
+- **CRUD Equipos**: Relaciones múltiples (users, areas, departments), gestión de posiciones
+- **Goal Templates**: Server functions implementadas (interfaz pendiente)
+- **Sistema de usuarios**: 6 usuarios seed con todos los roles, scripts db:seed y db:clear
+- **Navegación**: Sidebar fija, auto-redirect /admin → /admin/departments
+- **UX**: Loading states inteligentes, interfaz en español, manejo de errores consistente
+- **Scripts**: check-all automatizado para build + tipos, getErrorMessage utilitario
+- **Autenticación**: Login redirect a home, validación de roles funcional
 
 ### Fase 3: Sistema de Metas (4-5 días)
 - [ ] Templates de metas

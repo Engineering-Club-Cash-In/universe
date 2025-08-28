@@ -94,3 +94,62 @@ export interface CreditoConInfo {
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
 }
+
+export type ClosureInfo =
+  | {
+      kind: "CANCELACION";
+      id: number;
+      motivo: string;
+      observaciones: string | null;
+      fecha: Date | string | null;
+      monto: string; // numeric de PG -> string
+    }
+  | {
+      kind: "INCOBRABLE";
+      id: number;
+      motivo: string;
+      observaciones: string | null;
+      fecha: Date | string | null;
+      monto: string; // numeric de PG -> string
+    }
+  | null;
+
+export type CuotaExcelRow = {
+  no: number;
+  mes: string;
+  interes: string; // numeric -> string
+  servicios: string; // numeric -> string
+  mora: string; // numeric -> string
+  otros: string; // numeric -> string
+  capital_pendiente: string; // numeric -> string
+  total_cancelar: string; // numeric -> string
+  fecha_vencimiento: string; // YYYY-MM-DD
+};
+
+// DTO principal
+export interface GetCreditDTO {
+  header: {
+    usuario: string;
+    numero_credito_sifco: string;
+    moneda: "Quetzal";
+    tipo_credito: string;
+    observaciones: string;
+    saldo_total: string; // numeric -> string
+    extras_total: string; // NUEVO
+    saldo_total_con_extras: string; // NUEVO
+  };
+  closure: ClosureInfo;
+  cuotas_atrasadas: {
+    total: number;
+    items: CuotaExcelRow[];
+  };
+  extras: {
+    total_items: number;
+    items: Array<{
+      id: number;
+      concepto: string;
+      monto: string; // numeric -> string
+      fecha_registro: Date | string | null;
+    }>;
+  };
+}

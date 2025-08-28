@@ -5,8 +5,10 @@ import { z } from 'zod';
 import { getCreditWithCancellationDetails } from '../controllers/cancelCredit';
 import puppeteer from 'puppeteer';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
-import { renderCancelationHTML } from '../utils/functions/generalFunctions';
+import { buildCancelationWorkbook, renderCancelationHTML } from '../utils/functions/generalFunctions';
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { buildCancelationWorkbookDetailedGreen, fetchImageBase64, renderCancelationHTMLDetailedGreen } from '../utils/functions/internReportCancelations';
+import { buildCostDetailWorkbookPeach, renderCostDetailHTMLPeach } from '../utils/functions/reportCancelationCosts';
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
   monto: z.number({ invalid_type_error: "monto debe ser numérico" }),
@@ -231,13 +233,21 @@ post("/creditAction", async ({ body, set }) => {
     set.status = 500;
     return { message: "Error reiniciando el crédito", error: String(error) };
   }
-})
-.get("/credit/cancelation-report", async ({ query, set }) => {
-  const { numero_sifco } = query as Record<string, string | undefined>;
+}).
+get("/credit/cancelation-report", async ({ query, set }) => {
+  const { numero_sifco, pdf, excel, format } = query as Record<string, string | undefined>;
 
   if (!numero_sifco) {
     set.status = 400;
     return { message: "El parámetro 'numero_sifco' es obligatorio." };
+  }
+
+  let outFormat: "pdf" | "excel" = "pdf";
+  if (format === "excel" || excel === "true") outFormat = "excel";
+  if (format === "pdf" || pdf === "true") outFormat = "pdf";
+  if (pdf === "true" && excel === "true") {
+    set.status = 400;
+    return { message: "Elige solo uno: 'pdf=true' o 'excel=true'." };
   }
 
   // 1) Datos
@@ -248,31 +258,38 @@ post("/creditAction", async ({ body, set }) => {
   }
   const data = res.data;
 
-  // 2) HTML
-  const logoUrl = process.env.LOGO_URL || "";
-  const html = renderCancelationHTML(data, logoUrl);
+  // 2) Generar archivo según formato
+  let fileBuffer: Buffer;
+  let filename: string;
+  let contentType: string;
 
-  // 3) PDF (Puppeteer)
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
-  const pagePDF = await browser.newPage();
-  await pagePDF.setContent(html, { waitUntil: "networkidle0" });
+  if (outFormat === "excel") {
+  fileBuffer = await buildCancelationWorkbook(data, { logoUrl: process.env.LOGO_URL || undefined });
+  filename = `cancelacion_${data.header.numero_credito_sifco}_${Date.now()}.xlsx`;
+  contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  } else {
+    const logoUrl = process.env.LOGO_URL || "";
+    const html = renderCancelationHTML(data, logoUrl);
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const pagePDF = await browser.newPage();
+    await pagePDF.setContent(html, { waitUntil: "networkidle0" });
+    const pdfData = await pagePDF.pdf({
+      format: "A4",
+      landscape: false,
+      printBackground: true,
+      margin: { top: "12mm", bottom: "12mm", left: "10mm", right: "10mm" },
+    });
+    fileBuffer = Buffer.from(pdfData);
+    await browser.close();
 
-  // A4 apaisado o tamaño personalizado; ajusta si quieres calcar el Excel
-  const pdfBuffer = await pagePDF.pdf({
-    format: "A4",
-    landscape: false,
-    printBackground: true,
-    margin: { top: "12mm", bottom: "12mm", left: "10mm", right: "10mm" },
-  });
+    filename = `cancelacion_${data.header.numero_credito_sifco}_${Date.now()}.pdf`;
+    contentType = "application/pdf";
+  }
 
-  await browser.close();
-
-  // 4) Upload a S3/R2
-  const filename = `cancelacion_${data.header.numero_credito_sifco}_${Date.now()}.pdf`;
-
+  // 3) Upload a S3/R2
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
     region: "auto",
@@ -286,12 +303,12 @@ post("/creditAction", async ({ body, set }) => {
     new PutObjectCommand({
       Bucket: process.env.BUCKET_REPORTS as string,
       Key: filename,
-      Body: pdfBuffer,
-      ContentType: "application/pdf",
+      Body: fileBuffer,
+      ContentType: contentType,
     })
   );
 
-  // 5) URL pública o pre-signed
+  // 4) URL pública o pre-signed
   let url: string;
   if (process.env.URL_PUBLIC_R2_REPORTS) {
     url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
@@ -302,16 +319,208 @@ post("/creditAction", async ({ body, set }) => {
         Bucket: process.env.BUCKET_REPORTS as string,
         Key: filename,
       }),
-      { expiresIn: 60 * 60 * 24 } // 24h
+      { expiresIn: 60 * 60 * 24 }
     );
   }
 
   return {
     ok: true,
+    format: outFormat,
     url,
     filename,
-    size: pdfBuffer.length,
+    size: fileBuffer.length,
+  };
+}).get("/credit/cancelation-report-intern", async ({ query, set }) => {
+  const { numero_sifco, pdf, excel, format } = query as Record<string, string | undefined>;
+  if (!numero_sifco) {
+    set.status = 400;
+    return { message: "El parámetro 'numero_sifco' es obligatorio." };
+  }
+
+  // formato
+  let outFormat: "pdf" | "excel" = "pdf";
+  if (format === "excel" || excel === "true") outFormat = "excel";
+  if (format === "pdf" || pdf === "true") outFormat = "pdf";
+  if (pdf === "true" && excel === "true") {
+    set.status = 400;
+    return { message: "Elige solo uno: 'pdf=true' o 'excel=true'." };
+  }
+
+  // 1) Data
+  const res = await getCreditWithCancellationDetails(numero_sifco);
+  if (!res.success) {
+    set.status = 404;
+    return { message: "Crédito no encontrado." };
+  }
+  const data = res.data;
+
+  // 2) Generar archivo
+  let fileBuffer: Buffer;
+  let filename: string;
+  let contentType: string;
+
+  if (outFormat === "excel") {
+    const logoBase64 = null; // el builder ya admite base64 si quieres: fetch y pásalo
+    fileBuffer = await buildCancelationWorkbookDetailedGreen(data, { logoBase64 });
+    filename = `cancelacion_detallada_${data.header.numero_credito_sifco}_${Date.now()}.xlsx`;
+    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  } else {
+    const logoUrl = process.env.LOGO_URL || "";
+    const html = renderCancelationHTMLDetailedGreen(data, logoUrl);
+
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const pagePDF = await browser.newPage();
+    await pagePDF.setContent(html, { waitUntil: "networkidle0" });
+    const pdfData = await pagePDF.pdf({
+      format: "A4",
+      landscape: false,
+      printBackground: true,
+      margin: { top: "12mm", bottom: "12mm", left: "10mm", right: "10mm" },
+    });
+    await browser.close();
+
+    fileBuffer = Buffer.from(pdfData);
+    filename = `cancelacion_detallada_${data.header.numero_credito_sifco}_${Date.now()}.pdf`;
+    contentType = "application/pdf";
+  }
+
+  // 3) Upload R2
+  const Bucket = process.env.BUCKET_REPORTS as string;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(new PutObjectCommand({
+    Bucket,
+    Key: filename,
+    Body: fileBuffer,
+    ContentType: contentType,
+  }));
+
+  // 4) URL pública o presignada (24h)
+  let url: string;
+  if (process.env.URL_PUBLIC_R2_REPORTS) {
+    const base = process.env.URL_PUBLIC_R2_REPORTS.replace(/\/+$/,"");
+    url = `${base}/${encodeURIComponent(filename)}`;
+  } else {
+    url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket, Key: filename }),
+      { expiresIn: 60 * 60 * 24 }
+    );
+  }
+
+  // 5) Respuesta final
+  return {
+    ok: true,
+    format: outFormat,
+    url,
+    filename,
+    size: fileBuffer.length,
+  };
+}) .get("/credit/cost-detail-report", async ({ query, set }) => {
+  const { numero_sifco, pdf, excel, format } = query as Record<string, string | undefined>;
+
+  if (!numero_sifco) {
+    set.status = 400;
+    return { message: "El parámetro 'numero_sifco' es obligatorio." };
+  }
+
+  // formato (mutuamente excluyente)
+  let outFormat: "pdf" | "excel" = "pdf";
+  if (format === "excel" || excel === "true") outFormat = "excel";
+  if (format === "pdf" || pdf === "true") outFormat = "pdf";
+  if (pdf === "true" && excel === "true") {
+    set.status = 400;
+    return { message: "Elige solo uno: 'pdf=true' o 'excel=true'." };
+  }
+
+  // 1) Datos
+  const res = await getCreditWithCancellationDetails(numero_sifco);
+  if (!res.success) {
+    set.status = 404;
+    return { message: "Crédito no encontrado." };
+  }
+  const data = res.data;
+
+  // 2) Generar archivo (tema durazno)
+  let fileBuffer: Buffer;
+  let filename: string;
+  let contentType: string;
+
+  if (outFormat === "excel") {
+    const logoBase64 = await fetchImageBase64(process.env.LOGO_URL || undefined);
+    fileBuffer = await buildCostDetailWorkbookPeach(data, { logoBase64 });
+    filename = `detalle_costos_${data.header.numero_credito_sifco}_${Date.now()}.xlsx`;
+    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  } else {
+    const html = renderCostDetailHTMLPeach(data, process.env.LOGO_URL || "");
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    const pdfData = await page.pdf({
+      format: "A4",
+      landscape: false,
+      printBackground: true,
+      margin: { top: "12mm", bottom: "12mm", left: "10mm", right: "10mm" },
+    });
+    await browser.close();
+
+    fileBuffer = Buffer.from(pdfData);
+    filename = `detalle_costos_${data.header.numero_credito_sifco}_${Date.now()}.pdf`;
+    contentType = "application/pdf";
+  }
+
+  // 3) Upload a R2
+  const Bucket = process.env.BUCKET_REPORTS as string;
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+    },
+  });
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket,
+      Key: filename,
+      Body: fileBuffer,
+      ContentType: contentType,
+    })
+  );
+
+  // 4) URL pública o presignada (24h)
+  let url: string;
+  if (process.env.URL_PUBLIC_R2_REPORTS) {
+    const base = process.env.URL_PUBLIC_R2_REPORTS.replace(/\/+$/, "");
+    url = `${base}/${encodeURIComponent(filename)}`;
+  } else {
+    url = await getSignedUrl(
+      s3,
+      new GetObjectCommand({ Bucket, Key: filename }),
+      { expiresIn: 60 * 60 * 24 }
+    );
+  }
+
+  // 5) Respuesta
+  return {
+    ok: true,
+    format: outFormat,
+    url,
+    filename,
+    size: fileBuffer.length,
   };
 });
-
- 

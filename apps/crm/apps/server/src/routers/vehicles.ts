@@ -486,8 +486,16 @@ export const vehiclesRouter = {
       })).optional(),
     }))
     .handler(async ({ input }) => {
+      // Log incoming data for debugging
+      console.log('=== createFullInspection DEBUG ===');
+      console.log('Vehicle data:', JSON.stringify(input.vehicle, null, 2));
+      console.log('Inspection data:', JSON.stringify(input.inspection, null, 2));
+      console.log('Checklist items count:', input.checklistItems?.length || 0);
+      console.log('Photos count:', input.photos?.length || 0);
+      
       // Start a transaction
-      return await db.transaction(async (tx) => {
+      try {
+        return await db.transaction(async (tx) => {
         // 1. Check if vehicle exists by VIN or create new
         let vehicleId: string;
         const existingVehicle = await tx
@@ -519,12 +527,21 @@ export const vehiclesRouter = {
           vehicleId = newVehicle.id;
         }
 
-        // 2. Create inspection
+        // 2. Create inspection - Clean numeric values
+        const cleanValue = (value: string): string => {
+          // Remove formatting but keep as string for the database
+          return parseFloat(value.replace(/[,_\s]/g, '')).toString();
+        };
+        
         const [newInspection] = await tx
           .insert(vehicleInspections)
           .values({
             vehicleId,
             ...input.inspection,
+            marketValue: cleanValue(input.inspection.marketValue),
+            suggestedCommercialValue: cleanValue(input.inspection.suggestedCommercialValue),
+            bankValue: cleanValue(input.inspection.bankValue),
+            currentConditionValue: cleanValue(input.inspection.currentConditionValue),
             status: "pending",
             alerts: [],
           } as NewVehicleInspection)
@@ -569,21 +586,28 @@ export const vehiclesRouter = {
             })
             .where(eq(vehicles.id, vehicleId));
             
+          // Safely handle alerts array - ensure proper JSON serialization
+          const alertsArray = criticalIssues.map(item => item.item);
+          
           await tx
             .update(vehicleInspections)
             .set({
               status: "rejected",
-              alerts: criticalIssues.map(item => item.item),
+              alerts: alertsArray,
               updatedAt: new Date()
             })
             .where(eq(vehicleInspections.id, newInspection.id));
         }
 
-        return {
-          vehicleId,
-          inspectionId: newInspection.id,
-          success: true,
-        };
-      });
+          return {
+            vehicleId,
+            inspectionId: newInspection.id,
+            success: true,
+          };
+        });
+      } catch (error) {
+        console.error('Error in createFullInspection:', error);
+        throw new Error(`Error al guardar la inspección: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      }
     })
 };

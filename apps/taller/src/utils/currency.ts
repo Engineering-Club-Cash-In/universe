@@ -7,7 +7,12 @@
  * @param value - String or number to format
  * @returns Formatted string with commas (e.g., "85,000")
  */
-export const formatCurrency = (value: string | number): string => {
+export const formatCurrency = (value: string | number | undefined | null): string => {
+  // Handle undefined, null, or empty values
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  
   // Convert to string and remove any non-numeric characters
   const cleanValue = value.toString().replace(/[^0-9]/g, '');
   

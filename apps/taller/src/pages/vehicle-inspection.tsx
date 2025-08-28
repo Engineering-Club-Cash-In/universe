@@ -7,6 +7,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast, Toaster } from "sonner";
 import { Sparkles } from "lucide-react";
+import { formatCurrency, handleCurrencyInput } from "../utils/currency";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -667,7 +668,16 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor de mercado</FormLabel>
                       <FormControl>
-                        <Input placeholder="Valor en moneda local" {...field} />
+                        <Input 
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -681,7 +691,16 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor comercial sugerido</FormLabel>
                       <FormControl>
-                        <Input placeholder="Valor en moneda local" {...field} />
+                        <Input 
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -697,7 +716,16 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor bancario</FormLabel>
                       <FormControl>
-                        <Input placeholder="Valor en moneda local" {...field} />
+                        <Input 
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -711,7 +739,16 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor vehículo condiciones actuales</FormLabel>
                       <FormControl>
-                        <Input placeholder="Valor en moneda local" {...field} />
+                        <Input 
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>

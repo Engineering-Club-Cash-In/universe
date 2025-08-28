@@ -23,7 +23,7 @@ type ClosureInfo =
   | { kind: "INCOBRABLE"; id: number; motivo: string; observaciones: string | null; fecha: Date | string | null; monto: string }
   | null;
 
-type CuotaExcelRow = {
+type  CuotaExcelRow = {
   no: number;
   mes: string;
   interes: string;
@@ -88,6 +88,7 @@ export async function getCreditWithCancellationDetails(
           otros: creditos.otros,
           tipo_credito: creditos.tipoCredito,
           observaciones: creditos.observaciones,
+          gps: creditos.gps,
         },
         user: {
           id: usuarios.usuario_id,
@@ -181,10 +182,11 @@ export async function getCreditWithCancellationDetails(
           : (c.fecha_vencimiento as Date).toISOString().slice(0, 10);
 
       const interes = new Big(r.credit.cuota_interes);
-      const servicios = new Big(r.credit.seguro_10_cuotas);
       const membresias = new Big(r.credit.membresias_pago);
       const mora = new Big(r.credit.mora ?? "0");
       const otros = new Big(r.credit.otros ?? "0");
+      const gps = new Big(r.credit.gps ?? "0");
+      const servicios = new Big(r.credit.seguro_10_cuotas).add(new Big(r.credit.membresias_pago)).add(new Big(r.credit.gps ?? "0"));
 
       const total_cancelar = interes.plus(servicios).plus(membresias).plus(mora).plus(otros);
 
@@ -198,6 +200,7 @@ export async function getCreditWithCancellationDetails(
         capital_pendiente: new Big(r.credit.capital).toFixed(2),
         total_cancelar: total_cancelar.toFixed(2),
         fecha_vencimiento: fv,
+        gps: gps.toFixed(2),
       };
     });
 
@@ -240,3 +243,10 @@ export async function getCreditWithCancellationDetails(
     return { success: false, message: "Error retrieving credit information" };
   }
 }
+
+
+
+
+
+
+

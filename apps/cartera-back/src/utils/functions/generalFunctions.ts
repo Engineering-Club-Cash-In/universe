@@ -1,65 +1,10 @@
 import { generarHTMLReporte } from "../../controllers/investor";
-import { InversionistaReporte } from "../interface";
+import { GetCreditDTO, InversionistaReporte } from "../interface";
 import puppeteer from "puppeteer";
+import ExcelJS from "exceljs";
+import axios from "axios";
 // Tipos auxiliares
-export type ClosureInfo =
-  | {
-      kind: "CANCELACION";
-      id: number;
-      motivo: string;
-      observaciones: string | null;
-      fecha: Date | string | null;
-      monto: string; // numeric de PG -> string
-    }
-  | {
-      kind: "INCOBRABLE";
-      id: number;
-      motivo: string;
-      observaciones: string | null;
-      fecha: Date | string | null;
-      monto: string; // numeric de PG -> string
-    }
-  | null;
 
-export type CuotaExcelRow = {
-  no: number;
-  mes: string;
-  interes: string;            // numeric -> string
-  servicios: string;          // numeric -> string
-  mora: string;               // numeric -> string
-  otros: string;              // numeric -> string
-  capital_pendiente: string;  // numeric -> string
-  total_cancelar: string;     // numeric -> string
-  fecha_vencimiento: string;  // YYYY-MM-DD
-};
-
-// DTO principal
-export interface GetCreditDTO {
-  header: {
-    usuario: string;
-    numero_credito_sifco: string;
-    moneda: "Quetzal";
-    tipo_credito: string;
-    observaciones: string;
-    saldo_total: string;             // numeric -> string
-    extras_total: string;            // NUEVO
-    saldo_total_con_extras: string;  // NUEVO
-  };
-  closure: ClosureInfo;
-  cuotas_atrasadas: {
-    total: number;
-    items: CuotaExcelRow[];
-  };
-  extras: {
-    total_items: number;
-    items: Array<{
-      id: number;
-      concepto: string;
-      monto: string;                 // numeric -> string
-      fecha_registro: Date | string | null;
-    }>;
-  };
-}
 
 export async function generarPDFBuffer(
   inversionista: InversionistaReporte,
@@ -69,12 +14,12 @@ export async function generarPDFBuffer(
   const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
   await page.setContent(html, { waitUntil: "networkidle0" });
-  const pdfData =await page.pdf({
-  format: 'A4',
-  landscape: true,
-  printBackground: true,
-  margin: { top: 20, bottom: 20, left: 12, right: 12 }
-});
+  const pdfData = await page.pdf({
+    format: "A4",
+    landscape: true,
+    printBackground: true,
+    margin: { top: 20, bottom: 20, left: 12, right: 12 },
+  });
 
   await browser.close();
   return Buffer.from(pdfData);
@@ -123,7 +68,7 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
                       <td>${i + 1}</td>
                       <td>${e.concepto}</td>
                       <td class="total">${gtq(e.monto)}</td>
-                      <td>${e.fecha_registro ? String(e.fecha_registro).slice(0,10) : "-"}</td>
+                      <td>${e.fecha_registro ? String(e.fecha_registro).slice(0, 10) : "-"}</td>
                     </tr>
                   `
                 )
@@ -241,4 +186,273 @@ ${extrasBlock}
 </body>
 </html>
 `;
+}
+
+/** ───────── helpers num/estilo ───────── */
+function toNum(v: string | number | null | undefined): number {
+  if (v == null) return 0;
+  if (typeof v === "number") return v;
+  // quita "Q", comas y espacios
+  const cleaned = String(v).replace(/[Qq,\s,]/g, "");
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+const COLOR = {
+  navy: "FF0F1B4C",
+  blue: "FF0F56D9",
+  text: "FF0F172A",
+  slate: "FF334155",
+  cardBg: "FFF0F6FF",
+  headRow: "FF0F1B4C",
+  white: "FFFFFFFF",
+  line: "FFE5E7EB",
+  zebra: "FFF9FBFF",
+};
+
+function styleHeaderRow(row: ExcelJS.Row) {
+  for (let i = 1; i <= 8; i++) {
+    const c = row.getCell(i);
+    c.font = { bold: true, color: { argb: COLOR.white } };
+    c.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLOR.headRow },
+    };
+    c.alignment = { horizontal: "center" };
+  }
+}
+
+function setThinBottomBorder(row: ExcelJS.Row, argb = COLOR.line) {
+  row.eachCell((cell) => {
+    cell.border = {
+      ...(cell.border ?? {}),
+      bottom: { style: "thin", color: { argb } },
+    };
+  });
+}
+
+/** pinta “tarjeta” sin merges (evita Cannot merge already merged cells) */
+function paintCard(ws: ExcelJS.Worksheet, range: string) {
+  const [a, b] = range.split(":");
+  const start = ws.getCell(a);
+  const end = ws.getCell(b);
+  for (let r = Number(start.row); r <= Number(end.row); r++) {
+    for (let c = Number(start.col); c <= Number(end.col); c++) {
+      const cell = ws.getCell(r, c);
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: COLOR.cardBg },
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: COLOR.line } },
+        left: { style: "thin", color: { argb: COLOR.line } },
+        bottom: { style: "thin", color: { argb: COLOR.line } },
+        right: { style: "thin", color: { argb: COLOR.line } },
+      };
+    }
+  }
+}
+
+/** trae imagen como base64 (evita tipos de Buffer) */
+async function fetchImageBase64(
+  url?: string
+): Promise<{ data: string; ext: "png" | "jpeg" } | null> {
+  if (!url) return null;
+  try {
+    const res = await axios.get(url, { responseType: "arraybuffer" });
+    // infiere extensión simple
+    const ct = String(res.headers["content-type"] || "");
+    const ext: "png" | "jpeg" = ct.includes("png") ? "png" : "jpeg";
+    const b64 = Buffer.from(res.data).toString("base64");
+    return { data: b64, ext };
+  } catch {
+    return null;
+  }
+}
+
+/** ───────── builder principal ───────── */
+export async function buildCancelationWorkbook(
+  data: GetCreditDTO,
+  opts?: { logoUrl?: string }
+): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Club Cashin.com";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Cancelación", {
+    properties: { defaultRowHeight: 18 },
+  });
+  // anchos buscando similitud al PDF
+  [8, 18, 14, 14, 14, 12, 24, 18].forEach(
+    (w, i) => (ws.getColumn(i + 1).width = w)
+  );
+
+  // ── fila 1-2: logo + títulos
+  const logo = await fetchImageBase64(opts?.logoUrl);
+  if (logo) {
+    const imgId = wb.addImage({ base64: logo.data, extension: logo.ext });
+    // ocupa A1:B2 (no es merge real; addImage posiciona sobre ese rango)
+    ws.addImage(imgId, 'A1:B2');
+  }
+
+  ws.mergeCells("C1:H1");
+  ws.getCell("C1").value = "DETALLE DE CANCELACIÓN";
+  ws.getCell("C1").font = {
+    bold: true,
+    size: 12,
+    color: { argb: COLOR.slate },
+  };
+  ws.getCell("C1").alignment = { vertical: "middle" };
+
+  ws.mergeCells("C2:H2");
+  ws.getCell("C2").value = "PRÉSTAMO";
+  ws.getCell("C2").font = { bold: true, size: 14, color: { argb: COLOR.navy } };
+  ws.getCell("C2").alignment = { vertical: "middle" };
+
+  // ── tarjetas (sin merges grandes; solo pintamos el bloque)
+  paintCard(ws, "A3:D9");
+  paintCard(ws, "E3:H9");
+
+  // tarjeta izquierda: info
+  const info: [string, string][] = [
+    ["Cliente", data.header.usuario],
+    ["Préstamo No.", data.header.numero_credito_sifco],
+    ["Moneda", data.header.moneda],
+    ["Tipo de crédito", data.header.tipo_credito],
+    ["Observaciones", data.header.observaciones || "-"],
+  ];
+  let r = 4;
+  for (const [k, v] of info) {
+    ws.getCell(`A${r}`).value = k;
+    ws.getCell(`A${r}`).font = { bold: true, color: { argb: COLOR.slate } };
+    ws.mergeCells(`B${r}:D${r}`);
+    ws.getCell(`B${r}`).value = v;
+    r++;
+  }
+
+  // tarjeta derecha: saldos
+  ws.getCell("E5").value = "Saldo total";
+  ws.getCell("E5").font = { bold: true, color: { argb: COLOR.slate } };
+  ws.mergeCells("F5:H5");
+  ws.getCell("F5").value = toNum(data.header.saldo_total);
+  ws.getCell("F5").numFmt = '"Q"#,##0.00';
+  ws.getCell("F5").font = { bold: true, size: 14, color: { argb: COLOR.blue } };
+
+  if (toNum(data.header.extras_total) !== 0) {
+    ws.getCell("E7").value = "Con extras";
+    ws.getCell("E7").font = { bold: true, color: { argb: COLOR.slate } };
+    ws.mergeCells("F7:H7");
+    ws.getCell("F7").value = toNum(data.header.saldo_total_con_extras);
+    ws.getCell("F7").numFmt = '"Q"#,##0.00';
+    ws.getCell("F7").font = {
+      bold: true,
+      size: 14,
+      color: { argb: COLOR.blue },
+    };
+  }
+
+  // ── tabla cuotas atrasadas
+  let row = 11;
+  const head = ws.getRow(row);
+  head.values = [
+    "No.",
+    "Mes",
+    "Interés",
+    "Servicios",
+    "Mora",
+    "OTROS",
+    "Capital pendiente de pago",
+    "Total a cancelar",
+  ];
+  styleHeaderRow(head);
+
+  if (data.cuotas_atrasadas.items.length === 0) {
+    row++;
+    ws.mergeCells(`A${row}:H${row}`);
+    ws.getCell(`A${row}`).value = "Sin cuotas atrasadas";
+    ws.getCell(`A${row}`).alignment = { horizontal: "center" };
+    ws.getCell(`A${row}`).font = { italic: true, color: { argb: "FF7C8591" } };
+  } else {
+    for (const it of data.cuotas_atrasadas.items) {
+      row++;
+      const rr = ws.getRow(row);
+      rr.values = [
+        it.no,
+        it.mes,
+        toNum(it.interes),
+        toNum(it.servicios),
+        toNum(it.mora),
+        toNum(it.otros),
+        toNum(it.capital_pendiente),
+        toNum(it.total_cancelar),
+      ];
+      [3, 4, 5, 6, 7, 8].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
+      rr.getCell(8).font = { bold: true, color: { argb: COLOR.blue } };
+      if (row % 2 === 0) {
+        for (let c = 1; c <= 8; c++) {
+          rr.getCell(c).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: COLOR.zebra },
+          };
+        }
+      }
+      setThinBottomBorder(rr);
+    }
+  }
+
+  // congelar encabezado hasta la fila de header de tabla
+  ws.views = [{ state: "frozen", ySplit: 11 }];
+
+  // ── sección extras
+  row += 2;
+  ws.mergeCells(`A${row}:H${row}`);
+  ws.getCell(`A${row}`).value = "Montos adicionales";
+  ws.getCell(`A${row}`).font = {
+    bold: true,
+    size: 12,
+    color: { argb: COLOR.navy },
+  };
+
+  row++;
+  const eHead = ws.getRow(row);
+  eHead.values = ["#", "Concepto", "Monto", "Fecha", "", "", "", ""];
+  styleHeaderRow(eHead);
+
+  if (data.extras.total_items > 0) {
+    for (let i = 0; i < data.extras.items.length; i++) {
+      const e = data.extras.items[i];
+      row++;
+      const rr = ws.getRow(row);
+      rr.values = [
+        i + 1,
+        e.concepto,
+        toNum(e.monto),
+        e.fecha_registro ? String(e.fecha_registro).slice(0, 10) : "-",
+      ];
+      rr.getCell(3).numFmt = '"Q"#,##0.00';
+      setThinBottomBorder(rr);
+    }
+    row++;
+    ws.mergeCells(`A${row}:G${row}`);
+    ws.getCell(`A${row}`).value = "Total extras:";
+    ws.getCell(`A${row}`).alignment = { horizontal: "right" };
+    ws.getCell(`A${row}`).font = { bold: true, color: { argb: COLOR.navy } };
+
+    ws.getCell(`H${row}`).value = toNum(data.header.extras_total);
+    ws.getCell(`H${row}`).numFmt = '"Q"#,##0.00';
+    ws.getCell(`H${row}`).font = { bold: true, color: { argb: COLOR.blue } };
+  } else {
+    row++;
+    ws.mergeCells(`A${row}:H${row}`);
+    ws.getCell(`A${row}`).value = "Sin extras registrados";
+    ws.getCell(`A${row}`).alignment = { horizontal: "center" };
+    ws.getCell(`A${row}`).font = { italic: true, color: { argb: "FF7C8591" } };
+  }
+
+  // buffer XLSX
+  const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+  return Buffer.from(arr); // Node Buffer
 }

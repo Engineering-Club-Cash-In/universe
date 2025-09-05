@@ -16,6 +16,7 @@ function ViewPresentationPage() {
 	const { id } = Route.useParams();
 	const [currentSlide, setCurrentSlide] = useState(0);
 	const [isFullscreen, setIsFullscreen] = useState(false);
+	const [showControls, setShowControls] = useState(true);
 
 	// Queries
 	const presentation = useQuery(
@@ -29,6 +30,33 @@ function ViewPresentationPage() {
 			input: { presentationId: id }
 		})
 	);
+
+	// Auto-hide controls
+	useEffect(() => {
+		let timeout: NodeJS.Timeout;
+		
+		const resetTimeout = () => {
+			if (timeout) clearTimeout(timeout);
+			setShowControls(true);
+			timeout = setTimeout(() => setShowControls(false), 3000);
+		};
+
+		const handleMouseMove = () => resetTimeout();
+		const handleKeyPress = () => resetTimeout();
+
+		// Show controls initially and on activity
+		resetTimeout();
+		window.addEventListener("mousemove", handleMouseMove);
+		window.addEventListener("keydown", handleKeyPress);
+		window.addEventListener("click", handleMouseMove);
+
+		return () => {
+			if (timeout) clearTimeout(timeout);
+			window.removeEventListener("mousemove", handleMouseMove);
+			window.removeEventListener("keydown", handleKeyPress);
+			window.removeEventListener("click", handleMouseMove);
+		};
+	}, []);
 
 	// Keyboard navigation
 	useEffect(() => {
@@ -102,12 +130,12 @@ function ViewPresentationPage() {
 		// Title slide
 		if (currentSlide === 0) {
 			return (
-				<div className="flex flex-col items-center justify-center h-full text-center space-y-8">
+				<div className="flex flex-col items-center justify-center min-h-[500px] text-center space-y-8 py-12 px-8">
 					<div className="space-y-4">
-						<h1 className="text-6xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+						<h1 className="text-6xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent leading-normal pb-2">
 							{presentation.data.name}
 						</h1>
-						<h2 className="text-3xl text-gray-600 dark:text-gray-400">
+						<h2 className="text-3xl text-gray-600 dark:text-gray-400 leading-normal">
 							{months[presentation.data.month]} {presentation.data.year}
 						</h2>
 					</div>
@@ -149,13 +177,13 @@ function ViewPresentationPage() {
 			const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0");
 
 			return (
-				<div className="flex flex-col justify-center h-full space-y-8 p-12">
-					<div className="text-center space-y-4">
+				<div className="flex flex-col items-center py-12 px-12 min-h-[500px]">
+					<div className="text-center space-y-4 mb-8">
 						<h2 className="text-4xl font-bold">{goal.userName}</h2>
 						<h3 className="text-2xl text-gray-600">{goal.areaName} - {goal.departmentName}</h3>
 					</div>
 					
-					<Card className="mx-auto max-w-2xl">
+					<Card className="w-full max-w-2xl">
 						<CardHeader>
 							<CardTitle className="text-2xl">{goal.goalTemplateName}</CardTitle>
 						</CardHeader>
@@ -200,15 +228,15 @@ function ViewPresentationPage() {
 
 		// Summary slide
 		return (
-			<div className="flex flex-col justify-center h-full space-y-8 p-12">
-				<div className="text-center space-y-4">
+			<div className="flex flex-col items-center py-12 px-12 min-h-[500px]">
+				<div className="text-center space-y-4 mb-8">
 					<h2 className="text-5xl font-bold">Resumen Final</h2>
 					<h3 className="text-2xl text-gray-600">
 						{months[presentation.data.month]} {presentation.data.year}
 					</h3>
 				</div>
 				
-				<div className="grid grid-cols-3 gap-8 max-w-4xl mx-auto">
+				<div className="grid grid-cols-3 gap-8 max-w-4xl w-full mb-8">
 					<Card className="text-center">
 						<CardContent className="pt-6">
 							<div className="text-4xl font-bold text-green-600 mb-2">
@@ -249,7 +277,7 @@ function ViewPresentationPage() {
 					</Card>
 				</div>
 
-				<div className="text-center space-y-4 mt-8">
+				<div className="text-center space-y-4">
 					<h3 className="text-2xl font-bold">¡Gracias por su atención!</h3>
 					<p className="text-lg text-gray-600">
 						Presentación generada con CCI Sync
@@ -260,69 +288,99 @@ function ViewPresentationPage() {
 	};
 
 	return (
-		<div className={`relative ${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-gray-900' : 'min-h-screen'}`}>
-			{/* Navigation Controls */}
-			<div className={`absolute top-4 left-4 right-4 flex items-center justify-between z-10 ${isFullscreen ? 'text-white' : ''}`}>
-				<div className="flex items-center gap-2">
-					<Button
-						variant="outline"
-						size="sm"
+		<div className={`${isFullscreen ? 'fixed inset-0 z-50 bg-white dark:bg-gray-900' : ''}`}>
+			{isFullscreen ? (
+				// Fullscreen mode - Fill entire screen
+				<div className="relative w-full h-full">
+					{/* Fullscreen controls overlay */}
+					<div className={`absolute top-4 right-4 z-10 transition-opacity duration-300 ${
+						showControls ? 'opacity-100' : 'opacity-0'
+					}`}>
+						<Button
+							variant="outline"
+							size="sm"
+							onClick={toggleFullscreen}
+							className="bg-white/80 backdrop-blur"
+						>
+							<Minimize className="h-4 w-4" /> Salir
+						</Button>
+					</div>
+
+					{/* Invisible click areas for navigation in fullscreen */}
+					<div 
+						className="absolute left-0 top-0 w-1/2 h-full z-5 cursor-pointer" 
 						onClick={prevSlide}
-						disabled={currentSlide === 0}
-					>
-						<ChevronLeft className="h-4 w-4" />
-						Anterior
-					</Button>
-					
-					<span className="text-sm font-medium px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded">
-						{currentSlide + 1} / {getTotalSlides()}
-					</span>
-					
-					<Button
-						variant="outline"
-						size="sm"
+					/>
+					<div 
+						className="absolute right-0 top-0 w-1/2 h-full z-5 cursor-pointer" 
 						onClick={nextSlide}
-						disabled={currentSlide === getTotalSlides() - 1}
-					>
-						Siguiente
-						<ChevronRight className="h-4 w-4" />
-					</Button>
+					/>
+					
+					{renderSlide()}
 				</div>
-				
-				<Button
-					variant="outline"
-					size="sm"
-					onClick={toggleFullscreen}
-				>
-					{isFullscreen ? (
-						<><Minimize className="h-4 w-4" /> Salir</>
-					) : (
-						<><Maximize className="h-4 w-4" /> Pantalla Completa</>
-					)}
-				</Button>
-			</div>
+			) : (
+				// Normal mode - Compact layout
+				<div className="space-y-4">
+					{/* Slide Content */}
+					<div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
+						{renderSlide()}
+					</div>
 
-			{/* Slide Content */}
-			<div className="h-full">
-				{renderSlide()}
-			</div>
+					{/* Controls directly below content */}
+					<div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3">
+						<div className="flex items-center justify-between max-w-4xl mx-auto">
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={prevSlide}
+									disabled={currentSlide === 0}
+								>
+									<ChevronLeft className="h-4 w-4" />
+									Anterior
+								</Button>
+								
+								<span className="text-sm font-medium px-3 py-1 bg-gray-100 dark:bg-gray-800 rounded">
+									{currentSlide + 1} / {getTotalSlides()}
+								</span>
+								
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={nextSlide}
+									disabled={currentSlide === getTotalSlides() - 1}
+								>
+									Siguiente
+									<ChevronRight className="h-4 w-4" />
+								</Button>
+							</div>
 
-			{/* Bottom Navigation */}
-			<div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
-				<div className="flex items-center gap-1">
-					{Array.from({ length: getTotalSlides() }, (_, i) => (
-						<button
-							key={i}
-							onClick={() => setCurrentSlide(i)}
-							className={`w-3 h-3 rounded-full transition-colors ${
-								i === currentSlide 
-									? 'bg-blue-600' 
-									: 'bg-gray-300 dark:bg-gray-600'
-							}`}
-						/>
-					))}
+							{/* Slide indicators */}
+							<div className="flex items-center gap-1">
+								{Array.from({ length: getTotalSlides() }, (_, i) => (
+									<button
+										key={i}
+										onClick={() => setCurrentSlide(i)}
+										className={`w-3 h-3 rounded-full transition-colors ${
+											i === currentSlide 
+												? 'bg-blue-600' 
+												: 'bg-gray-300 dark:bg-gray-600'
+										}`}
+									/>
+								))}
+							</div>
+							
+							<Button
+								variant="outline"
+								size="sm"
+								onClick={toggleFullscreen}
+							>
+								<Maximize className="h-4 w-4" /> Pantalla Completa
+							</Button>
+						</div>
+					</div>
 				</div>
-			</div>
+			)}
 		</div>
 	);
 }

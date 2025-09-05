@@ -328,12 +328,12 @@ monthly-goals/
 - [x] Histórico de cumplimientos
 
 **Detalles de implementación:**
-- **Templates**: CRUD completo con umbrales configurables (éxito/advertencia), unidades, metas por defecto
-- **Configuración mensual**: Interfaz de asignación masiva, selector de período, validaciones
-- **Cálculo automático**: Función calculateGoalProgress, porcentajes objetivo vs logrado
-- **Sistema semáforo**: Verde (≥80%), Amarillo (≥50%), Rojo (<50%), umbrales configurables por template
-- **Visualización**: Tabla con filtros período, barras de progreso, badges de estado, información organizacional completa
-- **Navegación**: Sección "Metas" en header, sidebar dedicada, rutas protegidas por roles
+- **Templates**: CRUD completo con umbrales configurables, roles específicos (super_admin, department_manager, area_lead)
+- **Configuración mensual**: Interfaz de asignación masiva, creación de usuarios nuevos desde equipos
+- **Sistema semáforo**: Verde (≥80%), Amarillo (≥50%), Rojo (<50%), cálculos automáticos
+- **"Mis Metas"**: Página para actualizar progreso, filtrado por roles, validaciones de permisos
+- **Dashboard funcional**: Métricas en tiempo real, top performers, resumen departamental, health check
+- **Testing completo**: 50+ tests con Bun nativo, coverage de CRUD, roles y cálculos
 
 ### Fase 4: Presentaciones (3-4 días)
 - [ ] Creación de presentaciones

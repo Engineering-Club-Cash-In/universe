@@ -1,4 +1,6 @@
-export function createMockContext(userRole: "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer", userId?: string) {
+import type { Context } from "../lib/context";
+
+export function createMockContext(userRole: "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer", userId?: string): Context {
 	const id = userId || crypto.randomUUID();
 	
 	return {
@@ -12,6 +14,10 @@ export function createMockContext(userRole: "super_admin" | "department_manager"
 				image: null,
 				createdAt: new Date(),
 				updatedAt: new Date(),
+				// Better Auth admin plugin fields
+				banned: null,
+				banReason: null,
+				banExpires: null,
 			},
 			session: {
 				id: crypto.randomUUID(),

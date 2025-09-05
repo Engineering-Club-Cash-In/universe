@@ -45,6 +45,16 @@ import {
 	getDashboardMetrics,
 	getHealthStatus,
 } from "./dashboard";
+import {
+	listPresentations,
+	getPresentation,
+	createPresentation,
+	updatePresentation,
+	deletePresentation,
+	getAvailableGoalsForPresentation,
+	submitGoalsForPresentation,
+	getPresentationSubmissions,
+} from "./presentations";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -100,6 +110,16 @@ export const appRouter = {
 	dashboard: {
 		metrics: getDashboardMetrics,
 		health: getHealthStatus,
+	},
+	presentations: {
+		list: listPresentations,
+		get: getPresentation,
+		create: createPresentation,
+		update: updatePresentation,
+		delete: deletePresentation,
+		availableGoals: getAvailableGoalsForPresentation,
+		submitGoals: submitGoalsForPresentation,
+		submissions: getPresentationSubmissions,
 	},
 };
 export type AppRouter = typeof appRouter;

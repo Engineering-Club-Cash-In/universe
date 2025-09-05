@@ -22,8 +22,23 @@ export const getDashboardMetrics = protectedProcedure
 		const currentUser = context.session.user;
 		const { month, year } = input;
 
-		// Base query with all joins
-		const baseQuery = db
+		// Build where conditions
+		let whereConditions = [
+			eq(monthlyGoals.month, month),
+			eq(monthlyGoals.year, year)
+		];
+
+		// Apply role-based filtering
+		if (currentUser.role === "employee") {
+			whereConditions.push(eq(user.id, currentUser.id));
+		} else if (currentUser.role === "department_manager") {
+			whereConditions.push(eq(departments.managerId, currentUser.id));
+		} else if (currentUser.role === "area_lead") {
+			whereConditions.push(eq(areas.leadId, currentUser.id));
+		}
+
+		// Build and execute query
+		const allGoals = await db
 			.select()
 			.from(monthlyGoals)
 			.leftJoin(goalTemplates, eq(monthlyGoals.goalTemplateId, goalTemplates.id))
@@ -31,22 +46,7 @@ export const getDashboardMetrics = protectedProcedure
 			.leftJoin(user, eq(teamMembers.userId, user.id))
 			.leftJoin(areas, eq(teamMembers.areaId, areas.id))
 			.leftJoin(departments, eq(areas.departmentId, departments.id))
-			.where(and(
-				eq(monthlyGoals.month, month),
-				eq(monthlyGoals.year, year)
-			));
-
-		// Apply role-based filtering (same logic as getMyGoals)
-		let filteredQuery = baseQuery;
-		if (currentUser.role === "employee") {
-			filteredQuery = baseQuery.where(eq(user.id, currentUser.id)) as typeof baseQuery;
-		} else if (currentUser.role === "department_manager") {
-			filteredQuery = baseQuery.where(eq(departments.managerId, currentUser.id)) as typeof baseQuery;
-		} else if (currentUser.role === "area_lead") {
-			filteredQuery = baseQuery.where(eq(areas.leadId, currentUser.id)) as typeof baseQuery;
-		}
-
-		const allGoals = await filteredQuery;
+			.where(and(...whereConditions));
 
 		// Calculate metrics
 		const totalGoals = allGoals.length;

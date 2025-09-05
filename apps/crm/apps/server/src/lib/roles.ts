@@ -5,6 +5,7 @@ export const ROLES = {
 	ADMIN: "admin",
 	SALES: "sales",
 	ANALYST: "analyst",
+	COBROS: "cobros",
 } as const;
 
 export type UserRole = typeof ROLES[keyof typeof ROLES];
@@ -25,6 +26,11 @@ export const ROLE_CONFIG = {
 		label: "Analista",
 		color: "bg-purple-100 text-purple-800",
 		icon: "FileText" as const,
+	},
+	[ROLES.COBROS]: {
+		label: "Cobros",
+		color: "bg-green-100 text-green-800",
+		icon: "DollarSign" as const,
 	},
 } as const;
 
@@ -60,6 +66,16 @@ export const PERMISSIONS = {
 	
 	canExportReports: (role: UserRole | string): boolean => 
 		(role === ROLES.ADMIN || role === ROLES.ANALYST),
+	
+	// Cobros Module Access
+	canAccessCobros: (role: UserRole | string): boolean => 
+		(role === ROLES.ADMIN || role === ROLES.COBROS),
+	
+	canManagePayments: (role: UserRole | string): boolean => 
+		(role === ROLES.ADMIN || role === ROLES.COBROS),
+	
+	canViewPaymentReports: (role: UserRole | string): boolean => 
+		(role === ROLES.ADMIN || role === ROLES.COBROS || role === ROLES.ANALYST),
 } as const;
 
 // Helper functions

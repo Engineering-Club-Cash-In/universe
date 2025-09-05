@@ -23,6 +23,18 @@ export const salesRole = ac.newRole({
 	report: ["read"],
 });
 
+export const analystRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read", "export"],
+});
+
+export const cobrosRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
 export const authClient = createAuthClient({
 	baseURL: import.meta.env.VITE_SERVER_URL,
 	plugins: [
@@ -31,6 +43,8 @@ export const authClient = createAuthClient({
 			roles: {
 				admin: adminRole,
 				sales: salesRole,
+				analyst: analystRole,
+				cobros: cobrosRole,
 			},
 		}),
 	],

@@ -18,7 +18,8 @@
 		"db:generate": "bun run --filter server db:generate",
 		"db:migrate": "bun run --filter server db:migrate",
 		"db:seed": "bun run --filter server db:seed",
-		"db:clear": "bun run --filter server db:clear"
+		"db:clear": "bun run --filter server db:clear",
+		"check-all": "bash check-all.sh"
 	},
 	"dependencies": {
 		"@hookform/resolvers": "^5.2.1",

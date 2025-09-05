@@ -123,6 +123,24 @@ function RootComponent() {
 											</div>
 										</div>
 
+										{/* Presentations Section */}
+										{canConfigureGoals && (
+											<div>
+												<h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+													Presentaciones
+												</h3>
+												<div className="space-y-1 ml-2">
+													<Link
+														to="/presentations"
+														className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+														activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
+													>
+														Gestionar Presentaciones
+													</Link>
+												</div>
+											</div>
+										)}
+
 										{/* Admin Section */}
 										{hasAdminAccess && (
 											<div>

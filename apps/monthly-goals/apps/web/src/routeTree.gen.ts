@@ -9,11 +9,13 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PresentationsRouteImport } from './routes/presentations'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as GoalsRouteImport } from './routes/goals'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PresentationsIndexRouteImport } from './routes/presentations/index'
 import { Route as GoalsIndexRouteImport } from './routes/goals/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as GoalsMyGoalsRouteImport } from './routes/goals/my-goals'
@@ -22,7 +24,14 @@ import { Route as AdminTeamsRouteImport } from './routes/admin/teams'
 import { Route as AdminGoalTemplatesRouteImport } from './routes/admin/goal-templates'
 import { Route as AdminDepartmentsRouteImport } from './routes/admin/departments'
 import { Route as AdminAreasRouteImport } from './routes/admin/areas'
+import { Route as PresentationsIdViewRouteImport } from './routes/presentations/$id.view'
+import { Route as PresentationsIdSubmitRouteImport } from './routes/presentations/$id.submit'
 
+const PresentationsRoute = PresentationsRouteImport.update({
+  id: '/presentations',
+  path: '/presentations',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -47,6 +56,11 @@ const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
+} as any)
+const PresentationsIndexRoute = PresentationsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PresentationsRoute,
 } as any)
 const GoalsIndexRoute = GoalsIndexRouteImport.update({
   id: '/',
@@ -88,6 +102,16 @@ const AdminAreasRoute = AdminAreasRouteImport.update({
   path: '/areas',
   getParentRoute: () => AdminRoute,
 } as any)
+const PresentationsIdViewRoute = PresentationsIdViewRouteImport.update({
+  id: '/$id/view',
+  path: '/$id/view',
+  getParentRoute: () => PresentationsRoute,
+} as any)
+const PresentationsIdSubmitRoute = PresentationsIdSubmitRouteImport.update({
+  id: '/$id/submit',
+  path: '/$id/submit',
+  getParentRoute: () => PresentationsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -95,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/goals': typeof GoalsRouteWithChildren
   '/login': typeof LoginRoute
+  '/presentations': typeof PresentationsRouteWithChildren
   '/admin/areas': typeof AdminAreasRoute
   '/admin/departments': typeof AdminDepartmentsRoute
   '/admin/goal-templates': typeof AdminGoalTemplatesRoute
@@ -103,6 +128,9 @@ export interface FileRoutesByFullPath {
   '/goals/my-goals': typeof GoalsMyGoalsRoute
   '/admin/': typeof AdminIndexRoute
   '/goals/': typeof GoalsIndexRoute
+  '/presentations/': typeof PresentationsIndexRoute
+  '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
+  '/presentations/$id/view': typeof PresentationsIdViewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -116,6 +144,9 @@ export interface FileRoutesByTo {
   '/goals/my-goals': typeof GoalsMyGoalsRoute
   '/admin': typeof AdminIndexRoute
   '/goals': typeof GoalsIndexRoute
+  '/presentations': typeof PresentationsIndexRoute
+  '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
+  '/presentations/$id/view': typeof PresentationsIdViewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -124,6 +155,7 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/goals': typeof GoalsRouteWithChildren
   '/login': typeof LoginRoute
+  '/presentations': typeof PresentationsRouteWithChildren
   '/admin/areas': typeof AdminAreasRoute
   '/admin/departments': typeof AdminDepartmentsRoute
   '/admin/goal-templates': typeof AdminGoalTemplatesRoute
@@ -132,6 +164,9 @@ export interface FileRoutesById {
   '/goals/my-goals': typeof GoalsMyGoalsRoute
   '/admin/': typeof AdminIndexRoute
   '/goals/': typeof GoalsIndexRoute
+  '/presentations/': typeof PresentationsIndexRoute
+  '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
+  '/presentations/$id/view': typeof PresentationsIdViewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +176,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/goals'
     | '/login'
+    | '/presentations'
     | '/admin/areas'
     | '/admin/departments'
     | '/admin/goal-templates'
@@ -149,6 +185,9 @@ export interface FileRouteTypes {
     | '/goals/my-goals'
     | '/admin/'
     | '/goals/'
+    | '/presentations/'
+    | '/presentations/$id/submit'
+    | '/presentations/$id/view'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -162,6 +201,9 @@ export interface FileRouteTypes {
     | '/goals/my-goals'
     | '/admin'
     | '/goals'
+    | '/presentations'
+    | '/presentations/$id/submit'
+    | '/presentations/$id/view'
   id:
     | '__root__'
     | '/'
@@ -169,6 +211,7 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/goals'
     | '/login'
+    | '/presentations'
     | '/admin/areas'
     | '/admin/departments'
     | '/admin/goal-templates'
@@ -177,6 +220,9 @@ export interface FileRouteTypes {
     | '/goals/my-goals'
     | '/admin/'
     | '/goals/'
+    | '/presentations/'
+    | '/presentations/$id/submit'
+    | '/presentations/$id/view'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -185,10 +231,18 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   GoalsRoute: typeof GoalsRouteWithChildren
   LoginRoute: typeof LoginRoute
+  PresentationsRoute: typeof PresentationsRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/presentations': {
+      id: '/presentations'
+      path: '/presentations'
+      fullPath: '/presentations'
+      preLoaderRoute: typeof PresentationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -223,6 +277,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/presentations/': {
+      id: '/presentations/'
+      path: '/'
+      fullPath: '/presentations/'
+      preLoaderRoute: typeof PresentationsIndexRouteImport
+      parentRoute: typeof PresentationsRoute
     }
     '/goals/': {
       id: '/goals/'
@@ -280,6 +341,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAreasRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/presentations/$id/view': {
+      id: '/presentations/$id/view'
+      path: '/$id/view'
+      fullPath: '/presentations/$id/view'
+      preLoaderRoute: typeof PresentationsIdViewRouteImport
+      parentRoute: typeof PresentationsRoute
+    }
+    '/presentations/$id/submit': {
+      id: '/presentations/$id/submit'
+      path: '/$id/submit'
+      fullPath: '/presentations/$id/submit'
+      preLoaderRoute: typeof PresentationsIdSubmitRouteImport
+      parentRoute: typeof PresentationsRoute
+    }
   }
 }
 
@@ -315,12 +390,29 @@ const GoalsRouteChildren: GoalsRouteChildren = {
 
 const GoalsRouteWithChildren = GoalsRoute._addFileChildren(GoalsRouteChildren)
 
+interface PresentationsRouteChildren {
+  PresentationsIndexRoute: typeof PresentationsIndexRoute
+  PresentationsIdSubmitRoute: typeof PresentationsIdSubmitRoute
+  PresentationsIdViewRoute: typeof PresentationsIdViewRoute
+}
+
+const PresentationsRouteChildren: PresentationsRouteChildren = {
+  PresentationsIndexRoute: PresentationsIndexRoute,
+  PresentationsIdSubmitRoute: PresentationsIdSubmitRoute,
+  PresentationsIdViewRoute: PresentationsIdViewRoute,
+}
+
+const PresentationsRouteWithChildren = PresentationsRoute._addFileChildren(
+  PresentationsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRouteWithChildren,
   DashboardRoute: DashboardRoute,
   GoalsRoute: GoalsRouteWithChildren,
   LoginRoute: LoginRoute,
+  PresentationsRoute: PresentationsRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

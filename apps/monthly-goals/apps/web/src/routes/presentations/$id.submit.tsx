@@ -99,12 +99,28 @@ function SubmitPresentationPage() {
 	};
 
 	const handleSubmitAll = () => {
-		const validSubmissions = submissions.filter(s => 
-			s.submittedValue && s.submittedValue.trim() !== ''
+		if (!availableGoals.data || availableGoals.data.length === 0) {
+			toast.error("No hay metas disponibles para enviar");
+			return;
+		}
+
+		// Crear submissions para todas las metas disponibles
+		const allSubmissions = availableGoals.data.map((goal: any) => {
+			const existingSubmission = submissions.find(s => s.monthlyGoalId === goal.id);
+			return {
+				monthlyGoalId: goal.id,
+				submittedValue: existingSubmission?.submittedValue || goal.achievedValue || '0',
+				notes: existingSubmission?.notes || '',
+			};
+		});
+
+		// Filtrar solo las que tienen un valor válido
+		const validSubmissions = allSubmissions.filter(s => 
+			s.submittedValue && s.submittedValue.trim() !== '' && s.submittedValue !== '0'
 		);
 
 		if (validSubmissions.length === 0) {
-			toast.error("Debe cargar al menos un valor de meta");
+			toast.error("No hay valores válidos para enviar. Asegúrate de que las metas tengan valores mayores a 0.");
 			return;
 		}
 
@@ -161,7 +177,7 @@ function SubmitPresentationPage() {
 				<div className="flex items-center gap-2">
 					<Button
 						onClick={handleSubmitAll}
-						disabled={submitGoalsMutation.isPending || submissions.length === 0}
+						disabled={submitGoalsMutation.isPending || (availableGoals.data?.length === 0)}
 					>
 						{submitGoalsMutation.isPending ? "Enviando..." : "Enviar Todos los Datos"}
 					</Button>

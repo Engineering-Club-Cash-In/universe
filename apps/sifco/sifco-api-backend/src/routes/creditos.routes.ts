@@ -240,6 +240,201 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
       headers: { 'Content-Type': 'application/json' },
     });
   }
+  
+// GET /api/clientes/prestamos/:preNumero
+if (method === 'GET' && path.length === 4 && path[2] === 'uniqueCreditByNumber') {
+  try {
+    const preNumero = path[3];
+
+    if (!preNumero) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'preNumero es requerido',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    const result = await creditosService.consultarPrestamoDetalle(preNumero);
+
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: any) {
+    console.error('❌ Error en ruta prestamos/:preNumero:', err);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `[ERROR] Falló la ruta prestamos/:preNumero: ${err.message || err}`,
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}
+if (method === 'POST' && path.length === 3 && path[2] === 'cuotas') {
+  try {
+    const body = await request.json();
+    const { numeroPrestamo } = body;
+
+    if (!numeroPrestamo) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'numeroPrestamo es requerido',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    const result = await creditosService.consultarCuotasPorPrestamo(numeroPrestamo);
+
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: any) {
+    console.error('❌ Error en ruta creditos/cuotas:', err);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `[ERROR] Falló la ruta creditos/cuotas: ${err.message || err}`,
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}
+// POST /api/creditos/recargos
+if (method === 'POST' && path.length === 3 && path[2] === 'recargos') {
+  try {
+    const body = await request.json();
+    const { numeroPrestamo } = body;
+
+    if (!numeroPrestamo) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'numeroPrestamo es requerido',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    const result = await creditosService.consultarRecargosLibres(numeroPrestamo);
+
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: any) {
+    console.error('❌ Error en ruta creditos/recargos:', err);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `[ERROR] Falló la ruta creditos/recargos: ${err.message || err}`,
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}
+// POST /api/creditos/estado-cuenta
+if (method === 'POST' && path.length === 3 && path[2] === 'estado-cuenta') {
+  try {
+    const body = await request.json();
+    const { numeroPrestamo } = body;
+
+    if (!numeroPrestamo) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'numeroPrestamo es requerido',
+        }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    const result = await creditosService.consultarEstadoCuentaPrestamo(numeroPrestamo);
+
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: any) {
+    console.error('❌ Error en ruta creditos/estado-cuenta:', err);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `[ERROR] Falló la ruta creditos/estado-cuenta: ${err.message || err}`,
+      }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }
+    );
+  }
+}
+
+// POST /api/creditos/informacion
+if (method === 'POST' && path.length === 3 && path[2] === 'informacion') {
+  try {
+    const body = await request.json();
+    // Permite body.identificador o body.ConsultaValorIdentificador
+    const identificador =
+      body?.identificador || body?.ConsultaValorIdentificador;
+
+    if (!identificador) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: 'identificador (o ConsultaValorIdentificador) es requerido',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const result = await creditosService.consultarInformacionPrestamo(
+      identificador
+    );
+
+    return new Response(JSON.stringify(result), {
+      status: result.success ? 200 : 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  } catch (err: any) {
+    console.error('❌ Error en ruta creditos/informacion:', err);
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: `[ERROR] Falló la ruta creditos/informacion: ${err.message || err}`,
+      }),
+      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+}
 
   throw new AppError(`Route not found: ${method} ${path.join('/')}`, 404);
+
+
 }

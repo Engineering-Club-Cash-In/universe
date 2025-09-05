@@ -983,3 +983,32 @@ export function generarHTMLReporte(
 </html>
 `;
 }
+
+export const findOrCreateInvestor = async (
+  nombre: string,
+  emite_factura: boolean = true
+) => {
+  // Buscar inversionista por nombre exacto
+  const existingInvestor = await db
+    .select()
+    .from(inversionistas)
+    .where(eq(inversionistas.nombre, nombre))
+    .limit(1);
+
+  if (existingInvestor.length > 0) {
+    return existingInvestor[0];
+  }
+
+  // Si no existe, crear inversionista
+  const [newInvestor] = await db
+    .insert(inversionistas)
+    .values({
+      nombre,
+      emite_factura
+    })
+    .returning();
+
+  return newInvestor;
+ 
+};
+

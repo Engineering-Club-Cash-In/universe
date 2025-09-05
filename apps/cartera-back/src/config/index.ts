@@ -1,5 +1,5 @@
 export default {
-    port: parseInt(process.env.PORT || "9000"),
+    port: parseInt(process.env.PORT || "7000"),
     
     postgres: {
         host: process.env.POSTGRES_HOST || 'localhost', // Hostname or IP address of the PostgreSQL server

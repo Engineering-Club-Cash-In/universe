@@ -1,4 +1,4 @@
-import axios from "axios";
+import axios  from "axios";
 import type { PagoFormValues } from "../hooks/registerPayment";
 
 const API_URL = import.meta.env.VITE_BACK_URL  ||'https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site'; ;
@@ -779,6 +779,68 @@ export interface UsuarioConCreditosSifco {
  * Servicio para obtener usuarios con sus números de crédito SIFCO
  */
 export async function getUsersWithSifco(): Promise<UsuarioConCreditosSifco[]> {
-  const { data } = await axios.get<UsuarioConCreditosSifco[]>(`${import.meta.env.VITE_BACK_URL}/users-with-sifco`);
+  const { data } = await axios.get<UsuarioConCreditosSifco[]>(`${API_URL}/users-with-sifco`);
   return data;
+}
+
+/** Supported output format */
+export type ReportFormat = "pdf" | "excel";
+
+/** Three backend endpoints (kinds) */
+export type ReportKind =
+  | "cancelation"          // /credit/cancelation-report
+  | "cancelation-intern"   // /credit/cancelation-report-intern
+  | "cost-detail";         // /credit/cost-detail-report
+
+/** Request params */
+export interface ReportQuery {
+  numero_sifco: string;
+  format?: ReportFormat; // default pdf on backend if omitted
+}
+
+/** Standard backend response */
+export interface ReportResponse {
+  ok: boolean;
+  format: ReportFormat;
+  url: string;
+  filename: string;
+  size: number;
+}
+
+/** Build query params in the same way backend accepts them */
+function buildParams(q: ReportQuery): Record<string, string> {
+  const params: Record<string, string> = { numero_sifco: q.numero_sifco };
+  // You can switch to "format" if you prefer (?format=pdf|excel)
+  if (q.format === "excel") params.excel = "true";
+  if (q.format === "pdf") params.pdf = "true";
+  return params;
+}
+
+/** Map kind → endpoint path */
+function pathFor(kind: ReportKind): string {
+  switch (kind) {
+    case "cancelation":
+      return "/credit/cancelation-report";
+    case "cancelation-intern":
+      return "/credit/cancelation-report-intern";
+    case "cost-detail":
+      return "/credit/cost-detail-report";
+  }
+}
+
+/** Single service for any report kind */
+export async function generateReport(
+  kind: ReportKind,
+  query: ReportQuery
+): Promise<ReportResponse> {
+  const url = `${API_URL}${pathFor(kind)}`;
+  const { data } = await axios.get<ReportResponse>(url, {
+    params: buildParams(query),
+  });
+  return data;
+}
+
+/** Utility: open in new tab */
+export function openReportUrl(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
 }

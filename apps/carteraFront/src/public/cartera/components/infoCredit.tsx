@@ -1,57 +1,289 @@
-import { XCircle, AlertCircle } from "lucide-react";
-import type { BadDebt, CreditCancelation } from "../services/services";
- ; // Ajusta el import según tus tipos
+// src/components/InfoCreditoEstadoModal.tsx
+import * as React from "react";
+import {
+  XCircle,
+  AlertCircle,
+  FileDown,
+  FileSpreadsheet,
+  Loader2,
+} from "lucide-react";
+import {
+  openReportUrl,
+  type BadDebt,
+  type CreditCancelation,
+  type ReportFormat,
+  type ReportKind,
+} from "../services/services"; // ← ajusta si tu ruta es distinta
+import { useReport } from "../hooks/reports";
 
-interface InfoCreditoEstadoProps {
+// 🧱 shadcn/ui
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogClose,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select";
+
+type Props = {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  numeroSifco: string;
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
-}
+};
 
-export function InfoCreditoEstado({ cancelacion, incobrable }: InfoCreditoEstadoProps) {
-    console.log("InfoCreditoEstado props:", { cancelacion, incobrable });
+export default function InfoEstadoCredito({
+  open,
+  onOpenChange,
+  numeroSifco,
+  cancelacion,
+  incobrable,
+}: Props) {
+  const isCancel = !!cancelacion;
+  const isBadDebt = !!incobrable && !isCancel;
 
-  if (cancelacion) {
-        console.log("Renderizando CANCELACION", cancelacion);
-    return (
-      <div className="mt-2 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-800 shadow">
-        <XCircle className="w-8 h-8 text-red-400" />
-        <div>
-          <div className="font-bold text-red-700 mb-1">Crédito Cancelado</div>
-          <div className="font-medium">Motivo: <span className="font-normal">{cancelacion.motivo}</span></div>
-          <div className="font-medium">Monto cancelación: <span className="font-normal">Q{Number(cancelacion.monto_cancelacion).toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span></div>
-          <div className="text-xs text-red-500">Fecha: {cancelacion.fecha_cancelacion && new Date(cancelacion.fecha_cancelacion).toLocaleDateString("es-GT")}</div>
-          {cancelacion.observaciones && (
-            <div className="text-xs text-gray-500">Obs: {cancelacion.observaciones}</div>
-          )}
-        </div>
-      </div>
+  const [kind, setKind] = React.useState<ReportKind>("cancelation");
+  const m = useReport(kind);
+
+  const gen = (format: ReportFormat) => {
+    m.mutate(
+      { numero_sifco: numeroSifco, format },
+      { onSuccess: (res) => openReportUrl(res.url) }
     );
-  }
+  };
 
-  if (incobrable) {
-        console.log("Renderizando INCOBRABLE", incobrable);
+  const Badge = ({
+    tone,
+    children,
+  }: {
+    tone: "danger" | "warn" | "neutral";
+    children: React.ReactNode;
+  }) => {
+    const map = {
+      danger: "bg-red-100 text-red-800 ring-1 ring-red-200",
+      warn: "bg-yellow-100 text-yellow-900 ring-1 ring-yellow-200",
+      neutral: "bg-slate-100 text-slate-700 ring-1 ring-slate-200",
+    } as const;
     return (
-      <div className="mt-2 p-4 bg-yellow-50 border border-yellow-200 rounded-xl flex items-center gap-3 text-yellow-800 shadow">
-        <AlertCircle className="w-8 h-8 text-yellow-500" />
-        <div>
-          <div className="font-bold text-yellow-800 mb-1">Crédito Incobrable</div>
-          <div className="font-medium">Motivo: <span className="font-normal">{incobrable.motivo}</span></div>
-          <div className="font-medium">Monto incobrable: <span className="font-normal">Q{Number(incobrable.monto_incobrable).toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span></div>
-          <div className="text-xs text-yellow-600">Fecha: {incobrable.fecha_registro && new Date(incobrable.fecha_registro).toLocaleDateString("es-GT")}</div>
-          {incobrable.observaciones && (
-            <div className="text-xs text-gray-500">Obs: {incobrable.observaciones}</div>
-          )}
-        </div>
-      </div>
+      <span
+        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${map[tone]}`}
+      >
+        {children}
+      </span>
     );
-  } else{
-     return (
-    <div className="p-2 text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl mt-2">
-      Sin info de cancelación/incobrable<br />
-      <pre>{JSON.stringify({ cancelacion, incobrable }, null, 2)}</pre>
-    </div>)
-  }
+  };
 
-  // Si no hay ni cancelacion ni incobrable, no muestra nada
-  return null;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg rounded-2xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
+        {/* Header */}
+        <div
+          className={[
+            "px-4 py-3",
+            isCancel
+              ? "bg-red-100"
+              : isBadDebt
+                ? "bg-yellow-100"
+                : "bg-slate-100",
+          ].join(" ")}
+        >
+          <DialogHeader className="flex flex-row items-center gap-2">
+            {isCancel && <XCircle className="h-5 w-5 text-red-600" />}
+            {isBadDebt && !isCancel && (
+              <AlertCircle className="h-5 w-5 text-yellow-600" />
+            )}
+            <DialogTitle
+              className={
+                isCancel
+                  ? "text-red-700"
+                  : isBadDebt
+                    ? "text-yellow-800"
+                    : "text-slate-800"
+              }
+            >
+              {isCancel
+                ? "Crédito Cancelado"
+                : isBadDebt
+                  ? "Crédito Incobrable"
+                  : "Estado del Crédito"}
+            </DialogTitle>
+            <div className="ml-auto">
+              <Badge
+                tone={isCancel ? "danger" : isBadDebt ? "warn" : "neutral"}
+              >
+                {isCancel
+                  ? "Cancelación"
+                  : isBadDebt
+                    ? "Incobrable"
+                    : "Sin info"}
+              </Badge>
+            </div>
+          </DialogHeader>
+          <DialogDescription className="sr-only">
+            Estado y acciones de reporte del crédito {numeroSifco}
+          </DialogDescription>
+        </div>
+
+        {/* Body */}
+        <div className="px-4 pt-4 pb-2 bg-white">
+          {isCancel && cancelacion && (
+            <div className="space-y-1">
+              <p className="text-sm text-red-900">
+                <b>Motivo:</b> {cancelacion.motivo ?? "—"}
+              </p>
+              <p className="text-sm text-red-900">
+                <b>Monto:</b>{" "}
+                {`Q${Number(cancelacion.monto_cancelacion ?? 0).toLocaleString(
+                  "es-GT",
+                  {
+                    minimumFractionDigits: 2,
+                  }
+                )}`}
+              </p>
+              <p className="text-xs text-red-800">
+                <b>Fecha:</b>{" "}
+                {cancelacion.fecha_cancelacion
+                  ? new Date(cancelacion.fecha_cancelacion).toLocaleDateString(
+                      "es-GT"
+                    )
+                  : "—"}
+              </p>
+              {!!cancelacion.observaciones && (
+                <p className="text-xs text-slate-500">
+                  <b>Obs:</b> {cancelacion.observaciones}
+                </p>
+              )}
+            </div>
+          )}
+
+          {isBadDebt && incobrable && (
+            <div className="space-y-1">
+              <p className="text-sm text-yellow-900">
+                <b>Motivo:</b> {incobrable.motivo ?? "—"}
+              </p>
+              <p className="text-sm text-yellow-900">
+                <b>Monto:</b>{" "}
+                {`Q${Number(incobrable.monto_incobrable ?? 0).toLocaleString(
+                  "es-GT",
+                  {
+                    minimumFractionDigits: 2,
+                  }
+                )}`}
+              </p>
+              <p className="text-xs text-yellow-800">
+                <b>Fecha:</b>{" "}
+                {incobrable.fecha_registro
+                  ? new Date(incobrable.fecha_registro).toLocaleDateString(
+                      "es-GT"
+                    )
+                  : "—"}
+              </p>
+              {!!incobrable.observaciones && (
+                <p className="text-xs text-slate-500">
+                  <b>Obs:</b> {incobrable.observaciones}
+                </p>
+              )}
+            </div>
+          )}
+
+          {!isCancel && !isBadDebt && (
+            <p className="text-sm text-slate-700">
+              No hay información de cancelación/incobrable.
+            </p>
+          )}
+
+          {/* Acciones */}
+          <div className="mt-4">
+            <Label className="text-sm text-slate-700">Tipo de reporte</Label>
+            <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <Select
+                defaultValue="cancelation"
+                onValueChange={(v) => setKind(v as ReportKind)}
+              >
+               <SelectTrigger
+    className="w-full sm:w-64 rounded-lg border-slate-300 bg-slate-50 
+               focus:ring-2 focus:ring-blue-500 text-slate-700"
+  >
+                  <SelectValue placeholder="Selecciona un reporte" />
+                </SelectTrigger>
+                <SelectContent className="z-[9999] rounded-lg border border-slate-200 bg-white shadow-lg">
+                  <SelectItem
+                    value="cancelation"
+                    className="cursor-pointer text-slate-700 hover:bg-blue-50 focus:bg-blue-100"
+                  >
+                    Cancelación (externo)
+                  </SelectItem>
+                  <SelectItem
+                    value="cancelation-intern"
+                    className="cursor-pointer text-slate-700 hover:bg-blue-50 focus:bg-blue-100"
+                  >
+                    Cancelación Detallado (interno)
+                  </SelectItem>
+                  <SelectItem
+                    value="cost-detail"
+                    className="cursor-pointer text-slate-700 hover:bg-blue-50 focus:bg-blue-100"
+                  >
+                    Detalle de Costos
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              <div className="flex gap-2">
+                {/* PDF: botón sólido primario */}
+                <Button
+                  className="gap-2 bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={m.isPending}
+                  onClick={() => gen("pdf")}
+                >
+                  {m.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileDown className="h-4 w-4" />
+                  )}
+                  PDF
+                </Button>
+
+                {/* Excel: botón sólido verde */}
+                <Button
+                  className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  disabled={m.isPending}
+                  onClick={() => gen("excel")}
+                >
+                  {m.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <FileSpreadsheet className="h-4 w-4" />
+                  )}
+                  Excel
+                </Button>
+              </div>
+            </div>
+
+            <p className="mt-3 text-[11px] text-slate-500">
+              N° SIFCO: <b>{numeroSifco}</b>
+            </p>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <DialogFooter className="px-4 pb-4 bg-slate-50">
+          <DialogClose asChild>
+            <Button variant="outline">Cerrar</Button>
+          </DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }

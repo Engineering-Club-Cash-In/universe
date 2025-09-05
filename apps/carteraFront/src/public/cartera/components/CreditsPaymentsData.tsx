@@ -4,14 +4,8 @@ import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
-import { MoreVertical, Eye, Pencil, XCircle } from "lucide-react";
+import { Eye, Pencil, XCircle } from "lucide-react";
 
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
 import {
   Table,
   TableBody,
@@ -39,7 +33,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { ModalCancelCredit } from "./modalCreditCancel";
 import { useActivateCredit } from "../hooks/cancelCredit";
 import { useIsMobile } from "../hooks/useIsMobile";
-import { InfoCreditoEstado } from "./infoCredit";
+import InfoEstadoCredito from "./infoCredit";
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const navigate = useNavigate();
@@ -86,6 +80,7 @@ export function ListaCreditosPagos() {
   const canCancel = (s: CreditStatus) => s === "ACTIVO";
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
   const canViewPayments = (_s: CreditStatus) => true;
+  const [openInfoCancelation, setOpenInfoCancelation] = React.useState(false);
   const handleOpenEdit = (credit: any, inversionistas: any) => {
     console.log(inversionistas);
     setCreditToEdit({
@@ -409,12 +404,25 @@ export function ListaCreditosPagos() {
                       : item.creditos.statusCredit}
                 </span>
               </p>
-              <InfoCreditoEstado
+                {/* Mostrar el botón solo para créditos con estado INCOBRABLE o CANCELADO */}
+                {(item.creditos.statusCredit === "INCOBRABLE" || item.creditos.statusCredit === "CANCELADO" || item.creditos.statusCredit === "PENDIENTE_CANCELACION") && (
+                <Button
+                  variant="outline"
+                  onClick={() => setOpenInfoCancelation(true)}
+                >
+                  Estado y reportes
+                </Button>
+                )}
+
+                <InfoEstadoCredito
                 cancelacion={item.cancelacion}
                 incobrable={item.incobrable}
-              />
+                numeroSifco={item.creditos.numero_credito_sifco}
+                open={openInfoCancelation}
+                onOpenChange={setOpenInfoCancelation}
+                />
 
-              {/* ✅ Reemplazo completo del bloque con Dropdown por acciones inline (responsive) */}
+                {/* ✅ Reemplazo completo del bloque con Dropdown por acciones inline (responsive) */}
               <div
                 className="flex justify-end mt-2"
                 // Evita que los clicks lleguen al TableRow (que expande/colapsa)
@@ -896,7 +904,7 @@ export function ListaCreditosPagos() {
                                 `%${inv.porcentaje_participacion_inversionista}`,
                               ],
                               [
-                                "cuota Inversionista",
+                                "cuota ",
                                 `Q${inv.cuota_inversionista}`,
                               ],
                               [
@@ -1196,9 +1204,22 @@ export function ListaCreditosPagos() {
                             )}
                             {/* Puedes agregar más estados si tienes otros */}
                           </div>
-                          <InfoCreditoEstado
+                          {(item.creditos.statusCredit === "PENDIENTE_CANCELACION" || item.creditos.statusCredit === "INCOBRABLE" || item.creditos.statusCredit === "CANCELADO") && (
+                            <Button
+                              variant="default"
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                              onClick={() => setOpenInfoCancelation(true)}
+                            >
+                              Estado y reportes
+                            </Button>
+                          )}
+
+                          <InfoEstadoCredito
                             cancelacion={item.cancelacion}
                             incobrable={item.incobrable}
+                            numeroSifco={item.creditos.numero_credito_sifco}
+                            open={openInfoCancelation}
+                            onOpenChange={setOpenInfoCancelation}
                           />
                           {[
                             [
@@ -1336,8 +1357,7 @@ export function ListaCreditosPagos() {
                             >
                               <span className="font-bold text-blue-700 text-base leading-tight">
                                 {label}:
-                              </span>
-                              <span className="font-semibold text-gray-900 text-lg">
+                              </span>  <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
                                 {value}
                               </span>
                             </div>
@@ -1520,9 +1540,10 @@ export function ListaCreditosPagos() {
                                       "Porcentaje Cash In",
                                       `%${inv.porcentaje_cash_in}`,
                                     ],
-                                    [
-                                      "cuota Inversionista",
-                                    ],
+                                        [
+                                "cuota  ",
+                                `Q${inv.cuota_inversionista}`,
+                              ],
                                   ].map(([label, value]) => (
                                     <div
                                       key={label}

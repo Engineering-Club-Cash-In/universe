@@ -9,6 +9,7 @@ import {
 	uuid,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
+import { vehicles } from "./vehicles";
 
 // Enums
 export const leadStatusEnum = pgEnum("lead_status", [
@@ -170,6 +171,7 @@ export const opportunities = pgTable("opportunities", {
 	title: text("title").notNull(),
 	leadId: uuid("lead_id").references(() => leads.id),
 	companyId: uuid("company_id").references(() => companies.id),
+	vehicleId: uuid("vehicle_id").references(() => vehicles.id), // Relación con vehículo (opcional)
 	value: decimal("value", { precision: 12, scale: 2 }),
 	stageId: uuid("stage_id")
 		.notNull()

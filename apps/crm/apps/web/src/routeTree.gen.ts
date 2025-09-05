@@ -13,12 +13,14 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
+import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities'
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
 import { Route as CrmClientsRouteImport } from './routes/crm/clients'
 import { Route as CrmAnalysisRouteImport } from './routes/crm/analysis'
+import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminReportsRouteImport } from './routes/admin/reports'
@@ -41,6 +43,11 @@ const IndexRoute = IndexRouteImport.update({
 const VehiclesIndexRoute = VehiclesIndexRouteImport.update({
   id: '/vehicles/',
   path: '/vehicles/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CobrosIndexRoute = CobrosIndexRouteImport.update({
+  id: '/cobros/',
+  path: '/cobros/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
@@ -73,6 +80,11 @@ const CrmAnalysisRoute = CrmAnalysisRouteImport.update({
   path: '/crm/analysis',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CobrosIdRoute = CobrosIdRouteImport.update({
+  id: '/cobros/$id',
+  path: '/cobros/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminUsersRoute = AdminUsersRouteImport.update({
   id: '/admin/users',
   path: '/admin/users',
@@ -96,12 +108,14 @@ export interface FileRoutesByFullPath {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/cobros/$id': typeof CobrosIdRoute
   '/crm/analysis': typeof CrmAnalysisRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/cobros': typeof CobrosIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -111,12 +125,14 @@ export interface FileRoutesByTo {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/cobros/$id': typeof CobrosIdRoute
   '/crm/analysis': typeof CrmAnalysisRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/cobros': typeof CobrosIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
 }
 export interface FileRoutesById {
@@ -127,12 +143,14 @@ export interface FileRoutesById {
   '/admin/reports': typeof AdminReportsRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
+  '/cobros/$id': typeof CobrosIdRoute
   '/crm/analysis': typeof CrmAnalysisRoute
   '/crm/clients': typeof CrmClientsRoute
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
+  '/cobros/': typeof CobrosIndexRoute
   '/vehicles/': typeof VehiclesIndexRoute
 }
 export interface FileRouteTypes {
@@ -144,12 +162,14 @@ export interface FileRouteTypes {
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/users'
+    | '/cobros/$id'
     | '/crm/analysis'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
     | '/vehicles/inspection'
+    | '/cobros'
     | '/vehicles'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -159,12 +179,14 @@ export interface FileRouteTypes {
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/users'
+    | '/cobros/$id'
     | '/crm/analysis'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
     | '/vehicles/inspection'
+    | '/cobros'
     | '/vehicles'
   id:
     | '__root__'
@@ -174,12 +196,14 @@ export interface FileRouteTypes {
     | '/admin/reports'
     | '/admin/settings'
     | '/admin/users'
+    | '/cobros/$id'
     | '/crm/analysis'
     | '/crm/clients'
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
     | '/vehicles/inspection'
+    | '/cobros/'
     | '/vehicles/'
   fileRoutesById: FileRoutesById
 }
@@ -190,12 +214,14 @@ export interface RootRouteChildren {
   AdminReportsRoute: typeof AdminReportsRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
+  CobrosIdRoute: typeof CobrosIdRoute
   CrmAnalysisRoute: typeof CrmAnalysisRoute
   CrmClientsRoute: typeof CrmClientsRoute
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
   CrmOpportunitiesRoute: typeof CrmOpportunitiesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
+  CobrosIndexRoute: typeof CobrosIndexRoute
   VehiclesIndexRoute: typeof VehiclesIndexRoute
 }
 
@@ -227,6 +253,13 @@ declare module '@tanstack/react-router' {
       path: '/vehicles'
       fullPath: '/vehicles'
       preLoaderRoute: typeof VehiclesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cobros/': {
+      id: '/cobros/'
+      path: '/cobros'
+      fullPath: '/cobros'
+      preLoaderRoute: typeof CobrosIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/vehicles/inspection': {
@@ -271,6 +304,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CrmAnalysisRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cobros/$id': {
+      id: '/cobros/$id'
+      path: '/cobros/$id'
+      fullPath: '/cobros/$id'
+      preLoaderRoute: typeof CobrosIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/users': {
       id: '/admin/users'
       path: '/admin/users'
@@ -302,12 +342,14 @@ const rootRouteChildren: RootRouteChildren = {
   AdminReportsRoute: AdminReportsRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
+  CobrosIdRoute: CobrosIdRoute,
   CrmAnalysisRoute: CrmAnalysisRoute,
   CrmClientsRoute: CrmClientsRoute,
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,
   CrmOpportunitiesRoute: CrmOpportunitiesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
+  CobrosIndexRoute: CobrosIndexRoute,
   VehiclesIndexRoute: VehiclesIndexRoute,
 }
 export const routeTree = rootRouteImport

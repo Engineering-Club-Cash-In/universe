@@ -13,12 +13,43 @@ import {
 	vehiclePhotos,
 	inspectionChecklistItems,
 } from "./schema/vehicles";
+import {
+	contratosFinanciamiento,
+	cuotasPago,
+	casosCobros,
+	contactosCobros,
+	conveniosPago,
+	recuperacionesVehiculo,
+	notificacionesCobros,
+} from "./schema/cobros";
 
 async function clearAllCRMData() {
 	console.log("🗑️ Clearing all CRM data...");
 
 	try {
-		// Delete vehicle data first (they depend on companies)
+		// Delete cobros data first (most dependent)
+		await db.delete(notificacionesCobros);
+		console.log("✅ Notificaciones de cobros cleared");
+
+		await db.delete(recuperacionesVehiculo);
+		console.log("✅ Recuperaciones de vehículo cleared");
+
+		await db.delete(conveniosPago);
+		console.log("✅ Convenios de pago cleared");
+
+		await db.delete(contactosCobros);
+		console.log("✅ Contactos de cobros cleared");
+
+		await db.delete(casosCobros);
+		console.log("✅ Casos de cobros cleared");
+
+		await db.delete(cuotasPago);
+		console.log("✅ Cuotas de pago cleared");
+
+		await db.delete(contratosFinanciamiento);
+		console.log("✅ Contratos de financiamiento cleared");
+
+		// Delete vehicle data (they depend on companies)
 		await db.delete(inspectionChecklistItems);
 		console.log("✅ Inspection checklist items cleared");
 

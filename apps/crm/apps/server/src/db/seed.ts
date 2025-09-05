@@ -15,6 +15,15 @@ import {
 	vehiclePhotos,
 	inspectionChecklistItems,
 } from "./schema/vehicles";
+import {
+	contratosFinanciamiento,
+	cuotasPago,
+	casosCobros,
+	contactosCobros,
+	conveniosPago,
+	recuperacionesVehiculo,
+	notificacionesCobros,
+} from "./schema/cobros";
 
 const salesStagesData = [
 	{
@@ -858,6 +867,16 @@ const usersData = [
 		createdAt: new Date(),
 		updatedAt: new Date(),
 	},
+	{
+		id: "cobros-user-1",
+		name: "Luis Hernandez",
+		email: "luis@crm.com",
+		emailVerified: true,
+		image: null,
+		role: "cobros" as const,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+	},
 ];
 
 async function seedUsers() {
@@ -898,6 +917,27 @@ const vehiclesData = [
 		fuelType: "Gasolina",
 		transmission: "Automático",
 		status: "available",
+		// GPS Information
+		gpsActivo: true,
+		dispositivoGPS: "Teltonika FMB130",
+		imeiGPS: "867648040123456",
+		ubicacionActualGPS: JSON.stringify({
+			lat: 14.6349,
+			lng: -90.5069,
+			precision: 10,
+			timestamp: new Date().toISOString(),
+			address: "Zona 1, Guatemala City"
+		}),
+		ultimaSeñalGPS: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 horas atrás
+		// Insurance Information
+		seguroVigente: true,
+		numeroPoliza: "POL-789123456",
+		companiaSeguro: "Seguros G&T",
+		fechaInicioSeguro: new Date("2024-01-01"),
+		fechaVencimientoSeguro: new Date("2024-12-31"),
+		montoAsegurado: "500000.00",
+		deducible: "15000.00",
+		tipoCobertura: "amplia",
 	},
 	{
 		make: "Honda",
@@ -914,6 +954,27 @@ const vehiclesData = [
 		fuelType: "Gasolina",
 		transmission: "Automático",
 		status: "pending",
+		// GPS Information
+		gpsActivo: true,
+		dispositivoGPS: "Queclink GV75W",
+		imeiGPS: "867648040234567",
+		ubicacionActualGPS: JSON.stringify({
+			lat: 14.5844,
+			lng: -90.5164,
+			precision: 15,
+			timestamp: new Date().toISOString(),
+			address: "Zona 4, Guatemala City"
+		}),
+		ultimaSeñalGPS: new Date(Date.now() - 30 * 60 * 1000), // 30 minutos atrás
+		// Insurance Information
+		seguroVigente: true,
+		numeroPoliza: "POL-456789123",
+		companiaSeguro: "Aseguradora Guatemalteca",
+		fechaInicioSeguro: new Date("2024-03-15"),
+		fechaVencimientoSeguro: new Date("2025-03-14"),
+		montoAsegurado: "650000.00",
+		deducible: "20000.00",
+		tipoCobertura: "total",
 	},
 	{
 		make: "Nissan",
@@ -930,6 +991,21 @@ const vehiclesData = [
 		fuelType: "Gasolina",
 		transmission: "Manual",
 		status: "available",
+		// GPS Information
+		gpsActivo: false,
+		dispositivoGPS: null,
+		imeiGPS: null,
+		ubicacionActualGPS: null,
+		ultimaSeñalGPS: null,
+		// Insurance Information
+		seguroVigente: false,
+		numeroPoliza: null,
+		companiaSeguro: null,
+		fechaInicioSeguro: null,
+		fechaVencimientoSeguro: null,
+		montoAsegurado: null,
+		deducible: null,
+		tipoCobertura: null,
 	},
 	{
 		make: "Ford",
@@ -946,6 +1022,27 @@ const vehiclesData = [
 		fuelType: "Gasolina",
 		transmission: "Automático",
 		status: "available",
+		// GPS Information
+		gpsActivo: true,
+		dispositivoGPS: "Concox GT06N",
+		imeiGPS: "867648040345678", 
+		ubicacionActualGPS: JSON.stringify({
+			lat: 14.6118,
+			lng: -90.5265,
+			precision: 8,
+			timestamp: new Date().toISOString(),
+			address: "Zona 9, Guatemala City"
+		}),
+		ultimaSeñalGPS: new Date(Date.now() - 5 * 60 * 1000), // 5 minutos atrás
+		// Insurance Information
+		seguroVigente: true,
+		numeroPoliza: "POL-789456123",
+		companiaSeguro: "Mapfre Guatemala",
+		fechaInicioSeguro: new Date("2023-11-01"),
+		fechaVencimientoSeguro: new Date("2024-10-31"),
+		montoAsegurado: "450000.00",
+		deducible: "12000.00",
+		tipoCobertura: "basica",
 	},
 	{
 		make: "Mazda",
@@ -962,6 +1059,27 @@ const vehiclesData = [
 		fuelType: "Gasolina",
 		transmission: "Automático",
 		status: "available",
+		// GPS Information
+		gpsActivo: true,
+		dispositivoGPS: "Meitrack T366L",
+		imeiGPS: "867648040456789",
+		ubicacionActualGPS: JSON.stringify({
+			lat: 14.6211,
+			lng: -90.5069,
+			precision: 12,
+			timestamp: new Date().toISOString(),
+			address: "Zona 10, Guatemala City"  
+		}),
+		ultimaSeñalGPS: new Date(Date.now() - 15 * 60 * 1000), // 15 minutos atrás
+		// Insurance Information
+		seguroVigente: true,
+		numeroPoliza: "POL-456123789",
+		companiaSeguro: "Seguros G&T",
+		fechaInicioSeguro: new Date("2024-05-01"),
+		fechaVencimientoSeguro: new Date("2025-04-30"),
+		montoAsegurado: "580000.00",
+		deducible: "18000.00",
+		tipoCobertura: "amplia",
 	},
 ];
 
@@ -1255,6 +1373,553 @@ async function getOrCreateAdminUser() {
 	}
 }
 
+// Datos de contratos de financiamiento
+async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any[], usersList: any[]) {
+	console.log("💰 Seeding contratos de financiamiento...");
+
+	try {
+		const existingContratos = await db.select().from(contratosFinanciamiento);
+		if (existingContratos.length > 0) {
+			console.log("Contratos already exist, skipping seed...");
+			return existingContratos;
+		}
+
+		// Crear 8 contratos de financiamiento con diferentes estados
+		const contratosData = [
+			{
+				montoFinanciado: "500000.00",
+				cuotaMensual: "25000.00", 
+				numeroCuotas: 24,
+				tasaInteres: "15.50",
+				fechaInicio: new Date("2023-06-01"),
+				fechaVencimiento: new Date("2025-06-01"),
+				diaPagoMensual: 15,
+				estado: "activo" as const,
+			},
+			{
+				montoFinanciado: "750000.00",
+				cuotaMensual: "31250.00",
+				numeroCuotas: 36,
+				tasaInteres: "14.75", 
+				fechaInicio: new Date("2023-03-15"),
+				fechaVencimiento: new Date("2026-03-15"),
+				diaPagoMensual: 10,
+				estado: "activo" as const,
+			},
+			{
+				montoFinanciado: "300000.00",
+				cuotaMensual: "18750.00",
+				numeroCuotas: 18,
+				tasaInteres: "16.25",
+				fechaInicio: new Date("2023-09-01"),
+				fechaVencimiento: new Date("2025-03-01"),
+				diaPagoMensual: 5,
+				estado: "activo" as const,
+			},
+			{
+				montoFinanciado: "650000.00",
+				cuotaMensual: "27083.33",
+				numeroCuotas: 30,
+				tasaInteres: "15.00",
+				fechaInicio: new Date("2023-01-10"),
+				fechaVencimiento: new Date("2025-07-10"),
+				diaPagoMensual: 20,
+				estado: "activo" as const,
+			},
+			{
+				montoFinanciado: "400000.00",
+				cuotaMensual: "20000.00",
+				numeroCuotas: 24,
+				tasaInteres: "17.00",
+				fechaInicio: new Date("2023-12-01"),
+				fechaVencimiento: new Date("2025-12-01"),
+				diaPagoMensual: 25,
+				estado: "completado" as const,
+			},
+			// Contratos al día (sin mora)
+			{
+				montoFinanciado: "350000.00",
+				cuotaMensual: "17500.00",
+				numeroCuotas: 24,
+				tasaInteres: "14.50",
+				fechaInicio: new Date("2024-01-15"),
+				fechaVencimiento: new Date("2026-01-15"),
+				diaPagoMensual: 8,
+				estado: "activo" as const,
+			},
+			{
+				montoFinanciado: "280000.00",
+				cuotaMensual: "15555.56",
+				numeroCuotas: 18,
+				tasaInteres: "15.75",
+				fechaInicio: new Date("2024-03-01"),
+				fechaVencimiento: new Date("2025-09-01"),
+				diaPagoMensual: 12,
+				estado: "activo" as const,
+			},
+			// Contratos incobrables
+			{
+				montoFinanciado: "550000.00",
+				cuotaMensual: "30555.56",
+				numeroCuotas: 18,
+				tasaInteres: "18.00",
+				fechaInicio: new Date("2023-02-01"),
+				fechaVencimiento: new Date("2024-08-01"),
+				diaPagoMensual: 18,
+				estado: "incobrable" as const,
+			},
+			{
+				montoFinanciado: "420000.00",
+				cuotaMensual: "23333.33",
+				numeroCuotas: 18,
+				tasaInteres: "19.50",
+				fechaInicio: new Date("2022-10-01"),
+				fechaVencimiento: new Date("2024-04-01"),
+				diaPagoMensual: 22,
+				estado: "recuperado" as const,
+			},
+		];
+
+		const contratosWithRelations = contratosData.map((contrato, index) => {
+			// Reutilizar clientes y vehículos si hay más contratos que entidades
+			const responsableCobros = usersList.find(u => u.role === "cobros") || usersList.find(u => u.role === "admin");
+			return {
+				...contrato,
+				clientId: clientsList[index % clientsList.length].id, // Reutilizar clientes
+				vehicleId: vehiclesList[index % vehiclesList.length].id, // Reutilizar vehículos
+				responsableCobros: responsableCobros?.id,
+				createdBy: usersList[0].id,
+			};
+		});
+
+		const insertedContratos = await db
+			.insert(contratosFinanciamiento)
+			.values(contratosWithRelations)
+			.returning();
+
+		console.log(`✅ ${insertedContratos.length} contratos de financiamiento seeded`);
+		return insertedContratos;
+	} catch (error) {
+		console.error("❌ Error seeding contratos:", error);
+		return [];
+	}
+}
+
+// Datos de cuotas de pago 
+async function seedCuotasPago(contratosList: any[]) {
+	console.log("📅 Seeding cuotas de pago...");
+
+	try {
+		const existingCuotas = await db.select().from(cuotasPago);
+		if (existingCuotas.length > 0) {
+			console.log("Cuotas already exist, skipping seed...");
+			return existingCuotas;
+		}
+
+		const cuotasData = [];
+		
+		for (const contrato of contratosList) {
+			// Crear cuotas mensuales para cada contrato
+			const fechaInicio = new Date(contrato.fechaInicio);
+			
+			// Determinar hasta qué cuota ha pagado según el estado del contrato
+			let ultimaCuotaPagada = 0;
+			
+			if (contrato.estado === "completado") {
+				// Contrato completado: todas las cuotas pagadas
+				ultimaCuotaPagada = contrato.numeroCuotas;
+			} else if (contrato.estado === "activo") {
+				// Contratos activos: diferentes niveles de pago
+				const contratoIndex = contratosList.indexOf(contrato);
+				if (contratoIndex < 4) {
+					// Primeros 4: tienen mora (diferentes niveles)
+					if (contratoIndex === 0) ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.7); // Mora leve
+					else if (contratoIndex === 1) ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.6); // Mora moderada
+					else if (contratoIndex === 2) ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.5); // Mora severa
+					else ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.4); // Mora crítica
+				} else {
+					// Contratos 5-6: al día
+					ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.95); // 95% pagadas, al día
+				}
+			} else if (contrato.estado === "incobrable" || contrato.estado === "recuperado") {
+				// Contratos incobrables: pagaron muy poco antes de dejar de pagar
+				ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.3); // Solo 30% pagadas
+			}
+			
+			for (let i = 1; i <= contrato.numeroCuotas; i++) {
+				const fechaVencimiento = new Date(fechaInicio);
+				fechaVencimiento.setMonth(fechaVencimiento.getMonth() + i - 1);
+				fechaVencimiento.setDate(contrato.diaPagoMensual);
+
+				const hoy = new Date();
+				const diasRetraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24));
+				
+				let estadoMora: "al_dia" | "mora_30" | "mora_60" | "mora_90" | "mora_120" | "mora_120_plus" | "pagado" | "incobrable" = "al_dia";
+				let fechaPago = null;
+				let montoPagado = null;
+				let montoMora = "0.00";
+
+				if (i <= ultimaCuotaPagada) {
+					// Cuotas ya pagadas (secuencialmente)
+					estadoMora = "pagado" as const;
+					
+					// Simular fecha de pago: algunas a tiempo, otras con mora
+					const pagoConMora = Math.random() > 0.7; // 30% de pagos tuvieron mora
+					
+					if (pagoConMora) {
+						// Pago con mora: se pagó 1-15 días después del vencimiento
+						fechaPago = new Date(fechaVencimiento);
+						const diasMoraPago = Math.floor(Math.random() * 15) + 1;
+						fechaPago.setDate(fechaPago.getDate() + diasMoraPago);
+						
+						// Calcular mora que se pagó
+						const mesesMora = Math.ceil(diasMoraPago / 30);
+						montoMora = (Number(contrato.cuotaMensual) * 0.02 * mesesMora).toFixed(2);
+						montoPagado = (Number(contrato.cuotaMensual) + Number(montoMora)).toFixed(2);
+					} else {
+						// Pago a tiempo
+						fechaPago = new Date(fechaVencimiento);
+						fechaPago.setDate(fechaPago.getDate() + Math.floor(Math.random() * 3)); // 0-3 días después
+						montoPagado = contrato.cuotaMensual;
+						montoMora = "0.00";
+					}
+				} else {
+					// Cuotas pendientes/en mora (secuencialmente después de la última pagada)
+					if (diasRetraso > 0) {
+						// Cuota vencida - calcular nivel de mora
+						if (diasRetraso <= 30) estadoMora = "mora_30" as const;
+						else if (diasRetraso <= 60) estadoMora = "mora_60" as const; 
+						else if (diasRetraso <= 90) estadoMora = "mora_90" as const;
+						else if (diasRetraso <= 120) estadoMora = "mora_120" as const;
+						else estadoMora = "mora_120_plus" as const;
+						
+						// Calcular mora acumulada
+						const mesesMora = Math.ceil(diasRetraso / 30);
+						montoMora = (Number(contrato.cuotaMensual) * 0.02 * mesesMora).toFixed(2);
+					} else {
+						// Cuota aún no vencida
+						estadoMora = "al_dia" as const;
+					}
+				}
+
+				cuotasData.push({
+					contratoId: contrato.id,
+					numeroCuota: i,
+					fechaVencimiento,
+					montoCuota: contrato.cuotaMensual,
+					fechaPago,
+					montoPagado,
+					montoMora,
+					estadoMora,
+					diasMora: diasRetraso > 0 && i > ultimaCuotaPagada ? diasRetraso : 0,
+				});
+			}
+		}
+
+		const insertedCuotas = await db
+			.insert(cuotasPago)
+			.values(cuotasData)
+			.returning();
+
+		console.log(`✅ ${insertedCuotas.length} cuotas de pago seeded`);
+		return insertedCuotas;
+	} catch (error) {
+		console.error("❌ Error seeding cuotas:", error);
+		return [];
+	}
+}
+
+// Datos de casos de cobros
+async function seedCasosCobros(contratosList: any[], clientsList: any[], vehiclesList: any[], usersList: any[]) {
+	console.log("⚠️ Seeding casos de cobros...");
+
+	try {
+		const existingCasos = await db.select().from(casosCobros);
+		if (existingCasos.length > 0) {
+			console.log("Casos de cobros already exist, skipping seed...");
+			return existingCasos;
+		}
+
+		// Crear casos para diferentes tipos de contratos
+		const casosData: any[] = [];
+
+		contratosList.forEach((contrato, index) => {
+			if (index >= clientsList.length) return;
+			
+			const cliente = clientsList[index];
+			const responsableCobros = usersList.find(u => u.role === "cobros") || usersList.find(u => u.role === "admin");
+			
+			// Determinar tipo de caso basado en el estado del contrato
+			if (contrato.estado === "activo") {
+				// Casos activos: algunos en mora, otros al día
+				if (index < 4) {
+					// Primeros 4: casos con diferentes niveles de mora
+					const estados = ["mora_30", "mora_60", "mora_90", "mora_120"] as const;
+					const estadoMora = estados[index % estados.length];
+					const montosEnMora = ["75000.00", "125000.00", "187500.00", "250000.00"];
+					const diasMora = [35, 65, 85, 125];
+					const cuotasVencidas = [2, 3, 4, 5];
+
+					casosData.push({
+						contratoId: contrato.id,
+						estadoMora,
+						montoEnMora: montosEnMora[index],
+						diasMoraMaximo: diasMora[index],
+						cuotasVencidas: cuotasVencidas[index],
+						responsableCobros: responsableCobros?.id,
+						telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
+						telefonoAlternativo: "+502 4444 0" + (index + 1) + "01", 
+						emailContacto: cliente.contactPerson.toLowerCase().replace(" ", ".") + "@email.com",
+						direccionContacto: `Zona ${index + 10}, Ciudad de Guatemala`,
+						proximoContacto: new Date(Date.now() + (index + 1) * 24 * 60 * 60 * 1000),
+						metodoContactoProximo: (["llamada", "whatsapp", "email", "visita_domicilio"] as const)[index],
+					});
+				}
+				// Los contratos 5-6 están al día, no necesitan casos de cobros
+			} else if (contrato.estado === "incobrable" || contrato.estado === "recuperado") {
+				// Casos incobrables con recuperación de vehículo
+				casosData.push({
+					contratoId: contrato.id,
+					estadoMora: "incobrable" as const,
+					montoEnMora: (Number(contrato.cuotaMensual) * 8).toFixed(2), // 8 cuotas vencidas
+					diasMoraMaximo: 180, // 6 meses sin pagar
+					cuotasVencidas: 8,
+					responsableCobros: responsableCobros?.id,
+					telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
+					telefonoAlternativo: "+502 4444 0" + (index + 1) + "01", 
+					emailContacto: cliente.contactPerson.toLowerCase().replace(" ", ".") + "@email.com",
+					direccionContacto: `Zona ${index + 10}, Ciudad de Guatemala`,
+					proximoContacto: null, // No hay próximo contacto para incobrables
+					metodoContactoProximo: null,
+					activo: true, // Los casos incobrables también deben ser visibles
+				});
+			}
+		});
+
+		const insertedCasos = await db
+			.insert(casosCobros)
+			.values(casosData)
+			.returning();
+
+		console.log(`✅ ${insertedCasos.length} casos de cobros seeded`);
+		return insertedCasos;
+	} catch (error) {
+		console.error("❌ Error seeding casos de cobros:", error);
+		return [];
+	}
+}
+
+// Datos de contactos de cobros
+async function seedContactosCobros(casosList: any[], usersList: any[]) {
+	console.log("📞 Seeding contactos de cobros...");
+
+	try {
+		const existingContactos = await db.select().from(contactosCobros);
+		if (existingContactos.length > 0) {
+			console.log("Contactos de cobros already exist, skipping seed...");
+			return existingContactos;
+		}
+
+		const contactosData = [];
+		const responsableCobros = usersList.find(u => u.role === "cobros") || usersList.find(u => u.role === "admin");
+
+		for (const caso of casosList) {
+			// 2-4 contactos por caso
+			const numeroContactos = Math.floor(Math.random() * 3) + 2;
+			
+			for (let i = 0; i < numeroContactos; i++) {
+				const fechaContacto = new Date();
+				fechaContacto.setDate(fechaContacto.getDate() - (numeroContactos - i) * 2); // Contactos cada 2 días
+
+				const metodos = ["llamada", "whatsapp", "email"] as const;
+				const estados = ["contactado", "promesa_pago", "no_contesta", "acuerdo_parcial", "rechaza_pagar"] as const;
+				
+				const metodoContacto = metodos[i % metodos.length];
+				const estadoContacto = estados[Math.floor(Math.random() * estados.length)];
+
+				const comentarios = [
+					"Cliente atendió la llamada, menciona dificultades económicas temporales",
+					"Se estableció compromiso de pago para el próximo viernes",
+					"Cliente no respondió, buzón de voz completo",
+					"Acuerdo parcial: pagará 50% esta semana y 50% la siguiente",
+					"Cliente rechaza reconocer la deuda, solicita verificación de documentos"
+				];
+
+				const acuerdos = [
+					"Pago completo antes del viernes",
+					"Pago en dos partes: 50% hoy, 50% en una semana",
+					"",
+					"Convenio de pago a 3 meses",
+					""
+				];
+
+				contactosData.push({
+					casoCobroId: caso.id,
+					fechaContacto,
+					metodoContacto,
+					estadoContacto,
+					duracionLlamada: metodoContacto === "llamada" ? Math.floor(Math.random() * 300) + 60 : null,
+					comentarios: comentarios[i % comentarios.length],
+					acuerdosAlcanzados: acuerdos[i % acuerdos.length],
+					compromisosPago: estadoContacto === "promesa_pago" ? `Pago de Q${Math.floor(Math.random() * 50000) + 25000} antes del ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}` : "",
+					requiereSeguimiento: Math.random() > 0.4,
+					fechaProximoContacto: Math.random() > 0.4 ? new Date(Date.now() + Math.floor(Math.random() * 7) * 24 * 60 * 60 * 1000) : null,
+					realizadoPor: responsableCobros?.id,
+				});
+			}
+		}
+
+		const insertedContactos = await db
+			.insert(contactosCobros)
+			.values(contactosData)
+			.returning();
+
+		console.log(`✅ ${insertedContactos.length} contactos de cobros seeded`);
+		return insertedContactos;
+	} catch (error) {
+		console.error("❌ Error seeding contactos:", error);
+		return [];
+	}
+}
+
+// Datos de convenios de pago
+async function seedConveniosPago(casosList: any[], usersList: any[]) {
+	console.log("🤝 Seeding convenios de pago...");
+
+	try {
+		const existingConvenios = await db.select().from(conveniosPago);
+		if (existingConvenios.length > 0) {
+			console.log("Convenios already exist, skipping seed...");
+			return existingConvenios;
+		}
+
+		// Solo algunos casos tienen convenios (primeros 2 casos)
+		const casosConConvenio = casosList.slice(0, 2);
+		const responsableAdmin = usersList.find(u => u.role === "admin");
+
+		const conveniosData = casosConConvenio.map((caso, index) => ({
+			casoCobroId: caso.id,
+			montoAcordado: (Number(caso.montoEnMora) * 0.8).toFixed(2), // 80% del monto en mora
+			numeroCuotasConvenio: [3, 4, 6, 8][index % 4], // 3-8 cuotas
+			montoCuotaConvenio: ((Number(caso.montoEnMora) * 0.8) / [3, 4, 6, 8][index % 4]).toFixed(2),
+			fechaInicioConvenio: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Inicia en una semana
+			activo: true,
+			cumplido: Math.random() > 0.7, // 30% están cumplidos
+			cuotasCumplidas: Math.floor(Math.random() * 3),
+			condicionesEspeciales: index % 2 === 0 ? "Pago únicamente los viernes, horario de 9am a 4pm" : "",
+			aprobadoPor: responsableAdmin?.id,
+		}));
+
+		const insertedConvenios = await db
+			.insert(conveniosPago)
+			.values(conveniosData)
+			.returning();
+
+		console.log(`✅ ${insertedConvenios.length} convenios de pago seeded`);
+		return insertedConvenios;
+	} catch (error) {
+		console.error("❌ Error seeding convenios:", error);
+		return [];
+	}
+}
+
+// Datos de recuperaciones de vehículo
+async function seedRecuperacionesVehiculo(casosList: any[], usersList: any[]) {
+	console.log("🚗 Seeding recuperaciones de vehículo...");
+
+	try {
+		const existingRecuperaciones = await db.select().from(recuperacionesVehiculo);
+		if (existingRecuperaciones.length > 0) {
+			console.log("Recuperaciones already exist, skipping seed...");
+			return existingRecuperaciones;
+		}
+
+		// Solo casos de mora avanzada requieren recuperación
+		const casosCriticos = casosList.filter(caso => 
+			["mora_90", "mora_120", "mora_120_plus"].includes(caso.estadoMora)
+		);
+
+		const tiposRecuperacion = ["entrega_voluntaria", "tomado", "orden_secuestro"] as const;
+		const responsableAdmin = usersList.find(u => u.role === "admin");
+
+		const recuperacionesData = casosCriticos.map((caso, index) => ({
+			casoCobroId: caso.id,
+			tipoRecuperacion: tiposRecuperacion[index % tiposRecuperacion.length],
+			fechaRecuperacion: index % 2 === 0 ? new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000) : null,
+			
+			// Proceso legal (solo para orden_secuestro)
+			ordenSecuestro: tiposRecuperacion[index % tiposRecuperacion.length] === "orden_secuestro",
+			numeroExpediente: tiposRecuperacion[index % tiposRecuperacion.length] === "orden_secuestro" ? `EXP-${Math.floor(Math.random() * 90000) + 10000}` : null,
+			juzgadoCompetente: tiposRecuperacion[index % tiposRecuperacion.length] === "orden_secuestro" ? "Juzgado de Primera Instancia Civil" : null,
+
+			completada: Math.random() > 0.5, // 50% completadas
+			observaciones: index % 2 === 0 ? "Vehículo localizado en buen estado" : "Cliente cooperativo en el proceso",
+			responsableRecuperacion: responsableAdmin?.id,
+		}));
+
+		const insertedRecuperaciones = await db
+			.insert(recuperacionesVehiculo)
+			.values(recuperacionesData)
+			.returning();
+
+		console.log(`✅ ${insertedRecuperaciones.length} recuperaciones de vehículo seeded`);
+		return insertedRecuperaciones;
+	} catch (error) {
+		console.error("❌ Error seeding recuperaciones:", error);
+		return [];
+	}
+}
+
+// Datos de notificaciones
+async function seedNotificacionesCobros(casosList: any[]) {
+	console.log("🔔 Seeding notificaciones de cobros...");
+
+	try {
+		const existingNotificaciones = await db.select().from(notificacionesCobros);
+		if (existingNotificaciones.length > 0) {
+			console.log("Notificaciones already exist, skipping seed...");
+			return existingNotificaciones;
+		}
+
+		const notificacionesData = [];
+
+		for (const caso of casosList) {
+			// 2-5 notificaciones por caso
+			const numeroNotificaciones = Math.floor(Math.random() * 4) + 2;
+			
+			for (let i = 0; i < numeroNotificaciones; i++) {
+				const tiposNotificacion = ["vencimiento_proximo", "mora_30", "mora_60", "recordatorio_pago"];
+				const canales = ["email", "whatsapp", "llamada"] as const;
+				
+				const fechaEnvio = Math.random() > 0.3 ? new Date(Date.now() - Math.floor(Math.random() * 15) * 24 * 60 * 60 * 1000) : null;
+
+				notificacionesData.push({
+					casoCobroId: caso.id,
+					tipoNotificacion: tiposNotificacion[i % tiposNotificacion.length],
+					canal: canales[i % canales.length],
+					asunto: `Recordatorio de Pago - Cuota ${i + 1}`,
+					mensaje: `Estimado cliente, le recordamos que tiene una cuota pendiente de pago por Q${Number(caso.montoEnMora) / caso.cuotasVencidas}. Por favor, acérquese a nuestras oficinas o contacte a su asesor.`,
+					enviada: !!fechaEnvio,
+					fechaEnvio,
+					respuesta: fechaEnvio && Math.random() > 0.7 ? "Cliente confirmó recepción, pagará mañana" : null,
+					fechaProgramada: new Date(Date.now() + i * 24 * 60 * 60 * 1000), // Una cada día
+				});
+			}
+		}
+
+		const insertedNotificaciones = await db
+			.insert(notificacionesCobros)
+			.values(notificacionesData)
+			.returning();
+
+		console.log(`✅ ${insertedNotificaciones.length} notificaciones seeded`);
+		return insertedNotificaciones;
+	} catch (error) {
+		console.error("❌ Error seeding notificaciones:", error);
+		return [];
+	}
+}
+
 async function main() {
 	console.log("🌱 Starting CRM database seeding...");
 
@@ -1289,6 +1954,15 @@ async function main() {
 	const checklistsList = await seedInspectionChecklists(inspectionsList);
 	const photosList = await seedVehiclePhotos(vehiclesList);
 
+	// Seed cobros system data
+	const contratosList = await seedContratosFinanciamiento(clientsList, vehiclesList, usersList);
+	const cuotasList = await seedCuotasPago(contratosList);
+	const casosList = await seedCasosCobros(contratosList, clientsList, vehiclesList, usersList);
+	const contactosList = await seedContactosCobros(casosList, usersList);
+	const conveniosList = await seedConveniosPago(casosList, usersList);
+	const recuperacionesList = await seedRecuperacionesVehiculo(casosList, usersList);
+	const notificacionesList = await seedNotificacionesCobros(casosList);
+
 	console.log("\n🎉 CRM database seeding completed!");
 	console.log(`✅ ${usersList.length} users`);
 	console.log(`✅ ${stagesList.length} sales stages`);
@@ -1301,6 +1975,13 @@ async function main() {
 	console.log(`✅ ${inspectionsList.length} vehicle inspections`);
 	console.log(`✅ ${checklistsList.length} checklist items`);
 	console.log(`✅ ${photosList.length} vehicle photos`);
+	console.log(`✅ ${contratosList.length} contratos de financiamiento`);
+	console.log(`✅ ${cuotasList.length} cuotas de pago`);
+	console.log(`✅ ${casosList.length} casos de cobros`);
+	console.log(`✅ ${contactosList.length} contactos de cobros`);
+	console.log(`✅ ${conveniosList.length} convenios de pago`);
+	console.log(`✅ ${recuperacionesList.length} recuperaciones de vehículo`);
+	console.log(`✅ ${notificacionesList.length} notificaciones de cobros`);
 
 	process.exit(0);
 }

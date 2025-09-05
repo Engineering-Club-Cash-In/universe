@@ -3,6 +3,7 @@ import { adminRouter } from "./admin";
 import { authRouter } from "./auth";
 import { crmRouter } from "./crm";
 import { vehiclesRouter } from "./vehicles";
+import { cobrosRouter } from "./cobros";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -58,6 +59,21 @@ export const appRouter = {
 	getVehicleInspectionById: vehiclesRouter.getInspectionById,
 	getVehicleStatistics: vehiclesRouter.getStatistics,
 	createFullVehicleInspection: vehiclesRouter.createFullInspection,
+
+	// Cobros routes
+	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
+	getCasosCobros: cobrosRouter.getCasosCobros,
+	getCasoCobroById: cobrosRouter.getCasoCobroById,
+	createContactoCobros: cobrosRouter.createContactoCobros,
+	getHistorialContactos: cobrosRouter.getHistorialContactos,
+	createConvenioPago: cobrosRouter.createConvenioPago,
+	getConveniosPago: cobrosRouter.getConveniosPago,
+	asignarResponsableCobros: cobrosRouter.asignarResponsableCobros,
+	getUsuariosCobros: cobrosRouter.getUsuariosCobros,
+	getHistorialPagos: cobrosRouter.getHistorialPagos,
+	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
+	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
+	getDetallesContrato: cobrosRouter.getDetallesContrato,
 };
 
 export type AppRouter = typeof appRouter;

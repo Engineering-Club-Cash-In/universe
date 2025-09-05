@@ -97,6 +97,17 @@ export default function Header() {
 								</>
 							)}
 
+							{/* Cobros Navigation */}
+							{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
+								<NavigationMenuItem>
+									<Link to="/cobros">
+										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
+											Cobros
+										</NavigationMenuLink>
+									</Link>
+								</NavigationMenuItem>
+							)}
+
 							{/* Analyst Navigation */}
 							{session && userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
 								<NavigationMenuItem>

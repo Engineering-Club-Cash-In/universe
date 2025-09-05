@@ -29,6 +29,23 @@ export const vehicles = pgTable('vehicles', {
   // Company relationship
   companyId: uuid('company_id').references(() => companies.id),
   
+  // GPS Information
+  gpsActivo: boolean('gps_activo').notNull().default(false),
+  dispositivoGPS: text('dispositivo_gps'), // Marca/modelo del dispositivo GPS
+  imeiGPS: text('imei_gps'), // IMEI único del dispositivo
+  ubicacionActualGPS: text('ubicacion_actual_gps'), // JSON con coordenadas actuales
+  ultimaSeñalGPS: timestamp('ultima_señal_gps'),
+  
+  // Insurance Information  
+  seguroVigente: boolean('seguro_vigente').notNull().default(false),
+  numeroPoliza: text('numero_poliza'),
+  companiaSeguro: text('compania_seguro'),
+  fechaInicioSeguro: timestamp('fecha_inicio_seguro'),
+  fechaVencimientoSeguro: timestamp('fecha_vencimiento_seguro'),
+  montoAsegurado: decimal('monto_asegurado', { precision: 12, scale: 2 }),
+  deducible: decimal('deducible', { precision: 12, scale: 2 }),
+  tipoCobertura: text('tipo_cobertura'), // "basica", "amplia", "total"
+  
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

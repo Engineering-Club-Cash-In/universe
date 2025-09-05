@@ -232,6 +232,7 @@ export const creditos_inversionistas = customSchema.table(
 
     monto_inversionista: numeric("monto_inversionista", {
       precision: 18,
+      scale: 2
     })
       .notNull()
       .default("0"), // Monto total que el inversionista aporta al crédito

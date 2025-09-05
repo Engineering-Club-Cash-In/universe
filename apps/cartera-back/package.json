@@ -38,6 +38,7 @@
     "puppeteer": "^24.14.0",
     "uuid": "^11.1.0",
     "valibot": "^0.42.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

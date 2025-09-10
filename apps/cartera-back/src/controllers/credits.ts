@@ -376,10 +376,7 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
       seguro_restante: "0",
       gps_restante: "0",
       total_restante: creditDataForInsert.deudatotal,
-      membresias:
-        typeof creditDataForInsert.membresias === "number"
-          ? creditDataForInsert.membresias
-          : 0,
+      membresias: creditDataForInsert.membresias?.toString() ?? "0",
       membresias_pago: creditDataForInsert.membresias_pago?.toString() ?? "",
       membresias_mes: creditDataForInsert.membresias?.toString() ?? "",
       otros: creditData.otros?.toString() ?? "0",
@@ -421,12 +418,9 @@ export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
         seguro_restante: creditData.seguro_10_cuotas?.toString() ?? "0",
         gps_restante: creditData.gps?.toString() ?? "0",
         total_restante: creditDataForInsert.deudatotal,
-        membresias:
-          typeof creditDataForInsert.membresias === "number"
-            ? creditDataForInsert.membresias
-            : 0,
+        membresias: creditDataForInsert.membresias_pago?.toString() ?? "",
         membresias_pago: creditDataForInsert.membresias_pago?.toString() ?? "",
-        membresias_mes: creditDataForInsert.membresias?.toString() ?? "",
+        membresias_mes: creditDataForInsert.membresias_pago?.toString() ?? "",
         otros: "",
         mora: "0",
         monto_boleta_cuota: "0",
@@ -1682,7 +1676,7 @@ export async function resetCredit({
         llamada: "",
         renuevo_o_nuevo: "renuevo",
         membresias:
-          typeof credito.membresias === "number" ? credito.membresias : 0,
+        credito.membresias_pago?.toString() ?? "",
         membresias_pago: credito.membresias_pago?.toString() ?? "",
         membresias_mes: credito.membresias_pago?.toString() ?? "",
         otros: "0",
@@ -1953,10 +1947,7 @@ export async function syncScheduleOnTermsChange({
         seguro_restante: new Big(credit.seguro_10_cuotas ?? 0).toString(),
         gps_restante: new Big(credit.gps ?? 0).toString(),
         total_restante: new Big(credit.deudatotal ?? 0).toString(),
-        membresias:
-          typeof credit.membresias_pago === "number"
-            ? credit.membresias_pago
-            : Number(credit.membresias_pago ?? 0),
+        membresias: new Big(credit.membresias_pago ?? 0).toString(),
         membresias_pago: new Big(credit.membresias_pago ?? 0).toString(),
         membresias_mes: new Big(credit.membresias_pago ?? 0).toString(),
         otros: "",

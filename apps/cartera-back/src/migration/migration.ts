@@ -2,6 +2,7 @@ import Big from "big.js";
 import { ExcelCreditoRow, leerCreditoPorNumeroSIFCO } from "../services/excel";
 import {
   ClienteEmail,
+  EstadoCuentaDetalle,
   EstadoCuentaTransaccion,
   PrestamoDetalle,
   WSCrEstadoCuentaResponse,
@@ -10,6 +11,7 @@ import {
 } from "../services/sifco.interface";
 import {
   consultarClientesPorEmail,
+  consultarEstadoCuentaPrestamo,
   consultarInformacionPrestamo,
   consultarPrestamoDetalle,
   consultarPrestamosPorCliente,
@@ -27,10 +29,10 @@ import {
 } from "../database/db";
 import { findOrCreateInvestor } from "../controllers/investor";
 import { map } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 const excelPath = path.resolve(
-  "C:/Users/Kelvin Palacios/Documents/analis de datos/agosto2025.csv"
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/octubre2025.csv"
 );
 
 /**
@@ -98,7 +100,12 @@ export async function mapPrestamoDetalleToCredito(
     excelRow?.NIT ?? null,
     excelRow?.ComoSeEntero ?? null
   );
-
+  
+  // Calculate cuotaCredito by summing all cuotas from Excel rows
+  const cuotaCredito = excelRows 
+    ? excelRows.reduce((acc, row) => acc + Number(row.Cuota || 0), 0)
+    : 0;
+    
   const advisor = await findOrCreateAdvisorByName(excelRow?.Asesor || "", true);
 
   const realPorcentaje = porcentaje_interes.mul(100).toFixed(2);
@@ -108,12 +115,12 @@ export async function mapPrestamoDetalleToCredito(
     usuario_id: Number(user.usuario_id ?? 0),
 
     otros: toBigExcel(excelRow?.Otros, "0").toString(),
-    numero_credito_sifco: toBigExcel(prestamo.PreNumero, "0").toString(),
+    numero_credito_sifco: prestamo.PreNumero,
 
     capital: capital.toFixed(2),
     porcentaje_interes: realPorcentaje.toString(),
     cuota_interes: cuota_interes.toFixed(2),
-    cuota: excelRow?.Cuota,
+    cuota: cuotaCredito.toString(),
     deudatotal: deudatotal.toFixed(2),
     seguro_10_cuotas: seguro_10_cuotas.toFixed(2),
     gps: gps.toFixed(2),
@@ -146,12 +153,16 @@ export async function mapPrestamoDetalleToCredito(
 
   try {
     // Insert credit and get the ID
-    const [insertedCredit] = await db
-      .insert(creditos)
-      .values(creditInsert)
-      .returning();
+  const [row] = await db
+    .insert(creditos)
+    .values(creditInsert)
+    .onConflictDoUpdate({
+      target: creditos.numero_credito_sifco, // o un índice único compuesto
+      set: creditInsert, // actualiza usando el MISMO shape que insertás
+    })
+    .returning();
 
-    const creditoId = insertedCredit.credito_id;
+    const creditoId = row.credito_id;
     console.log(`✅ Crédito insertado con ID: ${creditoId}`);
     const inversionistas = await mapInversionistas(excelRows);
     const creditosInversionistasData = inversionistas.map((inv: any) => {
@@ -209,7 +220,7 @@ export async function mapPrestamoDetalleToCredito(
         .insert(creditos_inversionistas)
         .values(creditosInversionistasData);
     }
-    return insertedCredit;
+    return row;
   } catch (error) {
     console.error("❌ Error al insertar crédito en la base de datos:", error);
     throw error;
@@ -347,17 +358,6 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
           continue;
         }
         //const infoPagos = await consultarInformacionPrestamo(preNumero);
-
-        console.log("🗂️ Crédito mapeado listo para DB:", combinado.credito_id);
-        return;
-        await mapEstadoCuentaToPagosBig(
-          infoPagos as unknown as WSCrEstadoCuentaResponse,
-          Number(combinado.credito_id)
-        );
-
-        console.log(
-          `✅ Flujo completado para el préstamo ${preNumero} del cliente ${cliente.NombreCompleto}`
-        );
       }
     }
   } catch (err: any) {
@@ -433,6 +433,11 @@ export async function mapEstadoCuentaToPagosBig(
   resp: WSCrEstadoCuentaResponse,
   creditoId: number
 ) {
+  console.log(
+    "▶️ Iniciando mapEstadoCuentaToPagosBig para crédito:",
+    creditoId
+  );
+
   const credito = await db.query.creditos.findFirst({
     where: eq(creditos.credito_id, creditoId),
     columns: {
@@ -442,8 +447,12 @@ export async function mapEstadoCuentaToPagosBig(
       cuota_interes: true,
       iva_12: true,
       capital: true,
+      deudatotal: true,
+      porcentaje_interes: true,
+      gps: true,
     },
   });
+  console.log("✅ Crédito encontrado:", credito);
 
   const cuotas = resp?.ConsultaResultado?.PlanPagos_Cuotas ?? [];
   const transacciones =
@@ -451,13 +460,41 @@ export async function mapEstadoCuentaToPagosBig(
   const primeraTransaccion: EstadoCuentaTransaccion | undefined =
     resp?.ConsultaResultado.EstadoCuenta_Transacciones?.[0];
 
+  console.log(
+    `📊 Respuesta: cuotas=${cuotas.length}, transacciones=${transacciones.length}`
+  );
+
   if (primeraTransaccion) {
-    // Buscar el detalle de ROYALTY
+    console.log("🔍 Primera transacción encontrada:", primeraTransaccion);
+
     const detalleRoyalty = primeraTransaccion.EstadoCuenta_Detalles.find(
       (d) => d.ApSalDes === "ROYALTY"
     );
+    console.log("🔍 Detalle ROYALTY:", detalleRoyalty);
+
     const royaltiValor = toBig(detalleRoyalty?.CrMoDeValor ?? 0);
-    // 1️⃣ Insertar el pago 0
+    console.log("💰 Valor de royalty:", royaltiValor.toString());
+    // 🧹 Primero limpiamos la cuota 0 de ese crédito
+
+    await db
+      .delete(pagos_credito)
+      .where(
+        inArray(
+          pagos_credito.cuota_id,
+          db
+            .select({ id: cuotas_credito.cuota_id })
+            .from(cuotas_credito)
+            .where(eq(cuotas_credito.credito_id, creditoId))
+        )
+      );
+
+    await db
+      .delete(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, creditoId));
+
+    console.log(`🧹 Eliminadas cuotas previas #0 para crédito_id=${creditoId}`);
+
+    // ➕ Luego insertamos la nueva cuota 0
     const cuota0 = await db
       .insert(cuotas_credito)
       .values({
@@ -467,16 +504,36 @@ export async function mapEstadoCuentaToPagosBig(
         pagado: true,
       })
       .returning();
+
+    console.log("✅ Insertada cuota 0:", cuota0);
+
     const reserva = new Big(credito?.seguro_10_cuotas ?? "0").plus(600);
+    console.log("📦 Reserva calculada:", reserva.toString());
+    const capital = toBigExcel(primeraTransaccion.CapitalDesembolsado, "0");
+    const porcentaje_interes = toBigExcel(credito?.porcentaje_interes, "1.5").div(100);
+    const gps = toBigExcel(credito?.gps, 0);
+    const seguro_10_cuotas = toBigExcel(credito?.seguro_10_cuotas, 0);
+    const membresias_pago = toBigExcel(credito?.membresias, 0);
+
+    const cuota_interes = capital.times(porcentaje_interes).round(2);
+    const iva_12 = cuota_interes.times(0.12).round(2);
+
+    const deudatotal = capital
+      .plus(cuota_interes)
+      .plus(iva_12)
+      .plus(seguro_10_cuotas)
+      .plus(gps)
+      .plus(membresias_pago)
+      .round(2, 0); // Using rounding mode 0 (round down/floor)
     const pago0 = {
       credito_id: creditoId,
       cuota: credito?.cuota?.toString() ?? "0.00",
-      cuota_interes: credito?.cuota_interes?.toString() ?? "0.00",
+      cuota_interes: cuota_interes?.toString() ?? "0.00",
       cuota_id: cuota0[0]?.cuota_id ?? null,
       fecha_pago: new Date(primeraTransaccion.CrMoFeTrx).toISOString(),
       abono_capital: "0.00",
-      abono_interes: credito?.cuota_interes?.toString() ?? "0.00",
-      abono_iva_12: credito?.iva_12?.toString() ?? "0.00",
+      abono_interes: cuota_interes.toString() ?? "0.00",
+      abono_iva_12: iva_12.toString() ?? "0.00",
       abono_interes_ci: "0.00",
       abono_iva_ci: "0.00",
       abono_seguro: credito?.seguro_10_cuotas?.toString() ?? "0.00",
@@ -486,13 +543,13 @@ export async function mapEstadoCuentaToPagosBig(
       monto_boleta: "0.00",
       fecha_filtro: new Date(primeraTransaccion.CrMoFeTrx).toISOString(),
       renuevo_o_nuevo: "",
-      capital_restante: credito?.capital?.toString() ?? "0.00",
+      capital_restante: capital?.toString() ?? "0.00",
       interes_restante: "0.00",
       iva_12_restante: "0.00",
       seguro_restante: "0.00",
       gps_restante: "0.00",
-      total_restante: "0.00",
-      membresias: credito?.membresias ? Number(credito.membresias) : 0,
+      total_restante: deudatotal.toString(),
+      membresias: credito?.membresias?.toString() ?? "0.00",
       membresias_pago: credito?.membresias?.toString() ?? "0.00",
       membresias_mes: credito?.membresias?.toString() ?? "0.00",
       otros: "",
@@ -510,17 +567,25 @@ export async function mapEstadoCuentaToPagosBig(
     };
 
     await db.insert(pagos_credito).values(pago0).onConflictDoNothing();
+    console.log("✅ Insertado pago 0");
 
-    // 2️⃣ Update del crédito con el valor de royalty
     if (royaltiValor.gt(0)) {
       await db
         .update(creditos)
         .set({ royalti: royaltiValor.toString() })
         .where(eq(creditos.credito_id, creditoId));
+      console.log(
+        "✅ Crédito actualizado con royalty:",
+        royaltiValor.toString()
+      );
     }
   }
+
+  console.log("▶️ Procesando cuotas...");
   const promiseResults = await Promise.all(
-    cuotas.map(async (c) => {
+    cuotas.map(async (c, idx) => {
+      console.log(`➡️ Cuota ${idx + 1} de ${cuotas.length}`, c);
+
       const cuotadB = await db
         .insert(cuotas_credito)
         .values({
@@ -532,51 +597,61 @@ export async function mapEstadoCuentaToPagosBig(
           pagado: c.CapitalPagado === "S" && c.InteresPagado === "S",
         })
         .returning();
+      console.log("✅ Insertada cuota en DB:", cuotadB);
+
       // Capital
       const abonoCapital = toBig(c.CapitalAbonado);
+      console.log("💵 Abono capital:", abonoCapital.toString());
 
-      // Interés (SIFCO suele traerlo con IVA incluido)
+      // Interés
       const interesAbonadoTotal = toBig(c.InteresAbonado);
-      let abonoInteres = new Big(0);
-      let abonoIva12 = new Big(0);
+      console.log("💵 Interés abonado total:", interesAbonadoTotal.toString());
 
       const base = interesAbonadoTotal.div(1.12);
-      abonoInteres = base.round(2, Big.roundHalfUp);
-      abonoIva12 = interesAbonadoTotal
+      const abonoInteres = base.round(2, Big.roundHalfUp);
+      const abonoIva12 = interesAbonadoTotal
         .minus(abonoInteres)
         .round(2, Big.roundHalfUp);
 
-      // Mora pagada
+      console.log(
+        "💵 Abono interés sin IVA:",
+        abonoInteres.toString(),
+        " IVA:",
+        abonoIva12.toString()
+      );
+
       const moraCapPag = toBig(c.CapitalMoraValorPagado);
       const moraIntPag = toBig(c.InteresMoraValorPagado);
       const moraTotal = moraCapPag.plus(moraIntPag);
+      console.log("💵 Mora total:", moraTotal.toString());
+
       const seguroDb = toBig(credito?.seguro_10_cuotas ?? 0);
       const membresiaDb = toBig(credito?.membresias ?? 0);
 
-      // 👇 Validar que OtrosMonto = seguro + membresia
       const otrosMonto = toBig(c.OtrosMonto);
-      let abonoSeguro = new Big(0);
+      console.log("💵 Otros monto:", otrosMonto.toString());
 
+      let abonoSeguro = new Big(0);
       if (otrosMonto.eq(seguroDb.plus(membresiaDb))) {
         abonoSeguro = seguroDb;
-      } else {
-        abonoSeguro = new Big(0); // si no cuadra, seguro = 0
       }
+      console.log("💵 Abono seguro:", abonoSeguro.toString());
 
-      // Total pagado del mes (sin doble conteo):
       const pagoDelMes = abonoCapital
         .plus(abonoInteres)
         .plus(abonoIva12)
         .plus(moraTotal)
         .plus(otrosMonto);
+      console.log("💵 Pago del mes:", pagoDelMes.toString());
 
-      const pagado = c.CapitalPagado === "S" && c.InteresPagado === "S";
       const capitalActual = getSaldoCapitalMatch(c.Fecha);
+      console.log("📌 Capital restante match:", capitalActual);
+
       return {
         cuota_id: cuotadB[0].cuota_id,
+        credito_id: creditoId,
         cuota_interes: abonoInteres.toString(),
-        cuota: credito?.cuota?.toString() || "0.00", // Ensure a non-undefined value
-        // acá puedes resolver cuota_id si ya la insertaste antes
+        cuota: credito?.cuota?.toString() || "0.00",
         fecha_pago: new Date(c.Fecha).toISOString(),
         abono_capital: abonoCapital.toString(),
         abono_interes: abonoInteres.toString(),
@@ -596,7 +671,7 @@ export async function mapEstadoCuentaToPagosBig(
         seguro_restante: "0.00",
         gps_restante: "0.00",
         total_restante: "0.00",
-        membresias: Number(credito?.membresias) || 0,
+        membresias: credito?.membresias,
         membresias_pago: credito?.membresias
           ? credito?.membresias.toString()
           : "0.00",
@@ -607,7 +682,7 @@ export async function mapEstadoCuentaToPagosBig(
         mora: moraTotal.toString(),
         monto_boleta_cuota: pagoDelMes.toString(),
         seguro_total: seguroDb.toString(),
-        pagado,
+        pagado: c.CapitalPagado === "S" && c.InteresPagado === "S",
         facturacion: "si",
         mes_pagado: "",
         seguro_facturado: seguroDb.toString(),
@@ -618,12 +693,16 @@ export async function mapEstadoCuentaToPagosBig(
       };
     })
   );
-  // Ensure we're spreading each object in the array, not the array itself
+
+  console.log("✅ Todas las cuotas procesadas. Insertando pagos...");
   const pagosDB = await db
     .insert(pagos_credito)
     .values(promiseResults)
     .returning();
+
+  console.log("✅ Pagos insertados:", pagosDB.length);
   return pagosDB;
+
   function getSaldoCapitalMatch(fechaCuota: string): string {
     const cuotaDate = new Date(fechaCuota);
     const mes = cuotaDate.getMonth();
@@ -632,9 +711,273 @@ export async function mapEstadoCuentaToPagosBig(
     for (const trx of transacciones) {
       const trxDate = new Date(trx.CrMoFeTrx);
       if (trxDate.getMonth() === mes && trxDate.getFullYear() === año) {
-        return trx.SaldoCapital; // 👈 usamos el campo directo
+        console.log(
+          `🔗 Match transacción con cuota ${fechaCuota}:`,
+          trx.SaldoCapital
+        );
+        return trx.SaldoCapital;
+      } else {
+        console.log(
+          `❌ No match transacción ${trx.CrMoFeTrx} con cuota ${fechaCuota}`
+        );
       }
     }
-    return "0.00"; // si no encuentra
+    console.log(`⚠️ No se encontró match para cuota ${fechaCuota}`);
+    return "0.00";
   }
+}
+
+/**
+ * Fetch a list of credits from DB. If numeroSifco is provided, filter by it.
+ * NOTE: Adjust selected columns to match your schema.
+ */
+async function fetchCreditosFromDB(numeroSifco?: string) {
+  if (numeroSifco) {
+    // Only the specified credit
+    const rows = await db
+      .select({
+        id: creditos.credito_id, // PK interno
+        numeroSifco: creditos.numero_credito_sifco, // número SIFCO (ajusta nombre)
+      })
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numeroSifco));
+
+    return rows;
+  }
+
+  // All credits
+  const rows = await db
+    .select({
+      id: creditos.credito_id,
+      numeroSifco: creditos.numero_credito_sifco,
+    })
+    .from(creditos);
+
+  return rows;
+}
+
+/**
+ * Main entry:
+ * - If numeroSifco is provided, process only that credit.
+ * - Otherwise, process all credits in DB.
+ *
+ * Keeps it sequential and simple by design.
+ */
+export async function mapPagosPorCreditos(numeroSifco?: string) {
+  // --- 1) Obtener créditos a procesar ---
+  const creditList = await fetchCreditosFromDB(numeroSifco);
+
+  if (!creditList.length) {
+    console.log(
+      numeroSifco
+        ? `[WARN] No se encontró crédito con número SIFCO=${numeroSifco}`
+        : "[WARN] No hay créditos para procesar."
+    );
+    return;
+  }
+
+  console.log(
+    `🧾 Créditos a procesar: ${creditList.length}${
+      numeroSifco ? ` (filtro SIFCO=${numeroSifco})` : ""
+    }`
+  );
+
+  // --- 2) Recorrer y mapear pagos (secuencial para mantenerlo sencillo) ---
+  let ok = 0;
+  let fail = 0;
+
+  for (const c of creditList) {
+    const label = `${c.numeroSifco} / credito_id=${c.id}`;
+    console.log(`🧭 Iniciando flujo para ${label}`);
+
+    try {
+      console.log(`🔍 Consultando estado de cuenta en SIFCO para ${label}...`);
+      // 2.1) Consultar estado de cuenta por número SIFCO
+      const infoPagos = await consultarEstadoCuentaPrestamo(c.numeroSifco);
+      console.log(infoPagos);
+      console.log(`✅ Estado de cuenta obtenido para ${label}.`);
+      // 2.2) Validaciones mínimas
+      if (!infoPagos) {
+        console.log(`[WARN] Sin estado de cuenta para ${label}. Se omite.`);
+        fail++;
+        continue;
+      }
+
+      // 2.3) Mapear pagos a DB usando tu método existente
+      await mapEstadoCuentaToPagosBig(
+        infoPagos as unknown as WSCrEstadoCuentaResponse,
+        Number(c.id)
+      );
+
+      ok++;
+    } catch (err: any) {
+      console.log(`[ERROR] Procesando ${label}:`, err?.message || err);
+      fail++;
+      // Nota: no hacemos throw para no tumbar el lote
+    }
+  }
+
+  // --- 3) Resumen ---
+  console.log(
+    `🎉 Resumen mapeo pagos -> OK=${ok} | FAIL=${fail} | TOTAL=${creditList.length}`
+  );
+}
+
+/**
+ * Inserta o actualiza pagos de inversionistas
+ * Puede procesar TODOS los créditos o solo uno específico
+ * @param numeroCredito Opcional: número de crédito SIFCO a procesar
+ */
+export async function fillPagosInversionistas(numeroCredito?: string) {
+  console.log("numeroCredito", numeroCredito);
+  console.log("🚀 Iniciando flujo de pagos de inversionistas...");
+
+  // 1. Obtener créditos de DB
+  let creditos: { credito_id: number; numero_credito_sifco: string }[] = [];
+
+  if (numeroCredito) {
+    const credito = await db.query.creditos.findFirst({
+      columns: { credito_id: true, numero_credito_sifco: true },
+      where: (c, { eq }) => eq(c.numero_credito_sifco, numeroCredito),
+    });
+
+    if (!credito) {
+      throw new Error(
+        `[ERROR] No se encontró el crédito con numero_credito_sifco=${numeroCredito}`
+      );
+    }
+
+    creditos = [credito];
+  } else {
+    creditos = await db.query.creditos.findMany({
+      columns: { credito_id: true, numero_credito_sifco: true },
+    });
+
+    if (!creditos || creditos.length === 0) {
+      throw new Error(`[ERROR] No se encontró ningún crédito en la DB`);
+    }
+  }
+
+  console.log(`🧾 Créditos a procesar: ${creditos?.length || 0}`);
+  console.log(creditos);
+
+  // Contadores globales
+  let totalOk = 0;
+  let totalFail = 0;
+
+  // 2. Iterar créditos
+  for (const credito of creditos) {
+    if (!credito) continue;
+
+    console.log(`🚀 Procesando inversionistas para crédito SIFCO=${credito.numero_credito_sifco}`);
+
+    // 3. Obtener filas desde Excel
+    const rows = await leerCreditoPorNumeroSIFCO(excelPath, credito.numero_credito_sifco);
+    console.log(`ℹ️ Filas obtenidas desde Excel: ${rows?.length || 0}`);
+
+    // Contadores por crédito
+    let ok = 0;
+    let fail = 0;
+
+    // 4. Procesar filas
+    for (const row of rows) {
+      try {
+        // 4.1 Resolver inversionista
+        const inv = await db.query.inversionistas.findFirst({
+          columns: { inversionista_id: true, nombre: true },
+          where: (i, { eq }) => eq(i.nombre, row.Inversionista.trim()),
+        });
+
+        if (!inv) {
+          throw new Error(
+            `[ERROR] No existe inversionista con nombre="${row.Inversionista}" (Crédito ${row.CreditoSIFCO})`
+          );
+        }
+
+        // 4.2 Calcular montos
+        const montoAportado = toBigExcel(row.Capital);
+        const porcentajeCashIn = toBigExcel(row.PorcentajeCashIn);
+        const porcentajeInversion = toBigExcel(row.PorcentajeInversionista);
+        const interes = toBigExcel(row.porcentaje);
+
+        const cuotaInteres = montoAportado.times(interes.div(100));
+
+        const montoInversionista = cuotaInteres
+          .times(porcentajeInversion)
+          .div(100)
+          .toFixed(2);
+        const montoCashIn = cuotaInteres
+          .times(porcentajeCashIn)
+          .div(100)
+          .toFixed(2);
+
+        const ivaInversionista =
+          Number(montoInversionista) > 0
+            ? new Big(montoInversionista).times(0.12).toFixed(2)
+            : "0.00";
+        const ivaCashIn =
+          Number(montoCashIn) > 0
+            ? new Big(montoCashIn).times(0.12).toFixed(2)
+            : "0.00";
+
+        const cuotaInv =
+          row.CuotaInversionista && row.CuotaInversionista !== "0"
+            ? row.CuotaInversionista
+            : row.Cuota;
+
+        // 4.3 Armar registro
+        const registro = {
+          credito_id: credito.credito_id,
+          inversionista_id: inv.inversionista_id,
+          monto_aportado: montoAportado.toString(),
+          porcentaje_cash_in: porcentajeCashIn.toString(),
+          porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+          monto_inversionista: montoInversionista,
+          monto_cash_in: montoCashIn,
+          iva_inversionista: ivaInversionista,
+          iva_cash_in: ivaCashIn,
+          fecha_creacion: new Date(),
+          cuota_inversionista: cuotaInv.toString(),
+        };
+
+        // 4.4 Upsert
+        await db
+          .insert(creditos_inversionistas)
+          .values(registro)
+          .onConflictDoUpdate({
+            target: [
+              creditos_inversionistas.credito_id,
+              creditos_inversionistas.inversionista_id,
+            ],
+            set: {
+              monto_aportado: sql`EXCLUDED.monto_aportado`,
+              porcentaje_cash_in: sql`EXCLUDED.porcentaje_cash_in`,
+              porcentaje_participacion_inversionista:
+                sql`EXCLUDED.porcentaje_participacion_inversionista`,
+              monto_inversionista: sql`EXCLUDED.monto_inversionista`,
+              monto_cash_in: sql`EXCLUDED.monto_cash_in`,
+              iva_inversionista: sql`EXCLUDED.iva_inversionista`,
+              iva_cash_in: sql`EXCLUDED.iva_cash_in`,
+              cuota_inversionista: sql`EXCLUDED.cuota_inversionista`,
+            },
+          });
+
+        ok++;
+        totalOk++;
+      } catch (err) {
+        console.error(`❌ Error procesando fila crédito=${credito.numero_credito_sifco}`, err);
+        fail++;
+        totalFail++;
+      }
+    }
+
+    console.log(
+      `🎉 Resumen crédito ${credito.numero_credito_sifco} -> OK=${ok} | FAIL=${fail} | TOTAL=${rows.length}`
+    );
+  }
+
+  // Resumen global
+  console.log(
+    `✅ Resumen final -> OK=${totalOk} | FAIL=${totalFail} | TOTAL=${totalOk + totalFail}`
+  );
 }

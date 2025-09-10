@@ -140,6 +140,7 @@ export async function leerCreditoPorNumeroSIFCO(
   }
 
   console.timeEnd("⏳ Lectura archivo (stream)");
+  console.log(`✅ Búsqueda completada. Resultados encontrados: ${resultados.length}`);
 
   if (resultados.length === 0) {
     console.warn("⚠️ No se encontró el crédito:", creditoSIFCO);
@@ -147,3 +148,5 @@ export async function leerCreditoPorNumeroSIFCO(
 
   return resultados;
 }
+
+

@@ -278,6 +278,7 @@ export async function processAndReplaceCreditInvestorsReverse(
   credito_id: number,
   abono_capital: number,
   addition: boolean,
+  pago_id: number
  
 ) {
   // 1. Fetch credit details
@@ -299,10 +300,22 @@ export async function processAndReplaceCreditInvestorsReverse(
   }
   console.log("adition", addition);
   // 3. Process and calculate new values for each investor
-  const processedInvestors = investors.map((inv) => {
+  const processedInvestors = investors.map(async (inv) => {
+    const [abonoCapital] = await db
+  .select({
+    abono_capital: pagos_credito_inversionistas.abono_capital,
+  })
+  .from(pagos_credito_inversionistas)
+  .where(
+    and(
+      eq(pagos_credito_inversionistas.pago_id, pago_id),
+      eq(pagos_credito_inversionistas.inversionista_id, inv.inversionista_id)
+    )
+  );
+
     const montoAportado = addition
-      ? new Big(inv.monto_aportado).add(abono_capital)
-      : new Big(inv.monto_aportado).minus(abono_capital);
+      ? new Big(inv.monto_aportado).add(abonoCapital.abono_capital)
+      : new Big(inv.monto_aportado).minus(abonoCapital.abono_capital);
     console.log("montoAportado", montoAportado.toString());
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
     const porcentajeInversion = new Big(
@@ -348,18 +361,18 @@ export async function processAndReplaceCreditInvestorsReverse(
     await db
       .update(creditos_inversionistas)
       .set({
-        cuota_inversionista: inv.cuota_inversionista,
+        cuota_inversionista: (await inv).cuota_inversionista,
         porcentaje_participacion_inversionista:
-          inv.porcentaje_participacion_inversionista,
-        monto_aportado: inv.monto_aportado,
-        porcentaje_cash_in: inv.porcentaje_cash_in,
-        iva_inversionista: inv.iva_inversionista,
-        iva_cash_in: inv.iva_cash_in,
-        monto_inversionista: inv.monto_inversionista,
-        monto_cash_in: inv.monto_cash_in,
+          (await inv).porcentaje_participacion_inversionista,
+        monto_aportado: (await inv).monto_aportado,
+        porcentaje_cash_in: (await inv).porcentaje_cash_in,
+        iva_inversionista: (await inv).iva_inversionista,
+        iva_cash_in: (await inv).iva_cash_in,
+        monto_inversionista: (await inv).monto_inversionista,
+        monto_cash_in: (await inv).monto_cash_in,
         // fecha_creacion: inv.fecha_creacion, // Descomenta si deseas actualizarla
       })
-      .where(eq(creditos_inversionistas.id, inv.id));
+      .where(eq(creditos_inversionistas.id, (await inv).id));
   }
 
   // 5. Return the new updated data (could re-fetch if you want actual DB values)

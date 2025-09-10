@@ -441,7 +441,7 @@ async consultarEstadoCuentaPrestamo(
       "WSCrEstadoCuenta",
       payload
     );
-
+    console.log('Response from WSCrEstadoCuenta:', response);
     if (response.success && response.data) {
       return {
         success: true,

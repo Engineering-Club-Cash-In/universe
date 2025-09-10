@@ -121,14 +121,11 @@ export async function consultarRecargosLibres(
  * ================================ 
  */
 export async function consultarEstadoCuentaPrestamo(numeroPrestamo: string) {
-  const request: WSCrEstadoCuentaRequest = { NumeroPrestamo: numeroPrestamo };
+  const request: WSCrEstadoCuentaRequest = { numeroPrestamo: numeroPrestamo };
 
   const { data } = await sifcoApi.post<
     ServiceResponse<WSCrEstadoCuentaResponse>
-  >("/api/creditos/estado-cuenta", request);
-
-  console.log("📊 Respuesta estado de cuenta:", data);
-
+  >("/api/creditos/estado-cuenta", request); 
   return data.data; // 👈 devolvemos WSCrEstadoCuentaResponse
 }
 /** ================================

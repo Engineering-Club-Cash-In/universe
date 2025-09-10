@@ -738,11 +738,10 @@ export function ListaCreditosPagos() {
                             className="flex flex-col items-center mb-1"
                           >
                             <span className="font-bold text-blue-700 text-base leading-tight">
-                              {label}:
-                            </span>{" "}
-                            <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
-                              {value}
-                            </span>
+                                {label}:
+                              </span>  <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
+                                {value}
+                              </span>
                           </div>
                         ))}
                       </div>

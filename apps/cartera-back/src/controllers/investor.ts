@@ -289,6 +289,7 @@ export async function processAndReplaceCreditInvestorsReverse(
   abono_capital: number,
   addition: boolean,
   pago_id: number
+ 
 ) {
   // 1. Fetch credit details
   const credit = await db.query.creditos.findFirst({
@@ -311,19 +312,16 @@ export async function processAndReplaceCreditInvestorsReverse(
   // 3. Process and calculate new values for each investor
   const processedInvestors = investors.map(async (inv) => {
     const [abonoCapital] = await db
-      .select({
-        abono_capital: pagos_credito_inversionistas.abono_capital,
-      })
-      .from(pagos_credito_inversionistas)
-      .where(
-        and(
-          eq(pagos_credito_inversionistas.pago_id, pago_id),
-          eq(
-            pagos_credito_inversionistas.inversionista_id,
-            inv.inversionista_id
-          )
-        )
-      );
+  .select({
+    abono_capital: pagos_credito_inversionistas.abono_capital,
+  })
+  .from(pagos_credito_inversionistas)
+  .where(
+    and(
+      eq(pagos_credito_inversionistas.pago_id, pago_id),
+      eq(pagos_credito_inversionistas.inversionista_id, inv.inversionista_id)
+    )
+  );
 
     const montoAportado = addition
       ? new Big(inv.monto_aportado).add(abonoCapital.abono_capital)
@@ -374,8 +372,8 @@ export async function processAndReplaceCreditInvestorsReverse(
       .update(creditos_inversionistas)
       .set({
         cuota_inversionista: (await inv).cuota_inversionista,
-        porcentaje_participacion_inversionista: (await inv)
-          .porcentaje_participacion_inversionista,
+        porcentaje_participacion_inversionista:
+          (await inv).porcentaje_participacion_inversionista,
         monto_aportado: (await inv).monto_aportado,
         porcentaje_cash_in: (await inv).porcentaje_cash_in,
         iva_inversionista: (await inv).iva_inversionista,

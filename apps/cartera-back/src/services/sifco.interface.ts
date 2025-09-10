@@ -313,7 +313,7 @@ export interface WSRecargosLibresResponse {
  * ================================ 
  */
 export interface WSCrEstadoCuentaRequest {
-  NumeroPrestamo: string;
+  numeroPrestamo: string;
 }
 
 export interface OtroCargo {

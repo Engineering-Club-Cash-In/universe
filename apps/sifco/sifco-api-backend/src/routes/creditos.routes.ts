@@ -359,6 +359,7 @@ if (method === 'POST' && path.length === 3 && path[2] === 'recargos') {
 // POST /api/creditos/estado-cuenta
 if (method === 'POST' && path.length === 3 && path[2] === 'estado-cuenta') {
   try {
+    console.log('Received request for estado-cuenta');
     const body = await request.json();
     const { numeroPrestamo } = body;
 
@@ -374,9 +375,10 @@ if (method === 'POST' && path.length === 3 && path[2] === 'estado-cuenta') {
         }
       );
     }
+    console.log('Request body for estado-cuenta:', body);
 
     const result = await creditosService.consultarEstadoCuentaPrestamo(numeroPrestamo);
-
+    console.log('Result from consultarEstadoCuentaPrestamo:', result);
     return new Response(JSON.stringify(result), {
       status: result.success ? 200 : 400,
       headers: { 'Content-Type': 'application/json' },

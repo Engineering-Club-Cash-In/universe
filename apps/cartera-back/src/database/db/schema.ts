@@ -11,6 +11,7 @@ import {
   timestamp,
   pgSchema,
   pgEnum,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
@@ -146,7 +147,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   gps_restante: numeric("gps_restante", { precision: 18, scale: 2 }), //aca lo que viene del credito gps menos abono_gps
   total_restante: numeric("total_restante", { precision: 18, scale: 2 }), //deuda de lo que viene del credito menos la suma del pago del mes
 
-  membresias: integer("membresias"), // se jala del credito
+  membresias: numeric("membresias"), // se jala del credito
   membresias_pago: numeric("membresias_pago"), // se jala del credito
 
   membresias_mes: numeric("membresias_mes"), // se jala del credito
@@ -184,65 +185,21 @@ export const creditos_inversionistas = customSchema.table(
   "creditos_inversionistas",
   {
     id: serial("id").primaryKey(),
-    cuota_inversionista: numeric("cuota_inversionista", {
-      precision: 18,
-      scale: 2,
-    }).notNull(),
-    credito_id: integer("credito_id")
-      .notNull()
-      .references(() => creditos.credito_id),
-    inversionista_id: integer("inversionista_id")
-      .notNull()
-      .references(() => inversionistas.inversionista_id),
-
-    porcentaje_participacion_inversionista: numeric(
-      "porcentaje_participacion_inversionista",
-      {
-        precision: 5,
-        scale: 2,
-      }
-    ).notNull(),
-
-    monto_aportado: numeric("monto_aportado", {
-      precision: 18,
-      scale: 2,
-    }).notNull(),
-
-    porcentaje_cash_in: numeric("porcentaje_cash_in", {
-      precision: 5,
-      scale: 2,
-    })
-      .notNull()
-      .default("0"),
-
-    iva_inversionista: numeric("iva_inversionista", {
-      precision: 18,
-      scale: 2,
-    })
-      .notNull()
-      .default("0"),
-    iva_cash_in: numeric("iva_cash_in", {
-      precision: 18,
-    })
-      .notNull()
-      .default("0"),
-    fecha_creacion: timestamp("fecha_creacion", { withTimezone: true })
-      .notNull()
-      .$default(() => new Date()),
-
-    monto_inversionista: numeric("monto_inversionista", {
-      precision: 18,
-      scale: 2
-    })
-      .notNull()
-      .default("0"), // Monto total que el inversionista aporta al crédito
-    monto_cash_in: numeric("monto_cash_in", {
-      precision: 18,
-      scale: 2,
-    }).notNull(),
-
-    // Clave primaria compuesta (evita duplicados)
-  }
+    cuota_inversionista: numeric("cuota_inversionista", { precision: 18, scale: 2 }).notNull(),
+    credito_id: integer("credito_id").notNull().references(() => creditos.credito_id),
+    inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id),
+    porcentaje_participacion_inversionista: numeric("porcentaje_participacion_inversionista", { precision: 5, scale: 2 }).notNull(),
+    monto_aportado: numeric("monto_aportado", { precision: 18, scale: 2 }).notNull(),
+    porcentaje_cash_in: numeric("porcentaje_cash_in", { precision: 5, scale: 2 }).notNull().default("0"),
+    iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
+    iva_cash_in: numeric("iva_cash_in", { precision: 18 }).notNull().default("0"),
+    fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
+    monto_inversionista: numeric("monto_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
+    monto_cash_in: numeric("monto_cash_in", { precision: 18, scale: 2 }).notNull(),
+  },
+  (t) => ({
+    uxCreditoInv: uniqueIndex("ux_credito_inversionista").on(t.credito_id, t.inversionista_id),
+  })
 );
 export const credit_cancelations = customSchema.table("credit_cancelations", {
   id: serial("id").primaryKey(),

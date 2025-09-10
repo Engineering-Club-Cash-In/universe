@@ -27,7 +27,7 @@ export const creditRouter = new Elysia()
 
   // Crear nuevo crédito
   .post('/newCredit', insertCredit)
-   .put('/updateCredit', updateCredit)
+   .post('/updateCredit', updateCredit)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get('/credito', async ({ query, set }) => {
     const { numero_credito_sifco } = query;

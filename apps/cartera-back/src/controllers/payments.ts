@@ -9,7 +9,7 @@ import {
   boletas,
   cuotas_credito,
 } from "../database/db/schema";
-import { desc, InferModel } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
@@ -143,13 +143,16 @@ export const reversePayment = async ({
     await processAndReplaceCreditInvestorsReverse(
       credito_id,
       abonoBig.toNumber(),
-      true
+      true,
+      pago_id
     );
-    await db
-      .delete(pagos_credito_inversionistas)
-      .where(eq(pagos_credito_inversionistas.credito_id, credito_id));
+  
 
     // 6. Reset the payment record
+    await db
+      .update(cuotas_credito)
+      .set({ pagado: false })
+      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
     await db
       .update(pagos_credito)
       .set({
@@ -174,8 +177,7 @@ export const reversePayment = async ({
         gps_restante: creditData.gps?.toString() ?? "0",
         total_restante: creditData.deudatotal,
 
-        membresias:
-          typeof creditData.membresias === "number" ? creditData.membresias : 0,
+        membresias: creditData.membresias,
         membresias_pago: creditData.membresias_pago?.toString() ?? "",
         membresias_mes: creditData.membresias?.toString() ?? "",
         otros: "",
@@ -457,8 +459,7 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
             fecha_filtro: fecha_pago,
             renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
             tipoCredito: "Renuevo",
-            membresias:
-              typeof credito.membresias === "number" ? credito.membresias : 0,
+            membresias: credito.membresias ?? 0,
             membresias_pago: credito.membresias_pago?.toString() ?? "",
             membresias_mes: credito.membresias?.toString() ?? "",
             otros: otros?.toString() ?? "",
@@ -475,7 +476,6 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
           };
           type PagoCredito = typeof pagos_credito.$inferSelect;
           let pagoInsertado: PagoCredito | undefined;
-          console.log("pagoooooooooooooo", existingPago);
           if (existingPago) {
             [pagoInsertado] = await db
               .update(pagos_credito)
@@ -674,8 +674,7 @@ export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
           fecha_filtro: fecha_pago,
           renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
           tipoCredito: "Renuevo",
-          membresias:
-            typeof credito.membresias === "number" ? credito.membresias : 0,
+          membresias: credito.membresias ?? 0,
           membresias_pago: credito.membresias_pago?.toString() ?? "",
           membresias_mes: credito.membresias?.toString() ?? "",
           otros: otros?.toString() ?? "",
@@ -1100,26 +1099,32 @@ export async function insertPagosCreditoInversionistas(
     const bigIVA = isCube
       ? new Big(inv.iva_cash_in ?? 0)
       : new Big(inv.iva_inversionista);
-
+    console.log("cuotaInversionista", inv.cuota_inversionista);
     let abono_capital = isCube
       ? new Big(inv?.cuota_inversionista ?? 0)
       : new Big(inv.cuota_inversionista ?? 0);
-
+    const totalMontos = new Big(inv.monto_cash_in ?? 0).plus(
+      new Big(inv.monto_inversionista ?? 0)
+    );
+    const totalIVA = new Big(inv.iva_cash_in ?? 0).plus(
+      new Big(inv.iva_inversionista ?? 0)
+    );
     if (idx === indexMayorCuota && !excludeCube) {
       console.log(
         `Abono al mayor inversionista (${inv.nombre}) con cuota ${inv.cuota_inversionista}`
       );
       // Si es el mayor inversionista, le resta TODO menos los cargos adicionales
       // Al mayor, le restas TODO
+
       abono_capital = abono_capital
-        .minus(bigInteres)
-        .minus(bigIVA)
+        .minus(totalIVA)
+        .minus(totalMontos)
         .minus(new Big(currentCredit?.membresias_pago ?? 0))
         .minus(new Big(currentCredit?.gps ?? 0))
         .minus(new Big(currentCredit?.seguro_10_cuotas ?? 0));
     } else {
       // Al resto, solo interes e iva
-      abono_capital = abono_capital.minus(bigInteres).minus(bigIVA);
+      abono_capital = abono_capital.minus(totalIVA).minus(totalMontos);
     }
     console.log("abono_capital", abono_capital.toString());
     await processAndReplaceCreditInvestors(
@@ -1390,8 +1395,7 @@ export async function insertarPago({
 
       renuevo_o_nuevo: "renuevo",
 
-      membresias:
-        typeof creditData.membresias === "number" ? creditData.membresias : 0,
+      membresias: creditData.membresias_pago ?? "0",
       membresias_pago: creditData.membresias_pago?.toString() ?? "",
       membresias_mes: creditData.membresias_mes?.toString() ?? "",
       otros: otros.toString() ?? "0",

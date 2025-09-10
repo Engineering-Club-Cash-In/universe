@@ -459,7 +459,7 @@ export interface UpdateCreditBody {
   inversionistas?: InversionistaPayload[];
 }
 export async function updateCreditService(body: UpdateCreditBody) {
-  const response = await axios.put(`${API_URL}/updateCredit`, body);
+  const response = await axios.post(`${API_URL}/updateCredit`, body);
   return response.data;
 }
 

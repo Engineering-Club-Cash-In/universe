@@ -1,6 +1,6 @@
 // routes/sifco.ts
 import { Elysia, t } from "elysia";
-import { syncClienteConPrestamos } from "../migration/migration";
+import { fillPagosInversionistas, syncClienteConPrestamos } from "../migration/migration";
  
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
@@ -98,4 +98,47 @@ export const sifcoRouter = new Elysia()
         numeroCredito: t.String(),
       }),
     }
-  );
+  ) /**
+   * 🔄 Sincronizar inversionistas de un crédito desde Excel
+   */
+.get(
+  "/migrate/investors",
+  async ({ query, set }) => {
+    try {
+      const { numeroCredito } = query as Record<string, string | undefined>;
+
+      console.log(
+        numeroCredito
+          ? `🚀 Buscando inversionistas para crédito SIFCO=${numeroCredito}`
+          : "🚀 Sincronizando inversionistas para TODOS los créditos"
+      );
+
+      // 1. Ejecutar flujo centralizado
+      await fillPagosInversionistas(numeroCredito);
+
+      set.status = 200;
+      return {
+        success: true,
+        message: numeroCredito
+          ? `Inversionistas sincronizados para crédito ${numeroCredito}`
+          : "Inversionistas sincronizados para TODOS los créditos",
+      };
+    } catch (error: any) {
+      console.error("❌ Error en /excel/inversionistas:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error.message || String(error),
+      };
+    }
+  },
+  {
+    detail: {
+      summary: "Sincroniza inversionistas desde Excel local",
+      tags: ["Excel", "Inversionistas", "Migración"],
+    },
+    query: t.Object({
+      numeroCredito: t.Optional(t.String()),
+    }),
+  }
+);

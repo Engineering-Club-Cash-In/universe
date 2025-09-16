@@ -14,9 +14,9 @@ function AdminLayout() {
 		if (!session && !isPending) {
 			navigate({ to: "/login" });
 		} else if (
-			session?.user.role !== "super_admin" &&
-			session?.user.role !== "department_manager" &&
-			session?.user.role !== "area_lead"
+			session?.user?.role !== "super_admin" &&
+			session?.user?.role !== "department_manager" &&
+			session?.user?.role !== "area_lead"
 		) {
 			navigate({ to: "/" });
 		}
@@ -26,7 +26,7 @@ function AdminLayout() {
 		return <div>Cargando...</div>;
 	}
 
-	if (!session || (session.user.role !== "super_admin" && session.user.role !== "department_manager" && session.user.role !== "area_lead")) {
+	if (!session || (session.user?.role !== "super_admin" && session.user?.role !== "department_manager" && session.user?.role !== "area_lead")) {
 		return null;
 	}
 

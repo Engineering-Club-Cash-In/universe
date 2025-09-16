@@ -31,12 +31,12 @@ export default function UserMenu() {
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
-				<Button variant="outline">{session.user.name}</Button>
+				<Button variant="outline">{session.user?.name}</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent className="bg-card">
 				<DropdownMenuLabel>Mi Cuenta</DropdownMenuLabel>
 				<DropdownMenuSeparator />
-				<DropdownMenuItem>{session.user.email}</DropdownMenuItem>
+				<DropdownMenuItem>{session.user?.email}</DropdownMenuItem>
 				<DropdownMenuItem asChild>
 					<Button
 						variant="destructive"

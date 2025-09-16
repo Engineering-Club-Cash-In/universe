@@ -11,7 +11,7 @@ export function usePermissions() {
 		hasAdminAccess: role === "super_admin" || role === "department_manager" || role === "area_lead",
 		
 		// Specific management permissions
-		canManageDepartments: role === "super_admin",
+		canManageDepartments: role === "super_admin" || role === "department_manager",
 		canManageAreas: role === "super_admin" || role === "department_manager", 
 		canManageTeams: role === "super_admin" || role === "department_manager" || role === "area_lead",
 		

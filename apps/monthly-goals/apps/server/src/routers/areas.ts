@@ -10,7 +10,7 @@ const AreaSchema = z.object({
 	name: z.string().min(1, "Name is required"),
 	description: z.string().optional(),
 	departmentId: z.string().uuid(),
-	leadId: z.string().uuid().optional(),
+	leadId: z.string().optional(),
 	createdAt: z.date(),
 	updatedAt: z.date(),
 });

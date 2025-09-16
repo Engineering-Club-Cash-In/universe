@@ -53,7 +53,7 @@ function RootComponent() {
 	});
 	
 	const { data: session, isPending: sessionPending } = authClient.useSession();
-	const { hasAdminAccess, canManageDepartments, canManageAreas, canManageTeams, canConfigureGoals } = usePermissions();
+	const { hasAdminAccess, canManageDepartments, canManageAreas, canManageTeams, canConfigureGoals, canManageUsers } = usePermissions();
 
 	const [client] = useState<AppRouterClient>(() => createORPCClient(link));
 	const [orpcUtils] = useState(() => createTanstackQueryUtils(client));
@@ -182,6 +182,15 @@ function RootComponent() {
 															activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
 														>
 															Templates de Metas
+														</Link>
+													)}
+													{canManageUsers && (
+														<Link
+															to="/admin/users"
+															className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+															activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
+														>
+															Usuarios
 														</Link>
 													)}
 												</div>

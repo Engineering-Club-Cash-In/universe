@@ -244,10 +244,10 @@ function MyGoalsPage() {
 											{getStatusBadge(percentage, goal.successThreshold, goal.warningThreshold)}
 										</TableCell>
 										<TableCell>
-											{session?.user.role !== "viewer" && (
-												session?.user.role === "super_admin" || 
-												session?.user.role === "manager" ||
-												goal.userEmail === session?.user.email
+											{session?.user?.role !== "viewer" && (
+												session?.user?.role === "super_admin" || 
+												session?.user?.role === "manager" ||
+												goal.userEmail === session?.user?.email
 											) && (
 												<Button
 													variant="outline"

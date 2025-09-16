@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AppRouterClient } from "../../../../server/src/routers/index";
+
+type User = Awaited<ReturnType<AppRouterClient['teams']['availableUsers']>>[0];
+type Department = Awaited<ReturnType<AppRouterClient['departments']['list']>>[0];
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -40,7 +44,7 @@ function DepartmentsPage() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-	const [editingDepartment, setEditingDepartment] = useState<any>(null);
+	const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
 
 	// Queries
 	const departments = useQuery(orpc.departments.list.queryOptions());
@@ -112,17 +116,17 @@ function DepartmentsPage() {
 			managerId: formData.get("managerId") as string || undefined,
 		};
 		updateMutation.mutate({
-			id: editingDepartment.id,
+			id: editingDepartment!.id,
 			data,
 		});
 	};
 
-	const handleEdit = (department: any) => {
+	const handleEdit = (department: Department) => {
 		setEditingDepartment(department);
 		setIsEditDialogOpen(true);
 	};
 
-	const handleDelete = (department: any) => {
+	const handleDelete = (department: Department) => {
 		if (confirm("¿Estás seguro de que quieres eliminar este departamento?")) {
 			deleteMutation.mutate({ id: department.id });
 		}
@@ -160,7 +164,7 @@ function DepartmentsPage() {
 											<SelectItem value="" disabled>
 												Cargando usuarios...
 											</SelectItem>
-										) : availableUsers.data?.filter((u: any) => u.role === "manager" || u.role === "super_admin").map((user: any) => (
+										) : availableUsers.data?.filter((u: User) => u.role === "department_manager" || u.role === "super_admin").map((user: User) => (
 											<SelectItem key={user.id} value={user.id}>
 												{user.name} ({user.email})
 											</SelectItem>
@@ -197,12 +201,12 @@ function DepartmentsPage() {
 										Cargando departamentos...
 									</TableCell>
 								</TableRow>
-							) : departments.data?.map((department: any) => (
+							) : departments.data?.map((department: Department) => (
 								<TableRow key={department.id}>
 									<TableCell className="font-medium">
 										{department.name}
 									</TableCell>
-									<TableCell>{department.description || "—"}</TableCell>
+									<TableCell>{department.description ?? "—"}</TableCell>
 									<TableCell>
 										{new Date(department.createdAt).toLocaleDateString()}
 									</TableCell>
@@ -253,12 +257,12 @@ function DepartmentsPage() {
 							<Textarea
 								id="edit-description"
 								name="description"
-								defaultValue={editingDepartment?.description}
+								defaultValue={editingDepartment?.description ?? ""}
 							/>
 						</div>
 						<div className="space-y-2">
 							<Label htmlFor="edit-managerId">Manager del Departamento</Label>
-							<Select name="managerId" defaultValue={editingDepartment?.managerId || ""}>
+							<Select name="managerId" defaultValue={editingDepartment?.managerId ?? ""}>
 								<SelectTrigger>
 									<SelectValue placeholder="Selecciona un manager (opcional)" />
 								</SelectTrigger>
@@ -267,7 +271,7 @@ function DepartmentsPage() {
 										<SelectItem value="" disabled>
 											Cargando usuarios...
 										</SelectItem>
-									) : availableUsers.data?.filter((u: any) => u.role === "manager" || u.role === "super_admin").map((user: any) => (
+									) : availableUsers.data?.filter((u: User) => u.role === "department_manager" || u.role === "super_admin").map((user: User) => (
 										<SelectItem key={user.id} value={user.id}>
 											{user.name} ({user.email})
 										</SelectItem>

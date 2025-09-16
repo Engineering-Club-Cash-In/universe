@@ -55,6 +55,12 @@ import {
 	submitGoalsForPresentation,
 	getPresentationSubmissions,
 } from "./presentations";
+import {
+	listUsers,
+	createUser,
+	updateUserRole,
+	deleteUser,
+} from "./users";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -120,6 +126,12 @@ export const appRouter = {
 		availableGoals: getAvailableGoalsForPresentation,
 		submitGoals: submitGoalsForPresentation,
 		submissions: getPresentationSubmissions,
+	},
+	users: {
+		list: listUsers,
+		create: createUser,
+		updateRole: updateUserRole,
+		delete: deleteUser,
 	},
 };
 export type AppRouter = typeof appRouter;

@@ -175,7 +175,7 @@ function RootComponent() {
 															Equipos
 														</Link>
 													)}
-													{canManageDepartments && (
+													{canConfigureGoals && (
 														<Link
 															to="/admin/goal-templates"
 															className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"

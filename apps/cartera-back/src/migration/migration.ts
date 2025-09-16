@@ -100,12 +100,12 @@ export async function mapPrestamoDetalleToCredito(
     excelRow?.NIT ?? null,
     excelRow?.ComoSeEntero ?? null
   );
-  
+
   // Calculate cuotaCredito by summing all cuotas from Excel rows
-  const cuotaCredito = excelRows 
+  const cuotaCredito = excelRows
     ? excelRows.reduce((acc, row) => acc + Number(row.Cuota || 0), 0)
     : 0;
-    
+
   const advisor = await findOrCreateAdvisorByName(excelRow?.Asesor || "", true);
 
   const realPorcentaje = porcentaje_interes.mul(100).toFixed(2);
@@ -153,14 +153,14 @@ export async function mapPrestamoDetalleToCredito(
 
   try {
     // Insert credit and get the ID
-  const [row] = await db
-    .insert(creditos)
-    .values(creditInsert)
-    .onConflictDoUpdate({
-      target: creditos.numero_credito_sifco, // o un índice único compuesto
-      set: creditInsert, // actualiza usando el MISMO shape que insertás
-    })
-    .returning();
+    const [row] = await db
+      .insert(creditos)
+      .values(creditInsert)
+      .onConflictDoUpdate({
+        target: creditos.numero_credito_sifco, // o un índice único compuesto
+        set: creditInsert, // actualiza usando el MISMO shape que insertás
+      })
+      .returning();
 
     const creditoId = row.credito_id;
     console.log(`✅ Crédito insertado con ID: ${creditoId}`);
@@ -510,7 +510,10 @@ export async function mapEstadoCuentaToPagosBig(
     const reserva = new Big(credito?.seguro_10_cuotas ?? "0").plus(600);
     console.log("📦 Reserva calculada:", reserva.toString());
     const capital = toBigExcel(primeraTransaccion.CapitalDesembolsado, "0");
-    const porcentaje_interes = toBigExcel(credito?.porcentaje_interes, "1.5").div(100);
+    const porcentaje_interes = toBigExcel(
+      credito?.porcentaje_interes,
+      "1.5"
+    ).div(100);
     const gps = toBigExcel(credito?.gps, 0);
     const seguro_10_cuotas = toBigExcel(credito?.seguro_10_cuotas, 0);
     const membresias_pago = toBigExcel(credito?.membresias, 0);
@@ -869,10 +872,15 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
   for (const credito of creditos) {
     if (!credito) continue;
 
-    console.log(`🚀 Procesando inversionistas para crédito SIFCO=${credito.numero_credito_sifco}`);
+    console.log(
+      `🚀 Procesando inversionistas para crédito SIFCO=${credito.numero_credito_sifco}`
+    );
 
     // 3. Obtener filas desde Excel
-    const rows = await leerCreditoPorNumeroSIFCO(excelPath, credito.numero_credito_sifco);
+    const rows = await leerCreditoPorNumeroSIFCO(
+      excelPath,
+      credito.numero_credito_sifco
+    );
     console.log(`ℹ️ Filas obtenidas desde Excel: ${rows?.length || 0}`);
 
     // Contadores por crédito
@@ -930,8 +938,10 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
           credito_id: credito.credito_id,
           inversionista_id: inv.inversionista_id,
           monto_aportado: montoAportado.toString(),
-          porcentaje_cash_in: porcentajeCashIn.toString(),
-          porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+          porcentaje_cash_in: porcentajeCashIn.mul(100).toString(),
+          porcentaje_participacion_inversionista: porcentajeInversion
+            .mul(100)
+            .toString(),
           monto_inversionista: montoInversionista,
           monto_cash_in: montoCashIn,
           iva_inversionista: ivaInversionista,
@@ -952,8 +962,7 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
             set: {
               monto_aportado: sql`EXCLUDED.monto_aportado`,
               porcentaje_cash_in: sql`EXCLUDED.porcentaje_cash_in`,
-              porcentaje_participacion_inversionista:
-                sql`EXCLUDED.porcentaje_participacion_inversionista`,
+              porcentaje_participacion_inversionista: sql`EXCLUDED.porcentaje_participacion_inversionista`,
               monto_inversionista: sql`EXCLUDED.monto_inversionista`,
               monto_cash_in: sql`EXCLUDED.monto_cash_in`,
               iva_inversionista: sql`EXCLUDED.iva_inversionista`,
@@ -965,7 +974,10 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
         ok++;
         totalOk++;
       } catch (err) {
-        console.error(`❌ Error procesando fila crédito=${credito.numero_credito_sifco}`, err);
+        console.error(
+          `❌ Error procesando fila crédito=${credito.numero_credito_sifco}`,
+          err
+        );
         fail++;
         totalFail++;
       }

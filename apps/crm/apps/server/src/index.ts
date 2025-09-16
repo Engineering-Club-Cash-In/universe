@@ -6,6 +6,13 @@ import { logger } from "hono/logger";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
+import {
+  getLeadProgress,
+  getRenapInfoController,
+  updateLeadAndCreateOpportunity,
+  validateMagicUrlController,
+} from "./controllers/bot";
+import { livenessController } from "./controllers/liveness";
 
 const app = new Hono();
 
@@ -43,20 +50,20 @@ app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
 
 const handler = new RPCHandler(appRouter);
 app.use("/rpc/*", async (c, next) => {
-	const context = await createContext({ context: c });
-	const { matched, response } = await handler.handle(c.req.raw, {
-		prefix: "/rpc",
-		context: context,
-	});
+  const context = await createContext({ context: c });
+  const { matched, response } = await handler.handle(c.req.raw, {
+    prefix: "/rpc",
+    context: context,
+  });
 
-	if (matched) {
-		return c.newResponse(response.body, response);
-	}
-	await next();
+  if (matched) {
+    return c.newResponse(response.body, response);
+  }
+  await next();
 });
 
 app.get("/", (c) => {
-	return c.text("OK");
+  return c.text("OK");
 });
 
 // Vehicle photo upload endpoint  
@@ -145,95 +152,183 @@ app.post("/api/upload-vehicle-photo", async (c) => {
 
 // File upload endpoint
 app.post("/api/upload-opportunity-document", async (c) => {
-	try {
-		// Get the context
-		const context = await createContext({ context: c });
-		
-		if (!context.session?.user?.id || !context.session?.user?.role) {
-			return c.json({ error: "No autorizado" }, 401);
-		}
-		
-		const userId = context.session.user.id;
-		const userRole = context.session.user.role;
+  try {
+    // Get the context
+    const context = await createContext({ context: c });
 
-		// Parse multipart form data
-		const formData = await c.req.formData();
-		const file = formData.get("file") as File;
-		const opportunityId = formData.get("opportunityId") as string;
-		const documentType = formData.get("documentType") as string;
-		const description = formData.get("description") as string | null;
+    if (!context.session?.user?.id || !context.session?.user?.role) {
+      return c.json({ error: "No autorizado" }, 401);
+    }
 
-		if (!file || !opportunityId || !documentType) {
-			return c.json({ error: "Faltan campos requeridos" }, 400);
-		}
+    const userId = context.session.user.id;
+    const userRole = context.session.user.role;
 
-		// Import necessary modules
-		const { db } = await import("./db");
-		const { opportunities, opportunityDocuments } = await import("./db/schema");
-		const { eq } = await import("drizzle-orm");
-		const { validateFile, generateUniqueFilename, uploadFileToR2 } = await import("./lib/storage");
+    // Parse multipart form data
+    const formData = await c.req.formData();
+    const file = formData.get("file") as File;
+    const opportunityId = formData.get("opportunityId") as string;
+    const documentType = formData.get("documentType") as string;
+    const description = formData.get("description") as string | null;
 
-		// Verify access to opportunity
-		const opportunity = await db
-			.select()
-			.from(opportunities)
-			.where(eq(opportunities.id, opportunityId))
-			.limit(1);
+    if (!file || !opportunityId || !documentType) {
+      return c.json({ error: "Faltan campos requeridos" }, 400);
+    }
 
-		if (!opportunity[0]) {
-			return c.json({ error: "Oportunidad no encontrada" }, 404);
-		}
+    // Import necessary modules
+    const { db } = await import("./db");
+    const { opportunities, opportunityDocuments } = await import("./db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { validateFile, generateUniqueFilename, uploadFileToR2 } =
+      await import("./lib/storage");
 
-		// Only admin and sales can upload documents
-		if (!["admin", "sales"].includes(userRole)) {
-			return c.json({ error: "No tienes permiso para subir documentos" }, 403);
-		}
+    // Verify access to opportunity
+    const opportunity = await db
+      .select()
+      .from(opportunities)
+      .where(eq(opportunities.id, opportunityId))
+      .limit(1);
 
-		// For sales, verify it's their opportunity
-		if (
-			userRole === "sales" &&
-			opportunity[0].assignedTo !== userId
-		) {
-			return c.json({ error: "No tienes permiso para subir documentos a esta oportunidad" }, 403);
-		}
+    if (!opportunity[0]) {
+      return c.json({ error: "Oportunidad no encontrada" }, 404);
+    }
 
-		// Validate file
-		const validation = validateFile(file);
-		if (!validation.valid) {
-			return c.json({ error: validation.error }, 400);
-		}
+    // Only admin and sales can upload documents
+    if (!["admin", "sales"].includes(userRole)) {
+      return c.json({ error: "No tienes permiso para subir documentos" }, 403);
+    }
 
-		// Generate unique filename
-		const uniqueFilename = generateUniqueFilename(file.name);
+    // For sales, verify it's their opportunity
+    if (userRole === "sales" && opportunity[0].assignedTo !== userId) {
+      return c.json(
+        { error: "No tienes permiso para subir documentos a esta oportunidad" },
+        403
+      );
+    }
 
-		// Upload to R2
-		const { key } = await uploadFileToR2(
-			file,
-			uniqueFilename,
-			opportunityId
-		);
+    // Validate file
+    const validation = validateFile(file);
+    if (!validation.valid) {
+      return c.json({ error: validation.error }, 400);
+    }
 
-		// Save to database
-		const [newDocument] = await db
-			.insert(opportunityDocuments)
-			.values({
-				opportunityId,
-				filename: uniqueFilename,
-				originalName: file.name,
-				mimeType: file.type,
-				size: file.size,
-				documentType: documentType as any,
-				description: description || undefined,
-				uploadedBy: userId,
-				filePath: key,
-			})
-			.returning();
+    // Generate unique filename
+    const uniqueFilename = generateUniqueFilename(file.name);
 
-		return c.json(newDocument);
-	} catch (error) {
-		console.error("Error uploading document:", error);
-		return c.json({ error: "Error al subir el documento" }, 500);
-	}
+    // Upload to R2
+    const { key } = await uploadFileToR2(file, uniqueFilename, opportunityId);
+
+    // Save to database
+    const [newDocument] = await db
+      .insert(opportunityDocuments)
+      .values({
+        opportunityId,
+        filename: uniqueFilename,
+        originalName: file.name,
+        mimeType: file.type,
+        size: file.size,
+        documentType: documentType as any,
+        description: description || undefined,
+        uploadedBy: userId,
+        filePath: key,
+      })
+      .returning();
+
+    return c.json(newDocument);
+  } catch (error) {
+    console.error("Error uploading document:", error);
+    return c.json({ error: "Error al subir el documento" }, 500);
+  }
+});
+app.post("/info/renap", async (c) => {
+  try {
+    const body = await c.req.json<{ dpi: string; phone: string }>();
+
+    const result = await getRenapInfoController(body.dpi, body.phone);
+
+    return c.json(result);
+  } catch (err: any) {
+    console.error("[ERROR] /test/renap:", err);
+    return c.json({ error: err.message || "Internal server error" }, 500);
+  }
+});
+app.post("/info/lead-opportunity", async (c) => {
+  try {
+    const body = await c.req.json<{
+      dpi: string;
+
+      // Campos financieros opcionales
+      dependents?: number;
+      monthlyIncome?: string;
+      loanAmount?: string;
+      occupation?: string;
+      workTime?: string;
+      loanPurpose?: string;
+      ownsHome?: boolean;
+      ownsVehicle?: boolean;
+      hasCreditCard?: boolean;
+
+      // Documentos legales opcionales
+      electricityBill?: string;
+      bankStatements?: string;
+    }>();
+
+    if (!body.dpi) {
+      return c.json({ success: false, message: "DPI is required" }, 400);
+    }
+
+    const result = await updateLeadAndCreateOpportunity(body.dpi, body);
+
+    return c.json(result);
+  } catch (err: any) {
+    console.error("[ERROR] /info/lead-opportunity:", err);
+    return c.json({ error: err.message || "Internal server error" }, 500);
+  }
+});
+app.post("/info/lead-progress", async (c) => {
+  try {
+    // Parse body
+    const body = await c.req.json<{ phone?: string }>();
+
+    if (!body.phone) {
+      return c.json({ success: false, message: "Phone is required" }, 400);
+    }
+
+    console.log("[DEBUG] /info/lead-progress request with phone:", body.phone);
+
+    const result = await getLeadProgress(body.phone);
+
+    return c.json(result);
+  } catch (err: any) {
+    console.error("[ERROR] /info/lead-progress:", err);
+    return c.json(
+      { success: false, message: err.message || "Internal server error" },
+      500
+    );
+  }
+});
+app.get("/info/liveness-session", async (c) => {
+  const result = await livenessController.createLivenessSession();
+  return c.json(result, result.success ? 200 : 500);
 });
 
+app.get("/info/validate-liveness", async (c) => {
+  const { sessionId, userDpi } = c.req.query() as { sessionId?: string; userDpi?: string };
+
+  if (!sessionId || !userDpi) {
+    return c.json({ success: false, message: "sessionId and userDpi are required" }, 400);
+  }
+
+  const result = await livenessController.validateLivenessSession(sessionId, userDpi);
+  return c.json(result, result.success ? 200 : 500);
+});
+app.get("/info/validate-magic-url", async (c) => {
+  const { userDpi } = c.req.query() as { userDpi?: string };
+
+  if (!userDpi) {
+    return c.json({ success: false, message: "userDpi is required" }, 400);
+  }
+
+  const result = await validateMagicUrlController(userDpi);
+  return c.json(result, result.success ? 200 : 400);
+});
 export default app;

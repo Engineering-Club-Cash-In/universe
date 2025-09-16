@@ -1,4 +1,3 @@
-import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
@@ -7,12 +6,13 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
+
 const app = new Hono();
 
 app.use(logger());
 const allowedOrigins = [
 	"http://localhost:3001", // Development frontend
-	// Add production origins here later
+	"https://metas.s3.devteamatcci.site", // Production frontend
 ];
 
 app.use(
@@ -25,7 +25,9 @@ app.use(
 	}),
 );
 
-app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
+app.on(["POST", "GET"], "/api/auth/**", async (c) => {
+	return auth.handler(c.req.raw);
+});
 
 const handler = new RPCHandler(appRouter);
 app.use("/rpc/*", async (c, next) => {

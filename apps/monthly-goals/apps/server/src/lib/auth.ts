@@ -5,6 +5,13 @@ import { db } from "../db";
 import * as schema from "../db/schema/auth";
 
 export const auth = betterAuth({
+	logger: {
+		disabled: false,
+		level: "debug",
+		log: (level, message, ...args) => {
+			console.log(`[${level}] ${message}`, ...args);
+		}
+	},
 	database: drizzleAdapter(db, {
 		provider: "pg",
 		schema: schema,
@@ -17,6 +24,20 @@ export const auth = betterAuth({
 		admin({
 			defaultRole: "employee",
 			adminRoles: ["super_admin"],
+			schema: {
+				user: {
+					fields: {
+						banned: "banned",
+						banReason: "ban_reason", 
+						banExpires: "ban_expires",
+					},
+				},
+				session: {
+					fields: {
+						impersonatedBy: "impersonated_by",
+					},
+				},
+			},
 		}),
 	],
 	user: {
@@ -25,7 +46,7 @@ export const auth = betterAuth({
 				type: "string",
 				required: true,
 				defaultValue: "employee",
-				input: false,
+				input: true,
 			},
 		},
 	},

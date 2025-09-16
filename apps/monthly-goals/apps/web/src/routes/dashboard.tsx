@@ -35,22 +35,28 @@ function RouteComponent() {
 	const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
 	const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
 
-	// Queries
-	const dashboardMetrics = useQuery(
-		orpc.dashboard.metrics.queryOptions({
-			input: {
-				month: selectedMonth,
-				year: selectedYear,
-			}
-		})
-	);
-	const healthStatus = useQuery(orpc.dashboard.health.queryOptions());
-
+	// Redirect immediately if no session and not loading
 	useEffect(() => {
 		if (!session && !isPending) {
 			navigate({ to: "/login" });
 		}
 	}, [session, isPending, navigate]);
+
+	// Only run queries if we have a session
+	const dashboardMetrics = useQuery({
+		...orpc.dashboard.metrics.queryOptions({
+			input: {
+				month: selectedMonth,
+				year: selectedYear,
+			}
+		}),
+		enabled: !!session // Only run query if we have a session
+	});
+	
+	const healthStatus = useQuery({
+		...orpc.dashboard.health.queryOptions(),
+		enabled: !!session // Only run query if we have a session
+	});
 
 	if (isPending) {
 		return <div>Cargando...</div>;
@@ -85,7 +91,7 @@ function RouteComponent() {
 				<div className="flex items-center justify-between">
 					<div>
 						<h1 className="text-3xl font-bold">Dashboard</h1>
-						<p className="text-gray-600">Bienvenido, {session.user.name}</p>
+						<p className="text-gray-600">Bienvenido, {session.user?.name}</p>
 					</div>
 					
 					<div className="flex items-end gap-4">

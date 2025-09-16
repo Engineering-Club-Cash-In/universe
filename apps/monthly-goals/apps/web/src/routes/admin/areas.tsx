@@ -2,6 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import type { AppRouterClient } from "../../../../server/src/routers/index";
+
+type User = Awaited<ReturnType<AppRouterClient['teams']['availableUsers']>>[0];
+type Area = Awaited<ReturnType<AppRouterClient['areas']['list']>>[0];
+type Department = Awaited<ReturnType<AppRouterClient['departments']['list']>>[0];
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Dialog,
@@ -40,11 +45,12 @@ function AreasPage() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-	const [editingArea, setEditingArea] = useState<any>(null);
+	const [editingArea, setEditingArea] = useState<Area | null>(null);
 
 	// Queries
 	const areas = useQuery(orpc.areas.list.queryOptions());
 	const departments = useQuery(orpc.departments.list.queryOptions());
+	const availableUsers = useQuery(orpc.teams.availableUsers.queryOptions());
 
 	// Mutations
 	const createMutation = useMutation(
@@ -111,17 +117,17 @@ function AreasPage() {
 			description: formData.get("description") as string,
 		};
 		updateMutation.mutate({
-			id: editingArea.id,
+			id: editingArea!.id,
 			data,
 		});
 	};
 
-	const handleEdit = (area: any) => {
+	const handleEdit = (area: Area) => {
 		setEditingArea(area);
 		setIsEditDialogOpen(true);
 	};
 
-	const handleDelete = (area: any) => {
+	const handleDelete = (area: Area) => {
 		if (confirm("¿Estás seguro de que quieres eliminar esta área?")) {
 			deleteMutation.mutate({ id: area.id });
 		}
@@ -159,9 +165,28 @@ function AreasPage() {
 											<SelectItem value="" disabled>
 												Cargando departamentos...
 											</SelectItem>
-										) : departments.data?.map((department: any) => (
+										) : departments.data?.map((department: Department) => (
 											<SelectItem key={department.id} value={department.id}>
 												{department.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							<div className="space-y-2">
+								<Label htmlFor="leadId">Líder de Área</Label>
+								<Select name="leadId">
+									<SelectTrigger>
+										<SelectValue placeholder="Selecciona un líder (opcional)" />
+									</SelectTrigger>
+									<SelectContent>
+										{availableUsers.isLoading ? (
+											<SelectItem value="" disabled>
+												Cargando usuarios...
+											</SelectItem>
+										) : availableUsers.data?.filter((u: User) => ["area_lead", "department_manager", "super_admin"].includes(u.role)).map((user: User) => (
+											<SelectItem key={user.id} value={user.id}>
+												{user.name} ({user.email})
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -197,7 +222,7 @@ function AreasPage() {
 										Cargando áreas...
 									</TableCell>
 								</TableRow>
-							) : areas.data?.map((area: any) => (
+							) : areas.data?.map((area: Area) => (
 								<TableRow key={area.id}>
 									<TableCell className="font-medium">{area.name}</TableCell>
 									<TableCell>{area.description || "—"}</TableCell>
@@ -252,7 +277,7 @@ function AreasPage() {
 							<Textarea
 								id="edit-description"
 								name="description"
-								defaultValue={editingArea?.description}
+								defaultValue={editingArea?.description ?? ""}
 							/>
 						</div>
 						<Button type="submit" disabled={updateMutation.isPending}>

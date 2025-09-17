@@ -131,6 +131,7 @@ export const leads = pgTable("leads", {
 	scoredAt: timestamp("scored_at"),  
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	livenessValidated: boolean("liveness_validated").notNull().default(false),
 	createdBy: text("created_by")
 		.notNull()
 		.references(() => user.id),

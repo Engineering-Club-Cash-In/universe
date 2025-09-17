@@ -337,11 +337,8 @@ export const updateLeadAndCreateOpportunity = async (
   if (data.electricityBill || data.bankStatements) {
     console.log(
       `[DEBUG] Inserting legal documents for lead ${existingLead.id}`
-    );
-    await db
-      .update(leads)
-      .set({ updatedAt: new Date(), status: "contacted" })
-      .where(eq(leads.id, existingLead.id));
+    ); 
+
     await db.insert(legalDocuments).values({
       leadId: existingLead.id,
       electricityBill: data.electricityBill ?? null,
@@ -565,3 +562,22 @@ export const validateMagicUrlController = async (dpi: string) => {
     expiresAt: magicUrl.magic_urls.expiresAt,
   };
 };
+/**
+ * Check if a lead has already passed liveness validation by DPI.
+ *
+ * @param dpi - The lead's DPI to search for.
+ * @returns true if liveness_validated = true, otherwise false.
+ */
+export async function hasPassedLiveness(dpi: string): Promise<boolean> {
+  const result = await db
+    .select({ livenessValidated: leads.livenessValidated })
+    .from(leads)
+    .where(eq(leads.dpi, dpi))
+    .limit(1);
+
+  if (result.length === 0) {
+    return false; // No lead found with this DPI
+  }
+
+  return result[0].livenessValidated;
+}

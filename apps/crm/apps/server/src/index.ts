@@ -9,6 +9,7 @@ import { appRouter } from "./routers/index";
 import {
   getLeadProgress,
   getRenapInfoController,
+  hasPassedLiveness,
   updateLeadAndCreateOpportunity,
   validateMagicUrlController,
 } from "./controllers/bot";
@@ -331,4 +332,35 @@ app.get("/info/validate-magic-url", async (c) => {
   const result = await validateMagicUrlController(userDpi);
   return c.json(result, result.success ? 200 : 400);
 });
+
+app.post("/info/liveness-validation", async (c) => {
+  const body = await c.req.json();
+  const { dpi } = body as { dpi?: string };
+
+  if (!dpi) {
+    return c.json({ success: false, message: "DPI is required" }, 400);
+  }
+
+  try {
+    const result = await hasPassedLiveness(dpi); // 👈 usamos el método que ya hicimos
+
+    return c.json(
+      {
+        success: true,
+        dpi,
+        livenessValidated: result,
+      },
+      200
+    );
+  } catch (err: any) {
+    return c.json(
+      {
+        success: false,
+        message: err.message || "Internal server error",
+      },
+      500
+    );
+  }
+});
+
 export default app;

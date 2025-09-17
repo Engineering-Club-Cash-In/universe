@@ -4,6 +4,7 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { eq } from "drizzle-orm";
 import { auth } from "../lib/auth";
+import { ORPCError } from "@orpc/server";
 
 type UserRole = "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer";
 
@@ -28,7 +29,7 @@ export const listUsers = protectedProcedure
 	.handler(async ({ context }) => {
 		const currentUser = context.session!.user;
 		if (!["super_admin", "department_manager", "area_lead"].includes(currentUser.role)) {
-			throw new Error("No tienes permisos para ver usuarios");
+			throw new ORPCError("FORBIDDEN", { message: "No tienes permisos para ver usuarios" });
 		}
 
 		const users = await db.select({
@@ -61,13 +62,13 @@ export const createUser = protectedProcedure
 		const allowedRoles = roleHierarchy[currentUser.role as UserRole];
 		
 		if (!allowedRoles.includes(input.role)) {
-			throw new Error(`No puedes crear usuarios con el rol ${input.role}`);
+			throw new ORPCError("FORBIDDEN", { message: `No puedes crear usuarios con el rol ${input.role}` });
 		}
 
 		// Verificar que el email no exista
 		const existingUser = await db.select().from(user).where(eq(user.email, input.email)).limit(1);
 		if (existingUser.length > 0) {
-			throw new Error("El email ya está en uso");
+			throw new ORPCError("BAD_REQUEST", { message: "El email ya está en uso" });
 		}
 
 		// Crear usuario usando Better Auth (rol se asignará después)
@@ -80,7 +81,7 @@ export const createUser = protectedProcedure
 		});
 
 		if (!newUser) {
-			throw new Error("Error al crear el usuario");
+			throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Error al crear el usuario" });
 		}
 
 		// Actualizar el rol del usuario explícitamente
@@ -108,12 +109,12 @@ export const updateUserRole = protectedProcedure
 		const allowedRoles = roleHierarchy[currentUser.role as UserRole];
 		
 		if (!allowedRoles.includes(input.newRole)) {
-			throw new Error(`No puedes asignar el rol ${input.newRole}`);
+			throw new ORPCError("FORBIDDEN", { message: `No puedes asignar el rol ${input.newRole}` });
 		}
 
 		// No permitir que se modifique a sí mismo
 		if (currentUser.id === input.userId) {
-			throw new Error("No puedes modificar tu propio rol");
+			throw new ORPCError("FORBIDDEN", { message: "No puedes modificar tu propio rol" });
 		}
 
 		await db.update(user)
@@ -134,12 +135,12 @@ export const deleteUser = protectedProcedure
 		
 		// Solo super_admin puede eliminar usuarios
 		if (currentUser.role !== "super_admin") {
-			throw new Error("Solo los super administradores pueden eliminar usuarios");
+			throw new ORPCError("FORBIDDEN", { message: "Solo los super administradores pueden eliminar usuarios" });
 		}
 
 		// No permitir eliminarse a sí mismo
 		if (currentUser.id === input.userId) {
-			throw new Error("No puedes eliminar tu propia cuenta");
+			throw new ORPCError("FORBIDDEN", { message: "No puedes eliminar tu propia cuenta" });
 		}
 
 		await db.delete(user).where(eq(user.id, input.userId));

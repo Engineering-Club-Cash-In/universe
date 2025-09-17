@@ -7,6 +7,7 @@ import { user } from "../db/schema/auth";
 import { eq } from "drizzle-orm";
 import * as z from "zod";
 import { auth } from "../lib/auth";
+import { ORPCError } from "@orpc/server";
 
 type UserRole = "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer";
 
@@ -233,13 +234,17 @@ export const createUserAndAssignToTeam = protectedProcedure
 			
 			// Validar permisos para crear usuario con ese rol
 			if (!allowedRoles.includes(input.role)) {
-				throw new Error(`No puedes crear usuarios con el rol ${input.role}`);
+				throw new ORPCError("FORBIDDEN", {
+					message: `No puedes crear usuarios con el rol ${input.role}`,
+				});
 			}
 
 			// Verificar que el email no exista
 			const existingUser = await db.select().from(user).where(eq(user.email, input.email)).limit(1);
 			if (existingUser.length > 0) {
-				throw new Error("Ya existe un usuario con este email");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Ya existe un usuario con este email",
+				});
 			}
 
 			// Crear usuario usando Better Auth
@@ -284,7 +289,7 @@ export const createUserAndAssignToTeam = protectedProcedure
 			// Detectar errores específicos y dar mensajes claros
 			if (error instanceof Error) {
 				if (error.message.includes("unique")) {
-					throw new Error("Ya existe un usuario con este email");
+					throw new ORPCError("BAD_REQUEST", { message: "Ya existe un usuario con este email" });
 				}
 				if (error.message.includes("No puedes crear")) {
 					throw error; // Re-lanzar errores de permisos tal como están
@@ -292,6 +297,6 @@ export const createUserAndAssignToTeam = protectedProcedure
 			}
 			
 			console.error("Error creating user and team member:", error);
-			throw new Error("Error al crear el usuario y asignarlo al equipo");
+			throw new ORPCError("INTERNAL_SERVER_ERROR", { message: "Error al crear el usuario y asignarlo al equipo" });
 		}
 	});

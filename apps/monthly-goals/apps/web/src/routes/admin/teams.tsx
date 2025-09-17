@@ -2,6 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createFilterableHeader, createActionsColumn } from "@/components/ui/data-table";
+import { Edit, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Dialog,
@@ -33,7 +36,7 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@/components/ui/tabs";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -178,6 +181,54 @@ function TeamsPage() {
 			deleteMutation.mutate({ id: teamMember.id });
 		}
 	};
+
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<any>[]>(() => [
+		{
+			accessorKey: "userName",
+			header: createSortableHeader("Nombre"),
+			cell: ({ row }) => (
+				<div className="font-medium">{row.getValue("userName")}</div>
+			),
+		},
+		{
+			accessorKey: "userEmail",
+			header: createSortableHeader("Email"),
+		},
+		{
+			accessorKey: "areaName",
+			header: createSortableHeader("Área"),
+		},
+		{
+			accessorKey: "departmentName",
+			header: createSortableHeader("Departamento"),
+		},
+		{
+			accessorKey: "position",
+			header: "Posición",
+			cell: ({ row }) => row.getValue("position") || "—",
+		},
+		{
+			accessorKey: "joinedAt",
+			header: createSortableHeader("Fecha de Ingreso"),
+			cell: ({ row }) => {
+				return new Date(row.getValue("joinedAt")).toLocaleDateString("es-ES");
+			},
+		},
+		createActionsColumn<any>([
+			{
+				label: "Editar",
+				icon: Edit,
+				onClick: handleEdit,
+			},
+			{
+				label: "Eliminar",
+				icon: Trash2,
+				onClick: handleDelete,
+				variant: "destructive",
+			},
+		]),
+	], []);
 
 	return (
 		<div className="space-y-6">

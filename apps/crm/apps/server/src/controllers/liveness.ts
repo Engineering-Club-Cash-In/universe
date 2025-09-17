@@ -109,6 +109,11 @@ export const livenessController = {
           .set({ used: true })
           .where(eq(magicUrls.leadId, user.leadId)); // asumiendo que renapInfo.dpi está ligado a lead
         console.log(`[DEBUG] Magic URL marcado como usado para DPI ${userDpi}`);
+
+        await db
+          .update(leads)
+          .set({ livenessValidated: true ,status: "contacted"})
+          .where(eq(leads.id, user.leadId));
       }
 
       return {

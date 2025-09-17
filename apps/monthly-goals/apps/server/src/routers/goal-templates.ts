@@ -3,6 +3,7 @@ import { db } from "../db";
 import { goalTemplates } from "../db/schema/goal-templates";
 import { eq } from "drizzle-orm";
 import * as z from "zod";
+import { ORPCError } from "@orpc/server";
 
 const GoalTemplateSchema = z.object({
 	id: z.string().uuid(),
@@ -38,7 +39,7 @@ export const getGoalTemplate = protectedProcedure
 			.limit(1);
 		
 		if (!goalTemplate[0]) {
-			throw new Error("Goal template not found");
+			throw new ORPCError("NOT_FOUND", { message: "Goal template not found" });
 		}
 		
 		return goalTemplate[0];
@@ -72,7 +73,7 @@ export const updateGoalTemplate = protectedProcedure
 			.returning();
 		
 		if (!updatedGoalTemplate) {
-			throw new Error("Goal template not found");
+			throw new ORPCError("NOT_FOUND", { message: "Goal template not found" });
 		}
 		
 		return updatedGoalTemplate;
@@ -87,7 +88,7 @@ export const deleteGoalTemplate = protectedProcedure
 			.returning();
 		
 		if (!deletedGoalTemplate) {
-			throw new Error("Goal template not found");
+			throw new ORPCError("NOT_FOUND", { message: "Goal template not found" });
 		}
 		
 		return { success: true };

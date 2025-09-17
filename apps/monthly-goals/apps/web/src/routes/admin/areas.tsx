@@ -3,6 +3,9 @@ import { orpc } from "@/utils/orpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import type { AppRouterClient } from "../../../../server/src/routers/index";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createActionsColumn } from "@/components/ui/data-table";
+import { Edit, Trash2 } from "lucide-react";
 
 type User = Awaited<ReturnType<AppRouterClient['teams']['availableUsers']>>[0];
 type Area = Awaited<ReturnType<AppRouterClient['areas']['list']>>[0];
@@ -33,7 +36,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -133,6 +136,48 @@ function AreasPage() {
 		}
 	};
 
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<Area>[]>(() => [
+		{
+			accessorKey: "name",
+			header: createSortableHeader("Nombre"),
+			cell: ({ row }) => (
+				<div className="font-medium">{row.getValue("name")}</div>
+			),
+		},
+		{
+			accessorKey: "description",
+			header: "Descripción",
+			cell: ({ row }) => (
+				<div className="max-w-xs truncate">{row.getValue("description") || "—"}</div>
+			),
+		},
+		{
+			accessorKey: "departmentName",
+			header: createSortableHeader("Departamento"),
+		},
+		{
+			accessorKey: "createdAt",
+			header: createSortableHeader("Fecha de Creación"),
+			cell: ({ row }) => {
+				return new Date(row.getValue("createdAt")).toLocaleDateString("es-ES");
+			},
+		},
+		createActionsColumn<Area>([
+			{
+				label: "Editar",
+				icon: Edit,
+				onClick: handleEdit,
+			},
+			{
+				label: "Eliminar",
+				icon: Trash2,
+				onClick: handleDelete,
+				variant: "destructive",
+			},
+		]),
+	], []);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -205,54 +250,13 @@ function AreasPage() {
 					<CardTitle>Todas las Áreas</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Nombre</TableHead>
-								<TableHead>Descripción</TableHead>
-								<TableHead>Departamento</TableHead>
-								<TableHead>Creado el</TableHead>
-								<TableHead>Acciones</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{areas.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={5} className="text-center py-4">
-										Cargando áreas...
-									</TableCell>
-								</TableRow>
-							) : areas.data?.map((area: Area) => (
-								<TableRow key={area.id}>
-									<TableCell className="font-medium">{area.name}</TableCell>
-									<TableCell className="max-w-xs truncate">{area.description || "—"}</TableCell>
-									<TableCell>{area.departmentName || "—"}</TableCell>
-									<TableCell>
-										{new Date(area.createdAt).toLocaleDateString()}
-									</TableCell>
-									<TableCell>
-										<div className="flex space-x-2">
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleEdit(area)}
-											>
-												Editar
-											</Button>
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleDelete(area)}
-												disabled={deleteMutation.isPending}
-											>
-												Eliminar
-											</Button>
-										</div>
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={areas.data || []}
+						isLoading={areas.isLoading}
+						searchPlaceholder="Buscar áreas..."
+						emptyMessage="No hay áreas registradas"
+					/>
 				</CardContent>
 			</Card>
 

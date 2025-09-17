@@ -5,6 +5,10 @@ import type { AppRouterClient } from "../../../../server/src/routers/index";
 
 type User = Awaited<ReturnType<AppRouterClient['teams']['availableUsers']>>[0];
 type Department = Awaited<ReturnType<AppRouterClient['departments']['list']>>[0];
+
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createActionsColumn } from "@/components/ui/data-table";
+import { Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -32,7 +36,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -132,6 +136,44 @@ function DepartmentsPage() {
 		}
 	};
 
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<Department>[]>(() => [
+		{
+			accessorKey: "name",
+			header: createSortableHeader("Nombre"),
+			cell: ({ row }) => (
+				<div className="font-medium">{row.getValue("name")}</div>
+			),
+		},
+		{
+			accessorKey: "description",
+			header: "Descripción",
+			cell: ({ row }) => (
+				<div className="max-w-xs truncate">{row.getValue("description") || "—"}</div>
+			),
+		},
+		{
+			accessorKey: "createdAt",
+			header: createSortableHeader("Fecha de Creación"),
+			cell: ({ row }) => {
+				return new Date(row.getValue("createdAt")).toLocaleDateString("es-ES");
+			},
+		},
+		createActionsColumn<Department>([
+			{
+				label: "Editar",
+				icon: Edit,
+				onClick: handleEdit,
+			},
+			{
+				label: "Eliminar",
+				icon: Trash2,
+				onClick: handleDelete,
+				variant: "destructive",
+			},
+		]),
+	], []);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -185,54 +227,13 @@ function DepartmentsPage() {
 					<CardTitle>Todos los Departamentos</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Nombre</TableHead>
-								<TableHead>Descripción</TableHead>
-								<TableHead>Creado el</TableHead>
-								<TableHead>Acciones</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{departments.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={4} className="text-center py-4">
-										Cargando departamentos...
-									</TableCell>
-								</TableRow>
-							) : departments.data?.map((department: Department) => (
-								<TableRow key={department.id}>
-									<TableCell className="font-medium">
-										{department.name}
-									</TableCell>
-									<TableCell className="max-w-xs truncate">{department.description ?? "—"}</TableCell>
-									<TableCell>
-										{new Date(department.createdAt).toLocaleDateString()}
-									</TableCell>
-									<TableCell>
-										<div className="flex space-x-2">
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleEdit(department)}
-											>
-												Editar
-											</Button>
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleDelete(department)}
-												disabled={deleteMutation.isPending}
-											>
-												Eliminar
-											</Button>
-										</div>
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={departments.data || []}
+						isLoading={departments.isLoading}
+						searchPlaceholder="Buscar departamentos..."
+						emptyMessage="No hay departamentos registrados"
+					/>
 				</CardContent>
 			</Card>
 

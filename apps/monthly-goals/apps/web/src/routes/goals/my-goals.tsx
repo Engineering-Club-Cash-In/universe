@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { authClient } from "@/lib/auth-client";
+import { usePermissions } from "@/lib/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +42,7 @@ export const Route = createFileRoute("/goals/my-goals")({
 
 function MyGoalsPage() {
 	const { data: session } = authClient.useSession();
+	const { canEditGoals } = usePermissions();
 	const queryClient = useQueryClient();
 	const currentDate = new Date();
 	const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
@@ -244,9 +246,8 @@ function MyGoalsPage() {
 											{getStatusBadge(percentage, goal.successThreshold, goal.warningThreshold)}
 										</TableCell>
 										<TableCell>
-											{session?.user?.role !== "viewer" && (
-												session?.user?.role === "super_admin" || 
-												session?.user?.role === "manager" ||
+											{canEditGoals && (
+												["super_admin", "department_manager", "area_lead"].includes(session?.user?.role || "") ||
 												goal.userEmail === session?.user?.email
 											) && (
 												<Button

@@ -59,6 +59,13 @@ interface AmortizationRow {
   finalBalance: number;
 }
 
+interface InterestRateRange {
+  id: number;
+  minAmount: number;
+  maxAmount: number;
+  rate: number;
+}
+
 // Main investment calculator component
 export default function InvestmentCalculator() {
   const [mainTab, setMainTab] = useState("calculator"); // 'calculator' or 'goal'
@@ -88,6 +95,23 @@ export default function InvestmentCalculator() {
   const [adminIsSmallTaxpayer, setAdminIsSmallTaxpayer] =
     useState<boolean>(false);
 
+  // Interest rate ranges state (rates are stored as annual rates)
+  const [interestRateRanges, setInterestRateRanges] = useState<InterestRateRange[]>([
+    { id: 0, minAmount: 1, maxAmount: 2999, rate: 12.00 }, // Rate for amounts below minimum investment
+    { id: 1, minAmount: 3000, maxAmount: 150000, rate: 14.11 },
+    { id: 2, minAmount: 150001, maxAmount: 300000, rate: 14.52 },
+    { id: 3, minAmount: 300001, maxAmount: 500000, rate: 15.12 },
+    { id: 4, minAmount: 500001, maxAmount: 750000, rate: 15.52 },
+    { id: 5, minAmount: 750001, maxAmount: 999999, rate: 15.72 },
+    { id: 6, minAmount: 1000000, maxAmount: Infinity, rate: 16.13 }
+  ]);
+
+  // Auto rate calculation enabled/disabled
+  const [autoRateEnabled, setAutoRateEnabled] = useState<boolean>(true);
+
+  // Minimum investment amount
+  const MINIMUM_INVESTMENT = 3000;
+
   // --- Inverse Calculator State ---
   const [desiredAmount, setDesiredAmount] = useState<string>("1000");
   const [inverseMode, setInverseMode] = useState<"monthly" | "lumpSum">(
@@ -103,8 +127,24 @@ export default function InvestmentCalculator() {
   const [activeTab, setActiveTab] = useState("standard");
 
   const getCapitalAsNumber = () => {
-    return parseInt(capital.replace(/,/g, ""), 10);
+    const cleanCapital = capital.replace(/,/g, "").trim();
+    const parsedCapital = parseInt(cleanCapital, 10);
+    return isNaN(parsedCapital) || cleanCapital === "" ? 0 : parsedCapital;
   };
+
+  // Function to get automatic interest rate based on investment amount (returns monthly rate)
+  const getAutomaticInterestRate = useCallback((amount: number): number => {
+    if (!autoRateEnabled || amount === 0) {
+      return interestRate;
+    }
+    
+    const range = interestRateRanges.find(range => 
+      amount >= range.minAmount && amount <= range.maxAmount
+    );
+    
+    // Convert annual rate to monthly rate by dividing by 12
+    return range ? range.rate / 12 : interestRate;
+  }, [autoRateEnabled, interestRate, interestRateRanges]);
 
   // Helper function to get term in months
   const getTermInMonths = useCallback(() => {
@@ -130,12 +170,13 @@ export default function InvestmentCalculator() {
     principal: number
   ): AmortizationRow[] => {
     const schedule: AmortizationRow[] = [];
-    const monthlyPayment = calculateMonthlyPayment(principal, interestRate);
+    const currentInterestRate = getAutomaticInterestRate(principal);
+    const monthlyPayment = calculateMonthlyPayment(principal, currentInterestRate);
     let balance = principal;
     const totalMonths = getTermInMonths();
     const vatRate = getVatRate();
     for (let month = 1; month <= totalMonths; month++) {
-      const interest = balance * (interestRate / 100);
+      const interest = balance * (currentInterestRate / 100);
       const vat = interest * vatRate;
       const interestPlusVat = interest + vat;
       const amortization = monthlyPayment - interestPlusVat;
@@ -161,10 +202,11 @@ export default function InvestmentCalculator() {
     principal: number
   ): AmortizationRow[] => {
     const schedule: AmortizationRow[] = [];
+    const currentInterestRate = getAutomaticInterestRate(principal);
     const totalMonths = getTermInMonths();
     const vatRate = getVatRate();
     for (let month = 1; month <= totalMonths; month++) {
-      const interest = principal * (interestRate / 100);
+      const interest = principal * (currentInterestRate / 100);
       const vat = interest * vatRate;
       const interestPlusVat = interest + vat;
       if (month < totalMonths) {
@@ -199,11 +241,12 @@ export default function InvestmentCalculator() {
   // Compound interest schedule (net interest is reinvested)
   const generateCompoundSchedule = (principal: number): AmortizationRow[] => {
     const schedule: AmortizationRow[] = [];
+    const currentInterestRate = getAutomaticInterestRate(principal);
     const totalMonths = getTermInMonths();
     const vatRate = getVatRate();
     let balance = principal;
     for (let month = 1; month <= totalMonths; month++) {
-      const interest = balance * (interestRate / 100);
+      const interest = balance * (currentInterestRate / 100);
       const vat = interest * vatRate;
       const netInterest = interest - vat; // reinvest net interest
       const finalBalance = balance + netInterest;
@@ -228,6 +271,9 @@ export default function InvestmentCalculator() {
       ? requiredCapital
       : getCapitalAsNumber();
 
+  // Get the effective interest rate for this investment amount
+  const effectiveInterestRate = getAutomaticInterestRate(displayCapital);
+
   const standardSchedule = generateAmortizationSchedule(displayCapital);
   const interestOnlySchedule = generateInterestOnlySchedule(displayCapital);
   const compoundScheduleArr = generateCompoundSchedule(displayCapital);
@@ -235,7 +281,7 @@ export default function InvestmentCalculator() {
   // Calculate investment results using the backend functions
   const investmentParams: InvestmentParams = {
     capital: displayCapital,
-    interestRate: interestRate,
+    interestRate: effectiveInterestRate,
     termMonths: getTermInMonths(),
     investorPercentage: investorPercentage,
     vatRate: getVatRate()
@@ -335,7 +381,7 @@ export default function InvestmentCalculator() {
     summary.appendChild(
       createSummaryRow(
         "Tasa de Interés Mensual:",
-        `${interestRate.toFixed(1)}%`
+        `${effectiveInterestRate.toFixed(1)}%`
       )
     );
 
@@ -673,10 +719,14 @@ export default function InvestmentCalculator() {
     }
 
     const totalMonths = getTermInMonths();
-    const monthlyInterestRate = interestRate / 100;
     const investorShare = investorPercentage / 100;
     const vatRate = getVatRate();
     let capital = 0;
+    
+    // For inverse calculation, we need to estimate or use a default rate
+    // since we don't know the capital yet
+    const estimatedAnnualRate = autoRateEnabled ? 15.0 : interestRate * 12; // Use middle range rate as estimate
+    const monthlyInterestRate = (estimatedAnnualRate / 12) / 100;
 
     if (inverseMode === "monthly") {
       // Corresponds to interest-only payments
@@ -765,16 +815,24 @@ export default function InvestmentCalculator() {
                     type="text"
                     value={capital}
                     onChange={(e) => setCapital(e.target.value)}
+                    className={getCapitalAsNumber() > 0 && getCapitalAsNumber() < MINIMUM_INVESTMENT ? "border-yellow-500" : ""}
                   />
+                  {getCapitalAsNumber() > 0 && getCapitalAsNumber() < MINIMUM_INVESTMENT && (
+                    <p className="text-sm text-yellow-600">
+                      ⚠️ La inversión mínima aceptada es Q{MINIMUM_INVESTMENT.toLocaleString()}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="interest">Tasa de interés mensual (%)</Label>
                   <Input
                     id="interest"
                     type="number"
-                    value={interestRate}
+                    value={autoRateEnabled ? effectiveInterestRate.toFixed(2) : interestRate}
                     onChange={(e) => setInterestRate(Number(e.target.value))}
                     step="0.1"
+                    disabled={autoRateEnabled}
+                    className={autoRateEnabled ? "bg-gray-50" : ""}
                   />
                 </div>
                 <div className="space-y-2">
@@ -1288,7 +1346,7 @@ export default function InvestmentCalculator() {
               <div className="flex justify-between text-lg font-semibold">
                 <p>Tasa de Interés Mensual:</p>
                 <span className="text-black">
-                  {(interestRate * (investorPercentage / 100)).toFixed(2)}%
+                  {(effectiveInterestRate * (investorPercentage / 100)).toFixed(2)}%
                 </span>
               </div>
               <Separator />
@@ -1427,66 +1485,189 @@ export default function InvestmentCalculator() {
 
       {/* Admin Settings Panel */}
       <Dialog open={isAdminPanelOpen} onOpenChange={setIsAdminPanelOpen}>
-        <DialogContent className="z-[100]">
+        <DialogContent className="z-[100] max-w-4xl max-h-[80vh] overflow-y-auto">
           <DialogTitle>Configuración de Administrador</DialogTitle>
           <DialogDescription>
             Ajuste los parámetros de la calculadora
           </DialogDescription>
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="adminInterestRate" className="text-right">
-                Tasa de interés (%)
-              </Label>
-              <Input
-                id="adminInterestRate"
-                type="number"
-                value={adminInterestRate}
-                onChange={(e) => setAdminInterestRate(Number(e.target.value))}
-                step="0.1"
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="adminInvestorPercentage" className="text-right">
-                Porcentaje del inversionista (%)
-              </Label>
-              <Input
-                id="adminInvestorPercentage"
-                type="number"
-                value={adminInvestorPercentage}
-                onChange={(e) => {
-                  // Allow typing any value temporarily
-                  setAdminInvestorPercentage(Number(e.target.value));
-                }}
-                onBlur={(e) => {
-                  // Enforce the range when the input loses focus
-                  const value = Number(e.target.value);
-                  if (value < 70) {
-                    setAdminInvestorPercentage(70);
-                  } else if (value > 90) {
-                    setAdminInvestorPercentage(90);
-                  }
-                }}
-                min="70"
-                max="90"
-                className="col-span-3"
-              />
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="adminSmallTaxpayer" className="text-right">
-                Pequeño Contribuyente
-              </Label>
-              <div className="col-span-3">
-                <input
-                  type="checkbox"
-                  id="adminSmallTaxpayer"
-                  checked={adminIsSmallTaxpayer}
-                  onChange={(e) => setAdminIsSmallTaxpayer(e.target.checked)}
-                  className="rounded"
-                />
+          
+          <Tabs defaultValue="general" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="general">Configuración General</TabsTrigger>
+              <TabsTrigger value="rates">Rangos de Tasas</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="general">
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="autoRateToggle" className="text-right">
+                    Tasas Automáticas
+                  </Label>
+                  <div className="col-span-3">
+                    <input
+                      type="checkbox"
+                      id="autoRateToggle"
+                      checked={autoRateEnabled}
+                      onChange={(e) => setAutoRateEnabled(e.target.checked)}
+                      className="rounded"
+                    />
+                    <span className="ml-2 text-sm text-gray-500">
+                      {autoRateEnabled ? "Activadas" : "Desactivadas"}
+                    </span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="adminInterestRate" className="text-right">
+                    Tasa de interés fija (%)
+                  </Label>
+                  <Input
+                    id="adminInterestRate"
+                    type="number"
+                    value={adminInterestRate}
+                    onChange={(e) => setAdminInterestRate(Number(e.target.value))}
+                    step="0.1"
+                    className="col-span-3"
+                    disabled={autoRateEnabled}
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="adminInvestorPercentage" className="text-right">
+                    Porcentaje del inversionista (%)
+                  </Label>
+                  <Input
+                    id="adminInvestorPercentage"
+                    type="number"
+                    value={adminInvestorPercentage}
+                    onChange={(e) => {
+                      setAdminInvestorPercentage(Number(e.target.value));
+                    }}
+                    onBlur={(e) => {
+                      const value = Number(e.target.value);
+                      if (value < 70) {
+                        setAdminInvestorPercentage(70);
+                      } else if (value > 90) {
+                        setAdminInvestorPercentage(90);
+                      }
+                    }}
+                    min="70"
+                    max="90"
+                    className="col-span-3"
+                  />
+                </div>
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="adminSmallTaxpayer" className="text-right">
+                    Pequeño Contribuyente
+                  </Label>
+                  <div className="col-span-3">
+                    <input
+                      type="checkbox"
+                      id="adminSmallTaxpayer"
+                      checked={adminIsSmallTaxpayer}
+                      onChange={(e) => setAdminIsSmallTaxpayer(e.target.checked)}
+                      className="rounded"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            </TabsContent>
+            
+            <TabsContent value="rates">
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-semibold">Configuración de Rangos de Tasas</h3>
+                </div>
+                <p className="text-sm text-gray-600">
+                  Las tasas se ingresan como tasas anuales. La calculadora automáticamente las convertirá a tasas mensuales.
+                </p>
+                
+                <ScrollArea className="h-[400px] rounded-md border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Monto Mínimo (Q)</TableHead>
+                        <TableHead>Monto Máximo (Q)</TableHead>
+                        <TableHead>Tasa Anual (%)</TableHead>
+                        <TableHead>Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {interestRateRanges.map((range, index) => (
+                        <TableRow key={range.id}>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={range.minAmount}
+                              onChange={(e) => {
+                                const newRanges = [...interestRateRanges];
+                                newRanges[index].minAmount = Number(e.target.value);
+                                setInterestRateRanges(newRanges);
+                              }}
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={range.maxAmount === Infinity ? 999999999 : range.maxAmount}
+                              onChange={(e) => {
+                                const newRanges = [...interestRateRanges];
+                                const value = Number(e.target.value);
+                                newRanges[index].maxAmount = value >= 999999999 ? Infinity : value;
+                                setInterestRateRanges(newRanges);
+                              }}
+                              className="w-24"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              value={range.rate}
+                              onChange={(e) => {
+                                const newRanges = [...interestRateRanges];
+                                newRanges[index].rate = Number(e.target.value);
+                                setInterestRateRanges(newRanges);
+                              }}
+                              step="0.01"
+                              className="w-20"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => {
+                                const newRanges = interestRateRanges.filter(r => r.id !== range.id);
+                                setInterestRateRanges(newRanges);
+                              }}
+                            >
+                              Eliminar
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+                
+                <Button
+                  onClick={() => {
+                    const maxId = Math.max(...interestRateRanges.map(r => r.id), 0);
+                    const newRange: InterestRateRange = {
+                      id: maxId + 1,
+                      minAmount: 0,
+                      maxAmount: 0,
+                      rate: 15.0
+                    };
+                    setInterestRateRanges([...interestRateRanges, newRange]);
+                  }}
+                  className="w-full"
+                >
+                  Agregar Nuevo Rango
+                </Button>
+              </div>
+            </TabsContent>
+          </Tabs>
+          
           <DialogFooter>
             <Button type="submit" onClick={handleSaveAdminSettings}>
               Guardar Cambios

@@ -3,6 +3,9 @@ import { orpc } from "@/utils/orpc";
 import { authClient } from "@/lib/auth-client";
 import { usePermissions } from "@/lib/permissions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createFilterableHeader, createActionsColumn } from "@/components/ui/data-table";
+import { Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -22,17 +25,9 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -112,6 +107,107 @@ function MyGoalsPage() {
 		}
 	};
 
+	const getStatusText = (percentage: number, successThreshold: string, warningThreshold: string) => {
+		const success = parseFloat(successThreshold || "80");
+		const warning = parseFloat(warningThreshold || "50");
+		
+		if (percentage >= success) return "exitoso";
+		else if (percentage >= warning) return "en_progreso";
+		else return "necesita_atencion";
+	};
+
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<any>[]>(() => [
+		{
+			accessorKey: "userName",
+			header: createSortableHeader("Empleado"),
+			cell: ({ row }) => (
+				<div>
+					<div className="font-medium">{row.getValue("userName")}</div>
+					<div className="text-sm text-gray-500">
+						{row.original.areaName} - {row.original.departmentName}
+					</div>
+				</div>
+			),
+		},
+		{
+			accessorKey: "goalTemplateName",
+			header: createSortableHeader("Meta"),
+			cell: ({ row }) => (
+				<div>
+					<div className="font-medium">{row.getValue("goalTemplateName")}</div>
+					{row.original.goalTemplateUnit && (
+						<div className="text-sm text-gray-500">{row.original.goalTemplateUnit}</div>
+					)}
+				</div>
+			),
+		},
+		{
+			accessorKey: "targetValue",
+			header: createSortableHeader("Objetivo"),
+			cell: ({ row }) => parseFloat(row.getValue("targetValue")).toLocaleString(),
+		},
+		{
+			accessorKey: "achievedValue", 
+			header: createSortableHeader("Logrado"),
+			cell: ({ row }) => parseFloat(row.getValue("achievedValue")).toLocaleString(),
+		},
+		{
+			id: "progress",
+			header: "Progreso",
+			cell: ({ row }) => {
+				const target = parseFloat(row.original.targetValue);
+				const achieved = parseFloat(row.original.achievedValue);
+				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				
+				return (
+					<div className="space-y-2">
+						<Progress value={Math.min(percentage, 100)} className="w-[60px]" />
+						<span className="text-sm font-medium">{Math.round(percentage)}%</span>
+					</div>
+				);
+			},
+		},
+		{
+			id: "status",
+			header: createFilterableHeader("Estado", [
+				{ label: "Exitoso", value: "exitoso" },
+				{ label: "En Progreso", value: "en_progreso" },
+				{ label: "Necesita Atención", value: "necesita_atencion" },
+			]),
+			cell: ({ row }) => {
+				const target = parseFloat(row.original.targetValue);
+				const achieved = parseFloat(row.original.achievedValue);
+				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				
+				return getStatusBadge(percentage, row.original.successThreshold, row.original.warningThreshold);
+			},
+			filterFn: (row, id, value) => {
+				if (!value || value.length === 0) return true;
+				
+				const target = parseFloat(row.original.targetValue);
+				const achieved = parseFloat(row.original.achievedValue);
+				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				const status = getStatusText(percentage, row.original.successThreshold, row.original.warningThreshold);
+				
+				return value.includes(status);
+			},
+		},
+		createActionsColumn<any>([
+			{
+				label: "Actualizar",
+				icon: Edit,
+				onClick: handleUpdate,
+				show: (goal) => {
+					return canEditGoals && (
+						["super_admin", "department_manager", "area_lead"].includes(session?.user?.role || "") ||
+						goal.userEmail === session?.user?.email
+					);
+				},
+			},
+		]),
+	], [canEditGoals, session]);
+
 	const months = [
 		{ value: 1, label: "Enero" },
 		{ value: 2, label: "Febrero" },
@@ -185,85 +281,13 @@ function MyGoalsPage() {
 					</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Empleado</TableHead>
-								<TableHead>Meta</TableHead>
-								<TableHead>Objetivo</TableHead>
-								<TableHead>Logrado</TableHead>
-								<TableHead>Progreso</TableHead>
-								<TableHead>Estado</TableHead>
-								<TableHead>Acciones</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{myGoals.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={7} className="text-center py-4">
-										Cargando metas...
-									</TableCell>
-								</TableRow>
-							) : userGoals.length === 0 ? (
-								<TableRow>
-									<TableCell colSpan={7} className="text-center py-4">
-										No tienes metas configuradas para este período
-									</TableCell>
-								</TableRow>
-							) : userGoals.map((goal: any) => {
-								const target = parseFloat(goal.targetValue);
-								const achieved = parseFloat(goal.achievedValue);
-								const percentage = target > 0 ? (achieved / target) * 100 : 0;
-
-								return (
-									<TableRow key={goal.id}>
-										<TableCell>
-											<div>
-												<div className="font-medium">{goal.userName}</div>
-												<div className="text-sm text-gray-500">{goal.areaName} - {goal.departmentName}</div>
-											</div>
-										</TableCell>
-										<TableCell>
-											<div>
-												<div className="font-medium">{goal.goalTemplateName}</div>
-												{goal.goalTemplateUnit && (
-													<div className="text-sm text-gray-500">{goal.goalTemplateUnit}</div>
-												)}
-											</div>
-										</TableCell>
-										<TableCell>{goal.targetValue}</TableCell>
-										<TableCell>{goal.achievedValue}</TableCell>
-										<TableCell className="w-32">
-											<div className="flex items-center space-x-2">
-												<Progress 
-													value={Math.min(percentage, 100)} 
-													className="flex-1"
-												/>
-												<span className="text-sm font-medium">{Math.round(percentage)}%</span>
-											</div>
-										</TableCell>
-										<TableCell>
-											{getStatusBadge(percentage, goal.successThreshold, goal.warningThreshold)}
-										</TableCell>
-										<TableCell>
-											{canEditGoals && (
-												["super_admin", "department_manager", "area_lead"].includes(session?.user?.role || "") ||
-												goal.userEmail === session?.user?.email
-											) && (
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => handleUpdate(goal)}
-												>
-													Actualizar
-												</Button>
-											)}
-										</TableCell>
-									</TableRow>
-								);
-							})}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={userGoals}
+						isLoading={myGoals.isLoading}
+						searchPlaceholder="Buscar metas..."
+						emptyMessage="No tienes metas configuradas para este período"
+					/>
 				</CardContent>
 			</Card>
 

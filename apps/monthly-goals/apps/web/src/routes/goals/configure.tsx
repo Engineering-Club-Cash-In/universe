@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createActionsColumn } from "@/components/ui/data-table";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,15 +16,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -29,12 +24,20 @@ export const Route = createFileRoute("/goals/configure")({
 	component: GoalsConfigurePage,
 });
 
+type BulkGoal = {
+	id: string;
+	teamMemberId: string;
+	goalTemplateId: string;
+	targetValue: string;
+	description: string;
+};
+
 function GoalsConfigurePage() {
 	const queryClient = useQueryClient();
 	const currentDate = new Date();
 	const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
 	const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
-	const [bulkGoals, setBulkGoals] = useState<any[]>([]);
+	const [bulkGoals, setBulkGoals] = useState<BulkGoal[]>([]);
 
 	// Queries
 	const teamMembers = useQuery(orpc.teams.list.queryOptions());
@@ -113,6 +116,105 @@ function GoalsConfigurePage() {
 		});
 	};
 
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<BulkGoal>[]>(() => [
+		{
+			accessorKey: "teamMemberId",
+			header: "Empleado",
+			cell: ({ row }) => {
+				const goal = row.original;
+				return (
+					<Select
+						value={goal.teamMemberId}
+						onValueChange={(value) => updateGoalInList(goal.id, "teamMemberId", value)}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Seleccionar empleado" />
+						</SelectTrigger>
+						<SelectContent>
+							{teamMembers.isLoading ? (
+								<SelectItem value="" disabled>
+									Cargando empleados...
+								</SelectItem>
+							) : teamMembers.data?.map((member: any) => (
+								<SelectItem key={member.id} value={member.id}>
+									{member.userName} - {member.areaName}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				);
+			},
+		},
+		{
+			accessorKey: "goalTemplateId", 
+			header: "Template de Meta",
+			cell: ({ row }) => {
+				const goal = row.original;
+				return (
+					<Select
+						value={goal.goalTemplateId}
+						onValueChange={(value) => updateGoalInList(goal.id, "goalTemplateId", value)}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Seleccionar template" />
+						</SelectTrigger>
+						<SelectContent>
+							{goalTemplates.isLoading ? (
+								<SelectItem value="" disabled>
+									Cargando templates...
+								</SelectItem>
+							) : goalTemplates.data?.map((template: any) => (
+								<SelectItem key={template.id} value={template.id}>
+									{template.name} ({template.unit || "unidades"})
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				);
+			},
+		},
+		{
+			accessorKey: "targetValue",
+			header: "Objetivo",
+			cell: ({ row }) => {
+				const goal = row.original;
+				return (
+					<Input
+						type="number"
+						step="0.01"
+						value={goal.targetValue}
+						onChange={(e) => updateGoalInList(goal.id, "targetValue", e.target.value)}
+						placeholder="Objetivo"
+					/>
+				);
+			},
+		},
+		{
+			accessorKey: "description",
+			header: "Descripción",
+			cell: ({ row }) => {
+				const goal = row.original;
+				return (
+					<Textarea
+						value={goal.description}
+						onChange={(e) => updateGoalInList(goal.id, "description", e.target.value)}
+						placeholder="Descripción opcional"
+						className="min-h-[60px]"
+					/>
+				);
+			},
+		},
+		createActionsColumn<BulkGoal>([
+			{
+				label: "Eliminar",
+				icon: Trash2,
+				onClick: (goal) => removeGoalFromList(goal.id),
+				variant: "destructive",
+			},
+		]),
+	], [teamMembers.data, goalTemplates.data]);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -182,91 +284,12 @@ function GoalsConfigurePage() {
 						</p>
 					) : (
 						<div className="space-y-4">
-							<Table>
-								<TableHeader>
-									<TableRow>
-										<TableHead>Empleado</TableHead>
-										<TableHead>Template de Meta</TableHead>
-										<TableHead>Objetivo</TableHead>
-										<TableHead>Descripción</TableHead>
-										<TableHead>Acciones</TableHead>
-									</TableRow>
-								</TableHeader>
-								<TableBody>
-									{bulkGoals.map((goal) => (
-										<TableRow key={goal.id}>
-											<TableCell>
-												<Select
-													value={goal.teamMemberId}
-													onValueChange={(value) => updateGoalInList(goal.id, "teamMemberId", value)}
-												>
-													<SelectTrigger>
-														<SelectValue placeholder="Seleccionar empleado" />
-													</SelectTrigger>
-													<SelectContent>
-														{teamMembers.isLoading ? (
-															<SelectItem value="" disabled>
-																Cargando empleados...
-															</SelectItem>
-														) : teamMembers.data?.map((member: any) => (
-															<SelectItem key={member.id} value={member.id}>
-																{member.userName} - {member.areaName}
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-											</TableCell>
-											<TableCell>
-												<Select
-													value={goal.goalTemplateId}
-													onValueChange={(value) => updateGoalInList(goal.id, "goalTemplateId", value)}
-												>
-													<SelectTrigger>
-														<SelectValue placeholder="Seleccionar template" />
-													</SelectTrigger>
-													<SelectContent>
-														{goalTemplates.isLoading ? (
-															<SelectItem value="" disabled>
-																Cargando templates...
-															</SelectItem>
-														) : goalTemplates.data?.map((template: any) => (
-															<SelectItem key={template.id} value={template.id}>
-																{template.name} ({template.unit || "unidades"})
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
-											</TableCell>
-											<TableCell>
-												<Input
-													type="number"
-													step="0.01"
-													value={goal.targetValue}
-													onChange={(e) => updateGoalInList(goal.id, "targetValue", e.target.value)}
-													placeholder="Objetivo"
-												/>
-											</TableCell>
-											<TableCell>
-												<Textarea
-													value={goal.description}
-													onChange={(e) => updateGoalInList(goal.id, "description", e.target.value)}
-													placeholder="Descripción opcional"
-													className="min-h-[60px]"
-												/>
-											</TableCell>
-											<TableCell>
-												<Button
-													variant="outline"
-													size="sm"
-													onClick={() => removeGoalFromList(goal.id)}
-												>
-													Eliminar
-												</Button>
-											</TableCell>
-										</TableRow>
-									))}
-								</TableBody>
-							</Table>
+							<DataTable
+								columns={columns}
+								data={bulkGoals}
+								searchPlaceholder="Buscar metas configuradas..."
+								emptyMessage="No hay metas configuradas"
+							/>
 
 							<div className="flex justify-end">
 								<Button

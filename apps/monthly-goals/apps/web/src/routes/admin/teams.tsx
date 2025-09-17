@@ -23,14 +23,6 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
-import {
 	Tabs,
 	TabsContent,
 	TabsList,
@@ -44,11 +36,21 @@ export const Route = createFileRoute("/admin/teams")({
 	component: TeamsPage,
 });
 
+type TeamMember = {
+	id: string;
+	userName: string | null;
+	userEmail: string | null;
+	areaName: string | null;
+	departmentName: string | null;
+	position: string | null;
+	joinedAt: Date;
+};
+
 function TeamsPage() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-	const [editingTeamMember, setEditingTeamMember] = useState<any>(null);
+	const [editingTeamMember, setEditingTeamMember] = useState<TeamMember | null>(null);
 
 	// Queries - Use filtered endpoint based on user role
 	const teamMembers = useQuery(orpc.teams.my.queryOptions());
@@ -166,42 +168,61 @@ function TeamsPage() {
 			position: formData.get("position") as string,
 		};
 		updateMutation.mutate({
-			id: editingTeamMember.id,
+			id: editingTeamMember!.id,
 			data,
 		});
 	};
 
-	const handleEdit = (teamMember: any) => {
+	const handleEdit = (teamMember: TeamMember) => {
 		setEditingTeamMember(teamMember);
 		setIsEditDialogOpen(true);
 	};
 
-	const handleDelete = (teamMember: any) => {
+	const handleDelete = (teamMember: TeamMember) => {
 		if (confirm("¿Estás seguro de que quieres eliminar este miembro del equipo?")) {
 			deleteMutation.mutate({ id: teamMember.id });
 		}
 	};
 
 	// Definir columnas para TanStack Table
-	const columns = useMemo<ColumnDef<any>[]>(() => [
+	const columns = useMemo<ColumnDef<TeamMember>[]>(() => [
 		{
 			accessorKey: "userName",
 			header: createSortableHeader("Nombre"),
 			cell: ({ row }) => (
-				<div className="font-medium">{row.getValue("userName")}</div>
+				<div className="font-medium">{row.getValue("userName") || "—"}</div>
 			),
 		},
 		{
 			accessorKey: "userEmail",
 			header: createSortableHeader("Email"),
+			cell: ({ row }) => row.getValue("userEmail") || "—",
 		},
 		{
 			accessorKey: "areaName",
-			header: createSortableHeader("Área"),
+			header: createFilterableHeader("Área", 
+				Array.from(new Set(teamMembers.data?.map(m => m.areaName).filter(Boolean) || []))
+					.map(area => ({ label: area as string, value: area as string }))
+			),
+			cell: ({ row }) => row.getValue("areaName") || "—",
+			filterFn: (row, id, value) => {
+				if (!value || value.length === 0) return true;
+				const cellValue = row.getValue(id);
+				return cellValue ? value.includes(cellValue) : false;
+			},
 		},
 		{
 			accessorKey: "departmentName",
-			header: createSortableHeader("Departamento"),
+			header: createFilterableHeader("Departamento",
+				Array.from(new Set(teamMembers.data?.map(m => m.departmentName).filter(Boolean) || []))
+					.map(dept => ({ label: dept as string, value: dept as string }))
+			),
+			cell: ({ row }) => row.getValue("departmentName") || "—",
+			filterFn: (row, id, value) => {
+				if (!value || value.length === 0) return true;
+				const cellValue = row.getValue(id);
+				return cellValue ? value.includes(cellValue) : false;
+			},
 		},
 		{
 			accessorKey: "position",
@@ -215,7 +236,7 @@ function TeamsPage() {
 				return new Date(row.getValue("joinedAt")).toLocaleDateString("es-ES");
 			},
 		},
-		createActionsColumn<any>([
+		createActionsColumn<TeamMember>([
 			{
 				label: "Editar",
 				icon: Edit,
@@ -228,7 +249,7 @@ function TeamsPage() {
 				variant: "destructive",
 			},
 		]),
-	], []);
+	], [teamMembers.data]);
 
 	return (
 		<div className="space-y-6">
@@ -365,58 +386,13 @@ function TeamsPage() {
 					<CardTitle>Todos los Miembros del Equipo</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Usuario</TableHead>
-								<TableHead>Email</TableHead>
-								<TableHead>Área</TableHead>
-								<TableHead>Departamento</TableHead>
-								<TableHead>Posición</TableHead>
-								<TableHead>Fecha de Ingreso</TableHead>
-								<TableHead>Acciones</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{teamMembers.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={7} className="text-center py-4">
-										Cargando miembros del equipo...
-									</TableCell>
-								</TableRow>
-							) : teamMembers.data?.map((member: any) => (
-								<TableRow key={member.id}>
-									<TableCell className="font-medium">{member.userName}</TableCell>
-									<TableCell>{member.userEmail}</TableCell>
-									<TableCell>{member.areaName}</TableCell>
-									<TableCell>{member.departmentName}</TableCell>
-									<TableCell>{member.position || "—"}</TableCell>
-									<TableCell>
-										{new Date(member.joinedAt).toLocaleDateString()}
-									</TableCell>
-									<TableCell>
-										<div className="flex space-x-2">
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleEdit(member)}
-											>
-												Editar
-											</Button>
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleDelete(member)}
-												disabled={deleteMutation.isPending}
-											>
-												Eliminar
-											</Button>
-										</div>
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={teamMembers.data || []}
+						isLoading={teamMembers.isLoading}
+						searchPlaceholder="Buscar miembros del equipo..."
+						emptyMessage="No hay miembros del equipo registrados"
+					/>
 				</CardContent>
 			</Card>
 
@@ -432,7 +408,7 @@ function TeamsPage() {
 							<Input
 								id="edit-position"
 								name="position"
-								defaultValue={editingTeamMember?.position}
+								defaultValue={editingTeamMember?.position || ""}
 							/>
 						</div>
 						<Button type="submit" disabled={updateMutation.isPending}>

@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createActionsColumn } from "@/components/ui/data-table";
+import { Edit, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -13,16 +16,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -134,6 +129,65 @@ function GoalTemplatesPage() {
 		return "bg-red-100 text-red-800";
 	};
 
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<any>[]>(() => [
+		{
+			accessorKey: "name",
+			header: createSortableHeader("Nombre"),
+			cell: ({ row }) => (
+				<div className="font-medium">{row.getValue("name")}</div>
+			),
+		},
+		{
+			accessorKey: "description",
+			header: "Descripción",
+			cell: ({ row }) => (
+				<div className="max-w-xs truncate">{row.getValue("description") || "—"}</div>
+			),
+		},
+		{
+			accessorKey: "unit",
+			header: "Unidad",
+			cell: ({ row }) => row.getValue("unit") || "—",
+		},
+		{
+			accessorKey: "defaultTarget",
+			header: "Meta por Defecto",
+			cell: ({ row }) => row.getValue("defaultTarget") || "—",
+		},
+		{
+			accessorKey: "successThreshold",
+			header: "Umbral Éxito",
+			cell: ({ row }) => (
+				<Badge className={getThresholdColor(row.getValue("successThreshold"))}>
+					{row.getValue("successThreshold")}%
+				</Badge>
+			),
+		},
+		{
+			accessorKey: "warningThreshold",
+			header: "Umbral Advertencia",
+			cell: ({ row }) => (
+				<Badge className={getThresholdColor(row.getValue("warningThreshold"))}>
+					{row.getValue("warningThreshold")}%
+				</Badge>
+			),
+		},
+		createActionsColumn<any>([
+			{
+				label: "Editar",
+				icon: Edit,
+				onClick: handleEdit,
+			},
+			{
+				label: "Eliminar",
+				icon: Trash2,
+				onClick: handleDelete,
+				variant: "destructive",
+			},
+		]),
+	], []);
+
 	return (
 		<div className="space-y-6">
 			<div className="flex items-center justify-between">
@@ -186,64 +240,13 @@ function GoalTemplatesPage() {
 					<CardTitle>Todos los Templates de Metas</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Nombre</TableHead>
-								<TableHead>Descripción</TableHead>
-								<TableHead>Unidad</TableHead>
-								<TableHead>Meta por Defecto</TableHead>
-								<TableHead>Umbral Éxito</TableHead>
-								<TableHead>Umbral Advertencia</TableHead>
-								<TableHead>Acciones</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{goalTemplates.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={7} className="text-center py-4">
-										Cargando templates de metas...
-									</TableCell>
-								</TableRow>
-							) : goalTemplates.data?.map((template: any) => (
-								<TableRow key={template.id}>
-									<TableCell className="font-medium">{template.name}</TableCell>
-									<TableCell className="max-w-xs truncate">{template.description || "—"}</TableCell>
-									<TableCell>{template.unit || "—"}</TableCell>
-									<TableCell>{template.defaultTarget || "—"}</TableCell>
-									<TableCell>
-										<Badge className={getThresholdColor(template.successThreshold)}>
-											{template.successThreshold}%
-										</Badge>
-									</TableCell>
-									<TableCell>
-										<Badge className={getThresholdColor(template.warningThreshold)}>
-											{template.warningThreshold}%
-										</Badge>
-									</TableCell>
-									<TableCell>
-										<div className="flex space-x-2">
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleEdit(template)}
-											>
-												Editar
-											</Button>
-											<Button
-												variant="outline"
-												size="sm"
-												onClick={() => handleDelete(template)}
-												disabled={deleteMutation.isPending}
-											>
-												Eliminar
-											</Button>
-										</div>
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={goalTemplates.data || []}
+						isLoading={goalTemplates.isLoading}
+						searchPlaceholder="Buscar templates..."
+						emptyMessage="No hay templates de metas registrados"
+					/>
 				</CardContent>
 			</Card>
 

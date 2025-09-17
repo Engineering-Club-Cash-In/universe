@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { orpc } from "@/utils/orpc";
 import { useQuery } from "@tanstack/react-query";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createFilterableHeader } from "@/components/ui/data-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
 	Select,
@@ -9,22 +11,27 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 export const Route = createFileRoute("/goals/")({
 	component: GoalsIndexPage,
 });
+
+type MonthlyGoal = {
+	id: string;
+	userName: string | null;
+	departmentName: string | null;
+	areaName: string | null;
+	goalTemplateName: string | null;
+	goalTemplateUnit?: string | null;
+	targetValue: string;
+	achievedValue: string;
+	successThreshold: string | null;
+	warningThreshold: string | null;
+};
 
 function GoalsIndexPage() {
 	const currentDate = new Date();
@@ -41,7 +48,7 @@ function GoalsIndexPage() {
 		})
 	);
 
-	const getStatusBadge = (percentage: number, successThreshold: string, warningThreshold: string) => {
+	const getStatusBadge = (percentage: number, successThreshold: string | null, warningThreshold: string | null) => {
 		const success = parseFloat(successThreshold || "80");
 		const warning = parseFloat(warningThreshold || "50");
 
@@ -54,13 +61,22 @@ function GoalsIndexPage() {
 		}
 	};
 
-	const getProgressColor = (percentage: number, successThreshold: string, warningThreshold: string) => {
+	const getProgressColor = (percentage: number, successThreshold: string | null, warningThreshold: string | null) => {
 		const success = parseFloat(successThreshold || "80");
 		const warning = parseFloat(warningThreshold || "50");
 
 		if (percentage >= success) return "bg-green-500";
 		if (percentage >= warning) return "bg-yellow-500";
 		return "bg-red-500";
+	};
+
+	const getStatusText = (percentage: number, successThreshold: string | null, warningThreshold: string | null) => {
+		const success = parseFloat(successThreshold || "80");
+		const warning = parseFloat(warningThreshold || "50");
+		
+		if (percentage >= success) return "exitoso";
+		else if (percentage >= warning) return "en_progreso";
+		else return "necesita_atencion";
 	};
 
 	const months = [
@@ -79,6 +95,93 @@ function GoalsIndexPage() {
 	];
 
 	const years = Array.from({ length: 5 }, (_, i) => currentDate.getFullYear() - 2 + i);
+
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<MonthlyGoal>[]>(() => [
+		{
+			accessorKey: "userName",
+			header: createSortableHeader("Empleado"),
+			cell: ({ row }) => (
+				<div className="font-medium">{row.getValue("userName") || "—"}</div>
+			),
+		},
+		{
+			accessorKey: "departmentName",
+			header: createSortableHeader("Departamento"),
+			cell: ({ row }) => row.getValue("departmentName") || "—",
+		},
+		{
+			accessorKey: "areaName",
+			header: createSortableHeader("Área"),
+			cell: ({ row }) => row.getValue("areaName") || "—",
+		},
+		{
+			accessorKey: "goalTemplateName",
+			header: createSortableHeader("Meta"),
+			cell: ({ row }) => (
+				<div>
+					{row.getValue("goalTemplateName") || "—"}
+					{row.original.goalTemplateUnit && (
+						<span className="text-gray-500 ml-1">({row.original.goalTemplateUnit})</span>
+					)}
+				</div>
+			),
+		},
+		{
+			accessorKey: "targetValue",
+			header: createSortableHeader("Objetivo"),
+			cell: ({ row }) => parseFloat(row.getValue("targetValue")).toLocaleString(),
+		},
+		{
+			accessorKey: "achievedValue",
+			header: createSortableHeader("Logrado"),
+			cell: ({ row }) => parseFloat(row.getValue("achievedValue")).toLocaleString(),
+		},
+		{
+			id: "progress",
+			header: "Progreso",
+			cell: ({ row }) => {
+				const target = parseFloat(row.original.targetValue);
+				const achieved = parseFloat(row.original.achievedValue);
+				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				
+				return (
+					<div className="flex items-center space-x-2 w-32">
+						<Progress 
+							value={Math.min(percentage, 100)} 
+							className="flex-1"
+						/>
+						<span className="text-sm font-medium">{Math.round(percentage)}%</span>
+					</div>
+				);
+			},
+		},
+		{
+			id: "status",
+			header: createFilterableHeader("Estado", [
+				{ label: "Exitoso", value: "exitoso" },
+				{ label: "En Progreso", value: "en_progreso" },
+				{ label: "Necesita Atención", value: "necesita_atencion" },
+			]),
+			cell: ({ row }) => {
+				const target = parseFloat(row.original.targetValue);
+				const achieved = parseFloat(row.original.achievedValue);
+				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				
+				return getStatusBadge(percentage, row.original.successThreshold, row.original.warningThreshold);
+			},
+			filterFn: (row, id, value) => {
+				if (!value || value.length === 0) return true;
+				
+				const target = parseFloat(row.original.targetValue);
+				const achieved = parseFloat(row.original.achievedValue);
+				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				const status = getStatusText(percentage, row.original.successThreshold, row.original.warningThreshold);
+				
+				return value.includes(status);
+			},
+		},
+	], []);
 
 	return (
 		<div className="space-y-6">
@@ -133,67 +236,13 @@ function GoalsIndexPage() {
 					</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Empleado</TableHead>
-								<TableHead>Departamento</TableHead>
-								<TableHead>Área</TableHead>
-								<TableHead>Meta</TableHead>
-								<TableHead>Objetivo</TableHead>
-								<TableHead>Logrado</TableHead>
-								<TableHead>Progreso</TableHead>
-								<TableHead>Estado</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{monthlyGoals.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={8} className="text-center py-4">
-										Cargando metas...
-									</TableCell>
-								</TableRow>
-							) : monthlyGoals.data?.length === 0 ? (
-								<TableRow>
-									<TableCell colSpan={8} className="text-center py-4">
-										No hay metas configuradas para este período
-									</TableCell>
-								</TableRow>
-							) : monthlyGoals.data?.map((goal: any) => {
-								const target = parseFloat(goal.targetValue);
-								const achieved = parseFloat(goal.achievedValue);
-								const percentage = target > 0 ? (achieved / target) * 100 : 0;
-
-								return (
-									<TableRow key={goal.id}>
-										<TableCell className="font-medium">{goal.userName}</TableCell>
-										<TableCell>{goal.departmentName}</TableCell>
-										<TableCell>{goal.areaName}</TableCell>
-										<TableCell>
-											{goal.goalTemplateName}
-											{goal.goalTemplateUnit && (
-												<span className="text-gray-500 ml-1">({goal.goalTemplateUnit})</span>
-											)}
-										</TableCell>
-										<TableCell>{goal.targetValue}</TableCell>
-										<TableCell>{goal.achievedValue}</TableCell>
-										<TableCell className="w-32">
-											<div className="flex items-center space-x-2">
-												<Progress 
-													value={Math.min(percentage, 100)} 
-													className="flex-1"
-												/>
-												<span className="text-sm font-medium">{Math.round(percentage)}%</span>
-											</div>
-										</TableCell>
-										<TableCell>
-											{getStatusBadge(percentage, goal.successThreshold, goal.warningThreshold)}
-										</TableCell>
-									</TableRow>
-								);
-							})}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={monthlyGoals.data || []}
+						isLoading={monthlyGoals.isLoading}
+						searchPlaceholder="Buscar metas..."
+						emptyMessage="No hay metas configuradas para este período"
+					/>
 				</CardContent>
 			</Card>
 		</div>

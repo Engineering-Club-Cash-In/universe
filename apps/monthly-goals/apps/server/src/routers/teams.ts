@@ -6,6 +6,17 @@ import { departments } from "../db/schema/departments";
 import { user } from "../db/schema/auth";
 import { eq } from "drizzle-orm";
 import * as z from "zod";
+import { auth } from "../lib/auth";
+
+type UserRole = "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer";
+
+const roleHierarchy: Record<UserRole, UserRole[]> = {
+	super_admin: ["super_admin", "department_manager", "area_lead", "employee", "viewer"],
+	department_manager: ["area_lead", "employee"],
+	area_lead: ["employee"],
+	employee: [],
+	viewer: []
+};
 
 const TeamMemberSchema = z.object({
 	id: z.string().uuid(),
@@ -114,15 +125,45 @@ export const updateTeamMember = protectedProcedure
 
 export const deleteTeamMember = protectedProcedure
 	.input(z.object({ id: z.string().uuid() }))
-	.handler(async ({ input }) => {
-		const [deletedTeamMember] = await db
-			.delete(teamMembers)
-			.where(eq(teamMembers.id, input.id))
-			.returning();
+	.handler(async ({ context, input }) => {
+		const currentUser = context.session!.user;
 		
-		if (!deletedTeamMember) {
-			throw new Error("Team member not found");
+		// Obtener información del team member y usuario a eliminar
+		const teamMemberToDelete = await db
+			.select({
+				teamMemberId: teamMembers.id,
+				userId: teamMembers.userId,
+				userRole: user.role,
+			})
+			.from(teamMembers)
+			.leftJoin(user, eq(teamMembers.userId, user.id))
+			.where(eq(teamMembers.id, input.id))
+			.limit(1);
+
+		if (!teamMemberToDelete[0]) {
+			throw new Error("Miembro del equipo no encontrado");
 		}
+
+		const targetUser = teamMemberToDelete[0];
+		
+		// Validar permisos jerárquicos - solo puedes eliminar usuarios de roles inferiores
+		const allowedRoles = roleHierarchy[currentUser.role as UserRole];
+		if (!allowedRoles.includes(targetUser.userRole as UserRole)) {
+			throw new Error(`No puedes eliminar usuarios con el rol ${targetUser.userRole}`);
+		}
+
+		// No permitir eliminar super_admin (excepto otros super_admin)
+		if (targetUser.userRole === "super_admin" && currentUser.role !== "super_admin") {
+			throw new Error("No puedes eliminar super administradores");
+		}
+
+		// No permitir eliminarse a sí mismo
+		if (currentUser.id === targetUser.userId) {
+			throw new Error("No puedes eliminar tu propia cuenta");
+		}
+
+		// Eliminar usuario completo (esto también eliminará el team member por CASCADE)
+		await db.delete(user).where(eq(user.id, targetUser.userId));
 		
 		return { success: true };
 	});
@@ -179,35 +220,78 @@ export const createUserAndAssignToTeam = protectedProcedure
 		// User data
 		name: z.string().min(1),
 		email: z.string().email(),
-		role: z.enum(["super_admin", "department_manager", "area_lead", "employee", "viewer"]).default("employee"),
+		password: z.string().min(8),
+		role: z.enum(["super_admin", "department_manager", "area_lead", "employee", "viewer"]),
 		// Team member data
 		areaId: z.string().uuid(),
 		position: z.string().optional(),
 	}))
-	.handler(async ({ input }) => {
-		// First create the user
-		const [newUser] = await db
-			.insert(user)
-			.values({
-				id: crypto.randomUUID(),
-				name: input.name,
-				email: input.email,
-				emailVerified: false,
-				role: input.role as "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer",
-				createdAt: new Date(),
-				updatedAt: new Date(),
-			})
-			.returning();
+	.handler(async ({ context, input }) => {
+		try {
+			const currentUser = context.session!.user;
+			const allowedRoles = roleHierarchy[currentUser.role as UserRole];
+			
+			// Validar permisos para crear usuario con ese rol
+			if (!allowedRoles.includes(input.role)) {
+				throw new Error(`No puedes crear usuarios con el rol ${input.role}`);
+			}
 
-		// Then create the team member relationship
-		const [newTeamMember] = await db
-			.insert(teamMembers)
-			.values({
-				userId: newUser.id,
-				areaId: input.areaId,
-				position: input.position,
-			})
-			.returning();
+			// Verificar que el email no exista
+			const existingUser = await db.select().from(user).where(eq(user.email, input.email)).limit(1);
+			if (existingUser.length > 0) {
+				throw new Error("Ya existe un usuario con este email");
+			}
 
-		return { user: newUser, teamMember: newTeamMember };
+			// Crear usuario usando Better Auth
+			const newUser = await auth.api.signUpEmail({
+				body: {
+					email: input.email,
+					password: input.password,
+					name: input.name,
+					role: input.role,
+				}
+			});
+
+			if (!newUser) {
+				throw new Error("Error al crear el usuario");
+			}
+
+			// Actualizar el rol del usuario explícitamente
+			await db.update(user)
+				.set({ role: input.role })
+				.where(eq(user.id, newUser.user.id));
+
+			// Crear la relación del team member
+			const [newTeamMember] = await db
+				.insert(teamMembers)
+				.values({
+					userId: newUser.user.id,
+					areaId: input.areaId,
+					position: input.position,
+				})
+				.returning();
+
+			return { 
+				user: {
+					id: newUser.user.id,
+					name: newUser.user.name,
+					email: newUser.user.email,
+					role: input.role,
+				}, 
+				teamMember: newTeamMember 
+			};
+		} catch (error) {
+			// Detectar errores específicos y dar mensajes claros
+			if (error instanceof Error) {
+				if (error.message.includes("unique")) {
+					throw new Error("Ya existe un usuario con este email");
+				}
+				if (error.message.includes("No puedes crear")) {
+					throw error; // Re-lanzar errores de permisos tal como están
+				}
+			}
+			
+			console.error("Error creating user and team member:", error);
+			throw new Error("Error al crear el usuario y asignarlo al equipo");
+		}
 	});

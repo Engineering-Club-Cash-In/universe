@@ -1,7 +1,0 @@
-# Claimable DB expires at: Fri, 29 Aug 2025 17:10:15 GMT
-# Claim it now to your account: https://neon.new/database/c2fe41a2-01e2-4ae5-a43d-cc619cb87e4d
-DATABASE_URL=postgresql://neondb_owner:npg_9JXO5Mptnojx@ep-nameless-flower-advea67n-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require
-DATABASE_URL_POOLER=postgresql://neondb_owner:npg_cErQ9AXFgvs7@ep-red-fire-a2w2116n-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require
-CORS_ORIGIN=*
-BETTER_AUTH_SECRET=nLBHq3E7zKcqvyM28CvGZuVrrfzCsx1s
-BETTER_AUTH_URL=http://localhost:3000

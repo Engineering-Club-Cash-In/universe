@@ -206,7 +206,7 @@ function DepartmentsPage() {
 									<TableCell className="font-medium">
 										{department.name}
 									</TableCell>
-									<TableCell>{department.description ?? "—"}</TableCell>
+									<TableCell className="max-w-xs truncate">{department.description ?? "—"}</TableCell>
 									<TableCell>
 										{new Date(department.createdAt).toLocaleDateString()}
 									</TableCell>

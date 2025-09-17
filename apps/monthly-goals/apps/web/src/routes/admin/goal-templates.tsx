@@ -208,7 +208,7 @@ function GoalTemplatesPage() {
 							) : goalTemplates.data?.map((template: any) => (
 								<TableRow key={template.id}>
 									<TableCell className="font-medium">{template.name}</TableCell>
-									<TableCell>{template.description || "—"}</TableCell>
+									<TableCell className="max-w-xs truncate">{template.description || "—"}</TableCell>
 									<TableCell>{template.unit || "—"}</TableCell>
 									<TableCell>{template.defaultTarget || "—"}</TableCell>
 									<TableCell>

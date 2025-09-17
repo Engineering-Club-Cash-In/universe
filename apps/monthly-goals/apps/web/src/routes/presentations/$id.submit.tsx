@@ -26,6 +26,7 @@ export const Route = createFileRoute("/presentations/$id/submit")({
 
 function SubmitPresentationPage() {
 	const { id } = Route.useParams();
+	const navigate = Route.useNavigate();
 	const queryClient = useQueryClient();
 	const [submissions, setSubmissions] = useState<any[]>([]);
 
@@ -58,6 +59,12 @@ function SubmitPresentationPage() {
 					data: { status: "ready" }
 				});
 				toast.success("Datos cargados exitosamente");
+				
+				// Navigate to view presentation
+				navigate({
+					to: "/presentations/$id/view",
+					params: { id },
+				});
 			},
 			onError: (error) => {
 				toast.error(getErrorMessage(error, "Error al cargar datos"));

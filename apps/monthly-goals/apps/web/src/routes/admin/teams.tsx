@@ -148,6 +148,7 @@ function TeamsPage() {
 		const data = {
 			name: formData.get("name") as string,
 			email: formData.get("email") as string,
+			password: formData.get("password") as string,
 			role: ((formData.get("role") as string) || "employee") as "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer",
 			areaId: formData.get("areaId") as string,
 			position: formData.get("position") as string,
@@ -256,6 +257,10 @@ function TeamsPage() {
 									<div className="space-y-2">
 										<Label htmlFor="email">Correo Electrónico</Label>
 										<Input id="email" name="email" type="email" required />
+									</div>
+									<div className="space-y-2">
+										<Label htmlFor="password">Contraseña</Label>
+										<Input id="password" name="password" type="password" minLength={8} required />
 									</div>
 									<div className="space-y-2">
 										<Label htmlFor="role">Rol</Label>

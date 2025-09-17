@@ -225,7 +225,7 @@ function AreasPage() {
 							) : areas.data?.map((area: Area) => (
 								<TableRow key={area.id}>
 									<TableCell className="font-medium">{area.name}</TableCell>
-									<TableCell>{area.description || "—"}</TableCell>
+									<TableCell className="max-w-xs truncate">{area.description || "—"}</TableCell>
 									<TableCell>{area.departmentName || "—"}</TableCell>
 									<TableCell>
 										{new Date(area.createdAt).toLocaleDateString()}

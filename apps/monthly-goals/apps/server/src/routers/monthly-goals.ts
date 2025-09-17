@@ -129,14 +129,24 @@ export const getMonthlyGoal = protectedProcedure
 export const createMonthlyGoal = protectedProcedure
 	.input(CreateMonthlyGoalSchema)
 	.handler(async ({ input }) => {
-		const [newGoal] = await db
-			.insert(monthlyGoals)
-			.values({
-				...input,
-			})
-			.returning();
-		
-		return newGoal;
+		try {
+			const [newGoal] = await db
+				.insert(monthlyGoals)
+				.values({
+					...input,
+				})
+				.returning();
+			
+			return newGoal;
+		} catch (error) {
+			// Detectar error de constraint de unicidad
+			if (error instanceof Error && error.message.includes("unique")) {
+				throw new Error("Ya existe una meta con esta plantilla para este usuario en el mes/año seleccionado");
+			}
+			
+			// Re-lanzar otros errores
+			throw error;
+		}
 	});
 
 export const bulkCreateMonthlyGoals = protectedProcedure
@@ -148,12 +158,22 @@ export const bulkCreateMonthlyGoals = protectedProcedure
 			year: input.year,
 		}));
 
-		const newGoals = await db
-			.insert(monthlyGoals)
-			.values(goalValues)
-			.returning();
-		
-		return newGoals;
+		try {
+			const newGoals = await db
+				.insert(monthlyGoals)
+				.values(goalValues)
+				.returning();
+			
+			return newGoals;
+		} catch (error) {
+			// Detectar error de constraint de unicidad
+			if (error instanceof Error && error.message.includes("unique")) {
+				throw new Error("Una o más metas ya existen para los usuarios seleccionados en el mes/año especificado");
+			}
+			
+			// Re-lanzar otros errores
+			throw error;
+		}
 	});
 
 export const updateMonthlyGoal = protectedProcedure
@@ -254,6 +274,8 @@ export const getMyGoals = protectedProcedure
 		}
 
 		const currentUser = context.session.user;
+		console.log("=== MY GOALS DEBUG ===");
+		console.log("Current user:", currentUser.email, "Role:", currentUser.role, "ID:", currentUser.id);
 		
 		let query = db
 			.select({
@@ -285,26 +307,44 @@ export const getMyGoals = protectedProcedure
 			.leftJoin(areas, eq(teamMembers.areaId, areas.id))
 			.leftJoin(departments, eq(areas.departmentId, departments.id));
 
+		// Prepare filters array
+		const filters = [];
+		
 		// Apply role-based filtering
 		if (currentUser.role === "employee") {
-			// Employee: only their own goals
-			query = query.where(eq(user.id, currentUser.id)) as typeof query;
+			console.log("Filtering for employee - only own goals");
+			filters.push(eq(user.id, currentUser.id));
 		} else if (currentUser.role === "department_manager") {
-			// Department manager: goals from users in departments they manage
-			query = query.where(eq(departments.managerId, currentUser.id)) as typeof query;
+			console.log("Filtering for department_manager - managerId:", currentUser.id);
+			filters.push(eq(departments.managerId, currentUser.id));
 		} else if (currentUser.role === "area_lead") {
-			// Area lead: goals from users in areas they lead
-			query = query.where(eq(areas.leadId, currentUser.id)) as typeof query;
+			console.log("Filtering for area_lead - leadId:", currentUser.id);
+			filters.push(eq(areas.leadId, currentUser.id));
+		} else {
+			console.log("No role filtering applied - role:", currentUser.role);
 		}
-		// Super admin and viewer: see all goals (no additional filter)
 
 		// Apply period filter if provided
 		if (input.month && input.year) {
-			query = query.where(and(
-				eq(monthlyGoals.month, input.month),
-				eq(monthlyGoals.year, input.year)
-			)) as typeof query;
+			filters.push(eq(monthlyGoals.month, input.month));
+			filters.push(eq(monthlyGoals.year, input.year));
 		}
 
-		return await query;
+		// Apply all filters together
+		if (filters.length > 0) {
+			query = query.where(and(...filters)) as typeof query;
+		}
+
+		// Debug: Print the SQL query
+		console.log("Final SQL query:", query.toSQL());
+		
+		const result = await query;
+		console.log("Query returned", result.length, "goals");
+		if (result.length > 0) {
+			console.log("First goal department:", result[0].departmentName, "User:", result[0].userName);
+			console.log("All departments returned:", [...new Set(result.map(r => r.departmentName))]);
+		}
+		console.log("==================");
+		
+		return result;
 	});

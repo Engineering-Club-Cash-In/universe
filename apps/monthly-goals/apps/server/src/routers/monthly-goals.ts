@@ -274,8 +274,6 @@ export const getMyGoals = protectedProcedure
 		}
 
 		const currentUser = context.session.user;
-		console.log("=== MY GOALS DEBUG ===");
-		console.log("Current user:", currentUser.email, "Role:", currentUser.role, "ID:", currentUser.id);
 		
 		let query = db
 			.select({
@@ -312,16 +310,11 @@ export const getMyGoals = protectedProcedure
 		
 		// Apply role-based filtering
 		if (currentUser.role === "employee") {
-			console.log("Filtering for employee - only own goals");
 			filters.push(eq(user.id, currentUser.id));
 		} else if (currentUser.role === "department_manager") {
-			console.log("Filtering for department_manager - managerId:", currentUser.id);
 			filters.push(eq(departments.managerId, currentUser.id));
 		} else if (currentUser.role === "area_lead") {
-			console.log("Filtering for area_lead - leadId:", currentUser.id);
 			filters.push(eq(areas.leadId, currentUser.id));
-		} else {
-			console.log("No role filtering applied - role:", currentUser.role);
 		}
 
 		// Apply period filter if provided
@@ -335,16 +328,5 @@ export const getMyGoals = protectedProcedure
 			query = query.where(and(...filters)) as typeof query;
 		}
 
-		// Debug: Print the SQL query
-		console.log("Final SQL query:", query.toSQL());
-		
-		const result = await query;
-		console.log("Query returned", result.length, "goals");
-		if (result.length > 0) {
-			console.log("First goal department:", result[0].departmentName, "User:", result[0].userName);
-			console.log("All departments returned:", [...new Set(result.map(r => r.departmentName))]);
-		}
-		console.log("==================");
-		
-		return result;
+		return await query;
 	});

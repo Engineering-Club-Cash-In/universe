@@ -4,6 +4,7 @@ import { areas } from "../db/schema/areas";
 import { departments } from "../db/schema/departments";
 import { eq } from "drizzle-orm";
 import * as z from "zod";
+import { ORPCError } from "@orpc/server";
 
 const AreaSchema = z.object({
 	id: z.string().uuid(),
@@ -59,7 +60,7 @@ export const getArea = protectedProcedure
 			.limit(1);
 		
 		if (!area[0]) {
-			throw new Error("Area not found");
+			throw new ORPCError("NOT_FOUND", { message: "Area not found" });
 		}
 		
 		return area[0];
@@ -93,7 +94,7 @@ export const updateArea = protectedProcedure
 			.returning();
 		
 		if (!updatedArea) {
-			throw new Error("Area not found");
+			throw new ORPCError("NOT_FOUND", { message: "Area not found" });
 		}
 		
 		return updatedArea;
@@ -108,7 +109,7 @@ export const deleteArea = protectedProcedure
 			.returning();
 		
 		if (!deletedArea) {
-			throw new Error("Area not found");
+			throw new ORPCError("NOT_FOUND", { message: "Area not found" });
 		}
 		
 		return { success: true };

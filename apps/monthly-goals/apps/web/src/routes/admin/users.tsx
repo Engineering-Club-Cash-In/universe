@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { client } from "@/utils/orpc";
 import { toast } from "sonner";
 import type { AppRouterClient } from "../../../../server/src/routers/index";
+import type { ColumnDef } from "@tanstack/react-table";
+import { DataTable, createSortableHeader, createFilterableHeader, createActionsColumn } from "@/components/ui/data-table";
 
 type UserRole = "super_admin" | "department_manager" | "area_lead" | "employee" | "viewer";
 type User = Awaited<ReturnType<AppRouterClient['users']['list']>>[0];
@@ -24,22 +26,8 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { MoreHorizontal, UserPlus, Trash2, Settings } from "lucide-react";
+import { UserPlus, Trash2, Settings } from "lucide-react";
 import { usePermissions } from "@/lib/permissions";
 
 export const Route = createFileRoute("/admin/users")({
@@ -115,6 +103,73 @@ function RouteComponent() {
 		viewer: "bg-gray-100 text-gray-800",
 	};
 
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<User>[]>(() => [
+		{
+			accessorKey: "name",
+			header: createSortableHeader("Nombre"),
+			cell: ({ row }) => (
+				<div className="font-medium">{row.getValue("name")}</div>
+			),
+		},
+		{
+			accessorKey: "email",
+			header: createSortableHeader("Email"),
+		},
+		{
+			accessorKey: "role",
+			header: createFilterableHeader("Rol", [
+				{ label: "Super Admin", value: "super_admin" },
+				{ label: "Gerente de Departamento", value: "department_manager" },
+				{ label: "Líder de Área", value: "area_lead" },
+				{ label: "Empleado", value: "employee" },
+				{ label: "Visor", value: "viewer" },
+			]),
+			cell: ({ row }) => {
+				const role = row.getValue("role") as UserRole;
+				return (
+					<Badge className={roleColors[role]}>
+						{roleLabels[role]}
+					</Badge>
+				);
+			},
+			filterFn: (row, id, value) => {
+				// Si no hay filtros seleccionados, mostrar todos
+				if (!value || value.length === 0) return true;
+				// Solo mostrar si el valor está en la lista de filtros seleccionados
+				return value.includes(row.getValue(id));
+			},
+		},
+		{
+			accessorKey: "createdAt",
+			header: createSortableHeader("Fecha de Creación"),
+			cell: ({ row }) => {
+				return new Date(row.getValue("createdAt")).toLocaleDateString("es-ES");
+			},
+		},
+		createActionsColumn<User>([
+			{
+				label: "Cambiar Rol",
+				icon: Settings,
+				onClick: (user) => {
+					setSelectedUser(user);
+					setNewRole(user.role);
+					setRoleDialogOpen(true);
+				},
+			},
+			{
+				label: "Eliminar",
+				icon: Trash2,
+				onClick: (user) => {
+					setSelectedUser(user);
+					setDeleteDialogOpen(true);
+				},
+				variant: "destructive",
+				show: () => canDeleteUsers,
+			},
+		]),
+	], [roleLabels, roleColors, canDeleteUsers]);
+
 	if (!canManageUsers) {
 		return (
 			<div className="container mx-auto p-6">
@@ -145,74 +200,13 @@ function RouteComponent() {
 				</Dialog>
 			</div>
 
-			{isLoading ? (
-				<div className="flex items-center justify-center py-8">
-					<div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-				</div>
-			) : (
-				<div className="bg-white shadow-sm rounded-lg border">
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Nombre</TableHead>
-								<TableHead>Email</TableHead>
-								<TableHead>Rol</TableHead>
-								<TableHead>Fecha de Creación</TableHead>
-								<TableHead className="w-[50px]"></TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{users?.map((user) => (
-								<TableRow key={user.id}>
-									<TableCell className="font-medium">{user.name}</TableCell>
-									<TableCell>{user.email}</TableCell>
-									<TableCell>
-										<Badge className={roleColors[user.role]}>
-											{roleLabels[user.role]}
-										</Badge>
-									</TableCell>
-									<TableCell>
-										{new Date(user.createdAt).toLocaleDateString("es-ES")}
-									</TableCell>
-									<TableCell>
-										<DropdownMenu>
-											<DropdownMenuTrigger asChild>
-												<Button variant="ghost" className="h-8 w-8 p-0">
-													<MoreHorizontal className="h-4 w-4" />
-												</Button>
-											</DropdownMenuTrigger>
-											<DropdownMenuContent align="end">
-												<DropdownMenuItem
-													onClick={() => {
-														setSelectedUser(user);
-														setNewRole(user.role);
-														setRoleDialogOpen(true);
-													}}
-												>
-													<Settings className="h-4 w-4 mr-2" />
-													Cambiar Rol
-												</DropdownMenuItem>
-												{canDeleteUsers && (
-													<DropdownMenuItem
-														onClick={() => {
-															setSelectedUser(user);
-															setDeleteDialogOpen(true);
-														}}
-														className="text-red-600"
-													>
-														<Trash2 className="h-4 w-4 mr-2" />
-														Eliminar
-													</DropdownMenuItem>
-												)}
-											</DropdownMenuContent>
-										</DropdownMenu>
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
-				</div>
-			)}
+			<DataTable
+				columns={columns}
+				data={users || []}
+				isLoading={isLoading}
+				searchPlaceholder="Buscar usuarios..."
+				emptyMessage="No hay usuarios registrados"
+			/>
 
 			{/* Modal para cambiar rol */}
 			<Dialog open={roleDialogOpen} onOpenChange={setRoleDialogOpen}>

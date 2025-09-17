@@ -3,6 +3,7 @@ import { db } from "../db";
 import { departments } from "../db/schema/departments";
 import { eq } from "drizzle-orm";
 import * as z from "zod";
+import { ORPCError } from "@orpc/server";
 
 const DepartmentSchema = z.object({
 	id: z.string().uuid(),
@@ -35,7 +36,7 @@ export const getDepartment = protectedProcedure
 			.limit(1);
 		
 		if (!department[0]) {
-			throw new Error("Department not found");
+			throw new ORPCError("NOT_FOUND", { message: "Department not found" });
 		}
 		
 		return department[0];
@@ -69,7 +70,7 @@ export const updateDepartment = protectedProcedure
 			.returning();
 		
 		if (!updatedDepartment) {
-			throw new Error("Department not found");
+			throw new ORPCError("NOT_FOUND", { message: "Department not found" });
 		}
 		
 		return updatedDepartment;
@@ -84,7 +85,7 @@ export const deleteDepartment = protectedProcedure
 			.returning();
 		
 		if (!deletedDepartment) {
-			throw new Error("Department not found");
+			throw new ORPCError("NOT_FOUND", { message: "Department not found" });
 		}
 		
 		return { success: true };

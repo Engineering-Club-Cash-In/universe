@@ -142,12 +142,27 @@ function SubmitPresentationPage() {
 		return submission ? submission[field] || '' : '';
 	};
 
-	const getProgressPercentage = (target: string, achieved: string) => {
-		const targetNum = parseFloat(target);
-		const achievedNum = parseFloat(achieved);
-		return targetNum > 0 ? (achievedNum / targetNum) * 100 : 0;
-	};
+const getProgressPercentage = (target: string, achieved: string) => {
+  const targetNum = parseFloat(target);
+  const achievedNum = parseFloat(achieved);
 
+  if (isNaN(targetNum) || isNaN(achievedNum) || targetNum <= 0) {
+    return 0; // valores inválidos
+  }
+
+  if (achievedNum === 0) {
+    return 100; // caso especial: mora en 0 = éxito total
+  }
+
+  let progress = (achievedNum / targetNum) * 100;
+
+  // si se pasa de 100, devolver 100
+  if (progress > 100) {
+    progress = 100;
+  }
+
+  return progress;
+};
 	const getStatusBadge = (percentage: number) => {
 		if (percentage >= 80) {
 			return <Badge className="bg-green-100 text-green-800">Exitoso</Badge>;

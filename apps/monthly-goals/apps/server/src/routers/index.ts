@@ -54,6 +54,7 @@ import {
 	getAvailableGoalsForPresentation,
 	submitGoalsForPresentation,
 	getPresentationSubmissions,
+	generatePresentationPDF,
 } from "./presentations";
 import {
 	listUsers,
@@ -126,6 +127,7 @@ export const appRouter = {
 		availableGoals: getAvailableGoalsForPresentation,
 		submitGoals: submitGoalsForPresentation,
 		submissions: getPresentationSubmissions,
+		generatePDF: generatePresentationPDF,
 	},
 	users: {
 		list: listUsers,

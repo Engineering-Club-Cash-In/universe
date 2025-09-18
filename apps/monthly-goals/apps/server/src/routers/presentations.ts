@@ -349,22 +349,40 @@ function getProgressPercentage(target: string, achieved: string) {
 	return targetNum > 0 ? (achievedNum / targetNum) * 100 : 0;
 }
 
-// Helper function to organize submissions by department and area
+// Helper function to organize submissions by department, area, and person
 function organizeSubmissions(submissions: any[]) {
 	return submissions.reduce((acc: any, submission: any) => {
 		const dept = submission.departmentName || 'Sin Departamento';
 		const area = submission.areaName || 'Sin Área';
+		const person = submission.userName || 'Sin Usuario';
 		
 		if (!acc[dept]) {
 			acc[dept] = {};
 		}
 		if (!acc[dept][area]) {
-			acc[dept][area] = [];
+			acc[dept][area] = {};
 		}
-		acc[dept][area].push(submission);
+		if (!acc[dept][area][person]) {
+			acc[dept][area][person] = {
+				userName: person,
+				departmentName: dept,
+				areaName: area,
+				goals: []
+			};
+		}
+		acc[dept][area][person].goals.push(submission);
 		
 		return acc;
 	}, {});
+}
+
+// Helper function to chunk goals into slides (max 4 per slide)
+function chunkGoals(goals: any[], maxPerSlide: number = 4) {
+	const chunks = [];
+	for (let i = 0; i < goals.length; i += maxPerSlide) {
+		chunks.push(goals.slice(i, i + maxPerSlide));
+	}
+	return chunks;
 }
 
 // Helper function to generate HTML for the presentation
@@ -413,7 +431,7 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 		`
 	});
 
-	// Department and area slides
+	// Department, area, and person slides
 	Object.keys(organized).forEach(dept => {
 		allSlides.push({
 			type: 'department',
@@ -444,57 +462,76 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 				`
 			});
 
-			organized[dept][area].forEach((goal: any) => {
-				const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0");
-				const statusBadge = percentage >= 80 ? 'badge-green">Exitoso' : 
-								   percentage >= 50 ? 'badge-yellow">En Progreso' : 
-								   'badge-red">Necesita Atención';
-
-				allSlides.push({
-					type: 'goal',
-					content: `
-						<div class="slide-page">
-							<div class="text-center space-y-8">
-								<div class="space-y-4 mb-8">
-									<h2 class="text-4xl font-bold">${goal.userName}</h2>
-									<h3 class="text-2xl text-gray-600">${goal.areaName} - ${goal.departmentName}</h3>
+			Object.keys(organized[dept][area]).forEach(person => {
+				const personData = organized[dept][area][person];
+				const goalChunks = chunkGoals(personData.goals, 4); // Max 4 goals per slide
+				
+				goalChunks.forEach((goalChunk: any[], chunkIndex: number) => {
+					const isFirstSlide = chunkIndex === 0;
+					const slideNumber = chunkIndex + 1;
+					const totalSlides = goalChunks.length;
+					
+					// Generate HTML for goals in this chunk
+					const goalsHTML = goalChunk.map(goal => {
+						const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0");
+						const statusClass = percentage >= 80 ? 'text-green-600' : 
+										   percentage >= 50 ? 'text-yellow-600' : 'text-red-600';
+						const statusText = percentage >= 80 ? 'Exitoso' : 
+										  percentage >= 50 ? 'En Progreso' : 'Necesita Atención';
+						
+						return `
+							<div class="card p-6 min-h-[280px] flex flex-col justify-between">
+								<div>
+									<h4 class="text-lg font-bold mb-4 leading-tight">${goal.goalTemplateName}</h4>
+									<div class="grid grid-cols-2 gap-4 text-center mb-6">
+										<div>
+											<div class="text-xl font-bold text-gray-600 break-words">${parseFloat(goal.targetValue).toLocaleString()}</div>
+											<div class="text-sm text-gray-600">Objetivo</div>
+										</div>
+										<div>
+											<div class="text-xl font-bold text-blue-600 break-words">${parseFloat(goal.submittedValue).toLocaleString()}</div>
+											<div class="text-sm text-gray-600">Logrado</div>
+										</div>
+									</div>
 								</div>
-								<div class="card max-w-2xl mx-auto">
-									<div class="p-6">
-										<h3 class="text-2xl font-bold mb-6">${goal.goalTemplateName}</h3>
-										<div class="grid grid-cols-2 gap-8 text-center mb-6">
-											<div>
-												<div class="text-3xl font-bold text-gray-600">${goal.targetValue}</div>
-												<div class="text-lg text-gray-600">Objetivo (${goal.goalTemplateUnit || "unidades"})</div>
-											</div>
-											<div>
-												<div class="text-3xl font-bold text-blue-600">${goal.submittedValue}</div>
-												<div class="text-lg text-gray-600">Logrado (${goal.goalTemplateUnit || "unidades"})</div>
-											</div>
+								<div class="space-y-2">
+									<div class="flex justify-between text-sm">
+										<span>Progreso</span>
+										<span class="font-bold">${Math.round(percentage)}%</span>
+									</div>
+									<div class="progress-bar">
+										<div class="progress-fill" style="width: ${percentage}%"></div>
+									</div>
+									<div class="text-center">
+										<span class="badge badge-${percentage >= 80 ? 'green' : percentage >= 50 ? 'yellow' : 'red'}">${statusText}</span>
+									</div>
+									${goal.notes ? `
+										<div class="bg-gray-50 p-2 rounded text-xs mt-2">
+											<p class="text-gray-600">${goal.notes}</p>
 										</div>
-										<div class="space-y-4">
-											<div style="display: flex; justify-content: space-between; align-items: center;">
-												<span class="text-lg font-bold">Progreso</span>
-												<span class="text-2xl font-bold">${Math.round(percentage)}%</span>
-											</div>
-											<div class="progress-bar">
-												<div class="progress-fill" style="width: ${percentage}%"></div>
-											</div>
-											<div class="text-center">
-												<span class="badge ${statusBadge}</span>
-											</div>
-										</div>
-										${goal.notes ? `
-											<div class="bg-gray-50 p-4 rounded-lg mt-6">
-												<h4 class="font-bold mb-2">Notas:</h4>
-												<p class="text-gray-600">${goal.notes}</p>
-											</div>
-										` : ''}
+									` : ''}
+								</div>
+							</div>
+						`;
+					}).join('');
+					
+					allSlides.push({
+						type: 'person',
+						content: `
+							<div class="slide-page">
+								<div class="text-center mb-6">
+									<h2 class="text-3xl font-bold">${personData.userName}</h2>
+									<h3 class="text-lg text-gray-600">${personData.areaName} - ${personData.departmentName}</h3>
+									${totalSlides > 1 ? `<p class="text-sm text-gray-500 mt-2">Slide ${slideNumber} de ${totalSlides}</p>` : ''}
+								</div>
+								<div class="flex justify-center">
+									<div class="grid gap-6 w-full max-w-5xl ${goalChunk.length === 1 ? 'grid-cols-1' : goalChunk.length === 2 ? 'grid-cols-2' : goalChunk.length === 3 ? 'grid-cols-3' : 'grid-cols-4'}">
+										${goalsHTML}
 									</div>
 								</div>
 							</div>
-						</div>
-					`
+						`
+					});
 				});
 			});
 		});
@@ -607,17 +644,38 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 				.text-yellow-600 { color: #d97706; }
 				.text-red-600 { color: #dc2626; }
 				.grid { display: grid; }
+				.grid-cols-1 { grid-template-columns: repeat(1, 1fr); }
 				.grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
 				.grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+				.grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+				.flex { display: flex; }
+				.flex-col { flex-direction: column; }
+				.justify-between { justify-content: space-between; }
+				.justify-center { justify-content: center; }
+				.align-center { align-items: center; }
+				.min-h-[200px] { min-height: 200px; }
+				.min-h-[220px] { min-height: 220px; }
+				.min-h-[280px] { min-height: 280px; }
+				.min-w-[280px] { min-width: 280px; }
+				.max-w-5xl { max-width: 64rem; }
+				.gap-6 { gap: 1.5rem; }
 				.gap-4 { gap: 1rem; }
 				.gap-8 { gap: 2rem; }
+				.space-y-2 > * + * { margin-top: 0.5rem; }
+				.space-y-3 > * + * { margin-top: 0.75rem; }
 				.space-y-4 > * + * { margin-top: 1rem; }
 				.space-y-6 > * + * { margin-top: 1.5rem; }
 				.space-y-8 > * + * { margin-top: 2rem; }
+				.break-all { word-break: break-all; }
+				.break-words { word-break: break-word; }
+				.leading-tight { line-height: 1.25; }
+				.text-base { font-size: 1rem; line-height: 1.5rem; }
 				.mb-2 { margin-bottom: 0.5rem; }
+				.mb-3 { margin-bottom: 0.75rem; }
 				.mb-4 { margin-bottom: 1rem; }
 				.mb-6 { margin-bottom: 1.5rem; }
 				.mb-8 { margin-bottom: 2rem; }
+				.gap-3 { gap: 0.75rem; }
 				.mt-6 { margin-top: 1.5rem; }
 				.mt-12 { margin-top: 3rem; }
 				.mx-auto { margin-left: auto; margin-right: auto; }
@@ -637,9 +695,15 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 				.badge-red { background-color: #fee2e2; color: #991b1b; }
 				.progress-bar { width: 100%; height: 1rem; background-color: #e5e7eb; border-radius: 0.5rem; overflow: hidden; }
 				.progress-fill { height: 100%; background-color: #3b82f6; transition: width 0.3s ease; }
+				.max-w-md { max-width: 28rem; }
 				.max-w-2xl { max-width: 42rem; }
 				.max-w-4xl { max-width: 56rem; }
+				.max-w-6xl { max-width: 72rem; }
 				.w-full { width: 100%; }
+				.text-xs { font-size: 0.75rem; line-height: 1rem; }
+				.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+				.mt-2 { margin-top: 0.5rem; }
+				.mb-3 { margin-bottom: 0.75rem; }
 			</style>
 		</head>
 		<body>

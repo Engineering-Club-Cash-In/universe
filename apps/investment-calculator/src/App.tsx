@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Card,
   CardContent,
@@ -43,6 +43,7 @@ import jsPDF from "jspdf";
 import {
   calculateCompoundInvestment,
   calculateTraditionalInvestment,
+  calculateInterestOnlyInvestment,
   type InvestmentParams,
   type InvestmentResult,
 } from "@/utils/investmentCalculations";
@@ -167,6 +168,9 @@ export default function InvestmentCalculator() {
       const interest = principal * (interestRate / 100);
       const vat = interest * vatRate;
       const interestPlusVat = interest + vat;
+      // Calculate what investor actually receives (net without VAT)
+      const investorNetReceived = interest * (investorPercentage / 100);
+      
       if (month < totalMonths) {
         schedule.push({
           month,
@@ -174,7 +178,7 @@ export default function InvestmentCalculator() {
           interest,
           vat,
           interestPlusVat,
-          payment: interestPlusVat,
+          payment: investorNetReceived, // Net amount investor receives
           interestVatPayment: interestPlusVat * (investorPercentage / 100),
           amortization: 0,
           finalBalance: principal,
@@ -186,7 +190,7 @@ export default function InvestmentCalculator() {
           interest,
           vat,
           interestPlusVat,
-          payment: interestPlusVat + principal, // add capital on final month
+          payment: investorNetReceived + principal, // Net amount + capital on final month
           interestVatPayment: interestPlusVat * (investorPercentage / 100),
           amortization: principal,
           finalBalance: 0,
@@ -205,8 +209,18 @@ export default function InvestmentCalculator() {
     for (let month = 1; month <= totalMonths; month++) {
       const interest = balance * (interestRate / 100);
       const vat = interest * vatRate;
-      const netInterest = interest - vat; // reinvest net interest
-      const finalBalance = balance + netInterest;
+      const interestPlusVat = interest + vat;
+      
+      // Investor's portion of total (interest + VAT)
+      const investorPortionTotal = interestPlusVat * (investorPercentage / 100);
+      
+      // Investor's portion of VAT only
+      const investorVatPortion = vat * (investorPercentage / 100);
+      
+      // Amount investor reinvests (their portion minus their VAT)
+      const investorNetToReinvest = investorPortionTotal - investorVatPortion;
+      
+      const finalBalance = balance + investorNetToReinvest;
       schedule.push({
         month,
         initialBalance: balance,
@@ -214,7 +228,7 @@ export default function InvestmentCalculator() {
         vat,
         interestPlusVat: interest + vat,
         payment: month === totalMonths ? finalBalance : 0, // Show total at the end
-        interestVatPayment: (interest + vat) * (investorPercentage / 100),
+        interestVatPayment: investorPortionTotal,
         amortization: month === totalMonths ? balance : 0, // Show original capital at the end
         finalBalance: finalBalance,
       });
@@ -228,9 +242,20 @@ export default function InvestmentCalculator() {
       ? requiredCapital
       : getCapitalAsNumber();
 
-  const standardSchedule = generateAmortizationSchedule(displayCapital);
-  const interestOnlySchedule = generateInterestOnlySchedule(displayCapital);
-  const compoundScheduleArr = generateCompoundSchedule(displayCapital);
+  const standardSchedule = useMemo(() => 
+    generateAmortizationSchedule(displayCapital), 
+    [displayCapital, interestRate, term, termUnit, investorPercentage, isSmallTaxpayer]
+  );
+  
+  const interestOnlySchedule = useMemo(() => 
+    generateInterestOnlySchedule(displayCapital), 
+    [displayCapital, interestRate, term, termUnit, investorPercentage, isSmallTaxpayer]
+  );
+  
+  const compoundScheduleArr = useMemo(() => 
+    generateCompoundSchedule(displayCapital), 
+    [displayCapital, interestRate, term, termUnit, investorPercentage, isSmallTaxpayer]
+  );
 
   // Calculate investment results using the backend functions
   const investmentParams: InvestmentParams = {
@@ -244,8 +269,11 @@ export default function InvestmentCalculator() {
   let investmentResult: InvestmentResult;
   if (activeTab === "compound") {
     investmentResult = calculateCompoundInvestment(investmentParams);
+  } else if (activeTab === "interest-only") {
+    // Interest-only uses fixed interest on initial capital
+    investmentResult = calculateInterestOnlyInvestment(investmentParams);
   } else {
-    // Both standard and interest-only use traditional calculation
+    // Standard uses traditional calculation with decreasing balance
     investmentResult = calculateTraditionalInvestment(investmentParams);
   }
 
@@ -1025,6 +1053,8 @@ export default function InvestmentCalculator() {
                   </TableHeader>
                   <TableBody>
                     {standardSchedule.map((row) => {
+                        // For traditional, show net amount received (without VAT)
+                        const netAmountReceived = row.amortization + (row.interest * (investorPercentage / 100));
                         return (
                           <TableRow key={row.month}>
                             <TableCell>{row.month}</TableCell>
@@ -1051,9 +1081,7 @@ export default function InvestmentCalculator() {
                             </TableCell>
                             <TableCell className="text-right">
                               Q{" "}
-                              {(
-                                row.amortization + row.interestVatPayment
-                              ).toLocaleString("en-US", {
+                              {netAmountReceived.toLocaleString("en-US", {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}
@@ -1110,6 +1138,8 @@ export default function InvestmentCalculator() {
                   </TableHeader>
                   <TableBody>
                     {interestOnlySchedule.map((row) => {
+                        // For interest-only, show net amount received (without VAT)
+                        const netAmountReceived = row.amortization + (row.interest * (investorPercentage / 100));
                         return (
                           <TableRow key={row.month}>
                             <TableCell>{row.month}</TableCell>
@@ -1136,9 +1166,7 @@ export default function InvestmentCalculator() {
                             </TableCell>
                             <TableCell className="text-right">
                               Q{" "}
-                              {(
-                                row.amortization + row.interestVatPayment
-                              ).toLocaleString("en-US", {
+                              {netAmountReceived.toLocaleString("en-US", {
                                 minimumFractionDigits: 2,
                                 maximumFractionDigits: 2,
                               })}

@@ -281,10 +281,30 @@ function ViewPresentationPage() {
 	}
 
 
-	const getProgressPercentage = (target: string, achieved: string) => {
+	const getProgressPercentage = (target: string, achieved: string, goalName?: string) => {
 		const targetNum = parseFloat(target);
 		const achievedNum = parseFloat(achieved);
-		return targetNum > 0 ? (achievedNum / targetNum) * 100 : 0;
+		
+		if (targetNum <= 0) return 0;
+		
+		// Detectar meta inversa por nombre (palabras clave que indican "reducir es mejor")
+		const inversaKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
+		const isInverseMeta = goalName ? 
+			inversaKeywords.some(keyword => goalName.toLowerCase().includes(keyword)) : 
+			false;
+		
+		if (isInverseMeta) {
+			// Para metas inversas: targetValue = logrado, submittedValue = meta máxima
+			// Si logrado <= meta = 100%, si logrado > meta = menos %
+			if (targetNum <= achievedNum) {
+				return 100; // Cumplió o superó la meta de reducción
+			} else {
+				return Math.max((achievedNum / targetNum) * 100, 0);
+			}
+		} else {
+			// Para metas normales: mayor valor logrado = mejor progreso
+			return (achievedNum / targetNum) * 100;
+		}
 	}
 
 	const getStatusBadge = (percentage: number) => {
@@ -330,7 +350,7 @@ function ViewPresentationPage() {
 							<div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg">
 								<div className="text-3xl font-bold text-green-600">
 									{submissions.data?.filter((s: any) => {
-										const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0");
+										const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.goalTemplateName);
 										return pct >= 80
 									}).length || 0}
 								</div>
@@ -340,7 +360,7 @@ function ViewPresentationPage() {
 							<div className="p-6 bg-gray-50 dark:bg-gray-800 rounded-lg">
 								<div className="text-3xl font-bold text-yellow-600">
 									{submissions.data?.filter((s: any) => {
-										const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0");
+										const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.goalTemplateName);
 										return pct >= 50 && pct < 80
 									}).length || 0}
 								</div>
@@ -408,7 +428,13 @@ function ViewPresentationPage() {
 								'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
 							}`}>
 							{personData.goals.map((goal: any, index: number) => {
-								const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0");
+								const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0", goal.goalTemplateName);
+								
+								// Detectar si es meta inversa para mostrar labels correctos
+								const inversaKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
+								const isInverseMeta = goal.goalTemplateName ? 
+									inversaKeywords.some(keyword => goal.goalTemplateName.toLowerCase().includes(keyword)) : 
+									false;
 								
 								return (
 									<Card key={index} className="w-full min-w-0 flex flex-col justify-between">
@@ -418,16 +444,16 @@ function ViewPresentationPage() {
 										<CardContent className="space-y-3 flex-1 flex flex-col justify-between">
 											<div className="grid grid-cols-2 gap-3 text-center">
 												<div>
-													<div className="text-base sm:text-lg font-bold text-gray-600 break-words">
-														{parseFloat(goal.targetValue).toLocaleString()}
-													</div>
-													<div className="text-xs text-gray-500">Objetivo</div>
-												</div>
-												<div>
 													<div className="text-base sm:text-lg font-bold text-blue-600 break-words">
-														{parseFloat(goal.submittedValue).toLocaleString()}
+														{parseFloat(isInverseMeta ? goal.targetValue : goal.submittedValue).toLocaleString()}
 													</div>
 													<div className="text-xs text-gray-500">Logrado</div>
+												</div>
+												<div>
+													<div className="text-base sm:text-lg font-bold text-gray-600 break-words">
+														{parseFloat(isInverseMeta ? goal.submittedValue : goal.targetValue).toLocaleString()}
+													</div>
+													<div className="text-xs text-gray-500">{isInverseMeta ? 'Meta (máx)' : 'Objetivo'}</div>
 												</div>
 											</div>
 											
@@ -472,7 +498,7 @@ function ViewPresentationPage() {
 								<CardContent className="pt-6">
 									<div className="text-4xl font-bold text-green-600 mb-2">
 										{submissions.data?.filter((s: any) => {
-											const pct = getProgressPercentage(s.targetValue, s.submittedValue);
+											const pct = getProgressPercentage(s.targetValue, s.submittedValue, s.goalTemplateName);
 											return pct >= 80
 										}).length || 0}
 									</div>
@@ -485,7 +511,7 @@ function ViewPresentationPage() {
 								<CardContent className="pt-6">
 									<div className="text-4xl font-bold text-yellow-600 mb-2">
 										{submissions.data?.filter((s: any) => {
-											const pct = getProgressPercentage(s.targetValue, s.submittedValue);
+											const pct = getProgressPercentage(s.targetValue, s.submittedValue, s.goalTemplateName);
 											return pct >= 50 && pct < 80
 										}).length || 0}
 									</div>
@@ -498,7 +524,7 @@ function ViewPresentationPage() {
 								<CardContent className="pt-6">
 									<div className="text-4xl font-bold text-red-600 mb-2">
 										{submissions.data?.filter((s: any) => {
-											const pct = getProgressPercentage(s.targetValue, s.submittedValue);
+											const pct = getProgressPercentage(s.targetValue, s.submittedValue, s.goalTemplateName);
 											return pct < 50
 										}).length || 0}
 									</div>

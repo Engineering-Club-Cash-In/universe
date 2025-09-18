@@ -60,7 +60,8 @@ export const getDashboardMetrics = protectedProcedure
 		allGoals.forEach((goal) => {
 			const target = parseFloat(goal.monthly_goals.targetValue);
 			const achieved = parseFloat(goal.monthly_goals.achievedValue);
-			const percentage = target > 0 ? (achieved / target) * 100 : 0;
+			const percentage = target > 0 ? Math.min((achieved / target) * 100, 100) : 0;
+
 			
 			totalProgress += percentage;
 
@@ -89,7 +90,8 @@ export const getDashboardMetrics = protectedProcedure
 
 			const target = parseFloat(goal.monthly_goals.targetValue);
 			const achieved = parseFloat(goal.monthly_goals.achievedValue);
-			const percentage = target > 0 ? (achieved / target) * 100 : 0;
+			const percentage = target > 0 ? Math.min((achieved / target) * 100, 100) : 0;
+
 
 			if (!performanceMap.has(userEmail)) {
 				performanceMap.set(userEmail, {
@@ -123,7 +125,8 @@ export const getDashboardMetrics = protectedProcedure
 
 			const target = parseFloat(goal.monthly_goals.targetValue);
 			const achieved = parseFloat(goal.monthly_goals.achievedValue);
-			const percentage = target > 0 ? (achieved / target) * 100 : 0;
+			const percentage = target > 0 ? Math.min((achieved / target) * 100, 100) : 0;
+
 
 			if (!departmentMap.has(deptName)) {
 				departmentMap.set(deptName, {

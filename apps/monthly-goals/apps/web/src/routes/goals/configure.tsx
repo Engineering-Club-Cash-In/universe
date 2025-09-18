@@ -88,13 +88,13 @@ function GoalsConfigurePage() {
 			},
 		]);
 	};
-
-	const updateGoalInList = (id: string, field: string, value: string) => {
-		setBulkGoals(bulkGoals.map(goal =>
-			goal.id === id ? { ...goal, [field]: value } : goal
-		));
-	};
-
+const updateGoalInList = (id: string, field: string, value: string) => {
+  setBulkGoals(prevGoals =>
+    prevGoals.map(goal =>
+      goal.id === id ? { ...goal, [field]: value } : goal
+    )
+  );
+};
 	const removeGoalFromList = (id: string) => {
 		setBulkGoals(bulkGoals.filter(goal => goal.id !== id));
 	};

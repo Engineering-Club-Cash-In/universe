@@ -17,6 +17,7 @@ function ViewPresentationPage() {
 	const [currentSlide, setCurrentSlide] = useState(0);
 	const [isFullscreen, setIsFullscreen] = useState(false);
 	const [showControls, setShowControls] = useState(true);
+	const [screenSize, setScreenSize] = useState(0);
 
 	// Queries
 	const presentation = useQuery(
@@ -76,6 +77,17 @@ function ViewPresentationPage() {
 		return () => window.removeEventListener("keydown", handleKeyDown);
 	}, [currentSlide]);
 
+	// Window resize listener to recalculate slides
+	useEffect(() => {
+		const handleResize = () => {
+			setScreenSize(window.innerWidth);
+		};
+
+		handleResize(); // Set initial size
+		window.addEventListener("resize", handleResize);
+		return () => window.removeEventListener("resize", handleResize);
+	}, []);
+
 	const nextSlide = () => {
 		const totalSlides = getTotalSlides();
 		setCurrentSlide(prev => (prev + 1) % totalSlides);
@@ -92,14 +104,23 @@ function ViewPresentationPage() {
 		const organized = submissions.data.reduce((acc: any, submission: any) => {
 			const dept = submission.departmentName || 'Sin Departamento';
 			const area = submission.areaName || 'Sin Área';
+			const person = submission.userName || 'Sin Usuario';
 			
 			if (!acc[dept]) {
 				acc[dept] = {};
 			}
 			if (!acc[dept][area]) {
-				acc[dept][area] = [];
+				acc[dept][area] = {};
 			}
-			acc[dept][area].push(submission);
+			if (!acc[dept][area][person]) {
+				acc[dept][area][person] = {
+					userName: person,
+					departmentName: dept,
+					areaName: area,
+					goals: []
+				};
+			}
+			acc[dept][area][person].goals.push(submission);
 			
 			return acc;
 		}, {});
@@ -107,20 +128,37 @@ function ViewPresentationPage() {
 		return organized;
 	}
 
+	// Helper function to get max goals per slide based on screen size
+	const getMaxGoalsPerSlide = () => {
+		if (typeof window === 'undefined') return 4; // SSR fallback
+		
+		const width = window.innerWidth;
+		if (width < 640) return 1;  // Mobile: 1 meta por slide
+		if (width < 1024) return 2; // Small: 2 metas por slide  
+		if (width < 1280) return 3; // Large: 3 metas por slide
+		return 4; // XL: 4 metas por slide
+	};
+
 	const getTotalSlides = () => {
 		if (!submissions.data) return 2; // Title + Summary
 		
 		const organized = getOrganizedSubmissions();
+		const maxGoalsPerSlide = getMaxGoalsPerSlide();
 		let totalSlides = 1; // Title slide
 		
-		// Count department and area separator slides + goal slides
+		// Count department, area separator slides + person slides (with pagination)
 		Object.keys(organized).forEach(dept => {
 			totalSlides += 1; // Department separator slide
 			Object.keys(organized[dept]).forEach(area => {
 				totalSlides += 1; // Area separator slide
-				totalSlides += organized[dept][area].length; // Goal slides
-			})
-		})
+				Object.keys(organized[dept][area]).forEach(person => {
+					const personData = organized[dept][area][person];
+					// Calculate slides needed for this person based on screen size
+					const slidesNeeded = Math.ceil(personData.goals.length / maxGoalsPerSlide);
+					totalSlides += slidesNeeded;
+				});
+			});
+		});
 		
 		totalSlides += 1; // Summary slide
 		return totalSlides;
@@ -130,6 +168,7 @@ function ViewPresentationPage() {
 		if (!submissions.data) return { type: 'summary', data: null };
 		
 		const organized = getOrganizedSubmissions();
+		const maxGoalsPerSlide = getMaxGoalsPerSlide();
 		let currentIndex = 0;
 		
 		// Title slide
@@ -138,7 +177,7 @@ function ViewPresentationPage() {
 		}
 		currentIndex++;
 		
-		// Department and area slides
+		// Department, area, and person slides
 		for (const dept of Object.keys(organized)) {
 			// Department separator slide
 			if (currentSlide === currentIndex) {
@@ -153,12 +192,30 @@ function ViewPresentationPage() {
 				}
 				currentIndex++;
 				
-				// Goal slides for this area
-				for (const goal of organized[dept][area]) {
-					if (currentSlide === currentIndex) {
-						return { type: 'goal', data: goal };
+				// Person slides for this area (with pagination)
+				for (const person of Object.keys(organized[dept][area])) {
+					const personData = organized[dept][area][person];
+					const totalSlides = Math.ceil(personData.goals.length / maxGoalsPerSlide);
+					
+					for (let slideIndex = 0; slideIndex < totalSlides; slideIndex++) {
+						if (currentSlide === currentIndex) {
+							const startIndex = slideIndex * maxGoalsPerSlide;
+							const endIndex = Math.min(startIndex + maxGoalsPerSlide, personData.goals.length);
+							const goalsForSlide = personData.goals.slice(startIndex, endIndex);
+							
+							return { 
+								type: 'person', 
+								data: {
+									...personData,
+									goals: goalsForSlide,
+									slideNumber: slideIndex + 1,
+									totalSlides: totalSlides,
+									maxGoalsPerSlide: maxGoalsPerSlide
+								}
+							};
+						}
+						currentIndex++;
 					}
-					currentIndex++
 				}
 			}
 		}
@@ -321,56 +378,81 @@ function ViewPresentationPage() {
 					</div>
 				)
 
-			case 'goal':
-				const goal = slideData.data;
-				const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0");
-
+			case 'person':
+				const personData = slideData.data;
+				
 				return (
-					<div className="flex flex-col items-center py-12 px-12 min-h-[500px]">
-						<div className="text-center space-y-4 mb-8">
-							<h2 className="text-4xl font-bold">{goal.userName}</h2>
-							<h3 className="text-2xl text-gray-600">{goal.areaName} - {goal.departmentName}</h3>
+					<div className="flex flex-col py-8 px-8 min-h-[500px]">
+						{/* Person header */}
+						<div className="text-center mb-8">
+							<h2 className="text-4xl font-bold">{personData.userName}</h2>
+							<h3 className="text-xl text-gray-600">{personData.areaName} - {personData.departmentName}</h3>
+							<div className="text-sm text-gray-500 mt-2">
+								<p>{personData.goals.length} {personData.goals.length === 1 ? 'meta' : 'metas'} 
+								{personData.totalSlides > 1 && (
+									<span className="ml-2 font-medium">
+										- Slide {personData.slideNumber} de {personData.totalSlides}
+									</span>
+								)}
+								</p>
+							</div>
 						</div>
 						
-						<Card className="w-full max-w-2xl">
-							<CardHeader>
-								<CardTitle className="text-2xl">{goal.goalTemplateName}</CardTitle>
-							</CardHeader>
-							<CardContent className="space-y-6">
-								<div className="grid grid-cols-2 gap-8 text-center">
-									<div>
-										<div className="text-3xl font-bold text-gray-600">{goal.targetValue}</div>
-										<div className="text-lg text-gray-500">
-											Objetivo ({goal.goalTemplateUnit || "unidades"})
-										</div>
-									</div>
-									<div>
-										<div className="text-3xl font-bold text-blue-600">{goal.submittedValue}</div>
-										<div className="text-lg text-gray-500">
-											Logrado ({goal.goalTemplateUnit || "unidades"})
-										</div>
-									</div>
-								</div>
+						{/* Goals grid - responsive with proper limits and centering */}
+						<div className="flex justify-center flex-1 px-4">
+							<div className={`grid gap-4 w-full ${
+								// Grid responsive que respeta el espacio disponible
+								personData.goals.length === 1 ? 'grid-cols-1 max-w-sm' :
+								personData.goals.length === 2 ? 'grid-cols-1 sm:grid-cols-2 max-w-3xl' :
+								personData.goals.length === 3 ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' :
+								'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+							}`}>
+							{personData.goals.map((goal: any, index: number) => {
+								const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0");
 								
-								<div className="space-y-4">
-									<div className="flex items-center justify-between">
-										<span className="text-lg font-medium">Progreso</span>
-										<span className="text-2xl font-bold">{Math.round(percentage)}%</span>
-									</div>
-									<Progress value={percentage} className="h-4" />
-									<div className="text-center">
-										{getStatusBadge(percentage)}
-									</div>
-								</div>
-								
-								{goal.notes && (
-									<div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
-										<h4 className="font-medium mb-2">Notas:</h4>
-										<p className="text-gray-700 dark:text-gray-300">{goal.notes}</p>
-									</div>
-								)}
-							</CardContent>
-						</Card>
+								return (
+									<Card key={index} className="w-full min-w-0 flex flex-col justify-between">
+										<CardHeader className="pb-2">
+											<CardTitle className="text-sm sm:text-base leading-tight">{goal.goalTemplateName}</CardTitle>
+										</CardHeader>
+										<CardContent className="space-y-3 flex-1 flex flex-col justify-between">
+											<div className="grid grid-cols-2 gap-3 text-center">
+												<div>
+													<div className="text-base sm:text-lg font-bold text-gray-600 break-words">
+														{parseFloat(goal.targetValue).toLocaleString()}
+													</div>
+													<div className="text-xs text-gray-500">Objetivo</div>
+												</div>
+												<div>
+													<div className="text-base sm:text-lg font-bold text-blue-600 break-words">
+														{parseFloat(goal.submittedValue).toLocaleString()}
+													</div>
+													<div className="text-xs text-gray-500">Logrado</div>
+												</div>
+											</div>
+											
+											<div className="space-y-2">
+												<div className="flex items-center justify-between text-sm">
+													<span>Progreso</span>
+													<span className="font-bold">{Math.round(percentage)}%</span>
+												</div>
+												<Progress value={percentage} className="h-2" />
+												<div className="text-center">
+													{getStatusBadge(percentage)}
+												</div>
+											</div>
+											
+											{goal.notes && (
+												<div className="bg-gray-50 dark:bg-gray-800 p-2 rounded text-xs">
+													<p className="text-gray-700 dark:text-gray-300 line-clamp-2">{goal.notes}</p>
+												</div>
+											)}
+										</CardContent>
+									</Card>
+								);
+							})}
+							</div>
+						</div>
 					</div>
 				)
 

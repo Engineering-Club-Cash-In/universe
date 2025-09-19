@@ -2,6 +2,30 @@ import { pgTable, text, integer, timestamp, boolean, decimal, json, uuid } from 
 import { relations } from 'drizzle-orm';
 import { companies } from './crm';
 
+// Vehicle Vendors table - Sellers of vehicles
+export const vehicleVendors = pgTable('vehicle_vendors', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  
+  // Basic vendor info
+  name: text('name').notNull(),
+  phone: text('phone').notNull(),
+  dpi: text('dpi').notNull().unique(),
+  
+  // Vendor type
+  vendorType: text('vendor_type').notNull(), // 'individual' or 'empresa'
+  
+  // Company info (if empresa)
+  companyName: text('company_name'), // Solo si es empresa
+  
+  // Contact details
+  email: text('email'),
+  address: text('address'),
+  
+  // Timestamps
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 // Vehicles table
 export const vehicles = pgTable('vehicles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -28,6 +52,9 @@ export const vehicles = pgTable('vehicles', {
   
   // Company relationship
   companyId: uuid('company_id').references(() => companies.id),
+  
+  // Vendor relationship
+  vendorId: uuid('vendor_id').references(() => vehicleVendors.id),
   
   // GPS Information
   gpsActivo: boolean('gps_activo').notNull().default(false),
@@ -128,12 +155,20 @@ export const inspectionChecklistItems = pgTable('inspection_checklist_items', {
 });
 
 // Relations
+export const vehicleVendorsRelations = relations(vehicleVendors, ({ many }) => ({
+  vehicles: many(vehicles),
+}));
+
 export const vehiclesRelations = relations(vehicles, ({ many, one }) => ({
   inspections: many(vehicleInspections),
   photos: many(vehiclePhotos),
   company: one(companies, {
     fields: [vehicles.companyId],
     references: [companies.id],
+  }),
+  vendor: one(vehicleVendors, {
+    fields: [vehicles.vendorId],
+    references: [vehicleVendors.id],
   }),
 }));
 
@@ -165,6 +200,9 @@ export const inspectionChecklistItemsRelations = relations(inspectionChecklistIt
 }));
 
 // Export types for TypeScript
+export type VehicleVendor = typeof vehicleVendors.$inferSelect;
+export type NewVehicleVendor = typeof vehicleVendors.$inferInsert;
+
 export type Vehicle = typeof vehicles.$inferSelect;
 export type NewVehicle = typeof vehicles.$inferInsert;
 

@@ -15,6 +15,12 @@ export const vehicleStatusEnum = pgEnum("vehicle_status", [
   "maintenance",
   "auction",
 ]);
+export const inspectionStatusEnum = pgEnum("inspection_status", [
+  "pending",     // inspección en proceso
+  "approved",    // vehículo aprobado
+  "rejected",    // vehículo rechazado
+  "auction",     // vehículo enviado a remate
+]);
 
 // Vehicle Vendors table - Sellers of vehicles
 export const vehicleVendors = pgTable('vehicle_vendors', {
@@ -126,7 +132,7 @@ export const vehicleInspections = pgTable('vehicle_inspections', {
   noTestDriveReason: text('no_test_drive_reason'),
   
   // Approval status
-  status: text('status').notNull().default('pending'), // pending, approved, rejected
+ status: inspectionStatusEnum("status").notNull().default("pending"),
   
   // Alerts (stored as JSON array)
   alerts: json('alerts').$type<string[]>().default([]),

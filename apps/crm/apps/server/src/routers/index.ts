@@ -4,6 +4,7 @@ import { authRouter } from "./auth";
 import { crmRouter } from "./crm";
 import { vehiclesRouter } from "./vehicles";
 import { cobrosRouter } from "./cobros";
+import { vendorsRouter } from "./vendors";
 
 export const appRouter = {
 	healthCheck: publicProcedure.handler(() => {
@@ -74,6 +75,14 @@ export const appRouter = {
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
+
+	// Vendors routes
+	getVendors: vendorsRouter.getAll,
+	getVendorById: vendorsRouter.getById,
+	createVendor: vendorsRouter.create,
+	updateVendor: vendorsRouter.update,
+	deleteVendor: vendorsRouter.delete,
+	searchVendors: vendorsRouter.search,
 };
 
 export type AppRouter = typeof appRouter;

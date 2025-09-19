@@ -1,6 +1,6 @@
 {
-  "id": "93c7aff3-d0be-4fe3-8181-a4d7a3369cf9",
-  "prevId": "9f187ec5-7184-47b6-b58f-2cb4607e0d64",
+  "id": "eb50c126-1296-45b5-8d7e-a47892345239",
+  "prevId": "93c7aff3-d0be-4fe3-8181-a4d7a3369cf9",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2196,6 +2196,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "vendor_id": {
+          "name": "vendor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "notes": {
           "name": "notes",
           "type": "text",
@@ -2845,7 +2851,7 @@
           "name": "vehicle_rating",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "market_value": {
           "name": "market_value",
@@ -3082,6 +3088,90 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.vehicle_vendors": {
+      "name": "vehicle_vendors",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "phone": {
+          "name": "phone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dpi": {
+          "name": "dpi",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vendor_type": {
+          "name": "vendor_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "company_name": {
+          "name": "company_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "vehicle_vendors_dpi_unique": {
+          "name": "vehicle_vendors_dpi_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "dpi"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.vehicles": {
       "name": "vehicles",
       "schema": "",
@@ -3190,6 +3280,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "vendor_id": {
+          "name": "vendor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "gps_activo": {
           "name": "gps_activo",
           "type": "boolean",
@@ -3293,6 +3389,19 @@
           "tableTo": "companies",
           "columnsFrom": [
             "company_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "vehicles_vendor_id_vehicle_vendors_id_fk": {
+          "name": "vehicles_vendor_id_vehicle_vendors_id_fk",
+          "tableFrom": "vehicles",
+          "tableTo": "vehicle_vendors",
+          "columnsFrom": [
+            "vendor_id"
           ],
           "columnsTo": [
             "id"

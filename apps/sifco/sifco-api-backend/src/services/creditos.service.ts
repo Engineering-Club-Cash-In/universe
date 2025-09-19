@@ -1,3 +1,4 @@
+import { PrestamoDetalle, PrestamoInformacion, WSCrEstadoCuentaRequest, WSCrEstadoCuentaResponse, WSInformacionPrestamoRequest, WSRecargosLibresRequest, WSRecargosLibresResponse, WSVerCuotasPorPrestamoRequest, WSVerCuotasPorPrestamoResponse } from '../utils/interface';
 import { BaseService, ServiceResponse } from './base.service';
 
 export interface Credito {
@@ -304,5 +305,207 @@ export class CreditosService extends BaseService {
   ): Promise<ServiceResponse<any>> {
     console.log(`➕ Adding guarantee to credit: ${creditoId}`);
     return this.request('POST', `WSCreditos/${creditoId}/Garantias`, garantia);
+  }
+  
+  async consultarPrestamoDetalle(
+    preNumero: string
+  ): Promise<ServiceResponse<PrestamoDetalle>> {
+    console.log(`📑 Consulting SIFCO loan detail for PreNumero: ${preNumero}`);
+
+    try {
+      const response = await this.request<PrestamoDetalle>(
+        "GET",
+        `TCrPrestamos/${preNumero}`
+      );
+
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          statusCode: response.statusCode,
+        };
+      }
+
+      return {
+        success: false,
+        error: response.error || "[ERROR] No se obtuvo respuesta válida de SIFCO",
+        statusCode: response.statusCode || 500,
+      };
+    } catch (err: any) {
+      console.error("❌ Error in consultarPrestamoDetalle:", err);
+      return {
+        success: false,
+        error: `[ERROR] Excepción en consultarPrestamoDetalle: ${err.message || err}`,
+        statusCode: 500,
+      };
+    }
+  }
+  
+  async consultarCuotasPorPrestamo(
+    numeroPrestamo: string
+  ): Promise<ServiceResponse<WSVerCuotasPorPrestamoResponse>> {
+    console.log(`📆 Consulting cuotas for prestamo: ${numeroPrestamo}`);
+
+    const requestBody: WSVerCuotasPorPrestamoRequest = {
+      NumeroPrestamo: numeroPrestamo,
+    };
+
+    try {
+      const response = await this.request<WSVerCuotasPorPrestamoResponse>(
+        "POST",
+        "WSVerCuotasPorPrestamo",
+        requestBody
+      );
+
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          statusCode: response.statusCode,
+        };
+      }
+
+      return {
+        success: false,
+        error:
+          response.error || "[ERROR] No se obtuvo respuesta válida de SIFCO",
+        statusCode: response.statusCode || 500,
+      };
+    } catch (err: any) {
+      console.error("❌ Error in consultarCuotasPorPrestamo:", err);
+      return {
+        success: false,
+        error: `[ERROR] Excepción en consultarCuotasPorPrestamo: ${
+          err.message || err
+        }`,
+        statusCode: 500,
+      };
+    }
+  }
+  async consultarRecargosLibres(
+  numeroPrestamo: string
+): Promise<ServiceResponse<WSRecargosLibresResponse>> {
+  console.log(`📌 Consulting recargos libres for loan: ${numeroPrestamo}`);
+
+  const payload: WSRecargosLibresRequest = {
+    Modo: "DSP",
+    ConsultaNumeroPrestamo: numeroPrestamo,
+    RecargosLibres: []
+  };
+
+  try {
+    const response = await this.request<WSRecargosLibresResponse>(
+      "POST",
+      "WSRecargosLibres",
+      payload
+    );
+
+    if (response.success && response.data) {
+      return {
+        success: true,
+        data: response.data,
+        statusCode: response.statusCode,
+      };
+    }
+
+    return {
+      success: false,
+      error: response.error || "[ERROR] No se obtuvo respuesta válida de WSRecargosLibres",
+      statusCode: response.statusCode || 500,
+    };
+  } catch (err: any) {
+    console.error("❌ Error in consultarRecargosLibres:", err);
+    return {
+      success: false,
+      error: `[ERROR] Excepción en consultarRecargosLibres: ${err.message || err}`,
+      statusCode: 500,
+    };
+  }
+}
+/**
+ * Consultar estado de cuenta de un préstamo
+ * Web Service: WSCrEstadoCuenta
+ */
+async consultarEstadoCuentaPrestamo(
+  numeroPrestamo: string
+): Promise<ServiceResponse<WSCrEstadoCuentaResponse>> {
+  console.log(`📊 Consulting estado de cuenta for loan: ${numeroPrestamo}`);
+
+  const payload: WSCrEstadoCuentaRequest = {
+    NumeroPrestamo: numeroPrestamo,
+  };
+
+  try {
+    const response = await this.request<WSCrEstadoCuentaResponse>(
+      "POST",
+      "WSCrEstadoCuenta",
+      payload
+    );
+    console.log('Response from WSCrEstadoCuenta:', response);
+    if (response.success && response.data) {
+      return {
+        success: true,
+        data: response.data,
+        statusCode: response.statusCode,
+      };
+    }
+
+    return {
+      success: false,
+      error: response.error || "[ERROR] No se obtuvo respuesta válida de WSCrEstadoCuenta",
+      statusCode: response.statusCode || 500,
+    };
+  } catch (err: any) {
+    console.error("❌ Error in consultarEstadoCuentaPrestamo:", err);
+    return {
+      success: false,
+      error: `[ERROR] Excepción en consultarEstadoCuentaPrestamo: ${err.message || err}`,
+      statusCode: 500,
+    };
+  }
+}
+
+  /**
+   * Consultar información de un préstamo por identificador
+   * Web Service: WSInformacionPrestamo (POST)
+   * Body: { "ConsultaValorIdentificador": "<identificador>" }
+   */
+  async consultarInformacionPrestamo(
+    identificador: string
+  ): Promise<ServiceResponse<PrestamoInformacion>> {
+    console.log(`🧾 Consulting WSInformacionPrestamo with id: ${identificador}`);
+
+    const payload: WSInformacionPrestamoRequest = {
+      ConsultaValorIdentificador: identificador,
+    };
+
+    try {
+      const response = await this.request<PrestamoInformacion>(
+        'POST',
+        'WSInformacionPrestamo',
+        payload
+      );
+
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          statusCode: response.statusCode,
+        };
+      }
+
+      return {
+        success: false,
+        error: response.error || '[ERROR] No se obtuvo respuesta válida de WSInformacionPrestamo',
+        statusCode: response.statusCode || 500,
+      };
+    } catch (err: any) {
+      console.error('❌ Error in consultarInformacionPrestamo:', err);
+      return {
+        success: false,
+        error: `[ERROR] Excepción en consultarInformacionPrestamo: ${err.message || err}`,
+        statusCode: 500,
+      };
+    }
   }
 }

@@ -1,0 +1,158 @@
+{
+  "id": "fdd9d346-25ba-4fc4-b7ec-5ce60754818c",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.magic_urls": {
+      "name": "magic_urls",
+      "schema": "",
+      "columns": {
+        "dpi": {
+          "name": "dpi",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nameOwner": {
+          "name": "nameOwner",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nameBox": {
+          "name": "nameBox",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rolCdd": {
+          "name": "rolCdd",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "typeUrl": {
+          "name": "typeUrl",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "phoneNumber": {
+          "name": "phoneNumber",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cajaId": {
+          "name": "cajaId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "clerkId": {
+          "name": "clerkId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "promoterId": {
+          "name": "promoterId",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "submissionId": {
+          "name": "submissionId",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "stepper": {
+          "name": "stepper",
+          "type": "json",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "isCompleted": {
+          "name": "isCompleted",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "id": {
+          "name": "id",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "url": {
+          "name": "url",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(NOW() AT TIME ZONE 'America/Guatemala')"
+        },
+        "expiresAt": {
+          "name": "expiresAt",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "(NOW() AT TIME ZONE 'America/Guatemala')"
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "magic_urls_id_unique": {
+          "name": "magic_urls_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id"
+          ]
+        },
+        "magic_urls_url_unique": {
+          "name": "magic_urls_url_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "url"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

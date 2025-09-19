@@ -1,4 +1,5 @@
-import { BaseService, ServiceResponse } from './base.service';
+import { WSVerPrestamosPorClienteRequest, WSVerPrestamosPorClienteResponse } from "../utils/interface";
+import { BaseService, ServiceResponse } from "./base.service";
 
 export interface Cliente {
   CodigoCliente?: number;
@@ -41,7 +42,7 @@ export interface Cliente {
 }
 
 export interface WSIngresarClientesRequest {
-  Modo: 'DSP' | 'INS' | 'UPD'; // DSP=Display/Consulta, INS=Insert, UPD=Update
+  Modo: "DSP" | "INS" | "UPD"; // DSP=Display/Consulta, INS=Insert, UPD=Update
   ConsultaFormaIdentificar: number; // 1=Por código, 2=Por identificación
   ConsultaValorIdentificador: string;
   WSCliente: Cliente;
@@ -57,58 +58,87 @@ export interface WSIngresarClientesResponse {
   }>;
   Result: string;
 }
+export interface WSClientesEmailConsultaRequest {
+  Email: string;
+}
 
+export interface WSClientesEmailConsultaResponse {
+  Clientes: Array<{
+    CodigoCliente: string;
+    NombreCompleto: string;
+    CodigoReferencia: string;
+    DireccionEMailPrincipal: string;
+    DireccionEMailSecundario: string;
+    ExcluirDeMensajesDeCorreo: number;
+  }>;
+}
 export class ClientesService extends BaseService {
   /**
    * Obtener información de un cliente por ID o identificación
    */
-  async obtenerCliente(identificador: string, porCodigo: boolean = true): Promise<ServiceResponse<Cliente>> {
+  async obtenerCliente(
+    identificador: string,
+    porCodigo: boolean = true
+  ): Promise<ServiceResponse<Cliente>> {
     console.log(`📋 Fetching client: ${identificador}`);
-    
+
     const requestBody: WSIngresarClientesRequest = {
-      Modo: 'DSP',
+      Modo: "DSP",
       ConsultaFormaIdentificar: porCodigo ? 1 : 2,
       ConsultaValorIdentificador: identificador,
-      WSCliente: {} as Cliente
+      WSCliente: {} as Cliente,
     };
-    
-    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
-    
+
+    const response = await this.request<WSIngresarClientesResponse>(
+      "POST",
+      "wsingresarclientes",
+      requestBody
+    );
+
     if (response.success && response.data) {
       const cliente = response.data.ConsultaResultados?.[0];
       return {
         success: !!cliente,
         data: cliente,
-        error: cliente ? undefined : 'Cliente no encontrado'
+        error: cliente ? undefined : "Cliente no encontrado",
       };
     }
-    
+
     return response as any;
   }
 
   /**
    * Buscar clientes por número de identificación
    */
-  async buscarClientes(numeroIdentificacion: string): Promise<ServiceResponse<Cliente[]>> {
-    console.log('🔍 Searching clients by identification:', numeroIdentificacion);
-    
+  async buscarClientes(
+    numeroIdentificacion: string
+  ): Promise<ServiceResponse<Cliente[]>> {
+    console.log(
+      "🔍 Searching clients by identification:",
+      numeroIdentificacion
+    );
+
     const requestBody: WSIngresarClientesRequest = {
-      Modo: 'DSP',
+      Modo: "DSP",
       ConsultaFormaIdentificar: 2, // Por identificación
       ConsultaValorIdentificador: numeroIdentificacion,
-      WSCliente: {} as Cliente
+      WSCliente: {} as Cliente,
     };
-    
-    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
-    
+
+    const response = await this.request<WSIngresarClientesResponse>(
+      "POST",
+      "wsingresarclientes",
+      requestBody
+    );
+
     if (response.success && response.data) {
       return {
         success: true,
         data: response.data.ConsultaResultados || [],
-        statusCode: response.statusCode
+        statusCode: response.statusCode,
       };
     }
-    
+
     return response as any;
   }
 
@@ -116,55 +146,67 @@ export class ClientesService extends BaseService {
    * Listar todos los clientes
    * Probamos el patrón similar a WSClGruposLista
    */
-  async listarClientes(limite: number = 50, pagina: number = 1): Promise<ServiceResponse<Cliente[]>> {
-    console.log(`📑 Attempting to list clients - Page: ${pagina}, Limit: ${limite}`);
-    
+  async listarClientes(
+    limite: number = 50,
+    pagina: number = 1
+  ): Promise<ServiceResponse<Cliente[]>> {
+    console.log(
+      `📑 Attempting to list clients - Page: ${pagina}, Limit: ${limite}`
+    );
+
     // Probar WSClClientesLista (siguiendo el patrón de WSClGruposLista)
     try {
-      console.log('Trying wsclclienteslista endpoint...');
-      const response = await this.request<any>('POST', 'wsclclienteslista', {});
-      
+      console.log("Trying wsclclienteslista endpoint...");
+      const response = await this.request<any>("POST", "wsclclienteslista", {});
+
       if (response.success && response.data) {
         // Puede ser ClientesLista siguiendo el patrón de GruposLista
-        const clientes = response.data.ClientesLista || response.data.clientes || response.data;
+        const clientes =
+          response.data.ClientesLista ||
+          response.data.clientes ||
+          response.data;
         if (Array.isArray(clientes)) {
           console.log(`✅ Found ${clientes.length} clients`);
           return {
             success: true,
             data: clientes,
-            statusCode: response.statusCode
+            statusCode: response.statusCode,
           };
         }
       }
     } catch (error) {
-      console.log('wsclclienteslista not available');
+      console.log("wsclclienteslista not available");
     }
-    
+
     // Probar WSClientesLista (sin el prefijo Cl)
     try {
-      console.log('Trying wsclienteslista endpoint...');
-      const response = await this.request<any>('POST', 'wsclienteslista', {});
-      
+      console.log("Trying wsclienteslista endpoint...");
+      const response = await this.request<any>("POST", "wsclienteslista", {});
+
       if (response.success && response.data) {
-        const clientes = response.data.ClientesLista || response.data.clientes || response.data;
+        const clientes =
+          response.data.ClientesLista ||
+          response.data.clientes ||
+          response.data;
         if (Array.isArray(clientes)) {
           console.log(`✅ Found ${clientes.length} clients`);
           return {
             success: true,
             data: clientes,
-            statusCode: response.statusCode
+            statusCode: response.statusCode,
           };
         }
       }
     } catch (error) {
-      console.log('wsclienteslista not available');
+      console.log("wsclienteslista not available");
     }
-    
+
     // Si no hay endpoint de listado, retornar mensaje informativo
     return {
       success: true,
       data: [],
-      error: 'No se encontró un endpoint para listar todos los clientes. Use /api/clientes/buscar para búsquedas específicas.'
+      error:
+        "No se encontró un endpoint para listar todos los clientes. Use /api/clientes/buscar para búsquedas específicas.",
     };
   }
 
@@ -172,26 +214,30 @@ export class ClientesService extends BaseService {
    * Crear un nuevo cliente
    */
   async crearCliente(datosCliente: Cliente): Promise<ServiceResponse<Cliente>> {
-    console.log('➕ Creating new client:', datosCliente.NumeroIdentificacion);
-    
+    console.log("➕ Creating new client:", datosCliente.NumeroIdentificacion);
+
     const requestBody: WSIngresarClientesRequest = {
-      Modo: 'INS',
+      Modo: "INS",
       ConsultaFormaIdentificar: 0,
-      ConsultaValorIdentificador: '',
-      WSCliente: datosCliente
+      ConsultaValorIdentificador: "",
+      WSCliente: datosCliente,
     };
-    
-    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
-    
+
+    const response = await this.request<WSIngresarClientesResponse>(
+      "POST",
+      "wsingresarclientes",
+      requestBody
+    );
+
     if (response.success && response.data) {
       const cliente = response.data.ConsultaResultados?.[0];
       return {
-        success: response.data.Result === 'OK',
+        success: response.data.Result === "OK",
         data: cliente,
-        error: response.data.Messages?.[0]?.Description
+        error: response.data.Messages?.[0]?.Description,
       };
     }
-    
+
     return response as any;
   }
 
@@ -203,57 +249,68 @@ export class ClientesService extends BaseService {
     datosActualizacion: Partial<Cliente>
   ): Promise<ServiceResponse<Cliente>> {
     console.log(`✏️ Updating client: ${clienteId}`);
-    
+
     // Primero obtenemos el cliente actual
     const clienteActual = await this.obtenerCliente(clienteId, true);
     if (!clienteActual.success || !clienteActual.data) {
       return {
         success: false,
-        error: 'Cliente no encontrado'
+        error: "Cliente no encontrado",
       };
     }
-    
+
     // Merge de datos
     const clienteActualizado = {
       ...clienteActual.data,
       ...datosActualizacion,
-      CodigoCliente: parseInt(clienteId)
+      CodigoCliente: parseInt(clienteId),
     };
-    
+
     const requestBody: WSIngresarClientesRequest = {
-      Modo: 'UPD',
+      Modo: "UPD",
       ConsultaFormaIdentificar: 1,
       ConsultaValorIdentificador: clienteId,
-      WSCliente: clienteActualizado
+      WSCliente: clienteActualizado,
     };
-    
-    const response = await this.request<WSIngresarClientesResponse>('POST', 'wsingresarclientes', requestBody);
-    
+
+    const response = await this.request<WSIngresarClientesResponse>(
+      "POST",
+      "wsingresarclientes",
+      requestBody
+    );
+
     if (response.success && response.data) {
       return {
-        success: response.data.Result === 'OK',
+        success: response.data.Result === "OK",
         data: clienteActualizado,
-        error: response.data.Messages?.[0]?.Description
+        error: response.data.Messages?.[0]?.Description,
       };
     }
-    
+
     return response as any;
   }
 
   /**
    * Obtener cuentas asociadas a un cliente
    */
-  async obtenerCuentasCliente(clienteId: string): Promise<ServiceResponse<any[]>> {
+  async obtenerCuentasCliente(
+    clienteId: string
+  ): Promise<ServiceResponse<any[]>> {
     console.log(`💳 Fetching accounts for client: ${clienteId}`);
-    return this.request<any[]>('GET', `WSClientes/${clienteId}/Cuentas`);
+    return this.request<any[]>("GET", `WSClientes/${clienteId}/Cuentas`);
   }
 
   /**
    * Obtener historial crediticio del cliente
    */
-  async obtenerHistorialCrediticio(clienteId: string): Promise<ServiceResponse<any>> {
+  async obtenerHistorialCrediticio(
+    clienteId: string
+  ): Promise<ServiceResponse<any>> {
     console.log(`📊 Fetching credit history for client: ${clienteId}`);
-    return this.request<any>('GET', `WSClientes/${clienteId}/HistorialCrediticio`);
+    return this.request<any>(
+      "GET",
+      `WSClientes/${clienteId}/HistorialCrediticio`
+    );
   }
 
   /**
@@ -263,13 +320,18 @@ export class ClientesService extends BaseService {
     tipoIdentificacion: number,
     numeroIdentificacion: string
   ): Promise<ServiceResponse<{ existe: boolean; cliente?: Cliente }>> {
-    console.log(`✔️ Validating client: ${tipoIdentificacion} - ${numeroIdentificacion}`);
-    
+    console.log(
+      `✔️ Validating client: ${tipoIdentificacion} - ${numeroIdentificacion}`
+    );
+
     const response = await this.buscarClientes(numeroIdentificacion);
 
     if (response.success && response.data && response.data.length > 0) {
       // Filtrar por tipo de identificación si es necesario
-      const cliente = response.data.find(c => c.TipoIdentificacion === tipoIdentificacion) || response.data[0];
+      const cliente =
+        response.data.find(
+          (c) => c.TipoIdentificacion === tipoIdentificacion
+        ) || response.data[0];
       return {
         success: true,
         data: {
@@ -290,9 +352,11 @@ export class ClientesService extends BaseService {
   /**
    * Obtener documentos del cliente
    */
-  async obtenerDocumentosCliente(clienteId: string): Promise<ServiceResponse<any[]>> {
+  async obtenerDocumentosCliente(
+    clienteId: string
+  ): Promise<ServiceResponse<any[]>> {
     console.log(`📄 Fetching documents for client: ${clienteId}`);
-    return this.request<any[]>('GET', `WSClientes/${clienteId}/Documentos`);
+    return this.request<any[]>("GET", `WSClientes/${clienteId}/Documentos`);
   }
 
   /**
@@ -307,6 +371,85 @@ export class ClientesService extends BaseService {
     }
   ): Promise<ServiceResponse<any>> {
     console.log(`📎 Adding document for client: ${clienteId}`);
-    return this.request<any>('POST', `WSClientes/${clienteId}/Documentos`, documento);
+    return this.request<any>(
+      "POST",
+      `WSClientes/${clienteId}/Documentos`,
+      documento
+    );
+  }
+async consultarClientesPorEmail(): Promise<ServiceResponse<WSClientesEmailConsultaResponse>> {
+    console.log("📧 Consulting SIFCO for clients (email optional in SIFCO)");
+
+    const requestBody = { Email: "" }; // siempre se envía vacío
+
+    try {
+      const response = await this.request<WSClientesEmailConsultaResponse>(
+        "POST",
+        "WSClientesEmailConsulta",
+        requestBody
+      );
+
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          statusCode: response.statusCode,
+        };
+      }
+
+      return {
+        success: false,
+        error: response.error || "[ERROR] No se obtuvo respuesta válida de SIFCO",
+        statusCode: response.statusCode || 500,
+      };
+    } catch (err: any) {
+      console.error("❌ Error in consultarClientesPorEmail:", err);
+      return {
+        success: false,
+        error: `[ERROR] Excepción en consultarClientesPorEmail: ${err.message || err}`,
+        statusCode: 500,
+      };
+    }
+  }
+    async consultarPrestamosPorCliente(
+    clienteCodigo: number
+  ): Promise<ServiceResponse<WSVerPrestamosPorClienteResponse>> {
+    console.log(`💳 Consulting SIFCO loans for client code: ${clienteCodigo}`);
+
+    const requestBody: WSVerPrestamosPorClienteRequest = {
+      ClCliCod: clienteCodigo,
+    };
+
+    try {
+      const response = await this.request<WSVerPrestamosPorClienteResponse>(
+        "POST",
+        "WSVerPrestamosPorCliente",
+        requestBody
+      );
+
+      if (response.success && response.data) {
+        return {
+          success: true,
+          data: response.data,
+          statusCode: response.statusCode,
+        };
+      }
+
+      return {
+        success: false,
+        error:
+          response.error || "[ERROR] No se obtuvo respuesta válida de SIFCO",
+        statusCode: response.statusCode || 500,
+      };
+    } catch (err: any) {
+      console.error("❌ Error in consultarPrestamosPorCliente:", err);
+      return {
+        success: false,
+        error: `[ERROR] Excepción en consultarPrestamosPorCliente: ${
+          err.message || err
+        }`,
+        statusCode: 500,
+      };
+    }
   }
 }

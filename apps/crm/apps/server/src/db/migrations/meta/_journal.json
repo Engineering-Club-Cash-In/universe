@@ -36,6 +36,13 @@
       "when": 1754587379364,
       "tag": "0004_special_speed",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1758250128476,
+      "tag": "0005_cheerful_medusa",
+      "breakpoints": true
     }
   ]
 }

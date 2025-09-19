@@ -388,6 +388,10 @@ function RouteComponent() {
 		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 	});
 
+	const vendorsQuery = useQuery({
+		...orpc.getVendors.queryOptions(),
+	});
+
 	const createOpportunityForm = useForm({
 		defaultValues: {
 			title: "",
@@ -396,6 +400,7 @@ function RouteComponent() {
 			stageId: "",
 			probability: 0,
 			expectedCloseDate: "",
+			vendorId: "",
 			notes: "",
 		},
 		validators: {
@@ -1034,6 +1039,32 @@ function RouteComponent() {
 										)}
 									</createOpportunityForm.Field>
 								</div>
+							</div>
+
+							<div>
+								<createOpportunityForm.Field name="vendorId">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Vendedor del Vehículo (opcional)</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) => field.handleChange(value)}
+											>
+												<SelectTrigger className="w-full">
+													<SelectValue placeholder="Seleccionar vendedor" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="">Sin vendedor asignado</SelectItem>
+													{vendorsQuery.data?.map((vendor: any) => (
+														<SelectItem key={vendor.id} value={vendor.id}>
+															{vendor.name} {vendor.vendorType === "empresa" ? `(${vendor.companyName})` : ""} - {vendor.dpi}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</createOpportunityForm.Field>
 							</div>
 
 							<div>

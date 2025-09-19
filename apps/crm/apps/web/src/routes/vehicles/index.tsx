@@ -326,9 +326,19 @@ function VehiclesDashboard() {
                                 : "-"}
                             </TableCell>
                             <TableCell>
-                              {latestInspection
-                                ? renderStatusBadge(latestInspection.status)
-                                : renderStatusBadge("pending")}
+                              <div className="flex flex-col gap-1">
+                                {latestInspection
+                                  ? renderStatusBadge(latestInspection.status)
+                                  : renderStatusBadge("pending")}
+                                {(vehicle as any).hasPaymentAgreement && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-blue-100 text-blue-800 border-blue-300 text-xs"
+                                  >
+                                    Convenio de Pago
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               {latestInspection?.alerts?.length > 0 ? (

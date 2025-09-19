@@ -86,6 +86,8 @@ app.post("/api/upload-vehicle-photo", async (c) => {
 		const photoType = formData.get("photoType") as string;
 		const title = formData.get("title") as string;
 		const description = formData.get("description") as string | null;
+		const valuatorComment = formData.get("valuatorComment") as string | null;
+		const noCommentsChecked = formData.get("noCommentsChecked") === "true";
 
 		if (!file || !vehicleId || !category || !photoType || !title) {
 			console.error("Missing required fields:", {
@@ -143,6 +145,8 @@ app.post("/api/upload-vehicle-photo", async (c) => {
 				photoType,
 				title,
 				description,
+				valuatorComment,
+				noCommentsChecked,
 			}
 		});
 	} catch (error) {

@@ -128,14 +128,37 @@ export const leads = pgTable("leads", {
 	convertedAt: timestamp("converted_at"),
 	score: decimal("score", { precision: 3, scale: 2 }),
 	fit: boolean("fit").default(false),
-	scoredAt: timestamp("scored_at"),
+	scoredAt: timestamp("scored_at"),  
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+	livenessValidated: boolean("liveness_validated").notNull().default(false),
 	createdBy: text("created_by")
 		.notNull()
 		.references(() => user.id),
 });
+export const magicUrls = pgTable("magic_urls", {
+  id: uuid("id").primaryKey().defaultRandom(), // identificador único del link
+  leadId: uuid("lead_id")
+    .notNull()
+    .references(() => leads.id), // relación con leads
+  url: text("url").notNull(), // link mágico generado
+  createdAt: timestamp("created_at").notNull().defaultNow(), // fecha de creación
+  updatedAt: timestamp("updated_at").notNull().defaultNow(), // fecha de última actualización|
+  expiresAt: timestamp("expires_at").notNull(), // expiración del link
+  used: boolean("used").notNull().default(false), // si ya fue usado
+});
+// LegalDocuments table
+export const legalDocuments = pgTable("legal_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  leadId: uuid("lead_id")
+    .notNull()
+    .references(() => leads.id, { onDelete: "cascade" }), // relación con leads
 
+  electricityBill: text("electricity_bill"),   // recibo de luz
+  bankStatements: text("bank_statements"),     // estados de cuenta
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 // Credit Analysis table - Análisis de capacidad de pago
 export const creditAnalysis = pgTable("credit_analysis", {
 	id: uuid("id").primaryKey().defaultRandom(),

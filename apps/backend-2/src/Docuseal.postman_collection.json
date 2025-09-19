@@ -1,0 +1,272 @@
+{
+	"info": {
+		"_postman_id": "4c1bc53b-66f7-42bc-b85a-7db76637017f",
+		"name": "Docuseal",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "9622069",
+		"_collection_link": "https://cash-in-9010.postman.co/workspace/a5a8b32e-2ead-432c-8436-d6dda8691598/collection/9622069-4c1bc53b-66f7-42bc-b85a-7db76637017f?action=share&source=collection_link&creator=9622069"
+	},
+	"item": [
+		{
+			"name": "envelopes",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-Auth-Token",
+						"value": "CdhE38ock7tM8p33VeP8CsNs3BmZrGo3nMhrZUaDhA2",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://docuseal.devteamatcci.site/api/templates/12",
+					"protocol": "https",
+					"host": [
+						"docuseal",
+						"devteamatcci",
+						"site"
+					],
+					"path": [
+						"api",
+						"templates",
+						"12"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "vehiclePurchaseRequestManTemplate4",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"demo@correo.com\",\r\n  \"dia\": \"15\",\r\n  \"mes\": \"Marzo\",\r\n  \"año\": 2025,\r\n  \"nombrePersona\": \"JUAN PEREZ\",\r\n  \"dpiPersona\": \"juan perez (1234567890123)\",\r\n  \"tipoVehiculo\": \"SEDAN\",\r\n  \"marcaVehiculo\": \"TOYOTA\",\r\n  \"colorVehiculo\": \"ROJO\",\r\n  \"usoVehiculo\": \"PARTICULAR\",\r\n  \"chasisVehiculo\": \"CHS123456789\",\r\n  \"combustibleVehiculo\": \"GASOLINA\",\r\n  \"motorVehiculo\": \"MTR987654321\",\r\n  \"serieVehiculo\": \"SR12345\",\r\n  \"lineaVehiculo\": \"COROLLA\",\r\n  \"modeloVehiculo\": \"2022\",\r\n  \"cm3Vehiculo\": \"1800\",\r\n  \"asientosVehiculo\": \"5\",\r\n  \"cilindrosVehiculo\": \"4\",\r\n  \"iscvVehiculo\": \"ISC123456\",\r\n  \"empresa\": \"RDBE, SOCIEDAD ANÓNIMA\",\r\n  \"nombreFirmaPersona\": \"JUAN PEREZ\",\r\n  \"dpiFirmaPersona\": \"1234567890123\",\r\n  \"firma\": \"\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseURL}}/docuSeal/vehiclePurchaseRequestManTemplate4",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"docuSeal",
+						"vehiclePurchaseRequestManTemplate4"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "generateGPSInstallationLetterTemplate5",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"demo@correo.com\",\r\n  \"dia\": \"15\",\r\n  \"mes\": \"septiembre\",\r\n  \"año\": 2025,\r\n  \"nombrePersona\": \"Juan Perez\",\r\n  \"dpiUsuario\": \"juan perez (1234567890123)\",\r\n  \"tipoVehiculo\": \"Sedan\",\r\n  \"marcaVehiculo\": \"Toyota\",\r\n  \"colorVehiculo\": \"Rojo\",\r\n  \"usoVehiculo\": \"Particular\",\r\n  \"chasisVehiculo\": \"ABC123XYZ\",\r\n  \"combustibleVehiculo\": \"Gasolina\",\r\n  \"motorVehiculo\": \"1NZ-FE\",\r\n  \"serieVehiculo\": \"SERIE1234\",\r\n  \"lineaVehiculo\": \"Corolla\",\r\n  \"modeloVehiculo\": \"2022\",\r\n  \"cm3Vehiculo\": \"1800\",\r\n  \"asientosVehiculo\": \"5\",\r\n  \"iscvVehiculo\": \"12345\",\r\n  \"nombreEmpresa\": \"RDBE, Sociedad Anónima\",\r\n  \"nombre\": \"Juan Perez\",\r\n  \"dpi\": \"1234567890123\",\r\n  \"vehiculoCilindros\": \"4\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseURL}}/docuSeal/vehiclePurchaseRequestManTemplate3",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"docuSeal",
+						"vehiclePurchaseRequestManTemplate3"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "vehicleTransferRequestTemplate6",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"demo@correo.com\",\r\n  \"fecha\": \"25 Marzo 2025\",\r\n  \"nombrePersona\": \"JUAN PEREZ\",\r\n  \"dpiPersona\": \"juan perez (1234567890123)\",\r\n  \"empresa\": \"Cube Investments\",\r\n  \"tipoVehiculo\": \"PICKUP\",\r\n  \"marcaVehiculo\": \"NISSAN\",\r\n  \"colorVehiculo\": \"BLANCO\",\r\n  \"usoVehiculo\": \"COMERCIAL\",\r\n  \"chasisVehiculo\": \"CHS987654321\",\r\n  \"combustibleVehiculo\": \"DIESEL\",\r\n  \"motorVehiculo\": \"MTR654987321\",\r\n  \"serieVehiculo\": \"SR45678\",\r\n  \"lineaVehiculo\": \"NP300\",\r\n  \"modeloVehiculo\": \"2022\",\r\n  \"cm3Vehiculo\": \"2500\",\r\n  \"asientosVehiculo\": \"5\",\r\n  \"cilindrosVehiculo\": \"4\",\r\n  \"iscvVehiculo\": \"ISC456789\",\r\n  \"nombreDeLaPersona\": \"JUAN PEREZ\",\r\n  \"dpi\": \"1234567890123\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseURL}}/docuSeal/vehicleTransferRequestTemplate6",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"docuSeal",
+						"vehicleTransferRequestTemplate6"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "vehiclePurchaseRequestManTemplate7",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"demo@correo.com\",\r\n  \"vehiculoTipo\": \"PICKUP\",\r\n  \"vehiculoMarca\": \"TOYOTA\",\r\n  \"vehiculoColor\": \"ROJO\",\r\n  \"vehiculoUso\": \"PARTICULAR\",\r\n  \"vehiculoChasis\": \"CHS123456789\",\r\n  \"vehiculoCombustible\": \"GASOLINA\",\r\n  \"vehiculoMotor\": \"MTR987654321\",\r\n  \"vehiculoSerie\": \"SR12345\",\r\n  \"vehiculoLinea\": \"HILUX\",\r\n  \"vehiculoModelo\": \"2023\",\r\n  \"vehiculoCm3\": \"2700\",\r\n  \"vehiculoAsientos\": \"5\",\r\n  \"vehiculoCilindros\": \"4\",\r\n  \"vehiculoIscv\": \"ISC987654\",\r\n  \"nombreDeudor\": \"JUAN PEREZ\",\r\n  \"dpiDeudorTexto\": \"juan perez (1234567890123)\",\r\n  \"dia\": \"lunes\",\r\n  \"mes\": \"marzo\",\r\n  \"año\": \"dosmilveinticinco\",\r\n  \"nombreDeudorFirma\": \"JUAN PEREZ\",\r\n  \"dpiDeudor\": \"1234567890123\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:9000/docuSeal/vehiclePurchaseRequestManTemplate7",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "9000",
+					"path": [
+						"docuSeal",
+						"vehiclePurchaseRequestManTemplate7"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "coberturaInrexsaTemplate8",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"demo@correo.com\",\r\n  \"vehiculoTipo\": \"PICKUP\",\r\n  \"vehiculoMarca\": \"TOYOTA\",\r\n  \"vehiculoColor\": \"BLANCO\",\r\n  \"vehiculoUso\": \"CARGA LIVIANA\",\r\n  \"vehiculoChasis\": \"CHS11223344\",\r\n  \"vehiculoCombustible\": \"DIESEL\",\r\n  \"vehiculoMotor\": \"MTR99887766\",\r\n  \"vehiculoSerie\": \"SR1122\",\r\n  \"vehiculoLinea\": \"HILUX\",\r\n  \"vehiculoModelo\": \"2023\",\r\n  \"vehiculoCm3\": \"2500\",\r\n  \"vehiculoAsientos\": \"2\",\r\n  \"vehiculoCilindros\": \"4\",\r\n  \"vehiculoIscv\": \"ISC987654\",\r\n  \"nombreDeudor\": \"CARLOS MENDEZ\",\r\n  \"dpiDeudorTexto\": \"carlos mendez (1234567890123)\",\r\n  \"dia\": \"lunes\",\r\n  \"mes\": \"mayo\",\r\n  \"año\": \"dosmilveinticinco\",\r\n  \"nombreDeudorFirma\": \"CARLOS MENDEZ\",\r\n  \"dpiDeudor\": \"1234567890123\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseURL}}/docuSeal/coberturaInrexsaTemplate8",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"docuSeal",
+						"coberturaInrexsaTemplate8"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "debtAcknowledgementTemplate9",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"demo@correo.com\",\r\n  \"dia\": \"cinco\",\r\n  \"mes\": \"febrero\",\r\n  \"año\": \"dosmilveinticinco\",\r\n  \"edadAndresAsencio\": \"40\",\r\n  \"dpiAndresAsencio\": \"dos mil quinientos cincuenta y tres...\",\r\n  \"nombreDeudor\": \"CARLOS MENDEZ\",\r\n  \"edadDeudor\": \"treinta\",\r\n  \"estadoCivilDeudor\": \"casado\",\r\n  \"profesionDeudor\": \"ingeniero\",\r\n  \"nacionalidadDeudor\": \"guatemalteco\",\r\n  \"dpiDeudor\": \"mil doscientos treinta y cuatro...\",\r\n  \"capitalAdeudado\": \"QUINIENTOS MIL QUETZALES (500000)\",\r\n  \"mesesPrestamo\": \"DOCE 12\",\r\n  \"cuotasMensuales\": \"CUARENTA MIL QUETZALES (40000)\",\r\n  \"porcentajeDeudaTexto\": \"diez por ciento\",\r\n  \"porcentajeDeudaNumero\": \"10\",\r\n  \"porcentajeMoraTexto\": \"quince por ciento\",\r\n  \"porcentajeMoraNumero\": \"15\",\r\n  \"direccionDeudor\": \"CIUDAD DE GUATEMALA ZONA DIEZ\",\r\n  \"vehiculoTipo\": \"PICKUP\",\r\n  \"vehiculoMarca\": \"TOYOTA\",\r\n  \"vehiculoColor\": \"BLANCO\",\r\n  \"vehiculoUso\": \"CARGA LIVIANA\",\r\n  \"vehiculoChasis\": \"CHS11223344\",\r\n  \"vehiculoCombustible\": \"DIESEL\",\r\n  \"vehiculoMotor\": \"MTR99887766\",\r\n  \"vehiculoSerie\": \"SR1122\",\r\n  \"vehiculoLinea\": \"HILUX\",\r\n  \"vehiculoModelo\": \"2023\",\r\n  \"vehiculoCm3\": \"2500\",\r\n  \"vehiculoAsientos\": \"2\",\r\n  \"vehiculoCilindros\": \"4\",\r\n  \"vehiculoIscv\": \"ISC987654\",\r\n  \"nombreDeudorFirma\": \"CARLOS MENDEZ\",\r\n  \"dpiDeudorFirma\": \"1234567890123\", \r\n  \"firmaCashIn\": \"https://a.storyblok.com/f/191576/1176x882/0707bde47c/make_signature_hero_after.webp\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseURL}}/docuSeal/debtAcknowledgementTemplate9",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"docuSeal",
+						"debtAcknowledgementTemplate9"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "generateNewCarLetterTemplate10",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"cliente@correo.com\",\r\n  \"fecha\": \"20 febrero 2025\",\r\n  \"nombreDeudor\": \"JUAN PEREZ GARCIA\",\r\n  \"dpiDeudor\": \"dpi en letras (1234567890123)\",\r\n  \"vehiculoTipo\": \"SEDAN\",\r\n  \"vehiculoMarca\": \"HONDA\",\r\n  \"vehiculoColor\": \"ROJO\",\r\n  \"vehiculoUso\": \"PARTICULAR\",\r\n  \"vehiculoChasis\": \"CHS99887766\",\r\n  \"vehiculoCombustible\": \"GASOLINA\",\r\n  \"vehiculoMotor\": \"MTR123456\",\r\n  \"vehiculoSerie\": \"SER112233\",\r\n  \"vehiculoLinea\": \"CIVIC\",\r\n  \"vehiculoModelo\": \"2025\",\r\n  \"vehiculoCm3\": \"2000\",\r\n  \"vehiculoAsientos\": \"5\",\r\n  \"vehiculoCilindros\": \"4\",\r\n  \"vehiculoIscv\": \"ISC001122\",\r\n  \"empresa\": \"CUBE INVESTMENTS\",\r\n  \"nombreDeudorFirma\": \"JUAN PEREZ GARCIA\",\r\n  \"dpiFirmaPersona\": \"1234567890123\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://127.0.0.1:9000/docuSeal/generateNewCarLetterTemplate10",
+					"protocol": "http",
+					"host": [
+						"127",
+						"0",
+						"0",
+						"1"
+					],
+					"port": "9000",
+					"path": [
+						"docuSeal",
+						"generateNewCarLetterTemplate10"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "responsibilityDisclaimerWomanTemplate12",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"email\": \"deudora@correo.com\",\r\n  \"vehiculoTipo\": \"SEDAN (12345)\",\r\n  \"vehiculoMarca\": \"TOYOTA (67890)\",\r\n  \"vehiculoColor\": \"ROJO (001)\",\r\n  \"vehiculoUso\": \"PARTICULAR (01)\",\r\n  \"vehiculoChasis\": \"CHASIS12345\",\r\n  \"vehiculoCombustible\": \"GASOLINA (95)\",\r\n  \"vehiculoMotor\": \"MOTOR12345\",\r\n  \"vehiculoSerie\": \"SERIE98765\",\r\n  \"vehiculoLinea\": \"COROLLA (2025)\",\r\n  \"vehiculoModelo\": \"2025\",\r\n  \"vehiculoCm3\": \"2000\",\r\n  \"vehiculoAsientos\": \"5\",\r\n  \"vehiculoCilindros\": \"4\",\r\n  \"vehiculoIscv\": \"123456\",\r\n  \"nombreDeudora\": \"MARIA FERNANDA LOPEZ\",\r\n  \"dpiDeudora\": \"tres millones quinientos (1234567890123)\",\r\n  \"dia\": \"cinco\",\r\n  \"mes\": \"febrero\",\r\n  \"año\": \"dos mil veinticinco\", \r\n  \"nombreDeudoraConfirm\": \"MARIA FERNANDA LOPEZ\",\r\n  \"dpiDeudor\": \"1234567890123\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "{{baseURL}}/docuSeal/responsibilityDisclaimerWomanTemplate12",
+					"host": [
+						"{{baseURL}}"
+					],
+					"path": [
+						"docuSeal",
+						"responsibilityDisclaimerWomanTemplate12"
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "baseURL",
+			"value": "",
+			"type": "default"
+		}
+	]
+}

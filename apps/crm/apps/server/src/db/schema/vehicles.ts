@@ -1,6 +1,20 @@
-import { pgTable, text, integer, timestamp, boolean, decimal, json, uuid } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, boolean, decimal, json, uuid, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { companies } from './crm';
+// Enum definition for vehicle status
+// Available values:
+// - pending: Vehicle is registered but not yet available
+// - available: Vehicle is available for sale
+// - sold: Vehicle has been sold
+// - maintenance: Vehicle is under maintenance
+// - auction: Vehicle is being sold at auction
+export const vehicleStatusEnum = pgEnum("vehicle_status", [
+  "pending",
+  "available",
+  "sold",
+  "maintenance",
+  "auction",
+]);
 
 // Vehicle Vendors table - Sellers of vehicles
 export const vehicleVendors = pgTable('vehicle_vendors', {
@@ -48,7 +62,7 @@ export const vehicles = pgTable('vehicles', {
   transmission: text('transmission').notNull(), // Automático, Manual
   
   // Status
-  status: text('status').notNull().default('pending'), // pending, available, sold, maintenance
+  status: vehicleStatusEnum("status").notNull().default("pending"),
   
   // Company relationship
   companyId: uuid('company_id').references(() => companies.id),

@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, count, desc, asc, sql, or } from "drizzle-orm";
+import { and, eq, gte, count, desc, asc, sql, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -11,11 +11,9 @@ import {
 	contactosCobros,
 	conveniosPago,
 	recuperacionesVehiculo,
-	notificacionesCobros,
 	estadoMoraEnum,
 	metodoContactoEnum,
 	estadoContactoEnum,
-	tipoRecuperacionEnum,
 } from "../db/schema/cobros";
 import { cobrosProcedure, adminProcedure } from "../lib/orpc";
 
@@ -107,7 +105,7 @@ export const cobrosRouter = {
 				offset: z.number().default(0),
 			})
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			// Obtener todos los contratos con información de casos de cobros (si existen)
 			const contratos = await db
 				.select({

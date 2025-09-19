@@ -107,6 +107,10 @@ export const vehiclePhotos = pgTable('vehicle_photos', {
   description: text('description'),
   url: text('url').notNull(),
   
+  // Valuator comments and verification
+  valuatorComment: text('valuator_comment'), // Comentario del valuador sobre la foto
+  noCommentsChecked: boolean('no_comments_checked').notNull().default(false), // Checkbox "Sin comentarios"
+  
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 

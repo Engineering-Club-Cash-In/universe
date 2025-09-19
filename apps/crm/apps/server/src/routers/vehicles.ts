@@ -11,6 +11,7 @@ import {
   type NewVehiclePhoto,
   type NewInspectionChecklistItem
 } from "../db/schema";
+import { contratosFinanciamiento, conveniosPago, casosCobros } from "../db/schema/cobros";
 import { protectedProcedure, publicProcedure } from "../lib/orpc";
 
 export const vehiclesRouter = {
@@ -85,7 +86,28 @@ export const vehiclesRouter = {
         }
       });
 
-      return Array.from(vehiclesMap.values());
+      // Get payment agreements for vehicles
+      const allVehicleIds = Array.from(vehiclesMap.keys());
+      const vehicleConvenios = allVehicleIds.length > 0 ? await db
+        .select({
+          vehicleId: contratosFinanciamiento.vehicleId,
+          hasActiveConvenio: conveniosPago.activo,
+        })
+        .from(contratosFinanciamiento)
+        .leftJoin(casosCobros, eq(contratosFinanciamiento.id, casosCobros.contratoId))
+        .leftJoin(conveniosPago, eq(casosCobros.id, conveniosPago.casoCobroId))
+        .where(and(
+          or(...allVehicleIds.map(id => eq(contratosFinanciamiento.vehicleId, id))),
+          eq(conveniosPago.activo, true)
+        )) : [];
+
+      // Add convenio info to vehicles
+      const vehiclesWithConvenios = Array.from(vehiclesMap.values()).map(vehicle => ({
+        ...vehicle,
+        hasPaymentAgreement: vehicleConvenios.some(c => c.vehicleId === vehicle.id && c.hasActiveConvenio)
+      }));
+
+      return vehiclesWithConvenios;
     }),
 
   // Get vehicle by ID with all related data

@@ -206,6 +206,10 @@ export const opportunities = pgTable("opportunities", {
 	assignedTo: text("assigned_to")
 		.notNull()
 		.references(() => user.id),
+	
+	// Vehicle vendor relationship
+	vendorId: uuid("vendor_id"),
+	
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),

@@ -96,26 +96,14 @@ export const appRouter = {
   getVehicleStatistics: vehiclesRouter.getStatistics,
   createFullVehicleInspection: vehiclesRouter.createFullInspection,
 
-  // Cobros routes
-  getCobrosDashboardStats: cobrosRouter.getDashboardStats,
-  getCasosCobros: cobrosRouter.getCasosCobros,
-  getCasoCobroById: cobrosRouter.getCasoCobroById,
-  createContactoCobros: cobrosRouter.createContactoCobros,
-  getHistorialContactos: cobrosRouter.getHistorialContactos,
-  createConvenioPago: cobrosRouter.createConvenioPago,
-  getConveniosPago: cobrosRouter.getConveniosPago,
-  asignarResponsableCobros: cobrosRouter.asignarResponsableCobros,
-  getUsuariosCobros: cobrosRouter.getUsuariosCobros,
-  getHistorialPagos: cobrosRouter.getHistorialPagos,
-  getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
-  getTodosLosContratos: cobrosRouter.getTodosLosContratos,
-  getDetallesContrato: cobrosRouter.getDetallesContrato,
+ 
 
   // Auction routes (subastas 🚗💸)
   createAuction: auctionRouter.createAuction,
   closeAuction: auctionRouter.closeAuction,
   getAuctions: auctionRouter.getAuctions,
-  addAuctionExpense: auctionRouter.addAuctionExpense,
+  addAuctionExpense: auctionRouter.addAuctionExpense, 
+  cancelAuction: auctionRouter.cancelAuction,
 };
 
 export type AppRouter = typeof appRouter;

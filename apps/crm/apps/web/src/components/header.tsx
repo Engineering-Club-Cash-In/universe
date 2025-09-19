@@ -95,6 +95,13 @@ export default function Header() {
 										</Link>
 									</NavigationMenuItem>
 									<NavigationMenuItem>
+												<Link to="/vehicles/auction-vehicles">
+													<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
+													Carros en Remate
+													</NavigationMenuLink>
+												</Link>
+												</NavigationMenuItem>
+									<NavigationMenuItem>
 										<Link to="/crm/vendors">
 											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
 												Vendedores

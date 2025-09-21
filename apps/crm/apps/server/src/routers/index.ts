@@ -61,6 +61,7 @@ export const appRouter = {
 	getVehicleStatistics: vehiclesRouter.getStatistics,
 	createFullVehicleInspection: vehiclesRouter.createFullInspection,
 	processVehicleRegistrationOCR: vehiclesRouter.processVehicleRegistrationOCR,
+	getAIVehicleValuation: vehiclesRouter.getAIVehicleValuation,
 
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,

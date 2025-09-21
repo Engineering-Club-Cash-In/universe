@@ -275,8 +275,12 @@ app.post("/info/lead-opportunity", async (c) => {
       // Documentos legales opcionales
       electricityBill?: string;
       bankStatements?: string;
+      bankStatements2?:string;
+      bankStatements3?:string;
     }>();
-
+    
+    console.log("Environment:", process.env.NODE_ENV);
+    console.log("[DEBUG] /info/lead-opportunity request with body:", body);
     if (!body.dpi) {
       return c.json({ success: false, message: "DPI is required" }, 400);
     }
@@ -297,6 +301,7 @@ app.post("/info/lead-progress", async (c) => {
     if (!body.phone) {
       return c.json({ success: false, message: "Phone is required" }, 400);
     }
+    console.log("Environment:", process.env.NODE_ENV);
 
     console.log("[DEBUG] /info/lead-progress request with phone:", body.phone);
 

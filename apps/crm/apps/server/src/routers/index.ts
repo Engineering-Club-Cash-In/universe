@@ -81,20 +81,7 @@ export const appRouter = {
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
-  // Vehicles routes
-  getVehicles: vehiclesRouter.getAll,
-  getVehicleById: vehiclesRouter.getById,
-  createVehicle: vehiclesRouter.create,
-  updateVehicle: vehiclesRouter.update,
-  deleteVehicle: vehiclesRouter.delete,
-  searchVehicles: vehiclesRouter.search,
-  createVehicleInspection: vehiclesRouter.createInspection,
-  updateVehicleInspection: vehiclesRouter.updateInspection,
-  uploadVehiclePhoto: vehiclesRouter.uploadPhoto,
-  deleteVehiclePhoto: vehiclesRouter.deletePhoto,
-  getVehicleInspectionById: vehiclesRouter.getInspectionById,
-  getVehicleStatistics: vehiclesRouter.getStatistics,
-  createFullVehicleInspection: vehiclesRouter.createFullInspection,
+
 
  
 

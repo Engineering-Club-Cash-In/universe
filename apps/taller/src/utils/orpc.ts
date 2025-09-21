@@ -70,4 +70,8 @@ export const vehiclesApi = {
   
   // Get statistics
   getStatistics: () => client.getVehicleStatistics(),
+  
+  // Process vehicle registration OCR
+  processRegistrationOCR: (data: Parameters<typeof client.processVehicleRegistrationOCR>[0]) => 
+    client.processVehicleRegistrationOCR(data),
 };

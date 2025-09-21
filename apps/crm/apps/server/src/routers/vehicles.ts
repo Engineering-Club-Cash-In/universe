@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { eq, desc, and, or, ilike } from "drizzle-orm";
+import { generateObject } from "ai";
+import { openai } from "@ai-sdk/openai";
+import { ORPCError } from "@orpc/server";
 import { db } from "../db";
 import { 
   vehicles, 
@@ -13,6 +16,7 @@ import {
 } from "../db/schema";
 import { contratosFinanciamiento, conveniosPago, casosCobros } from "../db/schema/cobros";
 import { protectedProcedure, publicProcedure } from "../lib/orpc";
+import { vehicleRegistrationOCRSchema, mapOCRToVehicleForm } from "../lib/ocr-schema";
 
 export const vehiclesRouter = {
   // Get all vehicles with their latest inspection and photos
@@ -630,6 +634,115 @@ export const vehiclesRouter = {
       } catch (error) {
         console.error('Error in createFullInspection:', error);
         throw new Error(`Error al guardar la inspección: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+      }
+    }),
+
+  // OCR endpoint for vehicle registration card (tarjeta de circulación)
+  processVehicleRegistrationOCR: publicProcedure
+    .input(z.object({
+      imageBase64: z.string().describe("Base64 encoded image of the vehicle registration card"),
+      mimeType: z.string().optional().default("image/jpeg").describe("MIME type of the image"),
+    }))
+    .handler(async ({ input }) => {
+      try {
+        console.log('Processing OCR for vehicle registration card...');
+        
+        // Use DeepSeek model for OCR processing
+        const isPDF = input.mimeType === 'application/pdf';
+        
+        // Convert base64 string to Buffer for file content
+        const fileBuffer = Buffer.from(input.imageBase64, 'base64');
+        
+        const { object } = await generateObject({
+          model: openai('gpt-4o-mini'),
+          schema: vehicleRegistrationOCRSchema,
+          messages: [
+            {
+              role: 'system',
+              content: `Eres un especialista en extracción de datos de tarjetas de circulación guatemaltecas del SAT (Superintendencia de Administración Tributaria).
+
+Tu tarea es extraer información específica de vehículos de estos documentos oficiales. Extrae estos campos cuando estén disponibles:
+
+INFORMACIÓN DEL VEHÍCULO:
+- Placa (formato: P0-123ABC)
+- Marca (ej: TOYOTA, NISSAN) 
+- Línea (nombre del modelo, ej: COROLLA, SENTRA)
+- Modelo/Año (año del vehículo, ej: 2020, 2023)
+- Color (descripción del color)
+- Tipo de vehículo (ej: AUTOMOVIL, CAMIONETA)
+
+ESPECIFICACIONES TÉCNICAS:
+- VIN/Chasis/Serie (números de identificación únicos)
+- Motor/CC (cilindrada)
+- Cilindros (número)
+- Asientos (número)
+
+REGLAS IMPORTANTES:
+- Si encuentras al menos 3 campos correctos: extractionSuccess = true
+- Si extraes menos de 3 campos: extractionSuccess = false  
+- Siempre retorna un objeto JSON válido con extractionSuccess como boolean y extractionErrors como array
+- Deja campos vacíos ("") si no los encuentras claramente
+- NO uses estructura "properties", retorna el objeto directamente
+- Ejemplo correcto: {"licensePlate": "P0-123ABC", "make": "TOYOTA", "line": "COROLLA", "model": "2020", "extractionSuccess": true, "extractionErrors": []}`
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: 'Extrae la información de esta tarjeta de circulación:'
+                },
+                isPDF ? {
+                  type: 'file',
+                  data: fileBuffer,
+                  mediaType: 'application/pdf',
+                  filename: 'tarjeta_circulacion.pdf'
+                } : {
+                  type: 'image',
+                  image: fileBuffer,
+                  mediaType: input.mimeType
+                }
+              ]
+            }
+          ],
+        });
+
+        console.log('OCR extraction result:', object);
+
+        // Map OCR data to vehicle form format
+        const mappedData = mapOCRToVehicleForm(object);
+        
+        return {
+          success: true,
+          ocrData: object,
+          mappedFormData: mappedData,
+          message: object.extractionSuccess 
+            ? "Información extraída exitosamente de la tarjeta de circulación" 
+            : "Información extraída parcialmente. Algunos campos necesitan ser completados manualmente.",
+        };
+
+      } catch (error) {
+        console.error('OCR processing error:', error);
+        
+        // Create user-friendly error message
+        let userMessage = "No se pudo procesar el archivo. Por favor complete los campos manualmente.";
+        
+        // Handle specific error types for better UX
+        if (error instanceof Error) {
+          const errorMsg = error.message.toLowerCase();
+          if (errorMsg.includes('schema') || errorMsg.includes('validation')) {
+            userMessage = "Error al procesar la respuesta. Por favor intente nuevamente o complete manualmente.";
+          } else if (errorMsg.includes('file') || errorMsg.includes('pdf') || errorMsg.includes('image')) {
+            userMessage = "El formato del archivo no es compatible. Por favor convierta a imagen (JPG/PNG) e intente nuevamente.";
+          } else if (errorMsg.includes('api') || errorMsg.includes('key')) {
+            userMessage = "Error de configuración del servicio. Contacte al administrador.";
+          } else if (errorMsg.includes('network') || errorMsg.includes('timeout')) {
+            userMessage = "Error de conexión. Verifique su internet e intente nuevamente.";
+          }
+        }
+        
+        // Throw ORPCError instead of returning success=false to make ORPC return proper error status
+        throw new ORPCError("BAD_REQUEST", { message: userMessage });
       }
     })
 };

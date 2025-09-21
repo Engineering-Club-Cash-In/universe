@@ -1,11 +1,12 @@
 import { z } from "zod";
-import { eq, desc, and, or, ilike } from "drizzle-orm";
+import { eq, desc, and, or, ilike, ne } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
 import { db } from "../db";
 import { 
   vehicleVendors,
   type NewVehicleVendor
 } from "../db/schema/vehicles";
-import { protectedProcedure, crmProcedure } from "../lib/orpc";
+import { crmProcedure } from "../lib/orpc";
 
 export const vendorsRouter = {
   // Get all vendors
@@ -56,7 +57,10 @@ export const vendorsRouter = {
         .limit(1);
 
       if (existingVendor.length > 0) {
-        throw new Error("Ya existe un vendedor con este DPI");
+        const vendor = existingVendor[0];
+        throw new ORPCError("CONFLICT", {
+          message: `Ya existe un vendedor con el DPI ${input.dpi}: ${vendor.name} (${vendor.vendorType === "empresa" ? vendor.companyName || "Empresa" : "Individual"})`
+        });
       }
 
       const [newVendor] = await db
@@ -85,15 +89,22 @@ export const vendorsRouter = {
       })
     }))
     .handler(async ({ input }) => {
-      // Check if DPI exists for another vendor
+      // Check if DPI exists for another vendor (not the current one being updated)
       const existingVendor = await db
         .select()
         .from(vehicleVendors)
         .where(and(
           eq(vehicleVendors.dpi, input.data.dpi),
-          eq(vehicleVendors.id, input.id)
+          ne(vehicleVendors.id, input.id) // Different vendor ID
         ))
         .limit(1);
+
+      if (existingVendor.length > 0) {
+        const vendor = existingVendor[0];
+        throw new ORPCError("CONFLICT", {
+          message: `Ya existe un vendedor con el DPI ${input.data.dpi}: ${vendor.name} (${vendor.vendorType === "empresa" ? vendor.companyName || "Empresa" : "Individual"})`
+        });
+      }
 
       const [updated] = await db
         .update(vehicleVendors)

@@ -74,4 +74,8 @@ export const vehiclesApi = {
   // Process vehicle registration OCR
   processRegistrationOCR: (data: Parameters<typeof client.processVehicleRegistrationOCR>[0]) => 
     client.processVehicleRegistrationOCR(data),
+  
+  // Get AI vehicle valuation
+  getAIValuation: (data: Parameters<typeof client.getAIVehicleValuation>[0]) =>
+    client.getAIVehicleValuation(data),
 };

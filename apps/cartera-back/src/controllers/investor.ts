@@ -9,7 +9,8 @@ import {
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db/schema";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, ilike } from "drizzle-orm";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 export const insertInvestor = async ({ body, set }: any) => {
   try {
     let inversionistasToInsert = [];
@@ -21,7 +22,7 @@ export const insertInvestor = async ({ body, set }: any) => {
       inversionistasToInsert = [body];
     }
 
-    // Validación: todos deben tener nombre y emite_factura
+    // Validación mínima: nombre y emite_factura son obligatorios
     const isValid = inversionistasToInsert.every(
       (inv) => inv.nombre && typeof inv.emite_factura !== "undefined"
     );
@@ -32,15 +33,25 @@ export const insertInvestor = async ({ body, set }: any) => {
       };
     }
 
-    // Puedes incluir 'categoria_pago' si tu modelo lo espera
+    // Insertar en la tabla inversionistas
     const inserted = await db
       .insert(inversionistas)
       .values(
         inversionistasToInsert.map(
-          ({ nombre, emite_factura, categoria_pago }) => ({
+          ({
             nombre,
             emite_factura,
-            categoria_pago: categoria_pago ?? null,
+            reinversion = false, // default false
+            banco = null,
+            tipo_cuenta = null,
+            numero_cuenta = null,
+          }) => ({
+            nombre,
+            emite_factura,
+            reinversion,
+            banco,
+            tipo_cuenta,
+            numero_cuenta,
           })
         )
       )
@@ -53,7 +64,6 @@ export const insertInvestor = async ({ body, set }: any) => {
     return { message: "Error inserting investors", error: String(error) };
   }
 };
-
 // GET: Obtener inversionistas (uno o todos)
 export const getInvestors = async ({ query, set }: any) => {
   try {
@@ -279,7 +289,6 @@ export async function processAndReplaceCreditInvestorsReverse(
   abono_capital: number,
   addition: boolean,
   pago_id: number
- 
 ) {
   // 1. Fetch credit details
   const credit = await db.query.creditos.findFirst({
@@ -302,16 +311,19 @@ export async function processAndReplaceCreditInvestorsReverse(
   // 3. Process and calculate new values for each investor
   const processedInvestors = investors.map(async (inv) => {
     const [abonoCapital] = await db
-  .select({
-    abono_capital: pagos_credito_inversionistas.abono_capital,
-  })
-  .from(pagos_credito_inversionistas)
-  .where(
-    and(
-      eq(pagos_credito_inversionistas.pago_id, pago_id),
-      eq(pagos_credito_inversionistas.inversionista_id, inv.inversionista_id)
-    )
-  );
+      .select({
+        abono_capital: pagos_credito_inversionistas.abono_capital,
+      })
+      .from(pagos_credito_inversionistas)
+      .where(
+        and(
+          eq(pagos_credito_inversionistas.pago_id, pago_id),
+          eq(
+            pagos_credito_inversionistas.inversionista_id,
+            inv.inversionista_id
+          )
+        )
+      );
 
     const montoAportado = addition
       ? new Big(inv.monto_aportado).add(abonoCapital.abono_capital)
@@ -362,8 +374,8 @@ export async function processAndReplaceCreditInvestorsReverse(
       .update(creditos_inversionistas)
       .set({
         cuota_inversionista: (await inv).cuota_inversionista,
-        porcentaje_participacion_inversionista:
-          (await inv).porcentaje_participacion_inversionista,
+        porcentaje_participacion_inversionista: (await inv)
+          .porcentaje_participacion_inversionista,
         monto_aportado: (await inv).monto_aportado,
         porcentaje_cash_in: (await inv).porcentaje_cash_in,
         iva_inversionista: (await inv).iva_inversionista,
@@ -389,49 +401,135 @@ export async function processAndReplaceCreditInvestorsReverse(
  * y cada resumen individual incluye su subtotal global.
  */
 export async function resumeInvestor(
-  investorId?: number,
+  investorId: number, // 👈 ahora obligatorio
   page = 1,
-  perPage = 10
+  perPage = 10,
+  numeroCreditoSifco?: string, // 👈 filtro nuevo
+  nombreUsuario?: string // 👈 filtro nuevo
 ) {
-  const conditionInvestor = investorId
-    ? eq(inversionistas.inversionista_id, investorId)
-    : sql`TRUE`;
+  console.log("resumeInvestor for", investorId);
+
+  // 1. Consulta inversionista único
   const listaInversionistas = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
+      reinversion: inversionistas.reinversion,
+      banco: inversionistas.banco,
+      tipo_cuenta: inversionistas.tipo_cuenta,
+      numero_cuenta: inversionistas.numero_cuenta,
     })
     .from(inversionistas)
-    .where(conditionInvestor);
+    .where(eq(inversionistas.inversionista_id, investorId))
+    .limit(1);
 
-  // PAGINADO de inversionistas
-  const pageNum = Math.max(1, Number(page) || 1);
-  const perPageNum = Math.max(1, Number(perPage) || 10);
-  const totalItems = listaInversionistas.length;
-  const totalPages = Math.ceil(totalItems / perPageNum);
-  const startIdx = (pageNum - 1) * perPageNum;
-  const pagedInversionistas = listaInversionistas.slice(
-    startIdx,
-    startIdx + perPageNum
+  if (listaInversionistas.length === 0) {
+    return { inversionistas: [], page, perPage, totalItems: 0, totalPages: 0 };
+  }
+
+  const inversionistaIds = listaInversionistas.map((i) => i.inversionista_id);
+
+  // 2. Créditos asociados al inversionista
+  const creditosParticipa = await db
+    .select({
+      credito_id: creditos_inversionistas.credito_id,
+      inversionista_id: creditos_inversionistas.inversionista_id,
+      monto_aportado: creditos_inversionistas.monto_aportado,
+      porcentaje_inversionista:
+        creditos_inversionistas.porcentaje_participacion_inversionista,
+      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+    })
+    .from(creditos_inversionistas)
+    .where(inArray(creditos_inversionistas.inversionista_id, inversionistaIds));
+
+  let creditosIds = creditosParticipa.map((c) => c.credito_id);
+
+  if (creditosIds.length === 0) {
+    return { inversionistas: [], page, perPage, totalItems: 0, totalPages: 0 };
+  }
+
+  // 3. Info de créditos con filtros
+  let conditions = [inArray(creditos.credito_id, creditosIds)];
+
+  if (numeroCreditoSifco) {
+    conditions.push(eq(creditos.numero_credito_sifco, numeroCreditoSifco));
+  }
+
+  if (nombreUsuario) {
+    conditions.push(ilike(usuarios.nombre, `%${nombreUsuario}%`));
+  }
+
+  const creditosInfo = await db
+    .select({
+      credito_id: creditos.credito_id,
+      numero_credito_sifco: creditos.numero_credito_sifco,
+      nombre_usuario: usuarios.nombre,
+      nit_usuario: usuarios.nit,
+      capital: creditos.capital,
+      porcentaje_interes: creditos.porcentaje_interes,
+      cuota_interes: creditos.cuota_interes,
+      iva12: creditos.iva_12,
+      fecha_creacion: creditos.fecha_creacion,
+    })
+    .from(creditos)
+    .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+    .where(and(...conditions));
+
+  creditosIds = creditosInfo.map((c) => c.credito_id);
+
+  if (creditosIds.length === 0) {
+    return { inversionistas: [], page, perPage, totalItems: 0, totalPages: 0 };
+  }
+
+  // 🚀 Paginación sobre créditos
+  const totalItems = creditosIds.length;
+  const totalPages = Math.ceil(totalItems / perPage);
+  const creditosIdsPaginados = creditosIds.slice(
+    (page - 1) * perPage,
+    page * perPage
   );
 
-  const inversionistasResumen: any[] = [];
+  const creditosMap = Object.fromEntries(
+    creditosInfo.map((c) => [c.credito_id, c])
+  );
 
-  for (const inv of pagedInversionistas) {
-    // Buscar créditos de ese inversionista
-    const creditosParticipa = await db
-      .select({
-        credito_id: creditos_inversionistas.credito_id,
-        monto_aportado: creditos_inversionistas.monto_aportado,
-        porcentaje_inversionista:
-          creditos_inversionistas.porcentaje_participacion_inversionista,
-        cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-      })
-      .from(creditos_inversionistas)
-      .where(
-        eq(creditos_inversionistas.inversionista_id, inv.inversionista_id)
-      );
+  // 4. Pagos NO_LIQUIDADOS
+  const pagos = await db
+    .select({
+      credito_id: pagos_credito_inversionistas.credito_id,
+      inversionista_id: pagos_credito_inversionistas.inversionista_id,
+      abono_capital: pagos_credito_inversionistas.abono_capital,
+      abono_interes: pagos_credito_inversionistas.abono_interes,
+      abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
+      fecha_pago: pagos_credito_inversionistas.fecha_pago,
+      porcentaje_participacion:
+        pagos_credito_inversionistas.porcentaje_participacion,
+      abonoGeneralInteres: pagos_credito.abono_interes,
+    })
+    .from(pagos_credito_inversionistas)
+    .innerJoin(
+      pagos_credito,
+      eq(pagos_credito_inversionistas.pago_id, pagos_credito.pago_id)
+    )
+    .where(
+      and(
+        inArray(pagos_credito_inversionistas.credito_id, creditosIdsPaginados),
+        inArray(
+          pagos_credito_inversionistas.inversionista_id,
+          inversionistaIds
+        ),
+        eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
+      )
+    );
+
+  // 5. Armar estructura final (idéntico a tu versión original, solo que limitado a los créditos paginados)
+  const inversionistasResumen = listaInversionistas.map((inv) => {
+    const creditosDeInv = creditosParticipa.filter(
+      (c) =>
+        c.inversionista_id === inv.inversionista_id &&
+        creditosIdsPaginados.includes(c.credito_id)
+    );
 
     let subtotal = {
       total_abono_capital: new Big(0),
@@ -443,78 +541,30 @@ export async function resumeInvestor(
       totalAbonoGeneralInteres: new Big(0),
     };
 
-    // Array para guardar la info de cada crédito
-    const creditosData: any[] = [];
+    const creditosData = creditosDeInv.map((c) => {
+      const credito = creditosMap[c.credito_id];
+      const pagosDeCredito = pagos.filter(
+        (p) =>
+          p.credito_id === c.credito_id &&
+          p.inversionista_id === inv.inversionista_id
+      );
 
-    for (const c of creditosParticipa) {
-      // Info del crédito
-      const [credito] = await db
-        .select({
-          numero_credito_sifco: creditos.numero_credito_sifco,
-          nombre_usuario: usuarios.nombre,
-          nit_usuario: usuarios.nit,
-          capital: creditos.capital,
-          porcentaje_interes: creditos.porcentaje_interes,
-            meses_en_credito: sql<number>`
-      GREATEST(
-        0,
-        (
-          (DATE_PART('year', AGE(LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE), ${creditos.fecha_creacion}))::int * 12)
-          + DATE_PART('month', AGE(LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE), ${creditos.fecha_creacion}))::int
-          + CASE
-              -- Contar el mes actual solo si ya pasamos (o es) el "día de corte" del inicio
-              WHEN EXTRACT(DAY FROM LEAST(COALESCE(${creditos.fecha_creacion}, CURRENT_DATE), CURRENT_DATE))
-                   >= EXTRACT(DAY FROM ${creditos.fecha_creacion})
-              THEN 1 ELSE 0
-            END
-        )
-      )
-    `.as('meses_en_credito'),
-          cuota_interes: creditos.cuota_interes,
-          iva12: creditos.iva_12,
-        })
-        .from(creditos)
-        .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-        .where(eq(creditos.credito_id, c.credito_id))
-        .limit(1);
-
-      // Pagos NO LIQUIDADOS
-      const pagos = await db
-        .select({
-          abono_capital: pagos_credito_inversionistas.abono_capital,
-          abono_interes: pagos_credito_inversionistas.abono_interes,
-          abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
-          fecha_pago: pagos_credito_inversionistas.fecha_pago,
-          porcentaje_participacion:
-            pagos_credito_inversionistas.porcentaje_participacion,
-          abonoGeneralInteres: pagos_credito.abono_interes,
-        })
-        .from(pagos_credito_inversionistas)
-        .innerJoin(
-          pagos_credito,
-          eq(pagos_credito_inversionistas.pago_id, pagos_credito.pago_id)
-        )
-        .where(
-          and(
-            eq(
-              pagos_credito_inversionistas.inversionista_id,
-              inv.inversionista_id
-            ),
-            eq(pagos_credito_inversionistas.credito_id, c.credito_id),
-            eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
-          )
-        );
-
-      // Totales de pagos de este crédito
       let total_abono_capital = new Big(0);
       let total_abono_interes = new Big(0);
       let total_abono_iva = new Big(0);
       let total_isr = new Big(0);
       let total_cuota = new Big(0);
-      let total_monto_aportado = new Big(0);
+      let total_monto_aportado = new Big(c.monto_aportado ?? 0);
       let totalAbonoGeneralInteres = new Big(0);
+      let meses_en_credito: number | null = null;
 
-      const pagos_detalle = pagos.map((pago) => {
+      if (credito?.fecha_creacion) {
+        const inicio = dayjs(credito.fecha_creacion);
+        const hoy = dayjs();
+        meses_en_credito = hoy.diff(inicio, "month");
+      }
+
+      const pagos_detalle = pagosDeCredito.map((pago) => {
         const abono_capital = new Big(pago.abono_capital ?? 0);
         const abono_interes = new Big(pago.abono_interes ?? 0);
         const abono_iva = new Big(pago.abono_iva_12 ?? 0);
@@ -522,36 +572,39 @@ export async function resumeInvestor(
         const cuota_inversor = abono_capital
           .plus(abono_interes)
           .plus(inv.emite_factura ? abono_iva : isr.neg());
-        const abonoGeneralInteres = abono_interes.plus(
-            inv.emite_factura ? abono_iva : isr.neg()
-          );  
-        totalAbonoGeneralInteres = totalAbonoGeneralInteres.plus(abonoGeneralInteres)
+        const abonoGeneralInteres = inv.emite_factura
+          ? abono_interes.plus(abono_iva) // factura → interés + IVA
+          : abono_interes.minus(isr);
+
+        totalAbonoGeneralInteres =
+          totalAbonoGeneralInteres.plus(abonoGeneralInteres);
         total_abono_capital = total_abono_capital.plus(abono_capital);
         total_abono_interes = total_abono_interes.plus(abono_interes);
         total_abono_iva = total_abono_iva.plus(abono_iva);
         total_isr = total_isr.plus(isr);
         total_cuota = total_cuota.plus(cuota_inversor);
-        total_monto_aportado = total_monto_aportado.plus(c.monto_aportado ?? 0);
+
         return {
-          mes: pago.fecha_pago?.toLocaleString("es-GT", { month: "long" }),
-          abono_capital: abono_capital.toString(),
-          abono_interes: abono_interes.toString(),
-          abono_iva: abono_iva.toString(),
-          isr: isr.toString(),
+          mes: pago.fecha_pago
+            ? pago.fecha_pago.toLocaleString("es-GT", { month: "long" })
+            : null,
+          abono_capital: Number(abono_capital.toString()),
+          abono_interes: Number(abono_interes.toString()),
+          abono_iva: Number(abono_iva.toString()),
+          isr: Number(isr.toString()),
           porcentaje_inversor: pago.porcentaje_participacion,
-          cuota_inversor: cuota_inversor.toString(),
+          cuota_inversor: Number(cuota_inversor.toString()),
           fecha_pago: pago.fecha_pago,
           cuota_inversionista: c.cuota_inversionista,
-          abonoGeneralInteres: abono_interes.plus(
-            inv.emite_factura ? abono_iva : isr.neg()
-          ),
-          tasaInteresInvesor: new Big(credito?.porcentaje_interes ?? 0).mul(
-            pago.porcentaje_participacion
+          abonoGeneralInteres: Number(abonoGeneralInteres.toString()),
+          tasaInteresInvesor: Number(
+            new Big(credito?.porcentaje_interes ?? 0).mul(
+              pago.porcentaje_participacion
+            )
           ),
         };
       });
 
-      // Suma a subtotal inversionista
       subtotal.total_monto_aportado =
         subtotal.total_monto_aportado.plus(total_monto_aportado);
       subtotal.total_abono_capital =
@@ -563,52 +616,57 @@ export async function resumeInvestor(
       subtotal.total_cuota = subtotal.total_cuota.plus(total_cuota);
       subtotal.totalAbonoGeneralInteres =
         subtotal.totalAbonoGeneralInteres.plus(totalAbonoGeneralInteres);
-      const interes = new Big(credito?.cuota_interes ?? 0).plus(
-        credito?.iva12 ?? 0
-      );
-      // Push detalle crédito
-      creditosData.push({
+
+      return {
         credito_id: c.credito_id,
         numero_credito_sifco: credito?.numero_credito_sifco,
         nombre_usuario: credito?.nombre_usuario,
         nit_usuario: credito?.nit_usuario,
         capital: credito?.capital,
         porcentaje_interes: credito?.porcentaje_interes,
-        meses_en_credito: credito?.meses_en_credito,
+        cuota_interes: credito?.cuota_interes,
+        iva12: credito?.iva12,
+        fecha_creacion: credito?.fecha_creacion,
         monto_aportado: c.monto_aportado,
         porcentaje_inversionista: c.porcentaje_inversionista,
         cuota_inversionista: c.cuota_inversionista,
         pagos: pagos_detalle,
-        total_abono_capital: total_abono_capital.toString(),
-        total_abono_interes: total_abono_interes.toString(),
-        total_abono_iva: total_abono_iva.toString(),
-        total_isr: total_isr.toString(),
-        total_cuota: total_cuota.toString(),
-        cuota_interes: interes.toString(),
-      });
-    }
+        total_abono_capital: Number(total_abono_capital.toString()),
+        total_abono_interes: Number(total_abono_interes.toString()),
+        total_abono_iva: Number(total_abono_iva.toString()),
+        total_isr: Number(total_isr.toString()),
+        total_cuota: Number(total_cuota.toString()),
+        meses_en_credito,
+      };
+    });
 
-    inversionistasResumen.push({
+    return {
       inversionista_id: inv.inversionista_id,
       inversionista: inv.inversionista,
       emite_factura: inv.emite_factura,
+      reinversion: inv.reinversion,
+      banco: inv.banco,
+      tipo_cuenta: inv.tipo_cuenta,
+      numero_cuenta: inv.numero_cuenta,
       creditosData,
       subtotal: {
-        total_abono_capital: subtotal.total_abono_capital.toString(),
-        total_abono_interes: subtotal.total_abono_interes.toString(),
-        total_abono_iva: subtotal.total_abono_iva.toString(),
-        total_isr: subtotal.total_isr.toString(),
-        total_cuota: subtotal.total_cuota.toString(),
-        total_monto_aportado: subtotal.total_monto_aportado.toString(),
-        total_abono_general_interes: subtotal.totalAbonoGeneralInteres.toString(),
+        total_abono_capital: Number(subtotal.total_abono_capital.toString()),
+        total_abono_interes: Number(subtotal.total_abono_interes.toString()),
+        total_abono_iva: Number(subtotal.total_abono_iva.toString()),
+        total_isr: Number(subtotal.total_isr.toString()),
+        total_cuota: Number(subtotal.total_cuota.toString()),
+        total_monto_aportado: Number(subtotal.total_monto_aportado.toString()),
+        total_abono_general_interes: Number(
+          subtotal.totalAbonoGeneralInteres.toString()
+        ),
       },
-    });
-  }
+    };
+  });
 
   return {
     inversionistas: inversionistasResumen,
-    page: pageNum,
-    perPage: perPageNum,
+    page,
+    perPage,
     totalItems,
     totalPages,
   };
@@ -651,12 +709,14 @@ export async function liquidateByInvestorId(inversionista_id: number) {
 import dayjs from "dayjs";
 import "dayjs/locale/es";
 import { InversionistaReporte } from "../utils/interface";
+ 
+import ExcelJS from 'exceljs';
 
 dayjs.locale("es");
 
 export function generarHTMLReporte(
   inversionista: InversionistaReporte,
-  logoUrl: string = import.meta.env.LOGO_URL || ''
+  logoUrl: string = import.meta.env.LOGO_URL || ""
 ): string {
   const {
     inversionista: nombre,
@@ -671,19 +731,21 @@ export function generarHTMLReporte(
     .reduce((s, c) => s + parseFloat(c.monto_aportado || "0"), 0)
     .toLocaleString("es-GT", { style: "currency", currency: "GTQ" });
   const abonoCapital = subtotal.total_abono_capital
-    ? parseFloat(subtotal.total_abono_capital).toLocaleString("es-GT", {
+    ? subtotal.total_abono_capital.toLocaleString("es-GT", {
         style: "currency",
         currency: "GTQ",
       })
     : "";
+
   const abonoInteres = subtotal.total_abono_interes
-    ? parseFloat(subtotal.total_abono_interes).toLocaleString("es-GT", {
+    ? subtotal.total_abono_interes.toLocaleString("es-GT", {
         style: "currency",
         currency: "GTQ",
       })
     : "";
+
   const granTotal = subtotal.total_cuota
-    ? parseFloat(subtotal.total_cuota).toLocaleString("es-GT", {
+    ? subtotal.total_cuota.toLocaleString("es-GT", {
         style: "currency",
         currency: "GTQ",
       })
@@ -931,57 +993,55 @@ export function generarHTMLReporte(
             <td></td>
             <td></td>
             <td> </td>
-            <td>${
-              subtotal.total_abono_interes
-                ? parseFloat(subtotal.total_abono_interes).toLocaleString(
-                    "es-GT",
-                    {
-                      style: "currency",
-                      currency: "GTQ",
-                    }
-                  )
-                : ""
-            }</td>
-            <td>${
-              subtotal.total_abono_iva
-                ? parseFloat(subtotal.total_abono_iva).toLocaleString("es-GT", {
-                    style: "currency",
-                    currency: "GTQ",
-                  })
-                : ""
-            }</td>
-            <td>${
-              subtotal.total_isr
-                ? parseFloat(subtotal.total_isr).toLocaleString("es-GT", {
-                    style: "currency",
-                    currency: "GTQ",
-                  })
-                : ""
-            }</td>
-  <td>${
-    subtotal.total_abono_capital
-      ? parseFloat(subtotal.total_abono_capital).toLocaleString("es-GT", {
-          style: "currency",
-          currency: "GTQ",
-        })
-      : ""
-  }</td>
           <td>${
-            subtotal.total_abono_general_interes
-              ? parseFloat(subtotal.total_abono_general_interes).toLocaleString("es-GT", {
+            subtotal.total_abono_interes
+              ? subtotal.total_abono_interes.toLocaleString("es-GT", {
                   style: "currency",
                   currency: "GTQ",
                 })
               : ""
           }</td>
-    <td>${
-      subtotal.total_monto_aportado
-        ? parseFloat(subtotal.total_monto_aportado).toLocaleString("es-GT", {
-            style: "currency",
-            currency: "GTQ",
-          })
-        : ""
-    }</td>
+<td>${
+    subtotal.total_abono_iva
+      ? subtotal.total_abono_iva.toLocaleString("es-GT", {
+          style: "currency",
+          currency: "GTQ",
+        })
+      : ""
+  }</td>
+<td>${
+    subtotal.total_isr
+      ? subtotal.total_isr.toLocaleString("es-GT", {
+          style: "currency",
+          currency: "GTQ",
+        })
+      : ""
+  }</td>
+<td>${
+    subtotal.total_abono_capital
+      ? subtotal.total_abono_capital.toLocaleString("es-GT", {
+          style: "currency",
+          currency: "GTQ",
+        })
+      : ""
+  }</td>
+<td>${
+    subtotal.total_abono_general_interes
+      ? subtotal.total_abono_general_interes.toLocaleString("es-GT", {
+          style: "currency",
+          currency: "GTQ",
+        })
+      : ""
+  }</td>
+<td>${
+    subtotal.total_monto_aportado
+      ? subtotal.total_monto_aportado.toLocaleString("es-GT", {
+          style: "currency",
+          currency: "GTQ",
+        })
+      : ""
+  }</td>
+
             <td></td>
             <td></td>
           </tr>
@@ -1001,7 +1061,7 @@ export const findOrCreateInvestor = async (
   nombre: string,
   emite_factura: boolean = true
 ) => {
-  // Buscar inversionista por nombre exacto
+  // 1. Buscar inversionista por nombre exacto
   const existingInvestor = await db
     .select()
     .from(inversionistas)
@@ -1012,16 +1072,254 @@ export const findOrCreateInvestor = async (
     return existingInvestor[0];
   }
 
-  // Si no existe, crear inversionista
+  // 2. Si no existe, crear inversionista con defaults
   const [newInvestor] = await db
     .insert(inversionistas)
     .values({
-      nombre,
-      emite_factura
+      nombre, // Usar el nombre como está definido en el schema
+      emite_factura, // Usar emite_factura como está definido en el schema
+      reinversion: false, // default
+      banco: null,
+      tipo_cuenta: null,
+      numero_cuenta: null,
     })
     .returning();
 
   return newInvestor;
- 
 };
 
+export const updateInvestor = async ({ body, set }: any) => {
+  try {
+    // Permitir un solo objeto o un arreglo
+    let inversionistasToUpdate = [];
+    if (Array.isArray(body)) {
+      inversionistasToUpdate = body;
+    } else if (typeof body === "object") {
+      inversionistasToUpdate = [body];
+    }
+
+    // Validación mínima: debe traer inversionista_id
+    const isValid = inversionistasToUpdate.every(
+      (inv) => typeof inv.inversionista_id !== "undefined"
+    );
+    if (!isValid || inversionistasToUpdate.length === 0) {
+      set.status = 400;
+      return {
+        message:
+          "Cada inversionista debe incluir inversionista_id para actualizar.",
+      };
+    }
+
+    const updatedResults = [];
+    for (const inv of inversionistasToUpdate) {
+      const {
+        inversionista_id,
+        nombre,
+        emite_factura,
+        reinversion,
+        banco,
+        tipo_cuenta,
+        numero_cuenta,
+      } = inv;
+
+      // Construir dinámicamente solo los campos enviados
+      const updateData: any = {};
+      if (typeof nombre !== "undefined") updateData.nombre = nombre;
+      if (typeof emite_factura !== "undefined")
+        updateData.emite_factura = emite_factura;
+      if (typeof reinversion !== "undefined")
+        updateData.reinversion = reinversion;
+      if (typeof banco !== "undefined") updateData.banco = banco;
+      if (typeof tipo_cuenta !== "undefined")
+        updateData.tipo_cuenta = tipo_cuenta;
+      if (typeof numero_cuenta !== "undefined")
+        updateData.numero_cuenta = numero_cuenta;
+
+      // Si no hay nada que actualizar, saltar
+      if (Object.keys(updateData).length === 0) continue;
+
+      const [updated] = await db
+        .update(inversionistas)
+        .set(updateData)
+        .where(eq(inversionistas.inversionista_id, inversionista_id))
+        .returning();
+
+      updatedResults.push(updated);
+    }
+
+    set.status = 200;
+    return updatedResults;
+  } catch (error) {
+    set.status = 500;
+    return { message: "Error updating investors", error: String(error) };
+  }
+};
+
+
+
+interface InversionistaResumen {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: boolean;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_a_recibir: number;
+}
+
+export async function resumenGlobalInversionistas(
+  inversionistaId?: number,
+  mes?: number,
+  anio?: number,
+  excel: boolean = false
+): Promise<InversionistaResumen[] | { success: boolean; url: string; filename: string }> {
+  // 🔎 Condiciones dinámicas
+  const condiciones: any[] = [
+    eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO"),
+  ];
+
+  if (inversionistaId) {
+    condiciones.push(eq(pagos_credito_inversionistas.inversionista_id, inversionistaId));
+  }
+
+  if (mes) {
+    condiciones.push(
+      sql`EXTRACT(MONTH FROM ${pagos_credito_inversionistas.fecha_pago}) = ${mes}`
+    );
+  }
+
+  if (anio) {
+    condiciones.push(
+      sql`EXTRACT(YEAR FROM ${pagos_credito_inversionistas.fecha_pago}) = ${anio}`
+    );
+  }
+
+  // 📊 Query agregada
+  const result = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
+      emite_factura: inversionistas.emite_factura,
+      reinversion: inversionistas.reinversion,
+      banco: inversionistas.banco,
+      tipo_cuenta: inversionistas.tipo_cuenta,
+      numero_cuenta: inversionistas.numero_cuenta,
+
+      total_abono_capital: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_capital}), 0)`,
+      total_abono_interes: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_interes}), 0)`,
+      total_abono_iva: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_iva_12}), 0)`,
+      total_isr: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_interes} * 0.05), 0)`,
+
+      total_a_recibir: sql<number>`COALESCE(SUM(
+        ${pagos_credito_inversionistas.abono_capital} 
+        + ${pagos_credito_inversionistas.abono_interes} 
+        + CASE 
+            WHEN ${inversionistas.emite_factura} 
+              THEN ${pagos_credito_inversionistas.abono_iva_12} 
+              ELSE -(${pagos_credito_inversionistas.abono_interes} * 0.05) 
+          END
+      ), 0)`,
+    })
+    .from(inversionistas)
+    .leftJoin(
+      pagos_credito_inversionistas,
+      eq(inversionistas.inversionista_id, pagos_credito_inversionistas.inversionista_id)
+    )
+    .where(and(...condiciones))
+    .groupBy(
+      inversionistas.inversionista_id,
+      inversionistas.nombre,
+      inversionistas.emite_factura,
+      inversionistas.reinversion,
+      inversionistas.banco,
+      inversionistas.tipo_cuenta,
+      inversionistas.numero_cuenta  );
+  // 📂 Si excel = true → generar archivo, subir a R2 y devolver URL
+  if (excel) {
+    const workbook = new ExcelJS.Workbook();
+ 
+    const sheet = workbook.addWorksheet("Resumen Inversionistas");
+
+    // Encabezados
+    sheet.addRow([
+      "ID",
+      "Nombre",
+      "Factura",
+      "Reinversión",
+      "Banco",
+      "Tipo Cuenta",
+      "Número Cuenta",
+      "Capital",
+      "Interés",
+      "IVA",
+      "ISR",
+      "Total a Recibir",
+    ]);
+
+    // Filas
+    result.forEach((inv) => {
+      sheet.addRow([
+        inv.inversionista_id,
+        inv.nombre,
+        inv.emite_factura ? "Sí" : "No",
+        inv.reinversion ? "Sí" : "No",
+        inv.banco ?? "",
+        inv.tipo_cuenta ?? "",
+        inv.numero_cuenta ?? "",
+        inv.total_abono_capital,
+        inv.total_abono_interes,
+        inv.total_abono_iva,
+        inv.total_isr,
+        inv.total_a_recibir,
+      ]);
+    });
+
+    // Ajustar ancho automático
+    sheet.columns.forEach((col) => {
+      let maxLength = 10;
+      col.eachCell?.({ includeEmpty: true }, (cell) => {
+        const len = cell.value ? cell.value.toString().length : 0;
+        if (len > maxLength) maxLength = len;
+      });
+      col.width = maxLength + 2;
+    });
+
+    const buffer = await workbook.xlsx.writeBuffer();
+
+    // 🚀 Subir directo a R2
+    const filename = `resumen_inversionistas_${Date.now()}.xlsx`;
+    const s3 = new S3Client({
+      endpoint: process.env.BUCKET_REPORTS_URL,
+      region: "auto",
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+      },
+    });
+
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.BUCKET_REPORTS,
+        Key: filename,
+        Body: new Uint8Array(buffer),
+        ContentType:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+    );
+
+    const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+
+    return {
+      success: true,
+      url,
+      filename,
+    };
+  }
+
+  return result;
+}

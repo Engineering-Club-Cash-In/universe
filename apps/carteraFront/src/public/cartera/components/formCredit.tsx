@@ -16,6 +16,7 @@ import {
   ListChecks,
 } from "lucide-react";
 import { useCatalogs } from "../hooks/catalogs";
+import { OtrosField } from "./rubros";
 import React from "react";
 const categorias = [
   "Contraseña",
@@ -53,7 +54,7 @@ const fields = [
 
   {
     name: "seguro_10_cuotas",
-    label: "Seguro 10 cuotas",
+    label: "Seguro ",
     type: "number",
     icon: <FileText className="text-blue-500 mr-2 w-5 h-5" />,
   },
@@ -158,12 +159,12 @@ export function CreditForm() {
     }
     // eslint-disable-next-line
   }, [formik.values.seguro_10_cuotas]);
-  return (<div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-  <h1 className="text-4xl font-extrabold text-blue-700 text-center mb-6 drop-shadow-md w-full">
-    Registro de Crédito
-  </h1>
+  return (
+    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+      <h1 className="text-4xl font-extrabold text-blue-700 text-center mb-6 drop-shadow-md w-full">
+        Registro de Crédito
+      </h1>
       <Card className="w-full max-w-[900px] mx-2 flex flex-col shadow-2xl border-2 border-blue-100 rounded-3xl bg-white/90 backdrop-blur-sm">
-
         <CardHeader className="pb-0 flex flex-col items-center gap-2">
           <span className="flex items-center justify-center bg-blue-100 rounded-full w-14 h-14 mb-1 shadow">
             <CreditCard className="text-blue-600 w-8 h-8" />
@@ -277,7 +278,9 @@ export function CreditForm() {
                     </div>
                   );
                 }
-
+                if (field.name === "otros") {
+                  return <OtrosField key={field.name} formik={formik} />;
+                }
                 // Prevent rendering Input for fields whose value is an array (like inversionistas)
                 const value =
                   formik.values[field.name as keyof typeof formik.values];
@@ -427,7 +430,7 @@ export function CreditForm() {
                   </div>
                   <div>
                     <Label className="text-gray-900 font-medium mb-2">
-                      Cuota Inversionista
+                      Cuota
                     </Label>
                     <Input
                       type="number"

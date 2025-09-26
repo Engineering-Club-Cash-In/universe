@@ -9,7 +9,8 @@
     "migrate": "NODE_ENV=LOCAL bunx drizzle-kit push"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.848.0",
+    "@aws-sdk/client-s3": "^3.896.0",
+    "@aws-sdk/lib-storage": "^3.896.0",
     "@aws-sdk/s3-request-presigner": "^3.848.0",
     "@elysiajs/cookie": "^0.8.0",
     "@elysiajs/cors": "^0.8.0",
@@ -49,7 +50,8 @@
     "@types/react-dom": "^19.1.6",
     "@types/uuid": "^9.0.8",
     "bun-types": "latest",
-    "drizzle-kit": "^0.28.1"
+    "drizzle-kit": "^0.28.1",
+    "typescript": "^5.9.2"
   },
   "module": "src/index.ts"
 }

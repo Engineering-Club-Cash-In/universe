@@ -371,5 +371,26 @@ app.post("/info/liveness-validation", async (c) => {
     );
   }
 });
+app.get("/webhook/facebook-lead", async (c) => {
+  const challenge = c.req.query("hub.challenge");
+
+  // 👉 Siempre responde con el challenge que manda Facebook
+  return new Response(challenge, { status: 200 });
+});
+app.post("/webhook/facebook-lead", async (c) => {
+  try {
+    const body = await c.req.json();
+
+    // 👀 De momento solo logueamos lo que llegue
+    console.log("Lead recibido:", JSON.stringify(body, null, 2));
+
+    return c.json({ success: true, message: "Lead recibido" }, 200);
+  } catch (err: any) {
+    return c.json(
+      { success: false, message: err.message || "Internal server error" },
+      500
+    );
+  }
+});
 
 export default app;

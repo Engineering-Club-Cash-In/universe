@@ -55,10 +55,7 @@ export const reversePaymentSchema = z.object({
 export const reversePayment = async ({
   body,
   set,
-}: {
-  body: any;
-  set: any;
-}) => {
+}:any) => {
   try {
     // 1. Validate input
     const parseResult = reversePaymentSchema.safeParse(body);
@@ -236,7 +233,7 @@ export const reversePayment = async ({
   }
 };
 
-export const insertPayment = async ({ body, set }: { body: any; set: any }) => {
+export const insertPayment = async ({ body, set }: any) => {
   try {
     const parseResult = pagoSchema.safeParse(body);
     if (!parseResult.success) {

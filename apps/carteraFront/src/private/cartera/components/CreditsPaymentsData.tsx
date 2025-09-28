@@ -39,6 +39,7 @@ export function ListaCreditosPagos() {
   const navigate = useNavigate();
   const {
     data,
+    refetch,
     isLoading,
     isError,
     error,
@@ -59,6 +60,7 @@ export function ListaCreditosPagos() {
     setEstado,
     estado,
     estados,
+    handleExcel
   } = useCreditosPaginadosWithFilters();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
@@ -332,13 +334,39 @@ export function ListaCreditosPagos() {
             value={perPage}
             onChange={handlePerPage}
           >
-            {[5, 10, 20, 50].map((n) => (
+            {[5, 10, 20, 50,100,200].map((n) => (
               <option key={n} value={n}>
                 {n} por página
               </option>
             ))}
           </select>
         </label>
+         <button
+    type="button"
+    onClick={async () => {
+      try {
+        // Pedimos el Excel al backend
+        handleExcel(true); // 👈 activamos
+      const response = await refetch();
+
+      if (response.data && "excelUrl" in response.data) {
+        const url = (response.data as any).excelUrl;
+        window.open(url, "_blank");
+      } else {
+        alert("No se pudo generar el Excel 😢");
+      }
+        
+      } catch (err) {
+        console.error("❌ Error generando Excel:", err);
+        alert("Error al generar el Excel");
+      } finally {
+        handleExcel(false); // 👈 volvemos a normal
+      }
+    }}
+    className="mt-4 px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md"
+  >
+    📊 Descargar Excel
+  </button>
       </div>
 
       {/* Tabla, sin scroll horizontal, diseño responsivo */}

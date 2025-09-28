@@ -56,6 +56,23 @@ export const conta_users = customSchema.table("conta_users", {
   updated_at: timestamp("updated_at").defaultNow(),
 });
 
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+export const platform_users = customSchema.table("platform_users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  password_hash: varchar("password_hash", { length: 255 }).notNull(), // hash, nunca plano
+  role: userRoleEnum("role").notNull(),
+  is_active: boolean("is_active").notNull().default(true),
+
+  // Relaciones opcionales
+  asesor_id: integer("asesor_id").references(() => asesores.asesor_id),
+  admin_id: integer("admin_id").references(() => admins.admin_id),
+
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
 // 1. Usuarios
 export const usuarios = customSchema.table("usuarios", {
   usuario_id: serial("usuario_id").primaryKey(),

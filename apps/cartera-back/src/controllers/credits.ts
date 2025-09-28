@@ -32,6 +32,7 @@ import {
 import { findOrCreateUserByName } from "./users";
 import { findOrCreateAdvisorByName } from "./advisor";
 import { getPagosDelMesActual } from "./payments";
+import { Context } from "elysia/dist/context";
 
 // Only input fields, no calculated fields here!
 const creditSchema = z.object({
@@ -108,7 +109,7 @@ export interface CreditInsert {
   otros: string; // Otros cargos o pagos adicionales
 }
 
-export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
+export const insertCredit = async ({ body, set }: any) => {
   try {
     const parseResult = creditSchema.safeParse(body);
     if (!parseResult.success) {
@@ -586,13 +587,7 @@ export function calcularDeudaTotal({
     gps: gps.toString(),
   };
 }
-export const updateCredit = async ({
-  body,
-  set,
-}: {
-  body: unknown;
-  set: any;
-}) => {
+export const updateCredit = async ({ body, set }: any) => {
   try {
     console.log("Updating credit with body:", body);
     const parseResult = creditUpdateSchema.safeParse(body);
@@ -1053,244 +1048,264 @@ export async function getCreditosWithUserByMesAnio(
   totalPages: number;
 }> {
   console.log(
-    `Fetching credits for month: ${mes}, year: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}`
+    `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}`
   );
+
   const offset = (page - 1) * perPage;
   const conditions: any[] = [];
 
-  if (numero_credito_sifco && numero_credito_sifco.length > 0) {
-    conditions.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
-  } else {
-    if (mes !== 0 && anio !== 0) {
-      conditions.push(
-        sql`EXTRACT(MONTH FROM ${creditos.fecha_creacion}) = ${mes}`,
-        sql`EXTRACT(YEAR FROM ${creditos.fecha_creacion}) = ${anio}`
-      );
+  try {
+    // 📌 Filtros
+    if (numero_credito_sifco && numero_credito_sifco.length > 0) {
+      console.log(`🔎 Filtrando por número de crédito: ${numero_credito_sifco}`);
+      conditions.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+    } else {
+      if (mes !== 0 && anio !== 0) {
+        console.log(`🔎 Filtrando por mes/año: ${mes}/${anio}`);
+        conditions.push(
+          sql`EXTRACT(MONTH FROM ${creditos.fecha_creacion}) = ${mes}`,
+          sql`EXTRACT(YEAR FROM ${creditos.fecha_creacion}) = ${anio}`
+        );
+      }
     }
-  }
-  if (estado && estado.length > 0) {
-    conditions.push(
-      eq(
-        creditos.statusCredit,
-        estado as
-          | "ACTIVO"
-          | "CANCELADO"
-          | "INCOBRABLE"
-          | "PENDIENTE_CANCELACION"
-      )
-    );
+    if (estado && estado.length > 0) {
+      console.log(`🔎 Filtrando por estado: ${estado}`);
+      conditions.push(eq(creditos.statusCredit, estado));
+    }
+  } catch (err) {
+    console.error("❌ Error construyendo filtros:", err);
   }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
-  // 1. Buscar los créditos y usuarios
-  const rows = await db
-    .select({
-      creditos,
-      usuarios,
-      asesores,
-    })
-    .from(creditos)
-    .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-    .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
-    .where(whereCondition)
-    .limit(perPage)
-    .offset(offset)
-    .orderBy(desc(creditos.fecha_creacion));
+  let rows: any[] = [];
+  try {
+    // 1️⃣ Buscar créditos + usuarios + asesores
+    rows = await db
+      .select({
+        creditos,
+        usuarios,
+        asesores,
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+      .where(whereCondition)
+      .limit(perPage)
+      .offset(offset)
+      .orderBy(desc(creditos.fecha_creacion));
 
-  console.log(`Found ${rows.length} records for the given month and year.`);
-
-  const creditosIds = rows.map((r) => r.creditos.credito_id);
-  const rubrosPorCredito = await db
-  .select({
-    credito_id: creditos_rubros_otros.credito_id,
-    nombre_rubro: creditos_rubros_otros.nombre_rubro,
-    monto: creditos_rubros_otros.monto,
-  })
-  .from(creditos_rubros_otros)
-  .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
-  const rubrosMap = creditosIds.reduce(
-  (acc, creditoId) => {
-    acc[creditoId] = rubrosPorCredito
-      .filter((r) => r.credito_id === creditoId)
-      .map(r => ({ 
-        nombre_rubro: r.nombre_rubro, 
-        monto: Number(r.monto) 
-      }));
-    return acc;
-  },
-  {} as Record<number, { nombre_rubro: string; monto: number }[]>
-);
-
-  // 2. Traer los inversionistas relacionados a esos créditos (con todos los campos)
-  const inversionistasPorCredito = await db
-    .select({
-      credito_id: creditos_inversionistas.credito_id,
-      inversionista_id: inversionistas.inversionista_id,
-      nombre: inversionistas.nombre,
-      emite_factura: inversionistas.emite_factura,
-      monto_aportado: creditos_inversionistas.monto_aportado,
-      monto_cash_in: creditos_inversionistas.monto_cash_in,
-      monto_inversionista: creditos_inversionistas.monto_inversionista,
-      iva_cash_in: creditos_inversionistas.iva_cash_in,
-      iva_inversionista: creditos_inversionistas.iva_inversionista,
-      porcentaje_participacion_inversionista:
-        creditos_inversionistas.porcentaje_participacion_inversionista,
-      porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-    })
-    .from(creditos_inversionistas)
-    .innerJoin(
-      inversionistas,
-      eq(
-        creditos_inversionistas.inversionista_id,
-        inversionistas.inversionista_id
-      )
-    )
-    .where(inArray(creditos_inversionistas.credito_id, creditosIds));
-
-  // 3. Agrupar inversionistas y calcular totales por crédito
-  const inversionistasMap = creditosIds.reduce(
-    (acc, creditoId) => {
-      const aportes = inversionistasPorCredito.filter(
-        (inv) => inv.credito_id === creditoId
-      );
-
-      const total_cash_in_monto = aportes.reduce(
-        (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
-        0
-      );
-      const total_cash_in_iva = aportes.reduce(
-        (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
-        0
-      );
-      const total_inversion_monto = aportes.reduce(
-        (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
-        0
-      );
-      const total_inversion_iva = aportes.reduce(
-        (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
-        0
-      );
-
-      acc[creditoId] = {
-        aportes,
-        resumen: {
-          total_cash_in_monto,
-          total_cash_in_iva,
-          total_inversion_monto,
-          total_inversion_iva,
-        },
-      };
-
-      return acc;
-    },
-    {} as Record<
-      number,
-      {
-        aportes: typeof inversionistasPorCredito;
-        resumen: {
-          total_cash_in_monto: number;
-          total_cash_in_iva: number;
-          total_inversion_monto: number;
-          total_inversion_iva: number;
-        };
-      }
-    >
-  );
-
-  // --- NUEVO: Cancelaciones e incobrables ---
-  const canceladosIds = rows
-    .filter((r) => r.creditos.statusCredit === "CANCELADO")
-    .map((r) => r.creditos.credito_id);
-  const incobrablesIds = rows
-    .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
-    .map((r) => r.creditos.credito_id);
-
-  let cancelaciones: CreditCancelation[] = [];
-  if (canceladosIds.length > 0) {
-    const cancelacionesRaw = await db
-      .select()
-      .from(credit_cancelations)
-      .where(inArray(credit_cancelations.credit_id, canceladosIds));
-    cancelaciones = cancelacionesRaw.map((row) => ({
-      ...row,
-      fecha_cancelacion: row.fecha_cancelacion ?? "",
-      monto_cancelacion: Number(row.monto_cancelacion),
-    }));
+    console.log(`📄 Créditos encontrados: ${rows.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando créditos:", err);
   }
 
+  // 🆔 IDs de créditos
+  const creditosIds = rows.map((r) => r.creditos.credito_id);
+  console.log("🆔 Créditos IDs:", creditosIds);
+
+  let rubrosPorCredito: any[] = [];
+  try {
+    // 2️⃣ Rubros
+    rubrosPorCredito = await db
+      .select({
+        credito_id: creditos_rubros_otros.credito_id,
+        nombre_rubro: creditos_rubros_otros.nombre_rubro,
+        monto: creditos_rubros_otros.monto,
+      })
+      .from(creditos_rubros_otros)
+      .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
+
+    console.log(`📊 Rubros encontrados: ${rubrosPorCredito.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando rubros:", err);
+  }
+
+  const rubrosMap = creditosIds.reduce(
+    (acc, creditoId) => {
+      acc[creditoId] = rubrosPorCredito
+        .filter((r) => r.credito_id === creditoId)
+        .map((r) => ({
+          nombre_rubro: r.nombre_rubro,
+          monto: Number(r.monto),
+        }));
+      return acc;
+    },
+    {} as Record<number, { nombre_rubro: string; monto: number }[]>
+  );
+
+  let inversionistasPorCredito: any[] = [];
+  try {
+    // 3️⃣ Inversionistas
+    inversionistasPorCredito = await db
+      .select({
+        credito_id: creditos_inversionistas.credito_id,
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+        emite_factura: inversionistas.emite_factura,
+        monto_aportado: creditos_inversionistas.monto_aportado,
+        monto_cash_in: creditos_inversionistas.monto_cash_in,
+        monto_inversionista: creditos_inversionistas.monto_inversionista,
+        iva_cash_in: creditos_inversionistas.iva_cash_in,
+        iva_inversionista: creditos_inversionistas.iva_inversionista,
+        porcentaje_participacion_inversionista:
+          creditos_inversionistas.porcentaje_participacion_inversionista,
+        porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+        cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(
+        inversionistas,
+        eq(
+          creditos_inversionistas.inversionista_id,
+          inversionistas.inversionista_id
+        )
+      )
+      .where(inArray(creditos_inversionistas.credito_id, creditosIds));
+
+    console.log(`👥 Inversionistas encontrados: ${inversionistasPorCredito.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando inversionistas:", err);
+  }
+
+  // Agrupar inversionistas por crédito
+  const inversionistasMap = creditosIds.reduce((acc, creditoId) => {
+    const aportes = inversionistasPorCredito.filter(
+      (inv) => inv.credito_id === creditoId
+    );
+    acc[creditoId] = {
+      aportes,
+      resumen: {
+        total_cash_in_monto: aportes.reduce(
+          (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
+          0
+        ),
+        total_cash_in_iva: aportes.reduce(
+          (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
+          0
+        ),
+        total_inversion_monto: aportes.reduce(
+          (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
+          0
+        ),
+        total_inversion_iva: aportes.reduce(
+          (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
+          0
+        ),
+      },
+    };
+    return acc;
+  }, {} as Record<number, any>);
+
+  // --- Cancelaciones & Incobrables ---
+  let cancelaciones: CreditCancelation[] = [];
   let incobrables: BadDebt[] = [];
-  if (incobrablesIds.length > 0) {
-    const incobrablesRaw = await db
-      .select()
-      .from(bad_debts)
-      .where(inArray(bad_debts.credit_id, incobrablesIds));
-    incobrables = incobrablesRaw.map((row) => ({
-      ...row,
-      fecha_registro: row.fecha_registro ?? "",
-      monto_incobrable: Number(row.monto_incobrable),
-    }));
+
+  try {
+    const canceladosIds = rows
+      .filter((r) => r.creditos.statusCredit === "CANCELADO")
+      .map((r) => r.creditos.credito_id);
+    if (canceladosIds.length > 0) {
+      console.log("🛑 Créditos cancelados:", canceladosIds);
+      const cancelacionesRaw = await db
+        .select()
+        .from(credit_cancelations)
+        .where(inArray(credit_cancelations.credit_id, canceladosIds));
+      cancelaciones = cancelacionesRaw.map((row) => ({
+        ...row,
+        fecha_cancelacion: row.fecha_cancelacion ?? "",
+        monto_cancelacion: Number(row.monto_cancelacion),
+      }));
+    }
+  } catch (err) {
+    console.error("❌ Error consultando cancelaciones:", err);
+  }
+
+  try {
+    const incobrablesIds = rows
+      .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
+      .map((r) => r.creditos.credito_id);
+    if (incobrablesIds.length > 0) {
+      console.log("⚠️ Créditos incobrables:", incobrablesIds);
+      const incobrablesRaw = await db
+        .select()
+        .from(bad_debts)
+        .where(inArray(bad_debts.credit_id, incobrablesIds));
+      incobrables = incobrablesRaw.map((row) => ({
+        ...row,
+        fecha_registro: row.fecha_registro ?? "",
+        monto_incobrable: Number(row.monto_incobrable),
+      }));
+    }
+  } catch (err) {
+    console.error("❌ Error consultando incobrables:", err);
   }
 
   const cancelacionesMap: Record<number, CreditCancelation> = {};
-  cancelaciones.forEach((row) => {
-    cancelacionesMap[row.credit_id] = row;
-  });
+  cancelaciones.forEach((row) => (cancelacionesMap[row.credit_id] = row));
+
   const incobrablesMap: Record<number, BadDebt> = {};
-  incobrables.forEach((row) => {
-    incobrablesMap[row.credit_id] = row;
-  });
+  incobrables.forEach((row) => (incobrablesMap[row.credit_id] = row));
 
-  // 4. Mapear la respuesta final
-  const data: CreditoConInfo[] = rows.map((row) => {
-    const info = inversionistasMap[row.creditos.credito_id] || {
-      aportes: [],
-      resumen: {
-        total_cash_in_monto: 0,
-        total_cash_in_iva: 0,
-        total_inversion_monto: 0,
-        total_inversion_iva: 0,
-      },
-    };
-    const rubros = rubrosMap[row.creditos.credito_id] || [];
+  // 4️⃣ Map final
+  let data: CreditoConInfo[] = [];
+  try {
+    data = rows.map((row) => {
+      const info = inversionistasMap[row.creditos.credito_id] || {
+        aportes: [],
+        resumen: {
+          total_cash_in_monto: 0,
+          total_cash_in_iva: 0,
+          total_inversion_monto: 0,
+          total_inversion_iva: 0,
+        },
+      };
+      const rubros = rubrosMap[row.creditos.credito_id] || [];
+      const cancelacion =
+        row.creditos.statusCredit === "CANCELADO"
+          ? cancelacionesMap[row.creditos.credito_id] || null
+          : undefined;
+      const incobrable =
+        row.creditos.statusCredit === "INCOBRABLE"
+          ? incobrablesMap[row.creditos.credito_id] || null
+          : undefined;
 
-    const cancelacion =
-      row.creditos.statusCredit === "CANCELADO"
-        ? cancelacionesMap[row.creditos.credito_id] || null
-        : undefined;
-    const incobrable =
-      row.creditos.statusCredit === "INCOBRABLE"
-        ? incobrablesMap[row.creditos.credito_id] || null
-        : undefined;
+      return {
+        creditos: row.creditos,
+        usuarios: row.usuarios,
+        asesores: row.asesores,
+        inversionistas: info.aportes,
+        resumen: info.resumen,
+        cancelacion,
+        rubros,
+        incobrable,
+      };
+    });
+    console.log(`✅ Créditos mapeados: ${data.length}`);
+  } catch (err) {
+    console.error("❌ Error mapeando créditos:", err);
+  }
 
-    return {
-      creditos: row.creditos,
-      usuarios: row.usuarios,
-      asesores: row.asesores,
-      inversionistas: info.aportes,
-      resumen: info.resumen,
-      cancelacion,
-      rubros,
-      incobrable,
-    };
-  });
-
-  // 5. Total de registros para la paginación
-  const [{ count }] = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(creditos)
-    .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-    .where(whereCondition);
-
-  console.log(`Total records found: ${count}`);
+  // 5️⃣ Paginación
+  let count = 0;
+  try {
+    const [{ count: total }] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .where(whereCondition);
+    count = Number(total);
+    console.log(`📊 Total records encontrados: ${count}`);
+  } catch (err) {
+    console.error("❌ Error contando créditos:", err);
+  }
 
   return {
     data,
     page,
     perPage,
-    totalCount: Number(count),
-    totalPages: Math.ceil(Number(count) / perPage),
+    totalCount: count,
+    totalPages: Math.ceil(count / perPage),
   };
 }
 

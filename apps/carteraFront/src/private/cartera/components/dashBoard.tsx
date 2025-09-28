@@ -8,16 +8,17 @@ import {
   SidebarMenuButton,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { Banknote, CreditCard, ListOrdered } from "lucide-react";
+import { Banknote, CreditCard, ListOrdered, LogOut } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { Menu, X } from "lucide-react"; // Hamburguesa y cerrar
+
 const menuOptions = [
   {
     key: "registro-prestamo",
     label: "Registro Crédito",
     icon: <Banknote className="mr-2 h-5 w-5" />,
-    path: "/realizarCredito", // Ajusta la ruta según tus paths reales
+    path: "/realizarCredito",
   },
   {
     key: "registro-pago",
@@ -43,13 +44,27 @@ const menuOptions = [
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
     path: "/inversionistas",
   },
+  {
+    key: "advisors",
+    label: "Asesores",
+    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/asesores",
+  },
 ];
 
 export function DashBoardCartera() {
   const navigate = useNavigate();
   const location = useLocation();
-   const [menuOpen, setMenuOpen] = useState(false);
- return (
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // 🔑 Acción logout
+  const handleLogout = () => {
+    // Aquí limpias tu token / contexto
+    localStorage.removeItem("token");
+    navigate("/login");
+  };
+
+  return (
     <>
       {/* HAMBURGUESA EN MOBILE */}
       <button
@@ -61,9 +76,7 @@ export function DashBoardCartera() {
       </button>
 
       {/* SIDEBAR NORMAL EN DESKTOP */}
-    <Sidebar
-        className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg mr-8 min-w-[260px] px-6 py-8 flex-col h-screen"
-      >
+      <Sidebar className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg mr-8 min-w-[260px] px-6 py-8 flex-col h-screen">
         <SidebarHeader className="flex items-center justify-center py-4">
           <img
             src="/logo-cashin.png"
@@ -72,7 +85,7 @@ export function DashBoardCartera() {
             style={{ objectFit: "contain" }}
           />
         </SidebarHeader>
-        <SidebarContent>
+        <SidebarContent className="flex flex-col justify-between h-full">
           <SidebarMenu>
             {menuOptions.map((opt) => (
               <SidebarMenuItem key={opt.key}>
@@ -97,6 +110,21 @@ export function DashBoardCartera() {
               </SidebarMenuItem>
             ))}
           </SidebarMenu>
+
+          {/* 🚪 Botón Logout */}
+          <div className="mt-6">
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={handleLogout}
+                  className="w-full flex items-center text-left text-red-600 font-medium rounded hover:bg-red-50 transition"
+                >
+                  <LogOut className="mr-2 h-5 w-5" />
+                  Cerrar sesión
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </div>
         </SidebarContent>
         <SidebarRail />
       </Sidebar>
@@ -126,7 +154,7 @@ export function DashBoardCartera() {
                 style={{ objectFit: "contain" }}
               />
             </SidebarHeader>
-            <SidebarContent>
+            <SidebarContent className="flex flex-col justify-between h-full">
               <SidebarMenu>
                 {menuOptions.map((opt) => (
                   <SidebarMenuItem key={opt.key}>
@@ -134,7 +162,7 @@ export function DashBoardCartera() {
                       isActive={location.pathname === opt.path}
                       onClick={() => {
                         navigate(opt.path);
-                        setMenuOpen(false); // Cierra el menú
+                        setMenuOpen(false);
                       }}
                       className={`w-full flex items-center text-left text-gray-900 font-medium rounded transition-all
                       ${
@@ -154,6 +182,24 @@ export function DashBoardCartera() {
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
+
+              {/* 🚪 Botón Logout en mobile */}
+              <div className="mt-6">
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      onClick={() => {
+                        handleLogout();
+                        setMenuOpen(false);
+                      }}
+                      className="w-full flex items-center text-left text-red-600 font-medium rounded hover:bg-red-50 transition"
+                    >
+                      <LogOut className="mr-2 h-5 w-5" />
+                      Cerrar sesión
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </div>
             </SidebarContent>
             <SidebarRail />
           </aside>

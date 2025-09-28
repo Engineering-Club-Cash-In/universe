@@ -29,6 +29,7 @@ import {
   gt,
 } from "drizzle-orm";
 import { getPagosDelMesActual } from "./payments";
+import { Context } from "elysia/dist/context";
 
  
 

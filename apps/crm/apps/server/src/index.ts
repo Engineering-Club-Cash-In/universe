@@ -14,6 +14,7 @@ import {
   validateMagicUrlController,
 } from "./controllers/bot";
 import { livenessController } from "./controllers/liveness";
+import { processCsvLeads } from "./controllers/csv";
 
 const app = new Hono();
 
@@ -392,5 +393,14 @@ app.post("/webhook/facebook-lead", async (c) => {
     );
   }
 });
+    app.get("/upload-csv", async (c) => {
+      try {
+        const result = await processCsvLeads();
+        return c.json(result);
+      } catch (err: any) {
+        return c.json({ error: err.message }, 500);
+      }
+    })
+
 
 export default app;

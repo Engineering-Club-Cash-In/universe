@@ -28,6 +28,7 @@
 		"ai": "^5.0.48",
 		"bcryptjs": "^3.0.2",
 		"better-auth": "^1.2.10",
+		"csv-parse": "^6.1.0",
 		"dotenv": "^16.4.7",
 		"drizzle-orm": "^0.44.2",
 		"hono": "^4.8.2",
@@ -35,10 +36,11 @@
 		"zod": "^4.0.2"
 	},
 	"devDependencies": {
-		"tsc-alias": "^1.8.11",
-		"typescript": "^5.8.2",
 		"@types/bun": "^1.2.6",
+		"@types/csv-parse": "^1.2.5",
+		"@types/pg": "^8.11.11",
 		"drizzle-kit": "^0.31.2",
-		"@types/pg": "^8.11.11"
+		"tsc-alias": "^1.8.11",
+		"typescript": "^5.8.2"
 	}
 }

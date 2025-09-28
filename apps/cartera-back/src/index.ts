@@ -13,6 +13,7 @@ app.use(cors())
 .use(routers.creditRouter)
 .use(routers.uploadRouter)
 .use(routers.sifcoRouter)
+.use(routers.authRouter)
 .listen(config.port)
 
 console.log (//vscode-app/usr/share/code/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html(

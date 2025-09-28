@@ -18,8 +18,33 @@ export enum CategoriaUsuario {
   VEHICULO = "Vehículo",
   CV_VEHICULO = "CV Vehículo",
 }
+export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR"]);
 export const customSchema = pgSchema("cartera");
+export const admins = customSchema.table("admins", {
+  admin_id: serial("admin_id").primaryKey(),
+  nombre: varchar("nombre", { length: 150 }).notNull(),
+  apellido: varchar("apellido", { length: 150 }).notNull(),
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  telefono: varchar("telefono", { length: 30 }),
+  activo: boolean("activo").notNull().default(true),
 
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+export const platform_users = customSchema.table("platform_users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  password_hash: varchar("password_hash", { length: 255 }).notNull(), // hash, nunca plano
+  role: userRoleEnum("role").notNull(),
+  is_active: boolean("is_active").notNull().default(true),
+
+  // Relaciones opcionales
+  asesor_id: integer("asesor_id").references(() => asesores.asesor_id),
+  admin_id: integer("admin_id").references(() => admins.admin_id),
+
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
 // 1. Usuarios
 export const usuarios = customSchema.table("usuarios", {
   usuario_id: serial("usuario_id").primaryKey(),

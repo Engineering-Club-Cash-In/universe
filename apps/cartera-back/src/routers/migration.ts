@@ -4,6 +4,7 @@ import { fillPagosInversionistas, syncClienteConPrestamos } from "../migration/m
  
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
+import { authMiddleware } from "./midleware";
 
 /**
  * 📂 Ruta absoluta del Excel en tu máquina
@@ -14,6 +15,7 @@ const excelPath = path.resolve(
 );
 
 export const sifcoRouter = new Elysia()
+ 
   /**
    * 🔄 Sincronizar cliente(s) con préstamos desde SIFCO
    */

@@ -236,6 +236,15 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
       "🚀 Iniciando flujo de sincronización de clientes con préstamos desde SIFCO"
     );
 
+    // 📊 Control de métricas
+    const stats = {
+      totalClientes: 0,
+      totalPrestamos: 0,
+      creditosMigrados: 0,
+      creditosFallidos: 0,
+      errores: [] as { prestamo: string; motivo: string }[],
+    };
+
     // 1️⃣ Consultar clientes (SIFCO)
     const clientes = await consultarClientesPorEmail();
     console.log(
@@ -243,40 +252,39 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
       clientes?.Clientes?.length || 0
     );
 
-    if (!clientes || !clientes.Clientes || clientes.Clientes.length === 0) {
+    if (!clientes?.Clientes?.length) {
       console.log("❌ No se encontraron clientes en SIFCO");
-      return;
+      return stats;
     }
 
-    // Si viene un filtro, trabajamos solo con ese cliente
+    // Filtrado
     const listaClientes = clienteCodigoFilter
       ? clientes.Clientes.filter(
           (c) => parseInt(c.CodigoCliente, 10) === clienteCodigoFilter
         )
-      : clientes.Clientes.filter(
-          (c) => parseInt(c.CodigoCliente, 10) >= 1140 // 👈 del 1140 en adelante
-        );
+      : clientes.Clientes.filter((c) => parseInt(c.CodigoCliente, 10) >= 1140);
+
     if (listaClientes.length === 0) {
       console.log(`❌ Cliente con código ${clienteCodigoFilter} no encontrado`);
-      return;
+      return stats;
     }
 
-    // 🔁 Recorrer clientes uno por uno
-    for (const cliente of listaClientes) {
-      console.log("👤 Cliente seleccionado:", cliente);
+    stats.totalClientes = listaClientes.length;
 
+    // 🔁 Recorrer clientes
+    for (const cliente of listaClientes) {
+      console.log("👤 Cliente seleccionado:", cliente.NombreCompleto);
       const clienteCodigo = parseInt(cliente.CodigoCliente, 10);
 
-      // 2️⃣ Consultar préstamos (SIFCO)
       let prestamosResp;
       try {
         prestamosResp = await consultarPrestamosPorCliente(clienteCodigo);
       } catch (err: any) {
         console.log(
-          `❌ No se pudieron obtener préstamos para el cliente ${cliente.NombreCompleto}:`,
+          `❌ No se pudieron obtener préstamos para ${cliente.NombreCompleto}:`,
           err?.message || err
         );
-        continue; // 👈 seguir con el siguiente cliente
+        continue;
       }
 
       if (!prestamosResp?.Prestamos?.length) {
@@ -286,82 +294,85 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
         continue;
       }
 
-      console.log("💳 Préstamos encontrados:", prestamosResp.Prestamos);
+      console.log("💳 Préstamos encontrados:", prestamosResp.Prestamos.length);
+      stats.totalPrestamos += prestamosResp.Prestamos.length;
 
       // 3️⃣ Iterar sobre cada préstamo
       for (const prestamo of prestamosResp.Prestamos) {
         const preNumero = prestamo.NumeroPrestamo;
         console.log(`📑 Consultando detalle del préstamo: ${preNumero}`);
 
-        let detalle;
         try {
-          detalle = await consultarPrestamoDetalle(preNumero);
-        } catch (err: any) {
-          console.log(
-            `❌ Error al obtener detalle del préstamo ${preNumero}:`,
-            err?.message || err
+          const detalle = await consultarPrestamoDetalle(preNumero);
+
+          if (!detalle) {
+            throw new Error("Detalle vacío");
+          }
+          if (detalle.ApEstDes === "CANCELADO") {
+            throw new Error("Préstamo cancelado");
+          }
+
+          const excelRow = await leerCreditoPorNumeroSIFCO(
+            excelPath,
+            preNumero
           );
-          continue; // 👉 pasar al siguiente préstamo
-        }
+          if (!excelRow?.length) {
+            throw new Error("No encontrado en Excel");
+          }
 
-        if (!detalle) {
-          console.log(`❌ No se obtuvo detalle válido para ${preNumero}`);
-          continue;
-        }
-        if (detalle?.ApEstDes === "CANCELADO") {
-          console.log(`❌ El préstamo ${preNumero} está cancelado`);
-          continue;
-        }
-        if (!detalle) {
-          console.log(`❌ No se pudo obtener detalle para ${preNumero}`);
-          continue;
-        }
+          const recargosLibres = await consultarRecargosLibres(preNumero);
+          if (!recargosLibres) {
+            throw new Error("Recargos libres no disponibles");
+          }
 
-        // Buscar en Excel
-        const excelRow = await leerCreditoPorNumeroSIFCO(excelPath, preNumero);
-        if (!excelRow || excelRow.length === 0) {
-          console.log(`❌ No se encontró el préstamo ${preNumero} en el Excel`);
-          continue;
-        }
-        const recargosLibres = await consultarRecargosLibres(preNumero);
-
-        if (!recargosLibres) {
-          console.log(
-            `❌ No se pudieron obtener los recargos libres para ${preNumero}`
-          );
-          continue;
-        }
-
-        // Mapear directo WS + Excel → DB
-        let combinado;
-        try {
-          combinado = await mapPrestamoDetalleToCredito(
+          const combinado = await mapPrestamoDetalleToCredito(
             detalle,
             excelRow as ExcelCreditoRow[],
             cliente
           );
-        } catch (err) {
-          console.log(`❌ Error al mapear el préstamo ${preNumero}:`, err);
-          continue; // 👈 sigue con el siguiente préstamo
-        }
 
-        if (!combinado || !combinado.credito_id) {
-          console.log(
-            `❌ No se pudo mapear el préstamo ${preNumero} a la base de datos`
-          );
-          continue;
-        } else {
+          if (!combinado?.credito_id) {
+            throw new Error("Mapeo a DB fallido");
+          }
+
           console.log(
             "💾 Crédito insertado en DB con ID:",
             combinado.credito_id
           );
+          stats.creditosMigrados++;
+        } catch (err: any) {
+          console.log(
+            `❌ Error procesando préstamo ${preNumero}:`,
+            err?.message || err
+          );
+          stats.creditosFallidos++;
+          stats.errores.push({
+            prestamo: preNumero,
+            motivo: err?.message || "Error desconocido",
+          });
           continue;
         }
-        //const infoPagos = await consultarInformacionPrestamo(preNumero);
       }
     }
+
+    // 📊 Resumen global
+    console.log("📊 Resumen de sincronización:");
+    console.log(`   Clientes procesados: ${stats.totalClientes}`);
+    console.log(`   Préstamos encontrados: ${stats.totalPrestamos}`);
+    console.log(`   Créditos migrados: ✅ ${stats.creditosMigrados}`);
+    console.log(`   Créditos fallidos: ❌ ${stats.creditosFallidos}`);
+
+    if (stats.errores.length > 0) {
+      console.log("📝 Detalles de errores:");
+      stats.errores.forEach((e) =>
+        console.log(`   - Préstamo ${e.prestamo}: ${e.motivo}`)
+      );
+    }
+
+    return stats;
   } catch (err: any) {
-    console.error("❌ Error en syncClienteConPrestamos:", err || err);
+    console.error("❌ Error en syncClienteConPrestamos:", err?.message || err);
+    throw err;
   }
 }
 
@@ -904,35 +915,76 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
 
         // 4.2 Calcular montos
         const montoAportado = toBigExcel(row.Capital);
+        console.log(
+          "💰 Capital (montoAportado):",
+          row.Capital,
+          "->",
+          montoAportado.toString()
+        );
+
         const porcentajeCashIn = toBigExcel(row.PorcentajeCashIn);
+        console.log(
+          "📊 Porcentaje CashIn:",
+          row.PorcentajeCashIn,
+          "->",
+          porcentajeCashIn.toString()
+        );
+
         const porcentajeInversion = toBigExcel(row.PorcentajeInversionista);
+        console.log(
+          "📊 Porcentaje Inversionista:",
+          row.PorcentajeInversionista,
+          "->",
+          porcentajeInversion.toString()
+        );
+
         const interes = toBigExcel(row.porcentaje);
+        console.log(
+          "📈 Interés (%):",
+          row.porcentaje,
+          "->",
+          interes.toString()
+        );
 
-        const cuotaInteres = montoAportado.times(interes.div(100));
+        // Calcular cuota de interés base
+        const cuotaInteres = montoAportado.times(interes);
+        console.log(
+          "💵 Cuota Interés (Capital * interes):",
+          cuotaInteres.toString()
+        );
 
+        // Dividir la cuota entre inversionista y cashin
         const montoInversionista = cuotaInteres
           .times(porcentajeInversion)
-          .div(100)
+ 
           .toFixed(2);
+        console.log("👤 Monto Inversionista:", montoInversionista);
+
         const montoCashIn = cuotaInteres
           .times(porcentajeCashIn)
-          .div(100)
+        
           .toFixed(2);
+        console.log("🏦 Monto CashIn:", montoCashIn);
 
+        // IVA sobre cada parte
         const ivaInversionista =
           Number(montoInversionista) > 0
             ? new Big(montoInversionista).times(0.12).toFixed(2)
             : "0.00";
+        console.log("🧾 IVA Inversionista:", ivaInversionista);
+
         const ivaCashIn =
           Number(montoCashIn) > 0
             ? new Big(montoCashIn).times(0.12).toFixed(2)
             : "0.00";
+        console.log("🧾 IVA CashIn:", ivaCashIn);
 
+        // Cuota final
         const cuotaInv =
           row.CuotaInversionista && row.CuotaInversionista !== "0"
             ? row.CuotaInversionista
             : row.Cuota;
-
+        console.log("📌 Cuota usada (Inversionista/General):", cuotaInv);
         // 4.3 Armar registro
         const registro = {
           credito_id: credito.credito_id,

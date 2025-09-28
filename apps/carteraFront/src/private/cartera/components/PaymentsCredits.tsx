@@ -96,7 +96,7 @@ const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   },
   // Puedes agregar más según tu interfaz
 };
-
+ 
 function formatCurrency(q: any) {
   return (
     "Q" +
@@ -177,10 +177,28 @@ export function PaymentsCredits() {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["pagosByCredito", numero_credito_sifco],
-    queryFn: () => getPagosByCredito(numero_credito_sifco!),
+    queryFn: () => getPagosByCredito(numero_credito_sifco!,false),
     enabled: !!numero_credito_sifco,
   });
+const handleDownloadExcel = async () => {
+  if (!numero_credito_sifco) return;
 
+  try {
+    const res = await getPagosByCredito(numero_credito_sifco, true); // 👈 pedimos excel
+    if (res.excelUrl) {
+      const link = document.createElement("a");
+      link.href = res.excelUrl;
+      link.download = `pagos_${numero_credito_sifco}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      alert("⚠️ No se pudo generar el Excel.");
+    }
+  } catch (error) {
+    console.error("❌ Error descargando Excel:", error);
+  }
+};
   const meses = [
     { value: "01", label: "Enero" },
     { value: "02", label: "Febrero" },
@@ -272,6 +290,15 @@ export function PaymentsCredits() {
               className="border-none outline-none bg-transparent text-blue-800 font-semibold placeholder-blue-400"
             />
           </div>
+                <div className="flex items-center gap-2 bg-blue-50 border-2 border-blue-200 rounded-xl px-4 py-2 shadow-md">
+          <button
+            onClick={handleDownloadExcel}
+            className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow-md transition flex items-center gap-2"
+          >
+            <FileText className="w-5 h-5" />
+            Descargar Excel
+          </button>
+        </div>
         </div>
 
         {isLoading ? (

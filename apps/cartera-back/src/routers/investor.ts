@@ -12,10 +12,13 @@ import {
   resumenGlobalInversionistas,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import puppeteer from "puppeteer"; 
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import puppeteer from "puppeteer";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { authMiddleware } from "./midleware";
+ 
 
 export const inversionistasRouter = new Elysia()
+  .use(authMiddleware)
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor) // 👈 update usando POST

@@ -9,6 +9,8 @@ import {
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { mapPagosPorCreditos } from "../migration/migration";
+import { authMiddleware } from "./midleware";
+import { exportPagosToExcel } from "../controllers/reports";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -27,33 +29,50 @@ const syncCreditPaymentsSchema = z.object({
 });
 
 export const paymentRouter = new Elysia()
+ 
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
 
   // Nuevo endpoint para buscar pagos por SIFCO y/o fecha
   .get("/paymentByCredit", async ({ query, set }) => {
-    const { numero_credito_sifco } = query;
+  const { numero_credito_sifco, excel } = query as {
+    numero_credito_sifco?: string;
+    excel?: string;
+  };
 
-    if (!numero_credito_sifco) {
-      set.status = 400;
-      return { message: "Falta el parámetro 'numero_credito_sifco'" };
-    }
+  if (!numero_credito_sifco) {
+    set.status = 400;
+    return { message: "Falta el parámetro 'numero_credito_sifco'" };
+  }
 
-    try {
-      const pagos = await getAllPagosWithCreditAndInversionistas(numero_credito_sifco);
+  try {
+    if (excel === "true") {
+      // 🚀 Generar Excel y devolver URL
+      const result = await exportPagosToExcel(numero_credito_sifco);
+      set.status = 200;
+      return result; // { excelUrl: "https://..." }
+    } else {
+      // 🔎 Consulta normal JSON
+      const pagos = await getAllPagosWithCreditAndInversionistas(
+        numero_credito_sifco
+      );
 
-      if (!pagos) {
-        set.status = 400;
+      if (!pagos || pagos.length === 0) {
+        set.status = 404;
         return { message: "No se encontraron pagos para el crédito" };
       }
 
+      set.status = 200;
       return pagos;
-    } catch (error) {
-      set.status = 500;
-      return { message: "Error consultando pagos", error: String(error) };
     }
-  })
+  } catch (error) {
+    console.error("❌ Error en /paymentByCredit:", error);
+    set.status = 500;
+    return { message: "Error consultando pagos", error: String(error) };
+  }
+})
+  .use(authMiddleware)
 
   .get("/payments", async ({ query, set }) => {
     const { mes, anio, page, perPage, numero_credito_sifco } = query;

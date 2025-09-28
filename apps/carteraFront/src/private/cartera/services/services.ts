@@ -2,10 +2,20 @@ import axios  from "axios";
 import type { PagoFormValues } from "../hooks/registerPayment";
 
 const API_URL = import.meta.env.VITE_BACK_URL  ||'https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site'; ;
+const api = axios.create({
+  baseURL: API_URL,
+});
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 // Traer todos los inversionistas
 export const getInvestors = async () => {
-  const res = await axios.get(`${API_URL}/investor`);
+  const res = await api.get(`/investor`);
   return res.data;
 };
 export interface InvestorPayload {
@@ -31,7 +41,7 @@ export interface InvestorResponse {
 export async function insertInvestorService(
   data: InvestorPayload | InvestorPayload[]
 ): Promise<InvestorResponse[]> {
-  const res = await axios.post(`${API_URL}/investor`, data);
+  const res = await api.post(`${API_URL}/investor`, data);
   return res.data;
 }
 
@@ -39,11 +49,11 @@ export async function insertInvestorService(
 export async function updateInvestorService(
   data: InvestorPayload | InvestorPayload[]
 ): Promise<InvestorResponse[]> {
-  const res = await axios.post(`${API_URL}/investor/update`, data);
+  const res = await api.post(`${API_URL}/investor/update`, data);
   return res.data;
 }
 export const getAdvisors = async () => {
-  const res = await axios.get(`${API_URL}/advisor`);
+  const res = await api.get(`${API_URL}/advisor`);
   return res.data;
 };
 // types/credit.ts
@@ -79,7 +89,7 @@ export interface CreditFormValues {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const createCredit = async (data: CreditFormValues): Promise<any> => {
-  const res = await axios.post(`${API_URL}/newCredit`, data);
+  const res = await api.post(`${API_URL}/newCredit`, data);
   return res.data;
 };
 export interface Credito {
@@ -196,14 +206,14 @@ export type GetCreditoByNumeroResponse =
   | GetCreditoByNumeroCanceladoResponse;
 
 export const createPago = async (data: PagoFormValues) => {
-  const res = await axios.post(`${API_URL}/newPayment`, data);
+  const res = await api.post(`${API_URL}/newPayment`, data);
   return res.data;
 };
 
 export const getCreditoByNumero = async (
   numero_credito_sifco: string
 ): Promise<GetCreditoByNumeroResponse> => {
-  const res = await axios.get<GetCreditoByNumeroResponse>(`${API_URL}/credito`, {
+  const res = await api.get<GetCreditoByNumeroResponse>(`${API_URL}/credito`, {
     params: { numero_credito_sifco },
   });
   return res.data;
@@ -326,15 +336,17 @@ export const getCreditosPaginados = async (params: {
   perPage?: number;
   numero_credito_sifco?: string;
   estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION";
+  excel: boolean; // 👈 nuevo parámetro
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
-  const response = await axios.get(`${BACK_URL}/getAllCredits`, {
+  const response = await api.get(`${BACK_URL}/getAllCredits`, {
     params: {
       mes: params.mes,
       anio: params.anio,
       page: params.page ?? 1,
       perPage: params.perPage ?? 10,
       estado: params.estado,
+      excel: params.excel, // 👈 nuevo parámetro
       // Solo manda el param si existe (así el backend no se lo traga vacío)
       ...(params.numero_credito_sifco && {
         numero_credito_sifco: params.numero_credito_sifco,
@@ -342,7 +354,9 @@ export const getCreditosPaginados = async (params: {
     },
   });
   return response.data;
-};
+};export interface ExcelResponse {
+  excelUrl: string;
+}
 export interface PagoData {
   pago: {
     pago_id: number;
@@ -428,10 +442,11 @@ export interface PagoData {
 }
 export const getPagosByCredito = async (
   numero_credito_sifco: string,
-  fecha_pago?: string
-): Promise<PagoData[]> => {
-  const res = await axios.get(`${API_URL}/paymentByCredit`, {
-    params: { numero_credito_sifco, fecha_pago },
+  excel: boolean,
+  fecha_pago?: string,
+): Promise<PagoData[] | ExcelResponse> => {
+  const res = await api.get(`${API_URL}/paymentByCredit`, {
+    params: { numero_credito_sifco, fecha_pago, excel },
   });
   return res.data;
 };
@@ -461,7 +476,7 @@ export interface Investor {
 }
 
 export const getInvestorsWithCredits = async (): Promise<Investor[]> => {
-  const { data } = await axios.get(`${API_URL}/getInvestorsWithFullCredits`);
+  const { data } = await api.get(`${API_URL}/getInvestorsWithFullCredits`);
   return data;
 };
 
@@ -503,13 +518,13 @@ export interface UpdateCreditBody {
   inversionistas?: InversionistaPayload[];
 }
 export async function updateCreditService(body: UpdateCreditBody) {
-  const response = await axios.post(`${API_URL}/updateCredit`, body);
+  const response = await api.post(`${API_URL}/updateCredit`, body);
   return response.data;
 }
 
 // Liquidar pagos
 export async function liquidatePagosInversionistasService({ pago_id, credito_id, cuota }: { pago_id: number; credito_id: number; cuota?: number }) {
-  const res = await axios.post(`${API_URL}/liquidate-pagos-inversionistas`, {
+  const res = await api.post(`${API_URL}/liquidate-pagos-inversionistas`, {
     pago_id,
     credito_id,
     cuota,
@@ -519,7 +534,7 @@ export async function liquidatePagosInversionistasService({ pago_id, credito_id,
 
 // Reversar pagos
 export async function reversePagosInversionistasService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
-  const res = await axios.post(`${API_URL}/reversePayment`, {
+  const res = await api.post(`${API_URL}/reversePayment`, {
     pago_id,
     credito_id,
   });
@@ -600,7 +615,7 @@ export async function getInvestorServices(
   if (params?.perPage !== undefined) query.append("perPage", String(params.perPage));
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestors${query.toString() ? `?${query.toString()}` : ""}`;
-  const res = await axios.get<InversionistasCreditosResponse>(url);
+  const res = await api.get<InversionistasCreditosResponse>(url);
   return res.data;
 }
 
@@ -645,7 +660,7 @@ export async function getPagosByMesAnio({
   perPage?: number;
   numero_credito_sifco?: string;
 }): Promise<PagosPorMesAnioResponse> {
-  const { data } = await axios.get<PagosPorMesAnioResponse>(`${API_URL}/payments`, {
+  const { data } = await api.get<PagosPorMesAnioResponse>(`${API_URL}/payments`, {
     params: { mes, anio, page, perPage, numero_credito_sifco },
   });
   console.log("getPagosByMesAnio response:", data);
@@ -665,7 +680,7 @@ export interface LiquidateByInvestorResponse {
 export async function liquidateByInvestorService(
   data: LiquidateByInvestorRequest
 ): Promise<LiquidateByInvestorResponse> {
-  const response = await axios.post<LiquidateByInvestorResponse>(
+  const response = await api.post<LiquidateByInvestorResponse>(
     `${import.meta.env.VITE_BACK_URL}/liquidate-inversionista-pagos`,
     data
   );
@@ -684,7 +699,7 @@ export async function downloadInvestorPDFService(
 ): Promise<PdfUploadResponse> {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
 
-  const { data } = await axios.get<PdfUploadResponse>(`${BACK_URL}/investor/pdf`, {
+  const { data } = await api.get<PdfUploadResponse>(`${BACK_URL}/investor/pdf`, {
     params: { id, page, perPage },
     // Asegura que el backend responda JSON (no blob)
     headers: { Accept: "application/json" },
@@ -705,7 +720,7 @@ export async function uploadFileService(file: File | Blob): Promise<{ url: strin
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await axios.post(`${BACK_URL}/upload`, formData, {
+  const response = await api.post(`${BACK_URL}/upload`, formData, {
     headers: {
       "Content-Type": "multipart/form-data",
     },
@@ -727,7 +742,7 @@ export interface FalsePaymentResponse {
 }
 
 export async function falsePaymentService(data: FalsePaymentPayload): Promise<FalsePaymentResponse> {
-  const res = await axios.post(`${API_URL}/false-payment`, data);
+  const res = await api.post(`${API_URL}/false-payment`, data);
   return res.data;
 }
 
@@ -747,7 +762,7 @@ export interface CancelCreditResponse {
  
 
 export async function cancelCreditService(creditId: number): Promise<CancelCreditResponse> {
-  const res = await axios.post(`${API_URL}/cancelCredit`, { creditId });
+  const res = await api.post(`${API_URL}/cancelCredit`, { creditId });
   return res.data;
 }
 
@@ -798,7 +813,7 @@ export interface CreditActionResponse {
 // Cambia esta URL por la de tu backend 
 // Servicio para cancelar o activar crédito
 export async function creditAction(payload: CreditActionPayload): Promise<CreditActionResponse> {
-  const { data } = await axios.post(`${API_URL}/creditAction`, payload);
+  const { data } = await api.post(`${API_URL}/creditAction`, payload);
   return data;
 }
 
@@ -811,7 +826,7 @@ export interface ResetCreditParams {
 }
 
 export async function resetCreditService(params: ResetCreditParams) {
-  const { data } = await axios.post(`${API_URL}/resetCredit`, params);
+  const { data } = await api.post(`${API_URL}/resetCredit`, params);
   return data;
 }
 export interface UsuarioConCreditosSifco {
@@ -828,7 +843,7 @@ export interface UsuarioConCreditosSifco {
  * Servicio para obtener usuarios con sus números de crédito SIFCO
  */
 export async function getUsersWithSifco(): Promise<UsuarioConCreditosSifco[]> {
-  const { data } = await axios.get<UsuarioConCreditosSifco[]>(`${API_URL}/users-with-sifco`);
+  const { data } = await api.get<UsuarioConCreditosSifco[]>(`${API_URL}/users-with-sifco`);
   return data;
 }
 
@@ -883,7 +898,7 @@ export async function generateReport(
   query: ReportQuery
 ): Promise<ReportResponse> {
   const url = `${API_URL}${pathFor(kind)}`;
-  const { data } = await axios.get<ReportResponse>(url, {
+  const { data } = await api.get<ReportResponse>(url, {
     params: buildParams(query),
   });
   return data;
@@ -927,7 +942,7 @@ export async function getResumenInversionistas(params?: {
   excel?: boolean;
 }): Promise<InversionistaResumen[] | ResumenInversionistasExcel> {
   const { id, mes, anio, excel } = params || {};
-  const res = await axios.get(
+  const res = await api.get(
     `${API_URL}/resumen-inversionistas`,
     {
       params: {
@@ -940,3 +955,25 @@ export async function getResumenInversionistas(params?: {
   );
 
   return res.data;}
+
+  export interface Advisor {
+  asesor_id: number;
+  nombre: string;
+  activo: boolean;
+  email?: string;
+}
+
+ 
+
+export const createAdvisor = async (data: Partial<Advisor> & { password?: string }) => {
+  const res = await api.post(`${API_URL}/advisor`, data);
+  return res.data;
+};
+
+export const updateAdvisor = async (
+  id: number,
+  data: Partial<Advisor> & { password?: string }
+) => {
+  const res = await api.post(`${API_URL}/updateAdvisor?id=${id}`, data);
+  return res.data;
+};

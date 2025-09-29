@@ -114,12 +114,14 @@ export default function InvestmentCalculator() {
 
   // Helper function to get VAT rate
   const getVatRate = useCallback(() => {
-    return isSmallTaxpayer ? 0.05 : 0.12;
+    const rate = isSmallTaxpayer ? 0.05 : 0.12;
+    console.log('getVatRate called:', rate, 'isSmallTaxpayer:', isSmallTaxpayer);
+    return rate;
   }, [isSmallTaxpayer]);
 
   // Standard amortization schedule (capital returned monthly)
   const calculateMonthlyPayment = (principal: number, rate: number) => {
-    const monthlyRate = (rate * (1 + getVatRate())) / 100;
+    const monthlyRate = (rate * (1 + 0.12)) / 100; // Always use 12% for payment calculations
     const totalMonths = getTermInMonths();
     return (
       (principal * monthlyRate * Math.pow(1 + monthlyRate, totalMonths)) /
@@ -134,7 +136,7 @@ export default function InvestmentCalculator() {
     const monthlyPayment = calculateMonthlyPayment(principal, interestRate);
     let balance = principal;
     const totalMonths = getTermInMonths();
-    const vatRate = getVatRate();
+    const vatRate = 0.12; // Always 12% for table calculations - what borrower pays
     for (let month = 1; month <= totalMonths; month++) {
       const interest = balance * (interestRate / 100);
       const vat = interest * vatRate;
@@ -163,7 +165,7 @@ export default function InvestmentCalculator() {
   ): AmortizationRow[] => {
     const schedule: AmortizationRow[] = [];
     const totalMonths = getTermInMonths();
-    const vatRate = getVatRate();
+    const vatRate = 0.12; // Always 12% for table calculations - what borrower pays
     for (let month = 1; month <= totalMonths; month++) {
       const interest = principal * (interestRate / 100);
       const vat = interest * vatRate;
@@ -204,7 +206,7 @@ export default function InvestmentCalculator() {
   const generateCompoundSchedule = (principal: number): AmortizationRow[] => {
     const schedule: AmortizationRow[] = [];
     const totalMonths = getTermInMonths();
-    const vatRate = getVatRate();
+    const vatRate = 0.12; // Always 12% for table calculations - what borrower pays
     let balance = principal;
     for (let month = 1; month <= totalMonths; month++) {
       const interest = balance * (interestRate / 100);
@@ -404,7 +406,7 @@ export default function InvestmentCalculator() {
         "Impuestos a Pagar:",
         `Q ${
           activeTab === "compound"
-            ? (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) * (0.12 / 1.12)).toLocaleString("en-US", {
+            ? (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) * (getVatRate() / (1 + getVatRate()))).toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })
@@ -425,7 +427,9 @@ export default function InvestmentCalculator() {
         "Total a Recibir:",
         `Q ${
           (activeTab === "compound" 
-            ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / 1.12)
+            ? activeTab === "compound" 
+                      ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / (1 + getVatRate()))
+                      : displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))
             : totalToReceive
           ).toLocaleString("en-US", {
             minimumFractionDigits: 2,
@@ -558,7 +562,9 @@ export default function InvestmentCalculator() {
     const summaryCell3 = document.createElement("td");
     summaryCell3.textContent = `Total a Recibir: Q ${
       (activeTab === "compound" 
-        ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / 1.12)
+        ? activeTab === "compound" 
+                      ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / (1 + getVatRate()))
+                      : displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))
         : totalToReceive
       ).toLocaleString("en-US", {
         minimumFractionDigits: 2,
@@ -718,7 +724,7 @@ export default function InvestmentCalculator() {
     const totalMonths = getTermInMonths();
     const monthlyInterestRate = interestRate / 100;
     const investorShare = investorPercentage / 100;
-    const vatRate = getVatRate();
+    const vatRate = 0.12; // Always 12% for table calculations - what borrower pays
     let capital = 0;
 
     if (inverseMode === "monthly") {
@@ -1016,7 +1022,9 @@ export default function InvestmentCalculator() {
                 <p className="text-2xl font-bold">
                   Q{" "}
                   {(activeTab === "compound" 
-                    ? displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / 1.12)
+                    ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / (1 + getVatRate()))
+                    : activeTab === "interest-only" || activeTab === "standard"
+                    ? displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))
                     : totalToReceive
                   ).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
@@ -1128,7 +1136,10 @@ export default function InvestmentCalculator() {
                     </TableCell>
                     <TableCell colSpan={2} className="text-right">
                       Total a Recibir: Q{" "}
-                      {totalToReceive.toLocaleString("en-US", {
+                      {(activeTab === "interest-only" || activeTab === "standard"
+                        ? displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))
+                        : totalToReceive
+                      ).toLocaleString("en-US", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1213,7 +1224,10 @@ export default function InvestmentCalculator() {
                     </TableCell>
                     <TableCell colSpan={2} className="text-right">
                       Total a Recibir: Q{" "}
-                      {totalToReceive.toLocaleString("en-US", {
+                      {(activeTab === "interest-only" || activeTab === "standard"
+                        ? displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / (1 + getVatRate()))
+                        : totalToReceive
+                      ).toLocaleString("en-US", {
                         minimumFractionDigits: 2,
                         maximumFractionDigits: 2,
                       })}
@@ -1385,7 +1399,7 @@ export default function InvestmentCalculator() {
                 <span className="text-black">
                   Q
                   {activeTab === "compound"
-                    ? (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) * (0.12 / 1.12)).toLocaleString(
+                    ? (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) * (getVatRate() / (1 + getVatRate()))).toLocaleString(
                         "en-US",
                         {
                           minimumFractionDigits: 2,

@@ -4,3 +4,4 @@ export * from "./documents";
 export * from "./renap";
 export * from "./vehicles";
 export * from "./cobros";
+export * from "./auctionVehicles";

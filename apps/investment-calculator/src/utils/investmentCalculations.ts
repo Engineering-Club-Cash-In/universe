@@ -38,8 +38,8 @@ export function calculateCompoundInvestment(params: InvestmentParams): Investmen
     const investorGross = (monthlyInterest + monthlyVat) * (investorPercentage / 100);
     const investorNet = netMonthlyInterest * (investorPercentage / 100);
     
-    // Add only investor's net portion to balance for compound effect
-    balance += investorNet;
+    // Add investor's full portion (including VAT) to balance for compound effect
+    balance += investorGross;
     
     totalInvestorGross += investorGross;
     totalInvestorNet += investorNet;

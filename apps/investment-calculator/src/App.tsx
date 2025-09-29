@@ -214,13 +214,8 @@ export default function InvestmentCalculator() {
       // Investor's portion of total (interest + VAT)
       const investorPortionTotal = interestPlusVat * (investorPercentage / 100);
       
-      // Investor's portion of VAT only
-      const investorVatPortion = vat * (investorPercentage / 100);
-      
-      // Amount investor reinvests (their portion minus their VAT)
-      const investorNetToReinvest = investorPortionTotal - investorVatPortion;
-      
-      const finalBalance = balance + investorNetToReinvest;
+      // In compound interest, reinvest the full amount received (including VAT)
+      const finalBalance = balance + investorPortionTotal;
       schedule.push({
         month,
         initialBalance: balance,
@@ -363,7 +358,7 @@ export default function InvestmentCalculator() {
     summary.appendChild(
       createSummaryRow(
         "Tasa de Interés Mensual:",
-        `${interestRate.toFixed(1)}%`
+        `${parseFloat((interestRate * (investorPercentage / 100)).toFixed(4))}%`
       )
     );
 
@@ -409,7 +404,7 @@ export default function InvestmentCalculator() {
         "Impuestos a Pagar:",
         `Q ${
           activeTab === "compound"
-            ? (summaryTotalInterest * getVatRate()).toLocaleString("en-US", {
+            ? (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) * (0.12 / 1.12)).toLocaleString("en-US", {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })
@@ -429,7 +424,10 @@ export default function InvestmentCalculator() {
       createSummaryRow(
         "Total a Recibir:",
         `Q ${
-          totalToReceive.toLocaleString("en-US", {
+          (activeTab === "compound" 
+            ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / 1.12)
+            : totalToReceive
+          ).toLocaleString("en-US", {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })
@@ -559,7 +557,10 @@ export default function InvestmentCalculator() {
 
     const summaryCell3 = document.createElement("td");
     summaryCell3.textContent = `Total a Recibir: Q ${
-      totalToReceive.toLocaleString("en-US", {
+      (activeTab === "compound" 
+        ? displayCapital + (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) / 1.12)
+        : totalToReceive
+      ).toLocaleString("en-US", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })
@@ -576,11 +577,25 @@ export default function InvestmentCalculator() {
     tbody.appendChild(summaryRow);
     table.appendChild(tbody);
 
+    // Agregar disclaimer legal
+    const disclaimer = document.createElement("div");
+    disclaimer.style.marginTop = "20px";
+    disclaimer.style.padding = "10px";
+    disclaimer.style.fontSize = "10px";
+    disclaimer.style.color = "#666666";
+    disclaimer.style.fontStyle = "italic";
+    disclaimer.style.lineHeight = "1.4";
+    disclaimer.style.border = "1px solid #ddd";
+    disclaimer.style.borderRadius = "3px";
+    disclaimer.style.backgroundColor = "#f9f9f9";
+    disclaimer.textContent = "Los rendimientos y montos presentados en este cotizador son de carácter referencial y pueden variar según el régimen fiscal aplicable al inversionista, así como por retenciones, impuestos u otras disposiciones legales vigentes. Esta simulación no constituye una oferta vinculante ni garantiza resultados futuros.";
+
     // Agregar todo al contenedor principal
     printContent.appendChild(header);
     printContent.appendChild(summary);
     printContent.appendChild(tableTitle);
     printContent.appendChild(table);
+    printContent.appendChild(disclaimer);
 
     // Agregar el contenedor al documento
     document.body.appendChild(printContent);
@@ -776,6 +791,9 @@ export default function InvestmentCalculator() {
             *El interés siempre es calculado sobre saldo
             <br />
             *No hay penalización por cancelación anticipada de créditos
+          </CardDescription>
+          <CardDescription className="text-xs text-gray-500 mt-4 italic">
+            Los rendimientos y montos presentados en este cotizador son de carácter referencial y pueden variar según el régimen fiscal aplicable al inversionista, así como por retenciones, impuestos u otras disposiciones legales vigentes. Esta simulación no constituye una oferta vinculante ni garantiza resultados futuros.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -997,7 +1015,10 @@ export default function InvestmentCalculator() {
               <CardContent>
                 <p className="text-2xl font-bold">
                   Q{" "}
-                  {totalToReceive.toLocaleString("en-US", {
+                  {(activeTab === "compound" 
+                    ? displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / 1.12)
+                    : totalToReceive
+                  ).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
@@ -1316,7 +1337,7 @@ export default function InvestmentCalculator() {
               <div className="flex justify-between text-lg font-semibold">
                 <p>Tasa de Interés Mensual:</p>
                 <span className="text-black">
-                  {(interestRate * (investorPercentage / 100)).toFixed(2)}%
+                  {parseFloat((interestRate * (investorPercentage / 100)).toFixed(4))}%
                 </span>
               </div>
               <Separator />
@@ -1364,7 +1385,7 @@ export default function InvestmentCalculator() {
                 <span className="text-black">
                   Q
                   {activeTab === "compound"
-                    ? (summaryTotalInterest * getVatRate()).toLocaleString(
+                    ? (((compoundScheduleArr[compoundScheduleArr.length - 1]?.finalBalance || displayCapital) - displayCapital) * (0.12 / 1.12)).toLocaleString(
                         "en-US",
                         {
                           minimumFractionDigits: 2,
@@ -1386,7 +1407,10 @@ export default function InvestmentCalculator() {
                 <p>Total a Recibir:</p>
                 <span className="text-black">
                   Q
-                  {totalToReceive.toLocaleString("en-US", {
+                  {(activeTab === "compound" 
+                    ? displayCapital + ((investmentResult.grossProfit + investmentResult.vatPaid) / 1.12)
+                    : totalToReceive
+                  ).toLocaleString("en-US", {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}

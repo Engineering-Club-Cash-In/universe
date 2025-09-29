@@ -21,8 +21,9 @@ export const creditSchema = z.object({
   membresias_pago: z.number().min(0),
   cuota_interes: z.number().min(0).optional(),
   categoria: z.string().max(1000),
+
   nit: z.string().max(1000),
-  otros: z.number().max(100000),
+  otros: z.number().max(10000),
   porcentaje_royalti: z.number().min(0),
   royalti: z.number().min(0),
   reserva: z.number().min(0), // 👈 Aquí
@@ -37,6 +38,15 @@ export const creditSchema = z.object({
       })
     )
     .min(1, "Debe agregar al menos un inversionista"),
+  rubros: z
+    .array(
+      z.object({
+        nombre_rubro: z.string().max(100),
+        monto: z.number().min(0),
+      })
+    )
+    .optional()
+    .default([]),
 });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function zodToFormikValidate(schema: z.ZodSchema<any>) {
@@ -75,16 +85,24 @@ export function useCreditForm(initialValues?: Partial<CreditFormValues>) {
       porcentaje_royalti: 0,
       otros: 0,
       reserva: 0,
-      inversionistas: [], // 👈 Aquí
+      inversionistas: [],
+      rubros: [],
       ...initialValues,
     },
 
     validate: zodToFormikValidate(creditSchema),
-    onSubmit: async (values, { setSubmitting, setStatus }) => {
+    onSubmit: async (values, { setSubmitting, setStatus, resetForm }) => {
       try {
         console.log("Enviando datos del crédito:", values);
         await createCredit(values);
         formik.resetForm();
+        resetForm({
+          values: {
+            ...formik.initialValues,
+            rubros: [],
+            otros: 0,
+          },
+        });
         alert("¡Crédito creado correctamente!");
         setStatus({ success: true });
       } catch (error: any) {

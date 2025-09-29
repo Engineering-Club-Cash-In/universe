@@ -10,10 +10,12 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useGetInvestors } from "../hooks/getInvestor";
 import { useCatalogs } from "../hooks/catalogs";
-import type { Investor } from "../services/services";
+import type { Investor, InvestorPayload } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
 import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport";
 import { Spinner } from "./spinner";
+import { InvestorModal } from "./modalInvestor";
+import { useInvestor } from "../hooks/investor";
 const PER_PAGE_OPTIONS = [5, 10, 20, 50];
 
 export function TableInvestors() {
@@ -24,13 +26,17 @@ export function TableInvestors() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [expandedCredit, setExpandedCredit] = useState<number | null>(null);
   const liquidateMutation = useLiquidateByInvestor();
-
+  const [modalOpen, setModalOpen] = useState(false);
+  const [mode, setMode] = useState<"create" | "update">("create");
+  const [selectedInvestorData, setSelectedInvestorData] =
+    useState<InvestorPayload | null>(null);
+const { resumenExcelMutation } = useInvestor();
   // Catálogo de inversionistas (para el filtro)
   const { investors = [], loading: loadingCatalogs } = useCatalogs() as {
     investors: Investor[];
     loading: boolean;
   };
-
+ 
   // Consulta con paginación y filtro por id
   const { data, isLoading, isError, isFetching, refetch } = useGetInvestors({
     id: selectedInvestor !== "" ? Number(selectedInvestor) : undefined,
@@ -47,15 +53,14 @@ export function TableInvestors() {
     tienePagosPendientes
   );
 
-  // Rangos para el label de paginado
-  const from = (page - 1) * perPage + 1;
-  const to = Math.min(
-    (page - 1) * perPage + (data?.inversionistas?.length ?? 0),
-    data?.totalItems ?? 0
-  );
-
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+      <InvestorModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        mode={mode}
+        initialData={selectedInvestorData || undefined}
+      />
       <h2 className="text-3xl font-extrabold text-blue-700 mb-6 text-center">
         Inversionistas y sus Créditos
       </h2>
@@ -86,7 +91,37 @@ export function TableInvestors() {
               </option>
             ))}
           </select>
-        </div>
+        </div>{" "}
+     <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+  <button
+    onClick={() => {
+      setMode("create");
+      setSelectedInvestor("");
+      setModalOpen(true);
+    }}
+    className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition"
+  >
+    + Nuevo Inversionista
+  </button>
+<button
+  onClick={() => {
+    resumenExcelMutation.mutate(
+      { mes: 9, anio: 2025 }, // o params dinámicos
+      {
+        onSuccess: (res) => {
+          if ("url" in res) {
+            window.open(res.url, "_blank"); // abre el Excel directo
+          }
+        },
+      }
+    );
+  }}
+  disabled={resumenExcelMutation.isPending}
+  className="px-4 py-2 rounded-lg bg-indigo-500 text-white font-bold hover:bg-indigo-600 transition"
+>
+  {resumenExcelMutation.isPending ? "Generando..." : "📊 Resumen General"}
+</button>
+</div>
         {/* Select por página */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
           <label className="text-blue-900 font-bold" htmlFor="per-page">
@@ -111,13 +146,6 @@ export function TableInvestors() {
           </select>
         </div>
         {/* Info paginación */}
-        {data && (
-          <div className="text-gray-600 font-semibold sm:ml-auto">
-            Mostrando <span className="text-blue-700">{from}</span> -{" "}
-            <span className="text-blue-700">{to}</span> de{" "}
-            <span className="text-blue-700">{data.totalItems}</span>
-          </div>
-        )}
       </div>
 
       {/* Tabla principal */}
@@ -138,6 +166,18 @@ export function TableInvestors() {
                     Nombre
                   </TableHead>
                   <TableHead className="text-blue-900 font-bold">
+                    Banco
+                  </TableHead>
+                  <TableHead className="text-blue-900 font-bold">
+                    Tipo Cuenta
+                  </TableHead>
+                  <TableHead className="text-blue-900 font-bold">
+                    Número Cuenta
+                  </TableHead>
+                  <TableHead className="text-blue-900 font-bold">
+                    Reinversión
+                  </TableHead>
+                  <TableHead className="text-blue-900 font-bold">
                     Total Capital
                   </TableHead>
                   <TableHead className="text-blue-900 font-bold">
@@ -148,6 +188,9 @@ export function TableInvestors() {
                   </TableHead>
                   <TableHead className="text-blue-900 font-bold">
                     Total Cuota
+                  </TableHead>
+                  <TableHead className="text-blue-900 font-bold">
+                    Acciones
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -171,6 +214,18 @@ export function TableInvestors() {
                       </TableCell>
                       <TableCell className="font-bold text-blue-800">
                         {inv.inversionista}
+                      </TableCell>
+                      <TableCell className="font-bold text-blue-800">
+                        {inv.banco || "--"}
+                      </TableCell>
+                      <TableCell className="font-bold text-blue-800">
+                        {inv.tipo_cuenta || "--"}
+                      </TableCell>
+                      <TableCell className="font-bold text-blue-800">
+                        {inv.numero_cuenta || "--"}
+                      </TableCell>
+                      <TableCell className="font-bold text-blue-800">
+                        {inv.reinversion ? "Sí" : "No"}
                       </TableCell>
                       <TableCell className="text-blue-700">
                         Q
@@ -236,6 +291,25 @@ export function TableInvestors() {
                             ) : (
                               "Liquidar"
                             )}
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setMode("update");
+                              setSelectedInvestorData({
+                                inversionista_id: inv.inversionista_id,
+                                nombre: inv.inversionista,
+                                emite_factura: inv.emite_factura,
+                                reinversion: inv.reinversion, // si tu backend devuelve esto lo mapeas
+                                banco: inv.banco, // igual acá
+                                tipo_cuenta: inv.tipo_cuenta,
+                                numero_cuenta: inv.numero_cuenta,
+                              });
+                              setModalOpen(true);
+                            }}
+                            className="px-3 py-1 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white font-bold"
+                          >
+                            Editar
                           </button>
                         </div>
                       </TableCell>
@@ -671,6 +745,26 @@ export function TableInvestors() {
             {/* SUBTOTALES resumen */}
             <div className="flex flex-wrap gap-x-6 gap-y-2 mb-2 text-sm">
               <div>
+                <span className="font-bold text-blue-900">Banco: </span>
+                <span className="text-blue-800">{inv.banco || "--"}</span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Tipo Cuenta: </span>
+                <span className="text-blue-800">{inv.tipo_cuenta || "--"}</span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Número Cuenta: </span>
+                <span className="text-blue-800">
+                  {inv.numero_cuenta || "--"}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-900">Reinversión: </span>
+                <span className="text-blue-800">
+                  {inv.reinversion ? "Sí" : "No"}
+                </span>
+              </div>
+              <div>
                 <span className="font-bold text-blue-900">Total Capital: </span>
                 <span className="text-blue-800 font-bold">
                   Q
@@ -786,6 +880,24 @@ export function TableInvestors() {
                 }}
               >
                 Liquidar
+              </button>
+              <button
+                onClick={() => {
+                  setMode("update");
+                  setSelectedInvestorData({
+                    inversionista_id: inv.inversionista_id,
+                    nombre: inv.inversionista,
+                    emite_factura: inv.emite_factura,
+                    reinversion: inv.reinversion, // si tu backend devuelve esto lo mapeas
+                    banco: inv.banco, // igual acá
+                    tipo_cuenta: inv.tipo_cuenta,
+                    numero_cuenta: inv.numero_cuenta,
+                  });
+                  setModalOpen(true);
+                }}
+                className="px-3 py-1 rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white font-bold"
+              >
+                Editar
               </button>
             </div>
 

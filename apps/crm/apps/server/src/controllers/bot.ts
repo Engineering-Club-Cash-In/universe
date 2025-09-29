@@ -244,7 +244,7 @@ function mapCivilStatusToEnum(
 }
 
 // Define the base URL for magic links
-const MAGIC_URL_BASE = process.env.MAGIC_URL_BASE  
+const MAGIC_URL_BASE = process.env.MAGIC_URL_BASE;
 /**
  * Controller: updateLeadAndCreateOpportunity
  *
@@ -267,11 +267,18 @@ export const updateLeadAndCreateOpportunity = async (
     hasCreditCard?: boolean;
     electricityBill?: string;
     bankStatements?: string;
+    bankStatements2?: string;
+    bankStatements3?: string;
   }
 ) => {
   console.log(
     `[DEBUG] Starting updateLeadAndCreateOpportunity for DPI: ${dpi}`
   );
+  console.log("[DEBUG] Data received:", data);
+
+  if (!dpi) {
+    return { success: false, message: "DPI is required" };
+  }
 
   // 1. Buscar lead por DPI con status NEW
   const existingLead = await db
@@ -334,17 +341,46 @@ export const updateLeadAndCreateOpportunity = async (
   let opportunityId: string | null = null;
 
   // 3. Insertar documentos legales si hay alguno
-  if (data.electricityBill || data.bankStatements) {
+  if (
+    data.electricityBill ||
+    data.bankStatements2 ||
+    data.bankStatements3 ||
+    data.bankStatements
+  ) {
     console.log(
       `[DEBUG] Inserting legal documents for lead ${existingLead.id}`
-    ); 
+    );
 
-    await db.insert(legalDocuments).values({
-      leadId: existingLead.id,
-      electricityBill: data.electricityBill ?? null,
-      bankStatements: data.bankStatements ?? null,
-      createdAt: new Date(),
-    });
+    const existingDoc = await db
+      .select()
+      .from(legalDocuments)
+      .where(eq(legalDocuments.leadId, existingLead.id))
+      .limit(1)
+      .then((results) => results[0] || null);
+
+    if (existingDoc) {
+      // 🔄 Update si ya existe
+      await db
+        .update(legalDocuments)
+        .set({
+          electricityBill: data.electricityBill ?? existingDoc.electricityBill,
+          bankStatements: data.bankStatements ?? existingDoc.bankStatements,
+          bankStatements2: data.bankStatements2 ?? existingDoc.bankStatements2,
+          bankStatements3: data.bankStatements3 ?? existingDoc.bankStatements3,
+          createdAt: new Date(),
+        })
+        .where(eq(legalDocuments.leadId, existingLead.id));
+    } else {
+      // 🆕 Insert si no existe
+      await db.insert(legalDocuments).values({
+        leadId: existingLead.id,
+        electricityBill: data.electricityBill ?? null,
+        bankStatements: data.bankStatements ?? null,
+        bankStatements2: data.bankStatements2 ?? null,
+        bankStatements3: data.bankStatements3 ?? null,
+        createdAt: new Date(),
+      });
+    }
 
     // 4. Crear oportunidad vinculada al lead
     const [firstStage] = await db
@@ -388,7 +424,9 @@ export const updateLeadAndCreateOpportunity = async (
 
       opportunityId = existingOpportunity.id;
     } else {
-      console.log(`[DEBUG] Creating new opportunity for lead ${existingLead.id}`);
+      console.log(
+        `[DEBUG] Creating new opportunity for lead ${existingLead.id}`
+      );
 
       const [newOpportunity] = await db
         .insert(opportunities)

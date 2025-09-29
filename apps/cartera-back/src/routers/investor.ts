@@ -8,55 +8,64 @@ import {
   liquidateByInvestorId,
   liquidateByInvestorSchema,
   generarHTMLReporte,
+  updateInvestor,
+  resumenGlobalInversionistas,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
-import puppeteer from "puppeteer"; 
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import puppeteer from "puppeteer";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+ 
 
 export const inversionistasRouter = new Elysia()
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
+  .post("/investor/update", updateInvestor) // 👈 update usando POST
   .get("/getInvestorsWithFullCredits", getInvestorsWithCredits)
   .get(
     "/getInvestors",
     async ({ query, set }) => {
-      // Extraer los query params
       const {
         id,
         page = "1",
         perPage = "10",
+        numeroCreditoSifco,
+        nombreUsuario,
       } = query as Record<string, string | undefined>;
 
-      // Paginación
+      // ✅ Validaciones
       const pageNum = Number(page);
       const perPageNum = Number(perPage);
 
-      if ((page && isNaN(pageNum)) || (perPage && isNaN(perPageNum))) {
+      if (isNaN(pageNum) || isNaN(perPageNum)) {
         set.status = 400;
         return { message: "Parámetros 'page' y/o 'perPage' inválidos." };
       }
 
-      // Validar que el id sea numérico si viene
-      if (id && isNaN(Number(id))) {
+      if (!id || isNaN(Number(id))) {
         set.status = 400;
-        return { message: "El parámetro 'id' debe ser numérico." };
+        return {
+          message: "El parámetro 'id' es obligatorio y debe ser numérico.",
+        };
       }
 
-      // Aquí llamas tu función con los filtros
+      // 🚀 Llamar función con filtros
       const result = await resumeInvestor(
-        id ? Number(id) : undefined,
+        Number(id), // ahora obligatorio
         pageNum,
-        perPageNum
+        perPageNum,
+        numeroCreditoSifco,
+        nombreUsuario
       );
 
       return result;
     },
     {
-      // Tipado/validación de los query params
       query: t.Object({
-        id: t.Optional(t.String()),
+        id: t.String(), // 👈 obligatorio
         page: t.Optional(t.String()),
         perPage: t.Optional(t.String()),
+        numeroCreditoSifco: t.Optional(t.String()),
+        nombreUsuario: t.Optional(t.String()),
       }),
     }
   )
@@ -102,73 +111,128 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
-.get("/investor/pdf", async ({ query, set }) => {
-  const { id, page = "1", perPage = "1" } = query as Record<string, string | undefined>;
+  .get("/investor/pdf", async ({ query, set }) => {
+    const {
+      id,
+      page = "1",
+      perPage = "1",
+    } = query as Record<string, string | undefined>;
 
-  // Validaciones...
-  const pageNum = Number(page);
-  const perPageNum = Number(perPage);
+    // Validaciones...
+    const pageNum = Number(page);
+    const perPageNum = Number(perPage);
 
-  if ((page && isNaN(pageNum)) || (perPage && isNaN(perPageNum))) {
+    if ((page && isNaN(pageNum)) || (perPage && isNaN(perPageNum))) {
+      set.status = 400;
+      return { message: "Parámetros 'page' y/o 'perPage' inválidos." };
+    }
+
+    if (!id || isNaN(Number(id))) {
+      set.status = 400;
+      return {
+        message: "El parámetro 'id' es obligatorio y debe ser numérico.",
+      };
+    }
+
+    const result: RespuestaReporte = await resumeInvestor(
+      Number(id),
+      pageNum,
+      perPageNum
+    );
+
+    if (!result.inversionistas.length) {
+      set.status = 404;
+      return { message: "Inversionista no encontrado." };
+    }
+
+    const inversionista: InversionistaReporte = result.inversionistas[0];
+
+    const logoUrl = import.meta.env.LOGO_URL || "";
+    const html = generarHTMLReporte(inversionista, logoUrl);
+
+    const browser = await puppeteer.launch({ headless: true });
+    const pagePDF = await browser.newPage();
+    await pagePDF.setContent(html, { waitUntil: "networkidle0" });
+
+    const pdfBuffer = await pagePDF.pdf({
+      printBackground: true,
+      width: "2500px",
+      height: "980px",
+      landscape: false,
+      margin: { top: 20, bottom: 20, left: 8, right: 8 },
+    });
+
+    await browser.close();
+
+    /** 🚀 SUBIR A R2 */
+    const filename = `reporte_inversionista_${id}.pdf`;
+    const s3 = new S3Client({
+      endpoint: process.env.BUCKET_REPORTS_URL,
+      region: "auto",
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
+      },
+    });
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: process.env.BUCKET_REPORTS,
+        Key: filename,
+        Body: pdfBuffer,
+        ContentType: "application/pdf",
+      })
+    );
+
+    const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+
+    return {
+      success: true,
+      url,
+      filename,
+    };
+  })
+  .get("/resumen-inversionistas", async ({ query, set }) => {
+  const {
+    id,
+    mes,
+    anio,
+    excel = "false",
+  } = query as Record<string, string | undefined>;
+
+  // Validaciones
+  if (id && isNaN(Number(id))) {
     set.status = 400;
-    return { message: "Parámetros 'page' y/o 'perPage' inválidos." };
+    return { message: "El parámetro 'id' debe ser numérico." };
   }
 
-  if (!id || isNaN(Number(id))) {
+  if (mes && isNaN(Number(mes))) {
     set.status = 400;
-    return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
+    return { message: "El parámetro 'mes' debe ser numérico." };
   }
 
-  const result: RespuestaReporte = await resumeInvestor(Number(id), pageNum, perPageNum);
-
-  if (!result.inversionistas.length) {
-    set.status = 404;
-    return { message: "Inversionista no encontrado." };
+  if (anio && isNaN(Number(anio))) {
+    set.status = 400;
+    return { message: "El parámetro 'anio' debe ser numérico." };
   }
 
-  const inversionista: InversionistaReporte = result.inversionistas[0];
+  const excelBool = excel === "true";
 
-  const logoUrl = import.meta.env.LOGO_URL || "";
-  const html = generarHTMLReporte(inversionista, logoUrl);
-
-  const browser = await puppeteer.launch({ headless: true });
-  const pagePDF = await browser.newPage();
-  await pagePDF.setContent(html, { waitUntil: "networkidle0" });
-
-  const pdfBuffer = await pagePDF.pdf({
-    printBackground: true,
-    width: "2500px",
-    height: "980px",
-    landscape: false,
-    margin: { top: 20, bottom: 20, left: 8, right: 8 },
-  });
-
-  await browser.close();
-
-  /** 🚀 SUBIR A R2 */
-  const filename = `reporte_inversionista_${id}.pdf`;
-  const s3 = new S3Client({
-    endpoint: process.env.BUCKET_REPORTS_URL,
-    region: "auto",
-    credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID as string,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
-    },
-  });
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: process.env.BUCKET_REPORTS,
-      Key: filename,
-      Body: pdfBuffer,
-      ContentType: "application/pdf",
-    })
+  // Llamada al servicio
+  const result = await resumenGlobalInversionistas(
+    id ? Number(id) : undefined,
+    mes ? Number(mes) : undefined,
+    anio ? Number(anio) : undefined,
+    excelBool
   );
 
-  const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  return result;
+}, {
+  query: t.Object({
+    id: t.Optional(t.String()),
+    mes: t.Optional(t.String()),
+    anio: t.Optional(t.String()),
+    excel: t.Optional(t.String()),
+  }),
+})
 
-  return {
-    success: true,
-    url,
-    filename,
-  };
-});
+

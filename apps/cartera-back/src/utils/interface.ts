@@ -3,53 +3,60 @@
 import { asesores, creditos, inversionistas, usuarios } from "../database/db";
 
 export interface PagoDetalle {
-  mes: string;
-  abono_capital: string;
-  abono_interes: string;
-  abono_iva: string;
-  isr: string;
+  mes: string | null; // 👈 antes era string
+  abono_capital: number;
+  abono_interes: number;
+  abono_iva: number;
+  isr: number;
   porcentaje_inversor: string;
-  cuota_inversor: string;
-  fecha_pago: string;
+  cuota_inversor: number;
+  fecha_pago: Date | null;
   cuota_inversionista: string;
-  abonoGeneralInteres: string;
-  tasaInteresInvesor:number
+  abonoGeneralInteres: number;
+  tasaInteresInvesor: number;
 }
 
 export interface CreditoData {
   credito_id: number;
   numero_credito_sifco: string;
-  nombre_usuario: string;
-  nit_usuario: string;
+  nombre_usuario: string | null;
+  nit_usuario: string | null;
   capital: string;
   porcentaje_interes: string;
-  meses_en_credito: number;
+  cuota_interes: string;
+  iva12: string;
+  fecha_creacion: Date | null;
+  meses_en_credito: number | null;
   monto_aportado: string;
   porcentaje_inversionista: string;
   cuota_inversionista: string;
   pagos: PagoDetalle[];
-  total_abono_capital: string;
-  total_abono_interes: string;
-  total_abono_iva: string;
-  total_isr: string;
-  total_cuota: string;
-  cuota_interes: string;
+  total_abono_capital: number;   // 👈 number
+  total_abono_interes: number;   // 👈 number
+  total_abono_iva: number;       // 👈 number
+  total_isr: number;             // 👈 number
+  total_cuota: number;           // 👈 number
 }
 
+
 export interface Subtotal {
-  total_abono_capital: string;
-  total_abono_interes: string;
-  total_abono_iva: string;
-  total_isr: string;
-  total_cuota: string;
-  total_monto_aportado: string;
-  total_abono_general_interes: string;
+  total_abono_capital: number;   // 👈 number
+  total_abono_interes: number;   // 👈 number
+  total_abono_iva: number;       // 👈 number
+  total_isr: number;             // 👈 number
+  total_cuota: number;           // 👈 number
+  total_monto_aportado: number; // 👈 number
+  total_abono_general_interes: number; // 👈 number
 }
 
 export interface InversionistaReporte {
   inversionista_id: number;
   inversionista: string;
   emite_factura: boolean;
+  reinversion: boolean;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
   creditosData: CreditoData[];
   subtotal: Subtotal;
 }

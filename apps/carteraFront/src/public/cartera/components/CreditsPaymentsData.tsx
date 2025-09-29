@@ -404,25 +404,27 @@ export function ListaCreditosPagos() {
                       : item.creditos.statusCredit}
                 </span>
               </p>
-                {/* Mostrar el botón solo para créditos con estado INCOBRABLE o CANCELADO */}
-                {(item.creditos.statusCredit === "INCOBRABLE" || item.creditos.statusCredit === "CANCELADO" || item.creditos.statusCredit === "PENDIENTE_CANCELACION") && (
+              {/* Mostrar el botón solo para créditos con estado INCOBRABLE o CANCELADO */}
+              {(item.creditos.statusCredit === "INCOBRABLE" ||
+                item.creditos.statusCredit === "CANCELADO" ||
+                item.creditos.statusCredit === "PENDIENTE_CANCELACION") && (
                 <Button
                   variant="outline"
                   onClick={() => setOpenInfoCancelation(true)}
                 >
                   Estado y reportes
                 </Button>
-                )}
+              )}
 
-                <InfoEstadoCredito
+              <InfoEstadoCredito
                 cancelacion={item.cancelacion}
                 incobrable={item.incobrable}
                 numeroSifco={item.creditos.numero_credito_sifco}
                 open={openInfoCancelation}
                 onOpenChange={setOpenInfoCancelation}
-                />
+              />
 
-                {/* ✅ Reemplazo completo del bloque con Dropdown por acciones inline (responsive) */}
+              {/* ✅ Reemplazo completo del bloque con Dropdown por acciones inline (responsive) */}
               <div
                 className="flex justify-end mt-2"
                 // Evita que los clicks lleguen al TableRow (que expande/colapsa)
@@ -692,14 +694,27 @@ export function ListaCreditosPagos() {
                           ["Plazo", item.creditos.plazo],
                           ["Tipo de Crédito", item.creditos.tipoCredito],
                           [
-                            "Otros",
-                            `Q${Number(item.creditos.otros).toLocaleString(
-                              "es-GT",
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              }
-                            )}`,
+                            "Otros", // Changed key to avoid Element as key
+                            <details className="cursor-pointer">
+                              <summary>
+                                Q
+                                {Number(item.creditos.otros).toLocaleString(
+                                  "es-GT",
+                                  {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  }
+                                )}
+                              </summary>
+                              <ul className="ml-4 mt-1 list-disc text-gray-700">
+                                {item.rubros?.map((r, idx) => (
+                                  <li key={idx}>
+                                    {r.nombre_rubro} - Q
+                                    {Number(r.monto).toLocaleString("es-GT")}
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>,
                           ],
 
                           ["Formato Crédito", item.creditos.formato_credito],
@@ -719,14 +734,15 @@ export function ListaCreditosPagos() {
                           ],
                         ].map(([label, value]) => (
                           <div
-                            key={label}
+                            
                             className="flex flex-col items-center mb-1"
                           >
                             <span className="font-bold text-blue-700 text-base leading-tight">
-                                {label}:
-                              </span>  <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
-                                {value}
-                              </span>
+                              {label}:
+                            </span>{" "}
+                            <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
+                              {value}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -902,10 +918,7 @@ export function ListaCreditosPagos() {
                                 "Porcentaje Inversionista",
                                 `%${inv.porcentaje_participacion_inversionista}`,
                               ],
-                              [
-                                "cuota ",
-                                `Q${inv.cuota_inversionista}`,
-                              ],
+                              ["cuota ", `Q${inv.cuota_inversionista}`],
                               [
                                 "Porcentaje Cash In",
                                 `%${inv.porcentaje_cash_in}`,
@@ -1203,7 +1216,10 @@ export function ListaCreditosPagos() {
                             )}
                             {/* Puedes agregar más estados si tienes otros */}
                           </div>
-                          {(item.creditos.statusCredit === "PENDIENTE_CANCELACION" || item.creditos.statusCredit === "INCOBRABLE" || item.creditos.statusCredit === "CANCELADO") && (
+                          {(item.creditos.statusCredit ===
+                            "PENDIENTE_CANCELACION" ||
+                            item.creditos.statusCredit === "INCOBRABLE" ||
+                            item.creditos.statusCredit === "CANCELADO") && (
                             <Button
                               variant="default"
                               className="bg-green-600 hover:bg-green-700 text-white"
@@ -1322,15 +1338,67 @@ export function ListaCreditosPagos() {
                             ],
                             ["Plazo", item.creditos.plazo],
                             ["Tipo de Crédito", item.creditos.tipoCredito],
+                            // Use a string key to avoid type error
                             [
-                              "Otros",
-                              `Q${Number(item.creditos.otros).toLocaleString(
-                                "es-GT",
-                                {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                }
-                              )}`,
+                              "Otros-details", // Changed key to avoid Element as key
+                              <details className="cursor-pointer">
+                                <summary>
+                                  Q
+                                  {Number(item.creditos.otros).toLocaleString(
+                                    "es-GT",
+                                    {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    }
+                                  )}
+                                </summary>
+                                <ul className="ml-4 mt-1 list-disc text-gray-700">
+                                  {item.rubros?.map(
+                                    (
+                                      r: {
+                                        nombre_rubro:
+                                          | string
+                                          | number
+                                          | bigint
+                                          | boolean
+                                          | React.ReactElement<
+                                              unknown,
+                                              | string
+                                              | React.JSXElementConstructor<any>
+                                            >
+                                          | Iterable<React.ReactNode>
+                                          | React.ReactPortal
+                                          | Promise<
+                                              | string
+                                              | number
+                                              | bigint
+                                              | boolean
+                                              | React.ReactPortal
+                                              | React.ReactElement<
+                                                  unknown,
+                                                  | string
+                                                  | React.JSXElementConstructor<any>
+                                                >
+                                              | Iterable<React.ReactNode>
+                                              | null
+                                              | undefined
+                                            >
+                                          | null
+                                          | undefined;
+                                        monto: any;
+                                      },
+                                      idx: React.Key | null | undefined
+                                    ) => (
+                                      <li key={idx}>
+                                        {r.nombre_rubro} - Q
+                                        {Number(r.monto).toLocaleString(
+                                          "es-GT"
+                                        )}
+                                      </li>
+                                    )
+                                  )}
+                                </ul>
+                              </details>,
                             ],
                             ["Asesor", item.asesores.nombre],
                             ["Formato Crédito", item.creditos.formato_credito],
@@ -1356,7 +1424,8 @@ export function ListaCreditosPagos() {
                             >
                               <span className="font-bold text-blue-700 text-base leading-tight">
                                 {label}:
-                              </span>  <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
+                              </span>{" "}
+                              <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
                                 {value}
                               </span>
                             </div>
@@ -1539,10 +1608,7 @@ export function ListaCreditosPagos() {
                                       "Porcentaje Cash In",
                                       `%${inv.porcentaje_cash_in}`,
                                     ],
-                                        [
-                                "cuota  ",
-                                `Q${inv.cuota_inversionista}`,
-                              ],
+                                    ["cuota  ", `Q${inv.cuota_inversionista}`],
                                   ].map(([label, value]) => (
                                     <div
                                       key={label}

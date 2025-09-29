@@ -8,6 +8,40 @@ export const getInvestors = async () => {
   const res = await axios.get(`${API_URL}/investor`);
   return res.data;
 };
+export interface InvestorPayload {
+  inversionista_id?: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: boolean;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+}
+export interface InvestorResponse {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: boolean;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+}
+
+// Crear inversionista(s)
+export async function insertInvestorService(
+  data: InvestorPayload | InvestorPayload[]
+): Promise<InvestorResponse[]> {
+  const res = await axios.post(`${API_URL}/investor`, data);
+  return res.data;
+}
+
+// Actualizar inversionista(s)
+export async function updateInvestorService(
+  data: InvestorPayload | InvestorPayload[]
+): Promise<InvestorResponse[]> {
+  const res = await axios.post(`${API_URL}/investor/update`, data);
+  return res.data;
+}
 export const getAdvisors = async () => {
   const res = await axios.get(`${API_URL}/advisor`);
   return res.data;
@@ -208,8 +242,12 @@ export interface CreditoUsuarioPago {
   aseor: Asesor;
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
+  rubros: Rubro[];
 }
-
+export interface Rubro {
+  nombre_rubro: string;
+  monto: number;
+}
 export interface Credito {
   credito_id: number;
   usuario_id: number;
@@ -411,6 +449,12 @@ export interface Investor {
   inversionista_id: number;
   nombre: string;
   emite_factura: boolean;
+  reinversion: boolean;          // 🔹 nuevo campo
+  banco: string | null;          // 🔹 nuevo campo
+  tipo_cuenta: string | null;    // 🔹 nuevo campo
+  numero_cuenta: string | null;  // 🔹 nuevo campo
+
+  // Ya existentes
   total_creditos: number;
   total_monto_asignado: string;
   creditos: Credit[];
@@ -531,6 +575,11 @@ export interface InversionistaConCreditos {
   emite_factura: boolean;
   creditosData: CreditoInversionistaData[];
   subtotal: SubtotalInversionista;
+    reinversion: boolean;           // 🔹 nuevo
+  banco: string | null;           // 🔹 nuevo
+  tipo_cuenta: string | null;     // 🔹 nuevo
+  numero_cuenta: string | null;   // 🔹 nuevo
+
 }
 
 // La respuesta completa (paginada)
@@ -844,3 +893,50 @@ export async function generateReport(
 export function openReportUrl(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+
+export interface InversionistaResumen {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: boolean;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_a_recibir: number;
+}
+
+export interface ResumenInversionistasExcel {
+  success: boolean;
+  url: string;
+  filename: string;
+}
+
+/**
+ * Consulta el resumen global de inversionistas.
+ * Si `excel = true`, devuelve un archivo con URL pública.
+ */
+export async function getResumenInversionistas(params?: {
+  id?: number;
+  mes?: number;
+  anio?: number;
+  excel?: boolean;
+}): Promise<InversionistaResumen[] | ResumenInversionistasExcel> {
+  const { id, mes, anio, excel } = params || {};
+  const res = await axios.get(
+    `${API_URL}/resumen-inversionistas`,
+    {
+      params: {
+        id,
+        mes,
+        anio,
+        excel,
+      },
+    }
+  );
+
+  return res.data;}

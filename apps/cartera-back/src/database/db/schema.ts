@@ -111,6 +111,14 @@ export const cuotas_credito = customSchema.table("cuotas_credito", {
   pagado: boolean("pagado").default(false),
   createdAt: timestamp("createdat").defaultNow(),
 });
+export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
+  id: serial("id").primaryKey(),
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  nombre_rubro: varchar("nombre_rubro", { length: 100 }).notNull(),
+  monto: numeric("monto", { precision: 18, scale: 2 }).notNull().default("0"),
+});
 
 // 3. Pagos de crédito
 
@@ -286,10 +294,41 @@ export const pagos_credito_inversionistas = customSchema.table(
   }
 );
 
+export const bancoEnum = pgEnum("banco_enum", [
+  "GyT",
+  "BAM",
+  "BI",
+  "BANRURAL",
+  "PROMERICA",
+  "BANTRAB",
+  "BAC",
+  "NEXA",
+  "INDUSTRIAL",
+  "INTERBANCO",
+  // si deseas, también puedes incluir casos especiales como:
+  "INTERBANCO/RICHARD",
+  "BI/MENFER S.A.",
+]);
+
+export const tipoCuentaEnum = pgEnum("tipo_cuenta_enum", [
+  "AHORRO",
+  "AHORRO Q",
+  "AHORROS",
+  "AHORRO $",
+  "MONETARIA",
+  "MONETARIA Q",
+  "MONETARIA $",
+]);
+
+
 export const inversionistas = customSchema.table("inversionistas", {
   inversionista_id: serial("inversionista_id").primaryKey(),
   nombre: varchar("nombre", { length: 200 }).notNull(),
-  emite_factura: boolean("emite_factura").notNull(), // true=Sí, false=No
+  emite_factura: boolean("emite_factura").notNull(), 
+  reinversion: boolean("reinversion").notNull().default(false),  
+  banco: bancoEnum("banco"),
+  tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
+  numero_cuenta: varchar("numero_cuenta", { length: 100 }), 
 });
 export const asesores = customSchema.table("asesores", {
   asesor_id: serial("asesor_id").primaryKey(),

@@ -1,6 +1,26 @@
-import { pgTable, text, integer, timestamp, boolean, decimal, json, uuid } from 'drizzle-orm/pg-core';
+import { pgTable, text, integer, timestamp, boolean, decimal, json, uuid, pgEnum } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 import { companies } from './crm';
+// Enum definition for vehicle status
+// Available values:
+// - pending: Vehicle is registered but not yet available
+// - available: Vehicle is available for sale
+// - sold: Vehicle has been sold
+// - maintenance: Vehicle is under maintenance
+// - auction: Vehicle is being sold at auction
+export const vehicleStatusEnum = pgEnum("vehicle_status", [
+  "pending",
+  "available",
+  "sold",
+  "maintenance",
+  "auction",
+]);
+export const inspectionStatusEnum = pgEnum("inspection_status", [
+  "pending",     // inspección en proceso
+  "approved",    // vehículo aprobado
+  "rejected",    // vehículo rechazado
+  "auction",     // vehículo enviado a remate
+]);
 
 // Vehicle Vendors table - Sellers of vehicles
 export const vehicleVendors = pgTable('vehicle_vendors', {
@@ -48,7 +68,7 @@ export const vehicles = pgTable('vehicles', {
   transmission: text('transmission').notNull(), // Automático, Manual
   
   // Status
-  status: text('status').notNull().default('pending'), // pending, available, sold, maintenance
+  status: vehicleStatusEnum("status").notNull().default("pending"),
   
   // Company relationship
   companyId: uuid('company_id').references(() => companies.id),
@@ -112,7 +132,7 @@ export const vehicleInspections = pgTable('vehicle_inspections', {
   noTestDriveReason: text('no_test_drive_reason'),
   
   // Approval status
-  status: text('status').notNull().default('pending'), // pending, approved, rejected
+ status: inspectionStatusEnum("status").notNull().default("pending"),
   
   // Alerts (stored as JSON array)
   alerts: json('alerts').$type<string[]>().default([]),

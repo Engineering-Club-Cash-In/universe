@@ -17,7 +17,8 @@ export interface InvestmentResult {
 // Model 1: Compound interest with monthly reinvestment
 // Reinvests only the investor's net portion (70% of net interest)
 export function calculateCompoundInvestment(params: InvestmentParams): InvestmentResult {
-  const { capital, interestRate, termMonths, investorPercentage, vatRate } = params;
+  const { capital, interestRate, termMonths, investorPercentage } = params;
+  const vatRate = 0.12; // Always 12% - what borrower pays to CashIn
   
   // Calculate compound growth month by month
   let balance = capital;
@@ -61,7 +62,8 @@ export function calculateCompoundInvestment(params: InvestmentParams): Investmen
 
 // Model 2: Traditional with monthly capital return (decreasing balance)
 export function calculateTraditionalInvestment(params: InvestmentParams): InvestmentResult {
-  const { capital, interestRate, termMonths, investorPercentage, vatRate } = params;
+  const { capital, interestRate, termMonths, investorPercentage } = params;
+  const vatRate = 0.12; // Always 12% - what borrower pays to CashIn
   
   // Calculate monthly payment using amortization formula
   const monthlyRate = (interestRate * (1 + vatRate)) / 100;
@@ -110,7 +112,8 @@ export function calculateTraditionalInvestment(params: InvestmentParams): Invest
 
 // Model 3: Interest-only until maturity (fixed interest on initial capital)
 export function calculateInterestOnlyInvestment(params: InvestmentParams): InvestmentResult {
-  const { capital, interestRate, termMonths, investorPercentage, vatRate } = params;
+  const { capital, interestRate, termMonths, investorPercentage } = params;
+  const vatRate = 0.12; // Always 12% - what borrower pays to CashIn
   
   // Fixed monthly interest on initial capital (no amortization)
   const monthlyInterest = capital * (interestRate / 100);

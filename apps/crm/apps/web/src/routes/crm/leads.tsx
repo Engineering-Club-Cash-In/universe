@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { PERMISSIONS } from "server/src/types/roles";
+import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -1745,12 +1746,19 @@ function RouteComponent() {
 							{/* Notes Section - Full Width */}
 							{selectedLead.notes && (
 								<div className="space-y-2">
-									<Label className="font-medium text-sm text-muted-foreground">Notas</Label>
+									<Label className="font-medium text-sm text-muted-foreground">Notas (Antiguas)</Label>
 									<p className="rounded-md bg-muted p-4 text-sm">
 										{selectedLead.notes}
 									</p>
 								</div>
 							)}
+
+							{/* Notes Timeline */}
+							<NotesTimeline
+								entityType="lead"
+								entityId={selectedLead.id}
+								title="Timeline de Notas"
+							/>
 						</div>
 					)}
 				</DialogContent>

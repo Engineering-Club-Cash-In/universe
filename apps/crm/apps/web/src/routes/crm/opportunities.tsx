@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { NotesTimeline } from "@/components/notes-timeline";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1577,6 +1578,17 @@ function RouteComponent() {
 								)}
 							</editOpportunityForm.Subscribe>
 						</form>
+
+						{/* Notes Timeline */}
+						{selectedOpportunity && (
+							<div className="mt-6 border-t pt-6">
+								<NotesTimeline
+									entityType="opportunity"
+									entityId={selectedOpportunity.id}
+									title="Timeline de Notas"
+								/>
+							</div>
+						)}
 					</DialogContent>
 				</Dialog>
 

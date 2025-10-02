@@ -3,6 +3,7 @@ import { GetCreditDTO, InversionistaReporte } from "../interface";
 import puppeteer from "puppeteer";
 import ExcelJS from "exceljs";
 import axios from "axios";
+import Big from "big.js";
 // Tipos auxiliares
 
 
@@ -455,4 +456,32 @@ export async function buildCancelationWorkbook(
   // buffer XLSX
   const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
   return Buffer.from(arr); // Node Buffer
+}
+/**
+ * Convierte un string o número en Big, limpiando %, Q, comas y guiones
+ * @param value valor original
+ * @param fallback valor por defecto si está vacío o inválido
+ */
+export function toBigExcel(value: any, fallback: string | number = "0"): Big {
+  if (value == null) return new Big(fallback);
+
+  let str = String(value).trim();
+
+  if (!str || str === "-" || str.toLowerCase() === "nan") {
+    return new Big(fallback);
+  }
+
+  // quitar prefijo Q si lo hubiera
+  str = str.replace(/^Q/i, "");
+  // quitar %
+  str = str.replace(/%/g, "");
+  // quitar separadores de miles
+  str = str.replace(/,/g, "");
+
+  // si al final no es numérico, usa fallback
+  if (!str || isNaN(Number(str))) {
+    return new Big(fallback);
+  }
+
+  return new Big(str);
 }

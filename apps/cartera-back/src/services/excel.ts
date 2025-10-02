@@ -74,6 +74,12 @@ export interface ExcelCreditoRow {
   GPSFacturado: string;
   Reserva: string;
 } 
+export interface CreditoAgrupado {
+  creditoBase: string;
+  cliente: string;
+  filas: ExcelCreditoRow[];
+}
+
 import fs from "fs";
 import iconv from "iconv-lite"; 
  
@@ -149,4 +155,61 @@ export async function leerCreditoPorNumeroSIFCO(
   return resultados;
 }
 
+/**
+ * Lista TODOS los créditos del CSV agrupados por número base
+ * (ej. 1234 y 1234_2 se agrupan en un objeto).
+ *
+ * @param filePath ruta al archivo CSV
+ * @returns Array de objetos { creditoBase, cliente, filas: ExcelCreditoRow[] }
+ */
+export async function listarCreditosAgrupados(
+  filePath: string
+): Promise<CreditoAgrupado[]> {
+  console.time("⏳ Lectura archivo (stream)");
 
+  const stream = fs.createReadStream(filePath).pipe(iconv.decodeStream("latin1"));
+  const rl = readline.createInterface({ input: stream });
+
+  let headers: string[] | null = null;
+  const mapa: Record<string, CreditoAgrupado> = {};
+
+  for await (const line of rl) {
+    const values = line.split(";").map((v) => v.trim());
+
+    if (!headers) {
+      headers = values;
+      continue;
+    }
+
+    const row: any = {};
+    headers.forEach((h, i) => {
+      let val = values[i] ?? "";
+      if (/^Q/i.test(val)) val = val.replace(/^Q/i, "").trim();
+      row[h] = val;
+    });
+
+    const creditoSifco = String(row["CreditoSifco"] ?? "").trim();
+    const cliente = String(row["Cliente"] ?? "").trim();
+
+    if (!creditoSifco) continue;
+
+    const base = creditoSifco.split("_")[0];
+
+    if (!mapa[base]) {
+      mapa[base] = {
+        creditoBase: base,
+        cliente,
+        filas: [],
+      };
+    }
+
+    // 🔥 Guardamos la fila completa como ExcelCreditoRow
+    mapa[base].filas.push(row as ExcelCreditoRow);
+  }
+
+  console.timeEnd("⏳ Lectura archivo (stream)");
+  const resultado = Object.values(mapa);
+  console.log(`✅ Créditos agrupados: ${resultado.length}`);
+
+  return resultado;
+}

@@ -17,9 +17,27 @@ const LANDOBT_URL =
  */
 function cleanPhone(phone: string): string {
   if (!phone) return "";
-  return phone.replace(/^p:/, "").replace(/\s+/g, "");
-} 
 
+  // 1. Quitar "p:" o "P:"
+  let cleaned = phone.replace(/^p:/i, "");
+
+  // 2. Eliminar todo lo que no sea número
+  cleaned = cleaned.replace(/\D/g, "");
+
+  // 3. Caso: número con prefijo 502
+  if (cleaned.startsWith("502")) {
+    const localPart = cleaned.slice(3).slice(-8); // últimos 8 dígitos
+    return `+502 ${localPart}`;
+  }
+
+  // 4. Caso: sin prefijo → devolver los últimos 8 dígitos
+  if (cleaned.length >= 8) {
+    return cleaned.slice(-8);
+  }
+
+  // 5. Si no cumple, devolver vacío
+  return "";
+}
 function readCsvUtf16(path: string): string {
   const buffer = fs.readFileSync(path);
   // ⚡ Quitar BOM si existe
@@ -46,12 +64,16 @@ function cleanEmail(email: string): string {
  */
 function parseCsv(content: string): Record<string, string>[] {
   const [headerLine, ...lines] = content.split(/\r?\n/).filter(Boolean);
-  const headers = headerLine.split("\t").map((h) => h.trim().toLowerCase());
+
+  // Normalizar headers y quitar la primera columna
+  const headers = headerLine.split("\t").map((h) => h.trim().toLowerCase()).slice(1);
 
   console.log("[DEBUG] Normalized headers:", headers);
 
   return lines.map((line, idx) => {
-    const values = line.split("\t").map((v) => v.trim());
+    // Separar valores y también quitar la primera columna
+    const values = line.split("\t").map((v) => v.trim()).slice(1);
+
     const row: Record<string, string> = {};
 
     headers.forEach((header, i) => {
@@ -62,6 +84,7 @@ function parseCsv(content: string): Record<string, string>[] {
     return row;
   });
 }
+
 
 /**
  * Process the CSV leads file and send each lead to Landbot API.
@@ -83,25 +106,25 @@ export async function processCsvLeads() {
   for (const [index, row] of records.entries()) {
     console.log(`\n[STEP] Processing record ${index + 1}/${records.length}`);
 
-    const payload = {
+       const payload = {
       codigo: "AuQ4yKF9HW1k6Bk7vM7XdOJk", // 🔒 static code for Landbot
       lead_id: row["id"] || "",
       lead_name: row["nombre_completo"] || "",
       lead_email: cleanEmail(row["correo_electrónico"]),
-      lead_company: "",
+      lead_company: row["campaign_name"] || "",
       lead_phone: cleanPhone(row["phone_number"]),
       welcome: "",
       nombre: row["nombre_completo"]?.split(" ")[0] || "",
       apellido: row["nombre_completo"]?.split(" ").slice(1).join(" ") || "",
       estados_de_cuenta: "",
-      tipo_de_credito: row["¿qué_servicio_te_interesa?"] || "",
+      tipo_de_credito: row["tipo_de_credito"] || "",
       vehiculo_garantia: "",
       credito_monto: "",
       telefono: cleanPhone(row["phone_number"]),
     };
-
     console.log("[DEBUG] Payload prepared:", payload);
     console.log("[INFO] Sending lead to Landbot API...");
+   
     try {
       const res = await fetch(LANDOBT_URL, {
         method: "POST",

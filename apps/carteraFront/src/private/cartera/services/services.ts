@@ -977,3 +977,62 @@ export const updateAdvisor = async (
   const res = await api.post(`${API_URL}/updateAdvisor?id=${id}`, data);
   return res.data;
 };
+// types/conta.ts
+export interface ContaPayload {
+  nombre: string;
+  apellido: string;
+  email: string;
+  telefono?: string;
+  password: string;
+}
+
+export interface ContaUpdatePayload {
+  email?: string;
+  password?: string;
+  is_active?: boolean;
+  telefono?: string;
+  nombre?: string;
+  apellido?: string;
+}
+
+export interface ContaUser {
+  conta_id: number;
+  nombre: string;
+  apellido: string;
+  email: string;
+  telefono?: string | null;
+}
+
+export interface PlatformUser {
+  id: number;
+  email: string;
+  role: "ASESOR" | "CONTA"; // excluimos ADMIN
+  is_active: boolean;
+  conta_id?: number | null;
+  asesor_id?: number | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  profile?: Record<string, any>; // datos enriquecidos
+}
+
+// Crear conta user
+export async function createContaServiceFrontend(data: ContaPayload): Promise<ContaUser> {
+  const { data: res } = await api.post("/auth/conta", data);
+  return res.data;
+}
+
+// Actualizar conta user
+export async function updateContaServiceFrontend(
+  contaId: number,
+  updates: ContaUpdatePayload
+): Promise<{ message: string }> {
+  const { data: res } = await api.post(`/auth/conta/update`, updates, {
+    params: { contaId },
+  });
+  return res.data;
+}
+
+// Obtener platform users (sin admins)
+export async function getPlatformUsersServiceFrontend(): Promise<PlatformUser[]> {
+  const { data: res } = await api.get("/auth/platform-users");
+  return res.data;
+}

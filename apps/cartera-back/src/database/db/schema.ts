@@ -18,7 +18,7 @@ export enum CategoriaUsuario {
   VEHICULO = "Vehículo",
   CV_VEHICULO = "CV Vehículo",
 }
-export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR"]);
+export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
 export const customSchema = pgSchema("cartera");
 export const admins = customSchema.table("admins", {
   admin_id: serial("admin_id").primaryKey(),
@@ -41,10 +41,21 @@ export const platform_users = customSchema.table("platform_users", {
   // Relaciones opcionales
   asesor_id: integer("asesor_id").references(() => asesores.asesor_id),
   admin_id: integer("admin_id").references(() => admins.admin_id),
+ conta_id: integer("conta_id").references(() => conta_users.conta_id),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+export const conta_users = customSchema.table("conta_users", {
+  conta_id: serial("conta_id").primaryKey(),
+  nombre: varchar("nombre", { length: 150 }).notNull(), 
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  telefono: varchar("telefono", { length: 30 }),
+  activo: boolean("activo").notNull().default(true),
 
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
 });
+
 // 1. Usuarios
 export const usuarios = customSchema.table("usuarios", {
   usuario_id: serial("usuario_id").primaryKey(),
@@ -117,8 +128,7 @@ export const creditos = customSchema.table("creditos", {
     precision: 18,
     scale: 2,
   }).notNull(),
-
-  mora: numeric("mora", { precision: 18, scale: 2 }).notNull().default("0"),
+ 
   statusCredit: text("statusCredit", {
     enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION"],
   })
@@ -136,6 +146,23 @@ export const cuotas_credito = customSchema.table("cuotas_credito", {
   pagado: boolean("pagado").default(false),
   createdAt: timestamp("createdat").defaultNow(),
 });
+export const moras_credito = customSchema.table("moras_credito", {
+  mora_id: serial("mora_id").primaryKey(),
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  activa: boolean("activa").notNull().default(true),
+  porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+    .notNull()
+    .default("1.12"),
+  monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
+    .notNull()
+    .default("0"),
+  cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+
 export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
   id: serial("id").primaryKey(),
   credito_id: integer("credito_id")

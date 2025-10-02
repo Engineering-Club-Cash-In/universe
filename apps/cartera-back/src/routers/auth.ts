@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { createAdminService, loginService, verifyTokenService } from "../controllers/auth";
+import { createAdminService, createContaService, getPlatformUsersService, loginService, updateContaUserService, verifyTokenService } from "../controllers/auth";
  
 
 export const authRouter = new Elysia()
@@ -119,5 +119,119 @@ export const authRouter = new Elysia()
       query: t.Object({
         token: t.String(),
       }),
+    }
+  ) .post(
+    "/auth/conta",
+    async ({ body, set }) => {
+      try {
+        const result = await createContaService(body);
+
+        set.status = 201;
+        return {
+          success: true,
+          message: "Usuario de contabilidad creado exitosamente",
+          data: result,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /auth/conta:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error creando usuario de contabilidad",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Crea un nuevo usuario de contabilidad y su usuario en plataforma",
+        tags: ["Auth", "Conta"],
+      },
+      body: t.Object({
+        nombre: t.String(), 
+        email: t.String({ format: "email" }),
+        telefono: t.Optional(t.String()),
+        password: t.String(),
+      }),
+    }
+  )
+
+  /**
+   * ✏️ Actualizar usuario de contabilidad
+   */
+  .post(
+    "/auth/conta/update",
+    async ({ body, query, set }) => {
+      try {
+        const contaId = Number(query.contaId);
+        if (!contaId) {
+          set.status = 400;
+          return { success: false, error: "contaId es obligatorio en query params" };
+        }
+
+        const result = await updateContaUserService(contaId, body);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Usuario de contabilidad actualizado",
+          data: result,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /auth/conta/update:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error actualizando usuario de contabilidad",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Actualiza datos de un usuario de contabilidad (profile + platform_users)",
+        tags: ["Auth", "Conta"],
+      },
+      query: t.Object({
+        contaId: t.String(), // query param obligatorio
+      }),
+      body: t.Object({
+        email: t.Optional(t.String({ format: "email" })),
+        password: t.Optional(t.String()),
+        is_active: t.Optional(t.Boolean()),
+        telefono: t.Optional(t.String()),
+        nombre: t.Optional(t.String()),
+        apellido: t.Optional(t.String()),
+      }),
+    }
+  )
+
+  /**
+   * 👥 Obtener todos los usuarios de plataforma (excepto admins)
+   */
+  .get(
+    "/auth/platform-users",
+    async ({ set }) => {
+      try {
+        const result = await getPlatformUsersService();
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Usuarios de plataforma obtenidos",
+          data: result,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /auth/platform-users:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error obteniendo usuarios de plataforma",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Obtiene todos los usuarios de plataforma (asesores y contabilidad, sin admins)",
+        tags: ["Auth", "Platform Users"],
+      },
     }
   );

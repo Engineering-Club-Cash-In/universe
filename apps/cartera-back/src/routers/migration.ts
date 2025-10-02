@@ -1,17 +1,22 @@
 // routes/sifco.ts
 import { Elysia, t } from "elysia";
-import { fillPagosInversionistas, syncClienteConPrestamos } from "../migration/migration";
+import { fillPagosInversionistas, mapPagosPorCreditos, syncClienteConPrestamos } from "../migration/migration";
  
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
 import { authMiddleware } from "./midleware";
-
+import { listarCreditosConDetalle } from "../migration/migrationCredits";
+import z from "zod";
+// ✅ Schema para sync de pagos desde SIFCO (param opcional)
+const syncCreditPaymentsSchema = z.object({
+  numero_credito_sifco: z.string().min(1).optional(),
+});
 /**
  * 📂 Ruta absoluta del Excel en tu máquina
  * ⚠️ para producción deberías meterlo en un bucket o carpeta compartida
  */
 const excelPath = path.resolve(
-  "C:/Users/Kelvin Palacios/Documents/analis de datos/agosto2025.csv"
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/noviembre2025csv"
 );
 
 export const sifcoRouter = new Elysia()
@@ -143,4 +148,80 @@ export const sifcoRouter = new Elysia()
       numeroCredito: t.Optional(t.String()),
     }),
   }
-);
+)  /**
+   * 📊 Sincronizar TODOS los créditos del Excel con detalle en SIFCO
+   */
+  .get(
+    "/sync/creditos/detalle",
+    async ({ set }) => {
+      try {
+        console.log("🚀 Iniciando sincronización masiva de créditos con detalle...");
+        const result = await listarCreditosConDetalle(excelPath);
+
+        set.status = 200;
+        return {
+          success: true,
+          message: `Se procesaron ${result.length} créditos desde el Excel`,
+          data: result,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /excel/creditos/detalle:", error);
+        set.status = 500;
+        return { success: false, error: error.message || String(error) };
+      }
+    },
+    {
+      detail: {
+        summary: "Sincroniza TODOS los créditos del Excel con detalle desde SIFCO",
+        tags: ["Excel", "Créditos", "Migración"],
+      },
+    }
+  )  // 🆕🛠️ Endpoint para sincronizar/mappear pagos de créditos desde SIFCO
+  // - Si envías `numero_credito_sifco`, procesa solo ese crédito.
+  // - Si NO envías nada, procesa todos los créditos en DB.
+  .post(
+    "/sync-credit-payments",
+    async ({ body, set }) => {
+      try {
+        /** Validate body with Zod (numero_credito_sifco es opcional) */
+        const { numero_credito_sifco } = syncCreditPaymentsSchema.parse(body ?? {});
+
+        console.log(
+          `[sync-credit-payments] Inicio${
+            numero_credito_sifco ? ` (SIFCO=${numero_credito_sifco})` : " (todos los créditos)"
+          }`
+        );
+
+        // Llamamos al servicio principal que:
+        // - Busca en DB (Drizzle)
+        // - Consulta estado de cuenta
+        // - Invoca mapEstadoCuentaToPagosBig por cada crédito
+        const summary = await mapPagosPorCreditos(numero_credito_sifco);
+
+        // Tip: si tu servicio no retorna nada, puedes devolver un mensaje genérico
+        set.status = 200;
+        return {
+          ok: true,
+          message: numero_credito_sifco
+            ? `Sincronización completada para crédito SIFCO=${numero_credito_sifco}`
+            : "Sincronización completada para todos los créditos",
+          summary: summary ?? null, // si tu servicio devuelve { ok, fail, total }
+        };
+      } catch (error: any) {
+        console.log("[ERROR] /sync-credit-payments:", error?.message || error);
+        set.status = 400;
+        return {
+          ok: false,
+          message: "Failed to sync credit payments",
+          error: error?.message ?? String(error),
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Sincroniza y mapea pagos de créditos desde SIFCO",
+        tags: ["Pagos", "Sync"],
+      },
+    }
+  );
+

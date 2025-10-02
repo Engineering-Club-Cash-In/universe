@@ -24,6 +24,16 @@ function PublicRoute({ children }: { children: JSX.Element }) {
   return isLoggedIn ? <Navigate to="/" replace /> : children;
 }
 
+// 🎯 Restricción por roles
+function RoleRoute({ children, allowedRoles }: { children: JSX.Element; allowedRoles: string[] }) {
+  const { user } = useAuth(); // 👉 aquí tu contexto ya devuelve user con { role }
+  if (!user) return <Navigate to="/login" replace />;
+  if (!allowedRoles.includes(user.role)) {
+    return <Navigate to="/" replace />; // 🚫 sin permisos
+  }
+  return children;
+}
+
 function App() {
   return (
     <BrowserRouter>
@@ -47,16 +57,76 @@ function App() {
             </PrivateRoute>
           }
         >
-          <Route path="realizarCredito" element={<CreditForm />} />
-          <Route path="realizarPago" element={<PagoForm />} />
-          <Route path="creditos" element={<ListaCreditosPagos />} />
-          <Route path="pagos" element={<PaymentsTable />} />
-          <Route path="inversionistas" element={<TableInvestors />} />
-          <Route path="asesores" element={<AdvisorsManager />} />
+          {/* Solo ADMIN puede registrar créditos */}
+          <Route
+            path="realizarCredito"
+            element={
+              <RoleRoute allowedRoles={["ADMIN"]}>
+                <CreditForm />
+              </RoleRoute>
+            }
+          />
+
+          {/* ADMIN y ASESOR pueden registrar pagos */}
+          <Route
+            path="realizarPago"
+            element={
+              <RoleRoute allowedRoles={["ADMIN", "ASESOR"]}>
+                <PagoForm />
+              </RoleRoute>
+            }
+          />
+
+          {/* Todos pueden ver créditos */}
+          <Route
+            path="creditos"
+            element={
+              <RoleRoute allowedRoles={["ADMIN", "CONTA", "ASESOR"]}>
+                <ListaCreditosPagos />
+              </RoleRoute>
+            }
+          />
+
+          {/* Todos pueden ver pagos */}
+          <Route
+            path="pagos"
+            element={
+              <RoleRoute allowedRoles={["ADMIN", "CONTA", "ASESOR"]}>
+                <PaymentsTable />
+              </RoleRoute>
+            }
+          />
+
+          {/* Solo ADMIN puede manejar inversionistas */}
+          <Route
+            path="inversionistas"
+            element={
+              <RoleRoute allowedRoles={["ADMIN"]}>
+                <TableInvestors />
+              </RoleRoute>
+            }
+          />
+
+          {/* Solo ADMIN puede manejar usuarios */}
+          <Route
+            path="usuarios"
+            element={
+              <RoleRoute allowedRoles={["ADMIN"]}>
+                <AdvisorsManager />
+              </RoleRoute>
+            }
+          />
+
+          {/* Todos pueden ver pagos por crédito */}
           <Route
             path="pagos/:numero_credito_sifco"
-            element={<PaymentsCredits />}
+            element={
+              <RoleRoute allowedRoles={["ADMIN", "CONTA", "ASESOR"]}>
+                <PaymentsCredits />
+              </RoleRoute>
+            }
           />
+
           <Route index element={<ListaCreditosPagos />} />
         </Route>
 

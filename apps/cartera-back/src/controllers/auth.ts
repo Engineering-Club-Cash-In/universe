@@ -1,7 +1,7 @@
  
 import { eq } from "drizzle-orm";
 import bcrypt from "bcrypt";
-import { admins, asesores, platform_users } from "../database/db";
+import { admins, asesores, conta_users, platform_users } from "../database/db";
 import { db } from "../database";
 import jwt from "jsonwebtoken";
 export async function createAdminService(data: {
@@ -130,3 +130,164 @@ export function verifyTokenService(token: string) {
     return { valid: false, error: "Token inválido o expirado" };
   }
 }
+
+/**
+ * Crear usuario de contabilidad + usuario en plataforma
+ * - Usa transacción: si falla platform_users, se revierte conta_users
+ */
+export async function createContaService(data: {
+  nombre: string;
+ 
+  email: string;
+  telefono?: string;
+  password: string;
+}) {
+  try {
+    return await db.transaction(async (tx) => {
+      console.log("➡️ Iniciando creación de conta:", data.email);
+
+      const passwordHash = await bcrypt.hash(data.password, 10);
+
+      // 1. Insertar en conta_users
+      const [newConta] = await tx
+        .insert(conta_users)
+        .values({
+          nombre: data.nombre, 
+          email: data.email,
+          telefono: data.telefono ?? null,
+        })
+        .returning();
+
+      console.log("✅ Conta creado:", newConta);
+
+      if (!newConta?.conta_id) {
+        throw new Error("❌ Error: conta_id no devuelto por la inserción");
+      }
+      console.log("🔍 conta_id obtenido:", newConta.conta_id);
+      // 2. Insertar en platform_users
+      const [newUser] = await tx
+        .insert(platform_users)
+        .values({
+          email: data.email,
+          password_hash: passwordHash,
+          role: "CONTA",
+          conta_id: newConta.conta_id,
+        })
+        .returning();
+
+      console.log("✅ Usuario de plataforma creado:", newUser);
+
+      return newConta;
+    });
+  } catch (error: any) {
+    console.error("❌ Error en createContaService:", error);
+    throw new Error(error.message || "Error creando usuario de contabilidad");
+  }
+}
+
+/**
+ * Actualizar usuario de contabilidad (profile + platform_users)
+ */
+export async function updateContaUserService(
+  platformUserId: number,
+  updates: {
+    email?: string;
+    password?: string;
+    is_active?: boolean;
+    nombre?: string;
+  }
+) {
+  try {
+    return await db.transaction(async (tx) => {
+      console.log("➡️ Actualizando conta desde platformUser:", platformUserId, updates);
+
+      // 1. Buscar usuario en platform_users
+      const [user] = await tx
+        .select()
+        .from(platform_users)
+        .where(eq(platform_users.id, platformUserId))
+        .limit(1);
+
+      if (!user) throw new Error("Usuario de contabilidad no encontrado");
+
+      console.log("🔎 Usuario encontrado en platform_users:", user);
+
+      // 2. Actualizar platform_users
+      const userUpdates: any = {};
+      if (updates.email) userUpdates.email = updates.email;
+      if (updates.password)
+        userUpdates.password_hash = await bcrypt.hash(updates.password, 10);
+      if (typeof updates.is_active !== "undefined")
+        userUpdates.is_active = updates.is_active;
+
+      if (Object.keys(userUpdates).length > 0) {
+        await tx
+          .update(platform_users)
+          .set(userUpdates)
+          .where(eq(platform_users.id, user.id));
+
+        console.log("✅ Platform_users actualizado:", userUpdates);
+      }
+
+      // 3. Actualizar conta_users usando el conta_id que trae platform_users
+      const contaUpdates: any = {};
+      if (updates.nombre) contaUpdates.nombre = updates.nombre;
+      if (updates.email) contaUpdates.email = updates.email;
+
+      if (Object.keys(contaUpdates).length > 0 && user.conta_id) {
+        await tx
+          .update(conta_users)
+          .set(contaUpdates)
+          .where(eq(conta_users.conta_id, user.conta_id));
+
+        console.log("✅ Conta_users actualizado:", contaUpdates);
+      }
+
+      return { message: "Usuario de contabilidad actualizado correctamente" };
+    });
+  } catch (error: any) {
+    console.error("❌ Error en updateContaUserService:", error);
+    throw new Error(error.message || "Error actualizando usuario de contabilidad");
+  }
+}
+/**
+ * Obtener usuarios de plataforma (excepto admins)
+ */
+export async function getPlatformUsersService() {
+  try {
+    console.log("➡️ Cargando usuarios de plataforma...");
+
+    const users = await db.select().from(platform_users);
+
+    const enrichedUsers = await Promise.all(
+      users.map(async (user) => {
+        if (user.role === "ASESOR" && user.asesor_id) {
+          const [asesor] = await db
+            .select()
+            .from(asesores)
+            .where(eq(asesores.asesor_id, user.asesor_id));
+          return { ...user, profile: asesor };
+        }
+        if (user.role === "CONTA" && user.conta_id) {
+          const [conta] = await db
+            .select()
+            .from(conta_users)
+            .where(eq(conta_users.conta_id, user.conta_id));
+          return { ...user, profile: conta };
+        }
+        // Excluir admins
+        return null;
+      })
+    );
+
+    const filtered = enrichedUsers.filter(Boolean);
+    console.log("✅ Usuarios de plataforma obtenidos:", filtered.length);
+
+    return filtered;
+  } catch (error: any) {
+    console.error("❌ Error en getPlatformUsersService:", error);
+    throw new Error(error.message || "Error obteniendo usuarios de plataforma");
+  }
+}
+ 
+

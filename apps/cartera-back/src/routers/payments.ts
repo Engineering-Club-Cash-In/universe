@@ -23,10 +23,7 @@ const falsePaymentSchema = z.object({
   credito_id: z.number(),
 });
 
-// ✅ Schema para sync de pagos desde SIFCO (param opcional)
-const syncCreditPaymentsSchema = z.object({
-  numero_credito_sifco: z.string().min(1).optional(),
-});
+
 
 export const paymentRouter = new Elysia()
  
@@ -169,51 +166,3 @@ export const paymentRouter = new Elysia()
     }
   })
 
-  // 🆕🛠️ Endpoint para sincronizar/mappear pagos de créditos desde SIFCO
-  // - Si envías `numero_credito_sifco`, procesa solo ese crédito.
-  // - Si NO envías nada, procesa todos los créditos en DB.
-  .post(
-    "/sync-credit-payments",
-    async ({ body, set }) => {
-      try {
-        /** Validate body with Zod (numero_credito_sifco es opcional) */
-        const { numero_credito_sifco } = syncCreditPaymentsSchema.parse(body ?? {});
-
-        console.log(
-          `[sync-credit-payments] Inicio${
-            numero_credito_sifco ? ` (SIFCO=${numero_credito_sifco})` : " (todos los créditos)"
-          }`
-        );
-
-        // Llamamos al servicio principal que:
-        // - Busca en DB (Drizzle)
-        // - Consulta estado de cuenta
-        // - Invoca mapEstadoCuentaToPagosBig por cada crédito
-        const summary = await mapPagosPorCreditos(numero_credito_sifco);
-
-        // Tip: si tu servicio no retorna nada, puedes devolver un mensaje genérico
-        set.status = 200;
-        return {
-          ok: true,
-          message: numero_credito_sifco
-            ? `Sincronización completada para crédito SIFCO=${numero_credito_sifco}`
-            : "Sincronización completada para todos los créditos",
-          summary: summary ?? null, // si tu servicio devuelve { ok, fail, total }
-        };
-      } catch (error: any) {
-        console.log("[ERROR] /sync-credit-payments:", error?.message || error);
-        set.status = 400;
-        return {
-          ok: false,
-          message: "Failed to sync credit payments",
-          error: error?.message ?? String(error),
-        };
-      }
-    },
-    {
-      detail: {
-        summary: "Sincroniza y mapea pagos de créditos desde SIFCO",
-        tags: ["Pagos", "Sync"],
-      },
-    }
-  );

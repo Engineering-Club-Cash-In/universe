@@ -34,6 +34,7 @@ import { ModalCancelCredit } from "./modalCreditCancel";
 import { useActivateCredit } from "../hooks/cancelCredit";
 import { useIsMobile } from "../hooks/useIsMobile";
 import InfoEstadoCredito from "./infoCredit";
+import { useAuth } from "@/Provider/authProvider";
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const navigate = useNavigate();
@@ -60,7 +61,7 @@ export function ListaCreditosPagos() {
     setEstado,
     estado,
     estados,
-    handleExcel
+    handleExcel,
   } = useCreditosPaginadosWithFilters();
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
@@ -121,6 +122,7 @@ export function ListaCreditosPagos() {
     advisors: any[];
     loading: boolean;
   };
+
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
@@ -136,7 +138,7 @@ export function ListaCreditosPagos() {
     setModalOpen(false);
     setSelectedCreditId(null);
   };
-
+  const { user } = useAuth();
   if (isLoading) return <div>Cargando...</div>;
   if (isError)
     return <div className="text-red-500">{(error as any)?.message}</div>;
@@ -334,39 +336,38 @@ export function ListaCreditosPagos() {
             value={perPage}
             onChange={handlePerPage}
           >
-            {[5, 10, 20, 50,100,200].map((n) => (
+            {[5, 10, 20, 50, 100, 200].map((n) => (
               <option key={n} value={n}>
                 {n} por página
               </option>
             ))}
           </select>
         </label>
-         <button
-    type="button"
-    onClick={async () => {
-      try {
-        // Pedimos el Excel al backend
-        handleExcel(true); // 👈 activamos
-      const response = await refetch();
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              // Pedimos el Excel al backend
+              handleExcel(true); // 👈 activamos
+              const response = await refetch();
 
-      if (response.data && "excelUrl" in response.data) {
-        const url = (response.data as any).excelUrl;
-        window.open(url, "_blank");
-      } else {
-        alert("No se pudo generar el Excel 😢");
-      }
-        
-      } catch (err) {
-        console.error("❌ Error generando Excel:", err);
-        alert("Error al generar el Excel");
-      } finally {
-        handleExcel(false); // 👈 volvemos a normal
-      }
-    }}
-    className="mt-4 px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md"
-  >
-    📊 Descargar Excel
-  </button>
+              if (response.data && "excelUrl" in response.data) {
+                const url = (response.data as any).excelUrl;
+                window.open(url, "_blank");
+              } else {
+                alert("No se pudo generar el Excel 😢");
+              }
+            } catch (err) {
+              console.error("❌ Error generando Excel:", err);
+              alert("Error al generar el Excel");
+            } finally {
+              handleExcel(false); // 👈 volvemos a normal
+            }
+          }}
+          className="mt-4 px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md"
+        >
+          📊 Descargar Excel
+        </button>
       </div>
 
       {/* Tabla, sin scroll horizontal, diseño responsivo */}
@@ -510,99 +511,112 @@ export function ListaCreditosPagos() {
                           <span className="hidden sm:inline">Ver pagos</span>
                         </a>
                       )}
-
-                      {/* Editar (solo ACTIVO) */}
-                      {canEdit && (
-                        <a
-                          role="link"
-                          tabIndex={0}
-                          title="Editar crédito"
-                          onClick={() =>
-                            handleOpenEdit(item.creditos, item.inversionistas)
-                          }
-                          onKeyDown={(e) =>
-                            onKey(e, () =>
-                              handleOpenEdit(item.creditos, item.inversionistas)
-                            )
-                          }
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-yellow-700 hover:bg-yellow-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300 cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4 shrink-0" />
-                          <span className="hidden sm:inline">Editar</span>
-                        </a>
-                      )}
-
-                      {/* Cancelar (solo ACTIVO) */}
-                      {canCancel && (
-                        <a
-                          role="link"
-                          tabIndex={0}
-                          title="Cancelar crédito"
-                          onClick={() =>
-                            handleOpenModal(item.creditos.credito_id)
-                          }
-                          onKeyDown={(e) =>
-                            onKey(e, () =>
-                              handleOpenModal(item.creditos.credito_id)
-                            )
-                          }
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-red-700 hover:bg-red-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 cursor-pointer"
-                        >
-                          <XCircle className="w-4 h-4 shrink-0" />
-                          <span className="hidden sm:inline">Cancelar</span>
-                        </a>
-                      )}
-
-                      {/* Activar (solo PENDIENTE_CANCELACION) */}
-                      {canActivate && (
-                        <a
-                          role="link"
-                          tabIndex={0}
-                          title="Activar crédito"
-                          onClick={() =>
-                            activateCreditMutation.mutate(
-                              {
-                                creditId: item.creditos.credito_id,
-                                accion: "ACTIVAR",
-                              },
-                              {
-                                onSuccess: (data) => {
-                                  alert(
-                                    data.message ||
-                                      "Crédito activado correctamente"
-                                  );
-                                  queryClient.invalidateQueries({
-                                    queryKey: [
-                                      "creditos-paginados",
-                                      mes,
-                                      anio,
-                                      page,
-                                      perPage,
-                                    ],
-                                  });
-                                },
-                                onError: (error: any) => {
-                                  alert(
-                                    error.message ||
-                                      "No se pudo activar el crédito"
-                                  );
-                                },
+                      {user?.role === "ADMIN" ? (
+                        <>
+                          {/* Editar (solo ACTIVO) */}
+                          {canEdit && (
+                            <a
+                              role="link"
+                              tabIndex={0}
+                              title="Editar crédito"
+                              onClick={() =>
+                                handleOpenEdit(
+                                  item.creditos,
+                                  item.inversionistas
+                                )
                               }
-                            )
-                          }
-                          onKeyDown={(e) =>
-                            onKey(e, () =>
-                              activateCreditMutation.mutate({
-                                creditId: item.creditos.credito_id,
-                                accion: "ACTIVAR",
-                              })
-                            )
-                          }
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-green-700 hover:bg-green-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 cursor-pointer"
-                        >
-                          <RefreshCw className="w-4 h-4 shrink-0" />
-                          <span className="hidden sm:inline">Activar</span>
-                        </a>
+                              onKeyDown={(e) =>
+                                onKey(e, () =>
+                                  handleOpenEdit(
+                                    item.creditos,
+                                    item.inversionistas
+                                  )
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-yellow-700 hover:bg-yellow-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-yellow-300 cursor-pointer"
+                            >
+                              <Pencil className="w-4 h-4 shrink-0" />
+                              <span className="hidden sm:inline">Editar</span>
+                            </a>
+                          )}
+
+                          {/* Cancelar (solo ACTIVO) */}
+                          {canCancel && (
+                            <a
+                              role="link"
+                              tabIndex={0}
+                              title="Cancelar crédito"
+                              onClick={() =>
+                                handleOpenModal(item.creditos.credito_id)
+                              }
+                              onKeyDown={(e) =>
+                                onKey(e, () =>
+                                  handleOpenModal(item.creditos.credito_id)
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-red-700 hover:bg-red-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300 cursor-pointer"
+                            >
+                              <XCircle className="w-4 h-4 shrink-0" />
+                              <span className="hidden sm:inline">Cancelar</span>
+                            </a>
+                          )}
+
+                          {/* Activar (solo PENDIENTE_CANCELACION) */}
+                          {canActivate && (
+                            <a
+                              role="link"
+                              tabIndex={0}
+                              title="Activar crédito"
+                              onClick={() =>
+                                activateCreditMutation.mutate(
+                                  {
+                                    creditId: item.creditos.credito_id,
+                                    accion: "ACTIVAR",
+                                  },
+                                  {
+                                    onSuccess: (data) => {
+                                      alert(
+                                        data.message ||
+                                          "Crédito activado correctamente"
+                                      );
+                                      queryClient.invalidateQueries({
+                                        queryKey: [
+                                          "creditos-paginados",
+                                          mes,
+                                          anio,
+                                          page,
+                                          perPage,
+                                        ],
+                                      });
+                                    },
+                                    onError: (error: any) => {
+                                      alert(
+                                        error.message ||
+                                          "No se pudo activar el crédito"
+                                      );
+                                    },
+                                  }
+                                )
+                              }
+                              onKeyDown={(e) =>
+                                onKey(e, () =>
+                                  activateCreditMutation.mutate({
+                                    creditId: item.creditos.credito_id,
+                                    accion: "ACTIVAR",
+                                  })
+                                )
+                              }
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-sm font-semibold text-green-700 hover:bg-green-100 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 cursor-pointer"
+                            >
+                              <RefreshCw className="w-4 h-4 shrink-0" />
+                              <span className="hidden sm:inline">Activar</span>
+                            </a>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400 italic font-semibold">
+                          No tienes permitido realizar acciones aquí
+                        </span>
                       )}
                     </nav>
                   );
@@ -761,10 +775,7 @@ export function ListaCreditosPagos() {
                             )}`,
                           ],
                         ].map(([label, value]) => (
-                          <div
-                            
-                            className="flex flex-col items-center mb-1"
-                          >
+                          <div className="flex flex-col items-center mb-1">
                             <span className="font-bold text-blue-700 text-base leading-tight">
                                 {label}:
                               </span>  <span className="font-semibold text-gray-900 text-sm break-words whitespace-normal text-left max-w-xs">
@@ -818,6 +829,8 @@ export function ListaCreditosPagos() {
                         </div>
                       </div>
                     </div>
+                    {user?.role === "ADMIN" && (
+  <>
                     <div className="bg-blue-50 rounded-2xl p-4">
                       <h4 className="text-xl font-extrabold text-blue-800 mb-2 uppercase tracking-wide text-center">
                         Resumen general
@@ -966,7 +979,7 @@ export function ListaCreditosPagos() {
                           </div>
                         ))}
                       </div>
-                    </div>
+                    </div></>)}
                   </div>
                 </div>
               )}
@@ -1089,7 +1102,8 @@ export function ListaCreditosPagos() {
                             )}
 
                             {/* Editar (solo ACTIVO) */}
-                            {canEdit(status) && (
+                            {/* Editar (solo ACTIVO y solo ADMIN) */}
+                            {canEdit(status) && user?.role === "ADMIN" && (
                               <a
                                 role="link"
                                 tabIndex={0}
@@ -1114,8 +1128,8 @@ export function ListaCreditosPagos() {
                               </a>
                             )}
 
-                            {/* Cancelar (solo ACTIVO) */}
-                            {canCancel(status) && (
+                            {/* Cancelar (solo ACTIVO y solo ADMIN) */}
+                            {canCancel(status) && user?.role === "ADMIN" && (
                               <a
                                 role="link"
                                 tabIndex={0}
@@ -1136,8 +1150,8 @@ export function ListaCreditosPagos() {
                               </a>
                             )}
 
-                            {/* Activar (solo PENDIENTE_CANCELACION) */}
-                            {canActivate(status) && (
+                            {/* Activar (solo PENDIENTE_CANCELACION y solo ADMIN) */}
+                            {canActivate(status) && user?.role === "ADMIN" && (
                               <a
                                 role="link"
                                 tabIndex={0}
@@ -1188,6 +1202,16 @@ export function ListaCreditosPagos() {
                                 </span>
                               </a>
                             )}
+
+                            {/* Mensaje si no es ADMIN */}
+                            {(canEdit(status) ||
+                              canCancel(status) ||
+                              canActivate(status)) &&
+                              user?.role !== "ADMIN" && (
+                                <span className="text-gray-400 italic">
+                                  No tienes permisos para realizar acciones.
+                                </span>
+                              )}
                           </nav>
                         );
                       })()}
@@ -1505,155 +1529,163 @@ export function ListaCreditosPagos() {
                           </div>
                         </div>
                         {/* RESUMEN GENERAL */}
-                        <div className="px-8 py-4 flex flex-col items-center bg-blue-50 rounded-b-2xl">
-                          <h4 className="text-2xl font-extrabold text-blue-800 mb-2 mt-4 uppercase tracking-wide">
-                            Resumen general
-                          </h4>
-                          <div className="flex flex-wrap justify-center gap-8">
-                            {[
-                              [
-                                "Total Cash In Monto",
-                                `Q${Number(
-                                  item.resumen.total_cash_in_monto
-                                ).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}`,
-                              ],
-                              [
-                                "Total Cash In IVA",
-                                `Q${Number(
-                                  item.resumen.total_cash_in_iva
-                                ).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}`,
-                              ],
-                              [
-                                "Total Monto del inversionista",
-                                `Q${Number(
-                                  item.resumen.total_inversion_monto
-                                ).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}`,
-                              ],
-                              [
-                                "Total Inversión IVA",
-                                `Q${Number(
-                                  item.resumen.total_inversion_iva
-                                ).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}`,
-                              ],
-                            ].map(([label, value]) => (
-                              <div
-                                key={label}
-                                className="flex flex-col items-center mb-1"
-                              >
-                                <span className="font-bold text-blue-700">
-                                  {label}:
-                                </span>
-                                <span className="font-semibold text-gray-900">
-                                  {value}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                        {/* INVERSIONISTAS */}
-                        <div className="px-8 pb-8">
-                          <h4 className="text-2xl font-extrabold text-blue-800 mb-3 mt-6 uppercase tracking-wide">
-                            Inversionistas asociados
-                          </h4>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            {item.inversionistas.map(
-                              (inv: any, idx: number) => (
-                                <div
-                                  key={idx}
-                                  className="border border-blue-200 bg-white rounded-2xl shadow-md p-5 text-base text-gray-800 hover:shadow-xl transition"
-                                >
-                                  <div className="font-bold text-blue-700 mb-2 text-lg">
-                                    {inv.nombre}
+                        {user?.role === "ADMIN" && (
+                          <>
+                            <div className="px-8 py-4 flex flex-col items-center bg-blue-50 rounded-b-2xl">
+                              <h4 className="text-2xl font-extrabold text-blue-800 mb-2 mt-4 uppercase tracking-wide">
+                                Resumen general
+                              </h4>
+                              <div className="flex flex-wrap justify-center gap-8">
+                                {[
+                                  [
+                                    "Total Cash In Monto",
+                                    `Q${Number(
+                                      item.resumen.total_cash_in_monto
+                                    ).toLocaleString("es-GT", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}`,
+                                  ],
+                                  [
+                                    "Total Cash In IVA",
+                                    `Q${Number(
+                                      item.resumen.total_cash_in_iva
+                                    ).toLocaleString("es-GT", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}`,
+                                  ],
+                                  [
+                                    "Total Monto del inversionista",
+                                    `Q${Number(
+                                      item.resumen.total_inversion_monto
+                                    ).toLocaleString("es-GT", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}`,
+                                  ],
+                                  [
+                                    "Total Inversión IVA",
+                                    `Q${Number(
+                                      item.resumen.total_inversion_iva
+                                    ).toLocaleString("es-GT", {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    })}`,
+                                  ],
+                                ].map(([label, value]) => (
+                                  <div
+                                    key={label}
+                                    className="flex flex-col items-center mb-1"
+                                  >
+                                    <span className="font-bold text-blue-700">
+                                      {label}:
+                                    </span>
+                                    <span className="font-semibold text-gray-900">
+                                      {value}
+                                    </span>
                                   </div>
-                                  {[
-                                    [
-                                      "Emite Factura",
-                                      inv.emite_factura ? "Sí" : "No",
-                                    ],
-                                    [
-                                      "Monto Aportado",
-                                      `Q${Number(
-                                        inv.monto_aportado
-                                      ).toLocaleString("es-GT", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      })}`,
-                                    ],
-                                    [
-                                      "Monto Cash In",
-                                      `Q${Number(
-                                        inv.monto_cash_in
-                                      ).toLocaleString("es-GT", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      })}`,
-                                    ],
-                                    [
-                                      "Monto Inversionista",
-                                      `Q${Number(
-                                        inv.monto_inversionista
-                                      ).toLocaleString("es-GT", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      })}`,
-                                    ],
-                                    [
-                                      "IVA Cash In",
-                                      `Q${Number(
-                                        inv.iva_cash_in
-                                      ).toLocaleString("es-GT", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      })}`,
-                                    ],
-                                    [
-                                      "IVA Inversionista",
-                                      `Q${Number(
-                                        inv.iva_inversionista
-                                      ).toLocaleString("es-GT", {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                      })}`,
-                                    ],
-                                    [
-                                      "Porcentaje Inversionista",
-                                      `%${inv.porcentaje_participacion_inversionista}`,
-                                    ],
-                                    [
-                                      "Porcentaje Cash In",
-                                      `%${inv.porcentaje_cash_in}`,
-                                    ],
-                                    ["cuota  ", `Q${inv.cuota_inversionista}`],
-                                  ].map(([label, value]) => (
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* INVERSIONISTAS */}
+                            <div className="px-8 pb-8">
+                              <h4 className="text-2xl font-extrabold text-blue-800 mb-3 mt-6 uppercase tracking-wide">
+                                Inversionistas asociados
+                              </h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                                {item.inversionistas.map(
+                                  (inv: any, idx: number) => (
                                     <div
-                                      key={label}
-                                      className="flex flex-col items-start mb-1"
+                                      key={idx}
+                                      className="border border-blue-200 bg-white rounded-2xl shadow-md p-5 text-base text-gray-800 hover:shadow-xl transition"
                                     >
-                                      <span className="font-bold text-blue-700">
-                                        {label}:
-                                      </span>{" "}
-                                      <span className="font-semibold text-gray-900">
-                                        {value}
-                                      </span>
+                                      <div className="font-bold text-blue-700 mb-2 text-lg">
+                                        {inv.nombre}
+                                      </div>
+                                      {[
+                                        [
+                                          "Emite Factura",
+                                          inv.emite_factura ? "Sí" : "No",
+                                        ],
+                                        [
+                                          "Monto Aportado",
+                                          `Q${Number(
+                                            inv.monto_aportado
+                                          ).toLocaleString("es-GT", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}`,
+                                        ],
+                                        [
+                                          "Monto Cash In",
+                                          `Q${Number(
+                                            inv.monto_cash_in
+                                          ).toLocaleString("es-GT", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}`,
+                                        ],
+                                        [
+                                          "Monto Inversionista",
+                                          `Q${Number(
+                                            inv.monto_inversionista
+                                          ).toLocaleString("es-GT", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}`,
+                                        ],
+                                        [
+                                          "IVA Cash In",
+                                          `Q${Number(
+                                            inv.iva_cash_in
+                                          ).toLocaleString("es-GT", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}`,
+                                        ],
+                                        [
+                                          "IVA Inversionista",
+                                          `Q${Number(
+                                            inv.iva_inversionista
+                                          ).toLocaleString("es-GT", {
+                                            minimumFractionDigits: 2,
+                                            maximumFractionDigits: 2,
+                                          })}`,
+                                        ],
+                                        [
+                                          "Porcentaje Inversionista",
+                                          `%${inv.porcentaje_participacion_inversionista}`,
+                                        ],
+                                        [
+                                          "Porcentaje Cash In",
+                                          `%${inv.porcentaje_cash_in}`,
+                                        ],
+                                        [
+                                          "cuota  ",
+                                          `Q${inv.cuota_inversionista}`,
+                                        ],
+                                      ].map(([label, value]) => (
+                                        <div
+                                          key={label}
+                                          className="flex flex-col items-start mb-1"
+                                        >
+                                          <span className="font-bold text-blue-700">
+                                            {label}:
+                                          </span>{" "}
+                                          <span className="font-semibold text-gray-900">
+                                            {value}
+                                          </span>
+                                        </div>
+                                      ))}
                                     </div>
-                                  ))}
-                                </div>
-                              )
-                            )}
-                          </div>
-                        </div>
+                                  )
+                                )}
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </TableCell>
                     </TableRow>
                   )}

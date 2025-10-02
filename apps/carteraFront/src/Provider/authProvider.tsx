@@ -23,37 +23,35 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   // Cargar token de localStorage al iniciar
- useEffect(() => {
+useEffect(() => {
   const savedToken = localStorage.getItem("token");
   const savedUser = localStorage.getItem("user");
 
   if (savedToken) {
-    // Llamada al backend para verificar token
     fetch(`${import.meta.env.VITE_BACK_URL}/auth/verify?token=${savedToken}`)
-      .then((res) => res.json())
+      .then((res) => {
+        if (res.status === 401) {
+          // 👈 Token vencido
+          throw new Error("Token expirado");
+        }
+        return res.json();
+      })
       .then((data) => {
         if (data.success) {
           setToken(savedToken);
-          // Si quieres, podés confiar en `savedUser` o en `data.data` (decoded del JWT)
           if (savedUser) {
             setUser(JSON.parse(savedUser));
           } else if (data.data) {
-            setUser(data.data); // según lo que devuelva tu servicio
+            setUser(data.data);
           }
         } else {
           console.warn("Token inválido:", data.error);
-          localStorage.removeItem("token");
-          localStorage.removeItem("user");
-          setToken(null);
-          setUser(null);
+          logout(); // 👈 usar la función centralizada
         }
       })
       .catch((err) => {
         console.error("Error verificando token:", err);
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        setToken(null);
-        setUser(null);
+        logout(); // 👈 también en errores
       })
       .finally(() => setLoading(false));
   } else {

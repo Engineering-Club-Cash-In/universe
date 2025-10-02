@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { ExcelCreditoRow, leerCreditoPorNumeroSIFCO } from "../services/excel";
+import { ExcelCreditoRow, leerCreditoPorNumeroSIFCO, listarCreditosAgrupados } from "../services/excel";
 import {
   ClienteEmail,
   EstadoCuentaDetalle,
@@ -30,39 +30,13 @@ import {
 import { findOrCreateInvestor } from "../controllers/investor";
 import { map } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { toBigExcel } from "../utils/functions/generalFunctions";
 
 const excelPath = path.resolve(
-  "C:/Users/Kelvin Palacios/Documents/analis de datos/octubre2025.csv"
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/noviembre2025.csv"
 );
 
-/**
- * Convierte un string o número en Big, limpiando %, Q, comas y guiones
- * @param value valor original
- * @param fallback valor por defecto si está vacío o inválido
- */
-function toBigExcel(value: any, fallback: string | number = "0"): Big {
-  if (value == null) return new Big(fallback);
 
-  let str = String(value).trim();
-
-  if (!str || str === "-" || str.toLowerCase() === "nan") {
-    return new Big(fallback);
-  }
-
-  // quitar prefijo Q si lo hubiera
-  str = str.replace(/^Q/i, "");
-  // quitar %
-  str = str.replace(/%/g, "");
-  // quitar separadores de miles
-  str = str.replace(/,/g, "");
-
-  // si al final no es numérico, usa fallback
-  if (!str || isNaN(Number(str))) {
-    return new Big(fallback);
-  }
-
-  return new Big(str);
-}
 
 export async function mapPrestamoDetalleToCredito(
   prestamo: PrestamoDetalle,
@@ -216,10 +190,16 @@ export async function mapPrestamoDetalleToCredito(
     }); // <-- Add this closing parenthesis and semicolon
 
     if (creditosInversionistasData.length > 0) {
-      await db
-        .insert(creditos_inversionistas)
-        .values(creditosInversionistasData);
-    }
+  // 1️⃣ Eliminar cuotas viejas del crédito
+  await db
+    .delete(creditos_inversionistas)
+    .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+  // 2️⃣ Insertar las nuevas cuotas
+  await db
+    .insert(creditos_inversionistas)
+    .values(creditosInversionistasData);
+}
     return row;
   } catch (error) {
     console.error("❌ Error al insertar crédito en la base de datos:", error);
@@ -316,9 +296,7 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
             excelPath,
             preNumero
           );
-          if (!excelRow?.length) {
-            throw new Error("No encontrado en Excel");
-          }
+     
 
           const recargosLibres = await consultarRecargosLibres(preNumero);
           if (!recargosLibres) {

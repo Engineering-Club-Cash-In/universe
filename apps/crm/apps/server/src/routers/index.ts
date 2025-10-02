@@ -5,6 +5,7 @@ import { crmRouter } from "./crm";
 import { vehiclesRouter } from "./vehicles";
 import { cobrosRouter } from "./cobros";
 import { vendorsRouter } from "./vendors";
+import { notesRouter } from "./notes";
 
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 export const appRouter = {
@@ -82,8 +83,12 @@ export const appRouter = {
 	deleteVendor: vendorsRouter.delete,
 	searchVendors: vendorsRouter.search,
 
-
- 
+	// Notes routes
+	getEntityNotes: notesRouter.getEntityNotes,
+	createNote: notesRouter.createNote,
+	updateNote: notesRouter.updateNote,
+	togglePinNote: notesRouter.togglePinNote,
+	deleteNote: notesRouter.deleteNote,
 
   // Auction routes (subastas 🚗💸)
   createAuction: auctionRouter.createAuction,

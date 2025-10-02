@@ -18,6 +18,7 @@ import {
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {

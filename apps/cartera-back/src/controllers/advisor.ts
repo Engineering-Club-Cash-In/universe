@@ -162,56 +162,75 @@ export const getAdvisors = async ({ query, set }: any) => {
 };
 export const updateAdvisor = async ({ query, body, set }: any) => {
   try {
-    console.log(query);
-    console.log(body);
-    const { id } = query;
-    console.log(id);
+    const { id } = query; // id de platform_users
+
     if (!id) {
       set.status = 400;
       return { message: "El parámetro 'id' es obligatorio." };
     }
-    console.log(id);
-    console.log(body);
-    // Validar body
+
     if (!body || Object.keys(body).length === 0) {
       set.status = 400;
       return { message: "Debe proporcionar campos para actualizar." };
     }
 
-    const { nombre, activo, email, password } = body;
+    const { nombre, apellido, telefono, activo, email, password } = body;
 
-    // 1. Actualizar datos en tabla asesores
+    // 1. Buscar el usuario en platform_users
+    const [user] = await db
+      .select()
+      .from(platform_users)
+      .where(eq(platform_users.id, Number(id)));
+
+    if (!user) {
+      set.status = 404;
+      return { message: "Usuario no encontrado en platform_users." };
+    }
+
+    if (!user.asesor_id) {
+      set.status = 400;
+      return { message: "El usuario no tiene un asesor_id asociado." };
+    }
+
+    // 2. Actualizar tabla asesores usando el asesor_id
     const updatedAdvisor = await db
       .update(asesores)
       .set({
-        ...(nombre !== undefined ? { nombre } : {}),
+        ...(nombre !== undefined ? { nombre } : {}), 
+        ...(telefono !== undefined ? { telefono } : {}),
         ...(activo !== undefined ? { activo } : {}),
       })
-      .where(eq(asesores.asesor_id, Number(id)))
+      .where(eq(asesores.asesor_id, user.asesor_id))
       .returning();
 
-    if (!updatedAdvisor.length) {
-      set.status = 404;
-      return { message: "Asesor no encontrado." };
-    }
-
-    // 2. Si se pasa email o password → actualizar en platform_users
-    if (email || password) {
-      const updateUser: any = {};
-      if (email) updateUser.email = email;
+    // 3. Preparar update para platform_users
+    const updateUser: any = {};
+    if (email) updateUser.email = email;
     if (password) {
-  updateUser.password_hash = await bcrypt.hash(password, 10);
-}
+      updateUser.password_hash = await bcrypt.hash(password, 10);
+    }
+    if (typeof activo !== "undefined") updateUser.is_active = activo;
+
+    if (Object.keys(updateUser).length > 0) {
       await db
         .update(platform_users)
         .set(updateUser)
-        .where(eq(platform_users.asesor_id, Number(id)));
+        .where(eq(platform_users.id, Number(id)));
     }
 
     set.status = 200;
-    return { message: "Asesor actualizado correctamente", data: updatedAdvisor[0] };
+    return {
+      message: "Asesor actualizado correctamente",
+      data: {
+        advisor: updatedAdvisor[0],
+        user: { ...user, ...updateUser },
+      },
+    };
   } catch (error: any) {
     set.status = 500;
-    return { message: "Error actualizando asesor", error: error.message };
+    return {
+      message: "Error actualizando asesor",
+      error: error.message,
+    };
   }
 };

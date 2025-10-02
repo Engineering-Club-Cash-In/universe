@@ -40,6 +40,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@radix-ui/react-dropdown-menu";
+import { useAuth } from "@/Provider/authProvider";
 // Iconos y colores por atributo
 const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
   pago_id: {
@@ -163,7 +164,7 @@ export function PaymentsCredits() {
     {}
   );
   const falsePayment = useFalsePayment();
-
+  const { user } = useAuth(); 
   const { liquidandoId, handleLiquidar, handleReverse, reversePago } =
     usePagoForm();
   const [mesFiltro, setMesFiltro] = useState<string>("");
@@ -185,7 +186,8 @@ const handleDownloadExcel = async () => {
 
   try {
     const res = await getPagosByCredito(numero_credito_sifco, true); // 👈 pedimos excel
-    if (res.excelUrl) {
+    // Check if response has excelUrl (is ExcelResponse)
+    if ('excelUrl' in res && res.excelUrl) {
       const link = document.createElement("a");
       link.href = res.excelUrl;
       link.download = `pagos_${numero_credito_sifco}.xlsx`;
@@ -214,8 +216,8 @@ const handleDownloadExcel = async () => {
     { value: "12", label: "Diciembre" },
   ];
 
-  const pagosFiltrados = (data || [])
-    .filter((pago: any) => {
+  const pagosFiltrados = Array.isArray(data) 
+    ? data.filter((pago: any) => {
       if (!mesFiltro && !anioFiltro) return true;
       const fecha = new Date(pago.fecha_pago);
       const mes = (fecha.getMonth() + 1).toString().padStart(2, "0");
@@ -231,7 +233,8 @@ const handleDownloadExcel = async () => {
           .join(" ")
           .toLowerCase()
           .includes(search.toLowerCase())
-    );
+    )
+    : [];
   const handleFalsePayment = (pago_id: number, credito_id: number) => {
     falsePayment.mutate({ pago_id, credito_id });
   };
@@ -380,57 +383,62 @@ const handleDownloadExcel = async () => {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="flex gap-2">
-                        {/* Botón Revertir Pago */}
-                        <Button
-                          className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow"
-                          onClick={() =>
-                            handleReverse(
-                              item.pago.pago_id,
-                              item.pago.credito_id
-                            )
-                          }
-                          disabled={
-                            item.pago.pagado === false ||
-                            item.pago.paymentFalse === true
-                          }
-                        >
-                          {reversePago.isPending ? (
-                            <>
-                              <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                              Revirtiendo...
-                            </>
-                          ) : (
-                            "Revertir Pago"
-                          )}
-                        </Button>
+             <TableCell className="text-center">
+              {user?.role === "ADMIN" ? (
+                <div className="flex gap-2 justify-center">
+                  {/* Botón Revertir Pago */}
+                  <Button
+                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow"
+                    onClick={() =>
+                      handleReverse(item.pago.pago_id, item.pago.credito_id)
+                    }
+                    disabled={
+                      item.pago.pagado === false ||
+                      item.pago.paymentFalse === true
+                    }
+                  >
+                    {reversePago.isPending ? (
+                      <>
+                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
+                        Revirtiendo...
+                      </>
+                    ) : (
+                      "Revertir Pago"
+                    )}
+                  </Button>
 
-                        {/* Botón Pago Falso */}
-                        <Button
-                          className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow"
-                          onClick={() => {
-                            handleFalsePayment(
-                              item.pago.pago_id,
-                              item.pago.credito_id
-                            );
-                            refetch();
-                          }}
-                          disabled={
-                            falsePayment.isPending ||
-                            item.pago.pagado === true ||
-                            item.pago.paymentFalse === true
-                          }
-                        >
-                          {falsePayment.isPending ? (
-                            <>
-                              <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                              Marcando falso...
-                            </>
-                          ) : (
-                            "Pago Falso"
-                          )}
-                        </Button>
-                      </TableCell>
+                  {/* Botón Pago Falso */}
+                  <Button
+                    className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded font-bold shadow"
+                    onClick={() => {
+                      handleFalsePayment(
+                        item.pago.pago_id,
+                        item.pago.credito_id
+                      );
+                      refetch();
+                    }}
+                    disabled={
+                      falsePayment.isPending ||
+                      item.pago.pagado === true ||
+                      item.pago.paymentFalse === true
+                    }
+                  >
+                    {falsePayment.isPending ? (
+                      <>
+                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
+                        Marcando falso...
+                      </>
+                    ) : (
+                      "Pago Falso"
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <span className="text-gray-400 font-semibold italic">
+                  No tienes permitido realizar acciones aquí
+                </span>
+              )}
+            </TableCell>
 
                       <TableCell className="text-center">
                         {Array.isArray(item.pago.boletas) &&
@@ -501,6 +509,8 @@ const handleDownloadExcel = async () => {
                                   />
                                 ))}
                             </div>
+                            {user?.role === "ADMIN" && (
+  <>
                             {/* INVERSIONISTAS DETALLE */}
                             {item.inversionistasData?.length > 0 && (
                               <div className="space-y-2">
@@ -827,7 +837,8 @@ const handleDownloadExcel = async () => {
                                   </div>
                                 </div>
                               )}
-                            </tbody>
+                            </tbody></>)}
+
                           </div>
                         </TableCell>
                       </TableRow>

@@ -916,7 +916,7 @@ const vehiclesData = [
 		engineCC: "1800",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Teltonika FMB130",
@@ -953,7 +953,7 @@ const vehiclesData = [
 		engineCC: "2400",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "pending",
+		status: "pending" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Queclink GV75W",
@@ -990,7 +990,7 @@ const vehiclesData = [
 		engineCC: "1600",
 		fuelType: "Gasolina",
 		transmission: "Manual",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: false,
 		dispositivoGPS: null,
@@ -1021,7 +1021,7 @@ const vehiclesData = [
 		engineCC: "2000",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Concox GT06N",
@@ -1058,7 +1058,7 @@ const vehiclesData = [
 		engineCC: "2500",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Meitrack T366L",
@@ -1247,7 +1247,7 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "approved",
+			status: "approved" as const,
 			alerts: [],
 		},
 		{
@@ -1264,7 +1264,7 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "pending",
+			status: "pending" as const,
 			alerts: ["Frenos"],
 		},
 		{
@@ -1283,7 +1283,7 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			missingAirbag: "Airbag lateral izquierdo",
 			testDrive: false,
 			noTestDriveReason: "Falla en transmisión impide manejo seguro",
-			status: "rejected",
+			status: "rejected" as const,
 			alerts: ["Airbag", "Transmisión", "Sistema eléctrico"],
 		},
 		{
@@ -1300,7 +1300,7 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "approved",
+			status: "approved" as const,
 			alerts: [],
 		},
 		{
@@ -1317,7 +1317,7 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "approved",
+			status: "approved" as const,
 			alerts: [],
 		},
 	];

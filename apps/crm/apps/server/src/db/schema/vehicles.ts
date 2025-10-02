@@ -40,7 +40,10 @@ export const vehicleVendors = pgTable('vehicle_vendors', {
   // Contact details
   email: text('email'),
   address: text('address'),
-  
+
+  // General notes
+  notes: text('notes'),
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
@@ -92,7 +95,10 @@ export const vehicles = pgTable('vehicles', {
   montoAsegurado: decimal('monto_asegurado', { precision: 12, scale: 2 }),
   deducible: decimal('deducible', { precision: 12, scale: 2 }),
   tipoCobertura: text('tipo_cobertura'), // "basica", "amplia", "total"
-  
+
+  // General notes
+  notes: text('notes'),
+
   // Timestamps
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

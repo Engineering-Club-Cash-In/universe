@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	Select,
 	SelectContent,
@@ -1083,13 +1084,14 @@ function RouteComponent() {
 											{(field) => (
 												<div className="space-y-2">
 													<Label htmlFor={field.name}>Notas</Label>
-													<Input
+													<Textarea
 														id={field.name}
 														name={field.name}
 														value={field.state.value}
 														onBlur={field.handleBlur}
 														onChange={(e) => field.handleChange(e.target.value)}
 														placeholder="Notas adicionales sobre este lead..."
+														rows={3}
 													/>
 												</div>
 											)}

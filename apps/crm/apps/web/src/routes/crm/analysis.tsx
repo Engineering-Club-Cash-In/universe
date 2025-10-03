@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
+import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 
 export const Route = createFileRoute("/crm/analysis")({
 	component: AnalysisPage,
@@ -108,8 +109,8 @@ function AnalysisPage() {
 
 			setIsApprovalDialogOpen(false);
 			loadOpportunities(); // Recargar lista
-		} catch (error) {
-			toast.error(`No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`);
+		} catch (error: any) {
+			toast.error(error.message || `No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -318,9 +319,14 @@ function AnalysisPage() {
 							)}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="py-4">
+					<div className="py-4 space-y-6">
 						{selectedOpportunityForDocs && (
-							<DocumentsViewer opportunityId={selectedOpportunityForDocs.id} />
+							<>
+								<DocumentValidationChecklist
+									opportunityId={selectedOpportunityForDocs.id}
+								/>
+								<DocumentsViewer opportunityId={selectedOpportunityForDocs.id} />
+							</>
 						)}
 					</div>
 				</DialogContent>
@@ -332,94 +338,85 @@ function AnalysisPage() {
 // Component to view documents
 // TODO: Descomentar cuando exista el endpoint getOpportunityDocuments en el router
 function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
-	// const documentsQuery = useQuery({
-	// 	...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),
-	// 	enabled: !!opportunityId,
-	// });
+	const documentsQuery = useQuery({
+		...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),
+		enabled: !!opportunityId,
+	});
 
-	// const documentTypeLabels: Record<string, string> = {
-	// 	identification: "Identificación (DPI/Pasaporte)",
-	// 	income_proof: "Comprobante de Ingresos",
-	// 	bank_statement: "Estado de Cuenta Bancario",
-	// 	business_license: "Patente de Comercio",
-	// 	property_deed: "Escrituras de Propiedad",
-	// 	vehicle_title: "Tarjeta de Circulación",
-	// 	credit_report: "Reporte Crediticio",
-	// 	other: "Otro",
-	// };
+	const documentTypeLabels: Record<string, string> = {
+		identification: "Identificación (DPI/Pasaporte)",
+		income_proof: "Comprobante de Ingresos",
+		bank_statement: "Estado de Cuenta Bancario",
+		business_license: "Patente de Comercio",
+		property_deed: "Escrituras de Propiedad",
+		vehicle_title: "Tarjeta de Circulación",
+		credit_report: "Reporte Crediticio",
+		other: "Otro",
+	};
 
-	// const getDocumentIcon = (mimeType: string) => {
-	// 	if (mimeType.includes("pdf")) return "📄";
-	// 	if (mimeType.includes("image")) return "🖼️";
-	// 	if (mimeType.includes("word")) return "📝";
-	// 	return "📎";
-	// };
+	const getDocumentIcon = (mimeType: string) => {
+		if (mimeType.includes("pdf")) return "📄";
+		if (mimeType.includes("image")) return "🖼️";
+		if (mimeType.includes("word")) return "📝";
+		return "📎";
+	};
 
-	// if (documentsQuery.isLoading) {
-	// 	return (
-	// 		<div className="flex items-center justify-center py-8">
-	// 			<p className="text-muted-foreground">Cargando documentos...</p>
-	// 		</div>
-	// 	);
-	// }
+	if (documentsQuery.isLoading) {
+		return (
+			<div className="flex items-center justify-center py-8">
+				<p className="text-muted-foreground">Cargando documentos...</p>
+			</div>
+		);
+	}
 
-	// if (!documentsQuery.data || documentsQuery.data.length === 0) {
-	// 	return (
-	// 		<Alert>
-	// 			<AlertCircle className="h-4 w-4" />
-	// 			<AlertDescription>
-	// 				No hay documentos subidos para esta oportunidad.
-	// 			</AlertDescription>
-	// 		</Alert>
-	// 	);
-	// }
-
-	// return (
-	// 	<div className="space-y-4">
-	// 		{documentsQuery.data.map((doc) => (
-	// 			<Card key={doc.id}>
-	// 				<CardContent className="p-4">
-	// 					<div className="flex items-center justify-between">
-	// 						<div className="flex items-center gap-3 flex-1">
-	// 							<span className="text-2xl">{getDocumentIcon(doc.mimeType)}</span>
-	// 							<div className="flex-1">
-	// 								<div className="flex items-center gap-2">
-	// 									<span className="font-medium">{doc.originalName}</span>
-	// 									<Badge variant="outline" className="text-xs">
-	// 										{documentTypeLabels[doc.documentType] || doc.documentType}
-	// 									</Badge>
-	// 								</div>
-	// 								{doc.description && (
-	// 									<p className="text-sm text-muted-foreground mt-1">{doc.description}</p>
-	// 								)}
-	// 								<div className="flex items-center gap-4 text-xs text-muted-foreground mt-2">
-	// 									<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-	// 									<span>Subido por {doc.uploadedBy?.name || "Usuario desconocido"}</span>
-	// 									<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
-	// 								</div>
-	// 							</div>
-	// 						</div>
-	// 						<Button
-	// 							size="sm"
-	// 							variant="default"
-	// 							onClick={() => window.open(doc.url, "_blank")}
-	// 						>
-	// 							<FileText className="h-4 w-4 mr-1" />
-	// 							Ver Documento
-	// 						</Button>
-	// 					</div>
-	// 				</CardContent>
-	// 			</Card>
-	// 		))}
-	// 	</div>
-	// );
+	if (!documentsQuery.data || documentsQuery.data.length === 0) {
+		return (
+			<Alert>
+				<AlertCircle className="h-4 w-4" />
+				<AlertDescription>
+					No hay documentos subidos para esta oportunidad.
+				</AlertDescription>
+			</Alert>
+		);
+	}
 
 	return (
-		<Alert>
-			<AlertCircle className="h-4 w-4" />
-			<AlertDescription>
-				Funcionalidad de documentos en desarrollo. Endpoint pendiente de implementación.
-			</AlertDescription>
-		</Alert>
+		<div className="space-y-4">
+			{documentsQuery.data.map((doc) => (
+				<Card key={doc.id}>
+					<CardContent className="p-4">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-3 flex-1">
+								<span className="text-2xl">{getDocumentIcon(doc.mimeType)}</span>
+								<div className="flex-1">
+									<div className="flex items-center gap-2">
+										<span className="font-medium">{doc.originalName}</span>
+										<Badge variant="outline" className="text-xs">
+											{documentTypeLabels[doc.documentType] || doc.documentType}
+										</Badge>
+									</div>
+									{doc.description && (
+										<p className="text-sm text-muted-foreground mt-1">{doc.description}</p>
+									)}
+									<div className="flex items-center gap-4 text-xs text-muted-foreground mt-2">
+										<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
+										<span>Subido por {doc.uploadedBy?.name || "Usuario desconocido"}</span>
+										<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
+									</div>
+								</div>
+							</div>
+							<Button
+								size="sm"
+								variant="default"
+								onClick={() => window.open(doc.url, "_blank")}
+							>
+								<FileText className="h-4 w-4 mr-1" />
+								Ver Documento
+							</Button>
+						</div>
+					</CardContent>
+				</Card>
+			))}
+		</div>
 	);
 }

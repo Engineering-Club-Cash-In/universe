@@ -6,6 +6,8 @@ import { vehiclesRouter } from "./vehicles";
 import { cobrosRouter } from "./cobros";
 import { vendorsRouter } from "./vendors";
 import { notesRouter } from "./notes";
+import { quotationsRouter } from "./quotations";
+import { insuranceRouter } from "./insurance";
 
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 export const appRouter = {
@@ -38,6 +40,10 @@ export const appRouter = {
   getOpportunitiesForAnalysis: crmRouter.getOpportunitiesForAnalysis,
   approveOpportunityAnalysis: crmRouter.approveOpportunityAnalysis,
   getOpportunityHistory: crmRouter.getOpportunityHistory,
+  validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,
+  getOpportunityDocuments: crmRouter.getOpportunityDocuments,
+  uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
+  deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
   getClients: crmRouter.getClients,
   createClient: crmRouter.createClient,
   updateClient: crmRouter.updateClient,
@@ -90,11 +96,21 @@ export const appRouter = {
 	togglePinNote: notesRouter.togglePinNote,
 	deleteNote: notesRouter.deleteNote,
 
+	// Quotations routes
+	createQuotation: quotationsRouter.createQuotation,
+	getQuotations: quotationsRouter.getQuotations,
+	getQuotationById: quotationsRouter.getQuotationById,
+	updateQuotation: quotationsRouter.updateQuotation,
+	deleteQuotation: quotationsRouter.deleteQuotation,
+
+	// Insurance routes
+	getInsuranceCost: insuranceRouter.getInsuranceCost,
+
   // Auction routes (subastas 🚗💸)
   createAuction: auctionRouter.createAuction,
   closeAuction: auctionRouter.closeAuction,
   getAuctions: auctionRouter.getAuctions,
-  addAuctionExpense: auctionRouter.addAuctionExpense, 
+  addAuctionExpense: auctionRouter.addAuctionExpense,
   cancelAuction: auctionRouter.cancelAuction,
 };
 

@@ -6,3 +6,5 @@ export * from "./vehicles";
 export * from "./cobros";
 export * from "./auctionVehicles";
 export * from "./notes";
+export * from "./quotations";
+export * from "./insurance";

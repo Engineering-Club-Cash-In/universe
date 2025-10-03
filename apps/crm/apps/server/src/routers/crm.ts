@@ -11,7 +11,12 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { opportunityDocuments } from "../db/schema/documents";
+import {
+	opportunityDocuments,
+	documentRequirements,
+	documentValidations,
+} from "../db/schema/documents";
+import { vehicles, vehicleInspections } from "../db/schema/vehicles";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { 
 	uploadFileToR2, 
@@ -468,6 +473,8 @@ export const crmRouter = {
 				title: z.string().min(1, "Title is required"),
 				leadId: z.string().uuid().optional(),
 				companyId: z.string().uuid().optional(),
+				vehicleId: z.string().uuid().optional(),
+				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
 				value: z.string().optional(), // Will be converted to decimal
 				stageId: z.string().uuid(),
 				probability: z.number().min(0).max(100).optional(),
@@ -522,6 +529,8 @@ export const crmRouter = {
 				title: z.string().min(1, "Title is required").optional(),
 				leadId: z.string().uuid().optional(),
 				companyId: z.string().uuid().optional(),
+				vehicleId: z.string().uuid().optional(),
+				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
 				value: z.string().optional(),
 				stageId: z.string().uuid().optional(),
 				probability: z.number().min(0).max(100).optional(),
@@ -665,6 +674,7 @@ export const crmRouter = {
 				opportunityId: z.string().uuid(),
 				approved: z.boolean(),
 				reason: z.string().optional(),
+				bypassValidation: z.boolean().optional(), // Solo admin puede usar bypass
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -677,6 +687,85 @@ export const crmRouter = {
 
 			if (!opportunity[0]) {
 				throw new Error("Opportunity not found");
+			}
+
+			// NUEVA VALIDACIÓN: Verificar documentos y vehículo antes de aprobar
+			if (input.approved && !input.bypassValidation) {
+				// Validar que tenga vehicleId y creditType
+				if (!opportunity[0].vehicleId) {
+					throw new Error("La oportunidad debe tener un vehículo asociado");
+				}
+				if (!opportunity[0].creditType) {
+					throw new Error("La oportunidad debe tener un tipo de crédito");
+				}
+
+				// Validar inspección del vehículo
+				const inspection = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opportunity[0].vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+
+				if (!inspection || inspection.length === 0) {
+					throw new Error("El vehículo debe tener una inspección aprobada");
+				}
+
+				// Validar documentos requeridos
+				const requiredDocs = await db
+					.select()
+					.from(documentRequirements)
+					.where(
+						and(
+							eq(documentRequirements.creditType, opportunity[0].creditType),
+							eq(documentRequirements.required, true),
+						),
+					);
+
+				const uploadedDocs = await db
+					.select()
+					.from(opportunityDocuments)
+					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+
+				const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+				const requiredTypes = requiredDocs.map((r) => r.documentType);
+				const missingDocs = requiredTypes.filter((t) => !uploadedTypes.has(t));
+
+				if (missingDocs.length > 0) {
+					const docLabels: Record<string, string> = {
+						identification: "Identificación",
+						income_proof: "Comprobante de Ingresos",
+						bank_statement: "Estado de Cuenta",
+						business_license: "Patente de Comercio",
+						property_deed: "Escrituras",
+						vehicle_title: "Tarjeta de Circulación",
+						credit_report: "Reporte Crediticio",
+						other: "Otros",
+					};
+					const missingLabels = missingDocs
+						.map((d) => docLabels[d] || d)
+						.join(", ");
+					throw new Error(`Faltan documentos obligatorios: ${missingLabels}`);
+				}
+
+				// Registrar validación exitosa
+				await db.insert(documentValidations).values({
+					opportunityId: input.opportunityId,
+					validatedBy: context.userId,
+					allDocumentsPresent: true,
+					vehicleInspected: true,
+					missingDocuments: [],
+					notes: "Validación automática al aprobar análisis",
+				});
+			}
+
+			// Permitir bypass solo a admin
+			if (input.bypassValidation && context.userRole !== "admin") {
+				throw new Error("No tienes permisos para omitir la validación");
 			}
 
 			// Get the analysis stage
@@ -1157,5 +1246,82 @@ export const crmRouter = {
 			} else {
 				throw new Error("No tienes permiso para eliminar este documento");
 			}
+		}),
+
+	// Validate opportunity documents - Para analistas
+	validateOpportunityDocuments: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// 1. Obtener oportunidad con vehículo
+			const [opp] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opp) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			if (!opp.vehicleId) {
+				throw new Error("La oportunidad debe tener un vehículo asociado");
+			}
+
+			if (!opp.creditType) {
+				throw new Error("La oportunidad debe tener un tipo de crédito");
+			}
+
+			// 2. Validar inspección del vehículo
+			const inspection = await db
+				.select()
+				.from(vehicleInspections)
+				.where(
+					and(
+						eq(vehicleInspections.vehicleId, opp.vehicleId),
+						eq(vehicleInspections.status, "approved"),
+					),
+				)
+				.limit(1);
+
+			const vehicleInspected = inspection.length > 0;
+
+			// 3. Obtener documentos requeridos según tipo de crédito
+			const requiredDocs = await db
+				.select()
+				.from(documentRequirements)
+				.where(
+					and(
+						eq(documentRequirements.creditType, opp.creditType),
+						eq(documentRequirements.required, true),
+					),
+				);
+
+			// 4. Obtener documentos subidos
+			const uploadedDocs = await db
+				.select()
+				.from(opportunityDocuments)
+				.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+
+			// 5. Calcular documentos faltantes
+			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+			const requiredTypes = requiredDocs.map((r) => r.documentType);
+			const missingDocs = requiredTypes.filter((t) => !uploadedTypes.has(t));
+
+			const allDocumentsPresent = missingDocs.length === 0;
+			const canApprove = allDocumentsPresent && vehicleInspected;
+
+			return {
+				creditType: opp.creditType,
+				vehicleInspected,
+				allDocumentsPresent,
+				canApprove,
+				requiredDocuments: requiredDocs,
+				uploadedDocuments: uploadedDocs,
+				missingDocuments: missingDocs,
+				vehicleInfo: {
+					id: opp.vehicleId,
+					inspectionStatus: inspection.length > 0 ? inspection[0].status : "pending",
+				},
+			};
 		}),
 };

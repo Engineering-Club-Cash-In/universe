@@ -128,3 +128,13 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Data files - should not be in Git
+*.xlsx
+*.xlsb
+*.xls
+*.pbix
+*.db
+apps/data-science/**/*.txt
+apps/Automatización\ Cartera/*.xlsx
+apps/Automatización\ Cartera/*.pbix

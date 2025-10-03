@@ -1,6 +1,14 @@
-import { pgTable, text, timestamp, uuid, integer, pgEnum } from "drizzle-orm/pg-core";
+import {
+	pgTable,
+	text,
+	timestamp,
+	uuid,
+	integer,
+	pgEnum,
+	boolean,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { opportunities } from "./crm";
+import { opportunities, creditTypeEnum } from "./crm";
 
 export const documentTypeEnum = pgEnum("document_type", [
 	"identification", // DPI, pasaporte
@@ -31,4 +39,29 @@ export const opportunityDocuments = pgTable("opportunity_documents", {
 	// Para almacenamiento, usaremos el sistema de archivos local
 	// En producción se podría usar S3 o similar
 	filePath: text("file_path").notNull(),
+});
+
+// Document Requirements table - Define qué documentos son requeridos por tipo de crédito
+export const documentRequirements = pgTable("document_requirements", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	creditType: creditTypeEnum("credit_type").notNull(),
+	documentType: documentTypeEnum("document_type").notNull(),
+	required: boolean("required").notNull().default(true),
+	description: text("description"),
+});
+
+// Document Validations table - Tracking de validaciones realizadas por analistas
+export const documentValidations = pgTable("document_validations", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	opportunityId: uuid("opportunity_id")
+		.notNull()
+		.references(() => opportunities.id, { onDelete: "cascade" }),
+	validatedBy: text("validated_by")
+		.notNull()
+		.references(() => user.id),
+	validatedAt: timestamp("validated_at").notNull().defaultNow(),
+	allDocumentsPresent: boolean("all_documents_present").notNull(),
+	vehicleInspected: boolean("vehicle_inspected").notNull(),
+	missingDocuments: text("missing_documents").array(),
+	notes: text("notes"),
 });

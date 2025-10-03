@@ -17,6 +17,7 @@ import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
+import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
 import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities'
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
@@ -65,6 +66,11 @@ const VehiclesAuctionVehiclesRoute = VehiclesAuctionVehiclesRouteImport.update({
 const CrmVendorsRoute = CrmVendorsRouteImport.update({
   id: '/crm/vendors',
   path: '/crm/vendors',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CrmQuoterRoute = CrmQuoterRouteImport.update({
+  id: '/crm/quoter',
+  path: '/crm/quoter',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CrmOpportunitiesRoute = CrmOpportunitiesRouteImport.update({
@@ -126,6 +132,7 @@ export interface FileRoutesByFullPath {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
+  '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
@@ -145,6 +152,7 @@ export interface FileRoutesByTo {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
+  '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
@@ -165,6 +173,7 @@ export interface FileRoutesById {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
+  '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
@@ -186,6 +195,7 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
+    | '/crm/quoter'
     | '/crm/vendors'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
@@ -205,6 +215,7 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
+    | '/crm/quoter'
     | '/crm/vendors'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
@@ -224,6 +235,7 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
+    | '/crm/quoter'
     | '/crm/vendors'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
@@ -244,6 +256,7 @@ export interface RootRouteChildren {
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
   CrmOpportunitiesRoute: typeof CrmOpportunitiesRoute
+  CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
@@ -307,6 +320,13 @@ declare module '@tanstack/react-router' {
       path: '/crm/vendors'
       fullPath: '/crm/vendors'
       preLoaderRoute: typeof CrmVendorsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/crm/quoter': {
+      id: '/crm/quoter'
+      path: '/crm/quoter'
+      fullPath: '/crm/quoter'
+      preLoaderRoute: typeof CrmQuoterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/opportunities': {
@@ -388,6 +408,7 @@ const rootRouteChildren: RootRouteChildren = {
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,
   CrmOpportunitiesRoute: CrmOpportunitiesRoute,
+  CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,

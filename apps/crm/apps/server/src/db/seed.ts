@@ -24,6 +24,7 @@ import {
 	recuperacionesVehiculo,
 	notificacionesCobros,
 } from "./schema/cobros";
+import { documentRequirements } from "./schema/documents";
 
 const salesStagesData = [
 	{
@@ -110,6 +111,92 @@ async function seedSalesStages() {
 		console.log("✅ Sales stages seeded successfully!");
 	} catch (error) {
 		console.error("❌ Error seeding sales stages:", error);
+	}
+}
+
+// Document requirements data
+const documentRequirementsData = [
+	// Autocompra - Documentos obligatorios
+	{
+		creditType: "autocompra" as const,
+		documentType: "identification" as const,
+		required: true,
+		description: "DPI o pasaporte del solicitante",
+	},
+	{
+		creditType: "autocompra" as const,
+		documentType: "income_proof" as const,
+		required: true,
+		description:
+			"Constancia laboral, recibos de pago o estados financieros",
+	},
+	{
+		creditType: "autocompra" as const,
+		documentType: "bank_statement" as const,
+		required: true,
+		description: "Estados de cuenta bancarios de los últimos 3 meses",
+	},
+	{
+		creditType: "autocompra" as const,
+		documentType: "credit_report" as const,
+		required: true,
+		description: "Reporte crediticio actualizado",
+	},
+	// Sobre Vehículo - Documentos obligatorios
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "identification" as const,
+		required: true,
+		description: "DPI o pasaporte del propietario",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "vehicle_title" as const,
+		required: true,
+		description:
+			"Tarjeta de circulación que demuestre la propiedad del vehículo",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "income_proof" as const,
+		required: true,
+		description:
+			"Constancia laboral, recibos de pago o estados financieros",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "bank_statement" as const,
+		required: true,
+		description: "Estados de cuenta bancarios de los últimos 3 meses",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "credit_report" as const,
+		required: true,
+		description: "Reporte crediticio actualizado",
+	},
+];
+
+async function seedDocumentRequirements() {
+	console.log("Seeding document requirements...");
+
+	try {
+		// Check if requirements already exist
+		const existingRequirements = await db.select().from(documentRequirements);
+
+		if (existingRequirements.length > 0) {
+			console.log(
+				"Document requirements already exist, skipping seed...",
+			);
+			return;
+		}
+
+		// Insert the document requirements
+		await db.insert(documentRequirements).values(documentRequirementsData);
+
+		console.log("✅ Document requirements seeded successfully!");
+	} catch (error) {
+		console.error("❌ Error seeding document requirements:", error);
 	}
 }
 
@@ -1936,6 +2023,7 @@ async function main() {
 	// Seed in order due to dependencies
 	await seedSalesStages();
 	const stagesList = await db.select().from(salesStages);
+	await seedDocumentRequirements();
 
 	const companiesList = await seedCompanies(usersList);
 	const leadsList = await seedLeads(usersList, companiesList);

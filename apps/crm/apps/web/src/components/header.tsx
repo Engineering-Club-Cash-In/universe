@@ -18,6 +18,7 @@ import {
 	ChevronDown,
 	TrendingUp,
 	Calculator,
+	MessageSquare,
 } from "lucide-react";
 
 import { ModeToggle } from "./mode-toggle";
@@ -132,6 +133,15 @@ export default function Header() {
 											Cotizador
 										</Link>
 									</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									{userRole && PERMISSIONS.canAccessWhatsApp(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/crm/whatsapp" className="cursor-pointer">
+												<MessageSquare className="h-4 w-4 mr-2" />
+												WhatsApp
+											</Link>
+										</DropdownMenuItem>
+									)}
 									<DropdownMenuSeparator />
 									<DropdownMenuItem asChild>
 										<Link to="/vehicles" className="cursor-pointer">

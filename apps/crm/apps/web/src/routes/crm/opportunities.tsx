@@ -405,7 +405,7 @@ function RouteComponent() {
 			stageId: "",
 			probability: 0,
 			expectedCloseDate: "",
-			vendorId: "",
+			vendorId: "none",
 			notes: "",
 		},
 		validators: {
@@ -1046,7 +1046,7 @@ function RouteComponent() {
 													Etapa Inicial <span className="text-red-500">*</span>
 												</Label>
 												<Select
-													value={field.state.value}
+													value={field.state.value || undefined}
 													onValueChange={(value) => field.handleChange(value)}
 												>
 													<SelectTrigger
@@ -1059,11 +1059,13 @@ function RouteComponent() {
 														<SelectValue placeholder="Seleccionar etapa" />
 													</SelectTrigger>
 													<SelectContent>
-														{salesStagesQuery.data?.map((stage) => (
-															<SelectItem key={stage.id} value={stage.id}>
-																{stage.name} ({stage.closurePercentage}%)
-															</SelectItem>
-														))}
+														{salesStagesQuery.data
+															?.filter((stage) => stage.id && stage.id !== "")
+															.map((stage) => (
+																<SelectItem key={stage.id} value={stage.id}>
+																	{stage.name} ({stage.closurePercentage}%)
+																</SelectItem>
+															))}
 													</SelectContent>
 												</Select>
 												{field.state.meta.errors.map((error) => (
@@ -1112,7 +1114,7 @@ function RouteComponent() {
 													<SelectValue placeholder="Seleccionar vendedor" />
 												</SelectTrigger>
 												<SelectContent>
-													<SelectItem value="">Sin vendedor asignado</SelectItem>
+													<SelectItem value="none">Sin vendedor asignado</SelectItem>
 													{vendorsQuery.data?.map((vendor: any) => (
 														<SelectItem key={vendor.id} value={vendor.id}>
 															{vendor.name} {vendor.vendorType === "empresa" ? `(${vendor.companyName})` : ""} - {vendor.dpi}
@@ -1420,7 +1422,7 @@ function RouteComponent() {
 
 				{/* Edit Opportunity Dialog */}
 				<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-					<DialogContent className="min-w-[600px] max-w-4xl">
+					<DialogContent className="min-w-[600px] max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700">
 						<DialogHeader>
 							<DialogTitle>Editar Oportunidad</DialogTitle>
 						</DialogHeader>

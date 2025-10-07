@@ -8,6 +8,7 @@ import { vendorsRouter } from "./vendors";
 import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
 import { insuranceRouter } from "./insurance";
+import * as reportsRouter from "./reports";
 
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 export const appRouter = {
@@ -112,6 +113,13 @@ export const appRouter = {
   getAuctions: auctionRouter.getAuctions,
   addAuctionExpense: auctionRouter.addAuctionExpense,
   cancelAuction: auctionRouter.cancelAuction,
+
+	// Reports routes (reportes 📊)
+	getDashboardExecutivo: reportsRouter.getDashboardExecutivo,
+	getReporteCobranza: reportsRouter.getReporteCobranza,
+	getReporteCartera: reportsRouter.getReporteCartera,
+	getReporteInventario: reportsRouter.getReporteInventario,
+	getReporteSubastas: reportsRouter.getReporteSubastas,
 };
 
 export type AppRouter = typeof appRouter;

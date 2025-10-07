@@ -18,12 +18,12 @@ import {
 } from "../db/schema/documents";
 import { vehicles, vehicleInspections } from "../db/schema/vehicles";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
-import { 
-	uploadFileToR2, 
-	getFileUrl, 
-	deleteFileFromR2, 
+import {
+	uploadFileToR2,
+	getFileUrl,
+	deleteFileFromR2,
 	generateUniqueFilename,
-	validateFile 
+	validateFile,
 } from "../lib/storage";
 
 export const crmRouter = {
@@ -574,18 +574,27 @@ export const crmRouter = {
 			}
 
 			// Check if this is a stage change
-			const isStageChange = input.stageId && input.stageId !== currentOpportunity[0].stageId;
-			
+			const isStageChange =
+				input.stageId && input.stageId !== currentOpportunity[0].stageId;
+
 			// Check if this is an override (sales moving from analysis stage)
 			let isOverride = false;
 			if (isStageChange && context.userRole === "sales") {
 				const analysisStage = await db
 					.select()
 					.from(salesStages)
-					.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
+					.where(
+						eq(
+							salesStages.name,
+							"Recepción de documentación y traslado a análisis",
+						),
+					)
 					.limit(1);
-				
-				if (analysisStage[0] && currentOpportunity[0].stageId === analysisStage[0].id) {
+
+				if (
+					analysisStage[0] &&
+					currentOpportunity[0].stageId === analysisStage[0].id
+				) {
 					isOverride = true;
 				}
 			}
@@ -616,7 +625,11 @@ export const crmRouter = {
 					fromStageId: currentOpportunity[0].stageId,
 					toStageId: input.stageId,
 					changedBy: context.userId,
-					reason: stageChangeReason || (isOverride ? "Ventas movió la oportunidad desde análisis" : "Cambio de etapa"),
+					reason:
+						stageChangeReason ||
+						(isOverride
+							? "Ventas movió la oportunidad desde análisis"
+							: "Cambio de etapa"),
 					isOverride,
 				});
 			}
@@ -625,48 +638,55 @@ export const crmRouter = {
 		}),
 
 	// Analyst specific endpoints
-	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context: _ }) => {
-		// Get the stage ID for "Recepción de documentación y traslado a análisis"
-		const analysisStage = await db
-			.select()
-			.from(salesStages)
-			.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
-			.limit(1);
+	getOpportunitiesForAnalysis: analystProcedure.handler(
+		async ({ context: _ }) => {
+			// Get the stage ID for "Recepción de documentación y traslado a análisis"
+			const analysisStage = await db
+				.select()
+				.from(salesStages)
+				.where(
+					eq(
+						salesStages.name,
+						"Recepción de documentación y traslado a análisis",
+					),
+				)
+				.limit(1);
 
-		if (!analysisStage[0]) {
-			throw new Error("Analysis stage not found");
-		}
+			if (!analysisStage[0]) {
+				throw new Error("Analysis stage not found");
+			}
 
-		// Get all opportunities in the analysis stage
-		return await db
-			.select({
-				id: opportunities.id,
-				title: opportunities.title,
-				value: opportunities.value,
-				probability: opportunities.probability,
-				expectedCloseDate: opportunities.expectedCloseDate,
-				status: opportunities.status,
-				notes: opportunities.notes,
-				createdAt: opportunities.createdAt,
-				updatedAt: opportunities.updatedAt,
-				lead: {
-					id: leads.id,
-					firstName: leads.firstName,
-					lastName: leads.lastName,
-					email: leads.email,
-					phone: leads.phone,
-				},
-				company: {
-					id: companies.id,
-					name: companies.name,
-				},
-			})
-			.from(opportunities)
-			.leftJoin(leads, eq(opportunities.leadId, leads.id))
-			.leftJoin(companies, eq(opportunities.companyId, companies.id))
-			.where(eq(opportunities.stageId, analysisStage[0].id))
-			.orderBy(opportunities.createdAt);
-	}),
+			// Get all opportunities in the analysis stage
+			return await db
+				.select({
+					id: opportunities.id,
+					title: opportunities.title,
+					value: opportunities.value,
+					probability: opportunities.probability,
+					expectedCloseDate: opportunities.expectedCloseDate,
+					status: opportunities.status,
+					notes: opportunities.notes,
+					createdAt: opportunities.createdAt,
+					updatedAt: opportunities.updatedAt,
+					lead: {
+						id: leads.id,
+						firstName: leads.firstName,
+						lastName: leads.lastName,
+						email: leads.email,
+						phone: leads.phone,
+					},
+					company: {
+						id: companies.id,
+						name: companies.name,
+					},
+				})
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
+				.where(eq(opportunities.stageId, analysisStage[0].id))
+				.orderBy(opportunities.createdAt);
+		},
+	),
 
 	approveOpportunityAnalysis: analystProcedure
 		.input(
@@ -772,7 +792,12 @@ export const crmRouter = {
 			const analysisStage = await db
 				.select()
 				.from(salesStages)
-				.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
+				.where(
+					eq(
+						salesStages.name,
+						"Recepción de documentación y traslado a análisis",
+					),
+				)
 				.limit(1);
 
 			if (opportunity[0].stageId !== analysisStage[0].id) {
@@ -791,15 +816,17 @@ export const crmRouter = {
 			}
 
 			// Update opportunity stage if approved
-			const newStageId = input.approved ? nextStage[0].id : opportunity[0].stageId;
-			
+			const newStageId = input.approved
+				? nextStage[0].id
+				: opportunity[0].stageId;
+
 			if (input.approved || input.reason) {
 				// Update opportunity
 				await db
 					.update(opportunities)
 					.set({
 						stageId: newStageId,
-						notes: input.reason 
+						notes: input.reason
 							? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
 							: opportunity[0].notes,
 						updatedAt: new Date(),
@@ -812,7 +839,11 @@ export const crmRouter = {
 					fromStageId: opportunity[0].stageId,
 					toStageId: newStageId,
 					changedBy: context.userId,
-					reason: input.reason || (input.approved ? "Documentación aprobada" : "Documentación rechazada"),
+					reason:
+						input.reason ||
+						(input.approved
+							? "Documentación aprobada"
+							: "Documentación rechazada"),
 					isOverride: false,
 				});
 			}
@@ -858,40 +889,65 @@ export const crmRouter = {
 				.orderBy(opportunityStageHistory.changedAt);
 
 			// Get all unique user IDs and stage IDs
-			const userIds = [...new Set(history.map(h => h.changedById))];
-			const stageIds = [...new Set(history.flatMap(h => [h.fromStageId, h.toStageId].filter(Boolean)))];
+			const userIds = [...new Set(history.map((h) => h.changedById))];
+			const stageIds = [
+				...new Set(
+					history.flatMap((h) => [h.fromStageId, h.toStageId].filter(Boolean)),
+				),
+			];
 
 			// Fetch users and stages
-			const users = userIds.length > 0 
-				? await db.select().from(user).where(or(...userIds.map(id => eq(user.id, id))))
-				: [];
-			const stages = stageIds.length > 0
-				? await db.select().from(salesStages).where(or(...stageIds.filter((id): id is string => id !== null).map(id => eq(salesStages.id, id))))
-				: [];
+			const users =
+				userIds.length > 0
+					? await db
+							.select()
+							.from(user)
+							.where(or(...userIds.map((id) => eq(user.id, id))))
+					: [];
+			const stages =
+				stageIds.length > 0
+					? await db
+							.select()
+							.from(salesStages)
+							.where(
+								or(
+									...stageIds
+										.filter((id): id is string => id !== null)
+										.map((id) => eq(salesStages.id, id)),
+								),
+							)
+					: [];
 
 			// Map users and stages
-			const userMap = new Map(users.map(u => [u.id, u]));
-			const stageMap = new Map(stages.map(s => [s.id, s]));
+			const userMap = new Map(users.map((u) => [u.id, u]));
+			const stageMap = new Map(stages.map((s) => [s.id, s]));
 
 			// Return formatted history
-			return history.map(h => ({
+			return history.map((h) => ({
 				id: h.id,
 				changedAt: h.changedAt,
 				reason: h.reason,
 				isOverride: h.isOverride,
-				changedBy: userMap.get(h.changedById) ? {
-					id: userMap.get(h.changedById)!.id,
-					name: userMap.get(h.changedById)!.name,
-					role: userMap.get(h.changedById)!.role,
-				} : null,
-				fromStage: h.fromStageId && stageMap.get(h.fromStageId) ? {
-					id: stageMap.get(h.fromStageId)!.id,
-					name: stageMap.get(h.fromStageId)!.name,
-				} : null,
-				toStage: stageMap.get(h.toStageId) ? {
-					id: stageMap.get(h.toStageId)!.id,
-					name: stageMap.get(h.toStageId)!.name,
-				} : null,
+				changedBy: userMap.get(h.changedById)
+					? {
+							id: userMap.get(h.changedById)!.id,
+							name: userMap.get(h.changedById)!.name,
+							role: userMap.get(h.changedById)!.role,
+						}
+					: null,
+				fromStage:
+					h.fromStageId && stageMap.get(h.fromStageId)
+						? {
+								id: stageMap.get(h.fromStageId)!.id,
+								name: stageMap.get(h.fromStageId)!.name,
+							}
+						: null,
+				toStage: stageMap.get(h.toStageId)
+					? {
+							id: stageMap.get(h.toStageId)!.id,
+							name: stageMap.get(h.toStageId)!.name,
+						}
+					: null,
 			}));
 		}),
 
@@ -1115,7 +1171,7 @@ export const crmRouter = {
 						...doc,
 						url,
 					};
-				})
+				}),
 			);
 
 			return documentsWithUrls;
@@ -1144,7 +1200,7 @@ export const crmRouter = {
 					size: z.number(),
 					data: z.string(), // Base64 o Buffer
 				}),
-			})
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			// Verificar acceso a la oportunidad
@@ -1168,31 +1224,33 @@ export const crmRouter = {
 				context.userRole === "sales" &&
 				opportunity[0].assignedTo !== context.userId
 			) {
-				throw new Error("No tienes permiso para subir documentos a esta oportunidad");
+				throw new Error(
+					"No tienes permiso para subir documentos a esta oportunidad",
+				);
 			}
 
 			// Crear un File/Blob desde los datos
-			const fileBuffer = Buffer.from(input.file.data, 'base64');
+			const fileBuffer = Buffer.from(input.file.data, "base64");
 			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
-			
+
 			// Validar archivo
 			const validation = validateFile({
 				type: input.file.type,
 				size: input.file.size,
 			} as File);
-			
+
 			if (!validation.valid) {
 				throw new Error(validation.error);
 			}
 
 			// Generar nombre único
 			const uniqueFilename = generateUniqueFilename(input.file.name);
-			
+
 			// Subir a R2
 			const { key } = await uploadFileToR2(
 				fileBlob,
 				uniqueFilename,
-				input.opportunityId
+				input.opportunityId,
 			);
 
 			// Guardar en base de datos
@@ -1218,7 +1276,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				documentId: z.string().uuid(),
-			})
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			// Obtener el documento
@@ -1233,15 +1291,18 @@ export const crmRouter = {
 			}
 
 			// Verificar permisos
-			if (context.userRole === "admin" || document.uploadedBy === context.userId) {
+			if (
+				context.userRole === "admin" ||
+				document.uploadedBy === context.userId
+			) {
 				// Eliminar de R2
 				await deleteFileFromR2(document.filePath);
-				
+
 				// Eliminar de la base de datos
 				await db
 					.delete(opportunityDocuments)
 					.where(eq(opportunityDocuments.id, input.documentId));
-				
+
 				return { success: true };
 			} else {
 				throw new Error("No tienes permiso para eliminar este documento");
@@ -1252,76 +1313,124 @@ export const crmRouter = {
 	validateOpportunityDocuments: analystProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			// 1. Obtener oportunidad con vehículo
-			const [opp] = await db
-				.select()
-				.from(opportunities)
-				.where(eq(opportunities.id, input.opportunityId))
-				.limit(1);
-
-			if (!opp) {
-				throw new Error("Oportunidad no encontrada");
-			}
-
-			if (!opp.vehicleId) {
-				throw new Error("La oportunidad debe tener un vehículo asociado");
-			}
-
-			if (!opp.creditType) {
-				throw new Error("La oportunidad debe tener un tipo de crédito");
-			}
-
-			// 2. Validar inspección del vehículo
-			const inspection = await db
-				.select()
-				.from(vehicleInspections)
-				.where(
-					and(
-						eq(vehicleInspections.vehicleId, opp.vehicleId),
-						eq(vehicleInspections.status, "approved"),
-					),
-				)
-				.limit(1);
-
-			const vehicleInspected = inspection.length > 0;
-
-			// 3. Obtener documentos requeridos según tipo de crédito
-			const requiredDocs = await db
-				.select()
-				.from(documentRequirements)
-				.where(
-					and(
-						eq(documentRequirements.creditType, opp.creditType),
-						eq(documentRequirements.required, true),
-					),
+			try {
+				console.log(
+					"[validateOpportunityDocuments] Starting validation for:",
+					input.opportunityId,
 				);
 
-			// 4. Obtener documentos subidos
-			const uploadedDocs = await db
-				.select()
-				.from(opportunityDocuments)
-				.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+				// 1. Obtener oportunidad con vehículo
+				const [opp] = await db
+					.select()
+					.from(opportunities)
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1);
 
-			// 5. Calcular documentos faltantes
-			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
-			const requiredTypes = requiredDocs.map((r) => r.documentType);
-			const missingDocs = requiredTypes.filter((t) => !uploadedTypes.has(t));
+				console.log("[validateOpportunityDocuments] Opportunity found:", !!opp);
 
-			const allDocumentsPresent = missingDocs.length === 0;
-			const canApprove = allDocumentsPresent && vehicleInspected;
+				if (!opp) {
+					throw new Error("Oportunidad no encontrada");
+				}
 
-			return {
-				creditType: opp.creditType,
-				vehicleInspected,
-				allDocumentsPresent,
-				canApprove,
-				requiredDocuments: requiredDocs,
-				uploadedDocuments: uploadedDocs,
-				missingDocuments: missingDocs,
-				vehicleInfo: {
-					id: opp.vehicleId,
-					inspectionStatus: inspection.length > 0 ? inspection[0].status : "pending",
-				},
-			};
+				console.log(
+					"[validateOpportunityDocuments] vehicleId:",
+					opp.vehicleId,
+					"creditType:",
+					opp.creditType,
+				);
+
+				if (!opp.vehicleId) {
+					throw new Error("La oportunidad debe tener un vehículo asociado");
+				}
+
+				if (!opp.creditType) {
+					throw new Error("La oportunidad debe tener un tipo de crédito");
+				}
+
+				// 2. Validar inspección del vehículo
+				console.log(
+					"[validateOpportunityDocuments] Checking vehicle inspection...",
+				);
+				const inspection = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opp.vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+
+				const vehicleInspected = inspection.length > 0;
+				console.log(
+					"[validateOpportunityDocuments] Vehicle inspected:",
+					vehicleInspected,
+				);
+
+				// 3. Obtener documentos requeridos según tipo de crédito
+				console.log(
+					"[validateOpportunityDocuments] Fetching required documents...",
+				);
+				const requiredDocs = await db
+					.select()
+					.from(documentRequirements)
+					.where(
+						and(
+							eq(documentRequirements.creditType, opp.creditType),
+							eq(documentRequirements.required, true),
+						),
+					);
+
+				console.log(
+					"[validateOpportunityDocuments] Required docs count:",
+					requiredDocs.length,
+				);
+
+				// 4. Obtener documentos subidos
+				console.log(
+					"[validateOpportunityDocuments] Fetching uploaded documents...",
+				);
+				const uploadedDocs = await db
+					.select()
+					.from(opportunityDocuments)
+					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+
+				console.log(
+					"[validateOpportunityDocuments] Uploaded docs count:",
+					uploadedDocs.length,
+				);
+
+				// 5. Calcular documentos faltantes
+				const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+				const requiredTypes = requiredDocs.map((r) => r.documentType);
+				const missingDocs = requiredTypes.filter((t) => !uploadedTypes.has(t));
+
+				const allDocumentsPresent = missingDocs.length === 0;
+				const canApprove = allDocumentsPresent && vehicleInspected;
+
+				console.log(
+					"[validateOpportunityDocuments] Validation complete - canApprove:",
+					canApprove,
+				);
+
+				return {
+					creditType: opp.creditType,
+					vehicleInspected,
+					allDocumentsPresent,
+					canApprove,
+					requiredDocuments: requiredDocs,
+					uploadedDocuments: uploadedDocs,
+					missingDocuments: missingDocs,
+					vehicleInfo: {
+						id: opp.vehicleId,
+						inspectionStatus:
+							inspection.length > 0 ? inspection[0].status : "pending",
+					},
+				};
+			} catch (error) {
+				console.error("[validateOpportunityDocuments] ERROR:", error);
+				throw error;
+			}
 		}),
 };

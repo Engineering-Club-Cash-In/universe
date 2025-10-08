@@ -217,8 +217,11 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-2xl font-semibold">Configurar Metas Mensuales</h1>
+			<div className="space-y-2">
+				<h1 className="text-2xl font-semibold">Asignar Metas Mensuales</h1>
+				<p className="text-gray-600 dark:text-gray-400">
+					Crea y asigna metas mensuales a los empleados. Selecciona el período, agrega las metas con sus objetivos y guárdalas todas de una vez.
+				</p>
 			</div>
 
 			{/* Period Selection */}
@@ -273,15 +276,21 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 			<Card>
 				<CardHeader>
 					<div className="flex items-center justify-between">
-						<CardTitle>Configurar Metas para {months.find(m => m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
-						<Button onClick={addGoalToList}>Agregar Meta</Button>
+						<div>
+							<CardTitle>Metas para {months.find(m => m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
+							<p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+								{bulkGoals.length === 0 ? "No hay metas agregadas" : `${bulkGoals.length} meta(s) configurada(s)`}
+							</p>
+						</div>
+						<Button onClick={addGoalToList}>+ Agregar Meta</Button>
 					</div>
 				</CardHeader>
 				<CardContent>
 					{bulkGoals.length === 0 ? (
-						<p className="text-gray-500 text-center py-8">
-							No hay metas configuradas. Haz clic en "Agregar Meta" para empezar.
-						</p>
+						<div className="text-center py-12 bg-gray-50 dark:bg-gray-900 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700">
+							<p className="text-gray-500 dark:text-gray-400 mb-2">No hay metas agregadas</p>
+							<p className="text-sm text-gray-400 dark:text-gray-500">Haz clic en "Agregar Meta" para comenzar</p>
+						</div>
 					) : (
 						<div className="space-y-4">
 							<DataTable
@@ -291,10 +300,14 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 								emptyMessage="No hay metas configuradas"
 							/>
 
-							<div className="flex justify-end">
+							<div className="flex items-center justify-between pt-4 border-t dark:border-gray-700">
+								<p className="text-sm text-gray-600 dark:text-gray-400">
+									Se crearán {bulkGoals.filter(g => g.teamMemberId && g.goalTemplateId && g.targetValue).length} meta(s) válida(s)
+								</p>
 								<Button
 									onClick={handleBulkSubmit}
 									disabled={bulkCreateMutation.isPending || bulkGoals.length === 0}
+									size="lg"
 								>
 									{bulkCreateMutation.isPending ? "Creando metas..." : "Crear Todas las Metas"}
 								</Button>

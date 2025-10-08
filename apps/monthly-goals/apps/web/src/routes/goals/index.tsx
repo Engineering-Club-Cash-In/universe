@@ -185,12 +185,17 @@ function GoalsIndexPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-2xl font-semibold">Metas Mensuales</h1>
-				
-				<div className="flex items-end gap-6">
-					<div className="flex flex-col gap-2">
-						<Label className="text-sm font-medium text-gray-700">Mes</Label>
+			<div className="space-y-2">
+				<h1 className="text-2xl font-semibold">Dashboard de Metas</h1>
+				<p className="text-gray-600 dark:text-gray-400">
+					Vista general de todas las metas mensuales asignadas en la organización. Filtra por período para ver el progreso de cada empleado.
+				</p>
+			</div>
+
+			<div className="flex items-center justify-end">
+				<div className="flex items-end gap-4">
+					<div className="space-y-2">
+						<Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Mes</Label>
 						<Select
 							value={selectedMonth.toString()}
 							onValueChange={(value) => setSelectedMonth(parseInt(value))}
@@ -208,8 +213,8 @@ function GoalsIndexPage() {
 						</Select>
 					</div>
 
-					<div className="flex flex-col gap-2">
-						<Label className="text-sm font-medium text-gray-700">Año</Label>
+					<div className="space-y-2">
+						<Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Año</Label>
 						<Select
 							value={selectedYear.toString()}
 							onValueChange={(value) => setSelectedYear(parseInt(value))}

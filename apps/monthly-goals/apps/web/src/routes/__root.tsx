@@ -102,14 +102,14 @@ function RootComponent() {
 													className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
 													activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
 												>
-													Mis Metas
+													Actualizar Progreso
 												</Link>
 												<Link
 													to="/goals"
 													className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
 													activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
 												>
-													Ver Todas las Metas
+													Dashboard de Metas
 												</Link>
 												{canConfigureGoals && (
 													<Link
@@ -117,7 +117,7 @@ function RootComponent() {
 														className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
 														activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
 													>
-														Configurar Metas
+														Asignar Metas Mensuales
 													</Link>
 												)}
 											</div>

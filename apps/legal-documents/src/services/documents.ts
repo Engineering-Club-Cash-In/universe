@@ -1,0 +1,34 @@
+// Types
+export interface DocumentType {
+  enum: string
+  label: string
+}
+
+export interface DocumentsResponse {
+  success: boolean
+  total: number
+  data: DocumentType[]
+}
+
+// API Service
+const API_URL = import.meta.env.VITE_API_URL
+
+export const documentsService = {
+  // Obtener todos los tipos de documentos disponibles
+  getDocumentTypes: async (): Promise<DocumentsResponse> => {
+    const response = await fetch(`${API_URL}/docuSeal/documents`)
+    
+    if (!response.ok) {
+      throw new Error(`Error fetching documents: ${response.status} ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    return data
+  }
+}
+
+// React Query Keys
+export const documentsKeys = {
+  all: ['documents'] as const,
+  types: () => [...documentsKeys.all, 'types'] as const,
+}

@@ -142,7 +142,7 @@ function SubmitPresentationPage() {
 		return submission ? submission[field] || '' : '';
 	};
 
-const getProgressPercentage = (target: string, achieved: string) => {
+const getProgressPercentage = (target: string, achieved: string, isInverse?: boolean) => {
   const targetNum = parseFloat(target);
   const achievedNum = parseFloat(achieved);
 
@@ -150,18 +150,17 @@ const getProgressPercentage = (target: string, achieved: string) => {
     return 0; // valores inválidos
   }
 
-  if (achievedNum === 0) {
-    return 100; // caso especial: mora en 0 = éxito total
+  if (isInverse) {
+    // Para metas inversas: menor o igual = 100%
+    if (achievedNum <= targetNum) {
+      return 100;
+    } else {
+      return Math.max((targetNum / achievedNum) * 100, 0);
+    }
+  } else {
+    // Para metas normales: mayor es mejor
+    return Math.min((achievedNum / targetNum) * 100, 100);
   }
-
-  let progress = (achievedNum / targetNum) * 100;
-
-  // si se pasa de 100, devolver 100
-  if (progress > 100) {
-    progress = 100;
-  }
-
-  return progress;
 };
 	const getStatusBadge = (percentage: number) => {
 		if (percentage >= 80) {
@@ -239,7 +238,7 @@ const getProgressPercentage = (target: string, achieved: string) => {
 								</TableRow>
 							) : availableGoals.data?.map((goal: any) => {
 								const submittedValue = getSubmissionValue(goal.id, 'submittedValue') || goal.achievedValue;
-								const percentage = getProgressPercentage(goal.targetValue, submittedValue);
+								const percentage = getProgressPercentage(goal.targetValue, submittedValue, goal.isInverse);
 
 								return (
 									<TableRow key={goal.id}>

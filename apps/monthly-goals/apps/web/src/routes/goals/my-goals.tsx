@@ -183,11 +183,22 @@ function MyGoalsPage() {
   cell: ({ row }) => {
     const target = parseFloat(row.original.targetValue);
     const achieved = parseFloat(row.original.achievedValue);
+    const isInverse = row.original.isInverse;
 
     let percentage = 0;
 
     if (!isNaN(target) && target > 0) {
-      percentage = (achieved / target) * 100;
+      if (isInverse) {
+        // Para metas inversas: menor o igual = 100%
+        if (achieved <= target) {
+          percentage = 100;
+        } else {
+          percentage = Math.max((target / achieved) * 100, 0);
+        }
+      } else {
+        // Para metas normales: mayor es mejor
+        percentage = (achieved / target) * 100;
+      }
     }
 
     const clamped = Math.min(percentage, 100);
@@ -210,7 +221,20 @@ function MyGoalsPage() {
         cell: ({ row }) => {
           const target = parseFloat(row.original.targetValue);
           const achieved = parseFloat(row.original.achievedValue);
-          const percentage = target > 0 ? (achieved / target) * 100 : 0;
+          const isInverse = row.original.isInverse;
+
+          let percentage = 0;
+          if (target > 0) {
+            if (isInverse) {
+              if (achieved <= target) {
+                percentage = 100;
+              } else {
+                percentage = Math.max((target / achieved) * 100, 0);
+              }
+            } else {
+              percentage = (achieved / target) * 100;
+            }
+          }
 
           return getStatusBadge(
             percentage,
@@ -223,7 +247,21 @@ function MyGoalsPage() {
 
           const target = parseFloat(row.original.targetValue);
           const achieved = parseFloat(row.original.achievedValue);
-          const percentage = target > 0 ? (achieved / target) * 100 : 0;
+          const isInverse = row.original.isInverse;
+
+          let percentage = 0;
+          if (target > 0) {
+            if (isInverse) {
+              if (achieved <= target) {
+                percentage = 100;
+              } else {
+                percentage = Math.max((target / achieved) * 100, 0);
+              }
+            } else {
+              percentage = (achieved / target) * 100;
+            }
+          }
+
           const status = getStatusText(
             percentage,
             row.original.successThreshold,
@@ -395,13 +433,20 @@ function MyGoalsPage() {
               <div className="grid grid-cols-2 gap-4">
                 <Card>
                   <CardContent className="pt-6">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1">Objetivo</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1">
+                      {updatingGoal.isInverse ? "Meta (máx)" : "Objetivo"}
+                    </p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                       {parseFloat(updatingGoal.targetValue).toLocaleString()}
                       <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
                         {updatingGoal.goalTemplateUnit || "unidades"}
                       </span>
                     </p>
+                    {updatingGoal.isInverse && (
+                      <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
+                        Meta de reducción: menor es mejor
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -423,11 +468,47 @@ function MyGoalsPage() {
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium text-gray-700 dark:text-gray-300">Progreso</span>
                   <span className="font-bold text-gray-900 dark:text-gray-100">
-                    {Math.round((parseFloat(updatingGoal.achievedValue) / parseFloat(updatingGoal.targetValue)) * 100)}%
+                    {(() => {
+                      const target = parseFloat(updatingGoal.targetValue);
+                      const achieved = parseFloat(updatingGoal.achievedValue);
+                      const isInverse = updatingGoal.isInverse;
+
+                      let percentage = 0;
+                      if (target > 0) {
+                        if (isInverse) {
+                          if (achieved <= target) {
+                            percentage = 100;
+                          } else {
+                            percentage = Math.max((target / achieved) * 100, 0);
+                          }
+                        } else {
+                          percentage = (achieved / target) * 100;
+                        }
+                      }
+                      return Math.round(percentage);
+                    })()}%
                   </span>
                 </div>
                 <Progress
-                  value={Math.min((parseFloat(updatingGoal.achievedValue) / parseFloat(updatingGoal.targetValue)) * 100, 100)}
+                  value={(() => {
+                    const target = parseFloat(updatingGoal.targetValue);
+                    const achieved = parseFloat(updatingGoal.achievedValue);
+                    const isInverse = updatingGoal.isInverse;
+
+                    let percentage = 0;
+                    if (target > 0) {
+                      if (isInverse) {
+                        if (achieved <= target) {
+                          percentage = 100;
+                        } else {
+                          percentage = Math.max((target / achieved) * 100, 0);
+                        }
+                      } else {
+                        percentage = (achieved / target) * 100;
+                      }
+                    }
+                    return Math.min(percentage, 100);
+                  })()}
                   className="h-3"
                 />
               </div>

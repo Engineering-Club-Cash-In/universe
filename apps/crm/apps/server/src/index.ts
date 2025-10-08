@@ -8,12 +8,14 @@ import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
 import {
   getLeadProgress,
+  getOnlyRenapInfoController,
   getRenapInfoController,
   hasPassedLiveness,
   updateLeadAndCreateOpportunity,
   validateMagicUrlController,
 } from "./controllers/bot";
 import { livenessController } from "./controllers/liveness";
+import { processCsvLeads } from "./controllers/csv";
 
 const app = new Hono();
 
@@ -256,6 +258,48 @@ app.post("/info/renap", async (c) => {
     return c.json({ error: err.message || "Internal server error" }, 500);
   }
 });
+
+app.post("/info/renap-only", async (c) => {
+  try {
+    // =====================================================
+    // 1️⃣ Parse incoming request body
+    // =====================================================
+    const body = await c.req.json<{ dpi: string }>();
+
+    if (!body.dpi) {
+      console.warn("[WARN] Missing DPI in request body.");
+      return c.json(
+        { success: false, message: "DPI is required in the request body." },
+        400
+      );
+    }
+
+    console.log(`[DEBUG] Incoming request to /info/renap-only for DPI: ${body.dpi}`);
+
+    // =====================================================
+    // 2️⃣ Execute RENAP-only logic
+    // =====================================================
+    const result = await getOnlyRenapInfoController(body.dpi);
+
+    // =====================================================
+    // 3️⃣ Return response
+    // =====================================================
+    return c.json(result, result.success ? 200 : 400);
+  } catch (err: any) {
+    // =====================================================
+    // ❌ Global error handler
+    // =====================================================
+    console.error("[ERROR] /info/renap-only:", err);
+    return c.json(
+      {
+        success: false,
+        message: "Internal server error while processing RENAP-only request.",
+        error: err?.message || err,
+      },
+      500
+    );
+  }
+});
 app.post("/info/lead-opportunity", async (c) => {
   try {
     const body = await c.req.json<{
@@ -392,5 +436,14 @@ app.post("/webhook/facebook-lead", async (c) => {
     );
   }
 });
+    app.get("/upload-csv", async (c) => {
+      try {
+        const result = await processCsvLeads();
+        return c.json(result);
+      } catch (err: any) {
+        return c.json({ error: err.message }, 500);
+      }
+    })
+
 
 export default app;

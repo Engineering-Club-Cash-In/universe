@@ -17,6 +17,7 @@ import {
   processAndReplaceCreditInvestors,
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
+import { updateMora } from "./latefee";
 
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -52,10 +53,7 @@ export const reversePaymentSchema = z.object({
  * @param set - Response handler (e.g., to set status)
  * @returns Detailed result object
  */
-export const reversePayment = async ({
-  body,
-  set,
-}:any) => {
+export const reversePayment = async ({ body, set }: any) => {
   try {
     // 1. Validate input
     const parseResult = reversePaymentSchema.safeParse(body);
@@ -122,9 +120,14 @@ export const reversePayment = async ({
       .plus(creditData.seguro_10_cuotas ?? 0)
       .plus(creditData.gps ?? 0)
       .plus(creditData.membresias_pago ?? 0);
-    const moraCalculada = new Big(creditData.mora ?? 0).minus(pago.mora ?? 0);
-    const moraTotal = moraCalculada.gt(0) ? moraCalculada.toString() : "0";
-
+    if (pago.mora && Number(pago.mora) > 0) {
+      await updateMora({
+        credito_id,
+        monto_cambio: Number(pago.mora),
+        tipo: "INCREMENTO",
+        activa: true,
+      });
+    }
     // 5. Update the credit record with new values
     await db
       .update(creditos)
@@ -133,7 +136,6 @@ export const reversePayment = async ({
         deudatotal: deudatotal.toString(),
         cuota_interes: cuota_interes.toString(),
         iva_12: iva_12.toString(),
-        mora: moraTotal,
       })
       .where(eq(creditos.credito_id, credito_id));
     const abonoBig = new Big(pago.abono_capital ?? 0);
@@ -143,7 +145,6 @@ export const reversePayment = async ({
       true,
       pago_id
     );
-  
 
     // 6. Reset the payment record
     await db
@@ -349,13 +350,12 @@ export const insertPayment = async ({ body, set }: any) => {
 
         // Actualizar la mora del crédito SOLO si se pagó mora
         if (moraBig.gt(0)) {
-          const moraActual = new Big(credito.mora ?? 0);
-          const nuevaMora = moraActual.minus(moraBig);
-          const moraFinal = nuevaMora.gt(0) ? nuevaMora.toString() : "0";
-          await db
-            .update(creditos)
-            .set({ mora: moraFinal })
-            .where(eq(creditos.credito_id, credito_id));
+          await updateMora({
+            credito_id,
+            monto_cambio: moraBig.toNumber(),
+            tipo: "DECREMENTO", // 👈 porque devolvés la mora al crédito
+            activa: true, // 👈 asegurás que quede activa
+          });
         }
         pagosRealizados.push(pagoEspecial);
       }
@@ -505,10 +505,12 @@ export const insertPayment = async ({ body, set }: any) => {
               );
             }
 
-            const moraCalculada = new Big(credito.mora ?? 0).minus(moraBig);
-            const moraTotal = moraCalculada.gt(0)
-              ? moraCalculada.toString()
-              : "0";
+            await updateMora({
+              credito_id,
+              monto_cambio: moraBig.toNumber(),
+              tipo: "DECREMENTO", // 👈 porque devolvés la mora al crédito
+              activa: true, // 👈 asegurás que quede activa
+            });
             const cuota_interes = new Big(capital_restante)
               .times(new Big(credito.porcentaje_interes).div(100))
               .round(2);
@@ -529,7 +531,6 @@ export const insertPayment = async ({ body, set }: any) => {
               .set({
                 capital: capital_restante.toString(),
                 deudatotal: deudatotal,
-                mora: moraTotal,
                 iva_12: iva_12.toString(),
                 cuota_interes: cuota_interes.toString(),
               })
@@ -1106,6 +1107,7 @@ export async function insertPagosCreditoInversionistas(
     const totalIVA = new Big(inv.iva_cash_in ?? 0).plus(
       new Big(inv.iva_inversionista ?? 0)
     );
+
     if (idx === indexMayorCuota && !excludeCube) {
       console.log(
         `Abono al mayor inversionista (${inv.nombre}) con cuota ${inv.cuota_inversionista}`
@@ -1408,6 +1410,13 @@ export async function insertarPago({
       observaciones: "",
     })
     .returning();
+  if (mora && Number(mora) > 0) {
+    await updateMora({
+      credito_id: creditData.credito_id,
+      monto_cambio: Number(mora),
+      tipo: "DECREMENTO", // 👈 bajamos la mora porque el cliente ya pagó
+    });
+  }
 
   if (urlBoletas && urlBoletas.length > 0) {
     await db.insert(boletas).values(
@@ -1589,4 +1598,156 @@ export async function getPagosDelMesActual(credito_id: number) {
   }
 
   return total.toFixed(2); // Devuelve como string, siempre dos decimales
+}
+ 
+ 
+interface GetPagosOptions {
+  page?: number;
+  pageSize?: number;
+  numeroCredito?: string;
+  dia?: number;
+  mes?: number;
+  anio?: number;
+  inversionistaId?: number;
+}
+
+export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
+  const {
+    page = 1,
+    pageSize = 20,
+    numeroCredito,
+    dia,
+    mes,
+    anio,
+    inversionistaId,
+  } = options;
+
+  try {
+    const conditions: any[] = [eq(creditos.statusCredit, "ACTIVO")];
+
+    // ✅ Filtros dinámicos
+    if (numeroCredito) {
+      conditions.push(eq(creditos.numero_credito_sifco, numeroCredito));
+    }
+    if (anio) {
+      conditions.push(sql.raw(`EXTRACT(YEAR FROM p.fecha_pago) = ${anio}`));
+    }
+    if (mes) {
+      conditions.push(sql.raw(`EXTRACT(MONTH FROM p.fecha_pago) = ${mes}`));
+    }
+    if (dia) {
+      conditions.push(sql.raw(`EXTRACT(DAY FROM p.fecha_pago) = ${dia}`));
+    }
+    if (inversionistaId) {
+      conditions.push(
+        eq(inversionistas.inversionista_id, inversionistaId)
+      );
+    }
+
+    const offset = (page - 1) * pageSize;
+
+    // ✅ Consulta principal (evita duplicados)
+    const rows = await db.execute(
+      sql`
+      SELECT DISTINCT ON (p.pago_id)
+        p.pago_id AS "pagoId",
+        p.monto_boleta AS "montoBoleta",
+        p.numeroAutorizacion AS "numeroAutorizacion",
+        p.fecha_pago AS "fechaPago",
+        c.credito_id AS "creditoId",
+        c.numero_credito_sifco AS "numeroCredito",
+        c.capital AS "capital",
+        c.deudatotal AS "deudaTotal",
+        u.nombre AS "usuarioNombre",
+        i.inversionista_id AS "inversionistaId",
+        i.nombre AS "nombreInversionista",
+        pci.abono_capital AS "abonoCapital",
+        pci.abono_interes AS "abonoInteres",
+        pci.abono_iva_12 AS "abonoIva",
+        pci.cuota AS "cuotaPago",
+        p.abono_interes AS "abono_interes",
+        p.abono_iva_12 AS "abono_iva_12",
+        p.abono_interes_ci AS "abono_interes_ci",
+        p.abono_iva_ci AS "abono_iva_ci",
+        p.abono_seguro AS "abono_seguro",
+        p.abono_gps AS "abono_gps",
+        ci.monto_aportado AS "montoAportado",
+        ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
+        b.id AS "boletaId",
+        b.url_boleta AS "urlBoleta"
+      FROM cartera.pagos_credito p
+      LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
+      LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      LEFT JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
+      LEFT JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+      LEFT JOIN cartera.creditos_inversionistas ci ON ci.credito_id = c.credito_id
+      LEFT JOIN cartera.boletas b ON b.pago_id = p.pago_id
+      WHERE ${and(...conditions)}
+      ORDER BY p.pago_id DESC
+      LIMIT ${pageSize} OFFSET ${offset};
+    `
+    );
+
+    const pagosMap: Record<number, any> = {};
+
+    for (const row of rows.rows) {
+      if (!pagosMap[row.pagoId]) {
+        pagosMap[row.pagoId] = {
+          pagoId: row.pagoId,
+          montoBoleta: row.montoBoleta,
+          numeroAutorizacion: row.numeroAutorizacion,
+          fechaPago: row.fechaPago,
+          creditoId: row.creditoId,
+          numeroCredito: row.numeroCredito,
+          capital: row.capital,
+          deudaTotal: row.deudaTotal,
+          usuarioNombre: row.usuarioNombre,
+          boleta: row.boletaId
+            ? {
+                boletaId: row.boletaId,
+                urlBoleta: row.urlBoleta,
+              }
+            : null,
+          abono_interes: row.abono_interes,
+          abono_iva_12: row.abono_iva_12,
+          abono_interes_ci: row.abono_interes_ci,
+          abono_iva_ci: row.abono_iva_ci,
+          abono_seguro: row.abono_seguro,
+          abono_gps: row.abono_gps,
+          inversionistas: [],
+        };
+      }
+
+      // ✅ Si hay inversionistas, agrégalos al grupo
+      if (row.inversionistaId) {
+        pagosMap[row.pagoId].inversionistas.push({
+          inversionistaId: row.inversionistaId,
+          nombreInversionista: row.nombreInversionista,
+          abonoCapital: row.abonoCapital,
+          abonoInteres: row.abonoInteres,
+          abonoIva: row.abonoIva,
+          isr: row.abonoInteres ? Number(row.abonoInteres) * 0.05 : 0,
+          cuotaPago: row.cuotaPago,
+          montoAportado: row.montoAportado,
+          porcentajeParticipacion: row.porcentajeParticipacion,
+        });
+      }
+    }
+
+    return {
+      page,
+      pageSize,
+      total: rows.rowCount,
+      data: Object.values(pagosMap),
+    };
+  } catch (error: any) {
+    console.error("❌ Error en getPagosConInversionistas:", error);
+    return {
+      page,
+      pageSize,
+      total: 0,
+      data: [],
+      error: error.message,
+    };
+  }
 }

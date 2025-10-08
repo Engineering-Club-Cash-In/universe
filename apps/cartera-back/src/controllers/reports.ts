@@ -1,7 +1,7 @@
 import ExcelJS from "exceljs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getCreditosWithUserByMesAnio } from "./credits";
-import { getAllPagosWithCreditAndInversionistas } from "./payments";
+import { getAllPagosWithCreditAndInversionistas, getPagosConInversionistas } from "./payments";
 
 export async function getCreditosWithUserByMesAnioExcel(
   params: {
@@ -10,7 +10,7 @@ export async function getCreditosWithUserByMesAnioExcel(
     page?: number;
     perPage?: number;
     numero_credito_sifco?: string;
-    estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION";
+    estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
     excel?: boolean;
   }
 ) {
@@ -254,5 +254,169 @@ const uint8Array = new Uint8Array(arrayBuffer);
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   return {
     excelUrl: url,
+  };
+}
+
+ 
+
+/**
+ * 📊 Genera y sube un Excel con todos los pagos e inversionistas
+ */
+export async function exportPagosConInversionistasExcel(
+  options: {
+    page?: number;
+    pageSize?: number;
+    numeroCredito?: string;
+    dia?: number;
+    mes?: number;
+    anio?: number;
+    inversionistaId?: number;
+  }
+) {
+  // 1️⃣ Obtener los datos completos de tu servicio
+  const result = await getPagosConInversionistas({
+    ...options,
+    pageSize: 99999, // sin paginar para traer TODO
+  });
+
+  if (!result.data || result.data.length === 0) {
+    throw new Error("No se encontraron pagos para generar el Excel.");
+  }
+
+  console.log(`📊 Generando Excel con ${result.data.length} pagos...`);
+
+  // 2️⃣ Crear el workbook
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Pagos con Inversionistas");
+
+  // 3️⃣ Definir columnas base
+  const columns: any[] = [
+    { header: "Pago ID", key: "pagoId", width: 12 },
+    { header: "Número Crédito", key: "numeroCredito", width: 20 },
+    { header: "Crédito ID", key: "creditoId", width: 15 },
+    { header: "Capital Crédito", key: "capital", width: 15 },
+    { header: "Deuda Total", key: "deudaTotal", width: 15 },
+    { header: "Usuario", key: "usuarioNombre", width: 25 },
+    { header: "Monto Boleta", key: "montoBoleta", width: 15 },
+    { header: "Número Autorización", key: "numeroAutorizacion", width: 20 },
+    { header: "Fecha Pago", key: "fechaPago", width: 20 },
+
+    // 👇 Información de la cuota
+    { header: "Cuota ID", key: "cuotaId", width: 12 },
+    { header: "Número Cuota", key: "numeroCuota", width: 12 },
+    { header: "Fecha Vencimiento", key: "fechaVencimiento", width: 20 },
+    { header: "Pagado", key: "pagado", width: 10 },
+
+    // 👇 Info de boleta
+    { header: "Boleta ID", key: "boletaId", width: 12 },
+    { header: "URL Boleta", key: "urlBoleta", width: 50 },
+
+    // 👇 Abonos globales
+    { header: "Abono Interés", key: "abono_interes", width: 15 },
+    { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
+    { header: "Abono Interés CI", key: "abono_interes_ci", width: 15 },
+    { header: "Abono IVA CI", key: "abono_iva_ci", width: 15 },
+    { header: "Abono Seguro", key: "abono_seguro", width: 15 },
+    { header: "Abono GPS", key: "abono_gps", width: 15 },
+  ];
+
+  // 4️⃣ Determinar máximo de inversionistas por pago
+  const maxInversionistas = Math.max(
+    ...result.data.map((pago: any) => pago.inversionistas.length)
+  );
+
+  // 5️⃣ Agregar columnas dinámicas para inversionistas
+  for (let i = 1; i <= maxInversionistas; i++) {
+    columns.push({ header: `Inv${i}_ID`, key: `inv${i}_id`, width: 12 });
+    columns.push({ header: `Inv${i}_Nombre`, key: `inv${i}_nombre`, width: 25 });
+    columns.push({ header: `Inv${i}_Monto Aportado`, key: `inv${i}_monto_aportado`, width: 15 });
+    columns.push({ header: `Inv${i}_% Participación`, key: `inv${i}_porcentaje`, width: 15 });
+    columns.push({ header: `Inv${i}_Abono Capital`, key: `inv${i}_abono_capital`, width: 15 });
+    columns.push({ header: `Inv${i}_Abono Interés`, key: `inv${i}_abono_interes`, width: 15 });
+    columns.push({ header: `Inv${i}_Abono IVA`, key: `inv${i}_abono_iva`, width: 15 });
+    columns.push({ header: `Inv${i}_ISR (5%)`, key: `inv${i}_isr`, width: 12 });
+    columns.push({ header: `Inv${i}_Cuota Pago`, key: `inv${i}_cuota_pago`, width: 15 });
+  }
+
+  sheet.columns = columns;
+
+  // 6️⃣ Poblar filas
+  result.data.forEach((item: any) => {
+    const row: any = {
+      pagoId: item.pagoId,
+      numeroCredito: item.numeroCredito,
+      creditoId: item.creditoId,
+      capital: item.capital,
+      deudaTotal: item.deudaTotal,
+      usuarioNombre: item.usuarioNombre,
+      montoBoleta: item.montoBoleta,
+      numeroAutorizacion: item.numeroAutorizacion,
+      fechaPago: item.fechaPago,
+
+      cuotaId: item.cuota?.cuotaId ?? "",
+      numeroCuota: item.cuota?.numeroCuota ?? "",
+      fechaVencimiento: item.cuota?.fechaVencimiento ?? "",
+      pagado: item.cuota?.pagado ? "Sí" : "No",
+
+      boletaId: item.boleta?.boletaId ?? "",
+      urlBoleta: item.boleta?.urlBoleta ?? "",
+
+      abono_interes: item.abono_interes,
+      abono_iva_12: item.abono_iva_12,
+      abono_interes_ci: item.abono_interes_ci,
+      abono_iva_ci: item.abono_iva_ci,
+      abono_seguro: item.abono_seguro,
+      abono_gps: item.abono_gps,
+    };
+
+    // Agregar inversionistas dinámicos
+    item.inversionistas.forEach((inv: any, index: number) => {
+      const i = index + 1;
+      row[`inv${i}_id`] = inv.inversionistaId;
+      row[`inv${i}_nombre`] = inv.nombreInversionista;
+      row[`inv${i}_monto_aportado`] = inv.montoAportado;
+      row[`inv${i}_porcentaje`] = inv.porcentajeParticipacion;
+      row[`inv${i}_abono_capital`] = inv.abonoCapital;
+      row[`inv${i}_abono_interes`] = inv.abonoInteres;
+      row[`inv${i}_abono_iva`] = inv.abonoIva;
+      row[`inv${i}_isr`] = inv.isr;
+      row[`inv${i}_cuota_pago`] = inv.cuotaPago;
+    });
+
+    sheet.addRow(row);
+  });
+
+  // 7️⃣ Generar buffer del Excel
+  const arrayBuffer = await workbook.xlsx.writeBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+
+  // 8️⃣ Subir a S3/R2
+  const s3 = new S3Client({
+    endpoint: process.env.BUCKET_REPORTS_URL,
+    region: "auto",
+    credentials: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+    },
+  });
+
+  const filename = `reportes/pagos_inversionistas_${Date.now()}.xlsx`;
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS!,
+      Key: filename,
+      Body: uint8Array,
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
+
+  const excelUrl = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
+  console.log("✅ Reporte de pagos con inversionistas subido:", excelUrl);
+
+  return {
+    success: true,
+    total: result.data.length,
+    excelUrl,
   };
 }

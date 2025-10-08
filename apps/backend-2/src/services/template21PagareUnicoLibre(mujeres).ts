@@ -27,38 +27,70 @@ const api = axios.create({
   },
 });
 
+/**
+ * 🧾 Genera el submission para el template 21:
+ * "PAGARÉ ÚNICO LIBRE DE PROTESTO (MUJERES)"
+ *
+ * 📌 Los params se mantienen limpios (sin duplicados),
+ * pero en `values` se reutilizan varias veces con los mismos nombres base.
+ */
 export async function generatePromissoryNoteWomanTemplate21Submission(
   params: PromissoryNoteWomanTemplate21Params,
   email: string
 ) {
   try {
     const payload = {
-      template_id: 21, // 📌 Template 21: PAGARÉ ÚNICO LIBRE DE PROTESTO (mujeres)
+      template_id: 21, // 📄 Template 21: PAGARÉ ÚNICO LIBRE DE PROTESTO (mujeres)
       submitters: [
         {
           email,
           values: {
+            // 💰 Datos principales
             Cantidad: params.cantidad,
+
+            // 📅 Fechas (reutilizadas con los mismos nombres)
             dia: params.dia,
             mes: params.mes,
             año: params.año,
+            dia: params.dia, // segunda vez
+            mes: params.mes,
+            año: params.año,
+            dia: params.dia, // tercera vez
+            mes: params.mes,
+            año: params.año,
+
+            // 👤 Datos personales
             "Estado Civil": params.estadoCivil,
             "NOMBRE COMPLETO": params.nombreCompleto,
             edad: params.edad,
             dpi: params.dpi,
             dirección: params.direccion,
+
+            // 💵 Monto en letras
             "Cantidad en Letras": params.cantidadEnLetras,
-            día: params.diaLetras,
-            mesLetras: params.mesLetras,
-            añoLetras: params.añoLetras,
-            // 🚫 Firma se hace directo en DocuSeal
+
+            // 🗓️ Letras (reutilizadas igual)
+            "dia letras": params.diaLetras,
+            "mes letras": params.mesLetras,
+            "año letras": params.añoLetras,
+            "dia letras": params.diaLetras,
+            "mes letras": params.mesLetras,
+            "año letras": params.añoLetras,
+            "dia letras": params.diaLetras,
+            "mes letras": params.mesLetras,
+            "año letras": params.añoLetras,
+
+            // 🚫 La firma se realiza directamente en DocuSeal
           },
         },
       ],
     };
 
     const response = await api.post("/submissions", payload);
-    console.log("✅ Submission PAGARÉ ÚNICO LIBRE DE PROTESTO (mujeres) creado:", response.data);
+    console.log(
+      "✅ Submission PAGARÉ ÚNICO LIBRE DE PROTESTO (mujeres) creado:",
+      response.data
+    );
     return response.data;
   } catch (error: any) {
     console.error(

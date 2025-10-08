@@ -1,6 +1,9 @@
 import { Elysia, t } from "elysia";
 import { createAdminService, createContaService, getPlatformUsersService, loginService, updateContaUserService, verifyTokenService } from "../controllers/auth";
+import jwt from "jsonwebtoken"; 
  
+const JWT_SECRET = process.env.JWT_SECRET!;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
 
 export const authRouter = new Elysia()
   /**
@@ -120,7 +123,67 @@ export const authRouter = new Elysia()
         token: t.String(),
       }),
     }
-  ) .post(
+  ).post(
+    "/auth/refresh",
+    async ({ body, set }) => {
+      try {
+        const { refreshToken } = body as { refreshToken?: string };
+
+        if (!refreshToken) {
+          set.status = 400;
+          return { success: false, error: "El refresh token es obligatorio." };
+        }
+
+        let decoded: any;
+        try {
+          decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+        } catch (err) {
+          set.status = 401;
+          return { success: false, error: "Refresh token inválido o expirado" };
+        }
+
+        // ✅ Generar un nuevo access token
+        const newAccessToken = jwt.sign(
+          { id: decoded.id, role: decoded.role },
+          JWT_SECRET,
+          { expiresIn: "30m" } // Access token válido por 30 minutos
+        );
+
+        // Opcional: generar también un nuevo refresh token
+        const newRefreshToken = jwt.sign(
+          { id: decoded.id, role: decoded.role },
+          JWT_REFRESH_SECRET,
+          { expiresIn: "7d" } // Refresh válido por 7 días
+        );
+
+        set.status = 200;
+        return {
+          success: true,
+          message: "Token renovado correctamente",
+          accessToken: newAccessToken,
+          refreshToken: newRefreshToken, // opcional devolverlo
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /auth/refresh:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "No se pudo refrescar el token",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Refresca el access token usando un refresh token",
+        tags: ["Auth"],
+      },
+      body: t.Object({
+        refreshToken: t.String(),
+      }),
+    }
+  )
+
+   .post(
     "/auth/conta",
     async ({ body, set }) => {
       try {

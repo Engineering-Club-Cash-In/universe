@@ -17,7 +17,6 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const passwordRegex =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&_\-#])[A-Za-z\d@$!%*?&_\-#]{8,}$/;
 
-
 export default function LoginPage() {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
@@ -72,8 +71,13 @@ export default function LoginPage() {
           localStorage.removeItem("rememberEmail");
         }
 
-        // 👀 login espera user + token, no solo email
-        login(res.data.data.user, res.data.data.token);
+        // 👀 login espera (user, accessToken, refreshToken)
+        login(
+          res.data.data.user,
+          res.data.data.accessToken,
+          res.data.data.refreshToken
+        );
+
         navigate("/", { replace: true });
       } else {
         setError(res.data.error || "Credenciales inválidas");
@@ -91,9 +95,19 @@ export default function LoginPage() {
         onSubmit={handleSubmit}
         className="bg-white p-8 rounded-lg shadow-xl w-full max-w-md border border-gray-200"
       >
-        <h1 className="text-2xl font-bold mb-6 text-blue-600 text-center">
-          Iniciar Sesión
-        </h1>
+        {/* 🔥 Logo */}
+        <div className="flex flex-col items-center mb-4">
+          <img
+            src="/logo-cashin.png"
+            alt="Club Cashin Logo"
+            className="h-12 mb-2"
+            style={{ objectFit: "contain" }}
+          />
+          {/* 🔥 Título personalizado */}
+          <h1 className="text-2xl font-bold text-blue-600 text-center">
+            Cartera de Créditos
+          </h1>
+        </div>
 
         {error && (
           <div className="mb-4 text-red-600 text-sm text-center">{error}</div>

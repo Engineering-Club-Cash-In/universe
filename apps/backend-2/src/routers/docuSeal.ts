@@ -18,8 +18,9 @@ import { generatePromissoryNoteWomanTemplate21Submission } from "../services/tem
 import { generateCheckIssuanceLetterManTemplate22Submission } from "../services/template22CartaEmisionCheques(hombre)";
 import { generateCheckIssuanceLetterWomanTemplate23Submission } from "../services/template23CartaEmisionCheques(mujer)";
 import { generateMovableGuaranteeManTemplate24Submission } from "../services/template24GarantiaInmobilaria(homre)";
-import {   generateVehiclePurchaseThirdPartyWomanTemplate13Submission } from "../services/template13solicitudCompraVechiculo(mujer)";
+import { generateVehiclePurchaseThirdPartyWomanTemplate13Submission } from "../services/template13solicitudCompraVechiculo(mujer)";
 import { generateMovableGuaranteeWomanTemplate25Submission } from "../services/template25GarantiaInmobilaria(mujer)";
+import { getDocusealDocumentsController } from "../controllers/docuseal";
 const docuSealRouter = new Elysia({
   prefix: "/docuSeal",
 })
@@ -32,9 +33,7 @@ const docuSealRouter = new Elysia({
     {
       body: t.Object({
         email: t.String(),
-        dia: t.String(),
-        mes: t.String(),
-        año: t.Number(),
+        fecha: t.String(),
         nombrePersona: t.String(),
         dpiPersona: t.String(),
         tipoVehiculo: t.String(),
@@ -178,27 +177,11 @@ const docuSealRouter = new Elysia({
     {
       body: t.Object({
         email: t.String(),
-        vehiculoTipo: t.String(),
-        vehiculoMarca: t.String(),
-        vehiculoColor: t.String(),
-        vehiculoUso: t.String(),
-        vehiculoChasis: t.String(),
-        vehiculoCombustible: t.String(),
-        vehiculoMotor: t.String(),
-        vehiculoSerie: t.String(),
-        vehiculoLinea: t.String(),
-        vehiculoModelo: t.String(),
-        vehiculoCm3: t.String(),
-        vehiculoAsientos: t.String(),
-        vehiculoCilindros: t.String(),
-        vehiculoIscv: t.String(),
-        nombreDeudor: t.String(),
-        dpiDeudorTexto: t.String(),
+
+        nombreDeudor: t.String(), 
         dia: t.String(),
         mes: t.String(),
-        año: t.String(),
-        nombreDeudorFirma: t.String(),
-        dpiDeudor: t.String(),
+        año: t.String(), 
       }),
     }
   )
@@ -248,8 +231,7 @@ const docuSealRouter = new Elysia({
         vehiculoAsientos: t.String(),
         vehiculoCilindros: t.String(),
         vehiculoIscv: t.String(),
-        nombreDeudorFirma: t.String(),
-        dpiDeudorFirma: t.String(),
+        nombreDeudorFirma: t.String(), 
         firmaCashIn: t.String(), // Nueva firma de CashIn
       }),
     }
@@ -288,44 +270,48 @@ const docuSealRouter = new Elysia({
         dpiFirmaPersona: t.String(),
       }),
     }
-  ).post(
-  "/responsibilityDisclaimerWomanTemplate12",
-  async ({ body }) => {
-    const { email, ...params } = body;
-    return await generateDescargoMujerSubmission(params, email);
-  },
-  {
-    body: t.Object({
-      email: t.String(),
-      vehiculoTipo: t.String(),
-      vehiculoMarca: t.String(),
-      vehiculoColor: t.String(),
-      vehiculoUso: t.String(),
-      vehiculoChasis: t.String(),
-      vehiculoCombustible: t.String(),
-      vehiculoMotor: t.String(),
-      vehiculoSerie: t.String(),
-      vehiculoLinea: t.String(),
-      vehiculoModelo: t.String(),
-      vehiculoCm3: t.String(),
-      vehiculoAsientos: t.String(),
-      vehiculoCilindros: t.String(),
-      vehiculoIscv: t.String(),
-      nombreDeudora: t.String(),
-      dpiDeudora: t.String(),
-      dia: t.String(),
-      mes: t.String(),
-      año: t.String(), 
-      nombreDeudoraConfirm: t.String(),
-      dpiDeudor: t.String(),
-    }),
-  }
-)
-.post(
+  )
+  .post(
+    "/responsibilityDisclaimerWomanTemplate12",
+    async ({ body }) => {
+      const { email, ...params } = body;
+      return await generateDescargoMujerSubmission(params, email);
+    },
+    {
+      body: t.Object({
+        email: t.String(),
+        vehiculoTipo: t.String(),
+        vehiculoMarca: t.String(),
+        vehiculoColor: t.String(),
+        vehiculoUso: t.String(),
+        vehiculoChasis: t.String(),
+        vehiculoCombustible: t.String(),
+        vehiculoMotor: t.String(),
+        vehiculoSerie: t.String(),
+        vehiculoLinea: t.String(),
+        vehiculoModelo: t.String(),
+        vehiculoCm3: t.String(),
+        vehiculoAsientos: t.String(),
+        vehiculoCilindros: t.String(),
+        vehiculoIscv: t.String(),
+        nombreDeudora: t.String(),
+        dpiDeudora: t.String(),
+        dia: t.String(),
+        mes: t.String(),
+        año: t.String(),
+        nombreDeudoraConfirm: t.String(),
+        dpiDeudor: t.String(),
+      }),
+    }
+  )
+  .post(
     "/vehiclePurchaseThirdPartyWomanTemplate13",
     async ({ body }) => {
       const { email, ...params } = body;
-      return await generateVehiclePurchaseThirdPartyWomanTemplate13Submission(params, email);
+      return await generateVehiclePurchaseThirdPartyWomanTemplate13Submission(
+        params,
+        email
+      );
     },
     {
       body: t.Object({
@@ -354,128 +340,87 @@ const docuSealRouter = new Elysia({
         dpiFirmaPersona: t.String(),
       }),
     }
-  ).post(
-  "/gpsAcceptanceLetterWomanTemplate14",
-  async ({ body }) => {
-    const { email, ...params } = body;
-    const response = await generateCartaAceptacionGpsMujerSubmission(
-      params,
-      email
-    );
-    return response;
-  },
-  {
-    body: t.Object({
-      email: t.String(),
-      fecha: t.String(),
-      nombreDeudora: t.String(),
-      tipo: t.String(),
-      marca: t.String(),
-      color: t.String(),
-      uso: t.String(),
-      chasis: t.String(),
-      combustible: t.String(),
-      motor: t.String(),
-      serie: t.String(),
-      linea: t.String(),
-      modelo: t.String(),
-      cm3: t.String(),
-      asientos: t.String(),
-      cilindros: t.String(),
-      iscv: t.String(),
-      dpiDeudora: t.String()
-    }),
-  }
-).post(
-  "/vehicleTransferLetterWomanTemplate15",
-  async ({ body }) => {
-    const { email, ...params } = body;
-    const response =
-      await generateVehicleTransferLetterWomanTemplate15Submission(
+  )
+  .post(
+    "/gpsAcceptanceLetterWomanTemplate14",
+    async ({ body }) => {
+      const { email, ...params } = body;
+      const response = await generateCartaAceptacionGpsMujerSubmission(
         params,
         email
       );
-    return response;
-  },
-  {
-    body: t.Object({
-      email: t.String(),
-      fecha: t.String(),
-      nombrePersona: t.String(),
-      dpiPersona: t.String(),
-      tipoVehiculo: t.String(),
-      marcaVehiculo: t.String(),
-      colorVehiculo: t.String(),
-      usoVehiculo: t.String(),
-      chasisVehiculo: t.String(),
-      combustibleVehiculo: t.String(),
-      motorVehiculo: t.String(),
-      serieVehiculo: t.String(),
-      lineaVehiculo: t.String(),
-      modeloVehiculo: t.String(),
-      cm3Vehiculo: t.String(),
-      asientosVehiculo: t.String(),
-      cilindrosVehiculo: t.String(),
-      iscvVehiculo: t.String(),
-      nombreFirmaPersona: t.String(),
-      dpiFirmaPersona: t.String()
-    }),
+      return response;
+    },
+    {
+      body: t.Object({
+        email: t.String(),
+        fecha: t.String(),
+        nombreDeudora: t.String(),
+        tipo: t.String(),
+        marca: t.String(),
+        color: t.String(),
+        uso: t.String(),
+        chasis: t.String(),
+        combustible: t.String(),
+        motor: t.String(),
+        serie: t.String(),
+        linea: t.String(),
+        modelo: t.String(),
+        cm3: t.String(),
+        asientos: t.String(),
+        cilindros: t.String(),
+        iscv: t.String(),
+        dpiDeudora: t.String(),
+      }),
+    }
+  )
+  .post(
+    "/vehicleTransferLetterWomanTemplate15",
+    async ({ body }) => {
+      const { email, ...params } = body;
+      const response =
+        await generateVehicleTransferLetterWomanTemplate15Submission(
+          params,
+          email
+        );
+      return response;
+    },
+    {
+      body: t.Object({
+        email: t.String(),
+        fecha: t.String(),
+        nombrePersona: t.String(),
+        dpiPersona: t.String(),
+        tipoVehiculo: t.String(),
+        marcaVehiculo: t.String(),
+        colorVehiculo: t.String(),
+        usoVehiculo: t.String(),
+        chasisVehiculo: t.String(),
+        combustibleVehiculo: t.String(),
+        motorVehiculo: t.String(),
+        serieVehiculo: t.String(),
+        lineaVehiculo: t.String(),
+        modeloVehiculo: t.String(),
+        cm3Vehiculo: t.String(),
+        asientosVehiculo: t.String(),
+        cilindrosVehiculo: t.String(),
+        iscvVehiculo: t.String(),
+        nombreFirmaPersona: t.String(),
+        dpiFirmaPersona: t.String(),
+      }),
     }
   )
 
   .post(
     "/debtAcknowledgementWomanTemplate16",
     async ({ body }) => {
-    const { email, ...params } = body;
-    const response =
-      await generateReconocimientoDeudaMujerTemplate16Submission(params, email);
-    return response;
-  },
-  {
-    body: t.Object({
-      email: t.String(),
-      dia: t.String(),
-      mes: t.String(),
-      año: t.String(),
-      edadAndresAsencio: t.String(),
-      dpiAndresAsencio: t.String(),
-      nombreDeudora: t.String(),
-      edadDeudora: t.String(),
-      estadoCivilDeudora: t.String(),
-      profesionDeudora: t.String(),
-      nacionalidadDeudora: t.String(),
-      dpiDeudora: t.String(),
-      capitalAdeudado: t.String(),
-      mesesPrestamo: t.String(),
-      cuotasMensuales: t.String(),
-      porcentajeDeudaTexto: t.String(),
-      porcentajeDeudaNumero: t.String(),
-      porcentajeMoraTexto: t.String(),
-      porcentajeMoraNumero: t.String(),
-      direccionDeudora: t.String(),
-      vehiculoTipo: t.String(),
-      vehiculoMarca: t.String(),
-      vehiculoColor: t.String(),
-      vehiculoUso: t.String(),
-      vehiculoChasis: t.String(),
-      vehiculoCombustible: t.String(),
-      vehiculoMotor: t.String(),
-      vehiculoSerie: t.String(),
-      vehiculoLinea: t.String(),
-      vehiculoModelo: t.String(),
-      vehiculoCm3: t.String(),
-      vehiculoAsientos: t.String(),
-      vehiculoCilindros: t.String(),
-      vehiculoIscv: t.String(),
-      nombreDeudoraFirma: t.String(),
-      dpiDeudoraFirma: t.String()
-    }),
-  }
-).post(
-    "/debtAcknowledgementManTemplate17",
-    async ({ body }) => {
       const { email, ...params } = body;
-      return await generateDebtAcknowledgementManTemplate17Submission(params, email);
+      const response =
+        await generateReconocimientoDeudaMujerTemplate16Submission(
+          params,
+          email
+        );
+      return response;
     },
     {
       body: t.Object({
@@ -483,6 +428,56 @@ const docuSealRouter = new Elysia({
         dia: t.String(),
         mes: t.String(),
         año: t.String(),
+        edadAndresAsencio: t.String(),
+        dpiAndresAsencio: t.String(),
+        nombreDeudora: t.String(),
+        edadDeudora: t.String(),
+        estadoCivilDeudora: t.String(),
+        profesionDeudora: t.String(),
+        nacionalidadDeudora: t.String(),
+        dpiDeudora: t.String(),
+        capitalAdeudado: t.String(),
+        mesesPrestamo: t.String(),
+        cuotasMensuales: t.String(),
+        porcentajeDeudaTexto: t.String(),
+        porcentajeDeudaNumero: t.String(),
+        porcentajeMoraTexto: t.String(),
+        porcentajeMoraNumero: t.String(),
+        direccionDeudora: t.String(),
+        vehiculoTipo: t.String(),
+        vehiculoMarca: t.String(),
+        vehiculoColor: t.String(),
+        vehiculoUso: t.String(),
+        vehiculoChasis: t.String(),
+        vehiculoCombustible: t.String(),
+        vehiculoMotor: t.String(),
+        vehiculoSerie: t.String(),
+        vehiculoLinea: t.String(),
+        vehiculoModelo: t.String(),
+        vehiculoCm3: t.String(),
+        vehiculoAsientos: t.String(),
+        vehiculoCilindros: t.String(),
+        vehiculoIscv: t.String(),
+        nombreDeudoraFirma: t.String(), 
+      }),
+    }
+  )
+  .post(
+    "/debtAcknowledgementManTemplate17",
+    async ({ body }) => {
+      const { email, ...params } = body;
+      return await generateDebtAcknowledgementManTemplate17Submission(
+        params,
+        email
+      );
+    },
+    {
+      body: t.Object({
+        email: t.String(),
+        dia: t.String(),
+        mes: t.String(),
+        año: t.String(),
+        edadRichard: t.String(),
         nombre: t.String(),
         edad: t.String(),
         dpiDeudor: t.String(),
@@ -505,11 +500,15 @@ const docuSealRouter = new Elysia({
         direccionDeudor: t.String(),
       }),
     }
-  ).post(
+  )
+  .post(
     "/debtAcknowledgementWomanTemplate18",
     async ({ body }) => {
       const { email, ...params } = body;
-      return await generateDebtAcknowledgementWomanTemplate18Submission(params, email);
+      return await generateDebtAcknowledgementWomanTemplate18Submission(
+        params,
+        email
+      );
     },
     {
       body: t.Object({
@@ -517,6 +516,7 @@ const docuSealRouter = new Elysia({
         dia: t.String(),
         mes: t.String(),
         año: t.String(),
+        edadRichard: t.String(),
         nombre: t.String(),
         edad: t.String(),
         dpiDeudora: t.String(),
@@ -539,11 +539,15 @@ const docuSealRouter = new Elysia({
         direccionDeudor: t.String(),
       }),
     }
-  )  .post(
+  )
+  .post(
     "/debtAcknowledgementWomanTemplate19",
     async ({ body }) => {
       const { email, ...params } = body;
-      return await generateDebtAcknowledgementWomanTemplate19Submission(params, email);
+      return await generateDebtAcknowledgementWomanTemplate19Submission(
+        params,
+        email
+      );
     },
     {
       body: t.Object({
@@ -566,209 +570,230 @@ const docuSealRouter = new Elysia({
         vehiculoCilindros: t.String(),
         vehiculoIscv: t.String(),
         empresa: t.String(),
-        nombreDeudor: t.String(),
+        nombreDeudoraFirma: t.String(),
         dpiFirmaPersona: t.String(),
       }),
     }
-  ).post(
-    "/promissoryNoteManTemplate20",
-    async ({ body }) => {
-      const { email, ...params } = body;
-      return await generatePromissoryNoteManTemplate20Submission(params, email);
-    },
-    {
-      body: t.Object({
-        email: t.String(),
-        cantidad: t.String(),
-        dia: t.Optional(t.String()),
-        mes: t.Optional(t.String()),
-        año: t.Optional(t.String()),
-        estadoCivil: t.String(),
-        nombreCompleto: t.String(),
-        edad: t.String(),
-        dpi: t.String(),
-        direccion: t.String(),
-        cantidadEnLetras: t.String(),
-        diaLetras: t.Optional(t.String()),
-        mesLetras: t.Optional(t.String()),
-        añoLetras: t.Optional(t.String()),
-      }),
-    }
-  ).post(
-    "/promissoryNoteWomanTemplate21",
-    async ({ body }) => {
-      const { email, ...params } = body;
-      return await generatePromissoryNoteWomanTemplate21Submission(params, email);
-    },
-    {
-      body: t.Object({
-        email: t.String(),
-        cantidad: t.String(),
-        dia: t.Optional(t.String()),
-        mes: t.Optional(t.String()),
-        año: t.Optional(t.String()),
-        estadoCivil: t.String(),
-        nombreCompleto: t.String(),
-        edad: t.String(),
-        dpi: t.String(),
-        direccion: t.String(),
-        cantidadEnLetras: t.String(),
-        diaLetras: t.Optional(t.String()),
-        mesLetras: t.Optional(t.String()),
-        añoLetras: t.Optional(t.String()),
-      }),
-    }
-  ).post(
-    "/checkIssuanceLetterManTemplate22",
-    async ({ body }) => {
-      const { email, ...params } = body;
-      return await generateCheckIssuanceLetterManTemplate22Submission(params, email);
-    },
-    {
-      body: t.Object({
-        email: t.String(),
-        dia: t.String(),
-        mes: t.String(),
-        año: t.String(),
-        dia2: t.String(),
-        mes2: t.String(),
-        año2: t.String(),
-        dia3: t.String(),
-        mes3: t.String(),
-        año3: t.String(),
-        entidad: t.String(),
-        cantidad: t.String(),
-        cuenta1: t.String(),
-        valor1: t.String(),
-        cuenta2: t.String(),
-        valor2: t.String(),
-        nombreCompleto: t.String(),
-        dpi: t.String(),
-      }),
-    }
-  ).post(
-    "/checkIssuanceLetterWomanTemplate23",
-    async ({ body }) => {
-      const { email, ...params } = body;
-      return await generateCheckIssuanceLetterWomanTemplate23Submission(params, email);
-    },
-    {
-      body: t.Object({
-        email: t.String(),
-        dia: t.String(),
-        mes: t.String(),
-        año: t.String(),
-        dia2: t.String(),
-        mes2: t.String(),
-        año2: t.String(),
-        dia3: t.String(),
-        mes3: t.String(),
-        año3: t.String(),
-        entidad: t.String(),
-        cantidad: t.String(),
-        cuenta1: t.String(),
-        valor1: t.String(),
-        cuenta2: t.String(),
-        valor2: t.String(),
-        nombreCompleto: t.String(),
-        dpi: t.String(),
-      }),
-    }
-  ).post(
-    "/movableGuaranteeManTemplate24",
-    async ({ body }) => {
-      const { email, ...params } = body;
-      return await generateMovableGuaranteeManTemplate24Submission(params, email);
-    },
-    {
-      body: t.Object({
-        email: t.String(),
-        dia: t.String(),
-        mes: t.String(),
-        año: t.String(),
-        nombreCompleto: t.String(),
-        edad: t.String(),
-        dpiLetras: t.String(),
-        dia2: t.String(),
-        mes2: t.String(),
-        año2: t.String(),
-        monto: t.String(),
-        vehiculoTipo: t.String(),
-        vehiculoMarca: t.String(),
-        vehiculoColor: t.String(),
-        vehiculoUso: t.String(),
-        vehiculoChasis: t.String(),
-        vehiculoCombustible: t.String(),
-        vehiculoMotor: t.String(),
-        vehiculoSerie: t.String(),
-        vehiculoLinea: t.String(),
-        vehiculoModelo: t.String(),
-        vehiculoCm3: t.String(),
-        vehiculoAsientos: t.String(),
-        vehiculoCilindros: t.String(),
-        vehiculoIscv: t.String(),
-        monto2: t.String(),
-        nombreCompleto2: t.String(),
-        nombreCompleto3: t.String(),
-        plazoLetras: t.String(),
-        plazoNumero: t.Optional(t.Number()),
-        año2Letras: t.String(),
-        monto3: t.String(),
-        nombreCompleto4: t.String(),
-        nombreCompleto5: t.String(),
-        direccion: t.String(),
-        correo: t.String(),
-      }),
-    }
   )
-
 .post(
-    "/movableGuaranteeWomanTemplate25",
-    async ({ body }) => {
-      const { email, ...params } = body;
-      return await generateMovableGuaranteeWomanTemplate25Submission(params, email);
-    },
-    {
-      body: t.Object({
-        email: t.String(),
-        dia: t.String(),
-        mes: t.String(),
-        año: t.String(),
-        nombreCompleto: t.String(),
-        edad: t.String(),
-        estadoCivil: t.String(),
-        dpiLetras: t.String(),
-        dia2: t.String(),
-        mes2: t.String(),
-        año2: t.String(),
-        monto: t.String(),
-        vehiculoTipo: t.String(),
-        vehiculoMarca: t.String(),
-        vehiculoColor: t.String(),
-        vehiculoUso: t.String(),
-        vehiculoChasis: t.String(),
-        vehiculoCombustible: t.String(),
-        vehiculoMotor: t.String(),
-        vehiculoSerie: t.String(),
-        vehiculoLinea: t.String(),
-        vehiculoModelo: t.String(),
-        vehiculoCm3: t.String(),
-        vehiculoAsientos: t.String(),
-        vehiculoCilindros: t.String(),
-        vehiculoIscv: t.String(),
-        monto2: t.String(),
-        nombreCompleto2: t.String(),
-        nombreCompleto3: t.String(),
-        plazoLetras: t.String(),
-        plazoNumero: t.Optional(t.Number()),
-        año2Letras: t.String(),
-        monto3: t.String(),
-        nombreCompleto4: t.String(),
-        nombreCompleto5: t.String(),
-        direccion: t.String(),
-        correo: t.String(),
-      }),
+  "/promissoryNoteManTemplate20",
+  async ({ body }) => {
+    const { email, ...params } = body;
+    return await generatePromissoryNoteManTemplate20Submission(params, email);
+  },
+  {
+    body: t.Object({
+      email: t.String(),
+      cantidad: t.String(),
+      dia: t.Optional(t.String()),
+      mes: t.Optional(t.String()),
+      año: t.Optional(t.String()),
+      estadoCivil: t.String(),
+      nombreCompleto: t.String(),
+      edad: t.String(),
+      dpi: t.String(),
+      direccion: t.String(),
+      cantidadEnLetras: t.String(),
+      diaLetras: t.Optional(t.String()),
+      mesLetras: t.Optional(t.String()),
+      añoLetras: t.Optional(t.String()),
+    }),
+  }
+)
+.post(
+  "/promissoryNoteWomanTemplate21",
+  async ({ body }) => {
+    const { email, ...params } = body;
+    return await generatePromissoryNoteWomanTemplate21Submission(params, email);
+  },
+  {
+    body: t.Object({
+      email: t.String(),
+      cantidad: t.String(),
+      dia: t.Optional(t.String()),
+      mes: t.Optional(t.String()),
+      año: t.Optional(t.String()),
+      estadoCivil: t.String(),
+      nombreCompleto: t.String(),
+      edad: t.String(),
+      dpi: t.String(),
+      direccion: t.String(),
+      cantidadEnLetras: t.String(),
+      diaLetras: t.Optional(t.String()),
+      mesLetras: t.Optional(t.String()),
+      añoLetras: t.Optional(t.String()),
+    }),
+  }
+)
+.post(
+  "/checkIssuanceLetterManTemplate22",
+  async ({ body }) => {
+    const { email, ...params } = body;
+    return await generateCheckIssuanceLetterManTemplate22Submission(
+      params,
+      email
+    );
+  },
+  {
+    body: t.Object({
+      email: t.String(),
+      dia: t.String(),
+      mes: t.String(),
+      año: t.String(),
+      entidad: t.String(),
+      cantidad: t.String(),
+      cuenta: t.String(),
+      valor: t.String(),
+      nombreCompleto: t.String(),
+      dpi: t.String(),
+    }),
+  }
+)
+.post(
+  "/checkIssuanceLetterWomanTemplate23",
+  async ({ body }) => {
+    const { email, ...params } = body;
+    return await generateCheckIssuanceLetterWomanTemplate23Submission(
+      params,
+      email
+    );
+  },
+  {
+    body: t.Object({
+      email: t.String(),
+      dia: t.String(),
+      mes: t.String(),
+      año: t.String(),
+      entidad: t.String(),
+      cantidad: t.String(),
+      cuenta: t.String(),
+      valor: t.String(),
+      nombreCompleto: t.String(),
+      dpi: t.String(),
+    }),
+  }
+)
+.post(
+  "/movableGuaranteeManTemplate24",
+  async ({ body }) => {
+    const { email, ...params } = body;
+    return await generateMovableGuaranteeManTemplate24Submission(params, email);
+  },
+  {
+    body: t.Object({
+      email: t.String(),
+
+      // 📅 Fechas principales
+      dia: t.String(),
+      mes: t.String(),
+      año: t.String(),
+
+      // 👤 Datos personales
+      edadAndres: t.String(),
+      nombreCompleto: t.String(),
+      edad: t.String(),
+      estadoCivil: t.String(),
+      dpiLetras: t.String(),
+
+      // 💰 Monto principal
+      montoLetras: t.String(),
+
+      // 🚗 Datos del vehículo
+      vehiculoTipo: t.String(),
+      vehiculoMarca: t.String(),
+      vehiculoColor: t.String(),
+      vehiculoUso: t.String(),
+      vehiculoChasis: t.String(),
+      vehiculoCombustible: t.String(),
+      vehiculoMotor: t.String(),
+      vehiculoSerie: t.String(),
+      vehiculoLinea: t.String(),
+      vehiculoModelo: t.String(),
+      vehiculoCm3: t.String(),
+      vehiculoAsientos: t.String(),
+      vehiculoCilindros: t.String(),
+      vehiculoIscv: t.String(),
+
+      // 📆 Plazos
+      plazoTexto: t.String(),
+      plazo: t.String(),
+      añoLetras: t.String(),
+
+      // 📍 Contacto
+      direccion: t.String(),
+      correo: t.String(),
+    }),
+  }
+)
+.post(
+  "/movableGuaranteeWomanTemplate25",
+  async ({ body }) => {
+    const { email, ...params } = body;
+    return await generateMovableGuaranteeWomanTemplate25Submission(
+      params,
+      email
+    );
+  },
+  {
+    body: t.Object({
+      email: t.String(),
+
+      // 📅 Fechas principales
+      dia: t.String(),
+      mes: t.String(),
+      año: t.String(),
+
+      // 👤 Datos personales
+      edadAndres: t.String(),
+      nombreCompleto: t.String(),
+      edad: t.String(),
+      estadoCivil: t.String(),
+      dpiLetras: t.String(),
+
+      // 💰 Monto principal
+      montoLetras: t.String(),
+
+      // 🚗 Datos del vehículo
+      vehiculoTipo: t.String(),
+      vehiculoMarca: t.String(),
+      vehiculoColor: t.String(),
+      vehiculoUso: t.String(),
+      vehiculoChasis: t.String(),
+      vehiculoCombustible: t.String(),
+      vehiculoMotor: t.String(),
+      vehiculoSerie: t.String(),
+      vehiculoLinea: t.String(),
+      vehiculoModelo: t.String(),
+      vehiculoCm3: t.String(),
+      vehiculoAsientos: t.String(),
+      vehiculoCilindros: t.String(),
+      vehiculoIscv: t.String(),
+
+      // 📆 Plazos
+      plazoTexto: t.String(),
+      plazo: t.String(),
+      añoLetras: t.String(),
+
+      // 📍 Contacto
+      direccion: t.String(),
+      correo: t.String(),
+    }),
+  }
+)
+ .get("/documents", async () => {
+    try {
+      // 🎯 Call the controller that retrieves all documents
+      const response = await getDocusealDocumentsController();
+      return response;
+    } catch (error: any) {
+      console.error("[ERROR] /docuseal/documents route:", error);
+      return {
+        success: false,
+        message: "Internal server error while fetching DocuSeal documents",
+        error: error.message,
+      };
     }
-  )
+  });
 
 export default docuSealRouter;
+ 

@@ -19,7 +19,7 @@ export interface DebtAcknowledgementWomanTemplate19Params {
   vehiculoCilindros: string;
   vehiculoIscv: string;
   empresa: string;
-  nombreDeudor: string;
+  nombreDeudoraFirma: string;
   dpiFirmaPersona: string;
 }
 
@@ -63,7 +63,7 @@ export async function generateDebtAcknowledgementWomanTemplate19Submission(
             "Vehículo Cilindros": params.vehiculoCilindros,
             "Vehículo ISCV": params.vehiculoIscv,
             Empresa: params.empresa,
-            "Nombre Deudor": params.nombreDeudor,
+            "Nombre Deudora Firma": params.nombreDeudoraFirma ,
             "DPI Firma Persona": params.dpiFirmaPersona
             // 🚫 La firma la coloca el usuario en DocuSeal, no se manda aquí
           },

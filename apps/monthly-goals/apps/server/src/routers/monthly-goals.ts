@@ -1,4 +1,5 @@
 import { protectedProcedure } from "../lib/orpc";
+import { ORPCError } from "@orpc/server";
 import { db } from "../db";
 import { monthlyGoals } from "../db/schema/monthly-goals";
 import { goalTemplates } from "../db/schema/goal-templates";
@@ -153,26 +154,47 @@ export const createMonthlyGoal = protectedProcedure
 export const bulkCreateMonthlyGoals = protectedProcedure
 	.input(BulkCreateMonthlyGoalsSchema)
 	.handler(async ({ input }) => {
+		console.log('[bulkCreateMonthlyGoals] Input received:', JSON.stringify(input, null, 2));
+
 		const goalValues = input.goals.map(goal => ({
 			...goal,
 			month: input.month,
 			year: input.year,
+			achievedValue: "0", // Valor inicial explícito
 		}));
+
+		console.log('[bulkCreateMonthlyGoals] Goal values to insert:', JSON.stringify(goalValues, null, 2));
 
 		try {
 			const newGoals = await db
 				.insert(monthlyGoals)
 				.values(goalValues)
 				.returning();
-			
+
+			console.log('[bulkCreateMonthlyGoals] Successfully created goals:', newGoals.length);
 			return newGoals;
-		} catch (error) {
-			// Detectar error de constraint de unicidad
-			if (error instanceof Error && error.message.includes("unique")) {
-				throw new Error("Una o más metas ya existen para los usuarios seleccionados en el mes/año especificado");
+		} catch (error: any) {
+			// Detectar error de constraint de unicidad (código PostgreSQL 23505)
+			// El error puede estar en varios lugares según cómo Drizzle/Neon lo envuelva
+			const errorMessage = error?.message || '';
+			const causeMessage = error?.cause?.message || '';
+
+			// Buscar indicadores de violación de constraint único
+			const isDuplicateKey =
+				errorMessage.includes('duplicate key') ||
+				errorMessage.includes('unique constraint') ||
+				causeMessage.includes('duplicate key') ||
+				causeMessage.includes('unique constraint') ||
+				causeMessage.includes('23505');
+
+			if (isDuplicateKey) {
+				throw new ORPCError('CONFLICT', {
+					message: 'Una o más metas ya existen para los usuarios seleccionados en el mes/año especificado',
+				});
 			}
-			
+
 			// Re-lanzar otros errores
+			console.error('[bulkCreateMonthlyGoals] Unhandled error:', error);
 			throw error;
 		}
 	});

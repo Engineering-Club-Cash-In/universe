@@ -11,6 +11,7 @@ const GoalTemplateSchema = z.object({
 	description: z.string().optional(),
 	defaultTarget: z.string().optional(),
 	unit: z.string().optional(),
+	isInverse: z.boolean(),
 	successThreshold: z.string(),
 	warningThreshold: z.string(),
 	createdAt: z.date(),

@@ -68,6 +68,7 @@ export const listMonthlyGoals = protectedProcedure
 				// Goal template info
 				goalTemplateName: goalTemplates.name,
 				goalTemplateUnit: goalTemplates.unit,
+				isInverse: goalTemplates.isInverse,
 				successThreshold: goalTemplates.successThreshold,
 				warningThreshold: goalTemplates.warningThreshold,
 				// User and organizational info
@@ -289,6 +290,7 @@ export const getMyGoals = protectedProcedure
 				// Goal template info
 				goalTemplateName: goalTemplates.name,
 				goalTemplateUnit: goalTemplates.unit,
+				isInverse: goalTemplates.isInverse,
 				successThreshold: goalTemplates.successThreshold,
 				warningThreshold: goalTemplates.warningThreshold,
 				// User and organizational info

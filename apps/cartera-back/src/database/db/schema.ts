@@ -130,7 +130,7 @@ export const creditos = customSchema.table("creditos", {
   }).notNull(),
  
   statusCredit: text("statusCredit", {
-    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION"],
+    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO"],
   })
     .notNull()
     .default(StatusCredit.ACTIVO),
@@ -161,6 +161,20 @@ export const moras_credito = customSchema.table("moras_credito", {
   cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
+});
+export const moras_condonaciones = pgTable("moras_condonaciones", {
+  condonacion_id: serial("condonacion_id").primaryKey(),
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  mora_id: integer("mora_id")
+    .notNull()
+    .references(() => moras_credito.mora_id, { onDelete: "cascade" }),
+  motivo: text("motivo").notNull(), // reason for condonation
+  usuario_id: integer("usuario_id")
+    .notNull()
+    .references(() => platform_users.id, { onDelete: "cascade" }),
+  fecha: timestamp("fecha").defaultNow().notNull(),
 });
 
 export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
@@ -196,6 +210,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   llamada: varchar("llamada", { length: 100 }), // ""
 
   monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input
+  numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), // input
   fecha_filtro: date("fecha_filtro").defaultNow(), // viene del credito
 
   renuevo_o_nuevo: varchar("renuevo_o_nuevo", { length: 50 }), //input

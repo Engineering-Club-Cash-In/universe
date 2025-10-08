@@ -111,7 +111,8 @@ export const creditRouter = new Elysia()
     | "ACTIVO"
     | "CANCELADO"
     | "INCOBRABLE"
-    | "PENDIENTE_CANCELACION";
+    | "PENDIENTE_CANCELACION"
+    | "MOROSO"
 
   if (
     isNaN(mesNum) ||

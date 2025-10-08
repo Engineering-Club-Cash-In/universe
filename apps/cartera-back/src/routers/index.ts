@@ -7,6 +7,7 @@ import { paymentRouter } from "./payments";
 import { uploadRouter } from "./uploads";
 import { authRouter } from "./auth";
 import { sifcoRouter } from "./migration";
+import { morasRouter } from "./latefee";
 export {
-    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter
-}
+    defaultRouter,inversionistasRouter,advisorRouter,usersRouter,creditRouter,paymentRouter,uploadRouter,sifcoRouter,authRouter,morasRouter
+}   

@@ -23,7 +23,7 @@ export function useCreditosPaginadosWithFilters() {
   const [perPage, setPerPage] = useState(10);
   const [creditoSifco, setCreditoSifco] = useState("");
   const [estado, setEstado] = useState<
-    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION"
+    "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
   >("ACTIVO");
 
   // 👇 Nuevo state para Excel
@@ -64,6 +64,7 @@ export function useCreditosPaginadosWithFilters() {
     { value: "CANCELADO", label: "Cancelado", color: "bg-red-200 text-red-800" },
     { value: "INCOBRABLE", label: "Incobrable", color: "bg-yellow-100 text-yellow-700" },
     { value: "PENDIENTE_CANCELACION", label: "Pendiente de Cancelación", color: "bg-blue-100 text-blue-800" },
+    { value: "MOROSO", label: "Moroso", color: "bg-purple-100 text-purple-800" },
   ];
 
   return {

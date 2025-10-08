@@ -1,0 +1,91 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+"use client";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useMoras } from "../hooks/useLateFee";
+
+interface ModalCreateMoraProps {
+  open: boolean;
+  onClose: () => void;
+  creditoId: number;
+  numeroCreditoSifco?: string;
+  onSuccess?: () => void; // 👈 para recargar la tabla al terminar
+}
+
+export function ModalCreateMora({
+  open,
+  onClose,
+  creditoId,
+  numeroCreditoSifco,
+  onSuccess,
+}: ModalCreateMoraProps) {
+  const [montoMora, setMontoMora] = useState<number | undefined>();
+  const [cuotas, setCuotas] = useState<number | undefined>();
+  const { createMora } = useMoras({}); // hook de moras
+
+  if (!open) return null;
+
+  const handleGuardar = () => {
+    if (!montoMora || !cuotas) {
+      alert("[ERROR] Debes ingresar monto y cuotas.");
+      return;
+    }
+
+    createMora.mutate(
+      {
+        credito_id: creditoId,
+        monto_mora: montoMora,
+        cuotas_atrasadas: cuotas,
+      },
+      {
+        onSuccess: (res: any) => {
+          alert(`[SUCCESS] Mora creada\n\n${JSON.stringify(res, null, 2)}`);
+          onClose();
+          setMontoMora(undefined);
+          setCuotas(undefined);
+          onSuccess?.(); // 👈 aquí hacemos refetch de créditos
+        },
+        onError: (err: any) =>
+          alert(`[ERROR] No se pudo crear mora\n\n${JSON.stringify(err, null, 2)}`),
+      }
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50">
+      <div className="bg-white rounded-lg p-6 w-96 shadow-lg">
+        <h3 className="text-lg font-bold text-blue-600 mb-4">
+          Crear Mora {numeroCreditoSifco && `(Crédito ${numeroCreditoSifco})`}
+        </h3>
+        <div className="flex flex-col gap-3 text-black">
+          <div>
+            <Label htmlFor="monto">Monto Mora</Label>
+            <Input
+              id="monto"
+              type="number"
+              value={montoMora ?? ""}
+              onChange={(e) => setMontoMora(Number(e.target.value))}
+            />
+          </div>
+          <div>
+            <Label htmlFor="cuotas">Cuotas Atrasadas</Label>
+            <Input
+              id="cuotas"
+              type="number"
+              value={cuotas ?? ""}
+              onChange={(e) => setCuotas(Number(e.target.value))}
+            />
+          </div>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="secondary" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button onClick={handleGuardar}>Guardar</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

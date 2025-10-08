@@ -9,6 +9,7 @@ import { MainLayout } from "./private/cartera/components/mainLayout";
 import LoginPage from "./public/login";
 import { useAuth } from "./Provider/authProvider";
 import AdvisorsManager from "./private/cartera/components/advisor";
+import MorasManager from "./private/cartera/components/Latefee";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -103,6 +104,14 @@ function App() {
             element={
               <RoleRoute allowedRoles={["ADMIN"]}>
                 <TableInvestors />
+              </RoleRoute>
+            }
+          />
+           <Route
+            path="mora"
+            element={
+              <RoleRoute allowedRoles={["ADMIN"]}>
+                <MorasManager />
               </RoleRoute>
             }
           />

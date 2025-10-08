@@ -496,18 +496,24 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 						const statusText = percentage >= 80 ? 'Exitoso' :
 										  percentage >= 50 ? 'En Progreso' : 'Necesita Atención';
 
+						// Para metas normales: submittedValue es lo logrado, targetValue es el objetivo
+						// Para metas inversas: TAMBIÉN submittedValue es lo logrado, targetValue es la meta
+						const logradoValue = goal.submittedValue;
+						const metaValue = goal.targetValue;
+						const metaLabel = goal.isInverse ? 'Meta (máx)' : 'Objetivo';
+
 						return `
 							<div class="card p-6 min-h-[280px] flex flex-col justify-between">
 								<div>
 									<h4 class="text-lg font-bold mb-4 leading-tight">${goal.goalTemplateName}</h4>
 									<div class="grid grid-cols-2 gap-4 text-center mb-6">
 										<div>
-											<div class="text-xl font-bold text-blue-600 break-words">${parseFloat(goal.submittedValue).toLocaleString()}</div>
+											<div class="text-xl font-bold text-blue-600 break-words">${parseFloat(logradoValue).toLocaleString()}</div>
 											<div class="text-sm text-gray-600">Logrado</div>
 										</div>
 										<div>
-											<div class="text-xl font-bold text-gray-600 break-words">${parseFloat(goal.targetValue).toLocaleString()}</div>
-											<div class="text-sm text-gray-600">${goal.isInverse ? 'Meta (máx)' : 'Objetivo'}</div>
+											<div class="text-xl font-bold text-gray-600 break-words">${parseFloat(metaValue).toLocaleString()}</div>
+											<div class="text-sm text-gray-600">${metaLabel}</div>
 										</div>
 									</div>
 								</div>
@@ -749,12 +755,12 @@ export async function generatePDF(presentationId: string, baseUrl: string = "htt
 		await fs.promises.writeFile('/tmp/presentation-debug.html', htmlContent);
 		console.log('HTML saved to /tmp/presentation-debug.html for debugging');
 		
-		browser = await puppeteer.launch({ 
+		browser = await puppeteer.launch({
 			headless: true,
-			executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+			executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
 			args: [
-				'--no-sandbox', 
-				'--disable-setuid-sandbox', 
+				'--no-sandbox',
+				'--disable-setuid-sandbox',
 				'--disable-dev-shm-usage',
 				'--disable-gpu',
 				'--disable-web-security',

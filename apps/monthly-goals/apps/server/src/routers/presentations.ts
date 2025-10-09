@@ -211,6 +211,7 @@ export const getAvailableGoalsForPresentation = protectedProcedure
 				// Goal template info
 				goalTemplateName: goalTemplates.name,
 				goalTemplateUnit: goalTemplates.unit,
+				isInverse: goalTemplates.isInverse,
 				// User and organizational info
 				userName: user.name,
 				userEmail: user.email,

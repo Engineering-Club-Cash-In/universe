@@ -1609,8 +1609,18 @@ interface GetPagosOptions {
   mes?: number;
   anio?: number;
   inversionistaId?: number;
+  usuarioNombre?: string; // 🆕 nuevo filtro
 }
-
+/**
+ * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
+ * - Incluye los nuevos campos del pago: mora, otros, reserva, membresías, observaciones.
+ * - Usa subconsultas JSON para traer toda la info relacionada en una sola query.
+ * - Si un pago no tiene registro en pagos_credito_inversionistas, igual aparece con inversionistas = [].
+ */
+/**
+ * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios e inversionistas.
+ * Incluye los abonos principales y campos adicionales de pago (mora, otros, reserva, membresías, observaciones).
+ */
 export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
   const {
     page = 1,
@@ -1620,129 +1630,171 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     mes,
     anio,
     inversionistaId,
+    usuarioNombre,
   } = options;
 
   try {
-    const conditions: any[] = [eq(creditos.statusCredit, "ACTIVO")];
-
-    // ✅ Filtros dinámicos
-    if (numeroCredito) {
-      conditions.push(eq(creditos.numero_credito_sifco, numeroCredito));
-    }
-    if (anio) {
-      conditions.push(sql.raw(`EXTRACT(YEAR FROM p.fecha_pago) = ${anio}`));
-    }
-    if (mes) {
-      conditions.push(sql.raw(`EXTRACT(MONTH FROM p.fecha_pago) = ${mes}`));
-    }
-    if (dia) {
-      conditions.push(sql.raw(`EXTRACT(DAY FROM p.fecha_pago) = ${dia}`));
-    }
-    if (inversionistaId) {
-      conditions.push(
-        eq(inversionistas.inversionista_id, inversionistaId)
-      );
-    }
-
     const offset = (page - 1) * pageSize;
 
-    // ✅ Consulta principal (evita duplicados)
-    const rows = await db.execute(
-      sql`
-      SELECT DISTINCT ON (p.pago_id)
+    // 🔹 Construcción dinámica de filtros
+    const whereClauses: string[] = [];
+
+    if (numeroCredito) whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
+    if (usuarioNombre) whereClauses.push(`u.nombre ILIKE '%${usuarioNombre}%'`);
+    if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago::date) = ${anio}`);
+    if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago::date) = ${mes}`);
+    if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago::date) = ${dia}`);
+
+    if (inversionistaId) {
+      whereClauses.push(`
+        EXISTS (
+          SELECT 1
+          FROM cartera.pagos_credito_inversionistas pci2
+          WHERE pci2.pago_id = p.pago_id
+          AND pci2.inversionista_id = '${inversionistaId}'
+        )
+      `);
+    }
+
+    // ✅ Solo créditos activos
+    whereClauses.push(`c."statusCredit" = 'ACTIVO'`);
+    const whereSQL = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+
+    // 🧩 Query principal
+    const query = sql`
+      SELECT 
         p.pago_id AS "pagoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
         p.fecha_pago AS "fechaPago",
-        c.credito_id AS "creditoId",
-        c.numero_credito_sifco AS "numeroCredito",
-        c.capital AS "capital",
-        c.deudatotal AS "deudaTotal",
-        u.nombre AS "usuarioNombre",
-        i.inversionista_id AS "inversionistaId",
-        i.nombre AS "nombreInversionista",
-        pci.abono_capital AS "abonoCapital",
-        pci.abono_interes AS "abonoInteres",
-        pci.abono_iva_12 AS "abonoIva",
-        pci.cuota AS "cuotaPago",
+
+        -- 💸 Campos propios del pago
+        p.mora AS "mora",
+        p.otros AS "otros",
+        p.reserva AS "reserva",
+        p.membresias AS "membresias",
+        p.observaciones AS "observaciones",
+
+        -- 💰 Abonos del pago
+        p.abono_capital AS "abono_capital",
         p.abono_interes AS "abono_interes",
         p.abono_iva_12 AS "abono_iva_12",
-        p.abono_interes_ci AS "abono_interes_ci",
-        p.abono_iva_ci AS "abono_iva_ci",
         p.abono_seguro AS "abono_seguro",
         p.abono_gps AS "abono_gps",
-        ci.monto_aportado AS "montoAportado",
-        ci.porcentaje_participacion_inversionista AS "porcentajeParticipacion",
-        b.id AS "boletaId",
-        b.url_boleta AS "urlBoleta"
+
+        -- 💳 Info del crédito
+        json_build_object(
+          'creditoId', c.credito_id,
+          'numeroCreditoSifco', c.numero_credito_sifco,
+          'capital', c.capital,
+          'deudaTotal', c.deudatotal,
+          'statusCredit', c."statusCredit",
+          'porcentajeInteres', c.porcentaje_interes,
+          'fechaCreacion', c.fecha_creacion
+        ) AS "credito",
+
+        -- 📅 Info de la cuota
+        (
+          SELECT json_build_object(
+            'cuotaId', cq.cuota_id,
+            'numeroCuota', cq.numero_cuota,
+            'fechaVencimiento', cq.fecha_vencimiento
+          )
+          FROM cartera.cuotas_credito cq
+          WHERE cq.cuota_id = p.cuota_id
+          LIMIT 1
+        ) AS "cuota",
+
+        -- 👤 Info del usuario
+        json_build_object(
+          'usuarioId', u.usuario_id,
+          'nombre', u.nombre,
+          'nit', u.nit
+        ) AS "usuario",
+
+        -- 💰 Subconsulta de inversionistas
+        COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'inversionistaId', i.inversionista_id,
+              'nombreInversionista', i.nombre,
+              'emiteFactura', i.emite_factura,
+              'abonoCapital', pci.abono_capital,
+              'abonoInteres', pci.abono_interes,
+              'abonoIva', pci.abono_iva_12,
+              'isr', ROUND(COALESCE(pci.abono_interes, 0) * 0.05, 2),
+              'cuotaPago', pci.cuota,
+              'montoAportado', ci.monto_aportado,
+              'porcentajeParticipacion', ci.porcentaje_participacion_inversionista
+            )
+          )
+          FROM cartera.pagos_credito_inversionistas pci
+          LEFT JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
+          LEFT JOIN cartera.creditos_inversionistas ci 
+            ON ci.credito_id = pci.credito_id 
+            AND ci.inversionista_id = pci.inversionista_id
+          WHERE pci.pago_id = p.pago_id
+        ), '[]'::json) AS "inversionistas",
+
+        -- 📸 Boleta asociada
+        (
+          SELECT json_build_object(
+            'boletaId', b.id,
+            'urlBoleta', b.url_boleta
+          )
+          FROM cartera.boletas b
+          WHERE b.pago_id = p.pago_id
+          LIMIT 1
+        ) AS "boleta"
+
       FROM cartera.pagos_credito p
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
       LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
-      LEFT JOIN cartera.pagos_credito_inversionistas pci ON pci.pago_id = p.pago_id
-      LEFT JOIN cartera.inversionistas i ON i.inversionista_id = pci.inversionista_id
-      LEFT JOIN cartera.creditos_inversionistas ci ON ci.credito_id = c.credito_id
-      LEFT JOIN cartera.boletas b ON b.pago_id = p.pago_id
-      WHERE ${and(...conditions)}
-      ORDER BY p.pago_id DESC
+      ${sql.raw(whereSQL)}
+      ORDER BY p.fecha_pago DESC
       LIMIT ${pageSize} OFFSET ${offset};
-    `
-    );
+    `;
 
-    const pagosMap: Record<number, any> = {};
+    const result = await db.execute(query);
 
-    for (const row of rows.rows) {
-      if (!pagosMap[row.pagoId]) {
-        pagosMap[row.pagoId] = {
-          pagoId: row.pagoId,
-          montoBoleta: row.montoBoleta,
-          numeroAutorizacion: row.numeroAutorizacion,
-          fechaPago: row.fechaPago,
-          creditoId: row.creditoId,
-          numeroCredito: row.numeroCredito,
-          capital: row.capital,
-          deudaTotal: row.deudaTotal,
-          usuarioNombre: row.usuarioNombre,
-          boleta: row.boletaId
-            ? {
-                boletaId: row.boletaId,
-                urlBoleta: row.urlBoleta,
-              }
-            : null,
-          abono_interes: row.abono_interes,
-          abono_iva_12: row.abono_iva_12,
-          abono_interes_ci: row.abono_interes_ci,
-          abono_iva_ci: row.abono_iva_ci,
-          abono_seguro: row.abono_seguro,
-          abono_gps: row.abono_gps,
-          inversionistas: [],
-        };
-      }
-
-      // ✅ Si hay inversionistas, agrégalos al grupo
-      if (row.inversionistaId) {
-        pagosMap[row.pagoId].inversionistas.push({
-          inversionistaId: row.inversionistaId,
-          nombreInversionista: row.nombreInversionista,
-          abonoCapital: row.abonoCapital,
-          abonoInteres: row.abonoInteres,
-          abonoIva: row.abonoIva,
-          isr: row.abonoInteres ? Number(row.abonoInteres) * 0.05 : 0,
-          cuotaPago: row.cuotaPago,
-          montoAportado: row.montoAportado,
-          porcentajeParticipacion: row.porcentajeParticipacion,
-        });
-      }
-    }
+    // 🧠 Transformación final del resultado
+    const data = result.rows.map((r) => ({
+      pagoId: r.pagoId,
+      montoBoleta: r.montoBoleta,
+      numeroAutorizacion: r.numeroAutorizacion,
+      fechaPago: r.fechaPago,
+      mora: r.mora,
+      otros: r.otros,
+      reserva: r.reserva,
+      membresias: r.membresias,
+      observaciones: r.observaciones,
+      abono_capital: r.abono_capital,
+      abono_interes: r.abono_interes,
+      abono_iva_12: r.abono_iva_12,
+      abono_seguro: r.abono_seguro,
+      abono_gps: r.abono_gps,
+      credito: r.credito,
+      cuota: r.cuota,
+      usuario: r.usuario,
+      inversionistas: Array.isArray(r.inversionistas)
+        ? r.inversionistas
+        : JSON.parse(typeof r.inversionistas === "string" ? r.inversionistas : "[]"),
+      boleta: r.boleta,
+    }));
 
     return {
+      success: true,
+      message: "📄 Datos de pagos obtenidos correctamente",
       page,
       pageSize,
-      total: rows.rowCount,
-      data: Object.values(pagosMap),
+      total: result.rowCount,
+      data,
     };
   } catch (error: any) {
     console.error("❌ Error en getPagosConInversionistas:", error);
     return {
+      success: false,
+      message: "❌ Error al obtener los pagos con inversionistas",
       page,
       pageSize,
       total: 0,

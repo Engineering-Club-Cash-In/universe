@@ -12,9 +12,14 @@ import {
   type NewVehicle,
   type NewVehicleInspection,
   type NewVehiclePhoto,
-  type NewInspectionChecklistItem
+  type NewInspectionChecklistItem,
+  casosCobros,
+  contratosFinanciamiento,
+  conveniosPago
 } from "../db/schema";
 import { protectedProcedure, publicProcedure } from "../lib/orpc";
+import { vehicleRegistrationOCRSchema, mapOCRToVehicleForm } from "@/lib/ocr-schema";
+import { prepareValuationContext, vehicleValuationSchema } from "@/lib/valuation-schema";
 
 export const vehiclesRouter = {
   // Get all vehicles with their latest inspection and photos

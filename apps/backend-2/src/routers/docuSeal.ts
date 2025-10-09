@@ -20,7 +20,7 @@ import { generateCheckIssuanceLetterWomanTemplate23Submission } from "../service
 import { generateMovableGuaranteeManTemplate24Submission } from "../services/template24GarantiaInmobilaria(homre)";
 import { generateVehiclePurchaseThirdPartyWomanTemplate13Submission } from "../services/template13solicitudCompraVechiculo(mujer)";
 import { generateMovableGuaranteeWomanTemplate25Submission } from "../services/template25GarantiaInmobilaria(mujer)";
-import { getDocusealDocumentsController } from "../controllers/docuseal";
+import { getDocumentsByDpiController, getDocusealDocumentsController } from "../controllers/docuseal";
 const docuSealRouter = new Elysia({
   prefix: "/docuSeal",
 })
@@ -793,7 +793,23 @@ const docuSealRouter = new Elysia({
         error: error.message,
       };
     }
-  });
+  })
+  .post(
+    "/document-by-dpi",
+    async ({ body }) => {
+      const { dpi, documentName } = body;
+
+      // 🧠 Llamamos al controller que maneja RENAP + query en DB
+      const result = await getDocumentsByDpiController(dpi, documentName);
+      return result;
+    },
+    {
+      body: t.Object({
+        dpi: t.String(),
+        documentName: t.String(),
+      }),
+    }
+  );
 
 export default docuSealRouter;
  

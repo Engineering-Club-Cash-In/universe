@@ -11,7 +11,7 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { opportunityDocuments } from "../db/schema/documents";
+import { documentRequirements, documentValidations, opportunityDocuments } from "../db/schema/documents";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { 
 	uploadFileToR2, 
@@ -20,6 +20,7 @@ import {
 	generateUniqueFilename,
 	validateFile,
 } from "../lib/storage";
+import { vehicleInspections } from "@/db/schema";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)

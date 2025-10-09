@@ -180,6 +180,7 @@ export const paymentRouter = new Elysia()
           anio,
           inversionistaId,
           excel,
+          usuarioNombre
         } = query;
 
         // ✅ Si viene excel=true, generamos el reporte Excel
@@ -192,6 +193,7 @@ export const paymentRouter = new Elysia()
             mes,
             anio,
             inversionistaId,
+            usuarioNombre
           });
           set.status = 200;
           return {
@@ -209,12 +211,12 @@ export const paymentRouter = new Elysia()
           mes,
           anio,
           inversionistaId,
+          usuarioNombre
         });
 
         set.status = 200;
         return {
-          success: true,
-          message: "📄 Datos de pagos obtenidos correctamente",
+          status: "📄 Datos de pagos obtenidos correctamente",
           ...data,
         };
       } catch (error: any) {
@@ -242,6 +244,7 @@ export const paymentRouter = new Elysia()
         anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
         inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
         excel: t.Optional(t.Boolean({ default: false })),
+        usuarioNombre: t.Optional(t.String({ minLength: 1 })),
       }),
       response: {
         200: t.Object({

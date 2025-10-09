@@ -271,6 +271,7 @@ export async function exportPagosConInversionistasExcel(
     mes?: number;
     anio?: number;
     inversionistaId?: number;
+    usuarioNombre?: string; // 🆕 nuevo filtro
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio

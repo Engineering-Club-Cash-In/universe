@@ -51,13 +51,7 @@ export async function generatePromissoryNoteWomanTemplate21Submission(
             // 📅 Fechas (reutilizadas con los mismos nombres)
             dia: params.dia,
             mes: params.mes,
-            año: params.año,
-            dia: params.dia, // segunda vez
-            mes: params.mes,
-            año: params.año,
-            dia: params.dia, // tercera vez
-            mes: params.mes,
-            año: params.año,
+            año: params.año, 
 
             // 👤 Datos personales
             "Estado Civil": params.estadoCivil,
@@ -72,13 +66,7 @@ export async function generatePromissoryNoteWomanTemplate21Submission(
             // 🗓️ Letras (reutilizadas igual)
             "dia letras": params.diaLetras,
             "mes letras": params.mesLetras,
-            "año letras": params.añoLetras,
-            "dia letras": params.diaLetras,
-            "mes letras": params.mesLetras,
-            "año letras": params.añoLetras,
-            "dia letras": params.diaLetras,
-            "mes letras": params.mesLetras,
-            "año letras": params.añoLetras,
+            "año letras": params.añoLetras, 
 
             // 🚫 La firma se realiza directamente en DocuSeal
           },

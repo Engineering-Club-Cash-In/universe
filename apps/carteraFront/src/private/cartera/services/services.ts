@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import axios  from "axios";
 import type { PagoFormValues } from "../hooks/registerPayment";
 import type { ReactNode } from "react";
@@ -375,6 +376,18 @@ export const getCreditosPaginados = async (params: {
   excelUrl: string;
 }
 export interface PagoData {
+  numeroCredito: ReactNode;
+  usuarioNombre: ReactNode;
+  cuota: any;
+  creditoId: any;
+  capital(capital: any): unknown;
+  deudaTotal(deudaTotal: any): unknown;
+  abono_interes(abono_interes: any): unknown;
+  abono_iva_12(abono_iva_12: any): unknown;
+  abono_interes_ci(abono_interes_ci: any): unknown;
+  abono_iva_ci(abono_iva_ci: any): unknown;
+  abono_seguro(abono_seguro: any): unknown;
+  abono_gps(abono_gps: any): unknown;
   pago: {
     pago_id: number;
     credito_id: number;
@@ -1177,64 +1190,93 @@ export async function getCondonacionesMoraService(params?: {
   );
   return data;}
 
-
-
-  
-export interface InversionistaPago {
-  inversionistaId: number;
-  nombreInversionista: string;
-  abonoCapital: number;
-  abonoInteres: number;
-  abonoIva: number;
-  isr: number;
-  cuotaPago: string;
-  montoAportado: number;
-  porcentajeParticipacion: number;
-}
-
+// 🧾 Información de la cuota asociada
+// 🧾 Información de la cuota asociada
 export interface CuotaPago {
   cuotaId: number;
   numeroCuota: number;
   fechaVencimiento: string;
-  pagado: boolean;
 }
 
+// 📄 Información de la boleta
 export interface BoletaPago {
   boletaId: number;
   urlBoleta: string;
 }
 
-export interface PagoData {
-  pagoId: number;
-  numeroCredito: string;
+// 💰 Inversionista vinculado al pago
+export interface InversionistaPago {
+  inversionistaId: number;
+  nombreInversionista: string;
+  emiteFactura: boolean;
+  abonoCapital: number;
+  abonoInteres: number;
+  abonoIva: number;
+  isr: number;
+  cuotaPago: number | null;
+  montoAportado: number;
+  porcentajeParticipacion: number;
+}
+
+// 💳 Información del crédito asociado
+export interface CreditoPago {
   creditoId: number;
+  numeroCreditoSifco: string;
   capital: number;
   deudaTotal: number;
-  usuarioNombre: string;
+  statusCredit: string;
+  porcentajeInteres: number;
+  fechaCreacion: string;
+}
+
+// 🧍‍♂️ Información del usuario del crédito
+export interface UsuarioPago {
+  usuarioId: number;
+  nombre: string;
+  nit: string;
+}
+
+// 💵 Objeto principal del pago
+export interface PagoDataInvestor {
+  pagoId: number;
   montoBoleta: number;
   numeroAutorizacion: string | null;
   fechaPago: string;
+
+  // 🆕 Campos adicionales del pago
+  mora: number | null;
+  otros: number | null;
+  reserva: number | null;
+  membresias: number | null;
+  observaciones: string | null;
+
+  // 💰 Abonos asociados directamente al pago
   abono_interes: number;
   abono_iva_12: number;
-  abono_interes_ci: number;
-  abono_iva_ci: number;
   abono_seguro: number;
   abono_gps: number;
+  abono_capital: number;
+
+  // 🔗 Relaciones
+  credito: CreditoPago;
   cuota: CuotaPago | null;
-  boleta: BoletaPago | null;
+  usuario: UsuarioPago;
   inversionistas: InversionistaPago[];
+  boleta: BoletaPago | null;
 }
 
+// 📊 Respuesta del servicio
 export interface GetPagosResponse {
   success: boolean;
   message: string;
   page: number;
   pageSize: number;
   total: number;
-  data: PagoData[];
+  data: PagoDataInvestor[];
   excelUrl?: string;
 }
 
+// ⚙️ Parámetros del query
 export interface GetPagosParams {
   page?: number;
   pageSize?: number;
@@ -1244,17 +1286,38 @@ export interface GetPagosParams {
   anio?: number;
   inversionistaId?: number;
   excel?: boolean;
+  usuarioNombre?: string;
 }
 
 /**
- * 📦 Obtiene pagos con inversionistas o genera Excel
+ * 🔹 Servicio que obtiene los pagos junto con su información completa
+ * (crédito, usuario, cuota, inversionistas, boleta, etc.)
  */
 export async function getPagosConInversionistasService(
   params: GetPagosParams
 ): Promise<GetPagosResponse> {
-  const res = await api.get<GetPagosResponse>(
+  const { data } = await api.get<GetPagosResponse>(
     `/reportes/pagos-inversionistas`,
     { params }
   );
-  return res.data;
+
+  // 🔄 Aseguramos que el backend siempre devuelva tipos consistentes
+  const parsedData: GetPagosResponse = {
+    ...data,
+    data: (data.data || []).map((pago) => ({
+      ...pago,
+      mora: pago.mora ?? 0,
+      otros: pago.otros ?? 0,
+      reserva: pago.reserva ?? 0,
+      membresias: pago.membresias ?? 0,
+      observaciones: pago.observaciones ?? null,
+      abono_interes: Number(pago.abono_interes ?? 0),
+      abono_iva_12: Number(pago.abono_iva_12 ?? 0),
+      abono_seguro: Number(pago.abono_seguro ?? 0),
+      abono_gps: Number(pago.abono_gps ?? 0),
+      inversionistas: pago.inversionistas ?? [],
+    })),
+  };
+
+  return parsedData;
 }

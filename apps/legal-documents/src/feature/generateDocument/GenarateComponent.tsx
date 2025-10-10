@@ -3,10 +3,12 @@ import { Wizard, type WizardStep } from "@/components/wizard/Wizard";
 import { Step1 } from "./components/Step1";
 import { Step2 } from "./components/Step2";
 import { Step3 } from "./components/Step3";
+import { Step4 } from "./components/Step4";
 import { type Document, type Field, type RenapData } from "./hooks/useStep2";
 import {
   documentsService,
   type DocumentSubmission,
+  type GenerateDocumentsResponse,
 } from "@/services/documents";
 
 interface DocumentData {
@@ -30,11 +32,12 @@ interface DocumentData {
 }
 
 export function GenerateComponent() {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [formData, setFormData] = useState<DocumentData>({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [step3Valid, setStep3Valid] = useState(false);
-  const [shouldValidateStep3, setShouldValidateStep3] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1)
+  const [formData, setFormData] = useState<DocumentData>({})
+  const [isLoading, setIsLoading] = useState(false)
+  const [step3Valid, setStep3Valid] = useState(false)
+  const [shouldValidateStep3, setShouldValidateStep3] = useState(false)
+  const [documentsResponse, setDocumentsResponse] = useState<GenerateDocumentsResponse | null>(null)
 
   const handleDataChange = (
     field: string,
@@ -54,30 +57,30 @@ export function GenerateComponent() {
         return !!(formData.renapData && formData.dpi);
       case 3:
         return step3Valid;
+      case 4:
+        return true; // El step 4 es solo visualización
       default:
         return false;
     }
   };
 
   const handleNext = async () => {
-    if (currentStep === steps.length) {
+    if (currentStep === 3) {
       // Activar validación antes de generar documento
-      if (currentStep === 3) {
-        setShouldValidateStep3(true);
-        // Dar tiempo para que la validación se procese
-        await new Promise((resolve) => setTimeout(resolve, 100));
+      setShouldValidateStep3(true);
+      // Dar tiempo para que la validación se procese
+      await new Promise((resolve) => setTimeout(resolve, 100));
 
-        if (!step3Valid) {
-          alert(
-            "Por favor, completa todos los campos requeridos antes de generar los documentos."
-          );
-          return; // No continuar si la validación falla
-        }
-
-        // Generar documentos
-        await generateDocuments();
+      if (!step3Valid) {
+        alert(
+          "Por favor, completa todos los campos requeridos antes de generar los documentos."
+        );
+        return; // No continuar si la validación falla
       }
-    } else {
+
+      // Generar documentos
+      await generateDocuments();
+    } else if (currentStep < steps.length) {
       setCurrentStep((prev) => prev + 1);
     }
   };
@@ -128,11 +131,9 @@ export function GenerateComponent() {
       const result = await documentsService.generateDocuments(payload);
       console.log("Respuesta del servidor:", result);
 
-      alert("¡Documentos generados exitosamente! 📄");
-
-      // Opcional: resetear el wizard
-      // setCurrentStep(1)
-      // setFormData({})
+      // Guardar la respuesta y avanzar al Step 4
+      setDocumentsResponse(result)
+      setCurrentStep(4)
     } catch (error) {
       console.error("Error generando documentos:", error);
       alert("Error al generar los documentos. Por favor, intenta de nuevo.");
@@ -178,6 +179,17 @@ export function GenerateComponent() {
         />
       ),
     },
+    {
+      id: 4,
+      title: "Documentos Generados",
+      description: "Vista previa de los documentos creados",
+      component: (
+        <Step4
+          documentsResponse={documentsResponse}
+          isLoading={isLoading}
+        />
+      ),
+    },
   ];
 
   return (
@@ -200,7 +212,7 @@ export function GenerateComponent() {
           onStepClick={handleStepClick}
           canGoNext={validateStep(currentStep)}
           isLoading={isLoading}
-          finishLabel="Generar Documentos"
+          finishLabel={currentStep === 3 ? "Generar Documentos" : "Finalizar"}
           nextLabel="Continuar"
           previousLabel="Volver"
         />

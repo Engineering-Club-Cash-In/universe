@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 // Types
-interface RenapData {
+export interface RenapData {
   dpi: string;
   firstName: string;
   secondName: string;
@@ -25,32 +25,59 @@ interface RenapData {
   dpi_expiracy_date: string;
 }
 
+export interface Document {
+  id: number;
+  nombre_documento: string;
+  descripcion: string;
+  genero: string;
+  serialid: string;
+  url_insercion: string;
+}
+
+export interface Field {
+  name: string;
+  key: string;
+  regex: string;
+  required: boolean;
+  iddocuments: string[];
+  relation: string;
+}
+
 interface DocumentByDpiResponse {
   success: boolean;
   message: string;
   renapData: RenapData;
+  documents: Document[];
+  campos: Field[];
 }
 
 interface Step2Props {
   readonly data: {
     dpi?: string;
+    documentTypes?: string[];
     renapData?: RenapData;
+    documents?: Document[];
+    fields?: Field[];
   };
-  readonly onChange: (field: string, value: string | RenapData) => void;
+  readonly onChange: (
+    field: string,
+    value: string | RenapData | Document[] | Field[]
+  ) => void;
 }
 
 // API Service
 const API_URL = import.meta.env.VITE_API_URL;
 
 const getDocumentByDpi = async (
-  dpi: string
+  dpi: string,
+  documentNames: string[]
 ): Promise<DocumentByDpiResponse> => {
   const response = await fetch(`${API_URL}/docuSeal/document-by-dpi`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ dpi, documentName: "carta_emision_cheques" }),
+    body: JSON.stringify({ dpi, documentNames }),
   });
 
   if (!response.ok) {
@@ -66,11 +93,14 @@ export const useStep2 = ({ data, onChange }: Step2Props) => {
 
   // Mutation para consultar el DPI
   const dpiMutation = useMutation({
-    mutationFn: getDocumentByDpi,
+    mutationFn: (dpi: string) =>
+      getDocumentByDpi(dpi, data.documentTypes || []),
     onSuccess: (response) => {
       if (response.success) {
         onChange("dpi", dpiInput);
         onChange("renapData", response.renapData);
+        onChange("documents", response.documents);
+        onChange("fields", response.campos);
       }
     },
   });
@@ -120,5 +150,7 @@ export const useStep2 = ({ data, onChange }: Step2Props) => {
     getGenderLabel,
     getCivilStatusLabel,
     renapData: data.renapData,
+    documents: data.documents,
+    fields: data.fields,
   };
 };

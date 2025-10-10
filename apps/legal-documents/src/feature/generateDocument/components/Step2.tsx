@@ -13,39 +13,20 @@ import {
   MapPin,
   Briefcase,
 } from "lucide-react";
-import { useStep2 } from "../hooks/useStep2";
-
-// Types
-interface RenapData {
-  dpi: string;
-  firstName: string;
-  secondName: string;
-  thirdName: string;
-  firstLastName: string;
-  secondLastName: string;
-  marriedLastName: string;
-  picture: string;
-  birthDate: string;
-  gender: string;
-  civil_status: string;
-  nationality: string;
-  borned_in: string;
-  department_borned_in: string;
-  municipality_borned_in: string;
-  deathDate: string;
-  ocupation: string;
-  cedula_order: string;
-  cedula_register: string;
-  dpi_expiracy_date: string;
-}
+import { useStep2, type Document, type Field, type RenapData } from "../hooks/useStep2";
 
 
 interface Step2Props {
   readonly data: {
     dpi?: string;
     renapData?: RenapData;
+    documents?: Document[];
+    fields?: Field[];
   };
-  readonly onChange: (field: string, value: string | RenapData | null) => void;
+  readonly onChange: (
+    field: string,
+    value: string | RenapData | Document[] | Field[] | null
+  ) => void;
 }
 
 // API Service
@@ -59,6 +40,8 @@ export function Step2({ data, onChange }: Step2Props) {
     setDpiInput,
     dpiInput,
     handleDpiChange,
+    documents,
+    fields,
   } = useStep2({ data, onChange });
 
   // Si ya hay datos de RENAP, mostrar la información
@@ -191,6 +174,13 @@ export function Step2({ data, onChange }: Step2Props) {
             La información ha sido verificada exitosamente con el RENAP. Estos
             datos serán utilizados para generar los documentos legales.
           </p>
+          {documents && documents.length > 0 && (
+            <p className="text-sm text-green-700 mt-2">
+              Se encontraron <strong>{documents.length}</strong> documentos
+              disponibles con <strong>{fields?.length || 0}</strong> campos
+              configurados.
+            </p>
+          )}
         </div>
 
         <div className="flex justify-center">
@@ -199,6 +189,8 @@ export function Step2({ data, onChange }: Step2Props) {
             onClick={() => {
               onChange("dpi", "");
               onChange("renapData", null);
+              onChange("documents", []);
+              onChange("fields", []);
               setDpiInput("");
             }}
           >

@@ -21,10 +21,48 @@ export interface DocumentSubmission {
   fields: DocumentField[]
 }
 
+export interface DocumentValue {
+  field: string
+  value: string | number | null
+}
+
+export interface DocumentSubmissionData {
+  id: number
+  slug: string
+  uuid: string
+  name: string | null
+  email: string
+  phone: string | null
+  completed_at: string | null
+  declined_at: string | null
+  external_id: string | null
+  submission_id: number
+  metadata: Record<string, unknown>
+  opened_at: string | null
+  sent_at: string
+  created_at: string
+  updated_at: string
+  status: string
+  application_key: string | null
+  values: DocumentValue[]
+  preferences: {
+    send_email: boolean
+    send_sms: boolean
+  }
+  role: string
+  embed_src: string
+}
+
+export interface DocumentResult {
+  templateId: number
+  success: boolean
+  data: DocumentSubmissionData[]
+}
+
 export interface GenerateDocumentsResponse {
   success: boolean
   message?: string
-  data?: unknown
+  results?: DocumentResult[]
 }
 
 // API Service

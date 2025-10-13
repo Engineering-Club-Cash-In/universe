@@ -50,14 +50,17 @@ export function useStep3({
   // Validar un campo específico
   const validateField = useCallback((field: Field, value: string): string => {
     const strValue = typeof value === "string" ? value : String(value || "");
+    
+    // Validar campo requerido
     if (field.required && !strValue.trim()) {
       return "Este campo es obligatorio";
     }
 
-    if (field.regex) {
+    // Validar regex si hay valor y regex definida
+    if (strValue.trim() && field.regex) {
       try {
         const regex = new RegExp(field.regex);
-        if (!regex.test(value)) {
+        if (!regex.test(strValue)) {
           return "El formato del campo no es válido";
         }
       } catch {
@@ -86,15 +89,27 @@ export function useStep3({
     // Solo validar campos que pertenecen a documentos seleccionados
     const fieldsToValidate = getRelevantFields();
 
+    console.log('🔍 Validando campos:', fieldsToValidate.length);
+    
     fieldsToValidate.forEach((field) => {
       const value = fieldValues[field.key] || "";
       const error = validateField(field, value);
+      
+      console.log(`Campo ${field.key}:`, {
+        value: value,
+        required: field.required,
+        error: error,
+        isValid: !error
+      });
+      
       if (error) {
         errors[field.key] = error;
         isValid = false;
       }
     });
 
+    console.log('📊 Resultado validación:', { isValid, errorsCount: Object.keys(errors).length });
+    
     setFieldErrors(errors);
     return isValid;
   }, [fieldValues, getRelevantFields, validateField]);
@@ -185,18 +200,37 @@ export function useStep3({
     }
   }, [renapData, fields, fieldValues, onChange]);
 
-  // Efecto para notificar cambios de validación al componente padre (solo después de submit o si shouldValidate)
+  // Función para validar sin mostrar errores
+  const validateWithoutErrors = useCallback((): boolean => {
+    const relevantFields = getRelevantFields();
+    let isValid = true;
+    
+    relevantFields.forEach((field) => {
+      const value = fieldValues[field.key] || "";
+      const error = validateField(field, value);
+      if (error) {
+        isValid = false;
+      }
+    });
+    
+    return isValid && relevantFields.length > 0;
+  }, [fieldValues, getRelevantFields, validateField]);
+
+  // Efecto para notificar cambios de validación al componente padre
   useEffect(() => {
     if (hasSubmitted || shouldValidate) {
+      // Si ya se intentó hacer submit o se debe validar, usar validación completa
       const isValid = validateAllFields();
+      console.log('🔍 Validación completa Step3:', { isValid });
       if (onValidationChange) {
         onValidationChange(isValid);
       }
     } else {
-      // Antes del submit, considerar válido si hay campos relevantes
-      const relevantFields = getRelevantFields();
+      // Antes del submit, validar pero no mostrar errores
+      const isValid = validateWithoutErrors();
+      console.log('🔍 Validación silenciosa Step3:', { isValid });
       if (onValidationChange) {
-        onValidationChange(relevantFields.length > 0);
+        onValidationChange(isValid);
       }
     }
   }, [
@@ -205,9 +239,29 @@ export function useStep3({
     hasSubmitted,
     shouldValidate,
     validateAllFields,
+    validateWithoutErrors,
     onValidationChange,
-    getRelevantFields,
   ]);
+
+  // Efecto para validación inicial cuando se tienen campos y documentos
+  useEffect(() => {
+    if (documents.length > 0 && fields.length > 0) {
+      // Ejecutar validación después de un pequeño delay para asegurar que todo esté inicializado
+      const timer = setTimeout(() => {
+        const isValid = validateWithoutErrors();
+        console.log('🚀 Validación inicial Step3:', { 
+          documentsCount: documents.length,
+          fieldsCount: fields.length,
+          isValid 
+        });
+        if (onValidationChange) {
+          onValidationChange(isValid);
+        }
+      }, 100);
+
+      return () => clearTimeout(timer);
+    }
+  }, [documents.length, fields.length, validateWithoutErrors, onValidationChange]);
 
   return {
     fieldValues,

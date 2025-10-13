@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Wizard, type WizardStep } from "@/components/wizard/Wizard";
 import { Step1 } from "./components/Step1";
 import { Step2 } from "./components/Step2";
@@ -39,6 +39,11 @@ export function GenerateComponent() {
   const [shouldValidateStep3, setShouldValidateStep3] = useState(false)
   const [documentsResponse, setDocumentsResponse] = useState<GenerateDocumentsResponse | null>(null)
 
+  // Monitor step3Valid changes
+  useEffect(() => {
+    console.log(`🔄 step3Valid changed to:`, step3Valid);
+  }, [step3Valid]);
+
   const handleDataChange = (
     field: string,
     value: string | boolean | string[] | object | null
@@ -50,18 +55,23 @@ export function GenerateComponent() {
   };
 
   const validateStep = (step: number): boolean => {
-    switch (step) {
-      case 1:
-        return !!(formData.documentTypes && formData.documentTypes.length > 0);
-      case 2:
-        return !!(formData.renapData && formData.dpi);
-      case 3:
-        return step3Valid;
-      case 4:
-        return true; // El step 4 es solo visualización
-      default:
-        return false;
-    }
+    const result = (() => {
+      switch (step) {
+        case 1:
+          return !!(formData.documentTypes && formData.documentTypes.length > 0);
+        case 2:
+          return !!(formData.renapData && formData.dpi);
+        case 3:
+          return true;
+        case 4:
+          return true; // El step 4 es solo visualización
+        default:
+          return false;
+      }
+    })();
+
+    console.log(`🔍 ValidateStep ${step}:`, { result, step3Valid });
+    return result;
   };
 
   const handleNext = async () => {
@@ -72,9 +82,6 @@ export function GenerateComponent() {
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       if (!step3Valid) {
-        alert(
-          "Por favor, completa todos los campos requeridos antes de generar los documentos."
-        );
         return; // No continuar si la validación falla
       }
 
@@ -168,13 +175,16 @@ export function GenerateComponent() {
     },
     {
       id: 3,
-      title: "Revisión y Generación",
-      description: "Revisa la información y genera los documentos",
+      title: "Configuración de Documentos",
+      description: "Completa la información requerida para generar los documentos",
       component: (
         <Step3
           data={formData}
           onChange={handleDataChange}
-          onValidationChange={setStep3Valid}
+          onValidationChange={(valid) => {
+            console.log(`📤 Step3 setting validation to:`, valid);
+            setStep3Valid(valid);
+          }}
           shouldValidate={shouldValidateStep3}
         />
       ),

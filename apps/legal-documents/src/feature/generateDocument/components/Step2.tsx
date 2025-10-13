@@ -13,8 +13,12 @@ import {
   MapPin,
   Briefcase,
 } from "lucide-react";
-import { useStep2, type Document, type Field, type RenapData } from "../hooks/useStep2";
-
+import {
+  useStep2,
+  type Document,
+  type Field,
+  type RenapData,
+} from "../hooks/useStep2";
 
 interface Step2Props {
   readonly data: {
@@ -203,13 +207,6 @@ export function Step2({ data, onChange }: Step2Props) {
 
   return (
     <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold">Información del Firmante</h2>
-        <p className="text-muted-foreground">
-          Ingresa el DPI de la persona que firmará los documentos
-        </p>
-      </div>
-
       <Card className="max-w-md mx-auto">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

@@ -59,14 +59,6 @@ export function Step3({
 
   return (
     <div className="space-y-6">
-      <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold">Configuración de Documentos</h2>
-        <p className="text-muted-foreground">
-          Selecciona los documentos a generar y completa la información
-          requerida
-        </p>
-      </div>
-
       {/* Información del Firmante */}
       {renapData && (
         <Card>
@@ -133,7 +125,6 @@ export function Step3({
                       {fieldErrors[field.key]}
                     </p>
                   )}
-                
                 </div>
               ))}
             </div>

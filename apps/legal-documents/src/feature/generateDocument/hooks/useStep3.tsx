@@ -36,15 +36,85 @@ export function useStep3({
     }
   }, [documents, selectedDocuments.length]);
 
-  const getCivilStatusLabel = useCallback((status: string) => {
-    const statusMap: Record<string, string> = {
-      S: "soltero",
-      C: "casado",
-      D: "divorciado",
-      V: "viudo",
-      U: "unido",
+  const getCivilStatusLabel = useCallback((status: string, gender: string) => {
+    const isFemale = gender === "F";
+    const statusMap: Record<string, { male: string; female: string }> = {
+      S: { male: "soltero", female: "soltera" },
+      C: { male: "casado", female: "casada" },
+      D: { male: "divorciado", female: "divorciada" },
+      V: { male: "viudo", female: "viuda" },
+      U: { male: "unido", female: "unida" },
     };
-    return statusMap[status] || "no especificado";
+    const statusObj = statusMap[status];
+    if (statusObj) {
+      return isFemale ? statusObj.female : statusObj.male;
+    }
+    return "no especificado";
+  }, []);
+
+  const getNationalityLabel = useCallback(
+    (nationality: string, gender: string) => {
+      const isFemale = gender === "F";
+
+      // Mapa de nacionalidades con sus gentilicios
+      const nationalityMap: Record<string, { male: string; female: string }> = {
+        guatemalteco: { male: "guatemalteco", female: "guatemalteca" },
+        guatemala: { male: "guatemalteco", female: "guatemalteca" },
+        mexicano: { male: "mexicano", female: "mexicana" },
+        mexico: { male: "mexicano", female: "mexicana" },
+        salvadoreño: { male: "salvadoreño", female: "salvadoreña" },
+        "el salvador": { male: "salvadoreño", female: "salvadoreña" },
+        hondureño: { male: "hondureño", female: "hondureña" },
+        honduras: { male: "hondureño", female: "hondureña" },
+        nicaragüense: { male: "nicaragüense", female: "nicaragüense" },
+        nicaragua: { male: "nicaragüense", female: "nicaragüense" },
+        costarricense: { male: "costarricense", female: "costarricense" },
+        "costa rica": { male: "costarricense", female: "costarricense" },
+        panameño: { male: "panameño", female: "panameña" },
+        panama: { male: "panameño", female: "panameña" },
+        estadounidense: { male: "estadounidense", female: "estadounidense" },
+        "estados unidos": { male: "estadounidense", female: "estadounidense" },
+        español: { male: "español", female: "española" },
+        españa: { male: "español", female: "española" },
+      };
+
+      const normalizedNationality = nationality?.toLowerCase().trim() || "";
+      const nationalityObj = nationalityMap[normalizedNationality];
+
+      if (nationalityObj) {
+        return isFemale ? nationalityObj.female : nationalityObj.male;
+      }
+
+      // Si no está en el mapa, devolver el valor original
+      return nationality || "";
+    },
+    []
+  );
+
+  const calculateAge = useCallback((birthDate: string): number => {
+    // Asumiendo formato DD/MM/YYYY
+    const parts = birthDate.split("/");
+    if (parts.length !== 3) return 0;
+
+    const day = parseInt(parts[0]);
+    const month = parseInt(parts[1]) - 1; // Los meses en JS son 0-11
+    const year = parseInt(parts[2]);
+
+    const birth = new Date(year, month, day);
+    const today = new Date();
+
+    let age = today.getFullYear() - birth.getFullYear();
+    const monthDiff = today.getMonth() - birth.getMonth();
+
+    // Si aún no ha cumplido años este año, restar 1
+    if (
+      monthDiff < 0 ||
+      (monthDiff === 0 && today.getDate() < birth.getDate())
+    ) {
+      age--;
+    }
+
+    return age;
   }, []);
 
   // Validar un campo específico
@@ -73,15 +143,21 @@ export function useStep3({
 
   // Obtener campos únicos que pertenecen a documentos seleccionados
   const getRelevantFields = useCallback((): Field[] => {
-    return fields.filter(
+    const filteredFields = fields.filter(
       (field) =>
         field.iddocuments.some((docId) =>
           selectedDocuments.includes(parseInt(docId))
-        ) && !HIDDEN_FIELDS.includes(field.key.toLowerCase())
+        ) && !HIDDEN_FIELDS.includes(field.key?.toLowerCase())
     );
+
+    // Ordenar por el campo relation (convertir a número para ordenar correctamente)
+    return filteredFields.sort((a, b) => {
+      const relationA = parseFloat(a.relation) || 0;
+      const relationB = parseFloat(b.relation) || 0;
+      return relationA - relationB;
+    });
   }, [fields, selectedDocuments]);
 
-  // Validar input en tiempo real basado en regex de forma genérica
   const validateInputOnType = useCallback(
     (regex: string, value: string): string => {
       if (!regex || !value) return value;
@@ -90,18 +166,54 @@ export function useStep3({
         // Remover los anchors ^ y $ para validación en tiempo real
         const cleanPattern = regex.replace(/^\^|\$$/g, "");
 
-        // Extraer el conjunto de caracteres permitidos del regex
+        // Extraer información del cuantificador y el tipo de carácter
+        const quantifierMatch = cleanPattern.match(
+          /^(.+?)\{(\d+)(?:,(\d+))?\}$/
+        );
+
+        if (quantifierMatch) {
+          const [, charPattern, min, max] = quantifierMatch;
+          const maxLength = parseInt(max || min); // Si no hay max, usar min como max
+
+          // Construir conjunto de caracteres permitidos
+          let allowedChars = "";
+
+          if (charPattern.includes("\\d")) allowedChars += "0-9";
+          if (charPattern.includes("\\w")) allowedChars += "a-zA-Z0-9_";
+          if (charPattern.includes("\\s")) allowedChars += " \\t\\n\\r";
+
+          // Manejar conjuntos de caracteres [...]
+          const charSetMatch = charPattern.match(/\[([^\]]+)\]/);
+          if (charSetMatch) {
+            allowedChars += charSetMatch[1];
+          }
+
+          // Caracteres literales
+          if (charPattern.includes("\\.")) allowedChars += ".";
+          if (charPattern.includes("-") && !charPattern.includes("["))
+            allowedChars += "-";
+          if (charPattern.includes(",")) allowedChars += ",";
+
+          if (allowedChars) {
+            // Filtrar caracteres no permitidos
+            const inverseRegex = new RegExp(`[^${allowedChars}]`, "g");
+            const filtered = value.replace(inverseRegex, "");
+
+            // Limitar a la longitud máxima
+            return filtered.slice(0, maxLength);
+          }
+        }
+
+        // Fallback: extraer caracteres permitidos sin límite estricto
         const charSetMatch = cleanPattern.match(/\[([^\]]+)\]/g);
 
         if (charSetMatch) {
-          // Combinar todos los conjuntos de caracteres encontrados
           let allowedChars = "";
           charSetMatch.forEach((set) => {
             // eslint-disable-next-line
             allowedChars += set.replace(/[\[\]]/g, "");
           });
 
-          // Agregar caracteres especiales comunes que aparecen fuera de []
           if (cleanPattern.includes("\\d")) allowedChars += "0-9";
           if (cleanPattern.includes("\\s")) allowedChars += " \\s";
           if (cleanPattern.includes("(") && cleanPattern.includes(")"))
@@ -109,28 +221,11 @@ export function useStep3({
           if (cleanPattern.includes("\\.")) allowedChars += ".";
           if (cleanPattern.includes(",")) allowedChars += ",";
 
-          // Crear un regex inverso para eliminar caracteres no permitidos
           const inverseRegex = new RegExp(`[^${allowedChars}]`, "g");
           return value.replace(inverseRegex, "");
         }
 
-        // Si no hay conjuntos de caracteres, intentar validación directa
-        const testRegex = new RegExp(cleanPattern);
-
-        // Validar carácter por carácter
-        let result = "";
-        for (const char of value) {
-          const testValue = result + char;
-          // Verificar si el valor parcial podría ser válido
-          if (
-            testRegex.test(testValue) ||
-            new RegExp(`^${cleanPattern}`).test(testValue)
-          ) {
-            result = testValue;
-          }
-        }
-
-        return result;
+        return value;
       } catch (error) {
         console.warn("Error procesando regex:", error);
         return value;
@@ -257,7 +352,7 @@ export function useStep3({
       fields.forEach((field) => {
         // Primero intentar mapear con datos del RENAP
         if (renapData) {
-          switch (field.key.toLowerCase()) {
+          switch (field.key?.toLowerCase()) {
             case "nombrecompleto":
             case "nombre_completo":
             case "fullname":
@@ -269,11 +364,9 @@ export function useStep3({
               initialValues[field.key] = renapData.dpi;
               return;
             case "edad":
-              // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-              // @ts-ignore
+            case "age":
               initialValues[field.key] = String(
-                new Date().getFullYear() -
-                  parseInt(renapData.birthDate.split("/")[2])
+                calculateAge(renapData.birthDate)
               );
               return;
             case "ocupacion":
@@ -284,14 +377,22 @@ export function useStep3({
               return;
             case "nacionalidad":
             case "nationality":
-              initialValues[field.key] =
-                renapData.nationality?.toLowerCase() || "";
-              return;
-            case "estadocivil":
-              initialValues[field.key] = getCivilStatusLabel(
-                renapData.civil_status
+            case "gentilicio":
+              initialValues[field.key] = getNationalityLabel(
+                renapData.nationality,
+                renapData.gender
               );
               return;
+            case "estadocivil":
+            case "civil_status":
+            case "marital_status":
+              initialValues[field.key] = getCivilStatusLabel(
+                renapData.civil_status,
+                renapData.gender
+              );
+              return;
+            default:
+              break;
           }
         }
 
@@ -309,7 +410,15 @@ export function useStep3({
         onChange("fieldValues", initialValues);
       }
     }
-  }, [renapData, fields, fieldValues, onChange, getCivilStatusLabel]);
+  }, [
+    renapData,
+    fields,
+    fieldValues,
+    onChange,
+    getCivilStatusLabel,
+    getNationalityLabel,
+    calculateAge,
+  ]);
 
   // Función para validar sin mostrar errores
   const validateWithoutErrors = useCallback((): boolean => {

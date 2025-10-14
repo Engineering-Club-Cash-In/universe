@@ -86,7 +86,7 @@ export function Step3({
                 <p className="text-muted-foreground">DPI: {renapData.dpi}</p>
                 <p className="text-muted-foreground flex items-center gap-1">
                   <Calendar className="h-3 w-3" />
-                  {renapData.birthDate}
+                  {renapData.birthDate} • {renapData.gender === 'F' ? 'Femenino' : 'Masculino'}
                 </p>
               </div>
             </div>
@@ -108,12 +108,12 @@ export function Step3({
                   <Label htmlFor={field.key} className="mb-1.5">
                     {field.name}
                     {field.required && (
-                      <span className="text-red-500 ml-1">*</span>
+                      <span className="text-red-500 ">*</span>
                     )}
                   </Label>
                   
                   {/* Description - altura fija reservada */}
-                  <div className="min-h-[30px] mb-1">
+                  <div className="min-h-[20px]">
                     {field.description && (
                       <p className="text-xs text-muted-foreground leading-tight">
                         {field.description}

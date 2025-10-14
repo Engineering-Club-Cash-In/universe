@@ -36,21 +36,21 @@ export function useStep3({
     }
   }, [documents, selectedDocuments.length]);
 
-  const getCivilStatusLabel = (status: string) => {
+  const getCivilStatusLabel = useCallback((status: string) => {
     const statusMap: Record<string, string> = {
-      S: "Soltero",
-      C: "Casado",
-      D: "Divorciado",
-      V: "Viudo",
-      U: "Unido",
+      S: "soltero",
+      C: "casado",
+      D: "divorciado",
+      V: "viudo",
+      U: "unido",
     };
-    return statusMap[status] || "No especificado";
-  };
+    return statusMap[status] || "no especificado";
+  }, []);
 
   // Validar un campo específico
   const validateField = useCallback((field: Field, value: string): string => {
     const strValue = typeof value === "string" ? value : String(value || "");
-    
+
     // Validar campo requerido
     if (field.required && !strValue.trim()) {
       return "Este campo es obligatorio";
@@ -81,6 +81,64 @@ export function useStep3({
     );
   }, [fields, selectedDocuments]);
 
+  // Validar input en tiempo real basado en regex de forma genérica
+  const validateInputOnType = useCallback(
+    (regex: string, value: string): string => {
+      if (!regex || !value) return value;
+
+      try {
+        // Remover los anchors ^ y $ para validación en tiempo real
+        const cleanPattern = regex.replace(/^\^|\$$/g, "");
+
+        // Extraer el conjunto de caracteres permitidos del regex
+        const charSetMatch = cleanPattern.match(/\[([^\]]+)\]/g);
+
+        if (charSetMatch) {
+          // Combinar todos los conjuntos de caracteres encontrados
+          let allowedChars = "";
+          charSetMatch.forEach((set) => {
+            // eslint-disable-next-line
+            allowedChars += set.replace(/[\[\]]/g, "");
+          });
+
+          // Agregar caracteres especiales comunes que aparecen fuera de []
+          if (cleanPattern.includes("\\d")) allowedChars += "0-9";
+          if (cleanPattern.includes("\\s")) allowedChars += " \\s";
+          if (cleanPattern.includes("(") && cleanPattern.includes(")"))
+            allowedChars += "()";
+          if (cleanPattern.includes("\\.")) allowedChars += ".";
+          if (cleanPattern.includes(",")) allowedChars += ",";
+
+          // Crear un regex inverso para eliminar caracteres no permitidos
+          const inverseRegex = new RegExp(`[^${allowedChars}]`, "g");
+          return value.replace(inverseRegex, "");
+        }
+
+        // Si no hay conjuntos de caracteres, intentar validación directa
+        const testRegex = new RegExp(cleanPattern);
+
+        // Validar carácter por carácter
+        let result = "";
+        for (const char of value) {
+          const testValue = result + char;
+          // Verificar si el valor parcial podría ser válido
+          if (
+            testRegex.test(testValue) ||
+            new RegExp(`^${cleanPattern}`).test(testValue)
+          ) {
+            result = testValue;
+          }
+        }
+
+        return result;
+      } catch (error) {
+        console.warn("Error procesando regex:", error);
+        return value;
+      }
+    },
+    []
+  );
+
   // Validar todos los campos
   const validateAllFields = useCallback((): boolean => {
     const errors: Record<string, string> = {};
@@ -89,37 +147,56 @@ export function useStep3({
     // Solo validar campos que pertenecen a documentos seleccionados
     const fieldsToValidate = getRelevantFields();
 
-    console.log('🔍 Validando campos:', fieldsToValidate.length);
-    
+    console.log("🔍 Validando campos:", fieldsToValidate.length);
+
     fieldsToValidate.forEach((field) => {
       const value = fieldValues[field.key] || "";
       const error = validateField(field, value);
-      
+
       console.log(`Campo ${field.key}:`, {
         value: value,
         required: field.required,
         error: error,
-        isValid: !error
+        isValid: !error,
       });
-      
+
       if (error) {
         errors[field.key] = error;
         isValid = false;
       }
     });
 
-    console.log('📊 Resultado validación:', { isValid, errorsCount: Object.keys(errors).length });
-    
+    console.log("📊 Resultado validación:", {
+      isValid,
+      errorsCount: Object.keys(errors).length,
+    });
+
     setFieldErrors(errors);
     return isValid;
   }, [fieldValues, getRelevantFields, validateField]);
 
   // Manejar cambio en un campo
   const handleFieldChange = useCallback(
-    (fieldKey: string, value: string) => {
+    (fieldKey: string, inputValue: string) => {
+      // Encontrar el campo para obtener su regex
+      const field = fields.find((f) => f.key === fieldKey);
+
+      // Aplicar validación en tiempo real si el campo tiene regex
+      const processedValue =
+        field && field.regex
+          ? validateInputOnType(field.regex, inputValue)
+          : inputValue;
+
+      // Log para debug de validación en tiempo real
+      if (field && field.regex && inputValue !== processedValue) {
+        console.log(
+          `⚡ Validación en tiempo real - Campo: ${field.key}, Regex: ${field.regex}, Input: "${inputValue}", Procesado: "${processedValue}"`
+        );
+      }
+
       const newFieldValues = {
         ...fieldValues,
-        [fieldKey]: value,
+        [fieldKey]: processedValue,
       };
 
       setFieldValues(newFieldValues);
@@ -127,9 +204,8 @@ export function useStep3({
 
       // Solo validar si ya se ha intentado hacer submit o si shouldValidate es true
       if (hasSubmitted || shouldValidate) {
-        const field = fields.find((f) => f.key === fieldKey);
         if (field) {
-          const error = validateField(field, value);
+          const error = validateField(field, processedValue);
           setFieldErrors((prev) => ({
             ...prev,
             [fieldKey]: error,
@@ -137,7 +213,15 @@ export function useStep3({
         }
       }
     },
-    [fieldValues, onChange, hasSubmitted, shouldValidate, fields, validateField]
+    [
+      fieldValues,
+      onChange,
+      hasSubmitted,
+      shouldValidate,
+      fields,
+      validateField,
+      validateInputOnType,
+    ]
   );
 
   // Manejar submit (activar validación)
@@ -153,43 +237,70 @@ export function useStep3({
     }
   }, [shouldValidate, hasSubmitted]);
 
-  // Pre-llenar algunos campos con datos del RENAP
+  // Pre-llenar algunos campos con datos del RENAP y valores por defecto
   useEffect(() => {
-    if (renapData && Object.keys(fieldValues).length === 0) {
+    if (fields.length > 0 && Object.keys(fieldValues).length === 0) {
       const initialValues: Record<string, string> = {};
 
-      // Mapear campos comunes
+      console.log(
+        "📋 Campos recibidos:",
+        fields.map((f) => ({
+          key: f.key,
+          name: f.name,
+          regex: f.regex,
+          required: f.required,
+          description: f.description,
+          default: f.default,
+        }))
+      );
+
       fields.forEach((field) => {
-        switch (field.key.toLowerCase()) {
-          case "nombrecompleto":
-          case "nombre_completo":
-          case "fullname":
-            initialValues[field.key] =
-              `${renapData.firstName} ${renapData.secondName} ${renapData.firstLastName} ${renapData.secondLastName}`.trim();
-            break;
-          case "dpi":
-          case "cui":
-            initialValues[field.key] = renapData.dpi;
-            break;
-          case "edad":
-            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-            // @ts-ignore
-            initialValues[field.key] = new Date().getFullYear() - renapData.birthDate.split("/")[2];
-            break;
-          case "ocupacion":
-          case "occupation":
-          case "profesion":
-            initialValues[field.key] = renapData.ocupation || "";
-            break;
-          case "nacionalidad":
-          case "nationality":
-            initialValues[field.key] = renapData.nationality;
-            break;
-          case "estadocivil":
-            initialValues[field.key] = getCivilStatusLabel(
-              renapData.civil_status
-            );
-            break;
+        // Primero intentar mapear con datos del RENAP
+        if (renapData) {
+          switch (field.key.toLowerCase()) {
+            case "nombrecompleto":
+            case "nombre_completo":
+            case "fullname":
+              initialValues[field.key] =
+                `${renapData.firstName} ${renapData.secondName} ${renapData.firstLastName} ${renapData.secondLastName}`.trim();
+              return;
+            case "dpi":
+            case "cui":
+              initialValues[field.key] = renapData.dpi;
+              return;
+            case "edad":
+              // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+              // @ts-ignore
+              initialValues[field.key] = String(
+                new Date().getFullYear() -
+                  parseInt(renapData.birthDate.split("/")[2])
+              );
+              return;
+            case "ocupacion":
+            case "occupation":
+            case "profesion":
+              initialValues[field.key] =
+                renapData.ocupation?.toLowerCase() || "";
+              return;
+            case "nacionalidad":
+            case "nationality":
+              initialValues[field.key] =
+                renapData.nationality?.toLowerCase() || "";
+              return;
+            case "estadocivil":
+              initialValues[field.key] = getCivilStatusLabel(
+                renapData.civil_status
+              );
+              return;
+          }
+        }
+
+        // Si no se mapeó con RENAP, usar el valor por defecto del campo
+        if (field.default && field.default.trim()) {
+          initialValues[field.key] = field.default;
+        } else {
+          // Valor vacío por defecto
+          initialValues[field.key] = "";
         }
       });
 
@@ -198,13 +309,13 @@ export function useStep3({
         onChange("fieldValues", initialValues);
       }
     }
-  }, [renapData, fields, fieldValues, onChange]);
+  }, [renapData, fields, fieldValues, onChange, getCivilStatusLabel]);
 
   // Función para validar sin mostrar errores
   const validateWithoutErrors = useCallback((): boolean => {
     const relevantFields = getRelevantFields();
     let isValid = true;
-    
+
     relevantFields.forEach((field) => {
       const value = fieldValues[field.key] || "";
       const error = validateField(field, value);
@@ -212,7 +323,7 @@ export function useStep3({
         isValid = false;
       }
     });
-    
+
     return isValid && relevantFields.length > 0;
   }, [fieldValues, getRelevantFields, validateField]);
 
@@ -221,14 +332,14 @@ export function useStep3({
     if (hasSubmitted || shouldValidate) {
       // Si ya se intentó hacer submit o se debe validar, usar validación completa
       const isValid = validateAllFields();
-      console.log('🔍 Validación completa Step3:', { isValid });
+      console.log("🔍 Validación completa Step3:", { isValid });
       if (onValidationChange) {
         onValidationChange(isValid);
       }
     } else {
       // Antes del submit, validar pero no mostrar errores
       const isValid = validateWithoutErrors();
-      console.log('🔍 Validación silenciosa Step3:', { isValid });
+      console.log("🔍 Validación silenciosa Step3:", { isValid });
       if (onValidationChange) {
         onValidationChange(isValid);
       }
@@ -249,10 +360,10 @@ export function useStep3({
       // Ejecutar validación después de un pequeño delay para asegurar que todo esté inicializado
       const timer = setTimeout(() => {
         const isValid = validateWithoutErrors();
-        console.log('🚀 Validación inicial Step3:', { 
+        console.log("🚀 Validación inicial Step3:", {
           documentsCount: documents.length,
           fieldsCount: fields.length,
-          isValid 
+          isValid,
         });
         if (onValidationChange) {
           onValidationChange(isValid);
@@ -261,7 +372,12 @@ export function useStep3({
 
       return () => clearTimeout(timer);
     }
-  }, [documents.length, fields.length, validateWithoutErrors, onValidationChange]);
+  }, [
+    documents.length,
+    fields.length,
+    validateWithoutErrors,
+    onValidationChange,
+  ]);
 
   return {
     fieldValues,

@@ -41,6 +41,8 @@ export interface Field {
   required: boolean;
   iddocuments: string[];
   relation: string;
+  description: string | null;
+  default: string | null;
 }
 
 interface DocumentByDpiResponse {

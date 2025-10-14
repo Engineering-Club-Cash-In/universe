@@ -103,28 +103,48 @@ export function Step3({
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {relevantFields.map((field) => (
-                <div key={field.key} className="space-y-2">
-                  <Label htmlFor={field.key}>
+                <div key={field.key} className="flex flex-col">
+                  {/* Label - altura fija */}
+                  <Label htmlFor={field.key} className="mb-1.5">
                     {field.name}
                     {field.required && (
                       <span className="text-red-500 ml-1">*</span>
                     )}
                   </Label>
+                  
+                  {/* Description - altura fija reservada */}
+                  <div className="min-h-[30px] mb-1">
+                    {field.description && (
+                      <p className="text-xs text-muted-foreground leading-tight">
+                        {field.description}
+                      </p>
+                    )}
+                  </div>
+                  
+                  {/* Input */}
                   <Input
                     id={field.key}
                     value={fieldValues[field.key] || ""}
                     onChange={(e) =>
                       handleFieldChange(field.key, e.target.value)
                     }
-                    placeholder={`Ingresa ${field.name.toLowerCase()}`}
+                    placeholder={
+                      field.default 
+                        ? `Por defecto: ${field.default}`
+                        : `Ingresa ${field.name.toLowerCase()}`
+                    }
                     className={fieldErrors[field.key] ? "border-red-500" : ""}
                   />
-                  {fieldErrors[field.key] && (
-                    <p className="text-sm text-red-600 flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      {fieldErrors[field.key]}
-                    </p>
-                  )}
+                  
+                  {/* Error - altura fija reservada */}
+                  <div className="min-h-[px] mt-1">
+                    {fieldErrors[field.key] && (
+                      <p className="text-sm text-red-600 flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        {fieldErrors[field.key]}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

@@ -90,6 +90,9 @@ export function GenerateComponent() {
     } else if (currentStep < steps.length) {
       setCurrentStep((prev) => prev + 1);
     }
+    
+    // Scroll hasta arriba al cambiar de paso
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const generateDocuments = async () => {
@@ -151,12 +154,16 @@ export function GenerateComponent() {
 
   const handlePrevious = () => {
     setCurrentStep((prev) => Math.max(1, prev - 1));
+    // Scroll hasta arriba al retroceder
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleStepClick = (stepId: number) => {
     // Solo permitir navegar a pasos anteriores o al actual
     if (stepId <= currentStep) {
       setCurrentStep(stepId);
+      // Scroll hasta arriba al hacer clic en un paso
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -203,7 +210,7 @@ export function GenerateComponent() {
   ];
 
   return (
-    <div className=" p-6">
+    <div className="py-6">
       <div className="max-w-7xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold mb-2">

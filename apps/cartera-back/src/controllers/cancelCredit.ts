@@ -6,7 +6,8 @@ import {
   credit_cancelations,
   bad_debts,
   cuotas_credito,
-  montos_adicionales, // 👈 importar
+  montos_adicionales,
+  moras_credito, // 👈 importar
 } from "../database/db/schema";
 import { eq, and, lt, asc } from "drizzle-orm";
 
@@ -84,7 +85,7 @@ export async function getCreditWithCancellationDetails(
           cuota_interes: creditos.cuota_interes,
           seguro_10_cuotas: creditos.seguro_10_cuotas,
           membresias_pago: creditos.membresias_pago,
-          mora: creditos.mora,
+      
           otros: creditos.otros,
           tipo_credito: creditos.tipoCredito,
           observaciones: creditos.observaciones,
@@ -175,7 +176,7 @@ export async function getCreditWithCancellationDetails(
     );
 
     // 5) Mapeo de cuotas atrasadas (sin prorratear extras)
-    const items: CuotaExcelRow[] = cuotasAtrasadas.map((c) => {
+    const itemsPromises = cuotasAtrasadas.map(async (c) => {
       const fv =
         typeof c.fecha_vencimiento === "string"
           ? c.fecha_vencimiento
@@ -183,11 +184,12 @@ export async function getCreditWithCancellationDetails(
 
       const interes = new Big(r.credit.cuota_interes);
       const membresias = new Big(r.credit.membresias_pago);
-      const mora = new Big(r.credit.mora ?? "0");
+
       const otros = new Big(r.credit.otros ?? "0");
       const gps = new Big(r.credit.gps ?? "0");
       const servicios = new Big(r.credit.seguro_10_cuotas).add(new Big(r.credit.membresias_pago)).add(new Big(r.credit.gps ?? "0"));
-
+      const moraResult = await db.select({monto: moras_credito.monto_mora}).from(moras_credito).where(eq(moras_credito.credito_id, r.credit.id));
+      const mora = moraResult.length > 0 ? new Big(moraResult[0].monto as unknown as string) : new Big(0);
       const total_cancelar = interes.plus(servicios).plus(membresias).plus(mora).plus(otros);
 
       return {
@@ -200,9 +202,10 @@ export async function getCreditWithCancellationDetails(
         capital_pendiente: new Big(r.credit.capital).toFixed(2),
         total_cancelar: total_cancelar.toFixed(2),
         fecha_vencimiento: fv,
-        gps: gps.toFixed(2),
       };
     });
+    
+    const items: CuotaExcelRow[] = await Promise.all(itemsPromises);
 
     // 6) DTO final con extras
     const saldo_total = new Big(r.credit.deudatotal);

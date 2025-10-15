@@ -62,7 +62,7 @@ export async function createPlatformUserService(data: {
 
  
 const JWT_SECRET = process.env.JWT_SECRET || "supersecreto"; // ⚠️ ponelo en tu .env
-
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "supersecreto";
 export async function loginService(email: string, password: string) {
   // 1. Buscar usuario por email
   const [user] = await db
@@ -105,8 +105,8 @@ export async function loginService(email: string, password: string) {
     extraInfo = asesor;
   }
 
-  // 4. Generar token
-  const token = jwt.sign(
+  // 4. Generar Access Token (30m)
+  const accessToken = jwt.sign(
     {
       id: user.id,
       email: user.email,
@@ -115,11 +115,26 @@ export async function loginService(email: string, password: string) {
       asesor_id: user.asesor_id,
     },
     JWT_SECRET,
-    { expiresIn: "1h" }
+    { expiresIn: "30m" }
   );
 
-  return { token, user: { ...user, ...extraInfo } };
+  // 5. Generar Refresh Token (7 días)
+  const refreshToken = jwt.sign(
+    {
+      id: user.id,
+      role: user.role,
+    },
+    JWT_REFRESH_SECRET,
+    { expiresIn: "7d" }
+  );
+
+  return {
+    accessToken,
+    refreshToken,
+    user: { ...user, ...extraInfo },
+  };
 }
+
 
 
 export function verifyTokenService(token: string) {

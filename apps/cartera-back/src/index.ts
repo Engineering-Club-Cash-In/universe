@@ -14,8 +14,9 @@ app.use(cors())
 .use(routers.uploadRouter)
 .use(routers.sifcoRouter)
 .use(routers.authRouter)
+.use(routers.morasRouter)
 .listen(config.port)
 
-console.log (//vscode-app/usr/share/code/resources/app/out/vs/code/electron-sandbox/workbench/workbench.html(
+console.log (
   `🦊 Elysia Server is running at ${app.server?.hostname}:${app.server?.port}`
 );

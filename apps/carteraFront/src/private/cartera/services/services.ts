@@ -1,12 +1,15 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import axios  from "axios";
 import type { PagoFormValues } from "../hooks/registerPayment";
+import type { ReactNode } from "react";
 
 const API_URL = import.meta.env.VITE_BACK_URL  ||'https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site'; ;
 const api = axios.create({
   baseURL: API_URL,
 });
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
+const token = localStorage.getItem("accessToken");
+
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -253,6 +256,18 @@ export interface CreditoUsuarioPago {
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
   rubros: Rubro[];
+   mora: Mora | null;
+  deuda_total_con_mora: string;
+}
+export interface Mora {
+  mora_id: number;
+  credito_id: number;
+  activa: boolean;
+  porcentaje_mora: string;
+  monto_mora: string;
+  cuotas_atrasadas: number;
+  created_at: string;
+  updated_at?: string;
 }
 export interface Rubro {
   nombre_rubro: string;
@@ -305,6 +320,10 @@ export interface Asesor {
 }
  
 export interface AporteInversionista {
+  nombre: ReactNode;
+  emite_factura: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  cuota_inversionista(cuota_inversionista: any): unknown;
   credito_id: number;
   inversionista: {
     inversionista_id: number;
@@ -335,7 +354,7 @@ export const getCreditosPaginados = async (params: {
   page?: number;
   perPage?: number;
   numero_credito_sifco?: string;
-  estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION";
+  estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
   excel: boolean; // 👈 nuevo parámetro
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
@@ -347,7 +366,6 @@ export const getCreditosPaginados = async (params: {
       perPage: params.perPage ?? 10,
       estado: params.estado,
       excel: params.excel, // 👈 nuevo parámetro
-      // Solo manda el param si existe (así el backend no se lo traga vacío)
       ...(params.numero_credito_sifco && {
         numero_credito_sifco: params.numero_credito_sifco,
       }),
@@ -358,6 +376,18 @@ export const getCreditosPaginados = async (params: {
   excelUrl: string;
 }
 export interface PagoData {
+  numeroCredito: ReactNode;
+  usuarioNombre: ReactNode;
+  cuota: any;
+  creditoId: any;
+  capital(capital: any): unknown;
+  deudaTotal(deudaTotal: any): unknown;
+  abono_interes(abono_interes: any): unknown;
+  abono_iva_12(abono_iva_12: any): unknown;
+  abono_interes_ci(abono_interes_ci: any): unknown;
+  abono_iva_ci(abono_iva_ci: any): unknown;
+  abono_seguro(abono_seguro: any): unknown;
+  abono_gps(abono_gps: any): unknown;
   pago: {
     pago_id: number;
     credito_id: number;
@@ -1035,4 +1065,259 @@ export async function updateContaServiceFrontend(
 export async function getPlatformUsersServiceFrontend(): Promise<PlatformUser[]> {
   const { data: res } = await api.get("/auth/platform-users");
   return res.data;
+}
+
+
+export type EstadoCredito = "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
+
+export interface Mora {
+  mora_id: number;
+  credito_id: number;
+  monto_mora: string;
+  cuotas_atrasadas: number;
+  activa: boolean;
+  porcentaje_mora: string;
+  updated_at?: string;
+}
+
+export interface CreditoConMora {
+  credito_id: number;
+  numero_credito_sifco: string;
+  capital: string;
+  cuota: string;
+  plazo: number;
+  estado: EstadoCredito;
+  fecha_creacion: string;
+  observaciones?: string;
+  usuario: string;
+  usuario_nit: string;
+  usuario_categoria: string;
+  asesor: string;
+  monto_mora: string;
+  cuotas_atrasadas: number;
+  mora_activa: boolean;
+}
+
+export interface Condonacion {
+  condonacion_id: number;
+  credito_id: number;
+  numero_credito_sifco: string;
+  estado_credito: EstadoCredito;
+  capital: string;
+  usuario: string;
+  asesor: string;
+  motivo: string;
+  fecha: string;
+  usuario_email: string;
+}
+
+// ---------- Requests ----------
+export interface CreateMoraPayload {
+  credito_id: number;
+  monto_mora?: number;
+  cuotas_atrasadas?: number;
+}
+
+export interface UpdateMoraPayload {
+  credito_id?: number;
+  numero_credito_sifco?: string;
+  monto_cambio: number;
+  tipo: "INCREMENTO" | "DECREMENTO";
+  cuotas_atrasadas?: number;
+  activa?: boolean;
+}
+
+export interface CondonarMoraPayload {
+  credito_id: number;
+  motivo: string;
+  usuario_email: string;
+}
+
+// ---------- Services ----------
+
+// Crear mora
+export async function createMoraService(payload: CreateMoraPayload) {
+  const { data } = await api.post<{ success: boolean; mora: Mora }>(`/mora`, payload);
+  return data;
+}
+
+// Actualizar mora
+export async function updateMoraService(payload: UpdateMoraPayload) {
+  const { data } = await api.post<{ success: boolean; mora: Mora }>(`/mora/update`, payload);
+  return data;
+}
+
+// Procesar todas las moras automáticamente
+export async function procesarMorasService() {
+  const { data } = await api.post<{ success: boolean; message: string }>(`/moras/procesar`);
+  return data;
+}
+
+// Condonar mora
+export async function condonarMoraService(payload: CondonarMoraPayload) {
+  const { data } = await api.post<{ success: boolean; mora: Mora; condonacion: Condonacion }>(
+    `/mora/condonar`,
+    payload
+  );
+  return data;
+}
+
+// Listar créditos con mora
+export async function getCreditosWithMorasService(params?: {
+  numero_credito_sifco?: string;
+  cuotas_atrasadas?: number;
+  estado?: EstadoCredito;
+  excel?: boolean;
+}) {
+  const { data } = await api.get<{ success: boolean; data: CreditoConMora[]; excelUrl?: string }>(
+    `/moras/creditos`,
+    { params }
+  );
+  return data;
+}
+
+// Listar condonaciones
+export async function getCondonacionesMoraService(params?: {
+  numero_credito_sifco?: string;
+  usuario_email?: string;
+  fecha_desde?: string;
+  fecha_hasta?: string;
+  excel?: boolean;
+}) {
+  const { data } = await api.get<{ success: boolean; data: Condonacion[]; excelUrl?: string }>(
+    `/moras/condonaciones`,
+    { params }
+  );
+  return data;}
+
+// 🧾 Información de la cuota asociada
+// 🧾 Información de la cuota asociada
+export interface CuotaPago {
+  cuotaId: number;
+  numeroCuota: number;
+  fechaVencimiento: string;
+}
+
+// 📄 Información de la boleta
+export interface BoletaPago {
+  boletaId: number;
+  urlBoleta: string;
+}
+
+// 💰 Inversionista vinculado al pago
+export interface InversionistaPago {
+  inversionistaId: number;
+  nombreInversionista: string;
+  emiteFactura: boolean;
+  abonoCapital: number;
+  abonoInteres: number;
+  abonoIva: number;
+  isr: number;
+  cuotaPago: number | null;
+  montoAportado: number;
+  porcentajeParticipacion: number;
+}
+
+// 💳 Información del crédito asociado
+export interface CreditoPago {
+  creditoId: number;
+  numeroCreditoSifco: string;
+  capital: number;
+  deudaTotal: number;
+  statusCredit: string;
+  porcentajeInteres: number;
+  fechaCreacion: string;
+}
+
+// 🧍‍♂️ Información del usuario del crédito
+export interface UsuarioPago {
+  usuarioId: number;
+  nombre: string;
+  nit: string;
+}
+
+// 💵 Objeto principal del pago
+export interface PagoDataInvestor {
+  pagoId: number;
+  montoBoleta: number;
+  numeroAutorizacion: string | null;
+  fechaPago: string;
+
+  // 🆕 Campos adicionales del pago
+  mora: number | null;
+  otros: number | null;
+  reserva: number | null;
+  membresias: number | null;
+  observaciones: string | null;
+
+  // 💰 Abonos asociados directamente al pago
+  abono_interes: number;
+  abono_iva_12: number;
+  abono_seguro: number;
+  abono_gps: number;
+  abono_capital: number;
+
+  // 🔗 Relaciones
+  credito: CreditoPago;
+  cuota: CuotaPago | null;
+  usuario: UsuarioPago;
+  inversionistas: InversionistaPago[];
+  boleta: BoletaPago | null;
+}
+
+// 📊 Respuesta del servicio
+export interface GetPagosResponse {
+  success: boolean;
+  message: string;
+  page: number;
+  pageSize: number;
+  total: number;
+  data: PagoDataInvestor[];
+  excelUrl?: string;
+}
+
+// ⚙️ Parámetros del query
+export interface GetPagosParams {
+  page?: number;
+  pageSize?: number;
+  numeroCredito?: string;
+  dia?: number;
+  mes?: number;
+  anio?: number;
+  inversionistaId?: number;
+  excel?: boolean;
+  usuarioNombre?: string;
+}
+
+/**
+ * 🔹 Servicio que obtiene los pagos junto con su información completa
+ * (crédito, usuario, cuota, inversionistas, boleta, etc.)
+ */
+export async function getPagosConInversionistasService(
+  params: GetPagosParams
+): Promise<GetPagosResponse> {
+  const { data } = await api.get<GetPagosResponse>(
+    `/reportes/pagos-inversionistas`,
+    { params }
+  );
+
+  // 🔄 Aseguramos que el backend siempre devuelva tipos consistentes
+  const parsedData: GetPagosResponse = {
+    ...data,
+    data: (data.data || []).map((pago) => ({
+      ...pago,
+      mora: pago.mora ?? 0,
+      otros: pago.otros ?? 0,
+      reserva: pago.reserva ?? 0,
+      membresias: pago.membresias ?? 0,
+      observaciones: pago.observaciones ?? null,
+      abono_interes: Number(pago.abono_interes ?? 0),
+      abono_iva_12: Number(pago.abono_iva_12 ?? 0),
+      abono_seguro: Number(pago.abono_seguro ?? 0),
+      abono_gps: Number(pago.abono_gps ?? 0),
+      inversionistas: pago.inversionistas ?? [],
+    })),
+  };
+
+  return parsedData;
 }

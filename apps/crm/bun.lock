@@ -27,9 +27,7 @@
     "apps/server": {
       "name": "server",
       "dependencies": {
-        "@ai-sdk/deepseek": "^1.0.18",
-        "@ai-sdk/openai": "^2.0.32",
-        "@aws-sdk/client-rekognition": "^3.888.0",
+        "@aws-sdk/client-rekognition": "^3.891.0",
         "@aws-sdk/client-s3": "^3.850.0",
         "@aws-sdk/s3-request-presigner": "^3.850.0",
         "@modelcontextprotocol/sdk": "^1.0.0",

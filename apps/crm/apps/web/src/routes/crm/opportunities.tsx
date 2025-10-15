@@ -10,6 +10,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	AlertCircle,
 	Building,
 	Calendar,
 	Clock,
@@ -29,6 +30,8 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { NotesTimeline } from "@/components/notes-timeline";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +50,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	Select,
 	SelectContent,
@@ -60,7 +64,6 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
@@ -396,11 +399,13 @@ function RouteComponent() {
 		defaultValues: {
 			title: "",
 			leadId: "none",
+			vehicleId: "",
+			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			value: "",
 			stageId: "",
 			probability: 0,
 			expectedCloseDate: "",
-			vendorId: "",
+			vendorId: "none",
 			notes: "",
 		},
 		validators: {
@@ -419,8 +424,10 @@ function RouteComponent() {
 			createOpportunityMutation.mutate({
 				...value,
 				stageId: value.stageId || firstStage?.id || "",
+				creditType: value.creditType,
 				leadId:
 					value.leadId && value.leadId !== "none" ? value.leadId : undefined,
+				vehicleId: value.vehicleId || undefined,
 				value: value.value || undefined,
 				expectedCloseDate: value.expectedCloseDate || undefined,
 				notes: value.notes || undefined,
@@ -469,8 +476,10 @@ function RouteComponent() {
 	const createOpportunityMutation = useMutation({
 		mutationFn: (input: {
 			title: string;
+			creditType: "autocompra" | "sobre_vehiculo";
 			leadId?: string;
 			companyId?: string;
+			vehicleId?: string;
 			value?: string;
 			stageId: string;
 			probability?: number;
@@ -925,6 +934,35 @@ function RouteComponent() {
 
 							<div className="grid grid-cols-2 gap-4">
 								<div>
+									<createOpportunityForm.Field name="creditType">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>
+													Tipo de Crédito <span className="text-red-500">*</span>
+												</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(
+															value as "autocompra" | "sobre_vehiculo",
+														)
+													}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar tipo" />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="autocompra">Autocompra</SelectItem>
+														<SelectItem value="sobre_vehiculo">
+															Sobre Vehículo
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</createOpportunityForm.Field>
+								</div>
+								<div>
 									<createOpportunityForm.Field name="leadId">
 										{(field) => (
 											<div className="space-y-2">
@@ -945,6 +983,26 @@ function RouteComponent() {
 														))}
 													</SelectContent>
 												</Select>
+											</div>
+										)}
+									</createOpportunityForm.Field>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div>
+									<createOpportunityForm.Field name="vehicleId">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Vehículo (Opcional)</Label>
+												<Input
+													id={field.name}
+													name={field.name}
+													value={field.state.value}
+													onBlur={field.handleBlur}
+													onChange={(e) => field.handleChange(e.target.value)}
+													placeholder="ID del vehículo..."
+												/>
 											</div>
 										)}
 									</createOpportunityForm.Field>
@@ -988,7 +1046,7 @@ function RouteComponent() {
 													Etapa Inicial <span className="text-red-500">*</span>
 												</Label>
 												<Select
-													value={field.state.value}
+													value={field.state.value || undefined}
 													onValueChange={(value) => field.handleChange(value)}
 												>
 													<SelectTrigger
@@ -1001,11 +1059,13 @@ function RouteComponent() {
 														<SelectValue placeholder="Seleccionar etapa" />
 													</SelectTrigger>
 													<SelectContent>
-														{salesStagesQuery.data?.map((stage) => (
-															<SelectItem key={stage.id} value={stage.id}>
-																{stage.name} ({stage.closurePercentage}%)
-															</SelectItem>
-														))}
+														{salesStagesQuery.data
+															?.filter((stage) => stage.id && stage.id !== "")
+															.map((stage) => (
+																<SelectItem key={stage.id} value={stage.id}>
+																	{stage.name} ({stage.closurePercentage}%)
+																</SelectItem>
+															))}
 													</SelectContent>
 												</Select>
 												{field.state.meta.errors.map((error) => (
@@ -1054,7 +1114,7 @@ function RouteComponent() {
 													<SelectValue placeholder="Seleccionar vendedor" />
 												</SelectTrigger>
 												<SelectContent>
-													<SelectItem value="">Sin vendedor asignado</SelectItem>
+													<SelectItem value="none">Sin vendedor asignado</SelectItem>
 													{vendorsQuery.data?.map((vendor: any) => (
 														<SelectItem key={vendor.id} value={vendor.id}>
 															{vendor.name} {vendor.vendorType === "empresa" ? `(${vendor.companyName})` : ""} - {vendor.dpi}
@@ -1072,13 +1132,14 @@ function RouteComponent() {
 									{(field) => (
 										<div className="space-y-2">
 											<Label htmlFor={field.name}>Notas</Label>
-											<Input
+											<Textarea
 												id={field.name}
 												name={field.name}
 												value={field.state.value}
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
 												placeholder="Notas adicionales sobre esta oportunidad..."
+												rows={3}
 											/>
 										</div>
 									)}
@@ -1361,7 +1422,7 @@ function RouteComponent() {
 
 				{/* Edit Opportunity Dialog */}
 				<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-					<DialogContent className="min-w-[600px] max-w-4xl">
+					<DialogContent className="min-w-[600px] max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700">
 						<DialogHeader>
 							<DialogTitle>Editar Oportunidad</DialogTitle>
 						</DialogHeader>
@@ -1532,13 +1593,14 @@ function RouteComponent() {
 									{(field) => (
 										<div className="space-y-2">
 											<Label htmlFor={field.name}>Notas</Label>
-											<Input
+											<Textarea
 												id={field.name}
 												name={field.name}
 												value={field.state.value}
 												onBlur={field.handleBlur}
 												onChange={(e) => field.handleChange(e.target.value)}
 												placeholder="Notas adicionales sobre esta oportunidad..."
+												rows={3}
 											/>
 										</div>
 									)}
@@ -1573,6 +1635,17 @@ function RouteComponent() {
 								)}
 							</editOpportunityForm.Subscribe>
 						</form>
+
+						{/* Notes Timeline */}
+						{selectedOpportunity && (
+							<div className="mt-6 border-t pt-6">
+								<NotesTimeline
+									entityType="opportunity"
+									entityId={selectedOpportunity.id}
+									title="Timeline de Notas"
+								/>
+							</div>
+						)}
 					</DialogContent>
 				</Dialog>
 
@@ -1756,7 +1829,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 
 	// Delete mutation
 	const deleteMutation = useMutation({
-		mutationFn: (documentId: string) => 
+		mutationFn: (documentId: string) =>
 			client.deleteOpportunityDocument({ documentId }),
 		onSuccess: () => {
 			toast.success("Documento eliminado exitosamente");

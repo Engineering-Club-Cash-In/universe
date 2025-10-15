@@ -144,3 +144,56 @@ body {
 		-moz-appearance: textfield;
 	}
 }
+
+/* Print styles para generar PDF */
+@media print {
+	/* Ocultar navegación y sidebar */
+	header,
+	nav,
+	aside,
+	.sidebar,
+	[data-sidebar] {
+		display: none !important;
+	}
+
+	/* Ocultar botones y acciones */
+	button,
+	.no-print {
+		display: none !important;
+	}
+
+	/* Ocultar la lista de cotizaciones guardadas al imprimir */
+	.print\\:hidden {
+		display: none !important;
+	}
+
+	/* Ajustar el contenedor principal */
+	main {
+		margin: 0 !important;
+		padding: 1rem !important;
+		max-width: 100% !important;
+	}
+
+	/* Asegurar que las tablas se vean bien */
+	table {
+		page-break-inside: auto;
+	}
+
+	tr {
+		page-break-inside: avoid;
+		page-break-after: auto;
+	}
+
+	/* Optimizar colores para impresión */
+	* {
+		color: black !important;
+		background: white !important;
+	}
+
+	/* Mantener bordes de tablas */
+	table,
+	th,
+	td {
+		border: 1px solid #ddd !important;
+	}
+}

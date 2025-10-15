@@ -15,6 +15,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { PERMISSIONS } from "server/src/types/roles";
+import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	Select,
 	SelectContent,
@@ -1083,13 +1085,14 @@ function RouteComponent() {
 											{(field) => (
 												<div className="space-y-2">
 													<Label htmlFor={field.name}>Notas</Label>
-													<Input
+													<Textarea
 														id={field.name}
 														name={field.name}
 														value={field.state.value}
 														onBlur={field.handleBlur}
 														onChange={(e) => field.handleChange(e.target.value)}
 														placeholder="Notas adicionales sobre este lead..."
+														rows={3}
 													/>
 												</div>
 											)}
@@ -1743,12 +1746,19 @@ function RouteComponent() {
 							{/* Notes Section - Full Width */}
 							{selectedLead.notes && (
 								<div className="space-y-2">
-									<Label className="font-medium text-sm text-muted-foreground">Notas</Label>
+									<Label className="font-medium text-sm text-muted-foreground">Notas (Antiguas)</Label>
 									<p className="rounded-md bg-muted p-4 text-sm">
 										{selectedLead.notes}
 									</p>
 								</div>
 							)}
+
+							{/* Notes Timeline */}
+							<NotesTimeline
+								entityType="lead"
+								entityId={selectedLead.id}
+								title="Timeline de Notas"
+							/>
 						</div>
 					)}
 				</DialogContent>

@@ -1,18 +1,35 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
 import { PERMISSIONS } from "server/src/types/roles";
+import {
+	LayoutDashboard,
+	Users,
+	Building2,
+	Briefcase,
+	UserCircle,
+	Car,
+	Gavel,
+	DollarSign,
+	BarChart3,
+	Settings,
+	FileText,
+	ChevronDown,
+	TrendingUp,
+	Calculator,
+	MessageSquare,
+} from "lucide-react";
 
 import { ModeToggle } from "./mode-toggle";
 import {
-	NavigationMenu,
-	NavigationMenuContent,
-	NavigationMenuItem,
-	NavigationMenuLink,
-	NavigationMenuList,
-	NavigationMenuTrigger,
-} from "./ui/navigation-menu";
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+import { Button } from "./ui/button";
 import UserMenu from "./user-menu";
 
 export default function Header() {
@@ -21,148 +38,196 @@ export default function Header() {
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session,
 	});
+	const router = useRouterState();
+	const currentPath = router.location.pathname;
 
 	const userRole = userProfile.data?.role;
 
+	const isActive = (path: string) => currentPath.startsWith(path);
+
 	return (
-		<div className="border-b">
+		<div className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
 			<div className="flex h-16 items-center px-6">
-				<div className="flex items-center space-x-6">
-					<div className="font-bold text-xl">
-						<Link to="/" className="hover:text-primary">
-							Club Cash In CRM
-						</Link>
-					</div>
+				<div className="flex items-center gap-8">
+					{/* Logo */}
+					<Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+						<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+							<TrendingUp className="h-5 w-5" />
+						</div>
+						<span className="font-bold text-lg hidden sm:inline-block">CCI CRM</span>
+					</Link>
 
-					<NavigationMenu>
-						<NavigationMenuList>
-							{!session && (
-								<NavigationMenuItem>
-									<Link to="/">
-										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-											Inicio
-										</NavigationMenuLink>
-									</Link>
-								</NavigationMenuItem>
-							)}
+					{/* Navigation */}
+					<nav className="flex items-center gap-1">
+						{!session && (
+							<Button variant="ghost" size="sm" asChild>
+								<Link to="/">
+									<LayoutDashboard className="h-4 w-4 mr-2" />
+									Inicio
+								</Link>
+							</Button>
+						)}
 
-							{session && (
-								<NavigationMenuItem>
-									<Link to="/dashboard">
-										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-											Tablero
-										</NavigationMenuLink>
-									</Link>
-								</NavigationMenuItem>
-							)}
+						{session && (
+							<Button
+								variant={isActive("/dashboard") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/dashboard">
+									<LayoutDashboard className="h-4 w-4 mr-2" />
+									Tablero
+								</Link>
+							</Button>
+						)}
 
-							{/* CRM Navigation for both admin and sales */}
-							{session && userRole && PERMISSIONS.canAccessCRM(userRole) && (
-								<>
-									<NavigationMenuItem>
-										<Link to="/crm/leads">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Prospectos
-											</NavigationMenuLink>
+						{/* CRM Dropdown */}
+						{session && userRole && PERMISSIONS.canAccessCRM(userRole) && (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/crm") || isActive("/vehicles") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Briefcase className="h-4 w-4" />
+										CRM
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-56">
+									<DropdownMenuItem asChild>
+										<Link to="/crm/leads" className="cursor-pointer">
+											<UserCircle className="h-4 w-4 mr-2" />
+											Prospectos
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/crm/opportunities">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Oportunidades
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/opportunities" className="cursor-pointer">
+											<TrendingUp className="h-4 w-4 mr-2" />
+											Oportunidades
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/crm/clients">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Clientes
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/clients" className="cursor-pointer">
+											<Users className="h-4 w-4 mr-2" />
+											Clientes
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/crm/companies">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Empresas
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/companies" className="cursor-pointer">
+											<Building2 className="h-4 w-4 mr-2" />
+											Empresas
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/vehicles">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Vehículos
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/vendors" className="cursor-pointer">
+											<UserCircle className="h-4 w-4 mr-2" />
+											Vendedores
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-												<Link to="/vehicles/auction-vehicles">
-													<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-													Carros en Remate
-													</NavigationMenuLink>
-												</Link>
-												</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/crm/vendors">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Vendedores
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									<DropdownMenuItem asChild>
+										<Link to="/crm/quoter" className="cursor-pointer">
+											<Calculator className="h-4 w-4 mr-2" />
+											Cotizador
 										</Link>
-									</NavigationMenuItem>
-								</>
-							)}
+									</DropdownMenuItem>
+									<DropdownMenuSeparator />
+									{userRole && PERMISSIONS.canAccessWhatsApp(userRole) && (
+										<DropdownMenuItem asChild>
+											<Link to="/crm/whatsapp" className="cursor-pointer">
+												<MessageSquare className="h-4 w-4 mr-2" />
+												WhatsApp
+											</Link>
+										</DropdownMenuItem>
+									)}
+									<DropdownMenuSeparator />
+									<DropdownMenuItem asChild>
+										<Link to="/vehicles" className="cursor-pointer">
+											<Car className="h-4 w-4 mr-2" />
+											Vehículos
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/vehicles/auction-vehicles" className="cursor-pointer">
+											<Gavel className="h-4 w-4 mr-2" />
+											Carros en Remate
+										</Link>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
 
-							{/* Cobros Navigation */}
-							{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
-								<NavigationMenuItem>
-									<Link to="/cobros">
-										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-											Cobros
-										</NavigationMenuLink>
-									</Link>
-								</NavigationMenuItem>
-							)}
+						{/* Cobros */}
+						{session && userRole && PERMISSIONS.canAccessCobros(userRole) && (
+							<Button
+								variant={isActive("/cobros") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/cobros">
+									<DollarSign className="h-4 w-4 mr-2" />
+									Cobros
+								</Link>
+							</Button>
+						)}
 
-							{/* Analyst Navigation */}
-							{session && userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
-								<NavigationMenuItem>
-									<Link to="/crm/analysis">
-										<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-											Análisis
-										</NavigationMenuLink>
-									</Link>
-								</NavigationMenuItem>
-							)}
+						{/* Análisis */}
+						{session && userRole && PERMISSIONS.canAccessAnalysis(userRole) && (
+							<Button
+								variant={isActive("/crm/analysis") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/crm/analysis">
+									<BarChart3 className="h-4 w-4 mr-2" />
+									Análisis
+								</Link>
+							</Button>
+						)}
 
-							{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
-								<>
-									<NavigationMenuItem>
-										<Link to="/admin/users">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Usuarios
-											</NavigationMenuLink>
+						{/* Admin Dropdown */}
+						{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/admin") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Settings className="h-4 w-4" />
+										Admin
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-48">
+									<DropdownMenuItem asChild>
+										<Link to="/admin/users" className="cursor-pointer">
+											<Users className="h-4 w-4 mr-2" />
+											Usuarios
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/admin/settings">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Configuración
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/admin/settings" className="cursor-pointer">
+											<Settings className="h-4 w-4 mr-2" />
+											Configuración
 										</Link>
-									</NavigationMenuItem>
-									<NavigationMenuItem>
-										<Link to="/admin/reports">
-											<NavigationMenuLink className="group inline-flex h-9 w-max items-center justify-center rounded-md bg-background px-4 py-2 font-medium text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground focus:outline-none disabled:pointer-events-none disabled:opacity-50">
-												Reportes
-											</NavigationMenuLink>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/admin/reports" className="cursor-pointer">
+											<FileText className="h-4 w-4 mr-2" />
+											Reportes
 										</Link>
-									</NavigationMenuItem>
-								</>
-							)}
-						</NavigationMenuList>
-					</NavigationMenu>
+									</DropdownMenuItem>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
+					</nav>
 				</div>
 
-				<div className="ml-auto flex items-center space-x-4">
+				{/* Right side */}
+				<div className="ml-auto flex items-center gap-2">
 					<ModeToggle />
 					<UserMenu />
 				</div>

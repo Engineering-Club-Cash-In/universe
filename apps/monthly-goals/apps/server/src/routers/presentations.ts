@@ -211,6 +211,7 @@ export const getAvailableGoalsForPresentation = protectedProcedure
 				// Goal template info
 				goalTemplateName: goalTemplates.name,
 				goalTemplateUnit: goalTemplates.unit,
+				isInverse: goalTemplates.isInverse,
 				// User and organizational info
 				userName: user.name,
 				userEmail: user.email,
@@ -277,6 +278,7 @@ export const getPresentationSubmissions = protectedProcedure
 				// Goal template info
 				goalTemplateName: goalTemplates.name,
 				goalTemplateUnit: goalTemplates.unit,
+				isInverse: goalTemplates.isInverse,
 				// User info
 				userName: user.name,
 				userEmail: user.email,
@@ -325,6 +327,7 @@ async function getPresentationData(presentationId: string) {
 			goalDescription: monthlyGoals.description,
 			goalTemplateName: goalTemplates.name,
 			goalTemplateUnit: goalTemplates.unit,
+			isInverse: goalTemplates.isInverse,
 			userName: user.name,
 			userEmail: user.email,
 			areaName: areas.name,
@@ -343,25 +346,20 @@ async function getPresentationData(presentationId: string) {
 }
 
 // Helper function to calculate progress percentage
-function getProgressPercentage(target: string, achieved: string, goalName?: string) {
+function getProgressPercentage(target: string, achieved: string, isInverse?: boolean) {
 	const targetNum = parseFloat(target);
 	const achievedNum = parseFloat(achieved);
-	
+
 	if (targetNum <= 0) return 0;
-	
-	// Detectar meta inversa por nombre (palabras clave que indican "reducir es mejor")
-	const inversaKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
-	const isInverseMeta = goalName ? 
-		inversaKeywords.some(keyword => goalName.toLowerCase().includes(keyword)) : 
-		false;
-	
-	if (isInverseMeta) {
-		// Para metas inversas: targetValue = logrado, submittedValue = meta máxima
-		// Si logrado <= meta = 100%, si logrado > meta = menos %
-		if (targetNum <= achievedNum) {
+
+	if (isInverse) {
+		// Para metas inversas (reducción): menor valor logrado = mejor progreso
+		// Si logrado <= objetivo = 100%, si logrado > objetivo = porcentaje reducido
+		if (achievedNum <= targetNum) {
 			return 100; // Cumplió o superó la meta de reducción
 		} else {
-			return Math.max((achievedNum / targetNum) * 100, 0);
+			// Si excede el objetivo, calcular qué porcentaje representa
+			return Math.max((targetNum / achievedNum) * 100, 0);
 		}
 	} else {
 		// Para metas normales: mayor valor logrado = mejor progreso
@@ -432,14 +430,14 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 						</div>
 						<div class="p-6 bg-gray-50 rounded-lg text-center">
 							<div class="text-3xl font-bold text-green-600">
-								${submissions.filter(s => getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.goalTemplateName) >= 80).length}
+								${submissions.filter(s => getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.isInverse) >= 80).length}
 							</div>
 							<div class="text-lg text-gray-600">Metas Exitosas</div>
 						</div>
 						<div class="p-6 bg-gray-50 rounded-lg text-center">
 							<div class="text-3xl font-bold text-yellow-600">
 								${submissions.filter(s => {
-									const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.goalTemplateName);
+									const pct = getProgressPercentage(s.targetValue || "0", s.submittedValue || "0", s.isInverse);
 									return pct >= 50 && pct < 80;
 								}).length}
 							</div>
@@ -493,30 +491,30 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 					
 					// Generate HTML for goals in this chunk
 					const goalsHTML = goalChunk.map(goal => {
-						const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0", goal.goalTemplateName);
-						const statusClass = percentage >= 80 ? 'text-green-600' : 
+						const percentage = getProgressPercentage(goal.targetValue || "0", goal.submittedValue || "0", goal.isInverse);
+						const statusClass = percentage >= 80 ? 'text-green-600' :
 										   percentage >= 50 ? 'text-yellow-600' : 'text-red-600';
-						const statusText = percentage >= 80 ? 'Exitoso' : 
+						const statusText = percentage >= 80 ? 'Exitoso' :
 										  percentage >= 50 ? 'En Progreso' : 'Necesita Atención';
-						
-						// Detectar si es meta inversa para mostrar labels correctos
-						const inversaKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
-						const isInverseMeta = goal.goalTemplateName ? 
-							inversaKeywords.some(keyword => goal.goalTemplateName.toLowerCase().includes(keyword)) : 
-							false;
-						
+
+						// Para metas normales: submittedValue es lo logrado, targetValue es el objetivo
+						// Para metas inversas: TAMBIÉN submittedValue es lo logrado, targetValue es la meta
+						const logradoValue = goal.submittedValue;
+						const metaValue = goal.targetValue;
+						const metaLabel = goal.isInverse ? 'Meta (máx)' : 'Objetivo';
+
 						return `
 							<div class="card p-6 min-h-[280px] flex flex-col justify-between">
 								<div>
 									<h4 class="text-lg font-bold mb-4 leading-tight">${goal.goalTemplateName}</h4>
 									<div class="grid grid-cols-2 gap-4 text-center mb-6">
 										<div>
-											<div class="text-xl font-bold text-blue-600 break-words">${parseFloat(isInverseMeta ? goal.targetValue : goal.submittedValue).toLocaleString()}</div>
+											<div class="text-xl font-bold text-blue-600 break-words">${parseFloat(logradoValue).toLocaleString()}</div>
 											<div class="text-sm text-gray-600">Logrado</div>
 										</div>
 										<div>
-											<div class="text-xl font-bold text-gray-600 break-words">${parseFloat(isInverseMeta ? goal.submittedValue : goal.targetValue).toLocaleString()}</div>
-											<div class="text-sm text-gray-600">${isInverseMeta ? 'Meta (máx)' : 'Objetivo'}</div>
+											<div class="text-xl font-bold text-gray-600 break-words">${parseFloat(metaValue).toLocaleString()}</div>
+											<div class="text-sm text-gray-600">${metaLabel}</div>
 										</div>
 									</div>
 								</div>
@@ -577,7 +575,7 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 						<div class="card text-center">
 							<div class="pt-6 p-6">
 								<div class="text-4xl font-bold text-green-600 mb-2">
-									${submissions.filter(s => getProgressPercentage(s.targetValue, s.submittedValue, s.goalTemplateName) >= 80).length}
+									${submissions.filter(s => getProgressPercentage(s.targetValue, s.submittedValue, s.isInverse) >= 80).length}
 								</div>
 								<div class="text-lg font-bold">Metas Exitosas</div>
 								<div class="text-gray-600">≥80% cumplimiento</div>
@@ -587,7 +585,7 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 							<div class="pt-6 p-6">
 								<div class="text-4xl font-bold text-yellow-600 mb-2">
 									${submissions.filter(s => {
-										const pct = getProgressPercentage(s.targetValue, s.submittedValue, s.goalTemplateName);
+										const pct = getProgressPercentage(s.targetValue, s.submittedValue, s.isInverse);
 										return pct >= 50 && pct < 80;
 									}).length}
 								</div>
@@ -598,7 +596,7 @@ function generatePresentationHTML(presentation: any, submissions: any[]) {
 						<div class="card text-center">
 							<div class="pt-6 p-6">
 								<div class="text-4xl font-bold text-red-600 mb-2">
-									${submissions.filter(s => getProgressPercentage(s.targetValue, s.submittedValue, s.goalTemplateName) < 50).length}
+									${submissions.filter(s => getProgressPercentage(s.targetValue, s.submittedValue, s.isInverse) < 50).length}
 								</div>
 								<div class="text-lg font-bold">Necesitan Atención</div>
 								<div class="text-gray-600">&lt;50% cumplimiento</div>
@@ -758,12 +756,12 @@ export async function generatePDF(presentationId: string, baseUrl: string = "htt
 		await fs.promises.writeFile('/tmp/presentation-debug.html', htmlContent);
 		console.log('HTML saved to /tmp/presentation-debug.html for debugging');
 		
-		browser = await puppeteer.launch({ 
+		browser = await puppeteer.launch({
 			headless: true,
-			executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+			executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
 			args: [
-				'--no-sandbox', 
-				'--disable-setuid-sandbox', 
+				'--no-sandbox',
+				'--disable-setuid-sandbox',
 				'--disable-dev-shm-usage',
 				'--disable-gpu',
 				'--disable-web-security',

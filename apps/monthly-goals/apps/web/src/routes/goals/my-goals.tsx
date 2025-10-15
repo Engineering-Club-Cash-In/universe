@@ -8,7 +8,6 @@ import {
   DataTable,
   createSortableHeader,
   createFilterableHeader,
-  createActionsColumn,
 } from "@/components/ui/data-table";
 import { Edit } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -184,11 +183,22 @@ function MyGoalsPage() {
   cell: ({ row }) => {
     const target = parseFloat(row.original.targetValue);
     const achieved = parseFloat(row.original.achievedValue);
+    const isInverse = row.original.isInverse;
 
     let percentage = 0;
 
     if (!isNaN(target) && target > 0) {
-      percentage = (achieved / target) * 100;
+      if (isInverse) {
+        // Para metas inversas: menor o igual = 100%
+        if (achieved <= target) {
+          percentage = 100;
+        } else {
+          percentage = Math.max((target / achieved) * 100, 0);
+        }
+      } else {
+        // Para metas normales: mayor es mejor
+        percentage = (achieved / target) * 100;
+      }
     }
 
     const clamped = Math.min(percentage, 100);
@@ -211,7 +221,20 @@ function MyGoalsPage() {
         cell: ({ row }) => {
           const target = parseFloat(row.original.targetValue);
           const achieved = parseFloat(row.original.achievedValue);
-          const percentage = target > 0 ? (achieved / target) * 100 : 0;
+          const isInverse = row.original.isInverse;
+
+          let percentage = 0;
+          if (target > 0) {
+            if (isInverse) {
+              if (achieved <= target) {
+                percentage = 100;
+              } else {
+                percentage = Math.max((target / achieved) * 100, 0);
+              }
+            } else {
+              percentage = (achieved / target) * 100;
+            }
+          }
 
           return getStatusBadge(
             percentage,
@@ -224,7 +247,21 @@ function MyGoalsPage() {
 
           const target = parseFloat(row.original.targetValue);
           const achieved = parseFloat(row.original.achievedValue);
-          const percentage = target > 0 ? (achieved / target) * 100 : 0;
+          const isInverse = row.original.isInverse;
+
+          let percentage = 0;
+          if (target > 0) {
+            if (isInverse) {
+              if (achieved <= target) {
+                percentage = 100;
+              } else {
+                percentage = Math.max((target / achieved) * 100, 0);
+              }
+            } else {
+              percentage = (achieved / target) * 100;
+            }
+          }
+
           const status = getStatusText(
             percentage,
             row.original.successThreshold,
@@ -234,22 +271,33 @@ function MyGoalsPage() {
           return value.includes(status);
         },
       },
-      createActionsColumn<any>([
-        {
-          label: "Actualizar",
-          icon: Edit,
-          onClick: handleUpdate,
-          show: (goal) => {
-            return (
-              canEditGoals &&
-              (["super_admin", "department_manager", "area_lead"].includes(
-                session?.user?.role || ""
-              ) ||
-                goal.userEmail === session?.user?.email)
-            );
-          },
+      {
+        id: "actions",
+        header: "Acciones",
+        cell: ({ row }) => {
+          const goal = row.original;
+          const canUpdate =
+            canEditGoals &&
+            (["super_admin", "department_manager", "area_lead"].includes(
+              session?.user?.role || ""
+            ) ||
+              goal.userEmail === session?.user?.email);
+
+          if (!canUpdate) return null;
+
+          return (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleUpdate(goal)}
+              className="flex items-center gap-2"
+            >
+              <Edit className="h-4 w-4" />
+              Actualizar
+            </Button>
+          );
         },
-      ]),
+      },
     ],
     [canEditGoals, session]
   );
@@ -279,12 +327,17 @@ function MyGoalsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Mis Metas</h1>
+      <div className="space-y-2">
+        <h1 className="text-2xl font-semibold">Actualizar Progreso</h1>
+        <p className="text-gray-600 dark:text-gray-400">
+          Registra y actualiza el progreso de tus metas mensuales. Aquí puedes actualizar los valores logrados y el estado de cada meta asignada.
+        </p>
+      </div>
 
+      <div className="flex items-center justify-end">
         <div className="flex items-end gap-4">
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-gray-700">Mes</Label>
+            <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Mes</Label>
             <Select
               value={selectedMonth.toString()}
               onValueChange={(value) => setSelectedMonth(parseInt(value))}
@@ -303,7 +356,7 @@ function MyGoalsPage() {
           </div>
 
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-gray-700">Año</Label>
+            <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Año</Label>
             <Select
               value={selectedYear.toString()}
               onValueChange={(value) => setSelectedYear(parseInt(value))}
@@ -343,64 +396,182 @@ function MyGoalsPage() {
 
       {/* Update Goal Dialog */}
       <Dialog open={isUpdateDialogOpen} onOpenChange={setIsUpdateDialogOpen}>
-        <DialogContent className="space-y-6">
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              Actualizar Meta: {updatingGoal?.goalTemplateName}
-            </DialogTitle>
+            <DialogTitle className="text-xl">Actualizar Progreso de Meta</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleUpdateSubmit} className="space-y-6">
-            <div className="bg-gray-50 p-4 rounded-md">
-              <div className="text-sm text-gray-600">
-                <strong>Objetivo:</strong> {updatingGoal?.targetValue}{" "}
-                {updatingGoal?.goalTemplateUnit || "unidades"}
+
+          {updatingGoal && (
+            <form onSubmit={handleUpdateSubmit} className="space-y-6">
+              {/* Context Card */}
+              <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+                <CardContent className="pt-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium uppercase">Empleado</p>
+                      <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">{updatingGoal.userName}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium uppercase">Meta</p>
+                      <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">{updatingGoal.goalTemplateName}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium uppercase">Área / Departamento</p>
+                      <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">{updatingGoal.areaName} / {updatingGoal.departmentName}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium uppercase">Período</p>
+                      <p className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                        {months.find(m => m.value === selectedMonth)?.label} {selectedYear}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Progress Section */}
+              <div className="grid grid-cols-2 gap-4">
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1">
+                      {updatingGoal.isInverse ? "Meta (máx)" : "Objetivo"}
+                    </p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                      {parseFloat(updatingGoal.targetValue).toLocaleString()}
+                      <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                        {updatingGoal.goalTemplateUnit || "unidades"}
+                      </span>
+                    </p>
+                    {updatingGoal.isInverse && (
+                      <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
+                        Meta de reducción: menor es mejor
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent className="pt-6">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium uppercase mb-1">Logrado Actual</p>
+                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                      {parseFloat(updatingGoal.achievedValue).toLocaleString()}
+                      <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                        {updatingGoal.goalTemplateUnit || "unidades"}
+                      </span>
+                    </p>
+                  </CardContent>
+                </Card>
               </div>
-              <div className="text-sm text-gray-600">
-                <strong>Actual:</strong> {updatingGoal?.achievedValue}{" "}
-                {updatingGoal?.goalTemplateUnit || "unidades"}
+
+              {/* Progress Bar */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-gray-700 dark:text-gray-300">Progreso</span>
+                  <span className="font-bold text-gray-900 dark:text-gray-100">
+                    {(() => {
+                      const target = parseFloat(updatingGoal.targetValue);
+                      const achieved = parseFloat(updatingGoal.achievedValue);
+                      const isInverse = updatingGoal.isInverse;
+
+                      let percentage = 0;
+                      if (target > 0) {
+                        if (isInverse) {
+                          if (achieved <= target) {
+                            percentage = 100;
+                          } else {
+                            percentage = Math.max((target / achieved) * 100, 0);
+                          }
+                        } else {
+                          percentage = (achieved / target) * 100;
+                        }
+                      }
+                      return Math.round(percentage);
+                    })()}%
+                  </span>
+                </div>
+                <Progress
+                  value={(() => {
+                    const target = parseFloat(updatingGoal.targetValue);
+                    const achieved = parseFloat(updatingGoal.achievedValue);
+                    const isInverse = updatingGoal.isInverse;
+
+                    let percentage = 0;
+                    if (target > 0) {
+                      if (isInverse) {
+                        if (achieved <= target) {
+                          percentage = 100;
+                        } else {
+                          percentage = Math.max((target / achieved) * 100, 0);
+                        }
+                      } else {
+                        percentage = (achieved / target) * 100;
+                      }
+                    }
+                    return Math.min(percentage, 100);
+                  })()}
+                  className="h-3"
+                />
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="achievedValue">Valor Logrado</Label>
-              <Input
-                id="achievedValue"
-                name="achievedValue"
-                type="number"
-                step="0.01"
-                defaultValue={updatingGoal?.achievedValue}
-                required
-              />
-            </div>
+              {/* Form Fields */}
+              <div className="space-y-4 pt-4 border-t dark:border-gray-700">
+                <div className="space-y-2">
+                  <Label htmlFor="achievedValue">Nuevo Valor Logrado</Label>
+                  <Input
+                    id="achievedValue"
+                    name="achievedValue"
+                    type="number"
+                    step="0.01"
+                    defaultValue={updatingGoal.achievedValue}
+                    required
+                    placeholder="Ingresa el valor logrado"
+                  />
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Unidad: {updatingGoal.goalTemplateUnit || "unidades"}
+                  </p>
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="status">Estado</Label>
-              <Select name="status" defaultValue={updatingGoal?.status}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pending">Pendiente</SelectItem>
-                  <SelectItem value="in_progress">En Progreso</SelectItem>
-                  <SelectItem value="completed">Completado</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="status">Estado</Label>
+                  <Select name="status" defaultValue={updatingGoal.status}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pendiente</SelectItem>
+                      <SelectItem value="in_progress">En Progreso</SelectItem>
+                      <SelectItem value="completed">Completado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="description">Notas (Opcional)</Label>
-              <Textarea
-                id="description"
-                name="description"
-                defaultValue={updatingGoal?.description}
-                placeholder="Agrega notas sobre el progreso..."
-              />
-            </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Notas (Opcional)</Label>
+                  <Textarea
+                    id="description"
+                    name="description"
+                    defaultValue={updatingGoal.description}
+                    placeholder="Agrega notas sobre el progreso, logros, obstáculos, etc."
+                    rows={4}
+                  />
+                </div>
+              </div>
 
-            <Button type="submit" disabled={updateMutation.isPending}>
-              {updateMutation.isPending ? "Actualizando..." : "Actualizar Meta"}
-            </Button>
-          </form>
+              <div className="flex items-center justify-end gap-3 pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setIsUpdateDialogOpen(false)}
+                  disabled={updateMutation.isPending}
+                >
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={updateMutation.isPending}>
+                  {updateMutation.isPending ? "Actualizando..." : "Actualizar Progreso"}
+                </Button>
+              </div>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </div>

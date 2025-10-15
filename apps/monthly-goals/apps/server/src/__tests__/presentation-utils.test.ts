@@ -6,25 +6,18 @@ import { describe, expect, test } from "bun:test";
  */
 
 // Progress calculation function (duplicated from presentations.ts and view component)
-function getProgressPercentage(target: string, achieved: string, goalName?: string): number {
+function getProgressPercentage(target: string, achieved: string, isInverse?: boolean): number {
 	const targetNum = parseFloat(target);
 	const achievedNum = parseFloat(achieved);
-	
+
 	if (targetNum <= 0) return 0;
-	
-	// Detectar meta inversa por nombre (palabras clave que indican "reducir es mejor")
-	const inversaKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
-	const isInverseMeta = goalName ? 
-		inversaKeywords.some(keyword => goalName.toLowerCase().includes(keyword)) : 
-		false;
-	
-	if (isInverseMeta) {
-		// Para metas inversas: targetValue = logrado, submittedValue = meta máxima
-		// Si logrado <= meta = 100%, si logrado > meta = menos %
-		if (targetNum <= achievedNum) {
+
+	if (isInverse) {
+		// Para metas inversas: menor o igual = 100%
+		if (achievedNum <= targetNum) {
 			return 100; // Cumplió o superó la meta de reducción
 		} else {
-			return Math.max((achievedNum / targetNum) * 100, 0);
+			return Math.max((targetNum / achievedNum) * 100, 0);
 		}
 	} else {
 		// Para metas normales: mayor valor logrado = mejor progreso
@@ -91,29 +84,27 @@ describe("Presentation Utility Functions", () => {
 	describe("getProgressPercentage", () => {
 		test("should calculate normal goal progress correctly", () => {
 			// Normal goal: higher achieved value = better
-			expect(getProgressPercentage("100", "85", "Ventas")).toBe(85);
-			expect(getProgressPercentage("50", "40", "Ingresos")).toBe(80);
-			expect(getProgressPercentage("200", "250", "Clientes")).toBe(125);
+			expect(getProgressPercentage("100", "85", false)).toBe(85);
+			expect(getProgressPercentage("50", "40", false)).toBe(80);
+			expect(getProgressPercentage("200", "250", false)).toBe(125);
+			// Test without explicit false (default behavior)
+			expect(getProgressPercentage("100", "85")).toBe(85);
 		});
 
 		test("should calculate inverse goal progress correctly", () => {
 			// Inverse goal: lower achieved value = better
-			expect(getProgressPercentage("3", "5", "Mora Cartera")).toBe(100); // 3 <= 5 = success
-			expect(getProgressPercentage("4", "5", "Error Rate")).toBe(100); // 4 <= 5 = success
-			expect(getProgressPercentage("6", "5", "Reclamos")).toBe(Math.max((5 / 6) * 100, 0));
+			expect(getProgressPercentage("5", "3", true)).toBe(100); // 3 <= 5 = success
+			expect(getProgressPercentage("5", "4", true)).toBe(100); // 4 <= 5 = success
+			expect(getProgressPercentage("5", "6", true)).toBe(Math.max((5 / 6) * 100, 0));
 		});
 
-		test("should detect inverse goals by keywords", () => {
-			const inverseKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
-			
-			inverseKeywords.forEach(keyword => {
-				// Test uppercase
-				expect(getProgressPercentage("5", "3", `Meta de ${keyword.toUpperCase()}`)).toBe(100);
-				// Test lowercase
-				expect(getProgressPercentage("5", "3", `reducir ${keyword}`)).toBe(100);
-				// Test mixed case
-				expect(getProgressPercentage("5", "3", `Control ${keyword}s`)).toBe(100);
-			});
+		test("should handle isInverse boolean parameter", () => {
+			// Test with explicit true
+			expect(getProgressPercentage("5", "3", true)).toBe(100);
+			// Test with explicit false
+			expect(getProgressPercentage("100", "50", false)).toBe(50);
+			// Test without parameter (defaults to normal goal)
+			expect(getProgressPercentage("100", "50")).toBe(50);
 		});
 
 		test("should handle edge cases", () => {
@@ -131,14 +122,14 @@ describe("Presentation Utility Functions", () => {
 		});
 
 		test("should handle inverse goal edge cases", () => {
-			// Perfect achievement (0 errors)
-			expect(getProgressPercentage("0", "5", "error rate")).toBe(0);
-			
-			// High achievement on inverse goal
-			expect(getProgressPercentage("10", "5", "mora")).toBe(100);
-			
-			// Underperformance on inverse goal
-			expect(getProgressPercentage("8", "5", "retrasos")).toBe(Math.max((5 / 8) * 100, 0));
+			// Perfect achievement (0 target = invalid)
+			expect(getProgressPercentage("0", "5", true)).toBe(0);
+
+			// High achievement on inverse goal (achieved <= target = 100%)
+			expect(getProgressPercentage("10", "5", true)).toBe(100);
+
+			// Underperformance on inverse goal (achieved > target)
+			expect(getProgressPercentage("5", "8", true)).toBe(Math.max((5 / 8) * 100, 0));
 		});
 	});
 
@@ -274,14 +265,16 @@ describe("Presentation Utility Functions", () => {
 					goalTemplateName: "Ventas Mensuales",
 					targetValue: "100",
 					submittedValue: "120",
+					isInverse: false,
 				},
 				{
 					departmentName: "Ventas",
 					areaName: "Ventas Online",
 					userName: "Ana López",
 					goalTemplateName: "Mora Cartera",
-					targetValue: "2",
-					submittedValue: "5",
+					targetValue: "5",
+					submittedValue: "2",
+					isInverse: true,
 				},
 				{
 					departmentName: "Operaciones",
@@ -290,20 +283,21 @@ describe("Presentation Utility Functions", () => {
 					goalTemplateName: "Tiempo Respuesta",
 					targetValue: "60",
 					submittedValue: "45",
+					isInverse: false,
 				}
 			];
 
 			// Organize data
 			const organized = organizeSubmissions(submissions);
-			
+
 			// Calculate progress for each goal
 			const ventasGoal = submissions[0];
 			const moraGoal = submissions[1];
 			const soporteGoal = submissions[2];
 
-			const ventasProgress = getProgressPercentage(ventasGoal.targetValue, ventasGoal.submittedValue, ventasGoal.goalTemplateName);
-			const moraProgress = getProgressPercentage(moraGoal.targetValue, moraGoal.submittedValue, moraGoal.goalTemplateName);
-			const soporteProgress = getProgressPercentage(soporteGoal.targetValue, soporteGoal.submittedValue, soporteGoal.goalTemplateName);
+			const ventasProgress = getProgressPercentage(ventasGoal.targetValue, ventasGoal.submittedValue, ventasGoal.isInverse);
+			const moraProgress = getProgressPercentage(moraGoal.targetValue, moraGoal.submittedValue, moraGoal.isInverse);
+			const soporteProgress = getProgressPercentage(soporteGoal.targetValue, soporteGoal.submittedValue, soporteGoal.isInverse);
 
 			// Verify calculations
 			expect(ventasProgress).toBe(120); // Normal goal: 120/100 = 120%

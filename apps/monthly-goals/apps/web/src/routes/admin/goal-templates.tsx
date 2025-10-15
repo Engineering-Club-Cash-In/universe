@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
@@ -88,6 +89,7 @@ function GoalTemplatesPage() {
 			description: formData.get("description") as string,
 			defaultTarget: formData.get("defaultTarget") as string,
 			unit: formData.get("unit") as string,
+			isInverse: formData.get("isInverse") === "on",
 			successThreshold: formData.get("successThreshold") as string,
 			warningThreshold: formData.get("warningThreshold") as string,
 		};
@@ -102,6 +104,7 @@ function GoalTemplatesPage() {
 			description: formData.get("description") as string,
 			defaultTarget: formData.get("defaultTarget") as string,
 			unit: formData.get("unit") as string,
+			isInverse: formData.get("isInverse") === "on",
 			successThreshold: formData.get("successThreshold") as string,
 			warningThreshold: formData.get("warningThreshold") as string,
 		};
@@ -149,6 +152,18 @@ function GoalTemplatesPage() {
 			accessorKey: "unit",
 			header: "Unidad",
 			cell: ({ row }) => row.getValue("unit") || "—",
+		},
+		{
+			accessorKey: "isInverse",
+			header: "Tipo",
+			cell: ({ row }) => {
+				const isInverse = row.getValue("isInverse");
+				return isInverse ? (
+					<Badge className="bg-purple-100 text-purple-800">Meta de Reducción</Badge>
+				) : (
+					<Badge className="bg-blue-100 text-blue-800">Meta Normal</Badge>
+				);
+			},
 		},
 		{
 			accessorKey: "defaultTarget",
@@ -212,6 +227,20 @@ function GoalTemplatesPage() {
 							<div className="space-y-2">
 								<Label htmlFor="unit">Unidad</Label>
 								<Input id="unit" name="unit" placeholder="ej: entregas, ventas, tickets" />
+							</div>
+							<div className="flex items-center space-x-2">
+								<Checkbox id="isInverse" name="isInverse" />
+								<div className="grid gap-1.5 leading-none">
+									<label
+										htmlFor="isInverse"
+										className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+									>
+										Meta de Reducción
+									</label>
+									<p className="text-sm text-muted-foreground">
+										Marcar si menor valor es mejor (ej: mora, errores, costos)
+									</p>
+								</div>
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="defaultTarget">Meta por Defecto</Label>
@@ -282,6 +311,20 @@ function GoalTemplatesPage() {
 								defaultValue={editingTemplate?.unit}
 								placeholder="ej: entregas, ventas, tickets"
 							/>
+						</div>
+						<div className="flex items-center space-x-2">
+							<Checkbox id="edit-isInverse" name="isInverse" defaultChecked={editingTemplate?.isInverse} />
+							<div className="grid gap-1.5 leading-none">
+								<label
+									htmlFor="edit-isInverse"
+									className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+								>
+									Meta de Reducción
+								</label>
+								<p className="text-sm text-muted-foreground">
+									Marcar si menor valor es mejor (ej: mora, errores, costos)
+								</p>
+							</div>
 						</div>
 						<div>
 							<Label htmlFor="edit-defaultTarget">Meta por Defecto</Label>

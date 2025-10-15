@@ -44,6 +44,10 @@ export const workTimeEnum = pgEnum("work_time", [
   "10_plus",
 ]);
 export const loanPurposeEnum = pgEnum("loan_purpose", ["personal", "business"]);
+export const creditTypeEnum = pgEnum("credit_type", [
+	"autocompra",
+	"sobre_vehiculo",
+]);
 export const opportunityStatusEnum = pgEnum("opportunity_status", [
   "open",
   "won",
@@ -212,6 +216,7 @@ export const opportunities = pgTable("opportunities", {
   leadId: uuid("lead_id").references(() => leads.id),
   companyId: uuid("company_id").references(() => companies.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id), // Relación con vehículo (opcional)
+  creditType: creditTypeEnum("credit_type").notNull().default("autocompra"),
   value: decimal("value", { precision: 12, scale: 2 }),
   stageId: uuid("stage_id")
     .notNull()

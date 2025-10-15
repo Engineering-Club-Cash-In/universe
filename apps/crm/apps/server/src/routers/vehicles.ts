@@ -213,7 +213,7 @@ export const vehiclesRouter = {
         fuelType: z.string().optional(),
         transmission: z.string().optional(),
         companyId: z.string().nullable().optional(),
-        status: z.string().optional()
+        status: z.enum(["pending", "available", "sold", "maintenance", "auction"]).optional()
       })
     }))
     .handler(async ({ input }) => {
@@ -256,7 +256,7 @@ export const vehiclesRouter = {
   search: protectedProcedure
     .input(z.object({
       query: z.string().optional(),
-      status: z.string().optional(),
+      status: z.enum(["pending", "available", "sold", "maintenance", "auction"]).optional(),
       vehicleType: z.string().optional(),
       fuelType: z.string().optional()
     }))
@@ -359,7 +359,7 @@ export const vehiclesRouter = {
         missingAirbag: z.string().optional(),
         testDrive: z.boolean().optional(),
         noTestDriveReason: z.string().optional(),
-        status: z.string().optional(),
+        status: z.enum(["pending", "approved", "rejected", "auction"]).optional(),
         alerts: z.array(z.string()).optional()
       })
     }))

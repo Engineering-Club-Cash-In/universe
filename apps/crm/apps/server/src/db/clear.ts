@@ -6,6 +6,7 @@ import {
 	leads,
 	opportunities,
 	salesStages,
+	magicUrls,
 } from "./schema/crm";
 import {
 	vehicles,
@@ -22,6 +23,10 @@ import {
 	recuperacionesVehiculo,
 	notificacionesCobros,
 } from "./schema/cobros";
+import {
+	auctionVehicles,
+	auctionExpenses,
+} from "./schema/auctionVehicles";
 
 async function clearAllCRMData() {
 	console.log("🗑️ Clearing all CRM data...");
@@ -49,6 +54,13 @@ async function clearAllCRMData() {
 		await db.delete(contratosFinanciamiento);
 		console.log("✅ Contratos de financiamiento cleared");
 
+		// Delete in reverse order of dependencies
+		await db.delete(clients);
+		console.log("✅ Clients cleared");
+
+		await db.delete(opportunities);
+		console.log("✅ Opportunities cleared");
+
 		// Delete vehicle data (they depend on companies)
 		await db.delete(inspectionChecklistItems);
 		console.log("✅ Inspection checklist items cleared");
@@ -59,18 +71,22 @@ async function clearAllCRMData() {
 		await db.delete(vehicleInspections);
 		console.log("✅ Vehicle inspections cleared");
 
+		// Delete auction data (depends on vehicles)
+		await db.delete(auctionExpenses);
+		console.log("✅ Auction expenses cleared");
+
+		await db.delete(auctionVehicles);
+		console.log("✅ Auction vehicles cleared");
+
 		await db.delete(vehicles);
 		console.log("✅ Vehicles cleared");
 
-		// Delete in reverse order of dependencies
-		await db.delete(clients);
-		console.log("✅ Clients cleared");
-
-		await db.delete(opportunities);
-		console.log("✅ Opportunities cleared");
-
 		await db.delete(creditAnalysis);
 		console.log("✅ Credit analyses cleared");
+
+		// Delete magic URLs before leads
+		await db.delete(magicUrls);
+		console.log("✅ Magic URLs cleared");
 
 		await db.delete(leads);
 		console.log("✅ Leads cleared");

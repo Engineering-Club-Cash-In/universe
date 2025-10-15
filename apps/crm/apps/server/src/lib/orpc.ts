@@ -85,7 +85,16 @@ const requireAnalyst = o.middleware(async ({ context, next }) => {
 		.limit(1);
 	const userRole = userData[0]?.role;
 
+	console.log("[requireAnalyst] userId:", userId);
+	console.log("[requireAnalyst] userData:", userData);
+	console.log("[requireAnalyst] userRole:", userRole);
+	console.log(
+		"[requireAnalyst] canAccessAnalysis:",
+		PERMISSIONS.canAccessAnalysis(userRole || ""),
+	);
+
 	if (!userRole || !PERMISSIONS.canAccessAnalysis(userRole)) {
+		console.log("[requireAnalyst] FORBIDDEN - userRole:", userRole);
 		throw new ORPCError("FORBIDDEN", { message: "Analyst role required" });
 	}
 

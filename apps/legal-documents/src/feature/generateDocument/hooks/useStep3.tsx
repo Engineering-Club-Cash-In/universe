@@ -117,6 +117,96 @@ export function useStep3({
     return age;
   }, []);
 
+  // Obtener el día actual en formato numérico (01-31)
+  const getCurrentDay = useCallback((): string => {
+    const today = new Date();
+    return today.getDate().toString().padStart(2, "0");
+  }, []);
+
+  // Obtener el día actual en formato texto (uno, dos, tres, etc.)
+  const getCurrentDayText = useCallback((): string => {
+    const day = parseInt(getCurrentDay());
+    const daysText: Record<number, string> = {
+      1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
+      6: "seis", 7: "siete", 8: "ocho", 9: "nueve", 10: "diez",
+      11: "once", 12: "doce", 13: "trece", 14: "catorce", 15: "quince",
+      16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve", 20: "veinte",
+      21: "veintiuno", 22: "veintidós", 23: "veintitrés", 24: "veinticuatro", 25: "veinticinco",
+      26: "veintiséis", 27: "veintisiete", 28: "veintiocho", 29: "veintinueve", 30: "treinta",
+      31: "treinta y uno"
+    };
+    return daysText[day] || "";
+  }, [getCurrentDay]);
+
+  // Obtener el mes actual en formato texto (enero, febrero, etc.)
+  const getCurrentMonthText = useCallback((): string => {
+    const today = new Date();
+    const months = [
+      "enero", "febrero", "marzo", "abril", "mayo", "junio",
+      "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+    ];
+    return months[today.getMonth()];
+  }, []);
+
+  // Obtener el año actual en formato numérico - solo últimos 2 dígitos (25)
+  const getCurrentYear = useCallback((): string => {
+    const today = new Date();
+    const fullYear = today.getFullYear().toString();
+    return fullYear.slice(-2); // Obtener solo los últimos 2 dígitos
+  }, []);
+
+  // Obtener el año actual en formato texto - solo últimos 2 dígitos (veinticinco)
+  const getCurrentYearText = useCallback((): string => {
+    const today = new Date();
+    const fullYear = today.getFullYear();
+    const lastTwoDigits = fullYear % 100; // Obtener últimos 2 dígitos (ej: 2025 -> 25)
+    
+    // Mapeo de números a texto
+    const numbersToText: Record<number, string> = {
+      0: "cero",
+      1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
+      6: "seis", 7: "siete", 8: "ocho", 9: "nueve", 10: "diez",
+      11: "once", 12: "doce", 13: "trece", 14: "catorce", 15: "quince",
+      16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve",
+      20: "veinte",
+      21: "veintiuno", 22: "veintidós", 23: "veintitrés", 24: "veinticuatro",
+      25: "veinticinco", 26: "veintiséis", 27: "veintisiete", 28: "veintiocho",
+      29: "veintinueve", 30: "treinta"
+    };
+
+    // Para números entre 31-99
+    if (lastTwoDigits > 30) {
+      const tens = Math.floor(lastTwoDigits / 10);
+      const units = lastTwoDigits % 10;
+      
+      const tensText: Record<number, string> = {
+        3: "treinta", 4: "cuarenta", 5: "cincuenta",
+        6: "sesenta", 7: "setenta", 8: "ochenta", 9: "noventa"
+      };
+      
+      const unitsText: Record<number, string> = {
+        1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
+        6: "seis", 7: "siete", 8: "ocho", 9: "nueve"
+      };
+      
+      if (units === 0) {
+        return tensText[tens] || lastTwoDigits.toString();
+      }
+      
+      return `${tensText[tens]} y ${unitsText[units]}`;
+    }
+    
+    return numbersToText[lastTwoDigits] || lastTwoDigits.toString();
+  }, []);
+
+  // Obtener fecha completa en formato: "02 de junio de 2025"
+  const getFormattedContractDate = useCallback((): string => {
+    const day = getCurrentDay();
+    const month = getCurrentMonthText();
+    const year = getCurrentYear();
+    return `${day} de ${month} de 20${year}`;
+  }, [getCurrentDay, getCurrentMonthText, getCurrentYear]);
+
   // Validar un campo específico
   const validateField = useCallback((field: Field, value: string): string => {
     const strValue = typeof value === "string" ? value : String(value || "");
@@ -350,9 +440,11 @@ export function useStep3({
       );
 
       fields.forEach((field) => {
+        const fieldKeyLower = field.key?.toLowerCase();
+
         // Primero intentar mapear con datos del RENAP
         if (renapData) {
-          switch (field.key?.toLowerCase()) {
+          switch (fieldKeyLower) {
             case "nombrecompleto":
             case "nombre_completo":
             case "fullname":
@@ -396,7 +488,54 @@ export function useStep3({
           }
         }
 
-        // Si no se mapeó con RENAP, usar el valor por defecto del campo
+        // Mapear campos de fecha (disponibles siempre, con o sin renapData)
+        switch (fieldKeyLower) {
+          case "dia":
+          case "day":
+            initialValues[field.key] = getCurrentDay();
+            return;
+          case "diatexto":
+          case "dia_texto":
+          case "daytext":
+          case "day_text":
+            initialValues[field.key] = getCurrentDayText();
+            return;
+          case "mes":
+          case "mestexto":
+          case "mes_texto":
+          case "month":
+          case "monthtext":
+          case "month_text":
+            initialValues[field.key] = getCurrentMonthText();
+            return;
+          case "año":
+          case "ano":
+          case "year":
+            initialValues[field.key] = getCurrentYear();
+            return;
+          case "añotexto":
+          case "año_texto":
+          case "anotexto":
+          case "ano_texto":
+          case "yeartext":
+          case "year_text":
+            initialValues[field.key] = getCurrentYearText();
+            return;
+          case "fechainicio":
+          case "fecha_inicio":
+          case "fechainiciocontrato":
+          case "fecha_inicio_contrato":
+          case "contractstartdate":
+          case "contract_start_date":
+          case "startdate":
+          case "start_date":
+            initialValues[field.key] = getFormattedContractDate();
+            return;
+          default:
+            break;
+        }
+
+        // Si no se mapeó con ninguno de los anteriores, usar el valor por defecto del campo
         if (field.default && field.default.trim()) {
           initialValues[field.key] = field.default;
         } else {
@@ -418,6 +557,12 @@ export function useStep3({
     getCivilStatusLabel,
     getNationalityLabel,
     calculateAge,
+    getCurrentDay,
+    getCurrentDayText,
+    getCurrentMonthText,
+    getCurrentYear,
+    getCurrentYearText,
+    getFormattedContractDate,
   ]);
 
   // Función para validar sin mostrar errores

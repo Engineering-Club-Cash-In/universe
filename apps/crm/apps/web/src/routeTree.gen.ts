@@ -15,10 +15,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
 import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
-import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
-import { Route as CrmWhatsappRouteImport } from './routes/crm/whatsapp'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
-import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
 import { Route as CrmOpportunitiesRouteImport } from './routes/crm/opportunities'
 import { Route as CrmLeadsRouteImport } from './routes/crm/leads'
 import { Route as CrmCompaniesRouteImport } from './routes/crm/companies'
@@ -59,24 +56,9 @@ const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
   path: '/vehicles/inspection',
   getParentRoute: () => rootRouteImport,
 } as any)
-const VehiclesAuctionVehiclesRoute = VehiclesAuctionVehiclesRouteImport.update({
-  id: '/vehicles/auction-vehicles',
-  path: '/vehicles/auction-vehicles',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CrmWhatsappRoute = CrmWhatsappRouteImport.update({
-  id: '/crm/whatsapp',
-  path: '/crm/whatsapp',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const CrmVendorsRoute = CrmVendorsRouteImport.update({
   id: '/crm/vendors',
   path: '/crm/vendors',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CrmQuoterRoute = CrmQuoterRouteImport.update({
-  id: '/crm/quoter',
-  path: '/crm/quoter',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CrmOpportunitiesRoute = CrmOpportunitiesRouteImport.update({
@@ -137,10 +119,7 @@ export interface FileRoutesByFullPath {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
-  '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
-  '/crm/whatsapp': typeof CrmWhatsappRoute
-  '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
@@ -158,10 +137,7 @@ export interface FileRoutesByTo {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
-  '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
-  '/crm/whatsapp': typeof CrmWhatsappRoute
-  '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
@@ -180,10 +156,7 @@ export interface FileRoutesById {
   '/crm/companies': typeof CrmCompaniesRoute
   '/crm/leads': typeof CrmLeadsRoute
   '/crm/opportunities': typeof CrmOpportunitiesRoute
-  '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
-  '/crm/whatsapp': typeof CrmWhatsappRoute
-  '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/vehicles/': typeof VehiclesIndexRoute
@@ -203,10 +176,7 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
-    | '/crm/quoter'
     | '/crm/vendors'
-    | '/crm/whatsapp'
-    | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros'
     | '/vehicles'
@@ -224,10 +194,7 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
-    | '/crm/quoter'
     | '/crm/vendors'
-    | '/crm/whatsapp'
-    | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros'
     | '/vehicles'
@@ -245,10 +212,7 @@ export interface FileRouteTypes {
     | '/crm/companies'
     | '/crm/leads'
     | '/crm/opportunities'
-    | '/crm/quoter'
     | '/crm/vendors'
-    | '/crm/whatsapp'
-    | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros/'
     | '/vehicles/'
@@ -267,10 +231,7 @@ export interface RootRouteChildren {
   CrmCompaniesRoute: typeof CrmCompaniesRoute
   CrmLeadsRoute: typeof CrmLeadsRoute
   CrmOpportunitiesRoute: typeof CrmOpportunitiesRoute
-  CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
-  CrmWhatsappRoute: typeof CrmWhatsappRoute
-  VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
   VehiclesIndexRoute: typeof VehiclesIndexRoute
@@ -321,32 +282,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VehiclesInspectionRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/vehicles/auction-vehicles': {
-      id: '/vehicles/auction-vehicles'
-      path: '/vehicles/auction-vehicles'
-      fullPath: '/vehicles/auction-vehicles'
-      preLoaderRoute: typeof VehiclesAuctionVehiclesRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/crm/whatsapp': {
-      id: '/crm/whatsapp'
-      path: '/crm/whatsapp'
-      fullPath: '/crm/whatsapp'
-      preLoaderRoute: typeof CrmWhatsappRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/crm/vendors': {
       id: '/crm/vendors'
       path: '/crm/vendors'
       fullPath: '/crm/vendors'
       preLoaderRoute: typeof CrmVendorsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/crm/quoter': {
-      id: '/crm/quoter'
-      path: '/crm/quoter'
-      fullPath: '/crm/quoter'
-      preLoaderRoute: typeof CrmQuoterRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/opportunities': {
@@ -427,10 +367,7 @@ const rootRouteChildren: RootRouteChildren = {
   CrmCompaniesRoute: CrmCompaniesRoute,
   CrmLeadsRoute: CrmLeadsRoute,
   CrmOpportunitiesRoute: CrmOpportunitiesRoute,
-  CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,
-  CrmWhatsappRoute: CrmWhatsappRoute,
-  VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
   VehiclesIndexRoute: VehiclesIndexRoute,

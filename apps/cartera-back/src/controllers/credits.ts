@@ -10,6 +10,7 @@ import {
   cuotas_credito,
   inversionistas,
   montos_adicionales,
+  moras_credito,
   pagos_credito,
   pagos_credito_inversionistas,
   StatusCredit,
@@ -1032,14 +1033,15 @@ export interface CreditoConInfo {
   incobrable?: BadDebt | null;
   rubros?: { nombre_rubro: string; monto: number }[];
 }
-
+;
+ 
 export async function getCreditosWithUserByMesAnio(
   mes: number,
   anio: number,
   page: number = 1,
   perPage: number = 10,
   numero_credito_sifco?: string,
-  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION"
+  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -1104,9 +1106,9 @@ export async function getCreditosWithUserByMesAnio(
   const creditosIds = rows.map((r) => r.creditos.credito_id);
   console.log("🆔 Créditos IDs:", creditosIds);
 
+  // 2️⃣ Rubros
   let rubrosPorCredito: any[] = [];
   try {
-    // 2️⃣ Rubros
     rubrosPorCredito = await db
       .select({
         credito_id: creditos_rubros_otros.credito_id,
@@ -1134,9 +1136,9 @@ export async function getCreditosWithUserByMesAnio(
     {} as Record<number, { nombre_rubro: string; monto: number }[]>
   );
 
+  // 3️⃣ Inversionistas
   let inversionistasPorCredito: any[] = [];
   try {
-    // 3️⃣ Inversionistas
     inversionistasPorCredito = await db
       .select({
         credito_id: creditos_inversionistas.credito_id,
@@ -1168,7 +1170,6 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando inversionistas:", err);
   }
 
-  // Agrupar inversionistas por crédito
   const inversionistasMap = creditosIds.reduce((acc, creditoId) => {
     const aportes = inversionistasPorCredito.filter(
       (inv) => inv.credito_id === creditoId
@@ -1196,6 +1197,33 @@ export async function getCreditosWithUserByMesAnio(
     };
     return acc;
   }, {} as Record<number, any>);
+
+  // 4️⃣ Moras
+  let moras: any[] = [];
+  try {
+    moras = await db
+      .select({
+        credito_id: moras_credito.credito_id,
+        mora_id: moras_credito.mora_id,
+        activa: moras_credito.activa,
+        porcentaje_mora: moras_credito.porcentaje_mora,
+        monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        created_at: moras_credito.created_at,
+        updated_at: moras_credito.updated_at,
+      })
+      .from(moras_credito)
+      .where(inArray(moras_credito.credito_id, creditosIds));
+
+    console.log(`📌 Moras encontradas: ${moras.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando moras:", err);
+  }
+
+  const morasMap: Record<number, any> = {};
+  moras.forEach((row) => {
+    morasMap[row.credito_id] = row;
+  });
 
   // --- Cancelaciones & Incobrables ---
   let cancelaciones: CreditCancelation[] = [];
@@ -1241,13 +1269,33 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando incobrables:", err);
   }
 
+  try {
+    const incobrablesIds = rows
+      .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
+      .map((r) => r.creditos.credito_id);
+    if (incobrablesIds.length > 0) {
+      console.log("⚠️ Créditos incobrables:", incobrablesIds);
+      const incobrablesRaw = await db
+        .select()
+        .from(bad_debts)
+        .where(inArray(bad_debts.credit_id, incobrablesIds));
+      incobrables = incobrablesRaw.map((row) => ({
+        ...row,
+        fecha_registro: row.fecha_registro ?? "",
+        monto_incobrable: Number(row.monto_incobrable),
+      }));
+    }
+  } catch (err) {
+    console.error("❌ Error consultando incobrables:", err);
+  }
+
   const cancelacionesMap: Record<number, CreditCancelation> = {};
   cancelaciones.forEach((row) => (cancelacionesMap[row.credit_id] = row));
 
   const incobrablesMap: Record<number, BadDebt> = {};
   incobrables.forEach((row) => (incobrablesMap[row.credit_id] = row));
 
-  // 4️⃣ Map final
+  // 5️⃣ Map final
   let data: CreditoConInfo[] = [];
   try {
     data = rows.map((row) => {
@@ -1270,6 +1318,11 @@ export async function getCreditosWithUserByMesAnio(
           ? incobrablesMap[row.creditos.credito_id] || null
           : undefined;
 
+      const mora = morasMap[row.creditos.credito_id] || null;
+      const deuda_total_con_mora = new Big(row.creditos.deudatotal ?? 0)
+        .plus(new Big(mora?.monto_mora ?? 0))
+        .toString();
+
       return {
         creditos: row.creditos,
         usuarios: row.usuarios,
@@ -1279,6 +1332,8 @@ export async function getCreditosWithUserByMesAnio(
         cancelacion,
         rubros,
         incobrable,
+        mora,                    // 👈 objeto de mora completo
+        deuda_total_con_mora,    // 👈 suma con Big.js
       };
     });
     console.log(`✅ Créditos mapeados: ${data.length}`);
@@ -1286,7 +1341,7 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error mapeando créditos:", err);
   }
 
-  // 5️⃣ Paginación
+  // 6️⃣ Paginación
   let count = 0;
   try {
     const [{ count: total }] = await db
@@ -1308,6 +1363,7 @@ export async function getCreditosWithUserByMesAnio(
     totalPages: Math.ceil(count / perPage),
   };
 }
+
 
 type Aporte = {
   monto_cash_in: string; // viene como string desde la DB
@@ -1662,8 +1718,7 @@ export async function reiniciarCredito(
       membresias_pago: "0",
       membresias: "0",
       porcentaje_royalti: "0",
-      royalti: "0",
-      mora: "0",
+      royalti: "0", 
       otros: "0",
       statusCredit: "ACTIVO",
     })
@@ -1687,13 +1742,26 @@ export async function resetCredit({
   cuota: number;
 }) {
   try {
+    // 🚨 1. Verificar si existe una mora activa para el crédito
+    const moraActiva = await db
+      .select()
+      .from(moras_credito)
+      .where(and(eq(moras_credito.credito_id, creditId), eq(moras_credito.activa, true)))
+      .limit(1);
+
+    if (moraActiva.length > 0) {
+      throw new Error("No se puede reiniciar el crédito porque tiene una mora activa.");
+    }
+
+    // 2. Determinar el estado del crédito
     const statusCredit =
       typeof montoIncobrable !== "undefined" &&
       montoIncobrable > 0 &&
       montoBoleta !== undefined
         ? "INCOBRABLE"
         : "CANCELADO";
-    // 1. Reinicia el crédito poniendo todos los montos a cero y el estado como ACTIVO
+
+    // 3. Reinicia el crédito poniendo todos los montos a cero y el estado
     await db
       .update(creditos)
       .set({
@@ -1709,14 +1777,13 @@ export async function resetCredit({
         membresias_pago: "0",
         membresias: "0",
         porcentaje_royalti: "0",
-        royalti: "0",
-        mora: "0",
+        royalti: "0", 
         otros: "0",
         statusCredit: statusCredit,
       })
       .where(eq(creditos.credito_id, creditId));
 
-    // 2. Consulta el crédito para validar que existe
+    // 4. Consulta el crédito para validar que existe
     const [credito] = await db
       .select()
       .from(creditos)
@@ -1725,14 +1792,15 @@ export async function resetCredit({
       throw new Error("Crédito no encontrado.");
     }
 
-    // 3. Construye las URLs completas para las boletas usando la base R2 (de tu env)
+    // 5. Construir URLs de boletas
     const r2BaseUrl = import.meta.env.URL_PUBLIC_R2 ?? "";
     const urlCompletas = construirUrlBoletas(url_boletas, r2BaseUrl);
 
-    // 4. Obtiene el monto pagado del mes actual y suma el monto de boleta actual
+    // 6. Obtener pagos del mes + monto de boleta
     const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
     const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(montoBoleta ?? 0);
-    // Buscar la cuota_id correspondiente al número de cuota recibido en el parámetro 'cuota'
+
+    // 7. Buscar cuota_id correspondiente
     const [cuotaEncontrada] = await db
       .select({ cuota_id: cuotas_credito.cuota_id })
       .from(cuotas_credito)
@@ -1746,7 +1814,7 @@ export async function resetCredit({
 
     const cuotaId = cuotaEncontrada?.cuota_id;
 
-    // 5. Inserta el nuevo pago para el crédito reiniciado
+    // 8. Insertar nuevo pago
     const [nuevoPago] = await db
       .insert(pagos_credito)
       .values({
@@ -1771,7 +1839,8 @@ export async function resetCredit({
         total_restante: credito.deudatotal?.toString() ?? "0",
         llamada: "",
         renuevo_o_nuevo: "renuevo",
-        membresias: credito.membresias_pago?.toString() ?? "",
+        membresias:
+        credito.membresias_pago?.toString() ?? "",
         membresias_pago: credito.membresias_pago?.toString() ?? "",
         membresias_mes: credito.membresias_pago?.toString() ?? "",
         otros: "0",
@@ -1788,6 +1857,7 @@ export async function resetCredit({
       })
       .returning();
 
+    // 9. Eliminar pagos no pagados
     await db
       .delete(pagos_credito)
       .where(
@@ -1797,7 +1867,7 @@ export async function resetCredit({
         )
       );
 
-    // 6. Si hay URLs de boletas, las asocia al nuevo pago
+    // 10. Insertar boletas si existen
     if (
       urlCompletas &&
       urlCompletas.length > 0 &&
@@ -1812,14 +1882,18 @@ export async function resetCredit({
       );
     }
 
-    // 7. Retorna OK
+    // 11. Retorno OK
     return {
       ok: true,
       message: "Crédito reiniciado y pago creado exitosamente.",
     };
   } catch (error) {
-    console.error("[ERROR] reiniciarCreditoYCrearPago:", error);
-    throw new Error("Error al reiniciar el crédito y crear el pago.");
+    console.error("[ERROR] resetCredit:", error);
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Error al reiniciar el crédito y crear el pago."
+    );
   }
 }
 

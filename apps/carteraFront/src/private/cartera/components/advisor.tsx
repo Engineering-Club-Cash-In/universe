@@ -124,39 +124,77 @@ export default function UsersManager() {
         {loadingPlatformUsers ? (
           <p className="text-black">Cargando usuarios...</p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border border-gray-200 text-sm text-black">
-              <thead className="bg-blue-100">
-                <tr>
-                  <th className="p-2 text-left">Tipo</th>
-                  <th className="p-2 text-left">Nombre</th>
-                  <th className="p-2 text-left">Email</th>
-                  <th className="p-2 text-left">Activo</th>
-                  <th className="p-2 text-center">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {platformUsers.map((u) => (
-                  <tr key={u.id} className="border-t">
-                    <td className="p-2">{u.role}</td>
-                    <td className="p-2">{u.profile?.nombre || "-"}</td>
-                    <td className="p-2">{u.email}</td>
-                    <td className="p-2">{u.is_active ? "Sí" : "No"}</td>
-                    <td className="p-2 text-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleOpen(u)}
-                        className="text-blue-600 border-blue-600"
-                      >
-                        Editar
-                      </Button>
-                    </td>
+          <>
+            {/* Desktop → Tabla */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full border border-gray-200 text-sm text-black">
+                <thead className="bg-gray-50 text-gray-700">
+                  <tr>
+                    <th className="p-2 text-left">Tipo</th>
+                    <th className="p-2 text-left">Nombre</th>
+                    <th className="p-2 text-left">Email</th>
+                    <th className="p-2 text-left">Activo</th>
+                    <th className="p-2 text-center">Acciones</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {platformUsers.map((u) => (
+                    <tr key={u.id} className="border-t hover:bg-gray-50">
+                      <td className="p-2">{u.role}</td>
+                      <td className="p-2">{u.profile?.nombre || "-"}</td>
+                      <td className="p-2">{u.email}</td>
+                      <td className="p-2">{u.is_active ? "Sí" : "No"}</td>
+                      <td className="p-2 text-center">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpen(u)}
+                          className="text-blue-600 border-blue-600"
+                        >
+                          Editar
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile → Lista */}
+            <div className="md:hidden space-y-3">
+              {platformUsers.map((u) => (
+                <div
+                  key={u.id}
+                  className="border rounded-lg p-3 shadow-sm bg-gray-50 text-gray-800"
+                >
+                  <p className="text-sm font-semibold text-blue-600">
+                    {u.role} — {u.profile?.nombre || "-"}
+                  </p>
+                  <p className="text-xs">Email: {u.email}</p>
+                  <p className="text-xs">
+                    Activo:{" "}
+                    <span
+                      className={`font-semibold ${
+                        u.is_active ? "text-green-600" : "text-red-600"
+                      }`}
+                    >
+                      {u.is_active ? "Sí" : "No"}
+                    </span>
+                  </p>
+                  <div className="flex gap-2 mt-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-blue-600 border-blue-600 flex-1"
+                      onClick={() => handleOpen(u)}
+                    >
+                      Editar
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
 
         {/* Modal */}

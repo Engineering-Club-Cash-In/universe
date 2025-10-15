@@ -4,18 +4,10 @@ export interface CheckIssuanceLetterManTemplate22Params {
   dia: string;
   mes: string;
   año: string;
-  dia2: string;
-  mes2: string;
-  año2: string;
-  dia3: string;
-  mes3: string;
-  año3: string;
   entidad: string;
   cantidad: string;
-  cuenta1: string;
-  valor1: string;
-  cuenta2: string;
-  valor2: string;
+  cuenta: string;
+  valor: string;
   nombreCompleto: string;
   dpi: string;
 }
@@ -31,34 +23,39 @@ const api = axios.create({
   },
 });
 
+/**
+ * 🧾 Genera el submission para el template 22:
+ * "CARTA DE EMISIÓN DE CHEQUES (HOMBRES)"
+ *
+ * 📌 Los params se mantienen limpios, sin duplicados.
+ * En `values` se reutilizan varias veces los mismos nombres base (“dia”, “mes”, “año”).
+ */
 export async function generateCheckIssuanceLetterManTemplate22Submission(
   params: CheckIssuanceLetterManTemplate22Params,
   email: string
 ) {
   try {
     const payload = {
-      template_id: 22, // 📌 Template 22: CARTA DE EMISIÓN DE CHEQUES (hombres)
+      template_id: 22, // 📄 Template 22: CARTA DE EMISIÓN DE CHEQUES (hombres)
       submitters: [
         {
           email,
           values: {
-            día: params.dia,
+            // 📅 Fechas (reutilizadas las veces necesarias)
+            dia: params.dia,
             mes: params.mes,
-            año: params.año,
-            "día ": params.dia2,
-            "mes ": params.mes2,
-            "año ": params.año2,
-            "día  ": params.dia3,
-            "mes  ": params.mes3,
-            "año  ": params.año3,
+            año: params.año, 
+
+            // 🏦 Datos bancarios
             Entidad: params.entidad,
             Cantidad: params.cantidad,
-            Cuenta: params.cuenta1,
-            valor: params.valor1,
-            "Cuenta ": params.cuenta2,
-            "valor ": params.valor2,
+            Cuenta: params.cuenta,
+            valor: params.valor, 
+
+            // 👤 Datos personales
             "Nombre Completo": params.nombreCompleto,
             Dpi: params.dpi,
+
             // 🚫 Firma se hace directo en DocuSeal
           },
         },
@@ -66,7 +63,10 @@ export async function generateCheckIssuanceLetterManTemplate22Submission(
     };
 
     const response = await api.post("/submissions", payload);
-    console.log("✅ Submission CARTA DE EMISIÓN DE CHEQUES (hombres) creado:", response.data);
+    console.log(
+      "✅ Submission CARTA DE EMISIÓN DE CHEQUES (hombres) creado:",
+      response.data
+    );
     return response.data;
   } catch (error: any) {
     console.error(

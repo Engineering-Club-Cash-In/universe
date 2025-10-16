@@ -1,14 +1,20 @@
-import { Elysia } from "elysia";
-import {
-  insertPayment,
+import { Elysia, t } from "elysia";
+import { 
   getAllPagosWithCreditAndInversionistas,
   getPayments,
   reversePayment,
   liquidatePagosCreditoInversionistas,
   falsePayment,
+  getPagosConInversionistas,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { mapPagosPorCreditos } from "../migration/migration";
+import { authMiddleware } from "./midleware";
+import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../controllers/reports";
+import { aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
+import { eq } from "drizzle-orm";
+import { db } from "../database";
+import { pagos_credito } from "../database/db";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -21,39 +27,53 @@ const falsePaymentSchema = z.object({
   credito_id: z.number(),
 });
 
-// ✅ Schema para sync de pagos desde SIFCO (param opcional)
-const syncCreditPaymentsSchema = z.object({
-  numero_credito_sifco: z.string().min(1).optional(),
-});
+
 
 export const paymentRouter = new Elysia()
+ 
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
 
   // Nuevo endpoint para buscar pagos por SIFCO y/o fecha
   .get("/paymentByCredit", async ({ query, set }) => {
-    const { numero_credito_sifco } = query;
+  const { numero_credito_sifco, excel } = query as {
+    numero_credito_sifco?: string;
+    excel?: string;
+  };
 
-    if (!numero_credito_sifco) {
-      set.status = 400;
-      return { message: "Falta el parámetro 'numero_credito_sifco'" };
-    }
+  if (!numero_credito_sifco) {
+    set.status = 400;
+    return { message: "Falta el parámetro 'numero_credito_sifco'" };
+  }
 
-    try {
-      const pagos = await getAllPagosWithCreditAndInversionistas(numero_credito_sifco);
+  try {
+    if (excel === "true") {
+      // 🚀 Generar Excel y devolver URL
+      const result = await exportPagosToExcel(numero_credito_sifco);
+      set.status = 200;
+      return result; // { excelUrl: "https://..." }
+    } else {
+      // 🔎 Consulta normal JSON
+      const pagos = await getAllPagosWithCreditAndInversionistas(
+        numero_credito_sifco
+      );
 
-      if (!pagos) {
-        set.status = 400;
+      if (!pagos || pagos.length === 0) {
+        set.status = 404;
         return { message: "No se encontraron pagos para el crédito" };
       }
 
+      set.status = 200;
       return pagos;
-    } catch (error) {
-      set.status = 500;
-      return { message: "Error consultando pagos", error: String(error) };
     }
-  })
+  } catch (error) {
+    console.error("❌ Error en /paymentByCredit:", error);
+    set.status = 500;
+    return { message: "Error consultando pagos", error: String(error) };
+  }
+})
+  .use(authMiddleware)
 
   .get("/payments", async ({ query, set }) => {
     const { mes, anio, page, perPage, numero_credito_sifco } = query;
@@ -149,52 +169,169 @@ export const paymentRouter = new Elysia()
       };
     }
   })
-
-  // 🆕🛠️ Endpoint para sincronizar/mappear pagos de créditos desde SIFCO
-  // - Si envías `numero_credito_sifco`, procesa solo ese crédito.
-  // - Si NO envías nada, procesa todos los créditos en DB.
-  .post(
-    "/sync-credit-payments",
-    async ({ body, set }) => {
+  .get(
+    "/reportes/pagos-inversionistas",
+    async ({ query, set }) => {
       try {
-        /** Validate body with Zod (numero_credito_sifco es opcional) */
-        const { numero_credito_sifco } = syncCreditPaymentsSchema.parse(body ?? {});
+        // 🧠 Extraer parámetros validados
+        const {
+          page,
+          pageSize,
+          numeroCredito,
+          dia,
+          mes,
+          anio,
+          inversionistaId,
+          excel,
+          usuarioNombre,
+          validationStatus
+        } = query;
 
-        console.log(
-          `[sync-credit-payments] Inicio${
-            numero_credito_sifco ? ` (SIFCO=${numero_credito_sifco})` : " (todos los créditos)"
-          }`
-        );
+        // ✅ Si viene excel=true, generamos el reporte Excel
+        if (excel === true) {
+          const result = await exportPagosConInversionistasExcel({
+            page,
+            pageSize,
+            numeroCredito,
+            dia,
+            mes,
+            anio,
+            inversionistaId,
+            usuarioNombre,validationStatus
+          });
+          set.status = 200;
+          return {
+            message: "📊 Reporte Excel generado correctamente",
+            ...result,
+          };
+        }
 
-        // Llamamos al servicio principal que:
-        // - Busca en DB (Drizzle)
-        // - Consulta estado de cuenta
-        // - Invoca mapEstadoCuentaToPagosBig por cada crédito
-        const summary = await mapPagosPorCreditos(numero_credito_sifco);
+        // ✅ Si no, devolvemos la data JSON normal
+        const data = await getPagosConInversionistas({
+          page,
+          pageSize,
+          numeroCredito,
+          dia,
+          mes,
+          anio,
+          inversionistaId,
+          usuarioNombre
+        });
 
-        // Tip: si tu servicio no retorna nada, puedes devolver un mensaje genérico
         set.status = 200;
         return {
-          ok: true,
-          message: numero_credito_sifco
-            ? `Sincronización completada para crédito SIFCO=${numero_credito_sifco}`
-            : "Sincronización completada para todos los créditos",
-          summary: summary ?? null, // si tu servicio devuelve { ok, fail, total }
+          status: "📄 Datos de pagos obtenidos correctamente",
+          ...data,
         };
       } catch (error: any) {
-        console.log("[ERROR] /sync-credit-payments:", error?.message || error);
-        set.status = 400;
+        console.error("❌ Error en /reportes/pagos-inversionistas:", error);
+        set.status = 500;
         return {
-          ok: false,
-          message: "Failed to sync credit payments",
-          error: error?.message ?? String(error),
+          success: false,
+          error: error.message || "Error generando reporte de pagos",
         };
       }
     },
     {
       detail: {
-        summary: "Sincroniza y mapea pagos de créditos desde SIFCO",
-        tags: ["Pagos", "Sync"],
+        summary: "Obtiene pagos con inversionistas o genera Excel",
+        description:
+          "Si `excel=true`, genera y sube un reporte Excel completo a R2. Si no, devuelve JSON con los datos de pagos e inversionistas.",
+        tags: ["Pagos", "Reportes", "Excel"],
+      },
+      query: t.Object({
+        page: t.Optional(t.Integer({ minimum: 1, default: 1 })),
+        pageSize: t.Optional(t.Integer({ minimum: 1, maximum: 1000, default: 20 })),
+        numeroCredito: t.Optional(t.String({ minLength: 1 })),
+        dia: t.Optional(t.Integer({ minimum: 1, maximum: 31 })),
+        mes: t.Optional(t.Integer({ minimum: 1, maximum: 12 })),
+        anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
+        inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
+        excel: t.Optional(t.Boolean({ default: false })),
+        usuarioNombre: t.Optional(t.String({ minLength: 1 })),
+        validationStatus: t.Optional(t.String({ minLength: 1 })),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          total: t.Optional(t.Number()),
+          excelUrl: t.Optional(t.String()),
+          data: t.Optional(t.Array(t.Any())),
+        }),
+        500: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
+        }),
       },
     }
-  );
+  )
+.post(
+  "/aplicar-pago",
+  async ({ query, set }) => {
+    try {
+      // Validar que pago_id esté presente
+      if (!query.pago_id) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "El parámetro pago_id es requerido",
+        };
+      }
+
+      // Validar que pago_id sea un número válido
+      const pagoId = parseInt(query.pago_id);
+      
+      if (isNaN(pagoId) || pagoId <= 0) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "El ID del pago debe ser un número válido mayor a 0",
+        };
+      }
+
+      // Verificar que el pago existe antes de aplicarlo
+      const [pagoExiste] = await db
+        .select()
+        .from(pagos_credito)
+        .where(eq(pagos_credito.pago_id, pagoId))
+        .limit(1);
+
+      if (!pagoExiste) {
+        set.status = 404;
+        return {
+          success: false,
+          message: `No se encontró el pago con ID ${pagoId}`,
+        };
+      }
+
+      // Verificar que el pago no esté ya validado
+      if (pagoExiste.validationStatus === 'validated') {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Este pago ya ha sido validado previamente",
+        };
+      }
+
+      // Aplicar el pago
+      const resultado = await aplicarPagoAlCredito(pagoId);
+
+      set.status = 200;
+      return resultado;
+
+    } catch (error) {
+      console.error("Error en el endpoint aplicar-pago:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Error al aplicar el pago al crédito",
+      };
+    }
+  },
+  {
+    query: t.Object({
+      pago_id: t.String(),
+    }),
+  }
+)

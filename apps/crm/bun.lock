@@ -27,9 +27,7 @@
     "apps/server": {
       "name": "server",
       "dependencies": {
-        "@ai-sdk/deepseek": "^1.0.18",
-        "@ai-sdk/openai": "^2.0.32",
-        "@aws-sdk/client-rekognition": "^3.888.0",
+        "@aws-sdk/client-rekognition": "^3.891.0",
         "@aws-sdk/client-s3": "^3.850.0",
         "@aws-sdk/s3-request-presigner": "^3.850.0",
         "@modelcontextprotocol/sdk": "^1.0.0",
@@ -39,6 +37,7 @@
         "ai": "^5.0.48",
         "bcryptjs": "^3.0.2",
         "better-auth": "^1.2.10",
+        "csv-parse": "^6.1.0",
         "dotenv": "^16.4.7",
         "drizzle-orm": "^0.44.2",
         "hono": "^4.8.2",
@@ -47,6 +46,7 @@
       },
       "devDependencies": {
         "@types/bun": "^1.2.6",
+        "@types/csv-parse": "^1.2.5",
         "@types/pg": "^8.11.11",
         "drizzle-kit": "^0.31.2",
         "tsc-alias": "^1.8.11",

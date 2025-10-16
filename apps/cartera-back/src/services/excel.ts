@@ -74,6 +74,12 @@ export interface ExcelCreditoRow {
   GPSFacturado: string;
   Reserva: string;
 } 
+export interface CreditoAgrupado {
+  creditoBase: string;
+  cliente: string;
+  filas: ExcelCreditoRow[];
+}
+
 import fs from "fs";
 import iconv from "iconv-lite"; 
  
@@ -149,4 +155,71 @@ export async function leerCreditoPorNumeroSIFCO(
   return resultados;
 }
 
+export async function listarCreditosAgrupados(
+  filePath: string
+): Promise<CreditoAgrupado[]> {
+  console.time("⏳ Lectura archivo (stream)");
 
+  const stream = fs.createReadStream(filePath).pipe(iconv.decodeStream("latin1"));
+  const rl = readline.createInterface({ input: stream });
+
+  let headers: string[] | null = null;
+  const mapa: Record<string, CreditoAgrupado> = {};
+  let saltados = 0;
+
+  for await (const line of rl) {
+    const values = line.split(";").map((v) => v.trim());
+
+    if (!headers) {
+      headers = values;
+      continue;
+    }
+
+    const row: any = {};
+    headers.forEach((h, i) => {
+      let val = values[i] ?? "";
+      if (/^Q/i.test(val)) val = val.replace(/^Q/i, "").trim();
+      row[h] = val;
+    });
+
+    let creditoSifco = String(row["CreditoSifco"] ?? "").trim();
+    const cliente = String(row["Cliente"] ?? "").trim();
+
+    if (!creditoSifco) continue;
+
+    // 🔥 Convertir notación científica a número normal
+    if (creditoSifco.includes("E+") || creditoSifco.includes("e+")) {
+      creditoSifco = Number(creditoSifco).toString();
+    }
+
+    const base = creditoSifco.split("_")[0];
+    const cleanBase = base.replace(/[^0-9]/g, "");
+    
+    // 🔥 Permitir 13 o 14 dígitos (algunos pueden tener 13)
+    if (cleanBase.length < 13 || cleanBase.length > 14) {
+      console.warn(`⚠️ Crédito inválido: "${base}" (${cleanBase.length} dígitos)`);
+      saltados++;
+      continue;
+    }
+
+    // 🔥 Pad con cero si tiene 13 dígitos
+    const paddedBase = cleanBase.padStart(14, "0");
+
+    if (!mapa[paddedBase]) {
+      mapa[paddedBase] = {
+        creditoBase: paddedBase,
+        cliente,
+        filas: [],
+      };
+    }
+
+    mapa[paddedBase].filas.push(row as ExcelCreditoRow);
+  }
+
+  console.timeEnd("⏳ Lectura archivo (stream)");
+  const resultado = Object.values(mapa);
+  console.log(`✅ Créditos agrupados: ${resultado.length}`);
+  console.log(`⚠️ Créditos saltados: ${saltados}`);
+
+  return resultado;
+}

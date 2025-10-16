@@ -1,1 +1,1 @@
-export * from "./cartera";
+export * from "../private/cartera";

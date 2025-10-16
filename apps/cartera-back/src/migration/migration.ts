@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { ExcelCreditoRow, leerCreditoPorNumeroSIFCO } from "../services/excel";
+import { ExcelCreditoRow, leerCreditoPorNumeroSIFCO, listarCreditosAgrupados } from "../services/excel";
 import {
   ClienteEmail,
   EstadoCuentaDetalle,
@@ -30,39 +30,13 @@ import {
 import { findOrCreateInvestor } from "../controllers/investor";
 import { map } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { toBigExcel } from "../utils/functions/generalFunctions";
 
 const excelPath = path.resolve(
-  "C:/Users/Kelvin Palacios/Documents/analis de datos/octubre2025.csv"
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/noviembre2025.csv"
 );
 
-/**
- * Convierte un string o número en Big, limpiando %, Q, comas y guiones
- * @param value valor original
- * @param fallback valor por defecto si está vacío o inválido
- */
-function toBigExcel(value: any, fallback: string | number = "0"): Big {
-  if (value == null) return new Big(fallback);
 
-  let str = String(value).trim();
-
-  if (!str || str === "-" || str.toLowerCase() === "nan") {
-    return new Big(fallback);
-  }
-
-  // quitar prefijo Q si lo hubiera
-  str = str.replace(/^Q/i, "");
-  // quitar %
-  str = str.replace(/%/g, "");
-  // quitar separadores de miles
-  str = str.replace(/,/g, "");
-
-  // si al final no es numérico, usa fallback
-  if (!str || isNaN(Number(str))) {
-    return new Big(fallback);
-  }
-
-  return new Big(str);
-}
 
 export async function mapPrestamoDetalleToCredito(
   prestamo: PrestamoDetalle,
@@ -100,12 +74,12 @@ export async function mapPrestamoDetalleToCredito(
     excelRow?.NIT ?? null,
     excelRow?.ComoSeEntero ?? null
   );
-
+  
   // Calculate cuotaCredito by summing all cuotas from Excel rows
-  const cuotaCredito = excelRows
+  const cuotaCredito = excelRows 
     ? excelRows.reduce((acc, row) => acc + Number(row.Cuota || 0), 0)
     : 0;
-
+    
   const advisor = await findOrCreateAdvisorByName(excelRow?.Asesor || "", true);
 
   const realPorcentaje = porcentaje_interes.mul(100).toFixed(2);
@@ -153,14 +127,14 @@ export async function mapPrestamoDetalleToCredito(
 
   try {
     // Insert credit and get the ID
-    const [row] = await db
-      .insert(creditos)
-      .values(creditInsert)
-      .onConflictDoUpdate({
-        target: creditos.numero_credito_sifco, // o un índice único compuesto
-        set: creditInsert, // actualiza usando el MISMO shape que insertás
-      })
-      .returning();
+  const [row] = await db
+    .insert(creditos)
+    .values(creditInsert)
+    .onConflictDoUpdate({
+      target: creditos.numero_credito_sifco, // o un índice único compuesto
+      set: creditInsert, // actualiza usando el MISMO shape que insertás
+    })
+    .returning();
 
     const creditoId = row.credito_id;
     console.log(`✅ Crédito insertado con ID: ${creditoId}`);
@@ -216,10 +190,16 @@ export async function mapPrestamoDetalleToCredito(
     }); // <-- Add this closing parenthesis and semicolon
 
     if (creditosInversionistasData.length > 0) {
-      await db
-        .insert(creditos_inversionistas)
-        .values(creditosInversionistasData);
-    }
+  // 1️⃣ Eliminar cuotas viejas del crédito
+  await db
+    .delete(creditos_inversionistas)
+    .where(eq(creditos_inversionistas.credito_id, creditoId));
+
+  // 2️⃣ Insertar las nuevas cuotas
+  await db
+    .insert(creditos_inversionistas)
+    .values(creditosInversionistasData);
+}
     return row;
   } catch (error) {
     console.error("❌ Error al insertar crédito en la base de datos:", error);
@@ -236,6 +216,15 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
       "🚀 Iniciando flujo de sincronización de clientes con préstamos desde SIFCO"
     );
 
+    // 📊 Control de métricas
+    const stats = {
+      totalClientes: 0,
+      totalPrestamos: 0,
+      creditosMigrados: 0,
+      creditosFallidos: 0,
+      errores: [] as { prestamo: string; motivo: string }[],
+    };
+
     // 1️⃣ Consultar clientes (SIFCO)
     const clientes = await consultarClientesPorEmail();
     console.log(
@@ -243,40 +232,39 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
       clientes?.Clientes?.length || 0
     );
 
-    if (!clientes || !clientes.Clientes || clientes.Clientes.length === 0) {
+    if (!clientes?.Clientes?.length) {
       console.log("❌ No se encontraron clientes en SIFCO");
-      return;
+      return stats;
     }
 
-    // Si viene un filtro, trabajamos solo con ese cliente
+    // Filtrado
     const listaClientes = clienteCodigoFilter
       ? clientes.Clientes.filter(
           (c) => parseInt(c.CodigoCliente, 10) === clienteCodigoFilter
         )
-      : clientes.Clientes.filter(
-          (c) => parseInt(c.CodigoCliente, 10) >= 1140 // 👈 del 1140 en adelante
-        );
+      : clientes.Clientes.filter((c) => parseInt(c.CodigoCliente, 10) >= 1140);
+
     if (listaClientes.length === 0) {
       console.log(`❌ Cliente con código ${clienteCodigoFilter} no encontrado`);
-      return;
+      return stats;
     }
 
-    // 🔁 Recorrer clientes uno por uno
-    for (const cliente of listaClientes) {
-      console.log("👤 Cliente seleccionado:", cliente);
+    stats.totalClientes = listaClientes.length;
 
+    // 🔁 Recorrer clientes
+    for (const cliente of listaClientes) {
+      console.log("👤 Cliente seleccionado:", cliente.NombreCompleto);
       const clienteCodigo = parseInt(cliente.CodigoCliente, 10);
 
-      // 2️⃣ Consultar préstamos (SIFCO)
       let prestamosResp;
       try {
         prestamosResp = await consultarPrestamosPorCliente(clienteCodigo);
       } catch (err: any) {
         console.log(
-          `❌ No se pudieron obtener préstamos para el cliente ${cliente.NombreCompleto}:`,
+          `❌ No se pudieron obtener préstamos para ${cliente.NombreCompleto}:`,
           err?.message || err
         );
-        continue; // 👈 seguir con el siguiente cliente
+        continue;
       }
 
       if (!prestamosResp?.Prestamos?.length) {
@@ -286,82 +274,83 @@ export async function syncClienteConPrestamos(clienteCodigoFilter?: number) {
         continue;
       }
 
-      console.log("💳 Préstamos encontrados:", prestamosResp.Prestamos);
+      console.log("💳 Préstamos encontrados:", prestamosResp.Prestamos.length);
+      stats.totalPrestamos += prestamosResp.Prestamos.length;
 
       // 3️⃣ Iterar sobre cada préstamo
       for (const prestamo of prestamosResp.Prestamos) {
         const preNumero = prestamo.NumeroPrestamo;
         console.log(`📑 Consultando detalle del préstamo: ${preNumero}`);
 
-        let detalle;
         try {
-          detalle = await consultarPrestamoDetalle(preNumero);
-        } catch (err: any) {
-          console.log(
-            `❌ Error al obtener detalle del préstamo ${preNumero}:`,
-            err?.message || err
+          const detalle = await consultarPrestamoDetalle(preNumero);
+
+          if (!detalle) {
+            throw new Error("Detalle vacío");
+          }
+          if (detalle.ApEstDes === "CANCELADO") {
+            throw new Error("Préstamo cancelado");
+          }
+
+          const excelRow = await leerCreditoPorNumeroSIFCO(
+            excelPath,
+            preNumero
           );
-          continue; // 👉 pasar al siguiente préstamo
-        }
+     
 
-        if (!detalle) {
-          console.log(`❌ No se obtuvo detalle válido para ${preNumero}`);
-          continue;
-        }
-        if (detalle?.ApEstDes === "CANCELADO") {
-          console.log(`❌ El préstamo ${preNumero} está cancelado`);
-          continue;
-        }
-        if (!detalle) {
-          console.log(`❌ No se pudo obtener detalle para ${preNumero}`);
-          continue;
-        }
+          const recargosLibres = await consultarRecargosLibres(preNumero);
+          if (!recargosLibres) {
+            throw new Error("Recargos libres no disponibles");
+          }
 
-        // Buscar en Excel
-        const excelRow = await leerCreditoPorNumeroSIFCO(excelPath, preNumero);
-        if (!excelRow || excelRow.length === 0) {
-          console.log(`❌ No se encontró el préstamo ${preNumero} en el Excel`);
-          continue;
-        }
-        const recargosLibres = await consultarRecargosLibres(preNumero);
-
-        if (!recargosLibres) {
-          console.log(
-            `❌ No se pudieron obtener los recargos libres para ${preNumero}`
-          );
-          continue;
-        }
-
-        // Mapear directo WS + Excel → DB
-        let combinado;
-        try {
-          combinado = await mapPrestamoDetalleToCredito(
+          const combinado = await mapPrestamoDetalleToCredito(
             detalle,
             excelRow as ExcelCreditoRow[],
             cliente
           );
-        } catch (err) {
-          console.log(`❌ Error al mapear el préstamo ${preNumero}:`, err);
-          continue; // 👈 sigue con el siguiente préstamo
-        }
 
-        if (!combinado || !combinado.credito_id) {
-          console.log(
-            `❌ No se pudo mapear el préstamo ${preNumero} a la base de datos`
-          );
-          continue;
-        } else {
+          if (!combinado?.credito_id) {
+            throw new Error("Mapeo a DB fallido");
+          }
+
           console.log(
             "💾 Crédito insertado en DB con ID:",
             combinado.credito_id
           );
+          stats.creditosMigrados++;
+        } catch (err: any) {
+          console.log(
+            `❌ Error procesando préstamo ${preNumero}:`,
+            err?.message || err
+          );
+          stats.creditosFallidos++;
+          stats.errores.push({
+            prestamo: preNumero,
+            motivo: err?.message || "Error desconocido",
+          });
           continue;
         }
-        //const infoPagos = await consultarInformacionPrestamo(preNumero);
       }
     }
+
+    // 📊 Resumen global
+    console.log("📊 Resumen de sincronización:");
+    console.log(`   Clientes procesados: ${stats.totalClientes}`);
+    console.log(`   Préstamos encontrados: ${stats.totalPrestamos}`);
+    console.log(`   Créditos migrados: ✅ ${stats.creditosMigrados}`);
+    console.log(`   Créditos fallidos: ❌ ${stats.creditosFallidos}`);
+
+    if (stats.errores.length > 0) {
+      console.log("📝 Detalles de errores:");
+      stats.errores.forEach((e) =>
+        console.log(`   - Préstamo ${e.prestamo}: ${e.motivo}`)
+      );
+    }
+
+    return stats;
   } catch (err: any) {
-    console.error("❌ Error en syncClienteConPrestamos:", err || err);
+    console.error("❌ Error en syncClienteConPrestamos:", err?.message || err);
+    throw err;
   }
 }
 
@@ -510,10 +499,7 @@ export async function mapEstadoCuentaToPagosBig(
     const reserva = new Big(credito?.seguro_10_cuotas ?? "0").plus(600);
     console.log("📦 Reserva calculada:", reserva.toString());
     const capital = toBigExcel(primeraTransaccion.CapitalDesembolsado, "0");
-    const porcentaje_interes = toBigExcel(
-      credito?.porcentaje_interes,
-      "1.5"
-    ).div(100);
+    const porcentaje_interes = toBigExcel(credito?.porcentaje_interes, "1.5").div(100);
     const gps = toBigExcel(credito?.gps, 0);
     const seguro_10_cuotas = toBigExcel(credito?.seguro_10_cuotas, 0);
     const membresias_pago = toBigExcel(credito?.membresias, 0);
@@ -646,10 +632,30 @@ export async function mapEstadoCuentaToPagosBig(
         .plus(moraTotal)
         .plus(otrosMonto);
       console.log("💵 Pago del mes:", pagoDelMes.toString());
+  
 
-      const capitalActual = getSaldoCapitalMatch(c.Fecha);
-      console.log("📌 Capital restante match:", capitalActual);
+// 🔹 Interés restante
+const interes_restante_big = c.InteresMonto && toBig(c.InteresMonto).gt(0)
+  ? toBig(c.InteresMonto) 
+  : new Big(0);
 
+// 🔹 Capital restante
+const capital_restante_big = c.CapitalMonto && toBig(c.CapitalMonto).gt(0)
+  ? toBig(c.CapitalMonto) 
+  : new Big(0);
+
+// 🔹 IVA 12% restante
+const iva_12_restante_big = interes_restante_big.times(0.12).round(2);
+console.log("📌 IVA 12 restante:", iva_12_restante_big.toString());
+
+ const mesNombre = new Date(c.Fecha).toLocaleDateString('es-ES', { month: 'long' })
+  .replace(/^\w/, (c) => c.toUpperCase());
+// "Agosto"
+// 🔹 Seguro restante
+const seguro_restante_big = ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) && seguroDb.gt(0)
+  ? seguroDb 
+  : new Big(0);
+console.log("📌 Seguro restante:", seguro_restante_big.toString());
       return {
         cuota_id: cuotadB[0].cuota_id,
         credito_id: creditoId,
@@ -668,10 +674,10 @@ export async function mapEstadoCuentaToPagosBig(
         monto_boleta: pagoDelMes.toString(),
         fecha_filtro: new Date(c.Fecha).toISOString(),
         renuevo_o_nuevo: "",
-        capital_restante: capitalActual || "0.00",
-        interes_restante: "0.00",
-        iva_12_restante: "0.00",
-        seguro_restante: "0.00",
+        capital_restante:   ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00": capital_restante_big.toString() ,
+        interes_restante: ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00" : interes_restante_big.toString(),
+        iva_12_restante:  ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00" : iva_12_restante_big.toString(),
+        seguro_restante: ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00" : seguroDb.toString(),
         gps_restante: "0.00",
         total_restante: "0.00",
         membresias: credito?.membresias,
@@ -687,7 +693,7 @@ export async function mapEstadoCuentaToPagosBig(
         seguro_total: seguroDb.toString(),
         pagado: c.CapitalPagado === "S" && c.InteresPagado === "S",
         facturacion: "si",
-        mes_pagado: "",
+        mes_pagado:  ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? mesNombre : "",
         seguro_facturado: seguroDb.toString(),
         gps_facturado: "0.00",
         reserva: "0.00",
@@ -705,29 +711,6 @@ export async function mapEstadoCuentaToPagosBig(
 
   console.log("✅ Pagos insertados:", pagosDB.length);
   return pagosDB;
-
-  function getSaldoCapitalMatch(fechaCuota: string): string {
-    const cuotaDate = new Date(fechaCuota);
-    const mes = cuotaDate.getMonth();
-    const año = cuotaDate.getFullYear();
-
-    for (const trx of transacciones) {
-      const trxDate = new Date(trx.CrMoFeTrx);
-      if (trxDate.getMonth() === mes && trxDate.getFullYear() === año) {
-        console.log(
-          `🔗 Match transacción con cuota ${fechaCuota}:`,
-          trx.SaldoCapital
-        );
-        return trx.SaldoCapital;
-      } else {
-        console.log(
-          `❌ No match transacción ${trx.CrMoFeTrx} con cuota ${fechaCuota}`
-        );
-      }
-    }
-    console.log(`⚠️ No se encontró match para cuota ${fechaCuota}`);
-    return "0.00";
-  }
 }
 
 /**
@@ -872,15 +855,10 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
   for (const credito of creditos) {
     if (!credito) continue;
 
-    console.log(
-      `🚀 Procesando inversionistas para crédito SIFCO=${credito.numero_credito_sifco}`
-    );
+    console.log(`🚀 Procesando inversionistas para crédito SIFCO=${credito.numero_credito_sifco}`);
 
     // 3. Obtener filas desde Excel
-    const rows = await leerCreditoPorNumeroSIFCO(
-      excelPath,
-      credito.numero_credito_sifco
-    );
+    const rows = await leerCreditoPorNumeroSIFCO(excelPath, credito.numero_credito_sifco);
     console.log(`ℹ️ Filas obtenidas desde Excel: ${rows?.length || 0}`);
 
     // Contadores por crédito
@@ -904,44 +882,83 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
 
         // 4.2 Calcular montos
         const montoAportado = toBigExcel(row.Capital);
+        console.log(
+          "💰 Capital (montoAportado):",
+          row.Capital,
+          "->",
+          montoAportado.toString()
+        );
+
         const porcentajeCashIn = toBigExcel(row.PorcentajeCashIn);
+        console.log(
+          "📊 Porcentaje CashIn:",
+          row.PorcentajeCashIn,
+          "->",
+          porcentajeCashIn.toString()
+        );
+
         const porcentajeInversion = toBigExcel(row.PorcentajeInversionista);
+        console.log(
+          "📊 Porcentaje Inversionista:",
+          row.PorcentajeInversionista,
+          "->",
+          porcentajeInversion.toString()
+        );
+
         const interes = toBigExcel(row.porcentaje);
+        console.log(
+          "📈 Interés (%):",
+          row.porcentaje,
+          "->",
+          interes.toString()
+        );
 
-        const cuotaInteres = montoAportado.times(interes.div(100));
+        // Calcular cuota de interés base
+        const cuotaInteres = montoAportado.times(interes);
+        console.log(
+          "💵 Cuota Interés (Capital * interes):",
+          cuotaInteres.toString()
+        );
 
+        // Dividir la cuota entre inversionista y cashin
         const montoInversionista = cuotaInteres
           .times(porcentajeInversion)
-          .div(100)
+ 
           .toFixed(2);
+        console.log("👤 Monto Inversionista:", montoInversionista);
+
         const montoCashIn = cuotaInteres
           .times(porcentajeCashIn)
-          .div(100)
+        
           .toFixed(2);
+        console.log("🏦 Monto CashIn:", montoCashIn);
 
+        // IVA sobre cada parte
         const ivaInversionista =
           Number(montoInversionista) > 0
             ? new Big(montoInversionista).times(0.12).toFixed(2)
             : "0.00";
+        console.log("🧾 IVA Inversionista:", ivaInversionista);
+
         const ivaCashIn =
           Number(montoCashIn) > 0
             ? new Big(montoCashIn).times(0.12).toFixed(2)
             : "0.00";
+        console.log("🧾 IVA CashIn:", ivaCashIn);
 
+        // Cuota final
         const cuotaInv =
           row.CuotaInversionista && row.CuotaInversionista !== "0"
             ? row.CuotaInversionista
             : row.Cuota;
-
+        console.log("📌 Cuota usada (Inversionista/General):", cuotaInv);
         // 4.3 Armar registro
         const registro = {
           credito_id: credito.credito_id,
           inversionista_id: inv.inversionista_id,
           monto_aportado: montoAportado.toString(),
-          porcentaje_cash_in: porcentajeCashIn.mul(100).toString(),
-          porcentaje_participacion_inversionista: porcentajeInversion
-            .mul(100)
-            .toString(),
+          porcentaje_cash_in: porcentajeCashIn.toString(),
+          porcentaje_participacion_inversionista: porcentajeInversion.toString(),
           monto_inversionista: montoInversionista,
           monto_cash_in: montoCashIn,
           iva_inversionista: ivaInversionista,
@@ -962,7 +979,8 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
             set: {
               monto_aportado: sql`EXCLUDED.monto_aportado`,
               porcentaje_cash_in: sql`EXCLUDED.porcentaje_cash_in`,
-              porcentaje_participacion_inversionista: sql`EXCLUDED.porcentaje_participacion_inversionista`,
+              porcentaje_participacion_inversionista:
+                sql`EXCLUDED.porcentaje_participacion_inversionista`,
               monto_inversionista: sql`EXCLUDED.monto_inversionista`,
               monto_cash_in: sql`EXCLUDED.monto_cash_in`,
               iva_inversionista: sql`EXCLUDED.iva_inversionista`,
@@ -974,10 +992,7 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
         ok++;
         totalOk++;
       } catch (err) {
-        console.error(
-          `❌ Error procesando fila crédito=${credito.numero_credito_sifco}`,
-          err
-        );
+        console.error(`❌ Error procesando fila crédito=${credito.numero_credito_sifco}`, err);
         fail++;
         totalFail++;
       }

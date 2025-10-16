@@ -26,20 +26,20 @@ app.use(
 			if (origin?.startsWith("http://localhost:") || origin?.startsWith("http://127.0.0.1:")) {
 				return origin;
 			}
-			
-			// Permitir subdominios de devteamatcci.site (wildcard)
-			if (origin?.match(/^https?:\/\/.*\.devteamatcci\.site$/)) {
+
+			// Permitir subdominios de devteamatcci.site (incluyendo el dominio base sin subdominio)
+			if (origin?.match(/^https?:\/\/(.*\.)?devteamatcci\.site(:\d+)?$/)) {
 				return origin;
 			}
-			
+
 			// En producción, usar el CORS_ORIGIN específico
 			const productionOrigin = process.env.CORS_ORIGIN;
 			if (productionOrigin && origin === productionOrigin) {
 				return origin;
 			}
-			
+
 			// Fallback para desarrollo sin origin (ej: Postman)
-			return "http://localhost:3000";
+			return origin || "http://localhost:3000";
 		},
 		allowMethods: ["GET", "POST", "OPTIONS"],
 		allowHeaders: ["Content-Type", "Authorization"],

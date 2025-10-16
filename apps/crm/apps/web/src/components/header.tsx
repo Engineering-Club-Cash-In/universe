@@ -19,6 +19,7 @@ import {
 	TrendingUp,
 	Calculator,
 	MessageSquare,
+	Key,
 } from "lucide-react";
 
 import { ModeToggle } from "./mode-toggle";
@@ -206,6 +207,12 @@ export default function Header() {
 										<Link to="/admin/users" className="cursor-pointer">
 											<Users className="h-4 w-4 mr-2" />
 											Usuarios
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/crm/admin/miniagent" className="cursor-pointer">
+											<Key className="h-4 w-4 mr-2" />
+											MiniAgent
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>

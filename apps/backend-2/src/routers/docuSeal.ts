@@ -21,6 +21,20 @@ import { generateMovableGuaranteeManTemplate24Submission } from "../services/tem
 import { generateVehiclePurchaseThirdPartyWomanTemplate13Submission } from "../services/template13solicitudCompraVechiculo(mujer)";
 import { generateMovableGuaranteeWomanTemplate25Submission } from "../services/template25GarantiaInmobilaria(mujer)";
 import { getDocumentsByDpiController, getDocusealDocumentsController } from "../controllers/docuseal";
+import { generateDocusealSubmissions } from "../services/genericFillDocument";
+// 🔥 Schema para validar un field
+const FieldSchema = t.Object({
+  key: t.String(),
+  value: t.Any(),
+});
+
+// 🎯 Schema para validar una submission request
+const SubmissionRequestSchema = t.Object({
+  id: t.Number(),
+  email: t.String({ format: "email" }),
+  fields: t.Array(FieldSchema),
+});
+
 const docuSealRouter = new Elysia({
   prefix: "/docuSeal",
 })
@@ -794,22 +808,45 @@ const docuSealRouter = new Elysia({
       };
     }
   })
-  .post(
-    "/document-by-dpi",
-    async ({ body }) => {
-      const { dpi, documentName } = body;
+.post(
+  "/document-by-dpi",
+  async ({ body }) => {
+    const { dpi, documentNames } = body;
 
-      // 🧠 Llamamos al controller que maneja RENAP + query en DB
-      const result = await getDocumentsByDpiController(dpi, documentName);
-      return result;
+    // 🧠 Llamamos al controller que maneja RENAP + query en DB
+    const result = await getDocumentsByDpiController(dpi, documentNames);
+    return result;
+  },
+  {
+    body: t.Object({
+      dpi: t.String(),
+      documentNames: t.Array(t.String()),
+    }),
+  }
+).post(
+    "/submissions",
+    async ({ body }) => {
+      try {
+        const result = await generateDocusealSubmissions(body);
+        return result;
+      } catch (error: any) {
+        return {
+          success: false,
+          message: "Error al procesar submissions",
+          error: error.message,
+        };
+      }
     },
     {
-      body: t.Object({
-        dpi: t.String(),
-        documentName: t.String(),
-      }),
+      body: t.Array(SubmissionRequestSchema),
+      detail: {
+        summary: "Crear múltiples submissions en DocuSeal",
+        description: "Envía un array de documentos con sus campos para crear submissions",
+        tags: ["DocuSeal"],
+      },
     }
-  );
+  )
+ 
 
 export default docuSealRouter;
  

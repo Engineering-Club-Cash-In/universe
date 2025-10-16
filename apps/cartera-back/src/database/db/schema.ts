@@ -159,6 +159,7 @@ export const moras_credito = customSchema.table("moras_credito", {
     .notNull()
     .default("0"),
   cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
+ 
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
 });
@@ -187,6 +188,11 @@ export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros",
 });
 
 // 3. Pagos de crédito
+export const paymentValidationStatus = pgEnum('payment_validation_status', [
+  'no_required',    // No necesita validación (pagos normales/automáticos)
+  'pending',        // Pendiente de validación
+  'validated'       // Validado
+]);
 
 export const pagos_credito = customSchema.table("pagos_credito", {
   pago_id: serial("pago_id").primaryKey(),
@@ -245,6 +251,9 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   observaciones: text("observaciones"), //input
 
   paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
+  validationStatus: paymentValidationStatus("validation_status")
+  .notNull()
+  .default('no_required'),
   createdAt: timestamp("createdat").defaultNow(),
 });
 export const boletas = customSchema.table("boletas", {

@@ -1249,6 +1249,7 @@ export interface PagoDataInvestor {
   reserva: number | null;
   membresias: number | null;
   observaciones: string | null;
+  validationStatus: string;
 
   // 💰 Abonos asociados directamente al pago
   abono_interes: number;
@@ -1321,3 +1322,36 @@ export async function getPagosConInversionistasService(
 
   return parsedData;
 }
+
+export interface AplicarPagoResponse {
+  success: boolean;
+  applied?: boolean;
+  message: string;
+  data?: {
+    credito_id: number;
+    capital_anterior: string;
+    abono_capital: string;
+    capital_nuevo: string;
+    deuda_total_nueva: string;
+  };
+}
+
+export const pagosService = {
+  /**
+   * Aplica un pago al crédito y lo valida
+   * @param pagoId - ID del pago a aplicar
+   */
+  aplicarPago: async (pagoId: number): Promise<AplicarPagoResponse> => {
+    try {
+      const { data } = await api.post<AplicarPagoResponse>(
+        `/aplicar-pago`,
+        null,
+        { params: { pago_id: pagoId } }
+      );
+      return data;
+    } catch (error) {
+      console.error('Error en aplicarPago:', error);
+      throw error;
+    }
+  },
+};

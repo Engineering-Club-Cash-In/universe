@@ -16,7 +16,7 @@ const syncCreditPaymentsSchema = z.object({
  * ⚠️ para producción deberías meterlo en un bucket o carpeta compartida
  */
 const excelPath = path.resolve(
-  "C:/Users/Kelvin Palacios/Documents/analis de datos/noviembre2025csv"
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/septiembre2025.csv"
 );
 
 export const sifcoRouter = new Elysia()

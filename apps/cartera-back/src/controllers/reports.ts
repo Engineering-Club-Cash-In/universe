@@ -272,6 +272,7 @@ export async function exportPagosConInversionistasExcel(
     anio?: number;
     inversionistaId?: number;
     usuarioNombre?: string; // 🆕 nuevo filtro
+    validationStatus?: string; // 🆕 nuevo filtro
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio

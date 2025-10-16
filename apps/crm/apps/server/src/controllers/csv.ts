@@ -126,6 +126,7 @@ export async function processCsvLeads() {
     console.log("[INFO] Sending lead to Landbot API...");
    
     try {
+ 
       const res = await fetch(LANDOBT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -23,12 +23,7 @@ const fields = [
     type: "number",
     icon: <Info className="text-blue-500 mr-2 w-5 h-5" />,
   },
-  {
-    name: "mora",
-    label: "Mora",
-    type: "number",
-    icon: <Percent className="text-blue-500 mr-2 w-5 h-5" />,
-  },
+  
   {
     name: "observaciones",
     label: "Observaciones",
@@ -50,8 +45,7 @@ export function PagoForm() {
     setModalExcesoOpen,
     excedente,
     handleAbonoCapital,
-    handleAbonoSiguienteCuota,
-    handleAbonoMora,
+    handleAbonoSiguienteCuota, 
     handleAbonoOtros,
     modalMode,
     setCuotaSeleccionada,
@@ -77,7 +71,7 @@ export function PagoForm() {
         onClose={() => setModalExcesoOpen(false)}
         onAbonoCapital={handleAbonoCapital}
         onAbonoSiguienteCuota={handleAbonoSiguienteCuota}
-        onAbonoMora={handleAbonoMora}
+     
         excedente={excedente}
         onAbonoOtros={handleAbonoOtros}
         cuotaNumero={cuotaActualInfo?.numero}

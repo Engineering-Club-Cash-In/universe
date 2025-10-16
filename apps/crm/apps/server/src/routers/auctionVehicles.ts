@@ -89,7 +89,7 @@ export const auctionRouter = {
   addAuctionExpense: protectedProcedure
     .input(
       z.object({
-        auctionId: z.uuid(),
+        auctionId: z.string().uuid(),
         description: z.string(),
         amount: z.string(), // keep as string for NUMERIC
       })

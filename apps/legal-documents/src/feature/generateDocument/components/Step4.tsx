@@ -22,12 +22,11 @@ const copyAllLinksToClipboard = (
 ) => {
   const { results = [] } = documentsResponse;
 
-  const allLinks = results.flatMap((result) =>
-    result.data.map((submission) => {
-      const documentName = submission.name || `Documento #${submission.id}`;
-      return `${documentName}: ${submission.embed_src}`;
-    })
-  );
+  const allLinks = results.flatMap((result) => {
+    const name = result.nameDocument?.[0]?.label || `Template-${result.templateId}`;
+    const link = result.data?.[0]?.embed_src || "No Link Available";
+    return [`${name}: ${link}`];
+  });
 
   const textToCopy = allLinks.join("\n\n");
 
@@ -208,7 +207,7 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                             </div>
                             <div>
                               <h5 className="font-semibold text-gray-900">
-                                {submission.name ||
+                                {result.nameDocument[0]?.label ||
                                   `Documento #${submission.id}`}
                               </h5>
                               <p className="text-xs text-gray-500 mb-1">
@@ -242,7 +241,7 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                             <button
                               onClick={() => {
                                 const documentName =
-                                  submission.name ||
+                                  result.nameDocument[0]?.label ||
                                   `Documento #${submission.id}`;
                                 const textToCopy = `${documentName}: ${submission.embed_src}`;
                                 navigator.clipboard.writeText(textToCopy);

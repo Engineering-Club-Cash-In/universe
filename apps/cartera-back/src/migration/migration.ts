@@ -632,10 +632,30 @@ export async function mapEstadoCuentaToPagosBig(
         .plus(moraTotal)
         .plus(otrosMonto);
       console.log("💵 Pago del mes:", pagoDelMes.toString());
+  
 
-      const capitalActual = getSaldoCapitalMatch(c.Fecha);
-      console.log("📌 Capital restante match:", capitalActual);
+// 🔹 Interés restante
+const interes_restante_big = c.InteresMonto && toBig(c.InteresMonto).gt(0)
+  ? toBig(c.InteresMonto) 
+  : new Big(0);
 
+// 🔹 Capital restante
+const capital_restante_big = c.CapitalMonto && toBig(c.CapitalMonto).gt(0)
+  ? toBig(c.CapitalMonto) 
+  : new Big(0);
+
+// 🔹 IVA 12% restante
+const iva_12_restante_big = interes_restante_big.times(0.12).round(2);
+console.log("📌 IVA 12 restante:", iva_12_restante_big.toString());
+
+ const mesNombre = new Date(c.Fecha).toLocaleDateString('es-ES', { month: 'long' })
+  .replace(/^\w/, (c) => c.toUpperCase());
+// "Agosto"
+// 🔹 Seguro restante
+const seguro_restante_big = ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) && seguroDb.gt(0)
+  ? seguroDb 
+  : new Big(0);
+console.log("📌 Seguro restante:", seguro_restante_big.toString());
       return {
         cuota_id: cuotadB[0].cuota_id,
         credito_id: creditoId,
@@ -654,10 +674,10 @@ export async function mapEstadoCuentaToPagosBig(
         monto_boleta: pagoDelMes.toString(),
         fecha_filtro: new Date(c.Fecha).toISOString(),
         renuevo_o_nuevo: "",
-        capital_restante: capitalActual || "0.00",
-        interes_restante: "0.00",
-        iva_12_restante: "0.00",
-        seguro_restante: "0.00",
+        capital_restante:   ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00": capital_restante_big.toString() ,
+        interes_restante: ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00" : interes_restante_big.toString(),
+        iva_12_restante:  ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00" : iva_12_restante_big.toString(),
+        seguro_restante: ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? "0.00" : seguroDb.toString(),
         gps_restante: "0.00",
         total_restante: "0.00",
         membresias: credito?.membresias,
@@ -673,7 +693,7 @@ export async function mapEstadoCuentaToPagosBig(
         seguro_total: seguroDb.toString(),
         pagado: c.CapitalPagado === "S" && c.InteresPagado === "S",
         facturacion: "si",
-        mes_pagado: "",
+        mes_pagado:  ( c.CapitalPagado === "S" && c.InteresPagado === "S" ) ? mesNombre : "",
         seguro_facturado: seguroDb.toString(),
         gps_facturado: "0.00",
         reserva: "0.00",
@@ -691,29 +711,6 @@ export async function mapEstadoCuentaToPagosBig(
 
   console.log("✅ Pagos insertados:", pagosDB.length);
   return pagosDB;
-
-  function getSaldoCapitalMatch(fechaCuota: string): string {
-    const cuotaDate = new Date(fechaCuota);
-    const mes = cuotaDate.getMonth();
-    const año = cuotaDate.getFullYear();
-
-    for (const trx of transacciones) {
-      const trxDate = new Date(trx.CrMoFeTrx);
-      if (trxDate.getMonth() === mes && trxDate.getFullYear() === año) {
-        console.log(
-          `🔗 Match transacción con cuota ${fechaCuota}:`,
-          trx.SaldoCapital
-        );
-        return trx.SaldoCapital;
-      } else {
-        console.log(
-          `❌ No match transacción ${trx.CrMoFeTrx} con cuota ${fechaCuota}`
-        );
-      }
-    }
-    console.log(`⚠️ No se encontró match para cuota ${fechaCuota}`);
-    return "0.00";
-  }
 }
 
 /**

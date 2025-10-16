@@ -1,7 +1,8 @@
-import { inArray, sql } from "drizzle-orm";
-import { docusealDocuments } from "../database/schemas/docuseal";
+import { asc, desc, inArray, sql } from "drizzle-orm";
+import { detail_document_field, docusealDocuments, field } from "../database/schemas/docuseal";
 import { db } from "../database";
 import { and, eq } from "drizzle-orm";
+
 /**
  * 🔤 Converts snake_case names into a clean readable format
  */
@@ -35,6 +36,7 @@ export async function getDocusealDocumentsController() {
       "pagare_unico_libre_protesto",
       "carta_emision_cheques",
       "garantia_mobiliaria",
+      "declaracion_vendedor"
     ] as const;
 
     // 🧠 Query optimized: only select distinct document names
@@ -102,11 +104,11 @@ async function fetchRenapInfo(dpi: string) {
 }
 
 /**
- * 🎯 Controller: Fetch RENAP info + query document directly from DB by gender
+ * 🎯 Controller: Fetch RENAP info + documents + fields from DB by gender
  */
 export async function getDocumentsByDpiController(
   dpi: string,
-  documentName: string
+  documentNames: string[]
 ) {
   try {
     // 1️⃣ Fetch RENAP info
@@ -121,7 +123,7 @@ export async function getDocumentsByDpiController(
     const gender = renapData.gender.toLowerCase();
     const genero = gender.startsWith("m") ? "hombre" : "mujer";
 
-    // 3️⃣ Validate enum name
+    // 3️⃣ Validate enum names
     const validEnums = [
       "solicitud_compra_vehiculo_tercero",
       "carta_aceptacion_instalacion_gps",
@@ -136,28 +138,22 @@ export async function getDocumentsByDpiController(
       "garantia_mobiliaria",
     ] as const;
 
-    if (!validEnums.includes(documentName as any)) {
-      return { success: false, message: "Invalid document name" };
+    // Validar todos los nombres
+    const invalidNames = documentNames.filter(name => !validEnums.includes(name as any));
+    if (invalidNames.length > 0) {
+      return { 
+        success: false, 
+        message: `Invalid document names: ${invalidNames.join(", ")}` 
+      };
     }
 
-    // 4️⃣ Query principal — busca por género
-    let document = await db
-      .select()
-      .from(docusealDocuments)
-      .where(
-        and(
-          eq(
-            docusealDocuments.nombre_documento,
-            documentName as (typeof validEnums)[number]
-          ),
-          eq(docusealDocuments.genero, genero)
-        )
-      )
-      .limit(1);
+    const documentosEncontrados = [];
+    const camposMap = new Map<number, any>();
 
-    // 5️⃣ Si no hay documento por género, intenta con UNISEX
-    if (!document.length) {
-      document = await db
+    // 4️⃣ Procesar cada documento
+    for (const documentName of documentNames) {
+      // 🔍 Busca por género
+      let document = await db
         .select()
         .from(docusealDocuments)
         .where(
@@ -166,41 +162,102 @@ export async function getDocumentsByDpiController(
               docusealDocuments.nombre_documento,
               documentName as (typeof validEnums)[number]
             ),
-            eq(docusealDocuments.genero, "unisex")
+            eq(docusealDocuments.genero, genero)
           )
         )
         .limit(1);
-    }
 
-    // 6️⃣ Si aún no hay resultados, devolver error
-    if (!document.length) {
-      return {
-        success: false,
-        message: `No document found for '${documentName}' (gender '${genero}' or unisex).`,
-        renapData,
-      };
-    }
+      // 5️⃣ Si no hay documento por género, intenta con UNISEX
+      if (!document.length) {
+        document = await db
+          .select()
+          .from(docusealDocuments)
+          .where(
+            and(
+              eq(
+                docusealDocuments.nombre_documento,
+                documentName as (typeof validEnums)[number]
+              ),
+              eq(docusealDocuments.genero, "unisex")
+            )
+          )
+          .limit(1);
+      }
 
-    // 7️⃣ Success response
-    const doc = document[0];
-    return {
-      success: true,
-      message: `Document '${doc.nombre_documento}' available for ${doc.genero}`,
-      renapData,
-      documento: {
-        id: doc.id,
+      // 6️⃣ Si no se encuentra el documento, continuar con el siguiente
+      if (!document.length) {
+        console.warn(`Document '${documentName}' not found for gender '${genero}' or unisex`);
+        continue;
+      }
+
+      const doc = document[0];
+      documentosEncontrados.push({
+        id: doc.id_docuseal,
         nombre_documento: doc.nombre_documento,
         descripcion: doc.descripcion,
         genero: doc.genero,
         serialid: doc.serialid,
         url_insercion: doc.url_insercion,
-      },
+      });
+
+      // 7️⃣ 🔥 Traer los campos del documento
+      const documentFields = await db
+        .select({
+          id: field.id,
+          name: field.name,
+          key: field.key,
+          regex: field.regex,
+          required: field.required,
+          relation: field.relation,
+          description: field.description,
+          default: field.default,
+        })
+        .from(detail_document_field)
+        .innerJoin(field, eq(detail_document_field.idField, field.id))
+        .where(eq(detail_document_field.idDocument, Number(doc.id_docuseal)))
+        .orderBy(asc(field.id));
+
+      // 8️⃣ Agrupar campos por ID y acumular documentos
+      for (const f of documentFields) {
+        if (camposMap.has(f.id)) {
+          // Si el campo ya existe, agregar el documento al array
+          const existingField = camposMap.get(f.id);
+          if (!existingField.iddocuments.includes(doc.id_docuseal)) {
+            existingField.iddocuments.push(doc.id_docuseal);
+          }
+        } else {
+          // Si es nuevo, crear el campo con el array de documentos
+          camposMap.set(f.id, {
+            id: f.id,
+            name: f.name,
+            key: f.key,
+            regex: f.regex,
+            required: f.required,
+            iddocuments: [doc.id_docuseal],
+            relation: f.relation,
+            description: f.description,
+            default: f.default,
+          });
+        }
+      }
+    }
+
+    // 9️⃣ Convertir el Map a array
+    const camposArray = Array.from(camposMap.values());
+
+    // 🔟 Success response
+    return {
+      success: true,
+      message: `Found ${documentosEncontrados.length} document(s)`,
+      renapData,
+      documents: documentosEncontrados,
+      campos: camposArray,
     };
   } catch (error: any) {
     console.error("[ERROR] getDocumentsByDpiController:", error);
     return {
       success: false,
-      message: "Internal server error while fetching document by DPI",
+      message: "Internal server error while fetching documents by DPI",
       error: error.message,
     };
   }

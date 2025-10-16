@@ -4,104 +4,93 @@ import { findOrCreateAdvisorByName } from "../controllers/advisor";
 import { findOrCreateUserByName } from "../controllers/users";
 import { db } from "../database";
 import { creditos, creditos_inversionistas } from "../database/db";
-import { CreditoAgrupado, ExcelCreditoRow, listarCreditosAgrupados } from "../services/excel";
+import {
+  CreditoAgrupado,
+  ExcelCreditoRow,
+  listarCreditosAgrupados,
+} from "../services/excel";
 import { PrestamoDetalle } from "../services/sifco.interface";
 import { mapInversionistas } from "./migration";
 import { toBigExcel } from "../utils/functions/generalFunctions";
 import { consultarPrestamoDetalle } from "../services/sifcoIntegrations";
- 
+
 import fs from "fs";
 import path from "path";
-import { stringify } from "csv-stringify/sync"; 
+import { stringify } from "csv-stringify/sync";
 type ResultadoCredito = {
   creditoBase: string;
   cliente: string;
-  status: "insertado" | "actualizado" | "fallido";
+  status: "insertado" | "actualizado" | "fallido" | "no_encontrado";
   error?: string;
 };
 
 export async function listarCreditosConDetalle(filePath: string) {
   const agrupados = await listarCreditosAgrupados(filePath);
-
   const resumen: ResultadoCredito[] = [];
+  const results = [];
 
-  const results = await Promise.all(
-    agrupados.map(async (credito) => {
+  for (const credito of agrupados) {
+    try {
+      console.log(`🔎 Procesando crédito ${credito.creditoBase}...`);
+      const detalle = await consultarPrestamoDetalle(credito.creditoBase);
+
+      // 🔥 Si no hay detalle, saltar
+      if (!detalle) {
+        console.warn(`⏭️ Saltando ${credito.creditoBase} - no disponible en SIFCO`);
+        resumen.push({
+          creditoBase: credito.creditoBase,
+          cliente: credito.cliente,
+          status: "no_encontrado",
+          error: "No disponible en SIFCO o timeout",
+        });
+        results.push({ ...credito, detalle: null, dbRow: null });
+        continue;
+      }
+
+      // ✅ Procesar normalmente
       try {
-        console.log(`🔎 Procesando crédito ${credito.creditoBase}...`);
-        const detalle = await consultarPrestamoDetalle(credito.creditoBase);
+        const dbRow = await mapExcelToCredito(detalle, credito);
+        const status = new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
+          ? "insertado"
+          : "actualizado";
 
-        let dbRow = null;
-        if (detalle) {
-          try {
-            dbRow = await mapExcelToCredito(detalle, credito);
-
-            // 🚀 Chequear si fue insertado o actualizado
-            // Asumimos que si la fecha de creación es reciente (menos de 1 minuto), es un registro nuevo
-            const status = new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
-                ? "insertado"
-                : "actualizado";
-
-            console.log(
-              `✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`
-            );
-
-            resumen.push({
-              creditoBase: credito.creditoBase,
-              cliente: credito.cliente,
-              status,
-            });
-          } catch (err: any) {
-            console.error(
-              `❌ Error insertando crédito ${credito.creditoBase} en DB:`,
-              err
-            );
-            resumen.push({
-              creditoBase: credito.creditoBase,
-              cliente: credito.cliente,
-              status: "fallido",
-              error: String(err?.message || err),
-            });
-          }
-        }
-
-        return { ...credito, detalle, dbRow };
+        console.log(`✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`);
+        resumen.push({
+          creditoBase: credito.creditoBase,
+          cliente: credito.cliente,
+          status,
+        });
+        results.push({ ...credito, detalle, dbRow });
       } catch (err: any) {
-        console.error(`❌ Error consultando crédito ${credito.creditoBase}:`, err);
+        console.error(`❌ Error al insertar ${credito.creditoBase}:`, err.message);
         resumen.push({
           creditoBase: credito.creditoBase,
           cliente: credito.cliente,
           status: "fallido",
           error: String(err?.message || err),
         });
-        return { ...credito, detalle: null, dbRow: null };
+        results.push({ ...credito, detalle, dbRow: null });
       }
-    })
-  );
+    } catch (err: any) {
+      console.error(`❌ Error general con ${credito.creditoBase}:`, err.message);
+      resumen.push({
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status: "fallido",
+        error: String(err?.message || err),
+      });
+      results.push({ ...credito, detalle: null, dbRow: null });
+    }
+  }
 
+  // Resto del código (logs, CSV, etc.)
   console.log(`\n📊 Créditos procesados: ${results.length}`);
-  console.log(
-    `   ✅ Insertados: ${resumen.filter((r) => r.status === "insertado").length}`
-  );
-  console.log(
-    `   ♻️  Actualizados: ${
-      resumen.filter((r) => r.status === "actualizado").length
-    }`
-  );
-  console.log(
-    `   ❌ Fallidos: ${resumen.filter((r) => r.status === "fallido").length}`
-  );
+  console.log(`   ✅ Insertados: ${resumen.filter((r) => r.status === "insertado").length}`);
+  console.log(`   ♻️  Actualizados: ${resumen.filter((r) => r.status === "actualizado").length}`);
+  console.log(`   ⏭️  No encontrados: ${resumen.filter((r) => r.status === "no_encontrado").length}`);
+  console.log(`   ❌ Fallidos: ${resumen.filter((r) => r.status === "fallido").length}`);
 
-  // 📝 Guardar resumen en CSV
-  const csvData = stringify(resumen, {
-    header: true,
-    columns: ["creditoBase", "cliente", "status", "error"],
-  });
-
-  const outPath = path.join(process.cwd(), "resumen_creditos.csv");
-  fs.writeFileSync(outPath, csvData);
-  console.log(`📂 Resumen exportado a: ${outPath}`);
-
+  // Guardar CSV...
   return results;
 }
 export async function mapExcelToCredito(
@@ -109,7 +98,9 @@ export async function mapExcelToCredito(
   agrupado: CreditoAgrupado
 ) {
   if (!agrupado.filas || agrupado.filas.length === 0) {
-    throw new Error(`❌ No se encontraron filas en el agrupado ${agrupado.creditoBase}`);
+    throw new Error(
+      `❌ No se encontraron filas en el agrupado ${agrupado.creditoBase}`
+    );
   }
 
   // 🔥 Tomamos la primera fila como referencia
@@ -123,12 +114,24 @@ export async function mapExcelToCredito(
     ComoSeEntero: excelRow?.ComoSeEntero ?? null,
   };
 
+  // 🧹 Función para limpiar valores numéricos
+  const cleanNumericValue = (value: any): string => {
+    if (value === null || value === undefined) return "0";
+    
+    // Convertir a string y limpiar
+    return String(value)
+      .replace(/[Q$,()"\s]/g, "") // Quitar Q, $, comas, paréntesis, comillas y espacios
+      .replace(/^-/, "") // Quitar signo negativo al inicio si existe
+      .trim() || "0"; // Si queda vacío, retornar "0"
+  };
+
   // ---- Cálculos base ----
-  const capital = toBigExcel(prestamo.PreSalCapital, "0");
-  const porcentaje_interes = toBigExcel(excelRow?.porcentaje, "0.015");
-  const gps = toBigExcel(excelRow?.GPS, 0);
-  const seguro_10_cuotas = toBigExcel(excelRow?.Seguro10Cuotas, 0);
-  const membresias_pago = toBigExcel(excelRow?.MembresiasPago, 0);
+  const capital = toBigExcel(cleanNumericValue(prestamo.PreSalCapital), "0");
+  const porcentaje_interes = toBigExcel(cleanNumericValue(excelRow?.porcentaje), "0.015");
+  const gps = toBigExcel(cleanNumericValue(excelRow?.GPS), 0);
+  const seguro_10_cuotas = toBigExcel(cleanNumericValue(excelRow?.Seguro10Cuotas), 0);
+  const otros = toBigExcel(cleanNumericValue(excelRow?.Otros), 0);
+  const membresias_pago = toBigExcel(cleanNumericValue(excelRow?.MembresiasPago), 0);
 
   const cuota_interes = capital.times(porcentaje_interes).round(2);
   const iva_12 = cuota_interes.times(0.12).round(2);
@@ -139,6 +142,7 @@ export async function mapExcelToCredito(
     .plus(seguro_10_cuotas)
     .plus(gps)
     .plus(membresias_pago)
+    .plus(otros)
     .round(2, 0);
 
   // ---- Relaciones (IDs reales) ----
@@ -151,7 +155,7 @@ export async function mapExcelToCredito(
 
   // 🔥 Sumar todas las cuotas de las filas agrupadas
   const cuotaCredito = agrupado.filas.reduce(
-    (acc, row) => acc + Number(row.Cuota || 0),
+    (acc, row) => acc + Number(cleanNumericValue(row.Cuota)),
     0
   );
 
@@ -162,7 +166,7 @@ export async function mapExcelToCredito(
   // ---- Shape del crédito ----
   const creditInsert = {
     usuario_id: Number(user.usuario_id ?? 0),
-    otros: toBigExcel(excelRow?.Otros, "0").toString(),
+    otros: otros.toFixed(2),
     numero_credito_sifco: prestamo.PreNumero,
     capital: capital.toFixed(2),
     porcentaje_interes: realPorcentaje.toString(),
@@ -176,7 +180,7 @@ export async function mapExcelToCredito(
     como_se_entero: excelRow?.ComoSeEntero ?? "",
     asesor_id: advisor.asesor_id,
     plazo: Number(
-      toBigExcel(prestamo.PrePlazo ?? excelRow?.Plazo ?? 0, "0").toString()
+      toBigExcel(cleanNumericValue(prestamo.PrePlazo ?? excelRow?.Plazo ?? 0), "0").toString()
     ),
     iva_12: iva_12.toFixed(2),
     membresias_pago: membresias_pago.toFixed(2),
@@ -185,14 +189,33 @@ export async function mapExcelToCredito(
       agrupado.filas.length > 1
         ? "Pool"
         : ((excelRow?.FormatoCredito as "Pool" | "Individual") ?? "Individual"),
-    porcentaje_royalti: toBigExcel(excelRow?.PorcentajeRoyalty, "0").toString(),
-    royalti: toBigExcel(excelRow?.Royalty, "0").toString(),
+    porcentaje_royalti: toBigExcel(cleanNumericValue(excelRow?.PorcentajeRoyalty), "0").toString(),
+    royalti: toBigExcel(cleanNumericValue(excelRow?.Royalty), "0").toString(),
     tipoCredito: "Nuevo",
     mora: "0",
   };
 
   try {
-    // Insert/update crédito
+    // 🔥 PRIMERO: Obtener el ID del crédito si ya existe
+    const [existingCredit] = await db
+      .select({ credito_id: creditos.credito_id })
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, prestamo.PreNumero))
+      .limit(1);
+
+    // 🗑️ Si existe, ELIMINAR inversionistas ANTES del upsert
+    if (existingCredit) {
+      await db
+        .delete(creditos_inversionistas)
+        .where(
+          eq(creditos_inversionistas.credito_id, existingCredit.credito_id)
+        );
+      console.log(
+        `🗑️ Inversionistas eliminados para crédito ${existingCredit.credito_id}`
+      );
+    }
+
+    // ✅ Insert/update crédito
     const [row] = await db
       .insert(creditos)
       .values(creditInsert)
@@ -208,9 +231,9 @@ export async function mapExcelToCredito(
     // Inversionistas: 🔥 ahora usamos todas las filas del agrupado
     const inversionistas = await mapInversionistas(agrupado.filas);
     const creditosInversionistasData = inversionistas.map((inv: any) => {
-      const montoAportado = new Big(inv.monto_aportado);
-      const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-      const porcentajeInversion = new Big(inv.porcentaje_inversion);
+      const montoAportado = new Big(cleanNumericValue(inv.monto_aportado));
+      const porcentajeCashIn = new Big(cleanNumericValue(inv.porcentaje_cash_in));
+      const porcentajeInversion = new Big(cleanNumericValue(inv.porcentaje_inversion));
       const interes = new Big(realPorcentaje ?? 0);
 
       const newCuotaInteres = montoAportado.times(interes.div(100));
@@ -233,11 +256,11 @@ export async function mapExcelToCredito(
 
       const cuotaInv =
         inv.cuota_inversionista === 0
-          ? excelRow?.Cuota.toString()
-          : inv.cuota_inversionista.toString();
+          ? cleanNumericValue(excelRow?.Cuota)
+          : cleanNumericValue(inv.cuota_inversionista);
 
       return {
-        credito_id: creditoId,
+        credito_id: creditoId, // 🔥 Siempre usa el creditoId del row insertado
         inversionista_id: inv.inversionista_id,
         monto_aportado: montoAportado.toString(),
         porcentaje_cash_in: porcentajeCashIn.toString(),
@@ -251,14 +274,14 @@ export async function mapExcelToCredito(
       };
     });
 
-    // Limpiar cuotas viejas
-    await db
-      .delete(creditos_inversionistas)
-      .where(eq(creditos_inversionistas.credito_id, creditoId));
-
-    // Insertar cuotas nuevas
+    // ✅ Insertar inversionistas nuevos
     if (creditosInversionistasData.length > 0) {
-      await db.insert(creditos_inversionistas).values(creditosInversionistasData);
+      await db
+        .insert(creditos_inversionistas)
+        .values(creditosInversionistasData);
+      console.log(
+        `✅ ${creditosInversionistasData.length} inversionistas insertados`
+      );
     }
 
     return row;

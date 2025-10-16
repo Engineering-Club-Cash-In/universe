@@ -72,11 +72,18 @@ else
     fi
 fi
 
-# If nothing changed, exit
-if [ "$SERVER_CHANGED" = false ] && [ "$WEB_CHANGED" = false ]; then
+# If nothing changed and not forcing, exit
+if [ "$SERVER_CHANGED" = false ] && [ "$WEB_CHANGED" = false ] && [ "$FORCE_DEPLOY" != "1" ]; then
     echo -e "\n${YELLOW}ℹ️  No changes detected in server or web. Skipping deployment.${NC}"
     echo -e "${YELLOW}💡 To force deployment, run: FORCE_DEPLOY=1 ./deploy.sh${NC}"
     exit 0
+fi
+
+# Check if forcing deployment
+if [ "$FORCE_DEPLOY" = "1" ]; then
+    echo -e "\n${BLUE}🚀 FORCE_DEPLOY enabled - deploying both server and web${NC}"
+    SERVER_CHANGED=true
+    WEB_CHANGED=true
 fi
 
 echo -e "\n${BLUE}🔐 Authenticating with AWS ECR...${NC}"

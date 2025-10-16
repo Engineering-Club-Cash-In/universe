@@ -1,7 +1,5 @@
 // controllers/leadsController.ts
 import fs from "fs";
-import fetch from "node-fetch";
-
 // 👉 Hardcoded path to the CSV file (Windows requires double backslashes)
 const CSV_PATH =
   "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\Leads\\leadsFacebook.csv";

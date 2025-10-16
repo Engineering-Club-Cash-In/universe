@@ -18,7 +18,43 @@ export enum CategoriaUsuario {
   VEHICULO = "Vehículo",
   CV_VEHICULO = "CV Vehículo",
 }
+export const userRoleEnum = pgEnum("user_role", ["ADMIN", "ASESOR","CONTA"]);
 export const customSchema = pgSchema("cartera");
+export const admins = customSchema.table("admins", {
+  admin_id: serial("admin_id").primaryKey(),
+  nombre: varchar("nombre", { length: 150 }).notNull(),
+  apellido: varchar("apellido", { length: 150 }).notNull(),
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  telefono: varchar("telefono", { length: 30 }),
+  activo: boolean("activo").notNull().default(true),
+
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+export const platform_users = customSchema.table("platform_users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  password_hash: varchar("password_hash", { length: 255 }).notNull(), // hash, nunca plano
+  role: userRoleEnum("role").notNull(),
+  is_active: boolean("is_active").notNull().default(true),
+
+  // Relaciones opcionales
+  asesor_id: integer("asesor_id").references(() => asesores.asesor_id),
+  admin_id: integer("admin_id").references(() => admins.admin_id),
+ conta_id: integer("conta_id").references(() => conta_users.conta_id),
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+export const conta_users = customSchema.table("conta_users", {
+  conta_id: serial("conta_id").primaryKey(),
+  nombre: varchar("nombre", { length: 150 }).notNull(), 
+  email: varchar("email", { length: 150 }).notNull().unique(),
+  telefono: varchar("telefono", { length: 30 }),
+  activo: boolean("activo").notNull().default(true),
+
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
 
 // 1. Usuarios
 export const usuarios = customSchema.table("usuarios", {
@@ -92,10 +128,9 @@ export const creditos = customSchema.table("creditos", {
     precision: 18,
     scale: 2,
   }).notNull(),
-
-  mora: numeric("mora", { precision: 18, scale: 2 }).notNull().default("0"),
+ 
   statusCredit: text("statusCredit", {
-    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION"],
+    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO"],
   })
     .notNull()
     .default(StatusCredit.ACTIVO),
@@ -111,6 +146,38 @@ export const cuotas_credito = customSchema.table("cuotas_credito", {
   pagado: boolean("pagado").default(false),
   createdAt: timestamp("createdat").defaultNow(),
 });
+export const moras_credito = customSchema.table("moras_credito", {
+  mora_id: serial("mora_id").primaryKey(),
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  activa: boolean("activa").notNull().default(true),
+  porcentaje_mora: numeric("porcentaje_mora", { precision: 5, scale: 2 })
+    .notNull()
+    .default("1.12"),
+  monto_mora: numeric("monto_mora", { precision: 18, scale: 2 })
+    .notNull()
+    .default("0"),
+  cuotas_atrasadas: integer("cuotas_atrasadas").notNull().default(0),
+ 
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+export const moras_condonaciones = pgTable("moras_condonaciones", {
+  condonacion_id: serial("condonacion_id").primaryKey(),
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  mora_id: integer("mora_id")
+    .notNull()
+    .references(() => moras_credito.mora_id, { onDelete: "cascade" }),
+  motivo: text("motivo").notNull(), // reason for condonation
+  usuario_id: integer("usuario_id")
+    .notNull()
+    .references(() => platform_users.id, { onDelete: "cascade" }),
+  fecha: timestamp("fecha").defaultNow().notNull(),
+});
+
 export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros", {
   id: serial("id").primaryKey(),
   credito_id: integer("credito_id")
@@ -121,6 +188,11 @@ export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros",
 });
 
 // 3. Pagos de crédito
+export const paymentValidationStatus = pgEnum('payment_validation_status', [
+  'no_required',    // No necesita validación (pagos normales/automáticos)
+  'pending',        // Pendiente de validación
+  'validated'       // Validado
+]);
 
 export const pagos_credito = customSchema.table("pagos_credito", {
   pago_id: serial("pago_id").primaryKey(),
@@ -144,6 +216,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   llamada: varchar("llamada", { length: 100 }), // ""
 
   monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input
+  numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), // input
   fecha_filtro: date("fecha_filtro").defaultNow(), // viene del credito
 
   renuevo_o_nuevo: varchar("renuevo_o_nuevo", { length: 50 }), //input
@@ -178,6 +251,9 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   observaciones: text("observaciones"), //input
 
   paymentFalse: boolean("paymentFalse").notNull().default(false), // indica si el pago es falso
+  validationStatus: paymentValidationStatus("validation_status")
+  .notNull()
+  .default('no_required'),
   createdAt: timestamp("createdat").defaultNow(),
 });
 export const boletas = customSchema.table("boletas", {

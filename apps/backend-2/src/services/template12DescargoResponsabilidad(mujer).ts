@@ -65,7 +65,7 @@ export async function generateDescargoMujerSubmission(
             dia: params.dia,
             mes: params.mes,
             año: params.año, 
-            "Nombre Deudora ": params.nombreDeudoraConfirm, // campo duplicado del template
+            "Nombre Deudora Confirm": params.nombreDeudoraConfirm, // campo duplicado del template
             "Dpi Deudor": params.dpiDeudor,
           },
         },

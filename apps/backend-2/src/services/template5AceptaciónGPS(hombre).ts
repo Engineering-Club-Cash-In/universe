@@ -55,7 +55,7 @@ export async function generateCartaGpsSubmission(
           email,
           values: {
             Fecha: params.fecha,
-            "Nombre DEUDOR": params.nombreDeudor,
+            "Nombre Deudor": params.nombreDeudor,
             Tipo: params.tipo,
             Marca: params.marca,
             Color: params.color,
@@ -70,7 +70,7 @@ export async function generateCartaGpsSubmission(
             Asientos: params.asientos,
             Cilindros: params.cilindros,
             ISCV: params.iscv,
-            "Nombre DEUDOR Firma": params.nombreFirmaPersona,
+            "Nombre Firma Persona": params.nombreFirmaPersona,
             "Dpi Deudor": params.dpiDeudor,
             // Firma no se pasa, DocuSeal la deja para el usuario
           },

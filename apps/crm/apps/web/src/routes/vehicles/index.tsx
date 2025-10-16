@@ -78,10 +78,10 @@ function VehiclesDashboard() {
 
   // Fetch vehicles
   const { data: vehicles, isLoading } = useQuery(
-    orpc.getVehicles.queryOptions()
+    orpc.getVehicles.queryOptions(),
   );
   const { data: statistics } = useQuery(
-    orpc.getVehicleStatistics.queryOptions()
+    orpc.getVehicleStatistics.queryOptions(),
   );
 
   // Filter vehicles based on search term and filter status
@@ -109,67 +109,6 @@ function VehiclesDashboard() {
   const [auctionInspection, setAuctionInspection] = useState<any>(null);
 
   const [auctionPrice, setAuctionPrice] = useState<number | null>(null);
-
-const renderStatusBadge = (status: string) => {
-  switch (status) {
-    // Estados de inspección
-    case "approved":
-      return (
-        <Badge className="bg-green-500">
-          <CheckCircle className="w-3.5 h-3.5 mr-1" />
-          Aprobado
-        </Badge>
-      );
-    case "pending":
-      return (
-        <Badge className="bg-yellow-500">
-          <AlertTriangle className="w-3.5 h-3.5 mr-1" />
-          Pendiente
-        </Badge>
-      );
-    case "rejected":
-      return (
-        <Badge className="bg-red-500">
-          <XCircle className="w-3.5 h-3.5 mr-1" />
-          Rechazado
-        </Badge>
-      );
-
-    // Estados de vehículo
-    case "available":
-      return (
-        <Badge className="bg-blue-500">
-          <Car className="w-3.5 h-3.5 mr-1" />
-          Disponible
-        </Badge>
-      );
-    case "sold":
-      return (
-        <Badge className="bg-purple-600">
-          <CheckCircle className="w-3.5 h-3.5 mr-1" />
-          Vendido
-        </Badge>
-      );
-    case "maintenance":
-      return (
-        <Badge className="bg-orange-500">
-          <Wrench className="w-3.5 h-3.5 mr-1" />
-          Mantenimiento
-        </Badge>
-      );
-    case "auction":
-      return (
-        <Badge className="bg-pink-500">
-          <Car className="w-3.5 h-3.5 mr-1" />
-          Remate
-        </Badge>
-      );
-
-    default:
-      return null;
-  }
-};
-
 
   if (isLoading) {
     return (
@@ -338,7 +277,7 @@ const renderStatusBadge = (status: string) => {
                                   <div className="font-medium">
                                     Q
                                     {Number(
-                                      latestInspection.suggestedCommercialValue
+                                      latestInspection.suggestedCommercialValue,
                                     ).toLocaleString("es-GT")}
                                   </div>
                                   <div
@@ -363,7 +302,7 @@ const renderStatusBadge = (status: string) => {
                                 ? format(
                                     new Date(latestInspection.inspectionDate),
                                     "dd MMM yyyy",
-                                    { locale: es }
+                                    { locale: es },
                                   )
                                 : "-"}
                             </TableCell>
@@ -444,7 +383,7 @@ const renderStatusBadge = (status: string) => {
                                         onClick={() => {
                                           window.open(
                                             latestInspection.scannerResultUrl,
-                                            "_blank"
+                                            "_blank",
                                           );
                                         }}
                                       >
@@ -457,10 +396,10 @@ const renderStatusBadge = (status: string) => {
                                     onClick={() => {
                                       // Copy VIN to clipboard
                                       navigator.clipboard.writeText(
-                                        vehicle.vinNumber
+                                        vehicle.vinNumber,
                                       );
                                       toast.success(
-                                        "VIN copiado al portapapeles"
+                                        "VIN copiado al portapapeles",
                                       );
                                     }}
                                   >
@@ -750,7 +689,7 @@ const renderStatusBadge = (status: string) => {
                                   ? format(
                                       new Date(inspection.inspectionDate),
                                       "PPP",
-                                      { locale: es }
+                                      { locale: es },
                                     )
                                   : "N/A"}
                               </CardDescription>
@@ -782,7 +721,7 @@ const renderStatusBadge = (status: string) => {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.marketValue
+                                          inspection.marketValue,
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -791,7 +730,7 @@ const renderStatusBadge = (status: string) => {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.suggestedCommercialValue
+                                          inspection.suggestedCommercialValue,
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -800,7 +739,7 @@ const renderStatusBadge = (status: string) => {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.bankValue
+                                          inspection.bankValue,
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -809,7 +748,7 @@ const renderStatusBadge = (status: string) => {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.currentConditionValue
+                                          inspection.currentConditionValue,
                                         ).toLocaleString("es-GT")}
                                       </div>
                                     </div>
@@ -906,7 +845,7 @@ const renderStatusBadge = (status: string) => {
                                               >
                                                 {alert}
                                               </Badge>
-                                            )
+                                            ),
                                           )}
                                         </div>
                                       </div>
@@ -932,8 +871,8 @@ const renderStatusBadge = (status: string) => {
                                             acc[item.category].push(item);
                                             return acc;
                                           },
-                                          {}
-                                        )
+                                          {},
+                                        ),
                                       ).map(
                                         ([category, items]: [string, any]) => (
                                           <div
@@ -970,18 +909,18 @@ const renderStatusBadge = (status: string) => {
                                                         : "✗ No cumple"}
                                                     </Badge>
                                                   </div>
-                                                )
+                                                ),
                                               )}
                                             </div>
                                           </div>
-                                        )
+                                        ),
                                       )}
 
                                       {/* Summary of critical issues */}
                                       {inspection.checklistItems.some(
                                         (item: any) =>
                                           !item.checked &&
-                                          item.severity === "critical"
+                                          item.severity === "critical",
                                       ) && (
                                         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
                                           <h5 className="text-sm font-semibold text-red-900 mb-2">
@@ -992,7 +931,7 @@ const renderStatusBadge = (status: string) => {
                                               .filter(
                                                 (item: any) =>
                                                   !item.checked &&
-                                                  item.severity === "critical"
+                                                  item.severity === "critical",
                                               )
                                               .map((item: any, idx: number) => (
                                                 <li
@@ -1014,7 +953,7 @@ const renderStatusBadge = (status: string) => {
                             </CardContent>
                           </Card>
                         );
-                      }
+                      },
                     )}
                   </div>
                 ) : (

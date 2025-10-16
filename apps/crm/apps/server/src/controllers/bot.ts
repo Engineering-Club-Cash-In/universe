@@ -619,3 +619,123 @@ export async function hasPassedLiveness(dpi: string): Promise<boolean> {
 
   return result[0].livenessValidated;
 }
+/**
+ * 📄 Controller: getOnlyRenapInfoController
+ *
+ * Fetches RENAP data by DPI, inserts or updates the `renap_info` table,
+ * and returns the normalized RENAP data.
+ *
+ * ⚠️ This controller does NOT create or update leads.
+ *
+ * @param dpi - The citizen's DPI (unique identifier in RENAP).
+ * @returns {Promise<{ success: boolean; message: string; data?: any; error?: any }>}
+ * A standardized response object with success status, message, and optional data/error.
+ */
+export const getOnlyRenapInfoController = async (dpi: string) => {
+  console.log(`[DEBUG] Starting RENAP-only process for DPI: ${dpi}`);
+
+  try {
+    // ========================================================
+    // 1️⃣ Fetch data from RENAP API
+    // ========================================================
+    console.log(`[DEBUG] Requesting RENAP API data for DPI: ${dpi}`);
+    const renapResponse = await getRenapData(dpi);
+
+    if (!renapResponse.success || !renapResponse.data) {
+      console.error(`[ERROR] RENAP API failed for DPI: ${dpi}`, renapResponse);
+      return {
+        success: false,
+        message: renapResponse.message || "No RENAP data found.",
+        error: renapResponse.error,
+      };
+    }
+
+    const renapData = renapResponse.data;
+    console.log(`[DEBUG] RENAP API response received for DPI: ${dpi}`, renapData);
+
+    // ========================================================
+    // 2️⃣ Insert or Update record in renap_info
+    // ========================================================
+    console.log(`[DEBUG] Checking if DPI already exists in renap_info: ${dpi}`);
+    const existingRenap = await db
+      .select()
+      .from(renapInfo)
+      .where(eq(renapInfo.dpi, dpi));
+
+    if (existingRenap.length === 0) {
+      // 🆕 Insert a new record if DPI not found
+      console.log(`[DEBUG] DPI not found in renap_info. Inserting new record.`);
+      await db.insert(renapInfo).values({
+        dpi: renapData.dpi,
+        firstName: renapData.firstName,
+        secondName: renapData.secondName,
+        thirdName: renapData.thirdName,
+        firstLastName: renapData.firstLastName,
+        secondLastName: renapData.secondLastName,
+        marriedLastName: renapData.marriedLastName,
+        picture: renapData.picture,
+        birthDate: normalizeDate(renapData.birthDate),
+        gender: renapData.gender,
+        civilStatus: renapData.civil_status,
+        nationality: renapData.nationality,
+        bornedIn: renapData.borned_in,
+        departmentBornedIn: renapData.department_borned_in,
+        municipalityBornedIn: renapData.municipality_borned_in,
+        deathDate: normalizeDate(renapData.deathDate),
+        ocupation: renapData.ocupation,
+        cedulaOrder: renapData.cedula_order,
+        cedulaRegister: renapData.cedula_register,
+        dpiExpiracyDate: normalizeDate(renapData.dpi_expiracy_date),
+      });
+    } else {
+      // 🔁 Update existing record if DPI is found
+      console.log(`[DEBUG] DPI found in renap_info. Updating record.`);
+      await db
+        .update(renapInfo)
+        .set({
+          firstName: renapData.firstName,
+          secondName: renapData.secondName,
+          thirdName: renapData.thirdName,
+          firstLastName: renapData.firstLastName,
+          secondLastName: renapData.secondLastName,
+          marriedLastName: renapData.marriedLastName,
+          picture: renapData.picture,
+          birthDate: normalizeDate(renapData.birthDate),
+          gender: renapData.gender,
+          civilStatus: renapData.civil_status,
+          nationality: renapData.nationality,
+          bornedIn: renapData.borned_in,
+          departmentBornedIn: renapData.department_borned_in,
+          municipalityBornedIn: renapData.municipality_borned_in,
+          deathDate: normalizeDate(renapData.deathDate),
+          ocupation: renapData.ocupation,
+          cedulaOrder: renapData.cedula_order,
+          cedulaRegister: renapData.cedula_register,
+          dpiExpiracyDate: normalizeDate(renapData.dpi_expiracy_date),
+        })
+        .where(eq(renapInfo.dpi, dpi));
+    }
+
+    // ========================================================
+    // 3️⃣ Return success response
+    // ========================================================
+    console.log(`[DEBUG] RENAP-only process completed successfully for DPI: ${dpi}`);
+
+    return {
+      success: true,
+      message: "RENAP data fetched and synchronized successfully (no lead created).",
+      data: renapData,
+    };
+  } catch (error: any) {
+    // ========================================================
+    // ❌ Error handling and recovery
+    // ========================================================
+    console.error(`[ERROR] Unexpected error in RENAP-only controller for DPI: ${dpi}`, error);
+
+    return {
+      success: false,
+      message: "An unexpected error occurred while processing RENAP data.",
+      error: error?.message || error,
+    };
+  }
+};

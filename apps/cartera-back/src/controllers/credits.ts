@@ -10,9 +10,8 @@ import {
   cuotas_credito,
   inversionistas,
   montos_adicionales,
+  moras_credito,
   pagos_credito,
-  pagos_credito_inversionistas,
-  StatusCredit,
   usuarios,
 } from "../database/db/schema";
 import { z } from "zod";
@@ -29,844 +28,10 @@ import {
   gte,
   gt,
 } from "drizzle-orm";
-import { findOrCreateUserByName } from "./users";
-import { findOrCreateAdvisorByName } from "./advisor";
 import { getPagosDelMesActual } from "./payments";
 
-// Only input fields, no calculated fields here!
-const creditSchema = z.object({
-  usuario: z.string().max(1000),
-  numero_credito_sifco: z.string().max(1000),
-  capital: z.number().nonnegative(),
-  porcentaje_interes: z.number().min(0).max(100),
-  seguro_10_cuotas: z.number().min(0),
-  gps: z.number().min(0),
-  observaciones: z.string().max(1000),
-  no_poliza: z.string().max(1000),
-  como_se_entero: z.string().max(100),
-  asesor: z.string().max(1000),
-  plazo: z.number().int().min(1).max(360),
-  cuota: z.number().min(0),
-  membresias_pago: z.number().min(0),
-  porcentaje_royalti: z.number().min(0),
-  royalti: z.number().min(0),
+ 
 
-  categoria: z.string().max(1000),
-  nit: z.string().max(1000),
-  otros: z.number().min(0),
-  reserva: z.number().min(0),
-  inversionistas: z
-    .array(
-      z.object({
-        inversionista_id: z.number().int().positive(),
-
-        // Nuevo campo obligatorio
-        monto_aportado: z.number().positive(),
-
-        // Estos dos porcentajes deben sumar 100, pero eso se valida en la lógica
-        porcentaje_cash_in: z.number().min(0).max(100),
-        porcentaje_inversion: z.number().min(0).max(100),
-        cuota_inversionista: z.number().min(0).optional(), // Nuevo campo opcional
-      })
-    )
-    .min(0),
-  rubros: z
-    .array(
-      z.object({
-        nombre_rubro: z.string().max(100),
-        monto: z.number().min(0),
-      })
-    )
-    .optional()
-    .default([]),
-});
-
-export interface CreditInsert {
-  usuario_id: number;
-  numero_credito_sifco: string;
-  capital: string;
-  porcentaje_interes: string;
-  cuota_interes: string;
-  iva_12: string;
-  deudatotal: string;
-  seguro_10_cuotas: string;
-  gps: string;
-  observaciones: string;
-  no_poliza: string;
-  como_se_entero: string;
-  asesor_id: number;
-  plazo: number;
-  cuota: string;
-  membresias_pago: string;
-  membresias: string;
-  formato_credito: string;
-  porcentaje_royalti: string;
-  royalti: string;
-  tipoCredito: string;
-  mora: string; // Valor por defecto
-  reserva?: string; // Opcional, si no se usa, no se envía
-  otros: string; // Otros cargos o pagos adicionales
-}
-
-export const insertCredit = async ({ body, set }: { body: any; set: any }) => {
-  try {
-    const parseResult = creditSchema.safeParse(body);
-    if (!parseResult.success) {
-      set.status = 400;
-      return {
-        message: "Validation failed",
-        errors: parseResult.error.flatten().fieldErrors,
-      };
-    }
-
-    const creditData = parseResult.data;
-    // Suma precisa con Big.js
-    const totalCuotaInversionista = creditData.inversionistas.reduce(
-      (acc: Big, inv: any) => acc.plus(inv.cuota_inversionista ?? 0),
-      new Big(0)
-    );
-
-    // Redondea a dos decimales
-    const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
-    if (
-      Number(creditData.cuota) !== totalCuotaInversionistaRedondeado.toNumber()
-    ) {
-      set.status = 400;
-      return {
-        message:
-          "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
-        cuotaEsperada: creditData.cuota,
-        totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
-      };
-    }
-    const totalMontoAportado = creditData.inversionistas.reduce(
-      (acc: Big, inv: any) => acc.plus(inv.monto_aportado ?? 0),
-      new Big(0)
-    );
-
-    // Validar que cada aporte tenga cash_in + inversion = 100
-    for (const inv of creditData.inversionistas) {
-      const sumaPorcentajes =
-        Number(inv.porcentaje_cash_in ?? 0) +
-        Number(inv.porcentaje_inversion ?? 0);
-
-      if (sumaPorcentajes !== 100) {
-        set.status = 400;
-        return {
-          message: `El inversionista con ID ${inv.inversionista_id} no tiene porcentajes válidos. La suma debe ser 100.`,
-          sumaPorcentajes,
-        };
-      }
-    }
-
-    // Validar que la suma de los montos aportados sea igual al capital
-    if (Number(creditData.capital) !== totalMontoAportado.toNumber()) {
-      set.status = 400;
-      return {
-        message:
-          "La suma de los montos aportados por los inversionistas debe ser igual al capital del crédito.",
-        capitalEsperado: creditData.capital,
-        totalMontoAportado: totalMontoAportado.toNumber(),
-      };
-    }
-    const capital = new Big(creditData.capital);
-    const porcentaje_interes = new Big(creditData.porcentaje_interes ?? 0);
-
-    const cuota_interes = capital.times(porcentaje_interes.div(100)).round(2);
-    const iva_12 = cuota_interes.times(0.12).round(2);
-
-    const deudatotal = capital
-      .plus(cuota_interes)
-      .plus(iva_12)
-      .plus(creditData.seguro_10_cuotas ?? 0)
-      .plus(creditData.gps ?? 0)
-      .plus(creditData.membresias_pago ?? 0)
-      .plus(creditData.otros ?? 0);
-
-    const deudatotalRedondeado = deudatotal.round(2);
-    const user = await findOrCreateUserByName(
-      creditData.usuario,
-      creditData.categoria,
-      creditData.nit,
-      creditData.como_se_entero
-    );
-
-    const advisor = await findOrCreateAdvisorByName(creditData.asesor, true);
-
-    const formatCredit = creditData.inversionistas.some(
-      (inv) => Number(inv.porcentaje_inversion) > 1
-    )
-      ? "Pool"
-      : "Individual";
-
-    const creditDataForInsert = {
-      usuario_id: user.usuario_id,
-      otros: creditData.otros?.toString() ?? "0",
-      numero_credito_sifco: creditData.numero_credito_sifco,
-      capital: capital.toString(),
-      porcentaje_interes: porcentaje_interes.toString(),
-      cuota: creditData.cuota.toString(),
-      cuota_interes: cuota_interes.toString(),
-      deudatotal: deudatotalRedondeado.toString(),
-      seguro_10_cuotas: creditData.seguro_10_cuotas.toString(),
-      gps: creditData.gps.toString(),
-      observaciones: creditData.observaciones ?? "0",
-      no_poliza: creditData.no_poliza ?? "",
-      como_se_entero: creditData.como_se_entero ?? "",
-      asesor_id: advisor.asesor_id,
-      plazo: creditData.plazo,
-      iva_12: iva_12.toString(),
-
-      membresias_pago: creditData.membresias_pago.toString(),
-      membresias: creditData.membresias_pago.toString(),
-      formato_credito: formatCredit ?? "",
-      porcentaje_royalti: creditData.porcentaje_royalti?.toString() ?? "0",
-      royalti: creditData.royalti?.toString() ?? "0",
-      tipoCredito: "Nuevo",
-      mora: "0", // Valor por defecto
-    };
-    console.log("Credit data to insert:", creditDataForInsert);
-
-    const [newCredit] = await db
-      .insert(creditos)
-      .values(creditDataForInsert)
-      .returning();
-      
-    console.log("Inserted credit:", newCredit);
-    if (creditData.rubros && creditData.rubros.length > 0) {
-      const rubrosToInsert = creditData.rubros.map((r) => ({
-        credito_id: newCredit.credito_id,
-        nombre_rubro: r.nombre_rubro,
-        monto: r.monto.toString(), // Convert number to string
-      }));
-
-      await db.insert(creditos_rubros_otros).values(rubrosToInsert);
-      console.log("Inserted rubros:", rubrosToInsert);
-    }
-
-    // 👇 Insertar inversionistas múltiples
-
-    const creditosInversionistasData = creditData.inversionistas.map(
-      (inv: any) => {
-        const montoAportado = new Big(inv.monto_aportado);
-        const porcentajeCashIn = new Big(inv.porcentaje_cash_in); // Ej: 30
-        const porcentajeInversion = new Big(inv.porcentaje_inversion); // Ej: 70
-        const interes = new Big(creditDataForInsert.porcentaje_interes ?? 0);
-        const newCuotaInteres = new Big(montoAportado ?? 0).times(
-          interes.div(100)
-        );
-        // Montos proporcionales
-        const montoInversionista = newCuotaInteres
-          .times(porcentajeInversion)
-          .div(100)
-          .toFixed(2);
-        const montoCashIn = newCuotaInteres
-          .times(porcentajeCashIn)
-          .div(100)
-          .toFixed(2);
-        // IVA respectivos
-        const ivaInversionista =
-          Number(montoInversionista) > 0
-            ? new Big(montoInversionista).times(0.12)
-            : new Big(0);
-        const ivaCashIn =
-          Number(montoCashIn) > 0
-            ? new Big(montoCashIn).times(0.12)
-            : new Big(0);
-        const cuotaInv =
-          inv.cuota_inversionista === 0
-            ? creditData.cuota.toString()
-            : inv.cuota_inversionista.toString();
-        return {
-          credito_id: newCredit.credito_id,
-          inversionista_id: inv.inversionista_id,
-          monto_aportado: montoAportado.toString(),
-          porcentaje_cash_in: porcentajeCashIn.toString(),
-          porcentaje_participacion_inversionista:
-            porcentajeInversion.toString(),
-          monto_inversionista: montoInversionista.toString(),
-          monto_cash_in: montoCashIn.toString(),
-          iva_inversionista: ivaInversionista.toString(),
-          iva_cash_in: ivaCashIn.toString(),
-          fecha_creacion: new Date(),
-          cuota_inversionista: cuotaInv.toString(),
-        };
-      }
-    );
-    let total_monto_cash_in = new Big(0);
-    let total_iva_cash_in = new Big(0);
-
-    creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }) => {
-      total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
-      total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
-    }); // <-- Add this closing parenthesis and semicolon
-
-    if (creditosInversionistasData.length > 0) {
-      await db
-        .insert(creditos_inversionistas)
-        .values(creditosInversionistasData);
-    }
-    const pagos = [];
-    const startDate = new Date(); // Primera fecha de pago: ahora
-
-    const fechas = [];
-    const fechaHoy = new Date();
-    const fechaHoyGuate = fechaHoy.toLocaleDateString("sv-SE", {
-      timeZone: "America/Guatemala",
-    });
-    fechas.push(fechaHoyGuate);
-    for (let i = 0; i < creditData.plazo; i++) {
-      const baseDate = new Date(startDate);
-      baseDate.setMonth(baseDate.getMonth() + i + 1);
-
-      const mes = baseDate.getMonth();
-      const anio = baseDate.getFullYear();
-      const ultimoDiaMes = new Date(anio, mes + 1, 0).getDate();
-      const diaPago = ultimoDiaMes < 30 ? ultimoDiaMes : 30;
-      const fechaLocal = new Date(anio, mes, diaPago, 12, 0, 0);
-      const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
-        timeZone: "America/Guatemala",
-      });
-      fechas.push(fechaGuateStr);
-    }
-    const cuotas = [];
-    const cuotaInicialArr = await db
-      .insert(cuotas_credito)
-      .values({
-        credito_id: newCredit.credito_id,
-        numero_cuota: 0,
-        fecha_vencimiento: fechas[0],
-        pagado: true,
-      })
-      .returning({ cuota_id: cuotas_credito.cuota_id });
-    const cuotaInicial =
-      Array.isArray(cuotaInicialArr) && cuotaInicialArr.length > 0
-        ? cuotaInicialArr[0].cuota_id
-        : undefined;
-
-    for (let i = 0; i < creditData.plazo; i++) {
-      cuotas.push({
-        credito_id: newCredit.credito_id,
-        numero_cuota: i + 1,
-        fecha_vencimiento: fechas[i + 1] || fechas[fechas.length - 1],
-        pagado: false,
-      });
-    }
-    const cuotasInsertadas = await db
-      .insert(cuotas_credito)
-      .values(cuotas)
-      .returning({
-        cuota_id: cuotas_credito.cuota_id,
-        numero_cuota: cuotas_credito.numero_cuota,
-        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
-      });
-
-    for (let i = 0; i < creditData.plazo; i++) {
-      const baseDate = new Date(startDate);
-      baseDate.setMonth(baseDate.getMonth() + i + 1);
-
-      const mes = baseDate.getMonth();
-      const anio = baseDate.getFullYear();
-      const ultimoDiaMes = new Date(anio, mes + 1, 0).getDate();
-      const diaPago = ultimoDiaMes < 30 ? ultimoDiaMes : 30;
-      const fechaLocal = new Date(anio, mes, diaPago, 12, 0, 0);
-      const fechaGuateStr = fechaLocal.toLocaleDateString("sv-SE", {
-        timeZone: "America/Guatemala",
-      });
-      fechas.push(fechaGuateStr);
-    }
-
-    pagos.push({
-      credito_id: newCredit.credito_id,
-      cuota: "0",
-      cuota_interes: "0",
-      cuota_id: cuotaInicial,
-      fecha_pago: fechas[0],
-      abono_capital: "0",
-      abono_interes: creditDataForInsert.cuota_interes,
-      abono_iva_12: creditDataForInsert.iva_12,
-      abono_interes_ci: total_monto_cash_in.toString(),
-      abono_iva_ci: total_iva_cash_in.toString(),
-      abono_seguro: creditData.seguro_10_cuotas ? "0" : undefined,
-      abono_gps: creditData.gps ? "0" : undefined,
-      pago_del_mes: "0",
-      monto_boleta: "0",
-      fecha_filtro: fechas[0],
-      renuevo_o_nuevo: "",
-      capital_restante: creditDataForInsert.capital,
-      interes_restante: "0",
-      iva_12_restante: "0",
-      seguro_restante: "0",
-      gps_restante: "0",
-      total_restante: creditDataForInsert.deudatotal,
-      membresias: creditDataForInsert.membresias?.toString() ?? "0",
-      membresias_pago: creditDataForInsert.membresias_pago?.toString() ?? "",
-      membresias_mes: creditDataForInsert.membresias?.toString() ?? "",
-      otros: creditData.otros?.toString() ?? "0",
-      mora: "0",
-      monto_boleta_cuota: "0",
-      seguro_total: creditData.seguro_10_cuotas?.toString() ?? "0",
-      pagado: true,
-      facturacion: "si",
-      mes_pagado: "",
-      seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
-      gps_facturado: creditData.gps?.toString() ?? "0",
-      reserva: creditData.reserva?.toString() ?? "0",
-      observaciones: "",
-      paymentFalse: false,
-    });
-
-    // 4️⃣ Pagos para cada cuota real
-    for (const cuota of cuotasInsertadas) {
-      pagos.push({
-        credito_id: newCredit.credito_id,
-        cuota: creditDataForInsert.cuota,
-        cuota_interes: creditDataForInsert.cuota_interes,
-        cuota_id: cuota.cuota_id,
-        fecha_pago: cuota.fecha_vencimiento,
-        abono_capital: "0",
-        abono_interes: "0",
-        abono_iva_12: "0",
-        abono_interes_ci: "0",
-        abono_iva_ci: "0",
-        abono_seguro: creditData.seguro_10_cuotas ? "0" : undefined,
-        abono_gps: creditData.gps ? "0" : undefined,
-        pago_del_mes: "0",
-        monto_boleta: "0",
-        fecha_filtro: cuota.fecha_vencimiento,
-        renuevo_o_nuevo: "",
-        capital_restante: creditDataForInsert.capital,
-        interes_restante: creditDataForInsert.cuota_interes,
-        iva_12_restante: creditDataForInsert.iva_12,
-        seguro_restante: creditData.seguro_10_cuotas?.toString() ?? "0",
-        gps_restante: creditData.gps?.toString() ?? "0",
-        total_restante: creditDataForInsert.deudatotal,
-        membresias: creditDataForInsert.membresias_pago?.toString() ?? "",
-        membresias_pago: creditDataForInsert.membresias_pago?.toString() ?? "",
-        membresias_mes: creditDataForInsert.membresias_pago?.toString() ?? "",
-        otros: "",
-        mora: "0",
-        monto_boleta_cuota: "0",
-        seguro_total: creditData.seguro_10_cuotas?.toString() ?? "0",
-        pagado: false,
-        facturacion: "si",
-        mes_pagado: "",
-        seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
-        gps_facturado: creditData.gps?.toString() ?? "0",
-        reserva: "0",
-        observaciones: "",
-        paymentFalse: false,
-      });
-    }
-
-    // 5️⃣ Insertar todos los pagos
-    // Filtra pagos con cuota_id undefined para evitar errores de tipo
-    const pagosValidos = pagos.filter(
-      (p) => p.cuota_id !== undefined
-    ) as typeof pagos;
-    // Map to remove any undefined cuota_id (should not happen, but for type safety)
-    const pagosValidosSinUndefined = pagosValidos.map((p) => ({
-      ...p,
-      cuota_id: p.cuota_id as number, // force type, since we filtered undefined above
-    }));
-    await db.insert(pagos_credito).values(pagosValidosSinUndefined);
-
-    // Por cada pago insertado
-
-    set.status = 201;
-    return newCredit;
-  } catch (error) {
-    console.log("Error inserting credit:", error);
-    set.status = 500;
-    return { message: "Error inserting credit", error: String(error) };
-  }
-};
-
-// All fields optional except credito_id
-export const creditUpdateSchema = z.object({
-  credito_id: z.number().int().positive(),
-  cuota: z.number().min(0),
-  plazo: z.number().min(0),
-  mora: z.number().optional(),
-  numero_credito_sifco: z.string().max(1000).optional(),
-  inversionistas: z
-    .array(
-      z.object({
-        inversionista_id: z.number().int().positive(),
-        monto_aportado: z.number().positive(),
-        porcentaje_cash_in: z.number().min(0).max(100),
-        porcentaje_inversion: z.number().min(0).max(100),
-        cuota_inversionista: z.number().min(0).optional(),
-      })
-    )
-    .min(0),
-  capital: z.number().nonnegative(),
-  porcentaje_interes: z.number().min(0).max(100),
-  seguro_10_cuotas: z.number().min(0),
-  membresias_pago: z.number().min(0),
-  otros: z.number().min(0),
-});
-
-/**
- * Calculates the debt summary including:
- * - principal (capital)
- * - interest (interes)
- * - subtotal before VAT (subtotalSinIVA)
- * - VAT amount (iva_12)
- * - total debt (totalDeuda)
- * - per-installment amount (cuota)
- *
- * Why Big.js?
- * - Prevents floating-point precision errors from native JS numbers.
- *
- * Rounding:
- * - All amounts are rounded to 2 decimals (Half Up).
- *
- * @param params.capital Principal amount.
- * @param params.porcentaje_interes Interest rate as percentage (e.g., 24 for 24%).
- * @param params.seguro_10_cuotas Insurance fee distributed over 10 installments.
- * @param params.membresias_pago Membership/processing fees.
- * @param params.otros Other additional fees.
- * @param params.iva_12 VAT amount already calculated externally.
- * @param numero_cuotas Number of installments for splitting the total (default = 10).
- *
- * @returns Object with all calculated fields as strings (rounded to 2 decimals).
- */
-export function calcularDeudaTotal({
-  capital,
-  porcentaje_interes,
-  seguro_10_cuotas,
-  membresias_pago,
-  otros,
-  gps,
-  cuota,
-  plazo,
-}: {
-  capital: number;
-  porcentaje_interes: number;
-  seguro_10_cuotas: number;
-  membresias_pago: number;
-  otros: number;
-  iva_12: number;
-  gps: number;
-  cuota: number;
-  plazo: number;
-}): {
-  capital: string;
-  interes: string;
-  totalDeuda: string;
-  cuota: string;
-  iva_12: string;
-  plazo: string;
-  gps: string;
-} {
-  // Convert to Big for precision
-  const bigCapital = new Big(capital);
-
-  // --- Calculate interest ---
-  const interes = bigCapital.times(new Big(porcentaje_interes).div(100));
-  const iva_12 = interes.times(0.12).round(2);
-  // --- Subtotal without VAT (capital + interest + other fees) ---
-  const deudatotal = bigCapital
-    .plus(interes)
-    .plus(iva_12)
-    .plus(seguro_10_cuotas ?? 0)
-    .plus(gps ?? 0)
-    .plus(membresias_pago ?? 0)
-    .plus(otros ?? 0);
-
-  // Return structured response (all as strings for display/storage)
-  return {
-    capital: bigCapital.round(2).toString(),
-    interes: interes.round(2).toString(),
-    iva_12: new Big(iva_12).round(2).toString(),
-    totalDeuda: deudatotal.toString(),
-    cuota: cuota.toString(),
-    plazo: plazo.toString(),
-    gps: gps.toString(),
-  };
-}
-export const updateCredit = async ({
-  body,
-  set,
-}: {
-  body: unknown;
-  set: any;
-}) => {
-  try {
-    console.log("Updating credit with body:", body);
-    const parseResult = creditUpdateSchema.safeParse(body);
-    if (!parseResult.success) {
-      set.status = 400;
-      return {
-        message: "Validation failed",
-        errors: parseResult.error.flatten().fieldErrors,
-      };
-    }
-
-    const {
-      credito_id,
-      inversionistas = [],
-      mora,
-      cuota,
-      numero_credito_sifco,
-      ...fieldsToUpdate
-    } = parseResult.data;
-
-    // Buscar el crédito actual
-    const [current] = await db
-      .select()
-      .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          eq(creditos.statusCredit, "ACTIVO")
-        )
-      )
-      .limit(1);
-    if (!current) {
-      set.status = 400;
-      return { message: "Credit not found" };
-    }
-    // Validación: suma de cash in + inversión debe ser 100
-    for (const inv of inversionistas) {
-      const total =
-        Number(inv.porcentaje_cash_in) + Number(inv.porcentaje_inversion);
-      if (total !== 100) {
-        set.status = 400;
-        return {
-          message: `El cash-in y la inversión para el inversionista con ID ${inv.inversionista_id} deben sumar 100%`,
-          detalle: { inversionista_id: inv.inversionista_id, total },
-        };
-      }
-    }
-    const totalCuotaInversionista = inversionistas.reduce(
-      (acc: Big, inv: any) => acc.plus(inv.cuota_inversionista ?? 0),
-      new Big(0)
-    );
-    const totalMontoAportado = inversionistas.reduce(
-      (acc: Big, inv: any) => acc.plus(inv.monto_aportado ?? 0),
-      new Big(0)
-    );
-    const totalMontoAportadoRedondeado = totalMontoAportado.round(2);
-    // Redondea a dos decimales
-    const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
-
-    console.log(
-      "Comparando cuota esperada y total cuota inversionista:",
-      "cuota:",
-      current.cuota,
-      "totalCuotaInversionista:",
-      totalCuotaInversionistaRedondeado.toString()
-    );
-
-    if (Number(cuota) !== totalCuotaInversionistaRedondeado.toNumber()) {
-      set.status = 400;
-      return {
-        message:
-          "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
-        cuotaEsperada: current.cuota,
-        totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
-      };
-    }
-    if (
-      Number(fieldsToUpdate.capital) !== totalMontoAportadoRedondeado.toNumber()
-    ) {
-      set.status = 400;
-      return {
-        message:
-          "La suma de los montos aportados de   los inversionistas debe ser igual aal capital del crédito.",
-        cuotaEsperada: current.cuota,
-        totalCuotaInversionista: totalMontoAportadoRedondeado.toNumber(),
-      };
-    }
-
-    // Campos que al modificarse requieren recalcular deuda_total
-    const camposQueModificanDeuda = [
-      "capital",
-      "porcentaje_interes",
-      "seguro_10_cuotas",
-      "membresias_pago",
-      "otros",
-      "capital",
-      "cuota",
-      "plazo",
-    ];
-
-    // Arma el objeto de update con todos los campos nuevos
-    const updateFields: any = { ...fieldsToUpdate };
-    const formatCredit = inversionistas.some(
-      (inv) => Number(inv.porcentaje_inversion) > 0
-    )
-      ? "Pool"
-      : "Individual";
-    updateFields.formato_credito = formatCredit;
-    if (mora !== undefined) updateFields.mora = mora.toString();
-    if (cuota !== undefined) updateFields.cuota = cuota.toString();
-    if (numero_credito_sifco !== undefined)
-      updateFields.numero_credito_sifco = numero_credito_sifco; // Checa si cambió alguno de los campos relevantes para deuda_total
-    const changes = camposQueModificanDeuda.some((campo) => {
-      const nuevo = fieldsToUpdate[campo as keyof typeof fieldsToUpdate];
-      const actual = current[campo as keyof typeof current];
-      // Solo comparar si el campo fue enviado (no undefined)
-      // Big.js para precisión en decimales
-      // Solo comparar si ambos son string o number (no Date)
-      const isValidBigSource = (v: unknown): v is string | number =>
-        typeof v === "string" || typeof v === "number";
-      return (
-        nuevo !== undefined &&
-        isValidBigSource(nuevo) &&
-        isValidBigSource(actual) &&
-        !new Big(nuevo).eq(new Big(actual))
-      );
-    });
-    const otrosModificado =
-      fieldsToUpdate.otros !== undefined &&
-      !new Big(fieldsToUpdate.otros).eq(new Big(current.otros));
-    console.log("Current credit data:", current);
-    console.log("cuotaaaaa", cuota);
-    const willChangeCuota =
-      cuota !== undefined && !new Big(cuota).eq(new Big(current.cuota));
-    const willChangePlazo =
-      fieldsToUpdate.plazo !== undefined &&
-      !new Big(fieldsToUpdate.plazo).eq(new Big(current.plazo));
-    if (willChangeCuota || willChangePlazo) {
-      console.log("Will change cuota or plazo");
-      await syncScheduleOnTermsChange({
-        creditoId: credito_id,
-        newCuota: Number(cuota ?? current.cuota),
-        newPlazo: Number(fieldsToUpdate.plazo ?? current.plazo),
-        preloadCredit: current, // para evitar otro roundtrip
-      });
-    }
-    if (changes) {
-      console.log(
-        "Changes detected in fields that affect deuda_total:",
-        changes
-      );
-
-      // Calcula la nueva deuda_total usando los valores nuevos (o actuales si no se modificó ese campo)
-      const nuevaDeudaTotal = calcularDeudaTotal({
-        capital: fieldsToUpdate.capital ?? current.capital,
-        porcentaje_interes:
-          fieldsToUpdate.porcentaje_interes ?? current.porcentaje_interes,
-        seguro_10_cuotas:
-          fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas,
-        membresias_pago:
-          fieldsToUpdate.membresias_pago ?? current.membresias_pago,
-        otros: fieldsToUpdate.otros ?? current.otros,
-        iva_12: new Big(current.iva_12).toNumber(),
-        gps: new Big(current.gps).toNumber(),
-        cuota: cuota ?? current.cuota,
-        plazo: fieldsToUpdate.plazo ?? current.plazo,
-      });
-      updateFields.deudatotal = nuevaDeudaTotal.totalDeuda;
-      updateFields.cuota = nuevaDeudaTotal.cuota;
-      updateFields.plazo = fieldsToUpdate.plazo ?? current.plazo;
-      updateFields.otros = fieldsToUpdate.otros ?? current.otros;
-      updateFields.iva_12 = nuevaDeudaTotal.iva_12;
-      updateFields.gps = nuevaDeudaTotal.gps;
-      updateFields.cuota_interes = nuevaDeudaTotal.interes;
-      updateFields.membresias_pago =
-        fieldsToUpdate.membresias_pago ?? current.membresias_pago;
-      updateFields.seguro_10_cuotas =
-        fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas;
-
-      if (otrosModificado) {
-        const cuotaInicial = await db
-          .select({ id: cuotas_credito.cuota_id })
-          .from(cuotas_credito)
-          .where(
-            and(
-              eq(cuotas_credito.credito_id, credito_id),
-              eq(cuotas_credito.numero_cuota, 0)
-            )
-          );
-        if (cuotaInicial.length) {
-          await db
-            .update(pagos_credito)
-            .set({ otros: fieldsToUpdate.otros?.toString() })
-            .where(eq(pagos_credito.cuota_id, cuotaInicial[0].id));
-        }
-      }
-    }
-    updateFields.membresias =
-      fieldsToUpdate.membresias_pago ?? current.membresias_pago;
-    // Ahora sí, haz un solo update con todos los campos a la vez
-    const [updatedCredit] = await db
-      .update(creditos)
-      .set(updateFields)
-      .where(eq(creditos.credito_id, credito_id))
-      .returning();
-
-    // Si hay inversionistas, limpiar y actualizar
-    if (inversionistas.length > 0) {
-      await db
-        .delete(creditos_inversionistas)
-        .where(eq(creditos_inversionistas.credito_id, credito_id));
-
-      const creditosInversionistasData = inversionistas.map((inv: any) => {
-        const montoAportado = new Big(inv.monto_aportado);
-        const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-        const porcentajeInversion = new Big(inv.porcentaje_inversion);
-        const interes = new Big(
-          updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
-        );
-        const newCuotaInteres = new Big(montoAportado ?? 0)
-          .times(interes.div(100))
-          .round(2);
-
-        const montoInversionista = newCuotaInteres
-          .times(porcentajeInversion)
-          .div(100)
-          .round(2);
-        const montoCashIn = newCuotaInteres
-          .times(porcentajeCashIn)
-          .div(100)
-          .round(2);
-
-        // IVA respectivos
-        const ivaInversionista =
-          montoInversionista.toNumber() > 0
-            ? new Big(montoInversionista ?? "0").times(0.12).round(2)
-            : new Big(0);
-        const ivaCashIn =
-          montoCashIn.toNumber() > 0
-            ? new Big(montoCashIn ?? "0").times(0.12).round(2)
-            : new Big(0);
-
-        return {
-          credito_id: credito_id,
-          inversionista_id: inv.inversionista_id,
-          monto_aportado: montoAportado.toString(),
-          porcentaje_cash_in: porcentajeCashIn.toString(),
-          porcentaje_participacion_inversionista:
-            porcentajeInversion.toString(),
-          monto_inversionista: montoInversionista.toString(),
-          monto_cash_in: montoCashIn.toString(),
-          iva_inversionista: ivaInversionista.toString(),
-          iva_cash_in: ivaCashIn.toString(),
-          fecha_creacion: new Date(),
-          cuota_inversionista: inv.cuota_inversionista ?? "0",
-          numero_credito_sifco: numero_credito_sifco ?? undefined,
-        };
-      });
-
-      if (creditosInversionistasData.length > 0) {
-        await db
-          .insert(creditos_inversionistas)
-          .values(creditosInversionistasData);
-      }
-    }
-
-    set.status = 200;
-    return updatedCredit;
-  } catch (error) {
-    console.error("Error al actualizar el crédito:", error);
-    set.status = 500;
-    return { message: "Error al actualizar el crédito" };
-  }
-};
 
 export const getCreditoByNumero = async (numero_credito_sifco: string) => {
   try {
@@ -1037,14 +202,15 @@ export interface CreditoConInfo {
   incobrable?: BadDebt | null;
   rubros?: { nombre_rubro: string; monto: number }[];
 }
-
+;
+ 
 export async function getCreditosWithUserByMesAnio(
   mes: number,
   anio: number,
   page: number = 1,
   perPage: number = 10,
   numero_credito_sifco?: string,
-  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION"
+  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -1053,246 +219,300 @@ export async function getCreditosWithUserByMesAnio(
   totalPages: number;
 }> {
   console.log(
-    `Fetching credits for month: ${mes}, year: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}`
+    `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}`
   );
+
   const offset = (page - 1) * perPage;
   const conditions: any[] = [];
 
-  if (numero_credito_sifco && numero_credito_sifco.length > 0) {
-    conditions.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
-  } else {
-    if (mes !== 0 && anio !== 0) {
-      conditions.push(
-        sql`EXTRACT(MONTH FROM ${creditos.fecha_creacion}) = ${mes}`,
-        sql`EXTRACT(YEAR FROM ${creditos.fecha_creacion}) = ${anio}`
-      );
+  try {
+    // 📌 Filtros
+    if (numero_credito_sifco && numero_credito_sifco.length > 0) {
+      console.log(`🔎 Filtrando por número de crédito: ${numero_credito_sifco}`);
+      conditions.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+    } else {
+      if (mes !== 0 && anio !== 0) {
+        console.log(`🔎 Filtrando por mes/año: ${mes}/${anio}`);
+        conditions.push(
+          sql`EXTRACT(MONTH FROM ${creditos.fecha_creacion}) = ${mes}`,
+          sql`EXTRACT(YEAR FROM ${creditos.fecha_creacion}) = ${anio}`
+        );
+      }
     }
-  }
-  if (estado && estado.length > 0) {
-    conditions.push(
-      eq(
-        creditos.statusCredit,
-        estado as
-          | "ACTIVO"
-          | "CANCELADO"
-          | "INCOBRABLE"
-          | "PENDIENTE_CANCELACION"
-      )
-    );
+    if (estado && estado.length > 0) {
+      console.log(`🔎 Filtrando por estado: ${estado}`);
+      conditions.push(eq(creditos.statusCredit, estado));
+    }
+  } catch (err) {
+    console.error("❌ Error construyendo filtros:", err);
   }
 
   const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
 
-  // 1. Buscar los créditos y usuarios
-  const rows = await db
-    .select({
-      creditos,
-      usuarios,
-      asesores,
-    })
-    .from(creditos)
-    .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-    .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
-    .where(whereCondition)
-    .limit(perPage)
-    .offset(offset)
-    .orderBy(desc(creditos.fecha_creacion));
+  let rows: any[] = [];
+  try {
+    // 1️⃣ Buscar créditos + usuarios + asesores
+    rows = await db
+      .select({
+        creditos,
+        usuarios,
+        asesores,
+      })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+      .where(whereCondition)
+      .limit(perPage)
+      .offset(offset)
+      .orderBy(desc(creditos.fecha_creacion));
 
-  console.log(`Found ${rows.length} records for the given month and year.`);
-
-  const creditosIds = rows.map((r) => r.creditos.credito_id);
-  const rubrosPorCredito = await db
-  .select({
-    credito_id: creditos_rubros_otros.credito_id,
-    nombre_rubro: creditos_rubros_otros.nombre_rubro,
-    monto: creditos_rubros_otros.monto,
-  })
-  .from(creditos_rubros_otros)
-  .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
-  const rubrosMap = creditosIds.reduce(
-  (acc, creditoId) => {
-    acc[creditoId] = rubrosPorCredito
-      .filter((r) => r.credito_id === creditoId)
-      .map(r => ({ 
-        nombre_rubro: r.nombre_rubro, 
-        monto: Number(r.monto) 
-      }));
-    return acc;
-  },
-  {} as Record<number, { nombre_rubro: string; monto: number }[]>
-);
-
-  // 2. Traer los inversionistas relacionados a esos créditos (con todos los campos)
-  const inversionistasPorCredito = await db
-    .select({
-      credito_id: creditos_inversionistas.credito_id,
-      inversionista_id: inversionistas.inversionista_id,
-      nombre: inversionistas.nombre,
-      emite_factura: inversionistas.emite_factura,
-      monto_aportado: creditos_inversionistas.monto_aportado,
-      monto_cash_in: creditos_inversionistas.monto_cash_in,
-      monto_inversionista: creditos_inversionistas.monto_inversionista,
-      iva_cash_in: creditos_inversionistas.iva_cash_in,
-      iva_inversionista: creditos_inversionistas.iva_inversionista,
-      porcentaje_participacion_inversionista:
-        creditos_inversionistas.porcentaje_participacion_inversionista,
-      porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-    })
-    .from(creditos_inversionistas)
-    .innerJoin(
-      inversionistas,
-      eq(
-        creditos_inversionistas.inversionista_id,
-        inversionistas.inversionista_id
-      )
-    )
-    .where(inArray(creditos_inversionistas.credito_id, creditosIds));
-
-  // 3. Agrupar inversionistas y calcular totales por crédito
-  const inversionistasMap = creditosIds.reduce(
-    (acc, creditoId) => {
-      const aportes = inversionistasPorCredito.filter(
-        (inv) => inv.credito_id === creditoId
-      );
-
-      const total_cash_in_monto = aportes.reduce(
-        (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
-        0
-      );
-      const total_cash_in_iva = aportes.reduce(
-        (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
-        0
-      );
-      const total_inversion_monto = aportes.reduce(
-        (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
-        0
-      );
-      const total_inversion_iva = aportes.reduce(
-        (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
-        0
-      );
-
-      acc[creditoId] = {
-        aportes,
-        resumen: {
-          total_cash_in_monto,
-          total_cash_in_iva,
-          total_inversion_monto,
-          total_inversion_iva,
-        },
-      };
-
-      return acc;
-    },
-    {} as Record<
-      number,
-      {
-        aportes: typeof inversionistasPorCredito;
-        resumen: {
-          total_cash_in_monto: number;
-          total_cash_in_iva: number;
-          total_inversion_monto: number;
-          total_inversion_iva: number;
-        };
-      }
-    >
-  );
-
-  // --- NUEVO: Cancelaciones e incobrables ---
-  const canceladosIds = rows
-    .filter((r) => r.creditos.statusCredit === "CANCELADO")
-    .map((r) => r.creditos.credito_id);
-  const incobrablesIds = rows
-    .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
-    .map((r) => r.creditos.credito_id);
-
-  let cancelaciones: CreditCancelation[] = [];
-  if (canceladosIds.length > 0) {
-    const cancelacionesRaw = await db
-      .select()
-      .from(credit_cancelations)
-      .where(inArray(credit_cancelations.credit_id, canceladosIds));
-    cancelaciones = cancelacionesRaw.map((row) => ({
-      ...row,
-      fecha_cancelacion: row.fecha_cancelacion ?? "",
-      monto_cancelacion: Number(row.monto_cancelacion),
-    }));
+    console.log(`📄 Créditos encontrados: ${rows.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando créditos:", err);
   }
 
+  // 🆔 IDs de créditos
+  const creditosIds = rows.map((r) => r.creditos.credito_id);
+  console.log("🆔 Créditos IDs:", creditosIds);
+
+  // 2️⃣ Rubros
+  let rubrosPorCredito: any[] = [];
+  try {
+    rubrosPorCredito = await db
+      .select({
+        credito_id: creditos_rubros_otros.credito_id,
+        nombre_rubro: creditos_rubros_otros.nombre_rubro,
+        monto: creditos_rubros_otros.monto,
+      })
+      .from(creditos_rubros_otros)
+      .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
+
+    console.log(`📊 Rubros encontrados: ${rubrosPorCredito.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando rubros:", err);
+  }
+
+  const rubrosMap = creditosIds.reduce(
+    (acc, creditoId) => {
+      acc[creditoId] = rubrosPorCredito
+        .filter((r) => r.credito_id === creditoId)
+        .map((r) => ({
+          nombre_rubro: r.nombre_rubro,
+          monto: Number(r.monto),
+        }));
+      return acc;
+    },
+    {} as Record<number, { nombre_rubro: string; monto: number }[]>
+  );
+
+  // 3️⃣ Inversionistas
+  let inversionistasPorCredito: any[] = [];
+  try {
+    inversionistasPorCredito = await db
+      .select({
+        credito_id: creditos_inversionistas.credito_id,
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+        emite_factura: inversionistas.emite_factura,
+        monto_aportado: creditos_inversionistas.monto_aportado,
+        monto_cash_in: creditos_inversionistas.monto_cash_in,
+        monto_inversionista: creditos_inversionistas.monto_inversionista,
+        iva_cash_in: creditos_inversionistas.iva_cash_in,
+        iva_inversionista: creditos_inversionistas.iva_inversionista,
+        porcentaje_participacion_inversionista:
+          creditos_inversionistas.porcentaje_participacion_inversionista,
+        porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+        cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(
+        inversionistas,
+        eq(
+          creditos_inversionistas.inversionista_id,
+          inversionistas.inversionista_id
+        )
+      )
+      .where(inArray(creditos_inversionistas.credito_id, creditosIds));
+
+    console.log(`👥 Inversionistas encontrados: ${inversionistasPorCredito.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando inversionistas:", err);
+  }
+
+  const inversionistasMap = creditosIds.reduce((acc, creditoId) => {
+    const aportes = inversionistasPorCredito.filter(
+      (inv) => inv.credito_id === creditoId
+    );
+    acc[creditoId] = {
+      aportes,
+      resumen: {
+        total_cash_in_monto: aportes.reduce(
+          (sum, cur) => sum + Number(cur.monto_cash_in ?? 0),
+          0
+        ),
+        total_cash_in_iva: aportes.reduce(
+          (sum, cur) => sum + Number(cur.iva_cash_in ?? 0),
+          0
+        ),
+        total_inversion_monto: aportes.reduce(
+          (sum, cur) => sum + Number(cur.monto_inversionista ?? 0),
+          0
+        ),
+        total_inversion_iva: aportes.reduce(
+          (sum, cur) => sum + Number(cur.iva_inversionista ?? 0),
+          0
+        ),
+      },
+    };
+    return acc;
+  }, {} as Record<number, any>);
+
+  // 4️⃣ Moras
+  let moras: any[] = [];
+  try {
+    moras = await db
+      .select({
+        credito_id: moras_credito.credito_id,
+        mora_id: moras_credito.mora_id,
+        activa: moras_credito.activa,
+        porcentaje_mora: moras_credito.porcentaje_mora,
+        monto_mora: moras_credito.monto_mora,
+        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        created_at: moras_credito.created_at,
+        updated_at: moras_credito.updated_at,
+      })
+      .from(moras_credito)
+      .where(inArray(moras_credito.credito_id, creditosIds));
+
+    console.log(`📌 Moras encontradas: ${moras.length}`);
+  } catch (err) {
+    console.error("❌ Error consultando moras:", err);
+  }
+
+  const morasMap: Record<number, any> = {};
+  moras.forEach((row) => {
+    morasMap[row.credito_id] = row;
+  });
+
+  // --- Cancelaciones & Incobrables ---
+  let cancelaciones: CreditCancelation[] = [];
   let incobrables: BadDebt[] = [];
-  if (incobrablesIds.length > 0) {
-    const incobrablesRaw = await db
-      .select()
-      .from(bad_debts)
-      .where(inArray(bad_debts.credit_id, incobrablesIds));
-    incobrables = incobrablesRaw.map((row) => ({
-      ...row,
-      fecha_registro: row.fecha_registro ?? "",
-      monto_incobrable: Number(row.monto_incobrable),
-    }));
+
+  try {
+    const canceladosIds = rows
+      .filter((r) => r.creditos.statusCredit === "CANCELADO")
+      .map((r) => r.creditos.credito_id);
+    if (canceladosIds.length > 0) {
+      console.log("🛑 Créditos cancelados:", canceladosIds);
+      const cancelacionesRaw = await db
+        .select()
+        .from(credit_cancelations)
+        .where(inArray(credit_cancelations.credit_id, canceladosIds));
+      cancelaciones = cancelacionesRaw.map((row) => ({
+        ...row,
+        fecha_cancelacion: row.fecha_cancelacion ?? "",
+        monto_cancelacion: Number(row.monto_cancelacion),
+      }));
+    }
+  } catch (err) {
+    console.error("❌ Error consultando cancelaciones:", err);
+  }
+
+  try {
+    const incobrablesIds = rows
+      .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
+      .map((r) => r.creditos.credito_id);
+    if (incobrablesIds.length > 0) {
+      console.log("⚠️ Créditos incobrables:", incobrablesIds);
+      const incobrablesRaw = await db
+        .select()
+        .from(bad_debts)
+        .where(inArray(bad_debts.credit_id, incobrablesIds));
+      incobrables = incobrablesRaw.map((row) => ({
+        ...row,
+        fecha_registro: row.fecha_registro ?? "",
+        monto_incobrable: Number(row.monto_incobrable),
+      }));
+    }
+  } catch (err) {
+    console.error("❌ Error consultando incobrables:", err);
   }
 
   const cancelacionesMap: Record<number, CreditCancelation> = {};
-  cancelaciones.forEach((row) => {
-    cancelacionesMap[row.credit_id] = row;
-  });
+  cancelaciones.forEach((row) => (cancelacionesMap[row.credit_id] = row));
+
   const incobrablesMap: Record<number, BadDebt> = {};
-  incobrables.forEach((row) => {
-    incobrablesMap[row.credit_id] = row;
-  });
+  incobrables.forEach((row) => (incobrablesMap[row.credit_id] = row));
 
-  // 4. Mapear la respuesta final
-  const data: CreditoConInfo[] = rows.map((row) => {
-    const info = inversionistasMap[row.creditos.credito_id] || {
-      aportes: [],
-      resumen: {
-        total_cash_in_monto: 0,
-        total_cash_in_iva: 0,
-        total_inversion_monto: 0,
-        total_inversion_iva: 0,
-      },
-    };
-    const rubros = rubrosMap[row.creditos.credito_id] || [];
+  // 5️⃣ Map final
+  let data: CreditoConInfo[] = [];
+  try {
+    data = rows.map((row) => {
+      const info = inversionistasMap[row.creditos.credito_id] || {
+        aportes: [],
+        resumen: {
+          total_cash_in_monto: 0,
+          total_cash_in_iva: 0,
+          total_inversion_monto: 0,
+          total_inversion_iva: 0,
+        },
+      };
+      const rubros = rubrosMap[row.creditos.credito_id] || [];
+      const cancelacion =
+        row.creditos.statusCredit === "CANCELADO"
+          ? cancelacionesMap[row.creditos.credito_id] || null
+          : undefined;
+      const incobrable =
+        row.creditos.statusCredit === "INCOBRABLE"
+          ? incobrablesMap[row.creditos.credito_id] || null
+          : undefined;
 
-    const cancelacion =
-      row.creditos.statusCredit === "CANCELADO"
-        ? cancelacionesMap[row.creditos.credito_id] || null
-        : undefined;
-    const incobrable =
-      row.creditos.statusCredit === "INCOBRABLE"
-        ? incobrablesMap[row.creditos.credito_id] || null
-        : undefined;
+      const mora = morasMap[row.creditos.credito_id] || null;
+      const deuda_total_con_mora = new Big(row.creditos.deudatotal ?? 0)
+        .plus(new Big(mora?.monto_mora ?? 0))
+        .toString();
 
-    return {
-      creditos: row.creditos,
-      usuarios: row.usuarios,
-      asesores: row.asesores,
-      inversionistas: info.aportes,
-      resumen: info.resumen,
-      cancelacion,
-      rubros,
-      incobrable,
-    };
-  });
+      return {
+        creditos: row.creditos,
+        usuarios: row.usuarios,
+        asesores: row.asesores,
+        inversionistas: info.aportes,
+        resumen: info.resumen,
+        cancelacion,
+        rubros,
+        incobrable,
+        mora,                    // 👈 objeto de mora completo
+        deuda_total_con_mora,    // 👈 suma con Big.js
+      };
+    });
+    console.log(`✅ Créditos mapeados: ${data.length}`);
+  } catch (err) {
+    console.error("❌ Error mapeando créditos:", err);
+  }
 
-  // 5. Total de registros para la paginación
-  const [{ count }] = await db
-    .select({ count: sql<number>`COUNT(*)` })
-    .from(creditos)
-    .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-    .where(whereCondition);
-
-  console.log(`Total records found: ${count}`);
+  // 6️⃣ Paginación
+  let count = 0;
+  try {
+    const [{ count: total }] = await db
+      .select({ count: sql<number>`COUNT(*)` })
+      .from(creditos)
+      .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .where(whereCondition);
+    count = Number(total);
+    console.log(`📊 Total records encontrados: ${count}`);
+  } catch (err) {
+    console.error("❌ Error contando créditos:", err);
+  }
 
   return {
     data,
     page,
     perPage,
-    totalCount: Number(count),
-    totalPages: Math.ceil(Number(count) / perPage),
+    totalCount: count,
+    totalPages: Math.ceil(count / perPage),
   };
 }
+
 
 type Aporte = {
   monto_cash_in: string; // viene como string desde la DB
@@ -1647,8 +867,7 @@ export async function reiniciarCredito(
       membresias_pago: "0",
       membresias: "0",
       porcentaje_royalti: "0",
-      royalti: "0",
-      mora: "0",
+      royalti: "0", 
       otros: "0",
       statusCredit: "ACTIVO",
     })
@@ -1672,13 +891,26 @@ export async function resetCredit({
   cuota: number;
 }) {
   try {
+    // 🚨 1. Verificar si existe una mora activa para el crédito
+    const moraActiva = await db
+      .select()
+      .from(moras_credito)
+      .where(and(eq(moras_credito.credito_id, creditId), eq(moras_credito.activa, true)))
+      .limit(1);
+
+    if (moraActiva.length > 0) {
+      throw new Error("No se puede reiniciar el crédito porque tiene una mora activa.");
+    }
+
+    // 2. Determinar el estado del crédito
     const statusCredit =
       typeof montoIncobrable !== "undefined" &&
       montoIncobrable > 0 &&
       montoBoleta !== undefined
         ? "INCOBRABLE"
         : "CANCELADO";
-    // 1. Reinicia el crédito poniendo todos los montos a cero y el estado como ACTIVO
+
+    // 3. Reinicia el crédito poniendo todos los montos a cero y el estado
     await db
       .update(creditos)
       .set({
@@ -1694,14 +926,13 @@ export async function resetCredit({
         membresias_pago: "0",
         membresias: "0",
         porcentaje_royalti: "0",
-        royalti: "0",
-        mora: "0",
+        royalti: "0", 
         otros: "0",
         statusCredit: statusCredit,
       })
       .where(eq(creditos.credito_id, creditId));
 
-    // 2. Consulta el crédito para validar que existe
+    // 4. Consulta el crédito para validar que existe
     const [credito] = await db
       .select()
       .from(creditos)
@@ -1710,14 +941,15 @@ export async function resetCredit({
       throw new Error("Crédito no encontrado.");
     }
 
-    // 3. Construye las URLs completas para las boletas usando la base R2 (de tu env)
+    // 5. Construir URLs de boletas
     const r2BaseUrl = import.meta.env.URL_PUBLIC_R2 ?? "";
     const urlCompletas = construirUrlBoletas(url_boletas, r2BaseUrl);
 
-    // 4. Obtiene el monto pagado del mes actual y suma el monto de boleta actual
+    // 6. Obtener pagos del mes + monto de boleta
     const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
     const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(montoBoleta ?? 0);
-    // Buscar la cuota_id correspondiente al número de cuota recibido en el parámetro 'cuota'
+
+    // 7. Buscar cuota_id correspondiente
     const [cuotaEncontrada] = await db
       .select({ cuota_id: cuotas_credito.cuota_id })
       .from(cuotas_credito)
@@ -1731,7 +963,7 @@ export async function resetCredit({
 
     const cuotaId = cuotaEncontrada?.cuota_id;
 
-    // 5. Inserta el nuevo pago para el crédito reiniciado
+    // 8. Insertar nuevo pago
     const [nuevoPago] = await db
       .insert(pagos_credito)
       .values({
@@ -1756,7 +988,8 @@ export async function resetCredit({
         total_restante: credito.deudatotal?.toString() ?? "0",
         llamada: "",
         renuevo_o_nuevo: "renuevo",
-        membresias: credito.membresias_pago?.toString() ?? "",
+        membresias:
+        credito.membresias_pago?.toString() ?? "",
         membresias_pago: credito.membresias_pago?.toString() ?? "",
         membresias_mes: credito.membresias_pago?.toString() ?? "",
         otros: "0",
@@ -1773,6 +1006,7 @@ export async function resetCredit({
       })
       .returning();
 
+    // 9. Eliminar pagos no pagados
     await db
       .delete(pagos_credito)
       .where(
@@ -1782,7 +1016,7 @@ export async function resetCredit({
         )
       );
 
-    // 6. Si hay URLs de boletas, las asocia al nuevo pago
+    // 10. Insertar boletas si existen
     if (
       urlCompletas &&
       urlCompletas.length > 0 &&
@@ -1797,14 +1031,18 @@ export async function resetCredit({
       );
     }
 
-    // 7. Retorna OK
+    // 11. Retorno OK
     return {
       ok: true,
       message: "Crédito reiniciado y pago creado exitosamente.",
     };
   } catch (error) {
-    console.error("[ERROR] reiniciarCreditoYCrearPago:", error);
-    throw new Error("Error al reiniciar el crédito y crear el pago.");
+    console.error("[ERROR] resetCredit:", error);
+    throw new Error(
+      error instanceof Error
+        ? error.message
+        : "Error al reiniciar el crédito y crear el pago."
+    );
   }
 }
 

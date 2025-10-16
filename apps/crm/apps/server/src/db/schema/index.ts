@@ -8,3 +8,4 @@ export * from "./auctionVehicles";
 export * from "./notes";
 export * from "./quotations";
 export * from "./insurance";
+export * from "./miniagent-credentials";

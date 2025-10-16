@@ -9,6 +9,8 @@ import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
 import { insuranceRouter } from "./insurance";
 import * as reportsRouter from "./reports";
+import { miniagentRouter } from "./miniagent";
+import { adminMiniagentRouter } from "./admin-miniagent";
 
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 export const appRouter = {
@@ -120,6 +122,14 @@ export const appRouter = {
 	getReporteCartera: reportsRouter.getReporteCartera,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
+
+	// MiniAgent routes
+	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,
+
+	// Admin MiniAgent routes
+	adminListUsersWithCredentials: adminMiniagentRouter.listUsersWithCredentials,
+	adminSetMiniAgentCredentials: adminMiniagentRouter.setMiniAgentCredentials,
+	adminDeleteMiniAgentCredentials: adminMiniagentRouter.deleteMiniAgentCredentials,
 };
 
 export type AppRouter = typeof appRouter;

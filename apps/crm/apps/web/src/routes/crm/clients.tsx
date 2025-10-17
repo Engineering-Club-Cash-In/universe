@@ -605,7 +605,7 @@ function RouteComponent() {
 										<TableCell>
 											{clientData.contractValue ? (
 												<div className="flex items-center gap-1 font-medium text-green-600">
-													<DollarSign className="h-3 w-3" />$
+													$
 													{Number.parseFloat(
 														clientData.contractValue,
 													).toLocaleString()}

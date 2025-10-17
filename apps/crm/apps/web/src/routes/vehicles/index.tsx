@@ -308,9 +308,9 @@ function VehiclesDashboard() {
                             </TableCell>
                             <TableCell>
                               <div className="flex flex-col gap-1">
-                                {latestInspection
+                                {/*latestInspection
                                   ? renderStatusBadge(latestInspection.status)
-                                  : renderStatusBadge("pending")}
+                                  : renderStatusBadge("pending")*/}
                                 {(vehicle as any).hasPaymentAgreement && (
                                   <Badge
                                     variant="outline"

@@ -247,7 +247,7 @@ export const crmRouter = {
 					"event",
 					"other",
 				]),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
 		)
@@ -312,7 +312,7 @@ export const crmRouter = {
 				status: z
 					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
 					.optional(),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 				score: z.number().min(0).max(1).optional(),
 				fit: z.boolean().optional(),
@@ -490,7 +490,7 @@ export const crmRouter = {
 				stageId: z.string().uuid(),
 				probability: z.number().min(0).max(100).optional(),
 				expectedCloseDate: z.string().optional(), // ISO date string
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				vendorId: z.string().uuid().optional(), // Vehicle vendor
 				notes: z.string().optional(),
 			}),
@@ -547,7 +547,7 @@ export const crmRouter = {
 				probability: z.number().min(0).max(100).optional(),
 				expectedCloseDate: z.string().optional(),
 				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 				stageChangeReason: z.string().optional(),
 			}),
@@ -1011,7 +1011,7 @@ export const crmRouter = {
 				contractValue: z.string().optional(),
 				startDate: z.string().optional(), // ISO date string
 				endDate: z.string().optional(), // ISO date string
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
 		)
@@ -1049,7 +1049,7 @@ export const crmRouter = {
 				startDate: z.string().optional(),
 				endDate: z.string().optional(),
 				status: z.enum(["active", "inactive", "churned"]).optional(),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
 		)

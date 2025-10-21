@@ -415,7 +415,7 @@ function RouteComponent() {
 											</Badge>
 										</TableCell>
 										<TableCell>
-											{new Date(user.createdAt).toLocaleDateString()}
+											{new Date(user.createdAt).toLocaleDateString("es-GT")}
 										</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>

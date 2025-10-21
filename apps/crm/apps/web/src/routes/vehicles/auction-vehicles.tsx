@@ -32,6 +32,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { orpc } from "@/utils/orpc";
+import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
 
 export const Route = createFileRoute("/vehicles/auction-vehicles")({
   component: AuctionsDashboard,
@@ -364,21 +365,7 @@ function AuctionsDashboard() {
                     <CardTitle className="text-base">
                       Inspección #{index + 1}
                     </CardTitle>
-                    <Badge
-                      variant={
-                        inspection.status === "approved"
-                          ? "default"
-                          : inspection.status === "rejected"
-                          ? "destructive"
-                          : "secondary"
-                      }
-                    >
-                      {inspection.status === "approved"
-                        ? "Aprobada"
-                        : inspection.status === "rejected"
-                        ? "Rechazada"
-                        : "Pendiente"}
-                    </Badge>
+                    {renderInspectionStatusBadge(inspection.status)}
                   </div>
                   <DialogDescription>
                     Realizada por {inspection.technicianName || "N/A"} el{" "}

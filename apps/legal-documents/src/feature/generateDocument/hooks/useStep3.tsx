@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useDebounce } from "@uidotdev/usehooks";
 import { type Document, type Field, type RenapData } from "./useStep2";
 
 // Campos que no se deben mostrar en el formulario
@@ -232,7 +233,8 @@ export function useStep3({
   }, []);
 
   // Obtener campos únicos que pertenecen a documentos seleccionados
-  const getRelevantFields = useCallback((): Field[] => {
+  // Cambiado a useMemo para mejor rendimiento - solo recalcula cuando cambian fields o selectedDocuments
+  const relevantFields = useMemo((): Field[] => {
     const filteredFields = fields.filter(
       (field) =>
         field.iddocuments.some((docId) =>
@@ -300,8 +302,8 @@ export function useStep3({
         if (charSetMatch) {
           let allowedChars = "";
           charSetMatch.forEach((set) => {
-            // eslint-disable-next-line
-            allowedChars += set.replace(/[\[\]]/g, "");
+            // Remover corchetes del principio y final (ej: "[abc]" -> "abc")
+            allowedChars += set.slice(1, -1);
           });
 
           if (cleanPattern.includes("\\d")) allowedChars += "0-9";
@@ -330,7 +332,7 @@ export function useStep3({
     let isValid = true;
 
     // Solo validar campos que pertenecen a documentos seleccionados
-    const fieldsToValidate = getRelevantFields();
+    const fieldsToValidate = relevantFields;
 
     console.log("🔍 Validando campos:", fieldsToValidate.length);
 
@@ -358,7 +360,7 @@ export function useStep3({
 
     setFieldErrors(errors);
     return isValid;
-  }, [fieldValues, getRelevantFields, validateField]);
+  }, [fieldValues, relevantFields, validateField]);
 
   // Manejar cambio en un campo
   const handleFieldChange = useCallback(
@@ -567,7 +569,6 @@ export function useStep3({
 
   // Función para validar sin mostrar errores
   const validateWithoutErrors = useCallback((): boolean => {
-    const relevantFields = getRelevantFields();
     let isValid = true;
 
     relevantFields.forEach((field) => {
@@ -579,9 +580,12 @@ export function useStep3({
     });
 
     return isValid && relevantFields.length > 0;
-  }, [fieldValues, getRelevantFields, validateField]);
+  }, [fieldValues, relevantFields, validateField]);
 
-  // Efecto para notificar cambios de validación al componente padre
+  // Debounced validation - espera 300ms después del último cambio antes de validar
+  const debouncedFieldValues = useDebounce(fieldValues, 300);
+
+  // Efecto para notificar cambios de validación al componente padre (con debouncing)
   useEffect(() => {
     if (hasSubmitted || shouldValidate) {
       // Si ya se intentó hacer submit o se debe validar, usar validación completa
@@ -599,7 +603,7 @@ export function useStep3({
       }
     }
   }, [
-    fieldValues,
+    debouncedFieldValues, // Usar valores debounced en lugar de fieldValues directos
     selectedDocuments,
     hasSubmitted,
     shouldValidate,
@@ -638,7 +642,7 @@ export function useStep3({
     fieldErrors,
     selectedDocuments,
     hasSubmitted,
-    relevantFields: getRelevantFields(),
+    relevantFields, // Ya no es una función, es el valor memoizado
     handleFieldChange,
     handleSubmit,
     setSelectedDocuments,

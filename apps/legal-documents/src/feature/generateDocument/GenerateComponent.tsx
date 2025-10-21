@@ -10,6 +10,7 @@ import {
   type DocumentSubmission,
   type GenerateDocumentsResponse,
 } from "@/services/documents";
+import { NetworkError, ValidationError, ServerError, TimeoutError } from '@/services/errors';
 
 interface DocumentData {
   // Step 1
@@ -116,9 +117,7 @@ export function GenerateComponent() {
           // Obtener los campos que pertenecen a este documento
           const documentFields =
             formData.fields?.filter((field) =>
-              // eslint-disable-next-line 
-              // @ts-ignore
-              field.iddocuments.includes(document.id)
+              field.iddocuments.includes(document.id.toString())
             ) || [];
 
           // Construir los campos con sus valores
@@ -146,7 +145,57 @@ export function GenerateComponent() {
       setCurrentStep(4)
     } catch (error) {
       console.error("Error generando documentos:", error);
-      alert("Error al generar los documentos. Por favor, intenta de nuevo.");
+
+      // Manejar diferentes tipos de errores con mensajes específicos
+      if (error instanceof NetworkError) {
+        alert(
+          '❌ Error de conexión\n\n' +
+          'No se pudo conectar con el servidor. Por favor:\n' +
+          '• Verifica tu conexión a internet\n' +
+          '• Intenta nuevamente en unos momentos\n\n' +
+          'Si el problema persiste, contacta a soporte.'
+        );
+      } else if (error instanceof TimeoutError) {
+        alert(
+          '⏱️ La solicitud tardó demasiado\n\n' +
+          'El servidor está tardando más de lo esperado.\n' +
+          'Por favor intenta nuevamente.'
+        );
+      } else if (error instanceof ValidationError) {
+        const errorList = error.errors
+          .map(e => `• ${e.field}: ${e.error}`)
+          .join('\n');
+
+        alert(
+          '⚠️ Errores de validación\n\n' +
+          'Por favor corrige los siguientes errores:\n\n' +
+          errorList
+        );
+      } else if (error instanceof ServerError) {
+        const statusMessages: Record<number, string> = {
+          500: 'Error interno del servidor',
+          502: 'El servidor no está disponible',
+          503: 'El servicio está temporalmente fuera de línea',
+          504: 'El servidor no respondió a tiempo',
+        };
+
+        const message = statusMessages[error.statusCode] || error.message;
+
+        alert(
+          `❌ Error del servidor (${error.statusCode})\n\n` +
+          message + '\n\n' +
+          'Por favor intenta nuevamente en unos momentos.\n' +
+          'Si el problema persiste, contacta a soporte.'
+        );
+      } else {
+        // Error desconocido
+        alert(
+          '❌ Error inesperado\n\n' +
+          'Ocurrió un error inesperado al generar los documentos.\n' +
+          'Por favor intenta nuevamente.\n\n' +
+          'Si el problema persiste, contacta a soporte.'
+        );
+      }
     } finally {
       setIsLoading(false);
     }

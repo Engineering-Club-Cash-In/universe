@@ -10,8 +10,10 @@ import {
   CheckCircle,
   CheckCheck,
   CopyMinus,
+  RefreshCw,
 } from "lucide-react";
 import { documentsService, documentsKeys } from "@/services/documents";
+import { NetworkError, ServerError, TimeoutError } from '@/services/errors';
 
 interface Step1Props {
   readonly data: {
@@ -27,11 +29,13 @@ export function Step1({ data, onChange }: Step1Props) {
     isLoading,
     error,
     isError,
+    refetch,
   } = useQuery({
     queryKey: documentsKeys.types(),
     queryFn: documentsService.getDocumentTypes,
     staleTime: 5 * 60 * 1000, // 5 minutos
     gcTime: 10 * 60 * 1000, // 10 minutos
+    retry: false, // Ya manejamos retry en fetchWithRetry
   });
 
   const documentTypes = documentsResponse?.data || [];
@@ -88,17 +92,47 @@ export function Step1({ data, onChange }: Step1Props) {
 
   // Estado de error
   if (isError) {
+    // Determinar el mensaje de error específico
+    let errorTitle = 'Error al cargar documentos';
+    let errorMessage = 'No se pudieron cargar los tipos de documentos. Por favor, intenta de nuevo.';
+
+    if (error instanceof NetworkError) {
+      errorTitle = '❌ Sin conexión';
+      errorMessage = 'No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta nuevamente.';
+    } else if (error instanceof TimeoutError) {
+      errorTitle = '⏱️ Tiempo de espera agotado';
+      errorMessage = 'La carga está tardando mucho. Por favor intenta nuevamente.';
+    } else if (error instanceof ServerError) {
+      errorTitle = `❌ Error del servidor (${error.statusCode})`;
+      const statusMessages: Record<number, string> = {
+        500: 'Error interno del servidor. Por favor intenta más tarde.',
+        502: 'El servidor no está disponible. Intenta nuevamente en unos momentos.',
+        503: 'El servicio está temporalmente fuera de línea.',
+        504: 'El servidor no respondió a tiempo.',
+      };
+      errorMessage = statusMessages[error.statusCode] || error.message;
+    } else if (error instanceof Error) {
+      errorMessage = error.message;
+    }
+
     return (
-      <div className="flex flex-col items-center justify-center py-12">
+      <div className="flex flex-col items-center justify-center py-12 space-y-4">
         <Alert variant="destructive" className="max-w-md">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription className="ml-2">
-            <strong>Error al cargar documentos:</strong>
+            <strong>{errorTitle}</strong>
             <br />
-            {error?.message ||
-              "No se pudieron cargar los tipos de documentos. Por favor, intenta de nuevo."}
+            {errorMessage}
           </AlertDescription>
         </Alert>
+        <Button
+          onClick={() => refetch()}
+          variant="outline"
+          className="gap-2"
+        >
+          <RefreshCw className="h-4 w-4" />
+          Reintentar
+        </Button>
       </div>
     );
   }

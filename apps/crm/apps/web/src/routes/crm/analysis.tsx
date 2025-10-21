@@ -200,7 +200,7 @@ function AnalysisPage() {
 										</TableCell>
 										<TableCell>
 											{opportunity.expectedCloseDate ? (
-												new Date(opportunity.expectedCloseDate).toLocaleDateString()
+												new Date(opportunity.expectedCloseDate).toLocaleDateString("es-GT")
 											) : (
 												<span className="text-muted-foreground">Sin fecha</span>
 											)}

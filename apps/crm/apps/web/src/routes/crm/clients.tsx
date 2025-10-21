@@ -50,6 +50,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import { DatePicker } from "@/components/ui/react-datepicker";
 import {
 	Table,
 	TableBody,
@@ -91,15 +92,23 @@ function RouteComponent() {
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
+	const crmUsersQuery = useQuery({
+		...orpc.getCrmUsers.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getCrmUsers", session?.user?.id, userProfile.data?.role],
+	});
 
 	const createClientForm = useForm({
 		defaultValues: {
 			companyId: "",
 			contactPerson: "",
 			contractValue: "",
-			startDate: "",
-			endDate: "",
-			assignedTo: "",
+			startDate: undefined as Date | undefined,
+			endDate: undefined as Date | undefined,
+			assignedTo: session?.user?.id || "",
 			notes: "",
 		},
 		validators: {
@@ -118,8 +127,8 @@ function RouteComponent() {
 				...value,
 				companyId: value.companyId,
 				contractValue: value.contractValue || undefined,
-				startDate: value.startDate || undefined,
-				endDate: value.endDate || undefined,
+				startDate: value.startDate ? value.startDate.toISOString().split('T')[0] : undefined,
+				endDate: value.endDate ? value.endDate.toISOString().split('T')[0] : undefined,
 				assignedTo: value.assignedTo || undefined,
 				notes: value.notes || undefined,
 			});
@@ -338,7 +347,7 @@ function RouteComponent() {
 									Agregar Cliente
 								</Button>
 							</DialogTrigger>
-							<DialogContent className="max-w-2xl">
+							<DialogContent className="max-w-3xl min-w-2xl">
 								<DialogHeader>
 									<DialogTitle>Crear Nuevo Cliente</DialogTitle>
 								</DialogHeader>
@@ -434,16 +443,35 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>Asignado a</Label>
-														<Input
-															id={field.name}
-															name={field.name}
+														<Select
 															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															placeholder="Dejar vacío para asignarte a ti"
-														/>
+															onValueChange={(value) => field.handleChange(value)}
+														>
+															<SelectTrigger size="full">
+																<SelectValue placeholder="Seleccionar vendedor" />
+															</SelectTrigger>
+															<SelectContent size="full">
+																{crmUsersQuery.isLoading ? (
+																	<SelectItem value="" disabled>
+																		Cargando usuarios...
+																	</SelectItem>
+																) : crmUsersQuery.isError ? (
+																	<SelectItem value="" disabled>
+																		Error al cargar usuarios
+																	</SelectItem>
+																) : !crmUsersQuery.data || crmUsersQuery.data.length === 0 ? (
+																	<SelectItem value="" disabled>
+																		No hay usuarios disponibles
+																	</SelectItem>
+																) : (
+																	crmUsersQuery.data.map((user) => (
+																		<SelectItem key={user.id} value={user.id}>
+																			{user.name}
+																		</SelectItem>
+																	))
+																)}
+															</SelectContent>
+														</Select>
 													</div>
 												)}
 											</createClientForm.Field>
@@ -456,15 +484,10 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>Fecha de Inicio</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="date"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
+														<DatePicker
+															date={field.state.value}
+															onDateChange={(date) => field.handleChange(date)}
+															placeholder="Seleccionar fecha de inicio"
 														/>
 													</div>
 												)}
@@ -475,15 +498,10 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>Fecha de Fin</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="date"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
+														<DatePicker
+															date={field.state.value}
+															onDateChange={(date) => field.handleChange(date)}
+															placeholder="Seleccionar fecha de fin"
 														/>
 													</div>
 												)}

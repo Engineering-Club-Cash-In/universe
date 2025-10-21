@@ -1,5 +1,5 @@
 # Imagen base de Bun
-FROM oven/bun:1.2.16 AS base
+FROM oven/bun:latest AS base
 WORKDIR /usr/src/app
 
 # =========================
@@ -25,11 +25,11 @@ RUN cd /temp/prod && bun install
 FROM base AS builder
 WORKDIR /usr/src/app
 
-# Traemos node_modules del stage install
-COPY --from=install /temp/prod/node_modules ./node_modules
-
 # Traemos el código fuente
 COPY . .
+
+# Instalamos dependencias (necesario para bun build --compile)
+RUN bun install
 
 # Compilamos la app
 RUN bun build \

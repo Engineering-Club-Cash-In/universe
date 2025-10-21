@@ -1,6 +1,5 @@
 import { Elysia, t } from "elysia";
-import {
-  insertPayment,
+import { 
   getAllPagosWithCreditAndInversionistas,
   getPayments,
   reversePayment,
@@ -12,6 +11,10 @@ import { z } from "zod";
 import { mapPagosPorCreditos } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../controllers/reports";
+import { aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
+import { eq } from "drizzle-orm";
+import { db } from "../database";
+import { pagos_credito } from "../database/db";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -180,7 +183,8 @@ export const paymentRouter = new Elysia()
           anio,
           inversionistaId,
           excel,
-          usuarioNombre
+          usuarioNombre,
+          validationStatus
         } = query;
 
         // ✅ Si viene excel=true, generamos el reporte Excel
@@ -193,7 +197,7 @@ export const paymentRouter = new Elysia()
             mes,
             anio,
             inversionistaId,
-            usuarioNombre
+            usuarioNombre,validationStatus
           });
           set.status = 200;
           return {
@@ -245,6 +249,7 @@ export const paymentRouter = new Elysia()
         inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
         excel: t.Optional(t.Boolean({ default: false })),
         usuarioNombre: t.Optional(t.String({ minLength: 1 })),
+        validationStatus: t.Optional(t.String({ minLength: 1 })),
       }),
       response: {
         200: t.Object({
@@ -261,3 +266,72 @@ export const paymentRouter = new Elysia()
       },
     }
   )
+.post(
+  "/aplicar-pago",
+  async ({ query, set }) => {
+    try {
+      // Validar que pago_id esté presente
+      if (!query.pago_id) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "El parámetro pago_id es requerido",
+        };
+      }
+
+      // Validar que pago_id sea un número válido
+      const pagoId = parseInt(query.pago_id);
+      
+      if (isNaN(pagoId) || pagoId <= 0) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "El ID del pago debe ser un número válido mayor a 0",
+        };
+      }
+
+      // Verificar que el pago existe antes de aplicarlo
+      const [pagoExiste] = await db
+        .select()
+        .from(pagos_credito)
+        .where(eq(pagos_credito.pago_id, pagoId))
+        .limit(1);
+
+      if (!pagoExiste) {
+        set.status = 404;
+        return {
+          success: false,
+          message: `No se encontró el pago con ID ${pagoId}`,
+        };
+      }
+
+      // Verificar que el pago no esté ya validado
+      if (pagoExiste.validationStatus === 'validated') {
+        set.status = 400;
+        return {
+          success: false,
+          message: "Este pago ya ha sido validado previamente",
+        };
+      }
+
+      // Aplicar el pago
+      const resultado = await aplicarPagoAlCredito(pagoId);
+
+      set.status = 200;
+      return resultado;
+
+    } catch (error) {
+      console.error("Error en el endpoint aplicar-pago:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : "Error al aplicar el pago al crédito",
+      };
+    }
+  },
+  {
+    query: t.Object({
+      pago_id: t.String(),
+    }),
+  }
+)

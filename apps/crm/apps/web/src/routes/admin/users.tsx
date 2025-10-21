@@ -57,6 +57,16 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
 
@@ -70,6 +80,7 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
+	const [userToDelete, setUserToDelete] = useState<string | null>(null);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	// *fix #12
@@ -136,13 +147,7 @@ function RouteComponent() {
 	};
 
 	const handleDeleteUser = (userId: string) => {
-		if (
-			window.confirm(
-				"Are you sure you want to delete this user? This action cannot be undone.",
-			)
-		) {
-			deleteUserMutation.mutate({ userId });
-		}
+		setUserToDelete(userId);
 	};
 
 
@@ -423,7 +428,7 @@ function RouteComponent() {
 											</Badge>
 										</TableCell>
 										<TableCell>
-											{new Date(user.createdAt).toLocaleDateString()}
+											{new Date(user.createdAt).toLocaleDateString("es-GT")}
 										</TableCell>
 										<TableCell className="text-right">
 											<DropdownMenu>
@@ -476,6 +481,32 @@ function RouteComponent() {
 					)}
 				</CardContent>
 			</Card>
+
+			{/* Alert Dialog para confirmar eliminación */}
+			<AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
+						<AlertDialogDescription>
+							Esta acción no se puede deshacer. El usuario será eliminado permanentemente del sistema.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Cancelar</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={() => {
+								if (userToDelete) {
+									deleteUserMutation.mutate({ userId: userToDelete });
+									setUserToDelete(null);
+								}
+							}}
+							className="bg-red-600 text-white hover:bg-red-700"
+						>
+							Eliminar
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

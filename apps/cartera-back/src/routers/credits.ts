@@ -5,10 +5,8 @@ import {
   cancelCredit,
   getCreditoByNumero,
   getCreditosIncobrables,
-  getCreditosWithUserByMesAnio,
-  insertCredit,
-  resetCredit,
-  updateCredit,
+  getCreditosWithUserByMesAnio, 
+  resetCredit, 
 } from "../controllers/credits";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
@@ -34,6 +32,8 @@ import {
 } from "../utils/functions/reportCancelationCosts";
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
+import { insertCredit } from "../controllers/createCredit";
+import { updateCredit } from "../controllers/updateCredit";
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
   monto: z.number({ invalid_type_error: "monto debe ser numérico" }),
@@ -55,7 +55,9 @@ const RouterBodySchema = z.object({
 export const creditRouter = new Elysia()
   .use(authMiddleware)
   // Crear nuevo crédito
-  .post("/newCredit", insertCredit)
+  .post("/newCredit", async ({ body, set }) => {
+    return await insertCredit({ body, set });
+  })
   .post("/updateCredit", updateCredit)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {

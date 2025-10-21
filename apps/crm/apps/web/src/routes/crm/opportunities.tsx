@@ -279,11 +279,15 @@ function DroppableStageColumn({
 
 export const Route = createFileRoute("/crm/opportunities")({
 	component: RouteComponent,
+	validateSearch: z.object({
+		companyId: z.string().optional(),
+	}).parse,
 });
 
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 	const navigate = Route.useNavigate();
+	const search = Route.useSearch();
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
@@ -295,6 +299,8 @@ function RouteComponent() {
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
+	const processedCompanyIdRef = useRef<string | null>(null);
+	const prevOpenRef = useRef(isCreateDialogOpen);
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		updateOpportunityMutation.mutate({
@@ -615,6 +621,38 @@ function RouteComponent() {
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
 	}, [session, isPending, userProfile.data?.role]);
+
+	// Handle opening create modal with pre-filled company leads
+	useEffect(() => {
+		if (search.companyId && leadsQuery.data && processedCompanyIdRef.current !== search.companyId) {
+			// Find leads from this company
+			const companyLeads = leadsQuery.data.filter(lead => lead.company?.id === search.companyId);
+
+			// If there are leads from this company, pre-select the first one
+			if (companyLeads.length > 0) {
+				createOpportunityForm.setFieldValue("leadId", companyLeads[0].id);
+			}
+
+			// Open the modal
+			setIsCreateDialogOpen(true);
+			// Mark as processed to prevent re-opening
+			processedCompanyIdRef.current = search.companyId;
+		}
+	}, [search.companyId, leadsQuery.data]);
+
+	// Clear search param when modal closes (only on transition from open to closed)
+	useEffect(() => {
+		const wasOpen = prevOpenRef.current;
+		prevOpenRef.current = isCreateDialogOpen;
+
+		// Only clear when modal transitions from open to closed
+		if (wasOpen && !isCreateDialogOpen && processedCompanyIdRef.current) {
+			processedCompanyIdRef.current = null;
+			if (search.companyId) {
+				navigate({ to: "/crm/opportunities", search: {}, replace: true });
+			}
+		}
+	}, [isCreateDialogOpen, navigate, search.companyId]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;
@@ -1829,7 +1867,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			if (fileInputRef.current) {
 				fileInputRef.current.value = "";
 			}
-			queryClient.invalidateQueries({ queryKey: ["getOpportunityDocuments", opportunityId] });
+			// Invalidate documents query
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
+			// Invalidate validation query to update checklist
+			queryClient.invalidateQueries({
+				queryKey: orpc.validateOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al subir el documento");
@@ -1842,7 +1887,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			client.deleteOpportunityDocument({ documentId }),
 		onSuccess: () => {
 			toast.success("Documento eliminado exitosamente");
-			queryClient.invalidateQueries({ queryKey: ["getOpportunityDocuments", opportunityId] });
+			// Invalidate documents query
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
+			// Invalidate validation query to update checklist
+			queryClient.invalidateQueries({
+				queryKey: orpc.validateOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al eliminar el documento");

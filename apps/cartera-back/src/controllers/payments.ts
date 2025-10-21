@@ -18,6 +18,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
+import { validate } from "uuid";
 
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
@@ -234,7 +235,7 @@ export const reversePayment = async ({ body, set }: any) => {
   }
 };
 
-export const insertPayment = async ({ body, set }: any) => {
+export const insertPaymentPast = async ({ body, set }: any) => {
   try {
     const parseResult = pagoSchema.safeParse(body);
     if (!parseResult.success) {
@@ -812,6 +813,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         usuario_nombre: usuarios.nombre,
         usuario_categoria: usuarios.categoria,
         usuario_nit: usuarios.nit,
+        validationStatus: pagos_credito.validationStatus,
 
         paymentFalse: pagos_credito.paymentFalse,
       })
@@ -1610,6 +1612,7 @@ interface GetPagosOptions {
   anio?: number;
   inversionistaId?: number;
   usuarioNombre?: string; // 🆕 nuevo filtro
+  validationStatus?: string; // 🆕 nuevo filtro
 }
 /**
  * 📊 Obtiene los pagos junto con su información detallada de créditos, usuarios, cuotas e inversionistas.
@@ -1631,6 +1634,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     anio,
     inversionistaId,
     usuarioNombre,
+    validationStatus
   } = options;
 
   try {
@@ -1644,6 +1648,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago::date) = ${anio}`);
     if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago::date) = ${mes}`);
     if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago::date) = ${dia}`);
+      whereClauses.push(`p.validation_status IN ('validated', 'pending')`);
 
     if (inversionistaId) {
       whereClauses.push(`
@@ -1681,6 +1686,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         p.abono_iva_12 AS "abono_iva_12",
         p.abono_seguro AS "abono_seguro",
         p.abono_gps AS "abono_gps",
+        p.validation_status AS "validation_status",
 
         -- 💳 Info del crédito
         json_build_object(
@@ -1772,6 +1778,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       abono_interes: r.abono_interes,
       abono_iva_12: r.abono_iva_12,
       abono_seguro: r.abono_seguro,
+      validationStatus: r.validation_status,
       abono_gps: r.abono_gps,
       credito: r.credito,
       cuota: r.cuota,

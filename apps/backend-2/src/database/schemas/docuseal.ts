@@ -1,4 +1,4 @@
-import { pgSchema, pgEnum, pgTable, varchar, text, uniqueIndex, serial } from "drizzle-orm/pg-core";
+import { pgSchema, pgEnum, pgTable, varchar, text, uniqueIndex, serial, boolean, integer, primaryKey } from "drizzle-orm/pg-core";
 
 // 🧱 Schema principal
 export const docusealSchema = pgSchema("docuseal");
@@ -16,16 +16,16 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "pagare_unico_libre_protesto",
   "carta_emision_cheques",
   "garantia_mobiliaria",
+  "declaracion_vendedor",
 ]);
 
 // 📗 Tabla principal
 export const docusealDocuments = docusealSchema.table(
   "documents",
-  {
-    id: serial("id").primaryKey(), // 🔹 ID autoincremental (tipo SERIAL)
+  { 
 
     nombre_documento: documentNameEnum("nombre_documento").notNull(),
-    id_docuseal: varchar("id_docuseal", { length: 255 }).notNull(),
+    id_docuseal: integer("id_docuseal").notNull().primaryKey(),
     genero: varchar("genero", { length: 10 }).notNull(),
     descripcion: text("descripcion"),
     serialid: varchar("serialid", { length: 255 }).notNull(),
@@ -34,10 +34,28 @@ export const docusealDocuments = docusealSchema.table(
   (table) => ({
     // 🚫 Evita duplicados
     uniqueDocusealId: uniqueIndex("unique_docuseal_id").on(table.id_docuseal),
-    uniqueSerial: uniqueIndex("unique_serialid").on(table.serialid),
+ 
     uniqueCombo: uniqueIndex("unique_document_combo").on(
       table.nombre_documento,
       table.id_docuseal
     ),
   })
 );
+// Tabla de detalles (relación many-to-many)
+export const detail_document_field = docusealSchema.table('detail_document_field', {
+  idField: integer('id_field').notNull().references(() => field.id, { onDelete: 'cascade' }),
+  idDocument: integer('id_document').notNull().references(() => docusealDocuments.id_docuseal, { onDelete: 'cascade' }),
+}, (table) => ({
+  pk: primaryKey({ columns: [table.idField, table.idDocument] }),
+}));
+export const field = docusealSchema.table('field', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  key: varchar('key', { length: 100 }).notNull().unique(),
+  regex: varchar('regex', { length: 500 }),
+  description: text('description'),
+  default: text('default'),
+  required: boolean('required').default(false),
+  relation: varchar('relation', { length: 100 }),
+});
+

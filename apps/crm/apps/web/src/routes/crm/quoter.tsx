@@ -918,7 +918,7 @@ function QuoterPage() {
                   <TableBody>
                     {quotationsQuery.data?.map((quotation) => (
                       <TableRow key={quotation.id}>
-                        <TableCell>{new Date(quotation.createdAt).toLocaleDateString()}</TableCell>
+                        <TableCell>{new Date(quotation.createdAt).toLocaleDateString("es-GT")}</TableCell>
                         <TableCell>
                           {quotation.vehicleBrand} {quotation.vehicleLine} {quotation.vehicleModel}
                         </TableCell>

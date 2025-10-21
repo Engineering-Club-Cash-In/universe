@@ -32,6 +32,21 @@ export const crmRouter = {
 		return stages;
 	}),
 
+	// Get sales users for assignment dropdown
+	getCrmUsers: crmProcedure.handler(async ({ context }) => {
+		const users = await db
+			.select({
+				id: user.id,
+				name: user.name,
+				email: user.email,
+				role: user.role,
+			})
+			.from(user)
+			.where(eq(user.role, "sales"));
+
+		return users;
+	}),
+
 	// Companies
 	getCompanies: crmProcedure.handler(async ({ context }) => {
 		// Admin can see all companies, sales can only see companies they created or are assigned to

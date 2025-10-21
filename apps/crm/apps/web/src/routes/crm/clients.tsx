@@ -91,6 +91,14 @@ function RouteComponent() {
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
+	const crmUsersQuery = useQuery({
+		...orpc.getCrmUsers.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getCrmUsers", session?.user?.id, userProfile.data?.role],
+	});
 
 	const createClientForm = useForm({
 		defaultValues: {
@@ -99,7 +107,7 @@ function RouteComponent() {
 			contractValue: "",
 			startDate: "",
 			endDate: "",
-			assignedTo: "",
+			assignedTo: session?.user?.id || "",
 			notes: "",
 		},
 		validators: {
@@ -434,16 +442,35 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>Asignado a</Label>
-														<Input
-															id={field.name}
-															name={field.name}
+														<Select
 															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															placeholder="Dejar vacío para asignarte a ti"
-														/>
+															onValueChange={(value) => field.handleChange(value)}
+														>
+															<SelectTrigger size="full">
+																<SelectValue placeholder="Seleccionar vendedor" />
+															</SelectTrigger>
+															<SelectContent size="full">
+																{crmUsersQuery.isLoading ? (
+																	<SelectItem value="" disabled>
+																		Cargando usuarios...
+																	</SelectItem>
+																) : crmUsersQuery.isError ? (
+																	<SelectItem value="" disabled>
+																		Error al cargar usuarios
+																	</SelectItem>
+																) : !crmUsersQuery.data || crmUsersQuery.data.length === 0 ? (
+																	<SelectItem value="" disabled>
+																		No hay usuarios disponibles
+																	</SelectItem>
+																) : (
+																	crmUsersQuery.data.map((user) => (
+																		<SelectItem key={user.id} value={user.id}>
+																			{user.name}
+																		</SelectItem>
+																	))
+																)}
+															</SelectContent>
+														</Select>
 													</div>
 												)}
 											</createClientForm.Field>

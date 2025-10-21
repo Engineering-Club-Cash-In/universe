@@ -30,6 +30,7 @@ export const appRouter = {
 
   // CRM routes
   getSalesStages: crmRouter.getSalesStages,
+  getCrmUsers: crmRouter.getCrmUsers,
   getCompanies: crmRouter.getCompanies,
   createCompany: crmRouter.createCompany,
   updateCompany: crmRouter.updateCompany,

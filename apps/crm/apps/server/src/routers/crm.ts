@@ -473,6 +473,7 @@ export const crmRouter = {
 				probability: z.number().min(0).max(100).optional(),
 				expectedCloseDate: z.string().optional(), // ISO date string
 				assignedTo: z.string().uuid().optional(),
+				vendorId: z.string().uuid().optional(), // Vehicle vendor
 				notes: z.string().optional(),
 			}),
 		)

@@ -1,16 +1,53 @@
-FROM node:20-slim
+# Imagen base de Bun
+FROM oven/bun:1.2.16 AS base
+WORKDIR /usr/src/app
 
-WORKDIR /app
+# =========================
+# Etapa: instalar dependencias
+# =========================
+FROM base AS install
+RUN mkdir -p /temp/prod
 
-RUN npm install -g bun
+# Copiamos package.json (y lock si existe) para instalar dependencias
+COPY package.json /temp/prod/
+# Si tienes bun.lockb, descomenta esta línea:
+# COPY bun.lockb /temp/prod/
 
-COPY package.json bun.lockb* ./
-RUN bun install --frozen-lockfile
+# Copiamos el resto del código
+COPY . /temp/prod/
 
+# Instalamos dependencias
+RUN cd /temp/prod && bun install
+
+# =========================
+# Etapa: compilar la app
+# =========================
+FROM base AS builder
+WORKDIR /usr/src/app
+
+# Traemos node_modules del stage install
+COPY --from=install /temp/prod/node_modules ./node_modules
+
+# Traemos el código fuente
 COPY . .
 
-RUN bun run build
+# Compilamos la app
+RUN bun build \
+    --compile \
+    --minify-whitespace \
+    --minify-syntax \
+    --target bun \
+    --outfile server \
+    src/index.ts
 
-EXPOSE 3000
+# =========================
+# Etapa: runner final
+# =========================
+FROM base AS runner
+WORKDIR /usr/src/app
 
-CMD ["bun", "run", "start"]
+# Copiamos solo el binario generado
+COPY --from=builder /usr/src/app/server .
+
+EXPOSE 9000
+ENTRYPOINT ["./server"]

@@ -22,6 +22,9 @@ import {
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -235,6 +238,9 @@ type PhotoData = {
   uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'failed';
   serverUrl?: string;
   uploadError?: string;
+  // Valuator comments and verification
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 };
 
 type PhotosState = {
@@ -287,11 +293,18 @@ export default function VehiclePictures({
     (acc, step) => acc + step.photos.length,
     0
   );
+  // Calculate completed photos with comment validation
   const completedPhotos = Object.values(photos).reduce((acc, stepPhotos) => {
     return (
-      acc + Object.values(stepPhotos).filter((photo) => photo !== null).length
+      acc + Object.values(stepPhotos).filter((photo) => {
+        if (!photo) return false;
+        // Photo is complete if it has either a comment or "no comments" checkbox checked
+        return (photo.valuatorComment?.trim() || photo.noCommentsChecked);
+      }).length
     );
   }, 0);
+  
+  
   const progress = Math.round((completedPhotos / totalPhotos) * 100);
   const isComplete = completedPhotos === totalPhotos;
 
@@ -484,6 +497,13 @@ export default function VehiclePictures({
 
   // Navigation functions
   const goToNextPhoto = () => {
+    // Check if current photo has comments or "no comments" checked
+    const currentPhotoData = photos[activeStep][currentPhoto.id];
+    if (currentPhotoData && !(currentPhotoData.valuatorComment?.trim() || currentPhotoData.noCommentsChecked)) {
+      toast.error("Por favor agregue un comentario o marque 'Sin comentarios' antes de continuar");
+      return;
+    }
+
     if (photoIndex < currentStep.photos.length - 1) {
       setPhotoIndex(photoIndex + 1);
     } else {
@@ -522,6 +542,123 @@ export default function VehiclePictures({
     }));
   };
   
+  // Function to generate realistic dummy comments based on photo type
+  const generateDummyComment = (photo: any) => {
+    const commentTemplates = {
+      // Exterior photos
+      'front-view': { 
+        comments: [
+          'Parachoques delantero en buen estado, sin rayones visibles',
+          'Ligero desgaste en la parte inferior del parachoques',
+          'Excelente estado general de la parte frontal'
+        ],
+        probability: 0.7
+      },
+      'rear-view': {
+        comments: [
+          'Área trasera sin daños, luces funcionando correctamente',
+          'Pequeño rayón en el parachoques trasero, lado derecho',
+          'Estado general muy bueno'
+        ],
+        probability: 0.6
+      },
+      'left-side': {
+        comments: [
+          'Puerta lateral izquierda con desgaste mínimo en manijas',
+          'Excelente estado de pintura y carrocería',
+          'Sin golpes ni abolladuras visibles'
+        ],
+        probability: 0.5
+      },
+      'right-side': {
+        comments: [
+          'Lateral derecho en perfecto estado',
+          'Ligero desgaste en molduras laterales',
+          'Pintura homogénea, sin retoques visibles'
+        ],
+        probability: 0.5
+      },
+      
+      // Interior photos
+      'dashboard': {
+        comments: [
+          'Tablero en excelente estado, todos los indicadores funcionando',
+          'Desgaste normal en volante y palanca de cambios',
+          'Sistema de aire acondicionado funcionando correctamente'
+        ],
+        probability: 0.8
+      },
+      'front-seats': {
+        comments: [
+          'Asientos delanteros con desgaste normal para la edad',
+          'Tapicería en buen estado, sin roturas',
+          'Mecanismo de ajuste funcionando correctamente'
+        ],
+        probability: 0.7
+      },
+      'rear-seats': {
+        comments: [
+          'Asientos traseros en muy buen estado',
+          'Sin desgaste significativo, poco uso aparente'
+        ],
+        probability: 0.4
+      },
+      
+      // Engine photos  
+      'engine-bay': {
+        comments: [
+          'Motor limpio, sin fugas visibles de aceite',
+          'Correa de distribución en buen estado',
+          'Batería nueva, terminales limpios',
+          'Ligero desgaste en mangueras, revisar en próximo mantenimiento'
+        ],
+        probability: 0.9
+      },
+      
+      // Wheels
+      'wheels': {
+        comments: [
+          'Llantas con 60% de vida útil restante',
+          'Rines en buen estado, sin golpes',
+          'Llantas nuevas, excelente estado',
+          'Desgaste irregular en llanta delantera derecha'
+        ],
+        probability: 0.8
+      },
+      
+      // Damage (higher probability of comments)
+      'damage': {
+        comments: [
+          'Rayón superficial en puerta, fácil de reparar',
+          'Pequeña abolladura en guardafango posterior',
+          'Desgaste en parachoques, no afecta funcionalidad',
+          'Oxidación menor en área de escape'
+        ],
+        probability: 0.95
+      }
+    };
+    
+    // Default for unknown photo types
+    const defaultTemplate = {
+      comments: [
+        'Estado general satisfactorio',
+        'Sin observaciones importantes',
+        'Condición normal para la edad del vehículo'
+      ],
+      probability: 0.3
+    };
+    
+    const template = commentTemplates[photo.id as keyof typeof commentTemplates] || defaultTemplate;
+    const shouldHaveComment = Math.random() < template.probability;
+    
+    if (shouldHaveComment) {
+      const randomComment = template.comments[Math.floor(Math.random() * template.comments.length)];
+      return { comment: randomComment, noComments: false };
+    } else {
+      return { comment: '', noComments: true };
+    }
+  };
+
   // Function to fill all photos with dummy data
   const fillWithDummyPhotos = async () => {
     const newPhotos: PhotosState = {};
@@ -553,10 +690,15 @@ export default function VehiclePictures({
           // Create preview URL
           const preview = URL.createObjectURL(blob);
           
+          // Generate realistic comments for testing based on photo type
+          const { comment, noComments } = generateDummyComment(photo);
+          
           newPhotos[step.id][photo.id] = {
             file,
             preview,
             uploadStatus: 'pending',
+            valuatorComment: comment,
+            noCommentsChecked: noComments,
           };
         } catch (error) {
           console.error(`Error loading sample image for ${photo.id}:`, error);
@@ -581,10 +723,15 @@ export default function VehiclePictures({
               const file = new File([blob], `${photo.id}.jpg`, { type: 'image/jpeg' });
               const preview = canvas.toDataURL('image/jpeg');
               
+              // Generate realistic comments for testing based on photo type  
+              const { comment, noComments } = generateDummyComment(photo);
+              
               newPhotos[step.id][photo.id] = {
                 file,
                 preview,
                 uploadStatus: 'pending',
+                valuatorComment: comment,
+                noCommentsChecked: noComments,
               };
             }
           }, 'image/jpeg', 0.9);
@@ -595,7 +742,7 @@ export default function VehiclePictures({
     setPhotos(newPhotos);
     
     // Show success message
-    toast.success('Se llenaron todas las fotos con datos de prueba');
+    toast.success('Se llenaron todas las fotos con datos de prueba y comentarios aleatorios');
     
     // Start uploading all photos in background with small delays to avoid overwhelming server
     let delay = 0;
@@ -948,6 +1095,80 @@ export default function VehiclePictures({
                 </div>
               )}
             </div>
+
+            {/* Comments section - only show if photo exists */}
+            {currentPhotoData && (
+              <div className="mt-6 border-t pt-4 space-y-4">
+                <div className="space-y-3">
+                  <Label className="text-sm font-medium">
+                    Comentarios de inspección <span className="text-red-500">*</span>
+                  </Label>
+                  
+                  <Textarea
+                    placeholder="Describe cualquier observación sobre esta fotografía (daños, desgaste, condiciones especiales, etc.)"
+                    value={currentPhotoData.valuatorComment || ''}
+                    onChange={(e) => {
+                      setPhotos((prev) => ({
+                        ...prev,
+                        [activeStep]: {
+                          ...prev[activeStep],
+                          [currentPhoto.id]: {
+                            ...prev[activeStep][currentPhoto.id]!,
+                            valuatorComment: e.target.value,
+                            // Clear checkbox if user starts typing
+                            noCommentsChecked: e.target.value ? false : prev[activeStep][currentPhoto.id]?.noCommentsChecked || false,
+                          },
+                        },
+                      }));
+                    }}
+                    className="min-h-[80px]"
+                    disabled={currentPhotoData.noCommentsChecked}
+                  />
+                  
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="no-comments"
+                      checked={currentPhotoData.noCommentsChecked || false}
+                      onCheckedChange={(checked) => {
+                        setPhotos((prev) => ({
+                          ...prev,
+                          [activeStep]: {
+                            ...prev[activeStep],
+                            [currentPhoto.id]: {
+                              ...prev[activeStep][currentPhoto.id]!,
+                              noCommentsChecked: checked as boolean,
+                              // Clear comment if checkbox is checked
+                              valuatorComment: checked ? '' : prev[activeStep][currentPhoto.id]?.valuatorComment || '',
+                            },
+                          },
+                        }));
+                      }}
+                    />
+                    <Label 
+                      htmlFor="no-comments" 
+                      className="text-sm text-muted-foreground cursor-pointer"
+                    >
+                      Sin comentarios - Esta fotografía no presenta observaciones relevantes
+                    </Label>
+                  </div>
+                  
+                  {/* Validation indicator */}
+                  <div className="flex items-center gap-2">
+                    {(currentPhotoData.valuatorComment?.trim() || currentPhotoData.noCommentsChecked) ? (
+                      <div className="flex items-center text-green-600 text-sm">
+                        <Check className="h-4 w-4 mr-1" />
+                        Validación completa
+                      </div>
+                    ) : (
+                      <div className="flex items-center text-orange-600 text-sm">
+                        <AlertTriangle className="h-4 w-4 mr-1" />
+                        Requiere comentario o marcar "Sin comentarios"
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </CardContent>
 
           <CardFooter className="flex justify-between px-4 py-3 sm:px-6 sm:py-4">

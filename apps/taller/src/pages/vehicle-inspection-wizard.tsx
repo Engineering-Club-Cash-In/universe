@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   Camera,
   CheckCircle,
+  DollarSign,
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { prepareInspectionData, createFullInspection } from "../services/vehicles";
@@ -15,6 +16,7 @@ import { cn } from "@/lib/utils";
 import VehicleInspectionForm from "./vehicle-inspection";
 import InspectionChecklist from "../components/inspection-checklist";
 import VehiclePictures from "./vehicle-pictures";
+import VehicleValuation from "../components/vehicle-valuation";
 import { toast } from "sonner";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -37,6 +39,12 @@ const STEPS = [
     description: "Captura de imágenes del vehículo",
     icon: Camera,
   },
+  {
+    id: "valuation",
+    title: "Valoración",
+    description: "Valoración del vehículo con IA",
+    icon: DollarSign,
+  },
 ];
 
 export default function VehicleInspectionWizard() {
@@ -45,6 +53,7 @@ export default function VehicleInspectionWizard() {
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
+  const [valuationCompleted, setValuationCompleted] = useState(false);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -58,6 +67,7 @@ export default function VehicleInspectionWizard() {
       toast.error("Por favor complete la evaluación de criterios antes de continuar");
       return;
     }
+    // Photo step validation is handled automatically by VehiclePictures component
 
     if (currentStep < STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -72,9 +82,11 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[]) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[], completeFormData?: any) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
+    // Usar los datos completos (incluyendo valoración) o los del contexto
+    const dataToUse = completeFormData || formData;
     
     // Verificar que las fotos estén disponibles
     if (!photosToUse || photosToUse.length === 0) {
@@ -87,7 +99,7 @@ export default function VehicleInspectionWizard() {
     
     try {
       // Prepare data for submission
-      const { vehicleData, inspectionData } = prepareInspectionData(formData);
+      const { vehicleData, inspectionData } = prepareInspectionData(dataToUse);
       
       // Call the API to create the full inspection
       const result = await createFullInspection(
@@ -150,7 +162,8 @@ export default function VehicleInspectionWizard() {
                 const isCompleted = 
                   (index === 0 && basicInfoCompleted) ||
                   (index === 1 && checklistCompleted) ||
-                  (index === 2 && photosCompleted);
+                  (index === 2 && photosCompleted) ||
+                  (index === 3 && valuationCompleted);
                 const isPast = index < currentStep;
 
                 return (
@@ -257,10 +270,31 @@ export default function VehicleInspectionWizard() {
             {currentStep === 2 && (
               <div>
                 <VehiclePictures 
-                  onComplete={(photosFromComponent) => {
+                  onComplete={(_photosFromComponent) => {
                     setPhotosCompleted(true);
-                    // Pasar las fotos directamente, sin delays
-                    handleCompleteInspection(photosFromComponent);
+                    // Store photos in context but don't complete inspection yet
+                    // Just advance to valuation step
+                    if (currentStep < STEPS.length - 1) {
+                      setCurrentStep(currentStep + 1);
+                      setTimeout(() => {
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }, 100);
+                    }
+                  }}
+                  isWizardMode={true}
+                />
+              </div>
+            )}
+
+            {currentStep === 3 && (
+              <div>
+                <VehicleValuation 
+                  vehicleData={formData}
+                  onComplete={(valuationData) => {
+                    setValuationCompleted(true);
+                    // Merge valuation data with existing form data
+                    const completeData = { ...formData, ...valuationData };
+                    handleCompleteInspection(photos, completeData);
                   }}
                   isWizardMode={true}
                 />

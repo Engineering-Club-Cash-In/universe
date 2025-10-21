@@ -12,6 +12,7 @@ import {
   FileText,
   Camera,
   Car,
+  Wrench,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -77,10 +78,10 @@ function VehiclesDashboard() {
 
   // Fetch vehicles
   const { data: vehicles, isLoading } = useQuery(
-    orpc.getVehicles.queryOptions(),
+    orpc.getVehicles.queryOptions()
   );
   const { data: statistics } = useQuery(
-    orpc.getVehicleStatistics.queryOptions(),
+    orpc.getVehicleStatistics.queryOptions()
   );
 
   // Filter vehicles based on search term and filter status
@@ -99,35 +100,76 @@ function VehiclesDashboard() {
 
     return matchesSearch && matchesStatus;
   });
+  // auction vehicles
+  const [isAuctionOpen, setIsAuctionOpen] = useState(false);
+  const [auctionVehicle, setAuctionVehicle] = useState<any>(null);
+  const createAuctionMutation = useMutation(
+    orpc.createAuction.mutationOptions()
+  );
+  const [auctionInspection, setAuctionInspection] = useState<any>(null);
 
-  // Function to render the status badge
-  const renderStatusBadge = (status: string) => {
-    switch (status) {
-      case "approved":
-        return (
-          <Badge className="bg-green-500">
-            <CheckCircle className="w-3.5 h-3.5 mr-1" />
-            Aprobado
-          </Badge>
-        );
-      case "pending":
-        return (
-          <Badge className="bg-yellow-500">
-            <AlertTriangle className="w-3.5 h-3.5 mr-1" />
-            Pendiente
-          </Badge>
-        );
-      case "rejected":
-        return (
-          <Badge className="bg-red-500">
-            <XCircle className="w-3.5 h-3.5 mr-1" />
-            Rechazado
-          </Badge>
-        );
-      default:
-        return null;
-    }
-  };
+  const [auctionPrice, setAuctionPrice] = useState<number | null>(null);
+
+const renderStatusBadge = (status: string) => {
+  switch (status) {
+    // Estados de inspección
+    case "approved":
+      return (
+        <Badge className="bg-green-500">
+          <CheckCircle className="w-3.5 h-3.5 mr-1" />
+          Aprobado
+        </Badge>
+      );
+    case "pending":
+      return (
+        <Badge className="bg-yellow-500">
+          <AlertTriangle className="w-3.5 h-3.5 mr-1" />
+          Pendiente
+        </Badge>
+      );
+    case "rejected":
+      return (
+        <Badge className="bg-red-500">
+          <XCircle className="w-3.5 h-3.5 mr-1" />
+          Rechazado
+        </Badge>
+      );
+
+    // Estados de vehículo
+    case "available":
+      return (
+        <Badge className="bg-blue-500">
+          <Car className="w-3.5 h-3.5 mr-1" />
+          Disponible
+        </Badge>
+      );
+    case "sold":
+      return (
+        <Badge className="bg-purple-600">
+          <CheckCircle className="w-3.5 h-3.5 mr-1" />
+          Vendido
+        </Badge>
+      );
+    case "maintenance":
+      return (
+        <Badge className="bg-orange-500">
+          <Wrench className="w-3.5 h-3.5 mr-1" />
+          Mantenimiento
+        </Badge>
+      );
+    case "auction":
+      return (
+        <Badge className="bg-pink-500">
+          <Car className="w-3.5 h-3.5 mr-1" />
+          Remate
+        </Badge>
+      );
+
+    default:
+      return null;
+  }
+};
+
 
   if (isLoading) {
     return (
@@ -296,7 +338,7 @@ function VehiclesDashboard() {
                                   <div className="font-medium">
                                     Q
                                     {Number(
-                                      latestInspection.suggestedCommercialValue,
+                                      latestInspection.suggestedCommercialValue
                                     ).toLocaleString("es-GT")}
                                   </div>
                                   <div
@@ -321,14 +363,24 @@ function VehiclesDashboard() {
                                 ? format(
                                     new Date(latestInspection.inspectionDate),
                                     "dd MMM yyyy",
-                                    { locale: es },
+                                    { locale: es }
                                   )
                                 : "-"}
                             </TableCell>
                             <TableCell>
-                              {latestInspection
-                                ? renderStatusBadge(latestInspection.status)
-                                : renderStatusBadge("pending")}
+                              <div className="flex flex-col gap-1">
+                                {latestInspection
+                                  ? renderStatusBadge(latestInspection.status)
+                                  : renderStatusBadge("pending")}
+                                {(vehicle as any).hasPaymentAgreement && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-blue-100 text-blue-800 border-blue-300 text-xs"
+                                  >
+                                    Convenio de Pago
+                                  </Badge>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell>
                               {latestInspection?.alerts?.length > 0 ? (
@@ -392,7 +444,7 @@ function VehiclesDashboard() {
                                         onClick={() => {
                                           window.open(
                                             latestInspection.scannerResultUrl,
-                                            "_blank",
+                                            "_blank"
                                           );
                                         }}
                                       >
@@ -405,15 +457,27 @@ function VehiclesDashboard() {
                                     onClick={() => {
                                       // Copy VIN to clipboard
                                       navigator.clipboard.writeText(
-                                        vehicle.vinNumber,
+                                        vehicle.vinNumber
                                       );
                                       toast.success(
-                                        "VIN copiado al portapapeles",
+                                        "VIN copiado al portapapeles"
                                       );
                                     }}
                                   >
                                     <FileText className="mr-2 h-4 w-4" />
                                     Copiar VIN
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setAuctionVehicle(vehicle);
+                                      setIsAuctionOpen(true);
+                                      setAuctionInspection(latestInspection);
+                                    }}
+                                  >
+                                    <Car className="mr-2 h-4 w-4" />
+                                    Rematar Carro
                                   </DropdownMenuItem>
                                 </DropdownMenuContent>
                               </DropdownMenu>
@@ -429,6 +493,116 @@ function VehiclesDashboard() {
           </Card>
         </TabsContent>
       </Tabs>
+      <Dialog open={isAuctionOpen} onOpenChange={setIsAuctionOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rematar Vehículo</DialogTitle>
+            <DialogDescription>
+              Ingresa los detalles para rematar {auctionVehicle?.make}{" "}
+              {auctionVehicle?.model} {auctionVehicle?.year}
+            </DialogDescription>
+          </DialogHeader>
+
+          {auctionVehicle && (
+            <>
+              {/* Obtenemos la última inspección */}
+              {(() => {
+                const auctionInspection = auctionVehicle.inspections?.[0];
+                return (
+                  auctionInspection && (
+                    <div className="bg-muted/40 p-3 rounded-md mb-4 space-y-1">
+                      <p className="text-sm">
+                        <span className="font-medium">Valor Comercial: </span>Q
+                        {Number(
+                          auctionInspection.suggestedCommercialValue
+                        ).toLocaleString("es-GT")}
+                      </p>
+                      {auctionPrice !== null && auctionPrice > 0 && (
+                        <p
+                          className={`text-sm font-medium ${
+                            Number(auctionInspection.suggestedCommercialValue) -
+                              auctionPrice >
+                            0
+                              ? "text-red-600"
+                              : "text-green-600"
+                          }`}
+                        >
+                          Pérdida estimada: Q
+                          {Math.max(
+                            Number(auctionInspection.suggestedCommercialValue) -
+                              auctionPrice,
+                            0
+                          ).toLocaleString("es-GT")}
+                        </p>
+                      )}
+                    </div>
+                  )
+                );
+              })()}
+            </>
+          )}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              const description = formData.get("description") as string;
+
+              createAuctionMutation.mutate(
+                {
+                  vehicleId: auctionVehicle.id,
+                  description,
+                  auctionPrice: auctionPrice?.toString() ?? "0",
+                },
+                {
+                  onSuccess: () => {
+                    toast.success("Vehículo rematado con éxito 🚗🔥");
+                    setIsAuctionOpen(false);
+                    setAuctionPrice(null);
+                  },
+                  onError: (err: any) => {
+                    toast.error(err.message || "Error al rematar el carro");
+                  },
+                }
+              );
+            }}
+            className="space-y-6"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="description">Motivo del Remate</Label>
+              <Textarea id="description" name="description" required />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="auctionPrice">Precio Final de Remate</Label>
+              <Input
+                id="auctionPrice"
+                name="auctionPrice"
+                type="number"
+                step="0.01"
+                value={auctionPrice ?? ""}
+                onChange={(e) => setAuctionPrice(Number(e.target.value))}
+                required
+              />
+            </div>
+
+            <DialogFooter className="pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setIsAuctionOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={createAuctionMutation.isPending}>
+                {createAuctionMutation.isPending
+                  ? "Procesando..."
+                  : "Confirmar Remate"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Vehicle Details Dialog */}
       <Dialog
@@ -576,7 +750,7 @@ function VehiclesDashboard() {
                                   ? format(
                                       new Date(inspection.inspectionDate),
                                       "PPP",
-                                      { locale: es },
+                                      { locale: es }
                                     )
                                   : "N/A"}
                               </CardDescription>
@@ -608,7 +782,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.marketValue,
+                                          inspection.marketValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -617,7 +791,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.suggestedCommercialValue,
+                                          inspection.suggestedCommercialValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -626,7 +800,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.bankValue,
+                                          inspection.bankValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -635,7 +809,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.currentConditionValue,
+                                          inspection.currentConditionValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                     </div>
@@ -732,7 +906,7 @@ function VehiclesDashboard() {
                                               >
                                                 {alert}
                                               </Badge>
-                                            ),
+                                            )
                                           )}
                                         </div>
                                       </div>
@@ -758,8 +932,8 @@ function VehiclesDashboard() {
                                             acc[item.category].push(item);
                                             return acc;
                                           },
-                                          {},
-                                        ),
+                                          {}
+                                        )
                                       ).map(
                                         ([category, items]: [string, any]) => (
                                           <div
@@ -796,18 +970,18 @@ function VehiclesDashboard() {
                                                         : "✗ No cumple"}
                                                     </Badge>
                                                   </div>
-                                                ),
+                                                )
                                               )}
                                             </div>
                                           </div>
-                                        ),
+                                        )
                                       )}
 
                                       {/* Summary of critical issues */}
                                       {inspection.checklistItems.some(
                                         (item: any) =>
                                           !item.checked &&
-                                          item.severity === "critical",
+                                          item.severity === "critical"
                                       ) && (
                                         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
                                           <h5 className="text-sm font-semibold text-red-900 mb-2">
@@ -818,7 +992,7 @@ function VehiclesDashboard() {
                                               .filter(
                                                 (item: any) =>
                                                   !item.checked &&
-                                                  item.severity === "critical",
+                                                  item.severity === "critical"
                                               )
                                               .map((item: any, idx: number) => (
                                                 <li
@@ -840,7 +1014,7 @@ function VehiclesDashboard() {
                             </CardContent>
                           </Card>
                         );
-                      },
+                      }
                     )}
                   </div>
                 ) : (

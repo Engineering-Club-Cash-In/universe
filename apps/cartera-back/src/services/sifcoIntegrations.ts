@@ -62,12 +62,44 @@ export async function consultarPrestamosPorCliente(clienteCodigo: number) {
  * ================================
  */
 export async function consultarPrestamoDetalle(preNumero: string) {
-  const { data } = await sifcoApi.get<ServiceResponse<PrestamoDetalle>>(
-    `/api/creditos/uniqueCreditByNumber/${preNumero}`
-  );
+  // 🧹 Limpiar el número
+  const cleanPreNumero = preNumero
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[^0-9]/g, "");
+  
+  console.log(`🔍 Consultando: ${cleanPreNumero}`);
+  
+  try {
+    const { data } = await sifcoApi.get<ServiceResponse<PrestamoDetalle>>(
+      `/api/creditos/uniqueCreditByNumber/${cleanPreNumero}`,
+      {
+        timeout: 10000, // 🔥 Timeout de 10 segundos
+      }
+    );
 
-  // Devolvemos solo la data útil
-  return data.data;
+    return data.data;
+  } catch (error: any) {
+    // 🔥 Manejar errores específicos
+    if (error.code === 'ECONNREFUSED') {
+      console.warn(`⚠️ Servidor SIFCO no disponible para: ${cleanPreNumero}`);
+      return null;
+    }
+    
+    if (error.response?.status === 404) {
+      console.warn(`⚠️ Crédito no existe en SIFCO: ${cleanPreNumero}`);
+      return null;
+    }
+
+    if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
+      console.warn(`⏱️ Timeout al consultar: ${cleanPreNumero}`);
+      return null;
+    }
+
+    // Re-lanzar otros errores
+    console.error(`❌ Error inesperado para ${cleanPreNumero}:`, error.message);
+    throw error;
+  }
 }
 /** ================================
  * Consultar cuotas de un préstamo

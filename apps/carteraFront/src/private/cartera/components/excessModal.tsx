@@ -7,8 +7,7 @@ type OpcionesExcesoModalProps = {
   mode: "excedente" | "pagada";
   onClose: () => void;
   onAbonoCapital?: () => void;
-  onAbonoSiguienteCuota?: () => void;
-  onAbonoMora?: () => void;
+  onAbonoSiguienteCuota?: () => void; 
   onAbonoOtros?: () => void;
   excedente?: number;
   cuotaNumero?: number;
@@ -19,8 +18,7 @@ export function OpcionesExcesoModal({
   mode,
   onClose,
   onAbonoCapital,
-  onAbonoSiguienteCuota,
-  onAbonoMora,
+  onAbonoSiguienteCuota, 
   onAbonoOtros,
   excedente,
   cuotaNumero,
@@ -86,11 +84,7 @@ export function OpcionesExcesoModal({
                 Abonar a siguiente cuota
               </Button>
             )}
-            {onAbonoMora && (
-              <Button onClick={onAbonoMora} className="w-full bg-orange-600 hover:bg-orange-700 text-lg font-bold shadow">
-                Abonar a mora
-              </Button>
-            )}
+         
             {onAbonoOtros && (
               <Button onClick={onAbonoOtros} className="w-full bg-orange-600 hover:bg-orange-700 text-lg font-bold shadow">
             Mandar a otros

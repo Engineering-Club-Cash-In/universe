@@ -28,6 +28,7 @@ import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
+import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -124,6 +125,11 @@ const AdminReportsIndexRoute = AdminReportsIndexRouteImport.update({
   path: '/admin/reports/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CrmAdminMiniagentRoute = CrmAdminMiniagentRouteImport.update({
+  id: '/crm/admin/miniagent',
+  path: '/crm/admin/miniagent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -144,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
+  '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/admin/reports': typeof AdminReportsIndexRoute
 }
 export interface FileRoutesByTo {
@@ -165,6 +172,7 @@ export interface FileRoutesByTo {
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
+  '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/admin/reports': typeof AdminReportsIndexRoute
 }
 export interface FileRoutesById {
@@ -187,6 +195,7 @@ export interface FileRoutesById {
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros/': typeof CobrosIndexRoute
   '/vehicles/': typeof VehiclesIndexRoute
+  '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
 }
 export interface FileRouteTypes {
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | '/vehicles/inspection'
     | '/cobros'
     | '/vehicles'
+    | '/crm/admin/miniagent'
     | '/admin/reports'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/vehicles/inspection'
     | '/cobros'
     | '/vehicles'
+    | '/crm/admin/miniagent'
     | '/admin/reports'
   id:
     | '__root__'
@@ -252,6 +263,7 @@ export interface FileRouteTypes {
     | '/vehicles/inspection'
     | '/cobros/'
     | '/vehicles/'
+    | '/crm/admin/miniagent'
     | '/admin/reports/'
   fileRoutesById: FileRoutesById
 }
@@ -274,6 +286,7 @@ export interface RootRouteChildren {
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
   VehiclesIndexRoute: typeof VehiclesIndexRoute
+  CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
 }
 
@@ -412,6 +425,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminReportsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/crm/admin/miniagent': {
+      id: '/crm/admin/miniagent'
+      path: '/crm/admin/miniagent'
+      fullPath: '/crm/admin/miniagent'
+      preLoaderRoute: typeof CrmAdminMiniagentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -434,6 +454,7 @@ const rootRouteChildren: RootRouteChildren = {
   VehiclesInspectionRoute: VehiclesInspectionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
   VehiclesIndexRoute: VehiclesIndexRoute,
+  CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,
 }
 export const routeTree = rootRouteImport

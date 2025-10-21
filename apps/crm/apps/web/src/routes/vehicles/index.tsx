@@ -63,10 +63,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { client, orpc } from "@/utils/orpc";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
 
 export const Route = createFileRoute("/vehicles/")({
   component: VehiclesDashboard,
 });
+
+// Nota: renderInspectionStatusBadge ahora se importa desde @/lib/vehicle-utils
 
 function VehiclesDashboard() {
   const navigate = useNavigate();
@@ -303,90 +306,129 @@ function VehiclesDashboard() {
                               >
                                 {latestInspection.vehicleRating}
                               </div>
-                            </>
-                          ) : (
-                            <span className="text-muted-foreground">
-                              Sin inspección
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {latestInspection
-                            ? format(
-                                new Date(latestInspection.inspectionDate),
-                                "dd MMM yyyy",
-                                { locale: es }
-                              )
-                            : "-"}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            {/*latestInspection
-                                  ? renderStatusBadge(latestInspection.status)
-                                  : renderStatusBadge("pending")*/}
-                            {(vehicle as any).hasPaymentAgreement && (
-                              <Badge
-                                variant="outline"
-                                className="bg-blue-100 text-blue-800 border-blue-300 text-xs"
-                              >
-                                Convenio de Pago
-                              </Badge>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {latestInspection?.alerts?.length > 0 ? (
-                            <Badge
-                              variant="outline"
-                              className="bg-red-100 text-red-800 border-red-300"
-                            >
-                              {latestInspection.alerts.length}{" "}
-                              {latestInspection.alerts.length === 1
-                                ? "alerta"
-                                : "alertas"}
-                            </Badge>
-                          ) : (
-                            <Badge
-                              variant="outline"
-                              className="bg-green-100 text-green-800 border-green-300"
-                            >
-                              Sin alertas
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0">
-                                <span className="sr-only">Abrir menú</span>
-                                <Eye className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setSelectedVehicle(vehicle);
-                                  setActiveTab("general");
-                                  setIsDetailsOpen(true);
-                                }}
-                              >
-                                <Eye className="mr-2 h-4 w-4" />
-                                Ver detalles completos
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => {
-                                  setSelectedVehicle(vehicle);
-                                  setActiveTab("photos");
-                                  setIsDetailsOpen(true);
-                                }}
-                              >
-                                <Camera className="mr-2 h-4 w-4" />
-                                Ver fotografías
-                              </DropdownMenuItem>
-                              {latestInspection?.scannerUsed &&
-                                latestInspection?.scannerResultUrl && (
+                            </TableCell>
+                            <TableCell>{vehicle.licensePlate}</TableCell>
+                            <TableCell>
+                              {latestInspection ? (
+                                <>
+                                  <div className="font-medium">
+                                    Q
+                                    {Number(
+                                      latestInspection.suggestedCommercialValue,
+                                    ).toLocaleString("es-GT")}
+                                  </div>
+                                  <div
+                                    className={
+                                      latestInspection.vehicleRating ===
+                                      "Comercial"
+                                        ? "text-sm text-green-500"
+                                        : "text-sm text-red-500"
+                                    }
+                                  >
+                                    {latestInspection.vehicleRating}
+                                  </div>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">
+                                  Sin inspección
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {latestInspection
+                                ? format(
+                                    new Date(latestInspection.inspectionDate),
+                                    "dd MMM yyyy",
+                                    { locale: es },
+                                  )
+                                : "-"}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex flex-col gap-1">
+                                {latestInspection
+                                  ? renderInspectionStatusBadge(latestInspection.status)
+                                  : renderInspectionStatusBadge("pending")}
+                                {(vehicle as any).hasPaymentAgreement && (
+                                  <Badge
+                                    variant="outline"
+                                    className="bg-blue-100 text-blue-800 border-blue-300 text-xs"
+                                  >
+                                    Convenio de Pago
+                                  </Badge>
+                                )}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {latestInspection?.alerts?.length > 0 ? (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-red-100 text-red-800 border-red-300"
+                                >
+                                  {latestInspection.alerts.length}{" "}
+                                  {latestInspection.alerts.length === 1
+                                    ? "alerta"
+                                    : "alertas"}
+                                </Badge>
+                              ) : (
+                                <Badge
+                                  variant="outline"
+                                  className="bg-green-100 text-green-800 border-green-300"
+                                >
+                                  Sin alertas
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    className="h-8 w-8 p-0"
+                                  >
+                                    <span className="sr-only">Abrir menú</span>
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuLabel>
+                                    Acciones
+                                  </DropdownMenuLabel>
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedVehicle(vehicle);
+                                      setActiveTab("general");
+                                      setIsDetailsOpen(true);
+                                    }}
+                                  >
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    Ver detalles completos
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => {
+                                      setSelectedVehicle(vehicle);
+                                      setActiveTab("photos");
+                                      setIsDetailsOpen(true);
+                                    }}
+                                  >
+                                    <Camera className="mr-2 h-4 w-4" />
+                                    Ver fotografías
+                                  </DropdownMenuItem>
+                                  {latestInspection?.scannerUsed &&
+                                    latestInspection?.scannerResultUrl && (
+                                      <DropdownMenuItem
+                                        onClick={() => {
+                                          window.open(
+                                            latestInspection.scannerResultUrl,
+                                            "_blank",
+                                          );
+                                        }}
+                                      >
+                                        <FileText className="mr-2 h-4 w-4" />
+                                        Ver reporte de scanner
+                                      </DropdownMenuItem>
+                                    )}
+                                  <DropdownMenuSeparator />
                                   <DropdownMenuItem
                                     onClick={() => {
                                       window.open(

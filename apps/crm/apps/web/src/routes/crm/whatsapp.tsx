@@ -41,6 +41,10 @@ function RouteComponent() {
 		}
 	}, [session, isPending, userRole, navigate]);
 
+	const handleIframeLoad = () => {
+		setIframeLoading(false);
+	};
+
 	if (isPending || userProfile.isPending) {
 		return (
 			<div className="flex h-[calc(100vh-4rem)] items-center justify-center">
@@ -64,7 +68,7 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent className="flex-1 p-0 relative">
 					{iframeLoading && (
-						<div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+						<div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-10">
 							<div className="flex flex-col items-center gap-2">
 								<Loader2 className="h-8 w-8 animate-spin text-primary" />
 								<p className="text-muted-foreground text-sm">
@@ -73,12 +77,13 @@ function RouteComponent() {
 							</div>
 						</div>
 					)}
+
 					<iframe
-						src="https://miniagent.wittysuite.com/login"
+						src="https://miniagent.wittysuite.com/chat"
 						className="h-full w-full border-0 rounded-b-lg"
 						title="MiniAgent WhatsApp"
 						allow="microphone; camera; clipboard-read; clipboard-write"
-						onLoad={() => setIframeLoading(false)}
+						onLoad={handleIframeLoad}
 					/>
 				</CardContent>
 			</Card>

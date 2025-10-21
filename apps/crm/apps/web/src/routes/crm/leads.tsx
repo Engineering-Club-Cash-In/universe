@@ -11,7 +11,7 @@ import {
 	Search,
 	Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { PERMISSIONS } from "server/src/types/roles";
@@ -74,6 +74,9 @@ import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/leads")({
 	component: RouteComponent,
+	validateSearch: z.object({
+		companyId: z.string().optional(),
+	}).parse,
 });
 
 // Type aliases for better type safety
@@ -89,12 +92,15 @@ type CreditAnalysis = Awaited<ReturnType<typeof client.getCreditAnalysisByLeadId
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 	const navigate = Route.useNavigate();
+	const search = Route.useSearch();
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const processedCompanyIdRef = useRef<string | null>(null);
+	const prevOpenRef = useRef(isCreateDialogOpen);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const leadsQuery = useQuery({
@@ -249,6 +255,52 @@ function RouteComponent() {
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
 	}, [session, isPending, userProfile.data?.role]);
+
+	// Handle opening create modal with pre-filled company
+	useEffect(() => {
+		console.log('[LEADS] Open effect:', {
+			hasCompanyId: !!search.companyId,
+			companiesDataReady: !!companiesQuery.data,
+			processedId: processedCompanyIdRef.current,
+			searchCompanyId: search.companyId
+		});
+
+		if (search.companyId && companiesQuery.data && processedCompanyIdRef.current !== search.companyId) {
+			const company = companiesQuery.data.find(c => c.id === search.companyId);
+			console.log('[LEADS] Found company:', company?.name);
+			if (company) {
+				// Pre-fill company field
+				createLeadForm.setFieldValue("companyId", search.companyId);
+				// Open the modal
+				setIsCreateDialogOpen(true);
+				// Mark as processed to prevent re-opening
+				processedCompanyIdRef.current = search.companyId;
+				console.log('[LEADS] Modal opened, marked as processed');
+			}
+		}
+	}, [search.companyId, companiesQuery.data]);
+
+	// Clear search param when modal closes (only on transition from open to closed)
+	useEffect(() => {
+		const wasOpen = prevOpenRef.current;
+		prevOpenRef.current = isCreateDialogOpen;
+
+		console.log('[LEADS] Close effect:', {
+			wasOpen,
+			isNowOpen: isCreateDialogOpen,
+			processedId: processedCompanyIdRef.current,
+			searchCompanyId: search.companyId
+		});
+
+		// Only clear when modal transitions from open to closed
+		if (wasOpen && !isCreateDialogOpen && processedCompanyIdRef.current) {
+			console.log('[LEADS] Clearing search param and ref');
+			processedCompanyIdRef.current = null;
+			if (search.companyId) {
+				navigate({ to: "/crm/leads", search: {}, replace: true });
+			}
+		}
+	}, [isCreateDialogOpen, navigate, search.companyId]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;

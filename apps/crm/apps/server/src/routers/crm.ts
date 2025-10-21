@@ -32,6 +32,21 @@ export const crmRouter = {
 		return stages;
 	}),
 
+	// Get sales users for assignment dropdown
+	getCrmUsers: crmProcedure.handler(async ({ context }) => {
+		const users = await db
+			.select({
+				id: user.id,
+				name: user.name,
+				email: user.email,
+				role: user.role,
+			})
+			.from(user)
+			.where(eq(user.role, "sales"));
+
+		return users;
+	}),
+
 	// Companies
 	getCompanies: crmProcedure.handler(async ({ context }) => {
 		// Admin can see all companies, sales can only see companies they created or are assigned to
@@ -232,7 +247,7 @@ export const crmRouter = {
 					"event",
 					"other",
 				]),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
 		)
@@ -297,7 +312,7 @@ export const crmRouter = {
 				status: z
 					.enum(["new", "contacted", "qualified", "unqualified", "converted"])
 					.optional(),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 				score: z.number().min(0).max(1).optional(),
 				fit: z.boolean().optional(),
@@ -475,7 +490,7 @@ export const crmRouter = {
 				stageId: z.string().uuid(),
 				probability: z.number().min(0).max(100).optional(),
 				expectedCloseDate: z.string().optional(), // ISO date string
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				vendorId: z.string().uuid().optional(), // Vehicle vendor
 				notes: z.string().optional(),
 			}),
@@ -532,7 +547,7 @@ export const crmRouter = {
 				probability: z.number().min(0).max(100).optional(),
 				expectedCloseDate: z.string().optional(),
 				status: z.enum(["open", "won", "lost", "on_hold"]).optional(),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 				stageChangeReason: z.string().optional(),
 			}),
@@ -996,7 +1011,7 @@ export const crmRouter = {
 				contractValue: z.string().optional(),
 				startDate: z.string().optional(), // ISO date string
 				endDate: z.string().optional(), // ISO date string
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
 		)
@@ -1034,7 +1049,7 @@ export const crmRouter = {
 				startDate: z.string().optional(),
 				endDate: z.string().optional(),
 				status: z.enum(["active", "inactive", "churned"]).optional(),
-				assignedTo: z.string().uuid().optional(),
+				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 			}),
 		)
@@ -1329,12 +1344,24 @@ export const crmRouter = {
 					opp.creditType,
 				);
 
-				if (!opp.vehicleId) {
-					throw new Error("La oportunidad debe tener un vehículo asociado");
-				}
-
-				if (!opp.creditType) {
-					throw new Error("La oportunidad debe tener un tipo de crédito");
+				// Si falta vehicleId o creditType, devolver validación fallida sin lanzar error
+				if (!opp.vehicleId || !opp.creditType) {
+					console.log(
+						"[validateOpportunityDocuments] Missing basic requirements - returning failed validation",
+					);
+					return {
+						creditType: opp.creditType || "unknown",
+						vehicleInspected: false,
+						allDocumentsPresent: false,
+						canApprove: false,
+						requiredDocuments: [],
+						uploadedDocuments: [],
+						missingDocuments: [],
+						vehicleInfo: {
+							id: opp.vehicleId || null,
+							inspectionStatus: "pending",
+						},
+					};
 				}
 
 				// 2. Validar inspección del vehículo

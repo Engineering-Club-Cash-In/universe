@@ -21,8 +21,7 @@ export const pagoSchema = z.object({
   fecha_pago: z.string(), // "YYYY-MM-DD"
   llamada: z.string().max(100).optional(),
   renuevo_o_nuevo: z.string().max(50).optional(),
-  otros: z.number().min(0),
-  mora: z.number().min(0),
+  otros: z.number().min(0), 
   monto_boleta_cuota: z.number().optional(),
   credito_sifco: z.string().max(50).optional(),
   observaciones: z.string().max(500).optional(),
@@ -92,8 +91,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
       fecha_pago: "",
       llamada: "",
       renuevo_o_nuevo: "",
-      otros: 0,
-      mora: 0,
+      otros: 0, 
       monto_boleta_cuota: undefined,
       credito_sifco: "",
       observaciones: "",
@@ -315,15 +313,14 @@ useEffect(() => {
       formik.handleSubmit();
       return;
     }
-    const { monto_boleta, otros, mora } = formik.values;
+    const { monto_boleta, otros } = formik.values;
     const cuota = Number(dataCredito?.credito?.cuota || 0);
 
     // Si no existen, ponemos 0
-    const otrosNum = Number(otros || 0);
-    const moraNum = Number(mora || 0);
+    const otrosNum = Number(otros || 0); 
 
     // Calcula el monto real de la boleta
-    const montoBoletaReal = Number(monto_boleta) - otrosNum - moraNum;
+    const montoBoletaReal = Number(monto_boleta) - otrosNum ;
     if (montoBoletaReal < 0) {
       alert(
         "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
@@ -342,8 +339,8 @@ useEffect(() => {
         formik.handleSubmit();
         return;
       }
-      if (otrosNum > 0 || moraNum > 0) {
-        const sumaTotal = otrosNum + moraNum;
+      if (otrosNum > 0  ) {
+        const sumaTotal = otrosNum  
 
         if (monto_boleta !== sumaTotal) {
           setExcedente(montoBoletaReal);
@@ -398,15 +395,7 @@ useEffect(() => {
     }
     formik.handleSubmit();
   };
-  const handleAbonoMora = () => {
-    // Toma el valor actual de mora y suma el excedente
-    const nuevaMora = Number(formik.values.mora || 0) + Number(excedente || 0);
-    formik.setFieldValue("mora", nuevaMora);
-    setCuotaSeleccionada(cuotaActualInfo?.numero); // Reiniciar cuota seleccionada
-    formik.setFieldValue("abono_directo_capital", 0);
-    setModalExcesoOpen(false);
-    formik.handleSubmit();
-  };
+ 
 
   const handleAbonoOtros = () => {
     // Toma el valor actual de otros y suma el excedente
@@ -539,8 +528,7 @@ async function handleResetCredito() {
     setModalExcesoOpen,
     excedente,
     handleAbonoCapital,
-    handleAbonoSiguienteCuota,
-    handleAbonoMora,
+    handleAbonoSiguienteCuota, 
     handleAbonoOtros,
     useLiquidatePagosInversionistas,
     modalMode,

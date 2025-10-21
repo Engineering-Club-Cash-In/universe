@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPagosConInversionistasService,
+  pagosService,
+  type AplicarPagoResponse,
   type GetPagosParams,
   type GetPagosResponse,
   type PagoDataInvestor,
-} from "../services/services";
+} from "../services/services"; 
 
 /**
  * 🔹 Hook que obtiene pagos con inversionistas
@@ -40,6 +42,7 @@ export function usePagosConInversionistas(params: GetPagosParams) {
         abono_seguro: Number(pago.abono_seguro ?? 0),
         abono_gps: Number(pago.abono_gps ?? 0),
         abono_capital: Number(pago.abono_capital ?? 0),
+        validationStatus: pago.validationStatus ?? "Pendiente",
 
         // 🔗 Relaciones principales
         credito: {
@@ -88,7 +91,7 @@ export function usePagosConInversionistas(params: GetPagosParams) {
             }
           : null,
       }));
-
+      console.log("Adapted Payments with Investors:", adaptedData);
       return {
         ...raw,
         data: adaptedData,
@@ -97,5 +100,41 @@ export function usePagosConInversionistas(params: GetPagosParams) {
 
     placeholderData: (previousData) => previousData,
     staleTime: 1000 * 60 * 2, // ⏳ 2 min para no sobrecargar peticiones
+  });
+}
+/**
+ * 🔹 Hook para aplicar un pago al crédito y validarlo
+ * Invalida automáticamente la caché de pagos con inversionistas
+ */
+export function useAplicarPago() {
+  const queryClient = useQueryClient();
+
+  return useMutation<AplicarPagoResponse, Error, number>({
+    mutationFn: (pagoId: number) => pagosService.aplicarPago(pagoId),
+    
+    onSuccess: (data) => {
+      // ✅ Mostrar mensaje de éxito
+      alert(data.message);
+
+      // 🔄 Invalidar la caché para refrescar la tabla
+      queryClient.invalidateQueries({ 
+        queryKey: ["pagos-inversionistas"] 
+      });
+
+      // 📊 Log adicional si se aplicó al crédito
+      if (data.applied && data.data) {
+        console.log("💰 Pago aplicado al crédito:", {
+          creditoId: data.data.credito_id,
+          capitalNuevo: data.data.capital_nuevo,
+          deudaTotalNueva: data.data.deuda_total_nueva,
+        });
+      }
+    },
+
+    onError: (error) => {
+      // ❌ Mostrar error
+      console.error("Error al aplicar pago:", error);
+      alert(error.message || "Error al aplicar el pago al crédito");
+    },
   });
 }

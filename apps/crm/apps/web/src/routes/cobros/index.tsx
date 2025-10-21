@@ -321,7 +321,6 @@ function RouteComponent() {
 												{contrato.clienteNombre}
 											</div>
 											<div className="flex items-center gap-1">
-												<DollarSign className="h-3 w-3" />
 												Q{Number(contrato.montoEnMora).toLocaleString()}
 											</div>
 											<div className="flex items-center gap-1">

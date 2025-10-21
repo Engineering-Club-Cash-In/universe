@@ -34,8 +34,7 @@ export interface ReconocimientoDeudaMujerTemplate8Params {
   vehiculoAsientos: string;
   vehiculoCilindros: string;
   vehiculoIscv: string;
-  nombreDeudoraFirma: string;
-  dpiDeudoraFirma: string;
+  nombreDeudoraFirma: string; 
 }
 
 const DOCUSEAL_API_URL = process.env.DOCUSEAL_API_URL!;
@@ -74,11 +73,11 @@ export async function generateReconocimientoDeudaMujerTemplate16Submission(
             "Capital Adeudado": params.capitalAdeudado,
             "meses préstamo": params.mesesPrestamo,
             "Cuotas Mensuales": params.cuotasMensuales,
-            "Porcentaje Deuda": params.porcentajeDeudaTexto,
-            "Porcentaje DeudaNum": params.porcentajeDeudaNumero,
-            "Porcentaje Mora": params.porcentajeMoraTexto,
-            "Porcentaje MoraNum": params.porcentajeMoraNumero,
-            "Dirección Deudor": params.direccionDeudora,
+            "Porcentaje Deuda Texto": params.porcentajeDeudaTexto,
+            "Porcentaje Deuda Numero": params.porcentajeDeudaNumero,
+            "Porcentaje Mora Texto": params.porcentajeMoraTexto,
+            "Porcentaje Mora Numero": params.porcentajeMoraNumero,
+            "Dirección Deudora": params.direccionDeudora,
             "Vehículo Tipo": params.vehiculoTipo,
             "Vehículo Marca": params.vehiculoMarca,
             "Vehículo Color": params.vehiculoColor,
@@ -93,8 +92,7 @@ export async function generateReconocimientoDeudaMujerTemplate16Submission(
             "Vehículo Asientos": params.vehiculoAsientos,
             "Vehículo Cilindros": params.vehiculoCilindros,
             "Vehículo ISCV": params.vehiculoIscv,
-            "Nombre Deudor Firma": params.nombreDeudoraFirma,
-            "Dpi Deudor Firma": params.dpiDeudoraFirma,
+            "Nombre Deudora Firma": params.nombreDeudoraFirma, 
 
             // ✅ Firma de Andrés Asencio (base64)
             "Firma Andres Asensio":

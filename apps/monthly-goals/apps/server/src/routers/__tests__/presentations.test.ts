@@ -164,6 +164,7 @@ describe("Presentations Procedures", () => {
 			description: "Meta de ventas mensual",
 			unit: "sales",
 			defaultTarget: "100",
+			isInverse: false,
 			successThreshold: "80",
 			warningThreshold: "50",
 		}).returning();
@@ -174,6 +175,7 @@ describe("Presentations Procedures", () => {
 			description: "Meta de reducción de mora",
 			unit: "percentage",
 			defaultTarget: "5",
+			isInverse: true,
 			successThreshold: "80",
 			warningThreshold: "50",
 		}).returning();
@@ -390,48 +392,45 @@ describe("Presentations Procedures", () => {
 	});
 
 	describe("Inverse goal calculations", () => {
-		test("should detect inverse goal by keywords", async () => {
-			// Test various inverse goal keywords
-			const inverseKeywords = ['mora', 'error', 'reclamo', 'falla', 'retraso', 'costo', 'gasto'];
-			
-			for (const keyword of inverseKeywords) {
-				// Create goal template with inverse keyword
-				const [template] = await db.insert(goalTemplates).values({
-					name: `Meta de ${keyword}`,
-					description: `Reducir ${keyword}`,
-					unit: "percentage",
-					defaultTarget: "5",
-					successThreshold: "80",
-					warningThreshold: "50",
-				}).returning();
+		test("should include isInverse field in submissions", async () => {
+			// Create a reduction goal template with isInverse=true
+			const [template] = await db.insert(goalTemplates).values({
+				name: "Errores de Sistema",
+				description: "Reducir errores del sistema",
+				unit: "errores",
+				defaultTarget: "5",
+				isInverse: true,
+				successThreshold: "80",
+				warningThreshold: "50",
+			}).returning();
 
-				const [goal] = await db.insert(monthlyGoals).values({
-					teamMemberId: testTeamMemberId,
-					goalTemplateId: template.id,
-					month: 9,
-					year: 2025,
-					targetValue: "5", // Meta máxima (quiere que sea <= 5%)
-					achievedValue: "3", // Logrado (actual es 3%)
-					status: "completed",
-				}).returning();
+			const [goal] = await db.insert(monthlyGoals).values({
+				teamMemberId: testTeamMemberId,
+				goalTemplateId: template.id,
+				month: 9,
+				year: 2025,
+				targetValue: "5", // Meta máxima (quiere que sea <= 5%)
+				achievedValue: "3", // Logrado (actual es 3%)
+				status: "completed",
+			}).returning();
 
-				// Submit goal to presentation
-				await db.insert(goalSubmissions).values({
-					presentationId: testPresentationId,
-					monthlyGoalId: goal.id,
-					submittedValue: "3", // Logrado 3%
-					submittedBy: employeeId,
-				});
+			// Submit goal to presentation
+			await db.insert(goalSubmissions).values({
+				presentationId: testPresentationId,
+				monthlyGoalId: goal.id,
+				submittedValue: "3", // Logrado 3%
+				submittedBy: employeeId,
+			});
 
-				const callable = getPresentationSubmissions.callable({ context: mockUsers.superAdmin });
-				const result = await callable({ presentationId: testPresentationId });
-				
-				// For inverse goals: if achieved (3) <= target (5) = success (100%)
-				// This is verified in the frontend calculation, but data structure should be correct
-				expect(result[result.length - 1].goalTemplateName).toContain(keyword);
-				expect(parseFloat(result[result.length - 1].targetValue)).toBe(5); // Meta máxima
-				expect(parseFloat(result[result.length - 1].submittedValue)).toBe(3); // Logrado
-			}
+			const callable = getPresentationSubmissions.callable({ context: mockUsers.superAdmin });
+			const result = await callable({ presentationId: testPresentationId });
+
+			// Verify isInverse field is included
+			const inverseGoal = result.find(r => r.goalTemplateName === "Errores de Sistema");
+			expect(inverseGoal).toBeDefined();
+			expect(inverseGoal.isInverse).toBe(true);
+			expect(parseFloat(inverseGoal.targetValue)).toBe(5); // Meta máxima
+			expect(parseFloat(inverseGoal.submittedValue)).toBe(3); // Logrado
 		});
 
 		test("should handle normal goal calculation", async () => {

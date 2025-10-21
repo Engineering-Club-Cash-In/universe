@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
+import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 
 export const Route = createFileRoute("/crm/analysis")({
 	component: AnalysisPage,
@@ -108,8 +109,8 @@ function AnalysisPage() {
 
 			setIsApprovalDialogOpen(false);
 			loadOpportunities(); // Recargar lista
-		} catch (error) {
-			toast.error(`No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`);
+		} catch (error: any) {
+			toast.error(error.message || `No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -318,9 +319,14 @@ function AnalysisPage() {
 							)}
 						</DialogDescription>
 					</DialogHeader>
-					<div className="py-4">
+					<div className="py-4 space-y-6">
 						{selectedOpportunityForDocs && (
-							<DocumentsViewer opportunityId={selectedOpportunityForDocs.id} />
+							<>
+								<DocumentValidationChecklist
+									opportunityId={selectedOpportunityForDocs.id}
+								/>
+								<DocumentsViewer opportunityId={selectedOpportunityForDocs.id} />
+							</>
 						)}
 					</div>
 				</DialogContent>
@@ -330,6 +336,7 @@ function AnalysisPage() {
 }
 
 // Component to view documents
+// TODO: Descomentar cuando exista el endpoint getOpportunityDocuments en el router
 function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 	const documentsQuery = useQuery({
 		...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),

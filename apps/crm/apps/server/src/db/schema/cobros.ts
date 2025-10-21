@@ -81,7 +81,10 @@ export const contratosFinanciamiento = pgTable("contratos_financiamiento", {
 	// Responsable de cobros asignado
 	responsableCobros: text("responsable_cobros")
 		.references(() => user.id),
-	
+
+	// General notes
+	notes: text("notes"),
+
 	// Metadata
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -144,7 +147,10 @@ export const casosCobros = pgTable("casos_cobros", {
 	
 	// Estado del caso
 	activo: boolean("activo").default(true),
-	
+
+	// General notes
+	notes: text("notes"),
+
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

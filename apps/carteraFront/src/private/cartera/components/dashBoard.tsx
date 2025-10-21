@@ -11,7 +11,7 @@ import {
 import { Banknote, CreditCard, ListOrdered, LogOut } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
-import { Menu, X } from "lucide-react"; // Hamburguesa y cerrar
+import { Menu, X } from "lucide-react";
 import { useAuth } from "@/Provider/authProvider";
 
 const menuOptions = [
@@ -20,42 +20,49 @@ const menuOptions = [
     label: "Registro Crédito",
     icon: <Banknote className="mr-2 h-5 w-5" />,
     path: "/realizarCredito",
-    roles: ["ADMIN"], // ✅ Solo admin
+    roles: ["ADMIN"],
   },
   {
     key: "registro-pago",
     label: "Registro Pago",
     icon: <CreditCard className="mr-2 h-5 w-5" />,
     path: "/realizarPago",
-    roles: ["ADMIN", "ASESOR"], // ✅ Admin y asesor
+    roles: ["ADMIN", "ASESOR"],
   },
   {
     key: "total-prestamos",
     label: "Créditos",
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
     path: "/creditos",
-    roles: ["ADMIN", "CONTA", "ASESOR"], // ✅ Todos
+    roles: ["ADMIN", "CONTA", "ASESOR"],
   },
   {
     key: "total-pagos",
     label: "Pagos",
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
     path: "/pagos",
-    roles: ["ADMIN", "CONTA", "ASESOR"], // ✅ Todos
+    roles: ["ADMIN", "CONTA", "ASESOR"],
   },
   {
     key: "investors",
     label: "Inversionistas",
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
     path: "/inversionistas",
-    roles: ["ADMIN"], // ✅ Solo admin
+    roles: ["ADMIN"],
   },
   {
     key: "advisors",
     label: "Usuarios",
     icon: <ListOrdered className="mr-2 h-5 w-5" />,
     path: "/usuarios",
-    roles: ["ADMIN"], // ✅ Solo admin
+    roles: ["ADMIN"],
+  },
+  {
+    key: "late-fee",
+    label: "Moras",
+    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/mora",
+    roles: ["ADMIN"],
   },
 ];
 
@@ -63,16 +70,13 @@ export function DashBoardCartera() {
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { logout, user } = useAuth();
 
-  const { logout, user } = useAuth(); // 👈 user viene con { role }
-
-  // 🔑 Acción logout
   const handleLogout = () => {
     logout();
     navigate("/login", { replace: true });
   };
 
-  // 🔍 Filtrar las opciones según el rol del usuario
   const filteredOptions = menuOptions.filter((opt) =>
     user ? opt.roles.includes(user.role) : false
   );
@@ -109,7 +113,7 @@ export function DashBoardCartera() {
 
   return (
     <>
-      {/* HAMBURGUESA EN MOBILE */}
+      {/* 🔹 Hamburguesa SOLO en mobile */}
       <button
         className="fixed top-4 left-4 z-50 md:hidden p-2 rounded-full bg-white shadow-lg border border-blue-100"
         onClick={() => setMenuOpen(true)}
@@ -118,19 +122,26 @@ export function DashBoardCartera() {
         <Menu className="h-7 w-7 text-blue-700" />
       </button>
 
-      {/* SIDEBAR NORMAL EN DESKTOP */}
-      <Sidebar className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg mr-8 min-w-[260px] px-6 py-8 flex-col h-screen">
-        <SidebarHeader className="flex items-center justify-center py-4">
+      {/* 🔹 Sidebar FIJO en desktop (siempre visible, no colapsa) */}
+      <Sidebar className="hidden md:flex bg-[#f8fbff] border-r-8 border-blue-600 rounded-2xl shadow-lg min-w-[260px] px-6 py-8 flex-col h-screen">
+        <SidebarHeader className="flex flex-col items-center justify-center py-4">
           <img
             src="/logo-cashin.png"
             alt="Club Cashin Logo"
-            className="h-10"
+            className="h-10 mb-2"
             style={{ objectFit: "contain" }}
           />
+          {user && (
+            <div className="text-center">
+              <p className="text-sm font-semibold text-gray-900">
+                Hola, {user.email.split("@")[0]}
+              </p>
+              <p className="text-xs text-gray-500">Rol: {user.role}</p>
+            </div>
+          )}
         </SidebarHeader>
         <SidebarContent className="flex flex-col justify-between h-full">
           {renderMenu()}
-          {/* 🚪 Botón Logout */}
           <div className="mt-6">
             <SidebarMenu>
               <SidebarMenuItem>
@@ -148,7 +159,7 @@ export function DashBoardCartera() {
         <SidebarRail />
       </Sidebar>
 
-      {/* DRAWER RESPONSIVO EN MOBILE */}
+      {/* 🔹 Drawer en mobile */}
       {menuOpen && (
         <div className="fixed inset-0 z-50 flex">
           <div
@@ -170,8 +181,6 @@ export function DashBoardCartera() {
                 className="h-10 mb-2"
                 style={{ objectFit: "contain" }}
               />
-
-              {/* 👤 Info del usuario */}
               {user && (
                 <div className="text-center">
                   <p className="text-sm font-semibold text-gray-900">
@@ -183,7 +192,6 @@ export function DashBoardCartera() {
             </SidebarHeader>
             <SidebarContent className="flex flex-col justify-between h-full">
               {renderMenu(() => setMenuOpen(false))}
-              {/* 🚪 Botón Logout en mobile */}
               <div className="mt-6">
                 <SidebarMenu>
                   <SidebarMenuItem>

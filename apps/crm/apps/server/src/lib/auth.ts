@@ -52,6 +52,20 @@ export const auth = betterAuth({
 				analyst: analystRole,
 				cobros: cobrosRole,
 			},
+			schema: {
+				user: {
+					fields: {
+						banned: "banned",
+						banReason: "ban_reason",
+						banExpires: "ban_expires",
+					},
+				},
+				session: {
+					fields: {
+						impersonatedBy: "impersonated_by",
+					},
+				},
+			},
 		}),
 	],
 	trustedOrigins: [process.env.CORS_ORIGIN || ""],

@@ -4,9 +4,7 @@ import axios from "axios";
  * Interfaz con los campos del template "2. SOLICITUD DE COMPRA DE VEHÍCULO POR INSTRUCCIÓN DE 3RO un deudor"
  */
 export interface SolicitudVehiculoParams {
-  dia: string;
-  mes: string;
-  año: number;
+ fecha: string;
   nombrePersona: string;
   dpiPersona: string;
   tipoVehiculo: string;
@@ -54,9 +52,7 @@ export async function generateSolicitudVehiculoSubmission(
         {
           email,
           values: {
-            Año: params.año,
-            Mes: params.mes,
-            Día: params.dia,
+            "Fecha": params.fecha,
             "Nombre Persona": params.nombrePersona,
             "Dpi Persona": params.dpiPersona,
             "Tipo Vehículo": params.tipoVehiculo,

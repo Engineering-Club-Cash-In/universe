@@ -12,17 +12,22 @@ import {
   type NewVehicle,
   type NewVehicleInspection,
   type NewVehiclePhoto,
-  type NewInspectionChecklistItem
+  type NewInspectionChecklistItem,
+  casosCobros,
+  contratosFinanciamiento,
+  conveniosPago
 } from "../db/schema";
-import { contratosFinanciamiento, conveniosPago, casosCobros } from "../db/schema/cobros";
 import { protectedProcedure, publicProcedure } from "../lib/orpc";
-import { vehicleRegistrationOCRSchema, mapOCRToVehicleForm } from "../lib/ocr-schema";
-import { vehicleValuationSchema, prepareValuationContext } from "../lib/valuation-schema";
+import { vehicleRegistrationOCRSchema, mapOCRToVehicleForm } from "@/lib/ocr-schema";
+import { prepareValuationContext, vehicleValuationSchema } from "@/lib/valuation-schema";
 
 export const vehiclesRouter = {
   // Get all vehicles with their latest inspection and photos
   getAll: publicProcedure
-    .handler(async () => {
+    .input(z.object({
+      filterType: z.enum(["alerts", "commercial", "non-commercial"]).optional().describe("Optional filter type to apply"),
+    }))
+    .handler(async ({ input }) => {
       const result = await db
         .select()
         .from(vehicles)
@@ -112,7 +117,41 @@ export const vehiclesRouter = {
         hasPaymentAgreement: vehicleConvenios.some(c => c.vehicleId === vehicle.id && c.hasActiveConvenio)
       }));
 
-      return vehiclesWithConvenios;
+      // Apply filters if filterType is provided
+      let filteredVehicles = vehiclesWithConvenios;
+
+      if (input.filterType) {
+        switch (input.filterType) {
+          case "alerts":
+            // Vehicles with alerts (have inspections with non-empty alerts array)
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle => 
+              vehicle.inspections.some((inspection: any) => 
+                inspection.alerts && (inspection.alerts as string[]).length > 0
+              )
+            );
+            break;
+            
+          case "commercial":
+            // Vehicles rated as commercial
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle =>
+              vehicle.inspections.some((inspection: any) => 
+                inspection.vehicleRating === "Comercial"
+              )
+            );
+            break;
+            
+          case "non-commercial":
+            // Vehicles rated as non-commercial
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle =>
+              vehicle.inspections.some((inspection: any) => 
+                inspection.vehicleRating === "No comercial"
+              )
+            );
+            break;
+        }
+      }
+
+      return filteredVehicles;
     }),
 
   // Get vehicle by ID with all related data
@@ -213,7 +252,7 @@ export const vehiclesRouter = {
         fuelType: z.string().optional(),
         transmission: z.string().optional(),
         companyId: z.string().nullable().optional(),
-        status: z.string().optional()
+        status: z.enum(["pending", "available", "sold", "maintenance", "auction"]).optional()
       })
     }))
     .handler(async ({ input }) => {
@@ -256,7 +295,7 @@ export const vehiclesRouter = {
   search: protectedProcedure
     .input(z.object({
       query: z.string().optional(),
-      status: z.string().optional(),
+      status: z.enum(["pending", "available", "sold", "maintenance", "auction"]).optional(),
       vehicleType: z.string().optional(),
       fuelType: z.string().optional()
     }))
@@ -359,7 +398,7 @@ export const vehiclesRouter = {
         missingAirbag: z.string().optional(),
         testDrive: z.boolean().optional(),
         noTestDriveReason: z.string().optional(),
-        status: z.string().optional(),
+        status: z.enum(["pending", "approved", "rejected", "auction"]).optional(),
         alerts: z.array(z.string()).optional()
       })
     }))

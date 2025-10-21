@@ -6,17 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
+import { DataTable } from "@/components/ui/data-table";
+import type { ColumnDef } from "@tanstack/react-table";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
 
@@ -59,7 +53,7 @@ function SubmitPresentationPage() {
 					data: { status: "ready" }
 				});
 				toast.success("Datos cargados exitosamente");
-				
+
 				// Navigate to view presentation
 				navigate({
 					to: "/presentations/$id/view",
@@ -89,14 +83,14 @@ function SubmitPresentationPage() {
 		setSubmissions(prev => {
 			const existing = prev.find(s => s.monthlyGoalId === goalId);
 			if (existing) {
-				return prev.map(s => 
-					s.monthlyGoalId === goalId 
+				return prev.map(s =>
+					s.monthlyGoalId === goalId
 						? { ...s, [field]: value }
 						: s
 				);
 			} else {
-				return [...prev, { 
-					monthlyGoalId: goalId, 
+				return [...prev, {
+					monthlyGoalId: goalId,
 					[field]: value,
 					submittedValue: field === 'submittedValue' ? value : '',
 					notes: field === 'notes' ? value : '',
@@ -142,7 +136,7 @@ function SubmitPresentationPage() {
 		return submission ? submission[field] || '' : '';
 	};
 
-const getProgressPercentage = (target: string, achieved: string) => {
+const getProgressPercentage = (target: string, achieved: string, isInverse?: boolean) => {
   const targetNum = parseFloat(target);
   const achievedNum = parseFloat(achieved);
 
@@ -150,18 +144,17 @@ const getProgressPercentage = (target: string, achieved: string) => {
     return 0; // valores inválidos
   }
 
-  if (achievedNum === 0) {
-    return 100; // caso especial: mora en 0 = éxito total
+  if (isInverse) {
+    // Para metas inversas: menor o igual = 100%
+    if (achievedNum <= targetNum) {
+      return 100;
+    } else {
+      return Math.max((targetNum / achievedNum) * 100, 0);
+    }
+  } else {
+    // Para metas normales: mayor es mejor
+    return Math.min((achievedNum / targetNum) * 100, 100);
   }
-
-  let progress = (achievedNum / targetNum) * 100;
-
-  // si se pasa de 100, devolver 100
-  if (progress > 100) {
-    progress = 100;
-  }
-
-  return progress;
 };
 	const getStatusBadge = (percentage: number) => {
 		if (percentage >= 80) {
@@ -172,6 +165,95 @@ const getProgressPercentage = (target: string, achieved: string) => {
 			return <Badge className="bg-red-100 text-red-800">Necesita Atención</Badge>;
 		}
 	};
+
+	// Tipo inferido de los datos
+	type GoalData = NonNullable<typeof availableGoals.data>[0];
+
+	// Definir columnas para TanStack Table
+	const columns = useMemo<ColumnDef<GoalData>[]>(() => [
+		{
+			accessorKey: "userName",
+			header: "Empleado",
+			cell: ({ row }) => (
+				<div>
+					<div className="font-medium">{row.original.userName}</div>
+					<div className="text-sm text-gray-500">{row.original.userEmail}</div>
+				</div>
+			),
+		},
+		{
+			accessorKey: "areaName",
+			header: "Área",
+		},
+		{
+			accessorKey: "goalTemplateName",
+			header: "Meta",
+			cell: ({ row }) => (
+				<div>
+					<div className="font-medium">{row.original.goalTemplateName}</div>
+					{row.original.goalTemplateUnit && (
+						<div className="text-sm text-gray-500">({row.original.goalTemplateUnit})</div>
+					)}
+				</div>
+			),
+		},
+		{
+			accessorKey: "targetValue",
+			header: "Objetivo",
+		},
+		{
+			id: "achievedValue",
+			header: "Valor Logrado",
+			cell: ({ row }) => {
+				const submittedValue = getSubmissionValue(row.original.id, 'submittedValue') || row.original.achievedValue;
+				return (
+					<Input
+						type="number"
+						step="0.01"
+						value={submittedValue}
+						onChange={(e) => handleSubmissionChange(row.original.id, 'submittedValue', e.target.value)}
+						placeholder={row.original.achievedValue}
+						className="w-24"
+					/>
+				);
+			},
+		},
+		{
+			id: "progress",
+			header: "Progreso",
+			cell: ({ row }) => {
+				const submittedValue = getSubmissionValue(row.original.id, 'submittedValue') || row.original.achievedValue;
+				const percentage = getProgressPercentage(row.original.targetValue, submittedValue, row.original.isInverse ?? false);
+				return (
+					<div className="flex items-center space-x-2 w-32">
+						<Progress value={Math.min(percentage, 100)} className="flex-1" />
+						<span className="text-sm font-medium">{Math.round(percentage)}%</span>
+					</div>
+				);
+			},
+		},
+		{
+			id: "status",
+			header: "Estado",
+			cell: ({ row }) => {
+				const submittedValue = getSubmissionValue(row.original.id, 'submittedValue') || row.original.achievedValue;
+				const percentage = getProgressPercentage(row.original.targetValue, submittedValue, row.original.isInverse ?? false);
+				return getStatusBadge(percentage);
+			},
+		},
+		{
+			id: "notes",
+			header: "Notas",
+			cell: ({ row }) => (
+				<Textarea
+					value={getSubmissionValue(row.original.id, 'notes')}
+					onChange={(e) => handleSubmissionChange(row.original.id, 'notes', e.target.value)}
+					placeholder="Notas opcionales..."
+					className="min-h-[60px] w-48"
+				/>
+			),
+		},
+	], [submissions]);
 
 	if (presentation.isLoading) {
 		return <div>Cargando presentación...</div>;
@@ -211,86 +293,13 @@ const getProgressPercentage = (target: string, achieved: string) => {
 					<CardTitle>Metas Disponibles para Cargar</CardTitle>
 				</CardHeader>
 				<CardContent>
-					<Table>
-						<TableHeader>
-							<TableRow>
-								<TableHead>Empleado</TableHead>
-								<TableHead>Área</TableHead>
-								<TableHead>Meta</TableHead>
-								<TableHead>Objetivo</TableHead>
-								<TableHead>Valor Logrado</TableHead>
-								<TableHead>Progreso</TableHead>
-								<TableHead>Estado</TableHead>
-								<TableHead>Notas</TableHead>
-							</TableRow>
-						</TableHeader>
-						<TableBody>
-							{availableGoals.isLoading ? (
-								<TableRow>
-									<TableCell colSpan={8} className="text-center py-4">
-										Cargando metas disponibles...
-									</TableCell>
-								</TableRow>
-							) : availableGoals.data?.length === 0 ? (
-								<TableRow>
-									<TableCell colSpan={8} className="text-center py-4">
-										No hay metas disponibles para este período
-									</TableCell>
-								</TableRow>
-							) : availableGoals.data?.map((goal: any) => {
-								const submittedValue = getSubmissionValue(goal.id, 'submittedValue') || goal.achievedValue;
-								const percentage = getProgressPercentage(goal.targetValue, submittedValue);
-
-								return (
-									<TableRow key={goal.id}>
-										<TableCell>
-											<div>
-												<div className="font-medium">{goal.userName}</div>
-												<div className="text-sm text-gray-500">{goal.userEmail}</div>
-											</div>
-										</TableCell>
-										<TableCell>{goal.areaName}</TableCell>
-										<TableCell>
-											<div>
-												<div className="font-medium">{goal.goalTemplateName}</div>
-												{goal.goalTemplateUnit && (
-													<div className="text-sm text-gray-500">({goal.goalTemplateUnit})</div>
-												)}
-											</div>
-										</TableCell>
-										<TableCell>{goal.targetValue}</TableCell>
-										<TableCell>
-											<Input
-												type="number"
-												step="0.01"
-												value={submittedValue}
-												onChange={(e) => handleSubmissionChange(goal.id, 'submittedValue', e.target.value)}
-												placeholder={goal.achievedValue}
-												className="w-24"
-											/>
-										</TableCell>
-										<TableCell className="w-32">
-											<div className="flex items-center space-x-2">
-												<Progress value={Math.min(percentage, 100)} className="flex-1" />
-												<span className="text-sm font-medium">{Math.round(percentage)}%</span>
-											</div>
-										</TableCell>
-										<TableCell>
-											{getStatusBadge(percentage)}
-										</TableCell>
-										<TableCell>
-											<Textarea
-												value={getSubmissionValue(goal.id, 'notes')}
-												onChange={(e) => handleSubmissionChange(goal.id, 'notes', e.target.value)}
-												placeholder="Notas opcionales..."
-												className="min-h-[60px] w-48"
-											/>
-										</TableCell>
-									</TableRow>
-								);
-							})}
-						</TableBody>
-					</Table>
+					<DataTable
+						columns={columns}
+						data={availableGoals.data || []}
+						isLoading={availableGoals.isLoading}
+						searchPlaceholder="Buscar metas..."
+						emptyMessage="No hay metas disponibles para este período"
+					/>
 				</CardContent>
 			</Card>
 		</div>

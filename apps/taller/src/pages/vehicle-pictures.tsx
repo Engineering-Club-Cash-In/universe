@@ -238,9 +238,6 @@ type PhotoData = {
   uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'failed';
   serverUrl?: string;
   uploadError?: string;
-  // Valuator comments and verification
-  valuatorComment?: string;
-  noCommentsChecked?: boolean;
 };
 
 type PhotosState = {
@@ -325,19 +322,17 @@ export default function VehiclePictures({
     };
   });
 
-  // Function to upload photo to server with retry and timeout handling
+  // Function to upload photo to server optimistically
   const uploadPhotoToServer = async (
     file: File, 
     stepId: string, 
     photoId: string, 
     title: string, 
-    description?: string,
-    retryCount = 0
-  ): Promise<string> => {
-    const maxRetries = 3;
-    const timeoutMs = 60000; // 60 seconds timeout for slow connections
-    
+    description?: string
+  ) => {
     try {
+      // Use the session's temporary vehicleId so all photos go to the same folder
+      
       const formData = new FormData();
       formData.append('file', file);
       formData.append('vehicleId', tempVehicleId);
@@ -348,20 +343,14 @@ export default function VehiclePictures({
         formData.append('description', description);
       }
 
-      // Create AbortController for timeout
-      const abortController = new AbortController();
-      const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
-
       const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
         method: 'POST',
         credentials: 'include',
         body: formData,
-        signal: abortController.signal,
       });
 
-      clearTimeout(timeoutId);
-
       if (!response.ok) {
+        // Get error details from server
         let errorMessage = `Upload failed: ${response.statusText}`;
         try {
           const errorData = await response.json();
@@ -376,23 +365,7 @@ export default function VehiclePictures({
       const result = await response.json();
       return result.data.url;
     } catch (error) {
-      console.error(`Upload error (attempt ${retryCount + 1}):`, error);
-      
-      // Check if it's a network error or timeout that we can retry
-      const isRetryableError = error instanceof Error && (
-        error.name === 'AbortError' ||
-        error.name === 'TypeError' ||
-        error.message.includes('Failed to fetch') ||
-        error.message.includes('NetworkError')
-      );
-      
-      if (isRetryableError && retryCount < maxRetries) {
-        console.log(`Retrying upload for ${photoId} (attempt ${retryCount + 2}/${maxRetries + 1})`);
-        // Wait progressively longer between retries
-        await new Promise(resolve => setTimeout(resolve, (retryCount + 1) * 2000));
-        return uploadPhotoToServer(file, stepId, photoId, title, description, retryCount + 1);
-      }
-      
+      console.error('Upload error:', error);
       throw error;
     }
   };
@@ -466,7 +439,7 @@ export default function VehiclePictures({
             ...prev[stepId],
             [photoId]: {
               ...prev[stepId][photoId]!,
-              uploadStatus: 'uploaded' as const,
+              uploadStatus: 'uploaded',
               serverUrl,
               // Keep the blob URL for preview, serverUrl is for database
             },
@@ -542,123 +515,6 @@ export default function VehiclePictures({
     }));
   };
   
-  // Function to generate realistic dummy comments based on photo type
-  const generateDummyComment = (photo: any) => {
-    const commentTemplates = {
-      // Exterior photos
-      'front-view': { 
-        comments: [
-          'Parachoques delantero en buen estado, sin rayones visibles',
-          'Ligero desgaste en la parte inferior del parachoques',
-          'Excelente estado general de la parte frontal'
-        ],
-        probability: 0.7
-      },
-      'rear-view': {
-        comments: [
-          'Área trasera sin daños, luces funcionando correctamente',
-          'Pequeño rayón en el parachoques trasero, lado derecho',
-          'Estado general muy bueno'
-        ],
-        probability: 0.6
-      },
-      'left-side': {
-        comments: [
-          'Puerta lateral izquierda con desgaste mínimo en manijas',
-          'Excelente estado de pintura y carrocería',
-          'Sin golpes ni abolladuras visibles'
-        ],
-        probability: 0.5
-      },
-      'right-side': {
-        comments: [
-          'Lateral derecho en perfecto estado',
-          'Ligero desgaste en molduras laterales',
-          'Pintura homogénea, sin retoques visibles'
-        ],
-        probability: 0.5
-      },
-      
-      // Interior photos
-      'dashboard': {
-        comments: [
-          'Tablero en excelente estado, todos los indicadores funcionando',
-          'Desgaste normal en volante y palanca de cambios',
-          'Sistema de aire acondicionado funcionando correctamente'
-        ],
-        probability: 0.8
-      },
-      'front-seats': {
-        comments: [
-          'Asientos delanteros con desgaste normal para la edad',
-          'Tapicería en buen estado, sin roturas',
-          'Mecanismo de ajuste funcionando correctamente'
-        ],
-        probability: 0.7
-      },
-      'rear-seats': {
-        comments: [
-          'Asientos traseros en muy buen estado',
-          'Sin desgaste significativo, poco uso aparente'
-        ],
-        probability: 0.4
-      },
-      
-      // Engine photos  
-      'engine-bay': {
-        comments: [
-          'Motor limpio, sin fugas visibles de aceite',
-          'Correa de distribución en buen estado',
-          'Batería nueva, terminales limpios',
-          'Ligero desgaste en mangueras, revisar en próximo mantenimiento'
-        ],
-        probability: 0.9
-      },
-      
-      // Wheels
-      'wheels': {
-        comments: [
-          'Llantas con 60% de vida útil restante',
-          'Rines en buen estado, sin golpes',
-          'Llantas nuevas, excelente estado',
-          'Desgaste irregular en llanta delantera derecha'
-        ],
-        probability: 0.8
-      },
-      
-      // Damage (higher probability of comments)
-      'damage': {
-        comments: [
-          'Rayón superficial en puerta, fácil de reparar',
-          'Pequeña abolladura en guardafango posterior',
-          'Desgaste en parachoques, no afecta funcionalidad',
-          'Oxidación menor en área de escape'
-        ],
-        probability: 0.95
-      }
-    };
-    
-    // Default for unknown photo types
-    const defaultTemplate = {
-      comments: [
-        'Estado general satisfactorio',
-        'Sin observaciones importantes',
-        'Condición normal para la edad del vehículo'
-      ],
-      probability: 0.3
-    };
-    
-    const template = commentTemplates[photo.id as keyof typeof commentTemplates] || defaultTemplate;
-    const shouldHaveComment = Math.random() < template.probability;
-    
-    if (shouldHaveComment) {
-      const randomComment = template.comments[Math.floor(Math.random() * template.comments.length)];
-      return { comment: randomComment, noComments: false };
-    } else {
-      return { comment: '', noComments: true };
-    }
-  };
-
   // Function to fill all photos with dummy data
   const fillWithDummyPhotos = async () => {
     const newPhotos: PhotosState = {};
@@ -690,15 +546,10 @@ export default function VehiclePictures({
           // Create preview URL
           const preview = URL.createObjectURL(blob);
           
-          // Generate realistic comments for testing based on photo type
-          const { comment, noComments } = generateDummyComment(photo);
-          
           newPhotos[step.id][photo.id] = {
             file,
             preview,
             uploadStatus: 'pending',
-            valuatorComment: comment,
-            noCommentsChecked: noComments,
           };
         } catch (error) {
           console.error(`Error loading sample image for ${photo.id}:`, error);
@@ -723,15 +574,10 @@ export default function VehiclePictures({
               const file = new File([blob], `${photo.id}.jpg`, { type: 'image/jpeg' });
               const preview = canvas.toDataURL('image/jpeg');
               
-              // Generate realistic comments for testing based on photo type  
-              const { comment, noComments } = generateDummyComment(photo);
-              
               newPhotos[step.id][photo.id] = {
                 file,
                 preview,
                 uploadStatus: 'pending',
-                valuatorComment: comment,
-                noCommentsChecked: noComments,
               };
             }
           }, 'image/jpeg', 0.9);
@@ -742,7 +588,7 @@ export default function VehiclePictures({
     setPhotos(newPhotos);
     
     // Show success message
-    toast.success('Se llenaron todas las fotos con datos de prueba y comentarios aleatorios');
+    toast.success('Se llenaron todas las fotos con datos de prueba');
     
     // Start uploading all photos in background with small delays to avoid overwhelming server
     let delay = 0;

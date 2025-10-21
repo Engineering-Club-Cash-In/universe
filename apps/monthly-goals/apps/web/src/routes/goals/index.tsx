@@ -29,6 +29,7 @@ type MonthlyGoal = {
 	goalTemplateUnit?: string | null;
 	targetValue: string;
 	achievedValue: string;
+	isInverse: boolean | null;
 	successThreshold: string | null;
 	warningThreshold: string | null;
 };
@@ -47,6 +48,22 @@ function GoalsIndexPage() {
 			}
 		})
 	);
+
+	const calculatePercentage = (target: number, achieved: number, isInverse: boolean | null): number => {
+		if (target <= 0) return 0;
+
+		if (isInverse) {
+			// Para metas inversas: menor o igual = 100%
+			if (achieved <= target) {
+				return 100;
+			} else {
+				return Math.max((target / achieved) * 100, 0);
+			}
+		} else {
+			// Para metas normales: mayor es mejor
+			return (achieved / target) * 100;
+		}
+	};
 
 	const getStatusBadge = (percentage: number, successThreshold: string | null, warningThreshold: string | null) => {
 		const success = parseFloat(successThreshold || "80");
@@ -143,12 +160,12 @@ function GoalsIndexPage() {
 			cell: ({ row }) => {
 				const target = parseFloat(row.original.targetValue);
 				const achieved = parseFloat(row.original.achievedValue);
-				const percentage = target > 0 ? (achieved / target) * 100 : 0;
-				
+				const percentage = calculatePercentage(target, achieved, row.original.isInverse);
+
 				return (
 					<div className="flex items-center space-x-2 w-32">
-						<Progress 
-							value={Math.min(percentage, 100)} 
+						<Progress
+							value={Math.min(percentage, 100)}
 							className="flex-1"
 						/>
 						<span className="text-sm font-medium">{Math.round(percentage)}%</span>
@@ -166,18 +183,18 @@ function GoalsIndexPage() {
 			cell: ({ row }) => {
 				const target = parseFloat(row.original.targetValue);
 				const achieved = parseFloat(row.original.achievedValue);
-				const percentage = target > 0 ? (achieved / target) * 100 : 0;
-				
+				const percentage = calculatePercentage(target, achieved, row.original.isInverse);
+
 				return getStatusBadge(percentage, row.original.successThreshold, row.original.warningThreshold);
 			},
 			filterFn: (row, id, value) => {
 				if (!value || value.length === 0) return true;
-				
+
 				const target = parseFloat(row.original.targetValue);
 				const achieved = parseFloat(row.original.achievedValue);
-				const percentage = target > 0 ? (achieved / target) * 100 : 0;
+				const percentage = calculatePercentage(target, achieved, row.original.isInverse);
 				const status = getStatusText(percentage, row.original.successThreshold, row.original.warningThreshold);
-				
+
 				return value.includes(status);
 			},
 		},
@@ -185,12 +202,17 @@ function GoalsIndexPage() {
 
 	return (
 		<div className="space-y-6">
-			<div className="flex items-center justify-between">
-				<h1 className="text-2xl font-semibold">Metas Mensuales</h1>
-				
-				<div className="flex items-end gap-6">
-					<div className="flex flex-col gap-2">
-						<Label className="text-sm font-medium text-gray-700">Mes</Label>
+			<div className="space-y-2">
+				<h1 className="text-2xl font-semibold">Dashboard de Metas</h1>
+				<p className="text-gray-600 dark:text-gray-400">
+					Vista general de todas las metas mensuales asignadas en la organización. Filtra por período para ver el progreso de cada empleado.
+				</p>
+			</div>
+
+			<div className="flex items-center justify-end">
+				<div className="flex items-end gap-4">
+					<div className="space-y-2">
+						<Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Mes</Label>
 						<Select
 							value={selectedMonth.toString()}
 							onValueChange={(value) => setSelectedMonth(parseInt(value))}
@@ -208,8 +230,8 @@ function GoalsIndexPage() {
 						</Select>
 					</div>
 
-					<div className="flex flex-col gap-2">
-						<Label className="text-sm font-medium text-gray-700">Año</Label>
+					<div className="space-y-2">
+						<Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Año</Label>
 						<Select
 							value={selectedYear.toString()}
 							onValueChange={(value) => setSelectedYear(parseInt(value))}

@@ -24,6 +24,7 @@ import {
 	recuperacionesVehiculo,
 	notificacionesCobros,
 } from "./schema/cobros";
+import { documentRequirements } from "./schema/documents";
 
 const salesStagesData = [
 	{
@@ -110,6 +111,88 @@ async function seedSalesStages() {
 		console.log("✅ Sales stages seeded successfully!");
 	} catch (error) {
 		console.error("❌ Error seeding sales stages:", error);
+	}
+}
+
+// Document requirements data
+const documentRequirementsData = [
+	// Autocompra - Documentos obligatorios
+	{
+		creditType: "autocompra" as const,
+		documentType: "identification" as const,
+		required: true,
+		description: "DPI o pasaporte del solicitante",
+	},
+	{
+		creditType: "autocompra" as const,
+		documentType: "income_proof" as const,
+		required: true,
+		description: "Constancia laboral, recibos de pago o estados financieros",
+	},
+	{
+		creditType: "autocompra" as const,
+		documentType: "bank_statement" as const,
+		required: true,
+		description: "Estados de cuenta bancarios de los últimos 3 meses",
+	},
+	{
+		creditType: "autocompra" as const,
+		documentType: "credit_report" as const,
+		required: true,
+		description: "Reporte crediticio actualizado",
+	},
+	// Sobre Vehículo - Documentos obligatorios
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "identification" as const,
+		required: true,
+		description: "DPI o pasaporte del propietario",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "vehicle_title" as const,
+		required: true,
+		description:
+			"Tarjeta de circulación que demuestre la propiedad del vehículo",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "income_proof" as const,
+		required: true,
+		description: "Constancia laboral, recibos de pago o estados financieros",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "bank_statement" as const,
+		required: true,
+		description: "Estados de cuenta bancarios de los últimos 3 meses",
+	},
+	{
+		creditType: "sobre_vehiculo" as const,
+		documentType: "credit_report" as const,
+		required: true,
+		description: "Reporte crediticio actualizado",
+	},
+];
+
+async function seedDocumentRequirements() {
+	console.log("Seeding document requirements...");
+
+	try {
+		// Check if requirements already exist
+		const existingRequirements = await db.select().from(documentRequirements);
+
+		if (existingRequirements.length > 0) {
+			console.log("Document requirements already exist, skipping seed...");
+			return;
+		}
+
+		// Insert the document requirements
+		await db.insert(documentRequirements).values(documentRequirementsData);
+
+		console.log("✅ Document requirements seeded successfully!");
+	} catch (error) {
+		console.error("❌ Error seeding document requirements:", error);
 	}
 }
 
@@ -624,7 +707,7 @@ async function seedCreditAnalysis(usersList: any[], leadsList: any[]) {
 
 		// Only seed for leads that are qualified or converted
 		const qualifiedLeads = leadsList.filter(
-			(lead) => lead.score && Number(lead.score) >= 0.7 && lead.fit === true
+			(lead) => lead.score && Number(lead.score) >= 0.7 && lead.fit === true,
 		);
 
 		const analysisWithRelations = creditAnalysisData
@@ -726,6 +809,7 @@ async function seedOpportunities(
 	companiesList: any[],
 	stagesList: any[],
 	leadsList: any[],
+	vehiclesList: any[],
 ) {
 	console.log("Seeding opportunities...");
 
@@ -739,25 +823,28 @@ async function seedOpportunities(
 
 		// Find the analysis stage
 		const analysisStage = stagesList.find(
-			stage => stage.name === "Recepción de documentación y traslado a análisis"
+			(stage) =>
+				stage.name === "Recepción de documentación y traslado a análisis",
 		);
 
 		const opportunitiesWithRelations = opportunitiesData.map((opp, index) => {
 			const assignedUser = usersList[index % usersList.length];
-			
+
 			// Put first 3 opportunities in analysis stage
 			let stageId;
 			if (index < 3 && analysisStage) {
 				stageId = analysisStage.id;
 			} else {
-				stageId = stagesList[Math.floor(Math.random() * stagesList.length)]?.id ||
+				stageId =
+					stagesList[Math.floor(Math.random() * stagesList.length)]?.id ||
 					stagesList[0]?.id;
 			}
-			
+
 			return {
 				...opp,
 				companyId: companiesList[index % companiesList.length]?.id || null,
 				leadId: leadsList[index % leadsList.length]?.id || null,
+				vehicleId: vehiclesList[index % vehiclesList.length]?.id || null,
 				stageId,
 				assignedTo: assignedUser.id,
 				createdBy: assignedUser.id,
@@ -916,7 +1003,7 @@ const vehiclesData = [
 		engineCC: "1800",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Teltonika FMB130",
@@ -926,7 +1013,7 @@ const vehiclesData = [
 			lng: -90.5069,
 			precision: 10,
 			timestamp: new Date().toISOString(),
-			address: "Zona 1, Guatemala City"
+			address: "Zona 1, Guatemala City",
 		}),
 		ultimaSeñalGPS: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 horas atrás
 		// Insurance Information
@@ -953,7 +1040,7 @@ const vehiclesData = [
 		engineCC: "2400",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "pending",
+		status: "pending" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Queclink GV75W",
@@ -963,7 +1050,7 @@ const vehiclesData = [
 			lng: -90.5164,
 			precision: 15,
 			timestamp: new Date().toISOString(),
-			address: "Zona 4, Guatemala City"
+			address: "Zona 4, Guatemala City",
 		}),
 		ultimaSeñalGPS: new Date(Date.now() - 30 * 60 * 1000), // 30 minutos atrás
 		// Insurance Information
@@ -990,7 +1077,7 @@ const vehiclesData = [
 		engineCC: "1600",
 		fuelType: "Gasolina",
 		transmission: "Manual",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: false,
 		dispositivoGPS: null,
@@ -1021,17 +1108,17 @@ const vehiclesData = [
 		engineCC: "2000",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Concox GT06N",
-		imeiGPS: "867648040345678", 
+		imeiGPS: "867648040345678",
 		ubicacionActualGPS: JSON.stringify({
 			lat: 14.6118,
 			lng: -90.5265,
 			precision: 8,
 			timestamp: new Date().toISOString(),
-			address: "Zona 9, Guatemala City"
+			address: "Zona 9, Guatemala City",
 		}),
 		ultimaSeñalGPS: new Date(Date.now() - 5 * 60 * 1000), // 5 minutos atrás
 		// Insurance Information
@@ -1058,7 +1145,7 @@ const vehiclesData = [
 		engineCC: "2500",
 		fuelType: "Gasolina",
 		transmission: "Automático",
-		status: "available",
+		status: "available" as const,
 		// GPS Information
 		gpsActivo: true,
 		dispositivoGPS: "Meitrack T366L",
@@ -1068,7 +1155,7 @@ const vehiclesData = [
 			lng: -90.5069,
 			precision: 12,
 			timestamp: new Date().toISOString(),
-			address: "Zona 10, Guatemala City"  
+			address: "Zona 10, Guatemala City",
 		}),
 		ultimaSeñalGPS: new Date(Date.now() - 15 * 60 * 1000), // 15 minutos atrás
 		// Insurance Information
@@ -1115,23 +1202,28 @@ async function seedVehiclePhotos(vehiclesList: any[]) {
 		{ category: "interior", photoType: "dashboard", label: "Tablero" },
 		{ category: "interior", photoType: "seats", label: "Asientos" },
 		{ category: "engine", photoType: "engine-bay", label: "Motor" },
-		{ category: "wheels", photoType: "front-wheels", label: "Ruedas delanteras" },
-		{ category: "damage", photoType: "scratches", label: "Detalles" }
+		{
+			category: "wheels",
+			photoType: "front-wheels",
+			label: "Ruedas delanteras",
+		},
+		{ category: "damage", photoType: "scratches", label: "Detalles" },
 	];
-	
-	const baseGithubUrl = "https://raw.githubusercontent.com/EkdeepSLubana/raw_dataset/master/ISP_processed/";
-	
+
+	const baseGithubUrl =
+		"https://raw.githubusercontent.com/EkdeepSLubana/raw_dataset/master/ISP_processed/";
+
 	const insertedPhotos = [];
 	let photoNumber = 1;
-	
+
 	for (const vehicle of vehiclesList) {
 		// Cada vehículo tendrá entre 4 y 8 fotos
 		const numberOfPhotos = Math.floor(Math.random() * 5) + 4;
-		
+
 		for (let i = 0; i < numberOfPhotos; i++) {
 			const photo = photoData[i % photoData.length];
 			const photoUrl = `${baseGithubUrl}${photoNumber}.jpg`;
-			
+
 			const [insertedPhoto] = await db
 				.insert(vehiclePhotos)
 				.values({
@@ -1143,14 +1235,14 @@ async function seedVehiclePhotos(vehiclesList: any[]) {
 					photoType: photo.photoType,
 				})
 				.returning();
-			
+
 			insertedPhotos.push(insertedPhoto);
-			
+
 			// Incrementar el número de foto, reiniciar si llegamos a 225
 			photoNumber = (photoNumber % 225) + 1;
 		}
 	}
-	
+
 	console.log(`✅ ${insertedPhotos.length} vehicle photos seeded`);
 	return insertedPhotos;
 }
@@ -1160,67 +1252,155 @@ async function seedInspectionChecklists(inspectionsList: any[]) {
 
 	const checklistTemplates = [
 		// Documentos
-		{ category: "documentos", label: "Tarjeta de circulación", isRejectionCriteria: true },
-		{ category: "documentos", label: "Título de propiedad", isRejectionCriteria: true },
-		{ category: "documentos", label: "Seguro vigente", isRejectionCriteria: false },
-		{ category: "documentos", label: "Historial de mantenimiento", isRejectionCriteria: false },
-		
+		{
+			category: "documentos",
+			label: "Tarjeta de circulación",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "documentos",
+			label: "Título de propiedad",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "documentos",
+			label: "Seguro vigente",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "documentos",
+			label: "Historial de mantenimiento",
+			isRejectionCriteria: false,
+		},
+
 		// Carrocería
-		{ category: "carroceria", label: "Sin daños estructurales", isRejectionCriteria: true },
-		{ category: "carroceria", label: "Pintura en buen estado", isRejectionCriteria: false },
-		{ category: "carroceria", label: "Sin óxido visible", isRejectionCriteria: false },
-		{ category: "carroceria", label: "Puertas funcionan correctamente", isRejectionCriteria: false },
-		
+		{
+			category: "carroceria",
+			label: "Sin daños estructurales",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "carroceria",
+			label: "Pintura en buen estado",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "carroceria",
+			label: "Sin óxido visible",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "carroceria",
+			label: "Puertas funcionan correctamente",
+			isRejectionCriteria: false,
+		},
+
 		// Interior
-		{ category: "interior", label: "Asientos en buen estado", isRejectionCriteria: false },
-		{ category: "interior", label: "Tablero sin daños", isRejectionCriteria: false },
-		{ category: "interior", label: "Aire acondicionado funcional", isRejectionCriteria: false },
-		{ category: "interior", label: "Sistema eléctrico operativo", isRejectionCriteria: true },
-		
+		{
+			category: "interior",
+			label: "Asientos en buen estado",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "interior",
+			label: "Tablero sin daños",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "interior",
+			label: "Aire acondicionado funcional",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "interior",
+			label: "Sistema eléctrico operativo",
+			isRejectionCriteria: true,
+		},
+
 		// Motor
 		{ category: "motor", label: "Motor sin fugas", isRejectionCriteria: true },
-		{ category: "motor", label: "Niveles de fluidos correctos", isRejectionCriteria: false },
-		{ category: "motor", label: "Sin ruidos anormales", isRejectionCriteria: true },
-		{ category: "motor", label: "Sistema de enfriamiento funcional", isRejectionCriteria: false },
-		
+		{
+			category: "motor",
+			label: "Niveles de fluidos correctos",
+			isRejectionCriteria: false,
+		},
+		{
+			category: "motor",
+			label: "Sin ruidos anormales",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "motor",
+			label: "Sistema de enfriamiento funcional",
+			isRejectionCriteria: false,
+		},
+
 		// Transmisión
-		{ category: "transmision", label: "Cambios suaves", isRejectionCriteria: true },
-		{ category: "transmision", label: "Embrague funcional", isRejectionCriteria: true },
-		{ category: "transmision", label: "Sin vibraciones", isRejectionCriteria: false },
-		
+		{
+			category: "transmision",
+			label: "Cambios suaves",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "transmision",
+			label: "Embrague funcional",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "transmision",
+			label: "Sin vibraciones",
+			isRejectionCriteria: false,
+		},
+
 		// Frenos
-		{ category: "frenos", label: "Frenos responden bien", isRejectionCriteria: true },
-		{ category: "frenos", label: "Discos/tambores en buen estado", isRejectionCriteria: true },
-		{ category: "frenos", label: "Líquido de frenos al nivel", isRejectionCriteria: false },
+		{
+			category: "frenos",
+			label: "Frenos responden bien",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "frenos",
+			label: "Discos/tambores en buen estado",
+			isRejectionCriteria: true,
+		},
+		{
+			category: "frenos",
+			label: "Líquido de frenos al nivel",
+			isRejectionCriteria: false,
+		},
 	];
 
 	const insertedChecklists = [];
-	
+
 	for (const inspection of inspectionsList) {
 		// Para cada inspección, crear items del checklist con valores aleatorios
 		for (const template of checklistTemplates) {
 			// Generar valor basado en el estado de la inspección
-			let value = 'yes';
-			
+			let value = "yes";
+
 			// Si la inspección fue rechazada, algunos criterios críticos deben ser 'no'
-			if (inspection.status === 'rejected' && template.isRejectionCriteria && Math.random() > 0.5) {
-				value = 'no';
+			if (
+				inspection.status === "rejected" &&
+				template.isRejectionCriteria &&
+				Math.random() > 0.5
+			) {
+				value = "no";
 			} else if (Math.random() > 0.85) {
 				// 15% de probabilidad de que sea 'no' o 'n/a'
-				value = Math.random() > 0.5 ? 'no' : 'n/a';
+				value = Math.random() > 0.5 ? "no" : "n/a";
 			}
-			
+
 			const [insertedItem] = await db
 				.insert(inspectionChecklistItems)
 				.values({
 					inspectionId: inspection.id,
 					category: template.category,
 					item: template.label,
-					checked: value === 'yes',
-					severity: template.isRejectionCriteria ? 'critical' : 'warning',
+					checked: value === "yes",
+					severity: template.isRejectionCriteria ? "critical" : "warning",
 				})
 				.returning();
-			
+
 			insertedChecklists.push(insertedItem);
 		}
 	}
@@ -1236,24 +1416,27 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 		{
 			technicianName: "Carlos Rodríguez",
 			inspectionDate: new Date("2024-01-15"),
-			inspectionResult: "Vehículo en excelentes condiciones. Motor en buen estado, carrocería sin daños relevantes.",
+			inspectionResult:
+				"Vehículo en excelentes condiciones. Motor en buen estado, carrocería sin daños relevantes.",
 			vehicleRating: "Comercial",
 			marketValue: "220000.00",
 			suggestedCommercialValue: "205000.00",
 			bankValue: "200000.00",
 			currentConditionValue: "195000.00",
-			vehicleEquipment: "Aire acondicionado, sistema de audio, bolsas de aire frontales y laterales",
+			vehicleEquipment:
+				"Aire acondicionado, sistema de audio, bolsas de aire frontales y laterales",
 			importantConsiderations: "Mantenimiento al día según bitácora",
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "approved",
+			status: "approved" as const,
 			alerts: [],
 		},
 		{
 			technicianName: "Ana Martínez",
 			inspectionDate: new Date("2024-01-18"),
-			inspectionResult: "Vehículo en buenas condiciones. Presenta desgaste normal por uso. Requiere cambio de frenos próximamente.",
+			inspectionResult:
+				"Vehículo en buenas condiciones. Presenta desgaste normal por uso. Requiere cambio de frenos próximamente.",
 			vehicleRating: "Comercial",
 			marketValue: "250000.00",
 			suggestedCommercialValue: "230000.00",
@@ -1264,13 +1447,14 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "pending",
+			status: "pending" as const,
 			alerts: ["Frenos"],
 		},
 		{
 			technicianName: "Roberto Sánchez",
 			inspectionDate: new Date("2024-01-20"),
-			inspectionResult: "Vehículo con múltiples problemas. Transmisión con fallos, sistema eléctrico requiere revisión.",
+			inspectionResult:
+				"Vehículo con múltiples problemas. Transmisión con fallos, sistema eléctrico requiere revisión.",
 			vehicleRating: "No comercial",
 			marketValue: "150000.00",
 			suggestedCommercialValue: "135000.00",
@@ -1283,13 +1467,14 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			missingAirbag: "Airbag lateral izquierdo",
 			testDrive: false,
 			noTestDriveReason: "Falla en transmisión impide manejo seguro",
-			status: "rejected",
+			status: "rejected" as const,
 			alerts: ["Airbag", "Transmisión", "Sistema eléctrico"],
 		},
 		{
 			technicianName: "María López",
 			inspectionDate: new Date("2024-01-22"),
-			inspectionResult: "Vehículo en muy buenas condiciones. Mantenimiento al día según bitácora.",
+			inspectionResult:
+				"Vehículo en muy buenas condiciones. Mantenimiento al día según bitácora.",
 			vehicleRating: "Comercial",
 			marketValue: "270000.00",
 			suggestedCommercialValue: "255000.00",
@@ -1300,13 +1485,14 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "approved",
+			status: "approved" as const,
 			alerts: [],
 		},
 		{
 			technicianName: "Javier Mendoza",
 			inspectionDate: new Date("2024-01-25"),
-			inspectionResult: "Vehículo en excelentes condiciones. Sin problemas detectados.",
+			inspectionResult:
+				"Vehículo en excelentes condiciones. Sin problemas detectados.",
 			vehicleRating: "Comercial",
 			marketValue: "290000.00",
 			suggestedCommercialValue: "280000.00",
@@ -1317,7 +1503,7 @@ async function seedVehicleInspections(vehiclesList: any[]) {
 			scannerUsed: true,
 			airbagWarning: false,
 			testDrive: true,
-			status: "approved",
+			status: "approved" as const,
 			alerts: [],
 		},
 	];
@@ -1374,7 +1560,11 @@ async function getOrCreateAdminUser() {
 }
 
 // Datos de contratos de financiamiento
-async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any[], usersList: any[]) {
+async function seedContratosFinanciamiento(
+	clientsList: any[],
+	vehiclesList: any[],
+	usersList: any[],
+) {
 	console.log("💰 Seeding contratos de financiamiento...");
 
 	try {
@@ -1388,7 +1578,7 @@ async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any
 		const contratosData = [
 			{
 				montoFinanciado: "500000.00",
-				cuotaMensual: "25000.00", 
+				cuotaMensual: "25000.00",
 				numeroCuotas: 24,
 				tasaInteres: "15.50",
 				fechaInicio: new Date("2023-06-01"),
@@ -1400,7 +1590,7 @@ async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any
 				montoFinanciado: "750000.00",
 				cuotaMensual: "31250.00",
 				numeroCuotas: 36,
-				tasaInteres: "14.75", 
+				tasaInteres: "14.75",
 				fechaInicio: new Date("2023-03-15"),
 				fechaVencimiento: new Date("2026-03-15"),
 				diaPagoMensual: 10,
@@ -1482,7 +1672,9 @@ async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any
 
 		const contratosWithRelations = contratosData.map((contrato, index) => {
 			// Reutilizar clientes y vehículos si hay más contratos que entidades
-			const responsableCobros = usersList.find(u => u.role === "cobros") || usersList.find(u => u.role === "admin");
+			const responsableCobros =
+				usersList.find((u) => u.role === "cobros") ||
+				usersList.find((u) => u.role === "admin");
 			return {
 				...contrato,
 				clientId: clientsList[index % clientsList.length].id, // Reutilizar clientes
@@ -1497,7 +1689,9 @@ async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any
 			.values(contratosWithRelations)
 			.returning();
 
-		console.log(`✅ ${insertedContratos.length} contratos de financiamiento seeded`);
+		console.log(
+			`✅ ${insertedContratos.length} contratos de financiamiento seeded`,
+		);
 		return insertedContratos;
 	} catch (error) {
 		console.error("❌ Error seeding contratos:", error);
@@ -1505,7 +1699,7 @@ async function seedContratosFinanciamiento(clientsList: any[], vehiclesList: any
 	}
 }
 
-// Datos de cuotas de pago 
+// Datos de cuotas de pago
 async function seedCuotasPago(contratosList: any[]) {
 	console.log("📅 Seeding cuotas de pago...");
 
@@ -1517,14 +1711,14 @@ async function seedCuotasPago(contratosList: any[]) {
 		}
 
 		const cuotasData = [];
-		
+
 		for (const contrato of contratosList) {
 			// Crear cuotas mensuales para cada contrato
 			const fechaInicio = new Date(contrato.fechaInicio);
-			
+
 			// Determinar hasta qué cuota ha pagado según el estado del contrato
 			let ultimaCuotaPagada = 0;
-			
+
 			if (contrato.estado === "completado") {
 				// Contrato completado: todas las cuotas pagadas
 				ultimaCuotaPagada = contrato.numeroCuotas;
@@ -1533,28 +1727,44 @@ async function seedCuotasPago(contratosList: any[]) {
 				const contratoIndex = contratosList.indexOf(contrato);
 				if (contratoIndex < 4) {
 					// Primeros 4: tienen mora (diferentes niveles)
-					if (contratoIndex === 0) ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.7); // Mora leve
-					else if (contratoIndex === 1) ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.6); // Mora moderada
-					else if (contratoIndex === 2) ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.5); // Mora severa
+					if (contratoIndex === 0)
+						ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.7); // Mora leve
+					else if (contratoIndex === 1)
+						ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.6); // Mora moderada
+					else if (contratoIndex === 2)
+						ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.5); // Mora severa
 					else ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.4); // Mora crítica
 				} else {
 					// Contratos 5-6: al día
 					ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.95); // 95% pagadas, al día
 				}
-			} else if (contrato.estado === "incobrable" || contrato.estado === "recuperado") {
+			} else if (
+				contrato.estado === "incobrable" ||
+				contrato.estado === "recuperado"
+			) {
 				// Contratos incobrables: pagaron muy poco antes de dejar de pagar
 				ultimaCuotaPagada = Math.floor(contrato.numeroCuotas * 0.3); // Solo 30% pagadas
 			}
-			
+
 			for (let i = 1; i <= contrato.numeroCuotas; i++) {
 				const fechaVencimiento = new Date(fechaInicio);
 				fechaVencimiento.setMonth(fechaVencimiento.getMonth() + i - 1);
 				fechaVencimiento.setDate(contrato.diaPagoMensual);
 
 				const hoy = new Date();
-				const diasRetraso = Math.floor((hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24));
-				
-				let estadoMora: "al_dia" | "mora_30" | "mora_60" | "mora_90" | "mora_120" | "mora_120_plus" | "pagado" | "incobrable" = "al_dia";
+				const diasRetraso = Math.floor(
+					(hoy.getTime() - fechaVencimiento.getTime()) / (1000 * 60 * 60 * 24),
+				);
+
+				let estadoMora:
+					| "al_dia"
+					| "mora_30"
+					| "mora_60"
+					| "mora_90"
+					| "mora_120"
+					| "mora_120_plus"
+					| "pagado"
+					| "incobrable" = "al_dia";
 				let fechaPago = null;
 				let montoPagado = null;
 				let montoMora = "0.00";
@@ -1562,24 +1772,32 @@ async function seedCuotasPago(contratosList: any[]) {
 				if (i <= ultimaCuotaPagada) {
 					// Cuotas ya pagadas (secuencialmente)
 					estadoMora = "pagado" as const;
-					
+
 					// Simular fecha de pago: algunas a tiempo, otras con mora
 					const pagoConMora = Math.random() > 0.7; // 30% de pagos tuvieron mora
-					
+
 					if (pagoConMora) {
 						// Pago con mora: se pagó 1-15 días después del vencimiento
 						fechaPago = new Date(fechaVencimiento);
 						const diasMoraPago = Math.floor(Math.random() * 15) + 1;
 						fechaPago.setDate(fechaPago.getDate() + diasMoraPago);
-						
+
 						// Calcular mora que se pagó
 						const mesesMora = Math.ceil(diasMoraPago / 30);
-						montoMora = (Number(contrato.cuotaMensual) * 0.02 * mesesMora).toFixed(2);
-						montoPagado = (Number(contrato.cuotaMensual) + Number(montoMora)).toFixed(2);
+						montoMora = (
+							Number(contrato.cuotaMensual) *
+							0.02 *
+							mesesMora
+						).toFixed(2);
+						montoPagado = (
+							Number(contrato.cuotaMensual) + Number(montoMora)
+						).toFixed(2);
 					} else {
 						// Pago a tiempo
 						fechaPago = new Date(fechaVencimiento);
-						fechaPago.setDate(fechaPago.getDate() + Math.floor(Math.random() * 3)); // 0-3 días después
+						fechaPago.setDate(
+							fechaPago.getDate() + Math.floor(Math.random() * 3),
+						); // 0-3 días después
 						montoPagado = contrato.cuotaMensual;
 						montoMora = "0.00";
 					}
@@ -1588,14 +1806,18 @@ async function seedCuotasPago(contratosList: any[]) {
 					if (diasRetraso > 0) {
 						// Cuota vencida - calcular nivel de mora
 						if (diasRetraso <= 30) estadoMora = "mora_30" as const;
-						else if (diasRetraso <= 60) estadoMora = "mora_60" as const; 
+						else if (diasRetraso <= 60) estadoMora = "mora_60" as const;
 						else if (diasRetraso <= 90) estadoMora = "mora_90" as const;
 						else if (diasRetraso <= 120) estadoMora = "mora_120" as const;
 						else estadoMora = "mora_120_plus" as const;
-						
+
 						// Calcular mora acumulada
 						const mesesMora = Math.ceil(diasRetraso / 30);
-						montoMora = (Number(contrato.cuotaMensual) * 0.02 * mesesMora).toFixed(2);
+						montoMora = (
+							Number(contrato.cuotaMensual) *
+							0.02 *
+							mesesMora
+						).toFixed(2);
 					} else {
 						// Cuota aún no vencida
 						estadoMora = "al_dia" as const;
@@ -1630,7 +1852,12 @@ async function seedCuotasPago(contratosList: any[]) {
 }
 
 // Datos de casos de cobros
-async function seedCasosCobros(contratosList: any[], clientsList: any[], vehiclesList: any[], usersList: any[]) {
+async function seedCasosCobros(
+	contratosList: any[],
+	clientsList: any[],
+	vehiclesList: any[],
+	usersList: any[],
+) {
 	console.log("⚠️ Seeding casos de cobros...");
 
 	try {
@@ -1645,18 +1872,30 @@ async function seedCasosCobros(contratosList: any[], clientsList: any[], vehicle
 
 		contratosList.forEach((contrato, index) => {
 			if (index >= clientsList.length) return;
-			
+
 			const cliente = clientsList[index];
-			const responsableCobros = usersList.find(u => u.role === "cobros") || usersList.find(u => u.role === "admin");
-			
+			const responsableCobros =
+				usersList.find((u) => u.role === "cobros") ||
+				usersList.find((u) => u.role === "admin");
+
 			// Determinar tipo de caso basado en el estado del contrato
 			if (contrato.estado === "activo") {
 				// Casos activos: algunos en mora, otros al día
 				if (index < 4) {
 					// Primeros 4: casos con diferentes niveles de mora
-					const estados = ["mora_30", "mora_60", "mora_90", "mora_120"] as const;
+					const estados = [
+						"mora_30",
+						"mora_60",
+						"mora_90",
+						"mora_120",
+					] as const;
 					const estadoMora = estados[index % estados.length];
-					const montosEnMora = ["75000.00", "125000.00", "187500.00", "250000.00"];
+					const montosEnMora = [
+						"75000.00",
+						"125000.00",
+						"187500.00",
+						"250000.00",
+					];
 					const diasMora = [35, 65, 85, 125];
 					const cuotasVencidas = [2, 3, 4, 5];
 
@@ -1668,15 +1907,24 @@ async function seedCasosCobros(contratosList: any[], clientsList: any[], vehicle
 						cuotasVencidas: cuotasVencidas[index],
 						responsableCobros: responsableCobros?.id,
 						telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
-						telefonoAlternativo: "+502 4444 0" + (index + 1) + "01", 
-						emailContacto: cliente.contactPerson.toLowerCase().replace(" ", ".") + "@email.com",
+						telefonoAlternativo: "+502 4444 0" + (index + 1) + "01",
+						emailContacto:
+							cliente.contactPerson.toLowerCase().replace(" ", ".") +
+							"@email.com",
 						direccionContacto: `Zona ${index + 10}, Ciudad de Guatemala`,
-						proximoContacto: new Date(Date.now() + (index + 1) * 24 * 60 * 60 * 1000),
-						metodoContactoProximo: (["llamada", "whatsapp", "email", "visita_domicilio"] as const)[index],
+						proximoContacto: new Date(
+							Date.now() + (index + 1) * 24 * 60 * 60 * 1000,
+						),
+						metodoContactoProximo: (
+							["llamada", "whatsapp", "email", "visita_domicilio"] as const
+						)[index],
 					});
 				}
 				// Los contratos 5-6 están al día, no necesitan casos de cobros
-			} else if (contrato.estado === "incobrable" || contrato.estado === "recuperado") {
+			} else if (
+				contrato.estado === "incobrable" ||
+				contrato.estado === "recuperado"
+			) {
 				// Casos incobrables con recuperación de vehículo
 				casosData.push({
 					contratoId: contrato.id,
@@ -1686,8 +1934,10 @@ async function seedCasosCobros(contratosList: any[], clientsList: any[], vehicle
 					cuotasVencidas: 8,
 					responsableCobros: responsableCobros?.id,
 					telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
-					telefonoAlternativo: "+502 4444 0" + (index + 1) + "01", 
-					emailContacto: cliente.contactPerson.toLowerCase().replace(" ", ".") + "@email.com",
+					telefonoAlternativo: "+502 4444 0" + (index + 1) + "01",
+					emailContacto:
+						cliente.contactPerson.toLowerCase().replace(" ", ".") +
+						"@email.com",
 					direccionContacto: `Zona ${index + 10}, Ciudad de Guatemala`,
 					proximoContacto: null, // No hay próximo contacto para incobrables
 					metodoContactoProximo: null,
@@ -1721,28 +1971,39 @@ async function seedContactosCobros(casosList: any[], usersList: any[]) {
 		}
 
 		const contactosData = [];
-		const responsableCobros = usersList.find(u => u.role === "cobros") || usersList.find(u => u.role === "admin");
+		const responsableCobros =
+			usersList.find((u) => u.role === "cobros") ||
+			usersList.find((u) => u.role === "admin");
 
 		for (const caso of casosList) {
 			// 2-4 contactos por caso
 			const numeroContactos = Math.floor(Math.random() * 3) + 2;
-			
+
 			for (let i = 0; i < numeroContactos; i++) {
 				const fechaContacto = new Date();
-				fechaContacto.setDate(fechaContacto.getDate() - (numeroContactos - i) * 2); // Contactos cada 2 días
+				fechaContacto.setDate(
+					fechaContacto.getDate() - (numeroContactos - i) * 2,
+				); // Contactos cada 2 días
 
 				const metodos = ["llamada", "whatsapp", "email"] as const;
-				const estados = ["contactado", "promesa_pago", "no_contesta", "acuerdo_parcial", "rechaza_pagar"] as const;
-				
+				const estados = [
+					"contactado",
+					"promesa_pago",
+					"no_contesta",
+					"acuerdo_parcial",
+					"rechaza_pagar",
+				] as const;
+
 				const metodoContacto = metodos[i % metodos.length];
-				const estadoContacto = estados[Math.floor(Math.random() * estados.length)];
+				const estadoContacto =
+					estados[Math.floor(Math.random() * estados.length)];
 
 				const comentarios = [
 					"Cliente atendió la llamada, menciona dificultades económicas temporales",
 					"Se estableció compromiso de pago para el próximo viernes",
 					"Cliente no respondió, buzón de voz completo",
 					"Acuerdo parcial: pagará 50% esta semana y 50% la siguiente",
-					"Cliente rechaza reconocer la deuda, solicita verificación de documentos"
+					"Cliente rechaza reconocer la deuda, solicita verificación de documentos",
 				];
 
 				const acuerdos = [
@@ -1750,7 +2011,7 @@ async function seedContactosCobros(casosList: any[], usersList: any[]) {
 					"Pago en dos partes: 50% hoy, 50% en una semana",
 					"",
 					"Convenio de pago a 3 meses",
-					""
+					"",
 				];
 
 				contactosData.push({
@@ -1758,12 +2019,24 @@ async function seedContactosCobros(casosList: any[], usersList: any[]) {
 					fechaContacto,
 					metodoContacto,
 					estadoContacto,
-					duracionLlamada: metodoContacto === "llamada" ? Math.floor(Math.random() * 300) + 60 : null,
+					duracionLlamada:
+						metodoContacto === "llamada"
+							? Math.floor(Math.random() * 300) + 60
+							: null,
 					comentarios: comentarios[i % comentarios.length],
 					acuerdosAlcanzados: acuerdos[i % acuerdos.length],
-					compromisosPago: estadoContacto === "promesa_pago" ? `Pago de Q${Math.floor(Math.random() * 50000) + 25000} antes del ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}` : "",
+					compromisosPago:
+						estadoContacto === "promesa_pago"
+							? `Pago de Q${Math.floor(Math.random() * 50000) + 25000} antes del ${new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toLocaleDateString()}`
+							: "",
 					requiereSeguimiento: Math.random() > 0.4,
-					fechaProximoContacto: Math.random() > 0.4 ? new Date(Date.now() + Math.floor(Math.random() * 7) * 24 * 60 * 60 * 1000) : null,
+					fechaProximoContacto:
+						Math.random() > 0.4
+							? new Date(
+									Date.now() +
+										Math.floor(Math.random() * 7) * 24 * 60 * 60 * 1000,
+								)
+							: null,
 					realizadoPor: responsableCobros?.id,
 				});
 			}
@@ -1795,18 +2068,24 @@ async function seedConveniosPago(casosList: any[], usersList: any[]) {
 
 		// Solo algunos casos tienen convenios (primeros 2 casos)
 		const casosConConvenio = casosList.slice(0, 2);
-		const responsableAdmin = usersList.find(u => u.role === "admin");
+		const responsableAdmin = usersList.find((u) => u.role === "admin");
 
 		const conveniosData = casosConConvenio.map((caso, index) => ({
 			casoCobroId: caso.id,
 			montoAcordado: (Number(caso.montoEnMora) * 0.8).toFixed(2), // 80% del monto en mora
 			numeroCuotasConvenio: [3, 4, 6, 8][index % 4], // 3-8 cuotas
-			montoCuotaConvenio: ((Number(caso.montoEnMora) * 0.8) / [3, 4, 6, 8][index % 4]).toFixed(2),
+			montoCuotaConvenio: (
+				(Number(caso.montoEnMora) * 0.8) /
+				[3, 4, 6, 8][index % 4]
+			).toFixed(2),
 			fechaInicioConvenio: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Inicia en una semana
 			activo: true,
 			cumplido: Math.random() > 0.7, // 30% están cumplidos
 			cuotasCumplidas: Math.floor(Math.random() * 3),
-			condicionesEspeciales: index % 2 === 0 ? "Pago únicamente los viernes, horario de 9am a 4pm" : "",
+			condicionesEspeciales:
+				index % 2 === 0
+					? "Pago únicamente los viernes, horario de 9am a 4pm"
+					: "",
 			aprobadoPor: responsableAdmin?.id,
 		}));
 
@@ -1828,32 +2107,56 @@ async function seedRecuperacionesVehiculo(casosList: any[], usersList: any[]) {
 	console.log("🚗 Seeding recuperaciones de vehículo...");
 
 	try {
-		const existingRecuperaciones = await db.select().from(recuperacionesVehiculo);
+		const existingRecuperaciones = await db
+			.select()
+			.from(recuperacionesVehiculo);
 		if (existingRecuperaciones.length > 0) {
 			console.log("Recuperaciones already exist, skipping seed...");
 			return existingRecuperaciones;
 		}
 
 		// Solo casos de mora avanzada requieren recuperación
-		const casosCriticos = casosList.filter(caso => 
-			["mora_90", "mora_120", "mora_120_plus"].includes(caso.estadoMora)
+		const casosCriticos = casosList.filter((caso) =>
+			["mora_90", "mora_120", "mora_120_plus"].includes(caso.estadoMora),
 		);
 
-		const tiposRecuperacion = ["entrega_voluntaria", "tomado", "orden_secuestro"] as const;
-		const responsableAdmin = usersList.find(u => u.role === "admin");
+		const tiposRecuperacion = [
+			"entrega_voluntaria",
+			"tomado",
+			"orden_secuestro",
+		] as const;
+		const responsableAdmin = usersList.find((u) => u.role === "admin");
 
 		const recuperacionesData = casosCriticos.map((caso, index) => ({
 			casoCobroId: caso.id,
 			tipoRecuperacion: tiposRecuperacion[index % tiposRecuperacion.length],
-			fechaRecuperacion: index % 2 === 0 ? new Date(Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000) : null,
-			
+			fechaRecuperacion:
+				index % 2 === 0
+					? new Date(
+							Date.now() - Math.floor(Math.random() * 30) * 24 * 60 * 60 * 1000,
+						)
+					: null,
+
 			// Proceso legal (solo para orden_secuestro)
-			ordenSecuestro: tiposRecuperacion[index % tiposRecuperacion.length] === "orden_secuestro",
-			numeroExpediente: tiposRecuperacion[index % tiposRecuperacion.length] === "orden_secuestro" ? `EXP-${Math.floor(Math.random() * 90000) + 10000}` : null,
-			juzgadoCompetente: tiposRecuperacion[index % tiposRecuperacion.length] === "orden_secuestro" ? "Juzgado de Primera Instancia Civil" : null,
+			ordenSecuestro:
+				tiposRecuperacion[index % tiposRecuperacion.length] ===
+				"orden_secuestro",
+			numeroExpediente:
+				tiposRecuperacion[index % tiposRecuperacion.length] ===
+				"orden_secuestro"
+					? `EXP-${Math.floor(Math.random() * 90000) + 10000}`
+					: null,
+			juzgadoCompetente:
+				tiposRecuperacion[index % tiposRecuperacion.length] ===
+				"orden_secuestro"
+					? "Juzgado de Primera Instancia Civil"
+					: null,
 
 			completada: Math.random() > 0.5, // 50% completadas
-			observaciones: index % 2 === 0 ? "Vehículo localizado en buen estado" : "Cliente cooperativo en el proceso",
+			observaciones:
+				index % 2 === 0
+					? "Vehículo localizado en buen estado"
+					: "Cliente cooperativo en el proceso",
 			responsableRecuperacion: responsableAdmin?.id,
 		}));
 
@@ -1862,7 +2165,9 @@ async function seedRecuperacionesVehiculo(casosList: any[], usersList: any[]) {
 			.values(recuperacionesData)
 			.returning();
 
-		console.log(`✅ ${insertedRecuperaciones.length} recuperaciones de vehículo seeded`);
+		console.log(
+			`✅ ${insertedRecuperaciones.length} recuperaciones de vehículo seeded`,
+		);
 		return insertedRecuperaciones;
 	} catch (error) {
 		console.error("❌ Error seeding recuperaciones:", error);
@@ -1886,12 +2191,23 @@ async function seedNotificacionesCobros(casosList: any[]) {
 		for (const caso of casosList) {
 			// 2-5 notificaciones por caso
 			const numeroNotificaciones = Math.floor(Math.random() * 4) + 2;
-			
+
 			for (let i = 0; i < numeroNotificaciones; i++) {
-				const tiposNotificacion = ["vencimiento_proximo", "mora_30", "mora_60", "recordatorio_pago"];
+				const tiposNotificacion = [
+					"vencimiento_proximo",
+					"mora_30",
+					"mora_60",
+					"recordatorio_pago",
+				];
 				const canales = ["email", "whatsapp", "llamada"] as const;
-				
-				const fechaEnvio = Math.random() > 0.3 ? new Date(Date.now() - Math.floor(Math.random() * 15) * 24 * 60 * 60 * 1000) : null;
+
+				const fechaEnvio =
+					Math.random() > 0.3
+						? new Date(
+								Date.now() -
+									Math.floor(Math.random() * 15) * 24 * 60 * 60 * 1000,
+							)
+						: null;
 
 				notificacionesData.push({
 					casoCobroId: caso.id,
@@ -1901,7 +2217,10 @@ async function seedNotificacionesCobros(casosList: any[]) {
 					mensaje: `Estimado cliente, le recordamos que tiene una cuota pendiente de pago por Q${Number(caso.montoEnMora) / caso.cuotasVencidas}. Por favor, acérquese a nuestras oficinas o contacte a su asesor.`,
 					enviada: !!fechaEnvio,
 					fechaEnvio,
-					respuesta: fechaEnvio && Math.random() > 0.7 ? "Cliente confirmó recepción, pagará mañana" : null,
+					respuesta:
+						fechaEnvio && Math.random() > 0.7
+							? "Cliente confirmó recepción, pagará mañana"
+							: null,
 					fechaProgramada: new Date(Date.now() + i * 24 * 60 * 60 * 1000), // Una cada día
 				});
 			}
@@ -1936,31 +2255,48 @@ async function main() {
 	// Seed in order due to dependencies
 	await seedSalesStages();
 	const stagesList = await db.select().from(salesStages);
+	await seedDocumentRequirements();
 
 	const companiesList = await seedCompanies(usersList);
 	const leadsList = await seedLeads(usersList, companiesList);
+
+	// Seed vehicles first so we can associate them with opportunities
+	const vehiclesList = await seedVehicles(companiesList);
+
 	const opportunitiesList = await seedOpportunities(
 		usersList,
 		companiesList,
 		stagesList,
 		leadsList,
+		vehiclesList,
 	);
 	const clientsList = await seedClients(usersList, companiesList);
 	const creditAnalysisList = await seedCreditAnalysis(usersList, leadsList);
-	
-	// Seed vehicles, inspections, checklists and photos
-	const vehiclesList = await seedVehicles(companiesList);
+
+	// Seed inspections, checklists and photos
 	const inspectionsList = await seedVehicleInspections(vehiclesList);
 	const checklistsList = await seedInspectionChecklists(inspectionsList);
 	const photosList = await seedVehiclePhotos(vehiclesList);
 
 	// Seed cobros system data
-	const contratosList = await seedContratosFinanciamiento(clientsList, vehiclesList, usersList);
+	const contratosList = await seedContratosFinanciamiento(
+		clientsList,
+		vehiclesList,
+		usersList,
+	);
 	const cuotasList = await seedCuotasPago(contratosList);
-	const casosList = await seedCasosCobros(contratosList, clientsList, vehiclesList, usersList);
+	const casosList = await seedCasosCobros(
+		contratosList,
+		clientsList,
+		vehiclesList,
+		usersList,
+	);
 	const contactosList = await seedContactosCobros(casosList, usersList);
 	const conveniosList = await seedConveniosPago(casosList, usersList);
-	const recuperacionesList = await seedRecuperacionesVehiculo(casosList, usersList);
+	const recuperacionesList = await seedRecuperacionesVehiculo(
+		casosList,
+		usersList,
+	);
 	const notificacionesList = await seedNotificacionesCobros(casosList);
 
 	console.log("\n🎉 CRM database seeding completed!");

@@ -4,6 +4,7 @@ export interface DebtAcknowledgementManParams {
   dia: string;
   mes: string;
   año: string;
+  edadRichard:string;
   nombre: string;
   edad: string;
   dpiDeudor: string;
@@ -50,10 +51,11 @@ export async function generateDebtAcknowledgementManTemplate17Submission(
           values: {
             día: params.dia,
             mes: params.mes,
-            año: params.año,
+            año: params.año,  
+            "Edad Richard": params.edadRichard,
             Nombre: params.nombre,
             edad: params.edad,
-            "Dpi Deudor": params.dpiDeudor,
+            "Dpi Deudora": params.dpiDeudor,
             "Vehículo Tipo": params.vehiculoTipo,
             "Vehículo Marca": params.vehiculoMarca,
             "Vehículo Color": params.vehiculoColor,
@@ -69,7 +71,7 @@ export async function generateDebtAcknowledgementManTemplate17Submission(
             "Vehículo cilindros": params.vehiculoCilindros,
             "Vehículo ISCV": params.vehiculoIscv,
             duración: params.duracion,
-            "Fecha de Inicio del contrato": params.fechaInicioContrato,
+            "Fecha Inicio contrato": params.fechaInicioContrato,
             "Dirección Deudor": params.direccionDeudor,
             // 👇 Firma del usuario no se pasa
             // FirmaCashIN sí va fija en base64

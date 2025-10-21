@@ -74,8 +74,12 @@ export const PERMISSIONS = {
 	canManagePayments: (role: UserRole | string): boolean => 
 		(role === ROLES.ADMIN || role === ROLES.COBROS),
 	
-	canViewPaymentReports: (role: UserRole | string): boolean => 
+	canViewPaymentReports: (role: UserRole | string): boolean =>
 		(role === ROLES.ADMIN || role === ROLES.COBROS || role === ROLES.ANALYST),
+
+	// WhatsApp Module Access
+	canAccessWhatsApp: (role: UserRole | string): boolean =>
+		(role === ROLES.ADMIN || role === ROLES.SALES),
 } as const;
 
 // Helper functions

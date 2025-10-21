@@ -1,4 +1,4 @@
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import {
   insertPayment,
   getAllPagosWithCreditAndInversionistas,
@@ -6,11 +6,12 @@ import {
   reversePayment,
   liquidatePagosCreditoInversionistas,
   falsePayment,
+  getPagosConInversionistas,
 } from "../controllers/payments"; 
 import { z } from "zod";
 import { mapPagosPorCreditos } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosToExcel } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../controllers/reports";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -165,4 +166,98 @@ export const paymentRouter = new Elysia()
       };
     }
   })
+  .get(
+    "/reportes/pagos-inversionistas",
+    async ({ query, set }) => {
+      try {
+        // 🧠 Extraer parámetros validados
+        const {
+          page,
+          pageSize,
+          numeroCredito,
+          dia,
+          mes,
+          anio,
+          inversionistaId,
+          excel,
+          usuarioNombre
+        } = query;
 
+        // ✅ Si viene excel=true, generamos el reporte Excel
+        if (excel === true) {
+          const result = await exportPagosConInversionistasExcel({
+            page,
+            pageSize,
+            numeroCredito,
+            dia,
+            mes,
+            anio,
+            inversionistaId,
+            usuarioNombre
+          });
+          set.status = 200;
+          return {
+            message: "📊 Reporte Excel generado correctamente",
+            ...result,
+          };
+        }
+
+        // ✅ Si no, devolvemos la data JSON normal
+        const data = await getPagosConInversionistas({
+          page,
+          pageSize,
+          numeroCredito,
+          dia,
+          mes,
+          anio,
+          inversionistaId,
+          usuarioNombre
+        });
+
+        set.status = 200;
+        return {
+          status: "📄 Datos de pagos obtenidos correctamente",
+          ...data,
+        };
+      } catch (error: any) {
+        console.error("❌ Error en /reportes/pagos-inversionistas:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error generando reporte de pagos",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Obtiene pagos con inversionistas o genera Excel",
+        description:
+          "Si `excel=true`, genera y sube un reporte Excel completo a R2. Si no, devuelve JSON con los datos de pagos e inversionistas.",
+        tags: ["Pagos", "Reportes", "Excel"],
+      },
+      query: t.Object({
+        page: t.Optional(t.Integer({ minimum: 1, default: 1 })),
+        pageSize: t.Optional(t.Integer({ minimum: 1, maximum: 1000, default: 20 })),
+        numeroCredito: t.Optional(t.String({ minLength: 1 })),
+        dia: t.Optional(t.Integer({ minimum: 1, maximum: 31 })),
+        mes: t.Optional(t.Integer({ minimum: 1, maximum: 12 })),
+        anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
+        inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
+        excel: t.Optional(t.Boolean({ default: false })),
+        usuarioNombre: t.Optional(t.String({ minLength: 1 })),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          total: t.Optional(t.Number()),
+          excelUrl: t.Optional(t.String()),
+          data: t.Optional(t.Array(t.Any())),
+        }),
+        500: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
+        }),
+      },
+    }
+  )

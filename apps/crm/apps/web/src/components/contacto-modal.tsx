@@ -52,7 +52,7 @@ export function ContactoModal({
 			acuerdosAlcanzados: "",
 			compromisosPago: "",
 			requiereSeguimiento: false,
-			duracionLlamada: 0,
+			duracionLlamada: undefined as number | undefined,
 		},
 		onSubmit: async ({ value }) => {
 			createContactoMutation.mutate(value);
@@ -70,6 +70,11 @@ export function ContactoModal({
 			queryClient.invalidateQueries({ queryKey: ["getCasosCobros"] });
 			queryClient.invalidateQueries({ queryKey: ["getHistorialContactos"] });
 			form.reset();
+			// Cerrar el dialogo
+			document.querySelector<HTMLButtonElement>(
+				'[data-radix-dialog-close]'
+			)?.click();
+			
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al registrar el contacto");
@@ -216,7 +221,7 @@ export function ContactoModal({
 								name="metodoContacto"
 								children={(metodoField) => (
 									metodoField.state.value === "llamada" && (
-										<form.Field 
+										<form.Field
 											name="duracionLlamada"
 											children={(field) => (
 												<div className="space-y-2">
@@ -224,8 +229,11 @@ export function ContactoModal({
 													<Input
 														type="number"
 														placeholder="Ej: 180"
-														value={field.state.value}
-														onChange={(e) => field.handleChange(Number(e.target.value))}
+														value={field.state.value ?? ""}
+														onChange={(e) => {
+															const value = e.target.value;
+															field.handleChange(value === "" ? undefined : Number(value));
+														}}
 													/>
 												</div>
 											)}

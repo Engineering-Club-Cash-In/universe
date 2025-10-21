@@ -82,11 +82,9 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[], completeFormData?: any) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[]) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
-    // Usar los datos completos (incluyendo valoración) o los del contexto
-    const dataToUse = completeFormData || formData;
     
     // Verificar que las fotos estén disponibles
     if (!photosToUse || photosToUse.length === 0) {
@@ -96,6 +94,7 @@ export default function VehicleInspectionWizard() {
     }
 
     console.log("Enviando inspección con", photosToUse.length, "fotos");
+    setIsSubmitting(true);
     
     try {
       // Prepare data for submission
@@ -270,16 +269,10 @@ export default function VehicleInspectionWizard() {
             {currentStep === 2 && (
               <div>
                 <VehiclePictures 
-                  onComplete={(_photosFromComponent) => {
+                  onComplete={(photosFromComponent) => {
                     setPhotosCompleted(true);
-                    // Store photos in context but don't complete inspection yet
-                    // Just advance to valuation step
-                    if (currentStep < STEPS.length - 1) {
-                      setCurrentStep(currentStep + 1);
-                      setTimeout(() => {
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }, 100);
-                    }
+                    // Pasar las fotos directamente, sin delays
+                    handleCompleteInspection(photosFromComponent);
                   }}
                   isWizardMode={true}
                 />

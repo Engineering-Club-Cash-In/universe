@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import type { Context } from "./context";
-import { ROLES, PERMISSIONS } from "./roles";
+import { PERMISSIONS } from "./roles";
 
 export const o = os.$context<Context>();
 

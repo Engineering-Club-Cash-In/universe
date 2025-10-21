@@ -38,6 +38,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
   // Section 1
   technicianName: z.string().min(1, { message: "El nombre es requerido" }),
@@ -79,17 +80,19 @@ const formSchema = z.object({
     message: "La calificación es requerida",
   }),
   marketValue: z
-    .string()
+    .string({ message: "El valor de mercado es requerido" })
     .min(1, { message: "El valor de mercado es requerido" }),
   suggestedCommercialValue: z
-    .string()
+    .string({ message: "El valor comercial sugerido es requerido" })
     .min(1, { message: "El valor comercial sugerido es requerido" }),
-  bankValue: z.string().min(1, { message: "El valor bancario es requerido" }),
+  bankValue: z
+    .string({ message: "El valor bancario es requerido" })
+    .min(1, { message: "El valor bancario es requerido" }),
   currentConditionValue: z
-    .string()
+    .string({ message: "El valor en condiciones actuales es requerido" })
     .min(1, { message: "El valor en condiciones actuales es requerido" }),
   vehicleEquipment: z
-    .string()
+    .string({ message: "El equipamiento es requerido" })
     .min(1, { message: "El equipamiento es requerido" }),
   importantConsiderations: z.string().optional(),
   scannerUsed: z.enum(["Sí", "No"], {
@@ -203,6 +206,57 @@ export default function VehicleInspectionForm({
   };
   
   // Function to fill form with dummy data
+  const handleOCRData = (ocrData: any) => {
+    console.log('OCR data received:', ocrData);
+    
+    // Map the OCR data to form fields
+    const mappedData: any = {};
+    
+    if (ocrData.vehicleMake) mappedData.vehicleMake = ocrData.vehicleMake;
+    if (ocrData.vehicleModel) mappedData.vehicleModel = ocrData.vehicleModel;
+    if (ocrData.vehicleYear) mappedData.vehicleYear = ocrData.vehicleYear;
+    if (ocrData.licensePlate) mappedData.licensePlate = ocrData.licensePlate;
+    if (ocrData.vinNumber) mappedData.vinNumber = ocrData.vinNumber;
+    if (ocrData.color) mappedData.color = ocrData.color;
+    if (ocrData.cylinders) mappedData.cylinders = ocrData.cylinders;
+    if (ocrData.engineCC) mappedData.engineCC = ocrData.engineCC;
+    if (ocrData.vehicleType) mappedData.vehicleType = ocrData.vehicleType;
+    if (ocrData.origin) mappedData.origin = ocrData.origin;
+    if (ocrData.fuelType) mappedData.fuelType = ocrData.fuelType;
+    if (ocrData.transmission) mappedData.transmission = ocrData.transmission;
+
+    // Update form with OCR data and trigger validation only for filled fields
+    Object.keys(mappedData).forEach(key => {
+      if (mappedData[key]) {
+        form.setValue(key as any, mappedData[key], { 
+          shouldValidate: true,
+          shouldDirty: true,
+          shouldTouch: true 
+        });
+      }
+    });
+
+    // Clear validation errors for fields that OCR cannot fill
+    const nonOCRFields = [
+      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage', 
+      'fuelType', 'transmission', 'inspectionResult', 'vehicleRating',
+      'marketValue', 'suggestedCommercialValue', 'bankValue', 'currentConditionValue',
+      'vehicleEquipment', 'importantConsiderations', 'scannerUsed', 'scannerResult',
+      'airbagWarning', 'missingAirbag', 'testDrive', 'noTestDriveReason'
+    ];
+    
+    nonOCRFields.forEach(field => {
+      form.clearErrors(field as any);
+    });
+
+    // Save to context
+    const currentData = form.getValues();
+    const updatedData = { ...currentData, ...mappedData };
+    setFormData(updatedData);
+    
+    toast.success('Información de la tarjeta aplicada al formulario');
+  };
+
   const fillWithDummyData = async () => {
     const dummyData = {
       technicianName: "Juan Pérez García",
@@ -323,6 +377,11 @@ export default function VehicleInspectionForm({
               />
             </CardContent>
           </Card>
+
+          <VehicleRegistrationOCR 
+            onDataExtracted={handleOCRData}
+            isProcessing={form.formState.isSubmitting}
+          />
 
           <Card>
             <CardHeader className="px-3 py-0.5 sm:px-6 sm:py-1">

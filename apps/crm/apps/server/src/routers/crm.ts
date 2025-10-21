@@ -1344,12 +1344,24 @@ export const crmRouter = {
 					opp.creditType,
 				);
 
-				if (!opp.vehicleId) {
-					throw new Error("La oportunidad debe tener un vehículo asociado");
-				}
-
-				if (!opp.creditType) {
-					throw new Error("La oportunidad debe tener un tipo de crédito");
+				// Si falta vehicleId o creditType, devolver validación fallida sin lanzar error
+				if (!opp.vehicleId || !opp.creditType) {
+					console.log(
+						"[validateOpportunityDocuments] Missing basic requirements - returning failed validation",
+					);
+					return {
+						creditType: opp.creditType || "unknown",
+						vehicleInspected: false,
+						allDocumentsPresent: false,
+						canApprove: false,
+						requiredDocuments: [],
+						uploadedDocuments: [],
+						missingDocuments: [],
+						vehicleInfo: {
+							id: opp.vehicleId || null,
+							inspectionStatus: "pending",
+						},
+					};
 				}
 
 				// 2. Validar inspección del vehículo

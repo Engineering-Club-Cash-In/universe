@@ -88,6 +88,7 @@ export function DocumentValidationChecklist({
 		requiredDocuments,
 		uploadedDocuments,
 		missingDocuments,
+		vehicleInfo,
 	} = validation.data;
 
 	return (
@@ -131,7 +132,14 @@ export function DocumentValidationChecklist({
 						<span className="font-medium text-sm">Inspección de Vehículo</span>
 					</div>
 					<div className="flex items-center gap-2 pl-6">
-						{vehicleInspected ? (
+						{!vehicleInfo?.id ? (
+							<>
+								<AlertTriangle className="h-4 w-4 text-red-600" />
+								<span className="text-sm text-red-600">
+									No hay vehículo asociado a la oportunidad
+								</span>
+							</>
+						) : vehicleInspected ? (
 							<>
 								<CheckCircle2 className="h-4 w-4 text-green-600" />
 								<span className="text-sm">Vehículo inspeccionado y aprobado</span>
@@ -202,7 +210,10 @@ export function DocumentValidationChecklist({
 					<Alert variant="destructive">
 						<AlertCircle className="h-4 w-4" />
 						<AlertDescription>
-							{!vehicleInspected && (
+							{!vehicleInfo?.id && (
+								<span className="block">• Debe asociar un vehículo a la oportunidad</span>
+							)}
+							{vehicleInfo?.id && !vehicleInspected && (
 								<span className="block">• El vehículo debe ser inspeccionado</span>
 							)}
 							{!allDocumentsPresent && (

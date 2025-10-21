@@ -6,6 +6,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
 	Card,
 	CardContent,
 	CardDescription,
@@ -39,6 +45,90 @@ export const Route = createFileRoute("/crm/analysis")({
 });
 
 type OpportunityForAnalysis = Awaited<ReturnType<typeof client.getOpportunitiesForAnalysis>>[0];
+
+// Helper component to render action buttons with validation
+function OpportunityActions({
+	opportunity,
+	onApprove,
+	onReject,
+	onViewDocuments,
+}: {
+	opportunity: OpportunityForAnalysis;
+	onApprove: () => void;
+	onReject: () => void;
+	onViewDocuments: () => void;
+}) {
+	const validation = useQuery({
+		...orpc.validateOpportunityDocuments.queryOptions({
+			input: { opportunityId: opportunity.id },
+		}),
+		enabled: !!opportunity.id,
+	});
+
+	const canApprove = validation.data?.canApprove ?? false;
+	const isLoading = validation.isLoading;
+
+	// Build tooltip message for why approve is disabled
+	const getDisabledReason = () => {
+		if (!validation.data) return "Cargando validación...";
+
+		const reasons: string[] = [];
+		if (!validation.data.vehicleInfo?.id) {
+			reasons.push("Debe asociar un vehículo a la oportunidad");
+		} else if (!validation.data.vehicleInspected) {
+			reasons.push("El vehículo no ha sido inspeccionado");
+		}
+		if (!validation.data.allDocumentsPresent) {
+			reasons.push(`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`);
+		}
+
+		return reasons.length > 0 ? reasons.join("\n") : "";
+	};
+
+	return (
+		<div className="flex gap-2">
+			<Button
+				size="sm"
+				variant="default"
+				onClick={onViewDocuments}
+			>
+				<FileText className="h-4 w-4 mr-1" />
+				Ver Documentos
+			</Button>
+			<TooltipProvider>
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<span>
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={onApprove}
+								disabled={!canApprove || isLoading}
+							>
+								<CheckCircle className="h-4 w-4 mr-1" />
+								Aprobar
+							</Button>
+						</span>
+					</TooltipTrigger>
+					{!canApprove && !isLoading && (
+						<TooltipContent className="max-w-xs whitespace-pre-line">
+							<p className="font-semibold mb-1">No se puede aprobar:</p>
+							<p className="text-sm">{getDisabledReason()}</p>
+						</TooltipContent>
+					)}
+				</Tooltip>
+			</TooltipProvider>
+			<Button
+				size="sm"
+				variant="outline"
+				onClick={onReject}
+			>
+				<XCircle className="h-4 w-4 mr-1" />
+				Rechazar
+			</Button>
+		</div>
+	);
+}
 
 function AnalysisPage() {
 	const { data: session } = authClient.useSession();
@@ -206,32 +296,12 @@ function AnalysisPage() {
 											)}
 										</TableCell>
 										<TableCell>
-											<div className="flex gap-2">
-												<Button
-													size="sm"
-													variant="default"
-													onClick={() => handleViewDocuments(opportunity)}
-												>
-													<FileText className="h-4 w-4 mr-1" />
-													Ver Documentos
-												</Button>
-												<Button
-													size="sm"
-													variant="outline"
-													onClick={() => handleApprovalClick(opportunity, true)}
-												>
-													<CheckCircle className="h-4 w-4 mr-1" />
-													Aprobar
-												</Button>
-												<Button
-													size="sm"
-													variant="outline"
-													onClick={() => handleApprovalClick(opportunity, false)}
-												>
-													<XCircle className="h-4 w-4 mr-1" />
-													Rechazar
-												</Button>
-											</div>
+											<OpportunityActions
+												opportunity={opportunity}
+												onApprove={() => handleApprovalClick(opportunity, true)}
+												onReject={() => handleApprovalClick(opportunity, false)}
+												onViewDocuments={() => handleViewDocuments(opportunity)}
+											/>
 										</TableCell>
 									</TableRow>
 								))}

@@ -1,5 +1,7 @@
 // controllers/leadsController.ts
 import fs from "fs";
+import fetch from "node-fetch";
+
 // 👉 Hardcoded path to the CSV file (Windows requires double backslashes)
 const CSV_PATH =
   "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\Leads\\leadsFacebook.csv";
@@ -124,7 +126,6 @@ export async function processCsvLeads() {
     console.log("[INFO] Sending lead to Landbot API...");
    
     try {
- 
       const res = await fetch(LANDOBT_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

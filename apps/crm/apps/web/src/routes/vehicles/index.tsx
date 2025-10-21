@@ -75,13 +75,19 @@ function VehiclesDashboard() {
   const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
+  const [filterType, setFilterType] = useState<"all" | "alerts" | "commercial" | "non-commercial">("all");
 
-  // Fetch vehicles
+  // Fetch vehicles with filter
   const { data: vehicles, isLoading } = useQuery(
-    orpc.getVehicles.queryOptions(),
+    orpc.getVehicles.queryOptions({
+      input: {
+        filterType: filterType === "all" ? undefined : filterType,
+      }
+    })
   );
-  const { data: statistics } = useQuery(
-    orpc.getVehicleStatistics.queryOptions(),
+
+  const { data: statistics, isLoading: isLoadingStatistics } = useQuery(
+    orpc.getVehicleStatistics.queryOptions()
   );
 
   // Filter vehicles based on search term and filter status
@@ -110,7 +116,7 @@ function VehiclesDashboard() {
 
   const [auctionPrice, setAuctionPrice] = useState<number | null>(null);
 
-  if (isLoading) {
+  if (isLoadingStatistics) {
     return (
       <div className="flex flex-col p-6 gap-4">
         <Skeleton className="h-10 w-64" />
@@ -188,7 +194,7 @@ function VehiclesDashboard() {
         </Card>
       </div>
 
-      <Tabs defaultValue="all" className="w-full">
+      <Tabs value={filterType} onValueChange={(value) => setFilterType(value as typeof filterType)} className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="all">Todos</TabsTrigger>
           <TabsTrigger value="alerts">
@@ -201,237 +207,239 @@ function VehiclesDashboard() {
             No Comerciales ({statistics?.nonCommercialVehicles || 0})
           </TabsTrigger>
         </TabsList>
+      </Tabs>
 
-        <TabsContent value="all" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Listado de Vehículos</CardTitle>
-              <CardDescription>
-                Información sobre los vehículos inspeccionados
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex justify-between mb-4">
-                <div className="flex gap-2 w-full md:w-auto">
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      type="search"
-                      placeholder="Buscar vehículo..."
-                      className="pl-8 w-full md:w-[300px]"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-                  </div>
-                  <Select value={filterStatus} onValueChange={setFilterStatus}>
-                    <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder="Filtrar por estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">Todos</SelectItem>
-                      <SelectItem value="approved">Aprobados</SelectItem>
-                      <SelectItem value="pending">Pendientes</SelectItem>
-                      <SelectItem value="rejected">Rechazados</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+    {
+      isLoading ? (
+        <div className="w-full flex flex-col gap-2">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <Skeleton key={i} className="h-12 w-full rounded-md" />
+          ))}
+        </div>
+      ) : (
+      <Card>
+        <CardHeader>
+          <CardTitle>Listado de Vehículos</CardTitle>
+          <CardDescription>
+            Información sobre los vehículos inspeccionados
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex justify-between mb-4">
+            <div className="flex gap-2 w-full md:w-auto">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="search"
+                  placeholder="Buscar vehículo..."
+                  className="pl-8 w-full md:w-[300px]"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
               </div>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Filtrar por estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos</SelectItem>
+                  <SelectItem value="approved">Aprobados</SelectItem>
+                  <SelectItem value="pending">Pendientes</SelectItem>
+                  <SelectItem value="rejected">Rechazados</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
 
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Vehículo</TableHead>
-                      <TableHead>Placa</TableHead>
-                      <TableHead>Valor Comercial</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Alertas</TableHead>
-                      <TableHead className="text-right">Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredVehicles?.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">
-                          No se encontraron resultados.
+          <div className="rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Vehículo</TableHead>
+                  <TableHead>Placa</TableHead>
+                  <TableHead>Valor Comercial</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Alertas</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredVehicles?.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="h-24 text-center">
+                      No se encontraron resultados.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredVehicles?.map((vehicle: any) => {
+                    const latestInspection = vehicle.inspections?.[0];
+                    return (
+                      <TableRow key={vehicle.id}>
+                        <TableCell>
+                          <div className="font-medium">
+                            {vehicle.make} {vehicle.model}
+                          </div>
+                          <div className="text-sm text-muted-foreground">
+                            {vehicle.year} - {vehicle.color}
+                          </div>
                         </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredVehicles?.map((vehicle: any) => {
-                        const latestInspection = vehicle.inspections?.[0];
-                        return (
-                          <TableRow key={vehicle.id}>
-                            <TableCell>
+                        <TableCell>{vehicle.licensePlate}</TableCell>
+                        <TableCell>
+                          {latestInspection ? (
+                            <>
                               <div className="font-medium">
-                                {vehicle.make} {vehicle.model}
+                                Q
+                                {Number(
+                                  latestInspection.suggestedCommercialValue
+                                ).toLocaleString("es-GT")}
                               </div>
-                              <div className="text-sm text-muted-foreground">
-                                {vehicle.year} - {vehicle.color}
+                              <div
+                                className={
+                                  latestInspection.vehicleRating === "Comercial"
+                                    ? "text-sm text-green-500"
+                                    : "text-sm text-red-500"
+                                }
+                              >
+                                {latestInspection.vehicleRating}
                               </div>
-                            </TableCell>
-                            <TableCell>{vehicle.licensePlate}</TableCell>
-                            <TableCell>
-                              {latestInspection ? (
-                                <>
-                                  <div className="font-medium">
-                                    Q
-                                    {Number(
-                                      latestInspection.suggestedCommercialValue,
-                                    ).toLocaleString("es-GT")}
-                                  </div>
-                                  <div
-                                    className={
-                                      latestInspection.vehicleRating ===
-                                      "Comercial"
-                                        ? "text-sm text-green-500"
-                                        : "text-sm text-red-500"
-                                    }
-                                  >
-                                    {latestInspection.vehicleRating}
-                                  </div>
-                                </>
-                              ) : (
-                                <span className="text-muted-foreground">
-                                  Sin inspección
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              {latestInspection
-                                ? format(
-                                    new Date(latestInspection.inspectionDate),
-                                    "dd MMM yyyy",
-                                    { locale: es },
-                                  )
-                                : "-"}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-col gap-1">
-                                {/*latestInspection
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              Sin inspección
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {latestInspection
+                            ? format(
+                                new Date(latestInspection.inspectionDate),
+                                "dd MMM yyyy",
+                                { locale: es }
+                              )
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            {/*latestInspection
                                   ? renderStatusBadge(latestInspection.status)
                                   : renderStatusBadge("pending")*/}
-                                {(vehicle as any).hasPaymentAgreement && (
-                                  <Badge
-                                    variant="outline"
-                                    className="bg-blue-100 text-blue-800 border-blue-300 text-xs"
-                                  >
-                                    Convenio de Pago
-                                  </Badge>
-                                )}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {latestInspection?.alerts?.length > 0 ? (
-                                <Badge
-                                  variant="outline"
-                                  className="bg-red-100 text-red-800 border-red-300"
-                                >
-                                  {latestInspection.alerts.length}{" "}
-                                  {latestInspection.alerts.length === 1
-                                    ? "alerta"
-                                    : "alertas"}
-                                </Badge>
-                              ) : (
-                                <Badge
-                                  variant="outline"
-                                  className="bg-green-100 text-green-800 border-green-300"
-                                >
-                                  Sin alertas
-                                </Badge>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    className="h-8 w-8 p-0"
-                                  >
-                                    <span className="sr-only">Abrir menú</span>
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                  <DropdownMenuLabel>
-                                    Acciones
-                                  </DropdownMenuLabel>
+                            {(vehicle as any).hasPaymentAgreement && (
+                              <Badge
+                                variant="outline"
+                                className="bg-blue-100 text-blue-800 border-blue-300 text-xs"
+                              >
+                                Convenio de Pago
+                              </Badge>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {latestInspection?.alerts?.length > 0 ? (
+                            <Badge
+                              variant="outline"
+                              className="bg-red-100 text-red-800 border-red-300"
+                            >
+                              {latestInspection.alerts.length}{" "}
+                              {latestInspection.alerts.length === 1
+                                ? "alerta"
+                                : "alertas"}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="bg-green-100 text-green-800 border-green-300"
+                            >
+                              Sin alertas
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Abrir menú</span>
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedVehicle(vehicle);
+                                  setActiveTab("general");
+                                  setIsDetailsOpen(true);
+                                }}
+                              >
+                                <Eye className="mr-2 h-4 w-4" />
+                                Ver detalles completos
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setSelectedVehicle(vehicle);
+                                  setActiveTab("photos");
+                                  setIsDetailsOpen(true);
+                                }}
+                              >
+                                <Camera className="mr-2 h-4 w-4" />
+                                Ver fotografías
+                              </DropdownMenuItem>
+                              {latestInspection?.scannerUsed &&
+                                latestInspection?.scannerResultUrl && (
                                   <DropdownMenuItem
                                     onClick={() => {
-                                      setSelectedVehicle(vehicle);
-                                      setActiveTab("general");
-                                      setIsDetailsOpen(true);
-                                    }}
-                                  >
-                                    <Eye className="mr-2 h-4 w-4" />
-                                    Ver detalles completos
-                                  </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setSelectedVehicle(vehicle);
-                                      setActiveTab("photos");
-                                      setIsDetailsOpen(true);
-                                    }}
-                                  >
-                                    <Camera className="mr-2 h-4 w-4" />
-                                    Ver fotografías
-                                  </DropdownMenuItem>
-                                  {latestInspection?.scannerUsed &&
-                                    latestInspection?.scannerResultUrl && (
-                                      <DropdownMenuItem
-                                        onClick={() => {
-                                          window.open(
-                                            latestInspection.scannerResultUrl,
-                                            "_blank",
-                                          );
-                                        }}
-                                      >
-                                        <FileText className="mr-2 h-4 w-4" />
-                                        Ver reporte de scanner
-                                      </DropdownMenuItem>
-                                    )}
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      // Copy VIN to clipboard
-                                      navigator.clipboard.writeText(
-                                        vehicle.vinNumber,
-                                      );
-                                      toast.success(
-                                        "VIN copiado al portapapeles",
+                                      window.open(
+                                        latestInspection.scannerResultUrl,
+                                        "_blank"
                                       );
                                     }}
                                   >
                                     <FileText className="mr-2 h-4 w-4" />
-                                    Copiar VIN
+                                    Ver reporte de scanner
                                   </DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuItem
-                                    onClick={() => {
-                                      setAuctionVehicle(vehicle);
-                                      setIsAuctionOpen(true);
-                                      setAuctionInspection(latestInspection);
-                                    }}
-                                  >
-                                    <Car className="mr-2 h-4 w-4" />
-                                    Rematar Carro
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                                )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  // Copy VIN to clipboard
+                                  navigator.clipboard.writeText(
+                                    vehicle.vinNumber
+                                  );
+                                  toast.success("VIN copiado al portapapeles");
+                                }}
+                              >
+                                <FileText className="mr-2 h-4 w-4" />
+                                Copiar VIN
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  setAuctionVehicle(vehicle);
+                                  setIsAuctionOpen(true);
+                                  setAuctionInspection(latestInspection);
+                                }}
+                              >
+                                <Car className="mr-2 h-4 w-4" />
+                                Rematar Carro
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+      )
+    }
+      
+
       <Dialog open={isAuctionOpen} onOpenChange={setIsAuctionOpen}>
         <DialogContent>
           <DialogHeader>
@@ -689,7 +697,7 @@ function VehiclesDashboard() {
                                   ? format(
                                       new Date(inspection.inspectionDate),
                                       "PPP",
-                                      { locale: es },
+                                      { locale: es }
                                     )
                                   : "N/A"}
                               </CardDescription>
@@ -721,7 +729,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.marketValue,
+                                          inspection.marketValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -730,7 +738,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.suggestedCommercialValue,
+                                          inspection.suggestedCommercialValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -739,7 +747,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.bankValue,
+                                          inspection.bankValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                       <div className="font-medium">
@@ -748,7 +756,7 @@ function VehiclesDashboard() {
                                       <div>
                                         Q
                                         {Number(
-                                          inspection.currentConditionValue,
+                                          inspection.currentConditionValue
                                         ).toLocaleString("es-GT")}
                                       </div>
                                     </div>
@@ -845,7 +853,7 @@ function VehiclesDashboard() {
                                               >
                                                 {alert}
                                               </Badge>
-                                            ),
+                                            )
                                           )}
                                         </div>
                                       </div>
@@ -871,8 +879,8 @@ function VehiclesDashboard() {
                                             acc[item.category].push(item);
                                             return acc;
                                           },
-                                          {},
-                                        ),
+                                          {}
+                                        )
                                       ).map(
                                         ([category, items]: [string, any]) => (
                                           <div
@@ -909,18 +917,18 @@ function VehiclesDashboard() {
                                                         : "✗ No cumple"}
                                                     </Badge>
                                                   </div>
-                                                ),
+                                                )
                                               )}
                                             </div>
                                           </div>
-                                        ),
+                                        )
                                       )}
 
                                       {/* Summary of critical issues */}
                                       {inspection.checklistItems.some(
                                         (item: any) =>
                                           !item.checked &&
-                                          item.severity === "critical",
+                                          item.severity === "critical"
                                       ) && (
                                         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-md">
                                           <h5 className="text-sm font-semibold text-red-900 mb-2">
@@ -931,7 +939,7 @@ function VehiclesDashboard() {
                                               .filter(
                                                 (item: any) =>
                                                   !item.checked &&
-                                                  item.severity === "critical",
+                                                  item.severity === "critical"
                                               )
                                               .map((item: any, idx: number) => (
                                                 <li
@@ -953,7 +961,7 @@ function VehiclesDashboard() {
                             </CardContent>
                           </Card>
                         );
-                      },
+                      }
                     )}
                   </div>
                 ) : (

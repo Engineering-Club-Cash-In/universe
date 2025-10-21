@@ -24,7 +24,10 @@ import { prepareValuationContext, vehicleValuationSchema } from "@/lib/valuation
 export const vehiclesRouter = {
   // Get all vehicles with their latest inspection and photos
   getAll: publicProcedure
-    .handler(async () => {
+    .input(z.object({
+      filterType: z.enum(["alerts", "commercial", "non-commercial"]).optional().describe("Optional filter type to apply"),
+    }))
+    .handler(async ({ input }) => {
       const result = await db
         .select()
         .from(vehicles)
@@ -114,7 +117,41 @@ export const vehiclesRouter = {
         hasPaymentAgreement: vehicleConvenios.some(c => c.vehicleId === vehicle.id && c.hasActiveConvenio)
       }));
 
-      return vehiclesWithConvenios;
+      // Apply filters if filterType is provided
+      let filteredVehicles = vehiclesWithConvenios;
+
+      if (input.filterType) {
+        switch (input.filterType) {
+          case "alerts":
+            // Vehicles with alerts (have inspections with non-empty alerts array)
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle => 
+              vehicle.inspections.some((inspection: any) => 
+                inspection.alerts && (inspection.alerts as string[]).length > 0
+              )
+            );
+            break;
+            
+          case "commercial":
+            // Vehicles rated as commercial
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle =>
+              vehicle.inspections.some((inspection: any) => 
+                inspection.vehicleRating === "Comercial"
+              )
+            );
+            break;
+            
+          case "non-commercial":
+            // Vehicles rated as non-commercial
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle =>
+              vehicle.inspections.some((inspection: any) => 
+                inspection.vehicleRating === "No comercial"
+              )
+            );
+            break;
+        }
+      }
+
+      return filteredVehicles;
     }),
 
   // Get vehicle by ID with all related data
@@ -456,135 +493,6 @@ export const vehiclesRouter = {
       };
 
       return stats;
-    }),
-
-  // Get vehicles by filter type (alerts, commercial, non-commercial)
-  getByFilterType: publicProcedure
-    .input(z.object({
-      filterType: z.enum(["alerts", "commercial", "non-commercial"]).describe("Type of filter to apply"),
-      limit: z.number().optional().default(50).describe("Maximum number of results to return"),
-      offset: z.number().optional().default(0).describe("Number of results to skip for pagination")
-    }))
-    .handler(async ({ input }) => {
-      // Get all vehicles with their inspections
-      const result = await db
-        .select()
-        .from(vehicles)
-        .leftJoin(
-          vehicleInspections,
-          eq(vehicles.id, vehicleInspections.vehicleId)
-        )
-        .orderBy(desc(vehicles.createdAt));
-
-      // Get all photos for these vehicles
-      const vehicleIds = result.map(row => row.vehicles.id);
-      const allPhotos = vehicleIds.length > 0 ? await db
-        .select()
-        .from(vehiclePhotos)
-        .where(or(...vehicleIds.map(id => eq(vehiclePhotos.vehicleId, id))))
-        .orderBy(vehiclePhotos.category, vehiclePhotos.photoType) : [];
-
-      // Group photos by vehicle ID
-      const photosByVehicle = new Map();
-      allPhotos.forEach(photo => {
-        if (!photosByVehicle.has(photo.vehicleId)) {
-          photosByVehicle.set(photo.vehicleId, []);
-        }
-        photosByVehicle.get(photo.vehicleId).push(photo);
-      });
-
-      // Get checklist items for inspections
-      const inspectionIds = result
-        .filter(row => row.vehicle_inspections)
-        .map(row => row.vehicle_inspections!.id);
-      
-      const allChecklistItems = inspectionIds.length > 0 
-        ? await db
-            .select()
-            .from(inspectionChecklistItems)
-            .where(or(...inspectionIds.map(id => eq(inspectionChecklistItems.inspectionId, id))))
-            .orderBy(inspectionChecklistItems.category)
-        : [];
-
-      // Group checklist items by inspection ID
-      const checklistByInspection = new Map();
-      allChecklistItems.forEach(item => {
-        if (!checklistByInspection.has(item.inspectionId)) {
-          checklistByInspection.set(item.inspectionId, []);
-        }
-        checklistByInspection.get(item.inspectionId).push(item);
-      });
-
-      // Group vehicles with their inspections and photos
-      const vehiclesMap = new Map();
-      
-      result.forEach(row => {
-        const vehicleId = row.vehicles.id;
-        
-        if (!vehiclesMap.has(vehicleId)) {
-          vehiclesMap.set(vehicleId, {
-            ...row.vehicles,
-            inspections: [],
-            photos: photosByVehicle.get(vehicleId) || []
-          });
-        }
-        
-        if (row.vehicle_inspections) {
-          const inspectionWithChecklist = {
-            ...row.vehicle_inspections,
-            checklistItems: checklistByInspection.get(row.vehicle_inspections.id) || []
-          };
-          vehiclesMap.get(vehicleId).inspections.push(inspectionWithChecklist);
-        }
-      });
-
-      // Convert to array and apply filters
-      let filteredVehicles = Array.from(vehiclesMap.values());
-
-      switch (input.filterType) {
-        case "alerts":
-          // Vehicles with alerts (have inspections with non-empty alerts array)
-          filteredVehicles = filteredVehicles.filter(vehicle => 
-            vehicle.inspections.some((inspection: any) => 
-              inspection.alerts && (inspection.alerts as string[]).length > 0
-            )
-          );
-          break;
-          
-        case "commercial":
-          // Vehicles rated as commercial
-          filteredVehicles = filteredVehicles.filter(vehicle =>
-            vehicle.inspections.some((inspection: any) => 
-              inspection.vehicleRating === "Comercial"
-            )
-          );
-          break;
-          
-        case "non-commercial":
-          // Vehicles rated as non-commercial
-          filteredVehicles = filteredVehicles.filter(vehicle =>
-            vehicle.inspections.some((inspection: any) => 
-              inspection.vehicleRating === "No comercial"
-            )
-          );
-          break;
-      }
-
-      // Apply pagination
-      const totalCount = filteredVehicles.length;
-      const paginatedVehicles = filteredVehicles
-        .slice(input.offset, input.offset + input.limit);
-
-      return {
-        vehicles: paginatedVehicles,
-        pagination: {
-          total: totalCount,
-          limit: input.limit,
-          offset: input.offset,
-          hasMore: input.offset + input.limit < totalCount
-        },
-        filterType: input.filterType
-      };
     }),
 
   // Create full inspection with all data (vehicle + inspection + checklist)

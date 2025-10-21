@@ -1820,7 +1820,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			if (fileInputRef.current) {
 				fileInputRef.current.value = "";
 			}
-			queryClient.invalidateQueries({ queryKey: ["getOpportunityDocuments", opportunityId] });
+			// Invalidate documents query
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
+			// Invalidate validation query to update checklist
+			queryClient.invalidateQueries({
+				queryKey: orpc.validateOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al subir el documento");
@@ -1833,7 +1840,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			client.deleteOpportunityDocument({ documentId }),
 		onSuccess: () => {
 			toast.success("Documento eliminado exitosamente");
-			queryClient.invalidateQueries({ queryKey: ["getOpportunityDocuments", opportunityId] });
+			// Invalidate documents query
+			queryClient.invalidateQueries({
+				queryKey: orpc.getOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
+			// Invalidate validation query to update checklist
+			queryClient.invalidateQueries({
+				queryKey: orpc.validateOpportunityDocuments.queryKey({ input: { opportunityId } })
+			});
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al eliminar el documento");

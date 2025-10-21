@@ -65,7 +65,7 @@ import {
 	TabsTrigger,
 } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
-import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
+import { formatGuatemalaDate, getStatusLabel, formatDate } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 import { PERMISSIONS } from "server/src/types/roles";
 
@@ -136,7 +136,7 @@ function DraggableOpportunityCard({
 				{opportunity.expectedCloseDate && (
 					<div className="flex items-center gap-1 text-muted-foreground text-xs">
 						<Calendar className="h-3 w-3" />
-						{formatGuatemalaDate(opportunity.expectedCloseDate)}
+						{formatDate(opportunity.expectedCloseDate)}
 					</div>
 				)}
 
@@ -1272,7 +1272,7 @@ function RouteComponent() {
 											<div className="flex items-center gap-3">
 												<Calendar className="h-5 w-5 text-muted-foreground" />
 												<span className="font-medium">
-													{formatGuatemalaDate(
+													{formatDate(
 														selectedOpportunity.expectedCloseDate,
 													)}
 												</span>

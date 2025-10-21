@@ -6,9 +6,59 @@ Este proyecto usa un Dockerfile multi-stage que:
 1. **Build Stage**: Usa `oven/bun:latest` para compilar la aplicación
 2. **Production Stage**: Usa `nginx:alpine` para servir los archivos estáticos
 
+## 🚀 Deploy Rápido a AWS ECR (Recomendado)
+
+### Deployment con un solo comando
+
+```bash
+# Deploy a AWS ECR Public Registry
+bun run deploy
+```
+
+Este comando ejecuta automáticamente:
+1. ✅ Autenticación con AWS ECR
+2. ✅ Build de la imagen Docker
+3. ✅ Tag de la imagen
+4. ✅ Push a ECR público
+
+**Requisitos:**
+- AWS CLI configurado con credenciales
+- Docker instalado
+- Permisos para push a `public.ecr.aws/a6w8m2u2`
+
+**Variables de entorno opcionales:**
+```bash
+# Cambiar URL del API (default: https://api.devteamatcci.site)
+VITE_API_URL=https://api.custom.com bun run deploy
+```
+
+**Output esperado:**
+```
+🚀 Starting deployment process...
+📝 Step 1/4: Authenticating with AWS ECR...
+✅ Authentication successful
+🔨 Step 2/4: Building Docker image...
+✅ Build successful
+🏷️  Step 3/4: Tagging image...
+✅ Image tagged
+⬆️  Step 4/4: Pushing to ECR...
+✅ Push successful
+🎉 Deployment completed successfully!
+```
+
+**Imagen resultante:**
+```
+public.ecr.aws/a6w8m2u2/cci/legal-documents:latest
+```
+
+Usa esta URI en Coolify para desplegar la aplicación.
+
+---
+
 ## 📋 Prerequisitos
 
 - Docker instalado
+- AWS CLI configurado (para deployment)
 - Acceso a la API en `https://api.devteamatcci.site`
 
 ## 🚀 Build y Ejecución

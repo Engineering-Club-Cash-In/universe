@@ -117,7 +117,7 @@ export function GenerateComponent() {
           // Obtener los campos que pertenecen a este documento
           const documentFields =
             formData.fields?.filter((field) =>
-              field.iddocuments.includes(document.id.toString())
+              field.iddocuments.map(Number).includes(document.id)
             ) || [];
 
           // Construir los campos con sus valores

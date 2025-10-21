@@ -47,6 +47,7 @@ function RouteComponent() {
 			input: { id, tipo }
 		}),
 		enabled: !!session && !!id,
+		queryKey: ["getCasosCobros", id, tipo],
 	})
 
 	// Obtener historial de contactos (solo para casos)
@@ -55,6 +56,7 @@ function RouteComponent() {
 			input: { casoCobroId: id }
 		}),
 		enabled: !!session && !!id && tipo === "caso",
+		queryKey: ["getHistorialContactos", id],
 	})
 
 	// Obtener convenios de pago (solo para casos)

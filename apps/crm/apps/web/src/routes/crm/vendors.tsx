@@ -97,6 +97,7 @@ function VendorsPage() {
   // Queries
   const vendorsQuery = useQuery({
     ...orpc.getVendors.queryOptions(),
+    queryKey: ["getVendors"],
   });
 
   // Mutations
@@ -283,7 +284,7 @@ function VendorsPage() {
                     control={createForm.control}
                     name="vendorType"
                     render={({ field }) => (
-                      <FormItem>
+                      <FormItem >
                         <FormLabel>Tipo</FormLabel>
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>

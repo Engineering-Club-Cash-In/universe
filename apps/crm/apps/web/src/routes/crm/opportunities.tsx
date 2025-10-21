@@ -65,7 +65,7 @@ import {
 	TabsTrigger,
 } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
-import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
+import { formatGuatemalaDate, getStatusLabel, formatDate } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 import { PERMISSIONS } from "server/src/types/roles";
 
@@ -128,7 +128,7 @@ function DraggableOpportunityCard({
 
 				{opportunity.value && (
 					<div className="flex items-center gap-1 font-medium text-green-600 text-xs">
-						<DollarSign className="h-3 w-3" />$
+						$
 						{Number.parseFloat(opportunity.value).toLocaleString()}
 					</div>
 				)}
@@ -136,7 +136,7 @@ function DraggableOpportunityCard({
 				{opportunity.expectedCloseDate && (
 					<div className="flex items-center gap-1 text-muted-foreground text-xs">
 						<Calendar className="h-3 w-3" />
-						{formatGuatemalaDate(opportunity.expectedCloseDate)}
+						{formatDate(opportunity.expectedCloseDate)}
 					</div>
 				)}
 
@@ -409,7 +409,7 @@ function RouteComponent() {
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			value: "",
 			stageId: "",
-			probability: 0,
+			probability: undefined as number | undefined,
 			expectedCloseDate: "",
 			vendorId: "none",
 			notes: "",
@@ -448,7 +448,7 @@ function RouteComponent() {
 			leadId: "none",
 			value: "",
 			stageId: "",
-			probability: 0,
+			probability: undefined as number | undefined,
 			expectedCloseDate: "",
 			notes: "",
 		},
@@ -1310,7 +1310,7 @@ function RouteComponent() {
 											<div className="flex items-center gap-3">
 												<Calendar className="h-5 w-5 text-muted-foreground" />
 												<span className="font-medium">
-													{formatGuatemalaDate(
+													{formatDate(
 														selectedOpportunity.expectedCloseDate,
 													)}
 												</span>
@@ -1596,11 +1596,20 @@ function RouteComponent() {
 													type="number"
 													min="0"
 													max="100"
-													value={field.state.value}
+													value={field.state.value ?? ""}
 													onBlur={field.handleBlur}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value))
-													}
+													onChange={(e) => {
+														let value = e.target.value;
+														console.log("Input value:", value);
+														if (value === "") {
+															field.handleChange(undefined);
+														} else {
+															let numericValue = Number(value);
+															if (numericValue < 0) numericValue = 0;
+															if (numericValue > 100) numericValue = 100;
+															field.handleChange(numericValue);
+														}
+													}}
 													placeholder="0"
 												/>
 											</div>

@@ -238,7 +238,7 @@ export function useStep3({
     const filteredFields = fields.filter(
       (field) =>
         field.iddocuments.some((docId) =>
-          selectedDocuments.includes(parseInt(docId))
+          selectedDocuments.includes(docId)
         ) && !HIDDEN_FIELDS.includes(field.key?.toLowerCase())
     );
 

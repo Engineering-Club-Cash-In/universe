@@ -39,7 +39,7 @@ export interface Field {
   key: string;
   regex: string;
   required: boolean;
-  iddocuments: string[];
+  iddocuments: number[];
   relation: string;
   description: string | null;
   default: string | null;

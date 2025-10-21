@@ -438,6 +438,26 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando incobrables:", err);
   }
 
+  try {
+    const incobrablesIds = rows
+      .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
+      .map((r) => r.creditos.credito_id);
+    if (incobrablesIds.length > 0) {
+      console.log("⚠️ Créditos incobrables:", incobrablesIds);
+      const incobrablesRaw = await db
+        .select()
+        .from(bad_debts)
+        .where(inArray(bad_debts.credit_id, incobrablesIds));
+      incobrables = incobrablesRaw.map((row) => ({
+        ...row,
+        fecha_registro: row.fecha_registro ?? "",
+        monto_incobrable: Number(row.monto_incobrable),
+      }));
+    }
+  } catch (err) {
+    console.error("❌ Error consultando incobrables:", err);
+  }
+
   const cancelacionesMap: Record<number, CreditCancelation> = {};
   cancelaciones.forEach((row) => (cancelacionesMap[row.credit_id] = row));
 

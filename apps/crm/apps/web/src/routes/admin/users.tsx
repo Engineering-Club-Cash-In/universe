@@ -83,7 +83,10 @@ function RouteComponent() {
 	const [userToDelete, setUserToDelete] = useState<string | null>(null);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
-	const usersQuery = useQuery(orpc.getAllUsers.queryOptions());
+	// *fix #12
+	const usersQuery = useQuery({ ...orpc.getAllUsers.queryOptions(),
+		queryKey: ["getAllUsers"],
+	});
 
 	const updateRoleMutation = useMutation({
 		mutationFn: (input: { userId: string; role: UserRole }) =>
@@ -127,22 +130,17 @@ function RouteComponent() {
 		},
 	});
 
+	// *fix #13
 	useEffect(() => {
+		console.log("Session:", userProfile.data);
 		if (!session && !isPending) {
 			navigate({ to: "/login" });
-		} else if (session && userProfile.data?.role !== "admin") {
+		} else if (session && userProfile.data !== undefined && userProfile.data?.role !== "admin") {
 			navigate({ to: "/dashboard" });
 			toast.error("Access denied: Admin role required");
 		}
-	}, [session, isPending, userProfile.data?.role]);
+	}, [session, isPending, userProfile.data]);
 
-	if (isPending || userProfile.isPending) {
-		return <div>Loading...</div>;
-	}
-
-	if (userProfile.data?.role !== "admin") {
-		return null;
-	}
 
 	const handleRoleChange = (userId: string, newRole: UserRole) => {
 		updateRoleMutation.mutate({ userId, role: newRole });
@@ -172,6 +170,16 @@ function RouteComponent() {
 			}),
 		},
 	});
+
+	
+	if (isPending || userProfile.isPending) {
+		return <div>Loading...</div>;
+	}
+	
+	if (userProfile === undefined) {
+		return null;
+	}
+
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">

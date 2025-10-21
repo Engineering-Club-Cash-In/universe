@@ -24,7 +24,10 @@ import { prepareValuationContext, vehicleValuationSchema } from "@/lib/valuation
 export const vehiclesRouter = {
   // Get all vehicles with their latest inspection and photos
   getAll: publicProcedure
-    .handler(async () => {
+    .input(z.object({
+      filterType: z.enum(["alerts", "commercial", "non-commercial"]).optional().describe("Optional filter type to apply"),
+    }))
+    .handler(async ({ input }) => {
       const result = await db
         .select()
         .from(vehicles)
@@ -114,7 +117,41 @@ export const vehiclesRouter = {
         hasPaymentAgreement: vehicleConvenios.some(c => c.vehicleId === vehicle.id && c.hasActiveConvenio)
       }));
 
-      return vehiclesWithConvenios;
+      // Apply filters if filterType is provided
+      let filteredVehicles = vehiclesWithConvenios;
+
+      if (input.filterType) {
+        switch (input.filterType) {
+          case "alerts":
+            // Vehicles with alerts (have inspections with non-empty alerts array)
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle => 
+              vehicle.inspections.some((inspection: any) => 
+                inspection.alerts && (inspection.alerts as string[]).length > 0
+              )
+            );
+            break;
+            
+          case "commercial":
+            // Vehicles rated as commercial
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle =>
+              vehicle.inspections.some((inspection: any) => 
+                inspection.vehicleRating === "Comercial"
+              )
+            );
+            break;
+            
+          case "non-commercial":
+            // Vehicles rated as non-commercial
+            filteredVehicles = vehiclesWithConvenios.filter(vehicle =>
+              vehicle.inspections.some((inspection: any) => 
+                inspection.vehicleRating === "No comercial"
+              )
+            );
+            break;
+        }
+      }
+
+      return filteredVehicles;
     }),
 
   // Get vehicle by ID with all related data

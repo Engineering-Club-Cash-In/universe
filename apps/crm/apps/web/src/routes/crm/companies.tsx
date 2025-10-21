@@ -73,6 +73,9 @@ function RouteComponent() {
 	const navigate = Route.useNavigate();
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+	const [selectedCompany, setSelectedCompany] = useState<any>(null);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [industryFilter, setIndustryFilter] = useState<string>("all");
 	const [sizeFilter, setSizeFilter] = useState<string>("all");
@@ -150,6 +153,48 @@ function RouteComponent() {
 		},
 	});
 
+	const editCompanyForm = useForm({
+		defaultValues: {
+			name: "",
+			industry: "",
+			size: "",
+			website: "",
+			email: "",
+			phone: "",
+			address: "",
+			notes: "",
+		},
+		validators: {
+			onChange: ({ value }) => {
+				if (!value.name || value.name.trim() === "") {
+					return { form: "El nombre de la empresa es requerido" };
+				}
+				if (value.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email)) {
+					return { form: "El correo electrónico no es válido" };
+				}
+				return undefined;
+			},
+		},
+		onSubmit: async ({ value }) => {
+			if (selectedCompany) {
+				updateCompanyMutation.mutate({
+					id: selectedCompany.id,
+					...value,
+					industry:
+						value.industry && value.industry !== "none"
+							? value.industry
+							: undefined,
+					size: value.size && value.size !== "none" ? value.size : undefined,
+					website: value.website || undefined,
+					email: value.email || undefined,
+					phone: value.phone || undefined,
+					address: value.address || undefined,
+					notes: value.notes || undefined,
+				});
+			}
+		},
+	});
+
 	const createCompanyMutation = useMutation({
 		mutationFn: (input: {
 			name: string;
@@ -191,11 +236,31 @@ function RouteComponent() {
 				queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 			});
 			toast.success("Empresa actualizada exitosamente");
+			setIsEditDialogOpen(false);
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al actualizar la empresa");
 		},
 	});
+
+	const handleViewDetails = (company: any) => {
+		setSelectedCompany(company);
+		setIsDetailsDialogOpen(true);
+	};
+
+	const handleEditCompany = (company: any) => {
+		setSelectedCompany(company);
+		// Populate form with company data
+		editCompanyForm.setFieldValue("name", company.name || "");
+		editCompanyForm.setFieldValue("industry", company.industry || "none");
+		editCompanyForm.setFieldValue("size", company.size || "none");
+		editCompanyForm.setFieldValue("website", company.website || "");
+		editCompanyForm.setFieldValue("email", company.email || "");
+		editCompanyForm.setFieldValue("phone", company.phone || "");
+		editCompanyForm.setFieldValue("address", company.address || "");
+		editCompanyForm.setFieldValue("notes", company.notes || "");
+		setIsEditDialogOpen(true);
+	};
 
 	useEffect(() => {
 		if (!session && !isPending) {
@@ -839,15 +904,23 @@ function RouteComponent() {
 													<DropdownMenuContent align="end">
 														<DropdownMenuLabel>Acciones</DropdownMenuLabel>
 														<DropdownMenuSeparator />
-														<DropdownMenuItem>Ver Detalles</DropdownMenuItem>
-														<DropdownMenuItem>Crear Prospecto</DropdownMenuItem>
-														<DropdownMenuItem>
+														<DropdownMenuItem onClick={() => handleViewDetails(company)}>
+															Ver Detalles
+														</DropdownMenuItem>
+														<DropdownMenuItem onClick={() => {
+															navigate({ to: "/crm/leads", search: { companyId: company.id } });
+														}}>
+															Crear Prospecto
+														</DropdownMenuItem>
+														<DropdownMenuItem onClick={() => {
+															navigate({ to: "/crm/opportunities", search: { companyId: company.id } });
+														}}>
 															Crear Oportunidad
 														</DropdownMenuItem>
 														{userProfile.data?.role === "admin" && (
 															<>
 																<DropdownMenuSeparator />
-																<DropdownMenuItem>
+																<DropdownMenuItem onClick={() => handleEditCompany(company)}>
 																	Editar Empresa
 																</DropdownMenuItem>
 															</>
@@ -863,6 +936,295 @@ function RouteComponent() {
 					)}
 				</CardContent>
 			</Card>
+
+			{/* Details Dialog */}
+			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+				<DialogContent className="min-w-2xl max-w-3xl">
+					<DialogHeader>
+						<DialogTitle>Detalles de la Empresa</DialogTitle>
+					</DialogHeader>
+					{selectedCompany && (
+						<div className="space-y-6">
+							<div>
+								<h3 className="text-xl font-semibold">{selectedCompany.name}</h3>
+								<div className="mt-2 flex gap-2">
+									{selectedCompany.industry && (
+										<Badge className={getIndustryBadgeColor(selectedCompany.industry)} variant="outline">
+											{selectedCompany.industry}
+										</Badge>
+									)}
+									{selectedCompany.size && (
+										<Badge className={getSizeBadgeColor(selectedCompany.size)} variant="outline">
+											{selectedCompany.size}
+										</Badge>
+									)}
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								{selectedCompany.email && (
+									<div className="flex items-center gap-2">
+										<Mail className="h-4 w-4 text-muted-foreground" />
+										<span>{selectedCompany.email}</span>
+									</div>
+								)}
+								{selectedCompany.phone && (
+									<div className="flex items-center gap-2">
+										<Phone className="h-4 w-4 text-muted-foreground" />
+										<span>{selectedCompany.phone}</span>
+									</div>
+								)}
+								{selectedCompany.website && (
+									<div className="flex items-center gap-2">
+										<Globe className="h-4 w-4 text-muted-foreground" />
+										<a href={selectedCompany.website} target="_blank" rel="noopener noreferrer" className="hover:underline">
+											{selectedCompany.website}
+										</a>
+									</div>
+								)}
+								{selectedCompany.address && (
+									<div className="flex items-center gap-2">
+										<MapPin className="h-4 w-4 text-muted-foreground" />
+										<span>{selectedCompany.address}</span>
+									</div>
+								)}
+							</div>
+
+							{selectedCompany.notes && (
+								<div>
+									<Label className="font-semibold">Notas</Label>
+									<p className="mt-2 text-sm text-muted-foreground">{selectedCompany.notes}</p>
+								</div>
+							)}
+
+							<div className="border-t pt-4">
+								<NotesTimeline
+									entityType="company"
+									entityId={selectedCompany.id}
+									title="Timeline de Notas"
+								/>
+							</div>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Edit Dialog */}
+			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+				<DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>Editar Empresa</DialogTitle>
+					</DialogHeader>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							void editCompanyForm.handleSubmit();
+						}}
+						className="space-y-4"
+					>
+						<div>
+							<editCompanyForm.Field name="name">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>
+											Nombre de la Empresa <span className="text-red-500">*</span>
+										</Label>
+										<Input
+											id={field.name}
+											name={field.name}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											placeholder="Ingresa el nombre de la empresa..."
+										/>
+									</div>
+								)}
+							</editCompanyForm.Field>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editCompanyForm.Field name="industry">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Industria</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) => field.handleChange(value)}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Seleccionar industria" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="none">Sin industria</SelectItem>
+													<SelectItem value="technology">Tecnología</SelectItem>
+													<SelectItem value="finance">Finanzas</SelectItem>
+													<SelectItem value="healthcare">Salud</SelectItem>
+													<SelectItem value="retail">Venta al por menor</SelectItem>
+													<SelectItem value="manufacturing">Manufactura</SelectItem>
+													<SelectItem value="education">Educación</SelectItem>
+													<SelectItem value="consulting">Consultoría</SelectItem>
+													<SelectItem value="other">Otro</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</editCompanyForm.Field>
+							</div>
+							<div>
+								<editCompanyForm.Field name="size">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Tamaño de la Empresa</Label>
+											<Select
+												value={field.state.value}
+												onValueChange={(value) => field.handleChange(value)}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Seleccionar tamaño" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="none">Sin tamaño</SelectItem>
+													<SelectItem value="startup">Startup (1-10)</SelectItem>
+													<SelectItem value="small">Pequeña (11-50)</SelectItem>
+													<SelectItem value="medium">Mediana (51-200)</SelectItem>
+													<SelectItem value="large">Grande (201-1000)</SelectItem>
+													<SelectItem value="enterprise">Corporativa (1000+)</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+									)}
+								</editCompanyForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editCompanyForm.Field name="website">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Sitio Web</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												type="url"
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												placeholder="https://empresa.com"
+											/>
+										</div>
+									)}
+								</editCompanyForm.Field>
+							</div>
+							<div>
+								<editCompanyForm.Field name="email">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Correo Electrónico</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												type="email"
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												placeholder="contacto@empresa.com"
+											/>
+										</div>
+									)}
+								</editCompanyForm.Field>
+							</div>
+						</div>
+
+						<div className="grid grid-cols-2 gap-4">
+							<div>
+								<editCompanyForm.Field name="phone">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Teléfono</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												type="tel"
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												placeholder="+1 (555) 123-4567"
+											/>
+										</div>
+									)}
+								</editCompanyForm.Field>
+							</div>
+							<div>
+								<editCompanyForm.Field name="address">
+									{(field) => (
+										<div className="space-y-2">
+											<Label htmlFor={field.name}>Dirección</Label>
+											<Input
+												id={field.name}
+												name={field.name}
+												value={field.state.value}
+												onBlur={field.handleBlur}
+												onChange={(e) => field.handleChange(e.target.value)}
+												placeholder="Dirección de la empresa..."
+											/>
+										</div>
+									)}
+								</editCompanyForm.Field>
+							</div>
+						</div>
+
+						<div>
+							<editCompanyForm.Field name="notes">
+								{(field) => (
+									<div className="space-y-2">
+										<Label htmlFor={field.name}>Notas</Label>
+										<Textarea
+											id={field.name}
+											name={field.name}
+											value={field.state.value}
+											onBlur={field.handleBlur}
+											onChange={(e) => field.handleChange(e.target.value)}
+											placeholder="Notas adicionales sobre esta empresa..."
+											rows={3}
+										/>
+									</div>
+								)}
+							</editCompanyForm.Field>
+						</div>
+
+						<editCompanyForm.Subscribe>
+							{(state) => (
+								<div className="flex gap-3">
+									<Button
+										type="button"
+										variant="outline"
+										className="flex-1"
+										onClick={() => setIsEditDialogOpen(false)}
+									>
+										Cancelar
+									</Button>
+									<Button
+										type="submit"
+										className="flex-1"
+										disabled={
+											!state.canSubmit ||
+											state.isSubmitting ||
+											updateCompanyMutation.isPending
+										}
+									>
+										{state.isSubmitting || updateCompanyMutation.isPending
+											? "Actualizando..."
+											: "Actualizar Empresa"}
+									</Button>
+								</div>
+							)}
+						</editCompanyForm.Subscribe>
+					</form>
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

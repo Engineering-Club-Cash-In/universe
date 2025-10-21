@@ -56,6 +56,7 @@ export interface DocumentSubmissionData {
 export interface DocumentResult {
   templateId: number
   success: boolean
+  nameDocument: DocumentType[]
   data: DocumentSubmissionData[]
 }
 

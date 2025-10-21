@@ -1,13 +1,44 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle, FileText, ExternalLink, Mail, Clock } from "lucide-react";
+import {
+  CheckCircle,
+  FileText,
+  ExternalLink,
+  Mail,
+  Clock,
+  Copy,
+} from "lucide-react";
 import { type GenerateDocumentsResponse } from "@/services/documents";
 
 interface Step4Props {
   readonly documentsResponse: GenerateDocumentsResponse | null;
   readonly isLoading: boolean;
 }
+
+// Función para copiar todos los links al portapapeles
+const copyAllLinksToClipboard = (
+  documentsResponse: GenerateDocumentsResponse
+) => {
+  const { results = [] } = documentsResponse;
+
+  const allLinks = results.flatMap((result) => {
+    const name = result.nameDocument?.[0]?.label || `Template-${result.templateId}`;
+    const link = result.data?.[0]?.embed_src || "No Link Available";
+    return [`${name}: ${link}`];
+  });
+
+  const textToCopy = allLinks.join("\n\n");
+
+  navigator.clipboard
+    .writeText(textToCopy)
+    .then(() => {
+      alert("✅ Todos los enlaces han sido copiados al portapapeles");
+    })
+    .catch(() => {
+      alert("❌ Error al copiar los enlaces");
+    });
+};
 
 export function Step4({ documentsResponse, isLoading }: Step4Props) {
   if (isLoading) {
@@ -65,9 +96,18 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
       {/* Resumen General */}
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <FileText className="h-5 w-5" />
-            Resumen de Generación
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Resumen de Generación
+            </div>
+            <button
+              onClick={() => copyAllLinksToClipboard(documentsResponse)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+            >
+              <Copy className="h-4 w-4" />
+              Copiar Todos los Enlaces
+            </button>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -155,9 +195,7 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                     {/* Acceso al Documento */}
                     <div className="space-y-3">
                       <div className="flex items-center justify-between">
-                        <h4 className="font-medium">
-                          Documento Generado
-                        </h4>
+                        <h4 className="font-medium">Documento Generado</h4>
                       </div>
 
                       {/* Tarjeta de Documento con Botones de Acción */}
@@ -169,17 +207,27 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                             </div>
                             <div>
                               <h5 className="font-semibold text-gray-900">
-                                Documento #{submission.id}
+                                {result.nameDocument[0]?.label ||
+                                  `Documento #${submission.id}`}
                               </h5>
+                              <p className="text-xs text-gray-500 mb-1">
+                                ID: {submission.id}
+                              </p>
                               <p className="text-sm text-gray-600">
-                                Estado: <span className="font-medium text-green-600">{submission.status}</span>
+                                Estado:{" "}
+                                <span className="font-medium text-green-600">
+                                  {submission.status}
+                                </span>
                               </p>
                               <p className="text-xs text-gray-500">
-                                Enviado: {new Date(submission.sent_at).toLocaleString('es-GT')}
+                                Enviado:{" "}
+                                {new Date(submission.sent_at).toLocaleString(
+                                  "es-GT"
+                                )}
                               </p>
                             </div>
                           </div>
-                          
+
                           <div className="flex flex-col gap-2">
                             <a
                               href={submission.embed_src}
@@ -192,8 +240,11 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                             </a>
                             <button
                               onClick={() => {
-                                navigator.clipboard.writeText(submission.embed_src)
-                                alert('Enlace copiado al portapapeles')
+                                const documentName =
+                                  result.nameDocument[0]?.label ||
+                                  `Documento #${submission.id}`;
+                                const textToCopy = `${documentName}: ${submission.embed_src}`;
+                                navigator.clipboard.writeText(textToCopy);
                               }}
                               className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-sm"
                             >
@@ -201,13 +252,12 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                             </button>
                           </div>
                         </div>
-                        
-                        
 
                         {/* URL del documento (truncada) */}
                         <div className="mt-3 p-2 bg-gray-100 rounded text-xs font-mono text-gray-600 break-all">
-                          🔗 {submission.embed_src.length > 80 
-                            ? submission.embed_src.substring(0, 80) + '...' 
+                          🔗{" "}
+                          {submission.embed_src.length > 80
+                            ? submission.embed_src.substring(0, 80) + "..."
                             : submission.embed_src}
                         </div>
                       </div>

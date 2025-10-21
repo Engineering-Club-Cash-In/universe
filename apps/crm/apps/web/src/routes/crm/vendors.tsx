@@ -53,6 +53,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { orpc, client } from "@/utils/orpc";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -80,6 +90,7 @@ function VendorsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState<any>(null);
+  const [vendorToDelete, setVendorToDelete] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -186,9 +197,7 @@ function VendorsPage() {
   };
 
   const handleDelete = (id: string) => {
-    if (confirm("¿Está seguro de eliminar este vendedor?")) {
-      deleteVendorMutation.mutate(id);
-    }
+    setVendorToDelete(id);
   };
 
   const onCreateSubmit = (data: VendorFormData) => {
@@ -602,6 +611,32 @@ function VendorsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Alert Dialog para confirmar eliminación */}
+      <AlertDialog open={!!vendorToDelete} onOpenChange={(open) => !open && setVendorToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar vendedor?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción no se puede deshacer. El vendedor será eliminado permanentemente del sistema.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (vendorToDelete) {
+                  deleteVendorMutation.mutate(vendorToDelete);
+                  setVendorToDelete(null);
+                }
+              }}
+              className="bg-red-600 text-white hover:bg-red-700"
+            >
+              Eliminar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

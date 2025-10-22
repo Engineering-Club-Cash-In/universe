@@ -27,6 +27,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
@@ -41,6 +42,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -50,7 +52,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
 	Select,
 	SelectContent,
@@ -58,16 +59,11 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import {
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
-} from "@/components/ui/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
-import { PERMISSIONS } from "server/src/types/roles";
 
 // Simple draggable opportunity card component
 function DraggableOpportunityCard({
@@ -112,7 +108,7 @@ function DraggableOpportunityCard({
 						{opportunity.title}
 					</h4>
 					<Badge
-						className={`${getStatusBadgeColor(opportunity.status)} flex-shrink-0`}
+						className={`${getStatusBadgeColor(opportunity.status)} shrink-0`}
 						variant="outline"
 					>
 						{getStatusLabel(opportunity.status)}
@@ -227,7 +223,7 @@ function DroppableStageColumn({
 
 	return (
 		<Card
-			className={`h-fit min-w-80 flex-shrink-0 ${
+			className={`h-fit min-w-80 shrink-0 ${
 				isDraggedOver ? "ring-2 ring-blue-500" : ""
 			}`}
 		>
@@ -303,6 +299,44 @@ function RouteComponent() {
 	const prevOpenRef = useRef(isCreateDialogOpen);
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
+		// Find the opportunity and the target stage
+		const opportunity = opportunitiesQuery.data?.find(
+			(opp) => opp.id === opportunityId,
+		);
+		const targetStage = salesStagesQuery.data?.find(
+			(stage) => stage.id === newStageId,
+		);
+		const currentStage = opportunity?.stage;
+
+		// Validate: cannot skip from <=20% to >30% (must go through analysis)
+		if (
+			opportunity &&
+			targetStage &&
+			currentStage &&
+			currentStage.closurePercentage <= 20 &&
+			targetStage.closurePercentage > 30
+		) {
+			toast.error(
+				"Las oportunidades en etapas tempranas deben pasar primero por Recepción de documentación (30%) antes de avanzar. No puedes saltarte el proceso de análisis.",
+			);
+			return;
+		}
+
+		// Validate: moving from <=20% to >=30% requires a vehicle
+		if (
+			opportunity &&
+			targetStage &&
+			currentStage &&
+			currentStage.closurePercentage <= 20 &&
+			targetStage.closurePercentage >= 30 &&
+			!opportunity.vehicleId
+		) {
+			toast.error(
+				"Para avanzar a esta etapa, la oportunidad debe tener un vehículo asignado. Por favor edita la oportunidad y asigna un vehículo.",
+			);
+			return;
+		}
+
 		updateOpportunityMutation.mutate({
 			id: opportunityId,
 			stageId: newStageId,
@@ -312,11 +346,13 @@ function RouteComponent() {
 	const handleOpportunityClick = async (opportunity: any) => {
 		setSelectedOpportunity(opportunity);
 		setIsDetailsDialogOpen(true);
-		
+
 		// Load opportunity history
 		setIsLoadingHistory(true);
 		try {
-			const history = await client.getOpportunityHistory({ opportunityId: opportunity.id });
+			const history = await client.getOpportunityHistory({
+				opportunityId: opportunity.id,
+			});
 			setOpportunityHistory(history);
 		} catch (error) {
 			console.error("Error loading opportunity history:", error);
@@ -336,6 +372,14 @@ function RouteComponent() {
 			editOpportunityForm.setFieldValue(
 				"leadId",
 				selectedOpportunity.lead?.id || "none",
+			);
+			editOpportunityForm.setFieldValue(
+				"vehicleId",
+				selectedOpportunity.vehicleId || "",
+			);
+			editOpportunityForm.setFieldValue(
+				"creditType",
+				selectedOpportunity.creditType || "autocompra",
 			);
 			editOpportunityForm.setFieldValue(
 				"value",
@@ -401,6 +445,15 @@ function RouteComponent() {
 		...orpc.getVendors.queryOptions(),
 	});
 
+	const vehiclesQuery = useQuery({
+		...orpc.getVehicles.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getVehicles", session?.user?.id, userProfile.data?.role],
+	});
+
 	const createOpportunityForm = useForm({
 		defaultValues: {
 			title: "",
@@ -446,6 +499,8 @@ function RouteComponent() {
 		defaultValues: {
 			title: "",
 			leadId: "none",
+			vehicleId: "",
+			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			value: "",
 			stageId: "",
 			probability: 0,
@@ -468,8 +523,10 @@ function RouteComponent() {
 				updateOpportunityMutation.mutate({
 					id: selectedOpportunity.id,
 					...value,
+					creditType: value.creditType,
 					leadId:
 						value.leadId && value.leadId !== "none" ? value.leadId : undefined,
+					vehicleId: value.vehicleId || null,
 					value: value.value || undefined,
 					expectedCloseDate: value.expectedCloseDate || undefined,
 					notes: value.notes || undefined,
@@ -515,6 +572,8 @@ function RouteComponent() {
 			id: string;
 			title?: string;
 			leadId?: string;
+			vehicleId?: string | null;
+			creditType?: "autocompra" | "sobre_vehiculo";
 			value?: string;
 			stageId?: string;
 			probability?: number;
@@ -576,14 +635,37 @@ function RouteComponent() {
 			toast.success("Oportunidad actualizada exitosamente");
 			setIsEditDialogOpen(false);
 			setIsChangeStageDialogOpen(false);
-			
-			// Reload history if we're viewing this opportunity and stage changed
-			if (selectedOpportunity?.id === variables.id && variables.stageId) {
-				try {
-					const history = await client.getOpportunityHistory({ opportunityId: variables.id });
-					setOpportunityHistory(history);
-				} catch (error) {
-					console.error("Error reloading history:", error);
+
+			// Update selectedOpportunity with fresh data
+			if (selectedOpportunity?.id === variables.id) {
+				// Wait for the query to be invalidated and refetch
+				await queryClient.invalidateQueries({
+					queryKey: [
+						"getOpportunities",
+						session?.user?.id,
+						userProfile.data?.role,
+					],
+				});
+
+				// Get fresh data
+				const freshOpportunities = await client.getOpportunities();
+				const updatedOpportunity = freshOpportunities.find(
+					(opp) => opp.id === variables.id,
+				);
+				if (updatedOpportunity) {
+					setSelectedOpportunity(updatedOpportunity);
+				}
+
+				// Reload history if stage changed
+				if (variables.stageId) {
+					try {
+						const history = await client.getOpportunityHistory({
+							opportunityId: variables.id,
+						});
+						setOpportunityHistory(history);
+					} catch (error) {
+						console.error("Error reloading history:", error);
+					}
 				}
 			}
 		},
@@ -624,9 +706,15 @@ function RouteComponent() {
 
 	// Handle opening create modal with pre-filled company leads
 	useEffect(() => {
-		if (search.companyId && leadsQuery.data && processedCompanyIdRef.current !== search.companyId) {
+		if (
+			search.companyId &&
+			leadsQuery.data &&
+			processedCompanyIdRef.current !== search.companyId
+		) {
 			// Find leads from this company
-			const companyLeads = leadsQuery.data.filter(lead => lead.company?.id === search.companyId);
+			const companyLeads = leadsQuery.data.filter(
+				(lead) => lead.company?.id === search.companyId,
+			);
 
 			// If there are leads from this company, pre-select the first one
 			if (companyLeads.length > 0) {
@@ -976,7 +1064,8 @@ function RouteComponent() {
 										{(field) => (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>
-													Tipo de Crédito <span className="text-red-500">*</span>
+													Tipo de Crédito{" "}
+													<span className="text-red-500">*</span>
 												</Label>
 												<Select
 													value={field.state.value}
@@ -989,8 +1078,10 @@ function RouteComponent() {
 													<SelectTrigger className="w-full">
 														<SelectValue placeholder="Seleccionar tipo" />
 													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="autocompra">Autocompra</SelectItem>
+													<SelectContent align="start">
+														<SelectItem value="autocompra">
+															Autocompra
+														</SelectItem>
 														<SelectItem value="sobre_vehiculo">
 															Sobre Vehículo
 														</SelectItem>
@@ -1005,22 +1096,19 @@ function RouteComponent() {
 										{(field) => (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>Lead</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) => field.handleChange(value)}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar lead" />
-													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="none">Sin lead</SelectItem>
-														{leadsQuery.data?.map((lead) => (
-															<SelectItem key={lead.id} value={lead.id}>
-																{lead.firstName} {lead.lastName}
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin lead" },
+														...(leadsQuery.data?.map((lead) => ({
+															value: lead.id,
+															label: `${lead.firstName} ${lead.lastName}`,
+														})) || []),
+													]}
+													value={field.state.value ?? null}
+													onChange={(value) => field.handleChange(value)}
+													placeholder="Seleccionar lead"
+													width="full"
+												/>
 											</div>
 										)}
 									</createOpportunityForm.Field>
@@ -1033,13 +1121,20 @@ function RouteComponent() {
 										{(field) => (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>Vehículo (Opcional)</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) => field.handleChange(e.target.value)}
-													placeholder="ID del vehículo..."
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin vehículo" },
+														...(vehiclesQuery.data?.map((vehicle: any) => ({
+															value: vehicle.id,
+															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+														})) || []),
+													]}
+													value={field.state.value ?? "none"}
+													onChange={(value) =>
+														field.handleChange(value === "none" ? "" : value)
+													}
+													placeholder="Seleccionar vehículo"
+													width="full"
 												/>
 											</div>
 										)}
@@ -1049,7 +1144,7 @@ function RouteComponent() {
 									<createOpportunityForm.Field name="value">
 										{(field) => (
 											<div className="space-y-2">
-												<Label htmlFor={field.name}>Valor del Negocio</Label>
+												<Label htmlFor={field.name}>Valor del Crédito</Label>
 												<Input
 													id={field.name}
 													name={field.name}
@@ -1084,7 +1179,12 @@ function RouteComponent() {
 													Etapa Inicial <span className="text-red-500">*</span>
 												</Label>
 												<Select
-													value={field.state.value || undefined}
+													value={
+														field.state.value ||
+														salesStagesQuery.data?.find((s) => s.closurePercentage === 1)
+															?.id ||
+														undefined
+													}
 													onValueChange={(value) => field.handleChange(value)}
 												>
 													<SelectTrigger
@@ -1096,9 +1196,15 @@ function RouteComponent() {
 													>
 														<SelectValue placeholder="Seleccionar etapa" />
 													</SelectTrigger>
-													<SelectContent>
+													<SelectContent align="start">
 														{salesStagesQuery.data
-															?.filter((stage) => stage.id && stage.id !== "")
+															?.filter(
+																(stage) =>
+																	stage.id &&
+																	stage.id !== "" &&
+																	stage.closurePercentage >= 1 &&
+																	stage.closurePercentage <= 20,
+															)
 															.map((stage) => (
 																<SelectItem key={stage.id} value={stage.id}>
 																	{stage.name} ({stage.closurePercentage}%)
@@ -1143,23 +1249,22 @@ function RouteComponent() {
 								<createOpportunityForm.Field name="vendorId">
 									{(field) => (
 										<div className="space-y-2">
-											<Label htmlFor={field.name}>Vendedor del Vehículo (opcional)</Label>
-											<Select
-												value={field.state.value}
-												onValueChange={(value) => field.handleChange(value)}
-											>
-												<SelectTrigger className="w-full">
-													<SelectValue placeholder="Seleccionar vendedor" />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="none">Sin vendedor asignado</SelectItem>
-													{vendorsQuery.data?.map((vendor: any) => (
-														<SelectItem key={vendor.id} value={vendor.id}>
-															{vendor.name} {vendor.vendorType === "empresa" ? `(${vendor.companyName})` : ""} - {vendor.dpi}
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
+											<Label htmlFor={field.name}>
+												Vendedor del Vehículo (opcional)
+											</Label>
+											<Combobox
+												options={[
+													{ value: "none", label: "Sin vendedor asignado" },
+													...(vendorsQuery.data?.map((vendor: any) => ({
+														value: vendor.id,
+														label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
+													})) || []),
+												]}
+												value={field.state.value ?? null}
+												onChange={(value) => field.handleChange(value)}
+												placeholder="Seleccionar vendedor"
+												width="full"
+											/>
 										</div>
 									)}
 								</createOpportunityForm.Field>
@@ -1221,8 +1326,8 @@ function RouteComponent() {
 									<TabsTrigger value="documents">Documentos</TabsTrigger>
 									<TabsTrigger value="history">Historial</TabsTrigger>
 								</TabsList>
-								
-								<TabsContent value="details" className="space-y-6 mt-6">
+
+								<TabsContent value="details" className="mt-6 space-y-6">
 									{/* Header with title and status */}
 									<div className="flex items-start justify-between">
 										<div>
@@ -1264,179 +1369,204 @@ function RouteComponent() {
 										</div>
 									</div>
 
-								{/* Details Grid */}
-								<div className="grid grid-cols-2 gap-6">
-									{/* Lead Information */}
-									{selectedOpportunity.lead && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Lead
-											</Label>
-											<div className="flex items-center gap-3">
-												<Users className="h-5 w-5 text-muted-foreground" />
-												<span className="font-medium">
-													{selectedOpportunity.lead.firstName}{" "}
-													{selectedOpportunity.lead.lastName}
-												</span>
+									{/* Details Grid */}
+									<div className="grid grid-cols-2 gap-6">
+										{/* Lead Information */}
+										{selectedOpportunity.lead && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Lead
+												</Label>
+												<div className="flex items-center gap-3">
+													<Users className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{selectedOpportunity.lead.firstName}{" "}
+														{selectedOpportunity.lead.lastName}
+													</span>
+												</div>
+												<div className="flex items-center gap-3 text-muted-foreground text-sm">
+													<Mail className="h-5 w-5" />
+													<span>{selectedOpportunity.lead.email}</span>
+												</div>
 											</div>
-											<div className="flex items-center gap-3 text-muted-foreground text-sm">
-												<Mail className="h-5 w-5" />
-												<span>{selectedOpportunity.lead.email}</span>
-											</div>
-										</div>
-									)}
+										)}
 
-									{/* Company Information */}
-									{selectedOpportunity.company && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Empresa
-											</Label>
-											<div className="flex items-center gap-3">
-												<Building className="h-5 w-5 text-muted-foreground" />
-												<span className="font-medium">
-													{selectedOpportunity.company.name}
-												</span>
+										{/* Company Information */}
+										{selectedOpportunity.company && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Empresa
+												</Label>
+												<div className="flex items-center gap-3">
+													<Building className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{selectedOpportunity.company.name}
+													</span>
+												</div>
 											</div>
-										</div>
-									)}
+										)}
 
-									{/* Expected Close Date */}
-									{selectedOpportunity.expectedCloseDate && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Fecha de Cierre Esperada
-											</Label>
-											<div className="flex items-center gap-3">
-												<Calendar className="h-5 w-5 text-muted-foreground" />
-												<span className="font-medium">
-													{formatGuatemalaDate(
-														selectedOpportunity.expectedCloseDate,
-													)}
-												</span>
+										{/* Expected Close Date */}
+										{selectedOpportunity.expectedCloseDate && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Fecha de Cierre Esperada
+												</Label>
+												<div className="flex items-center gap-3">
+													<Calendar className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{formatGuatemalaDate(
+															selectedOpportunity.expectedCloseDate,
+														)}
+													</span>
+												</div>
 											</div>
-										</div>
-									)}
+										)}
 
-									{/* Assigned To */}
-									{selectedOpportunity.assignedUser && (
-										<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-											<Label className="font-semibold text-muted-foreground text-sm">
-												Asignado a
-											</Label>
-											<div className="flex items-center gap-3">
-												<Users className="h-5 w-5 text-muted-foreground" />
-												<span className="font-medium">
-													{selectedOpportunity.assignedUser.name ||
-														"Usuario sin nombre"}
-												</span>
+										{/* Assigned To */}
+										{selectedOpportunity.assignedUser && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Asignado a
+												</Label>
+												<div className="flex items-center gap-3">
+													<Users className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{selectedOpportunity.assignedUser.name ||
+															"Usuario sin nombre"}
+													</span>
+												</div>
 											</div>
-										</div>
-									)}
-								</div>
-
-								{/* Weighted Value */}
-								<div className="rounded-lg border bg-muted/50 p-6">
-									<div className="flex items-center justify-between">
-										<span className="font-semibold text-base">
-											Valor Ponderado
-										</span>
-										<span className="font-bold text-2xl text-blue-600">
-											$
-											{(
-												(Number.parseFloat(selectedOpportunity.value || "0") *
-													(selectedOpportunity.probability ||
-														selectedOpportunity.stage?.closurePercentage ||
-														0)) /
-												100
-											).toLocaleString()}
-										</span>
+										)}
 									</div>
-								</div>
 
-								{/* Notes */}
-								{selectedOpportunity.notes && (
-									<div className="space-y-3">
-										<Label className="font-semibold text-base text-muted-foreground">
-											Notas
-										</Label>
-										<div className="rounded-lg border bg-muted/50 p-4">
-											<p className="text-sm leading-relaxed">
-												{selectedOpportunity.notes}
-											</p>
+									{/* Weighted Value */}
+									<div className="rounded-lg border bg-muted/50 p-6">
+										<div className="flex items-center justify-between">
+											<span className="font-semibold text-base">
+												Valor Ponderado
+											</span>
+											<span className="font-bold text-2xl text-blue-600">
+												$
+												{(
+													(Number.parseFloat(selectedOpportunity.value || "0") *
+														(selectedOpportunity.probability ||
+															selectedOpportunity.stage?.closurePercentage ||
+															0)) /
+													100
+												).toLocaleString()}
+											</span>
 										</div>
 									</div>
-								)}
 
-								{/* Actions */}
-								<div className="flex gap-3 border-t pt-6">
-									<Button
-										variant="outline"
-										size="default"
-										className="flex-1"
-										onClick={handleEditOpportunity}
-									>
-										Editar
-									</Button>
-									<Button
-										variant="outline"
-										size="default"
-										className="flex-1"
-										onClick={handleChangeStage}
-									>
-										Cambiar Etapa
-									</Button>
-								</div>
+									{/* Notes */}
+									{selectedOpportunity.notes && (
+										<div className="space-y-3">
+											<Label className="font-semibold text-base text-muted-foreground">
+												Notas
+											</Label>
+											<div className="rounded-lg border bg-muted/50 p-4">
+												<p className="text-sm leading-relaxed">
+													{selectedOpportunity.notes}
+												</p>
+											</div>
+										</div>
+									)}
+
+									{/* Actions */}
+									<div className="flex gap-3 border-t pt-6">
+										<Button
+											variant="outline"
+											size="default"
+											className="flex-1"
+											onClick={handleEditOpportunity}
+										>
+											Editar
+										</Button>
+										<Button
+											variant="outline"
+											size="default"
+											className="flex-1"
+											onClick={handleChangeStage}
+										>
+											Cambiar Etapa
+										</Button>
+									</div>
 								</TabsContent>
-								
-								<TabsContent value="history" className="space-y-4 mt-6">
+
+								<TabsContent value="history" className="mt-6 space-y-4">
 									<div className="space-y-4">
-										<div className="flex items-center gap-2 mb-4">
+										<div className="mb-4 flex items-center gap-2">
 											<History className="h-5 w-5 text-muted-foreground" />
-											<h3 className="font-semibold text-lg">Historial de Cambios</h3>
+											<h3 className="font-semibold text-lg">
+												Historial de Cambios
+											</h3>
 										</div>
-										
+
 										{isLoadingHistory ? (
 											<div className="flex items-center justify-center py-8">
-												<p className="text-muted-foreground">Cargando historial...</p>
+												<p className="text-muted-foreground">
+													Cargando historial...
+												</p>
 											</div>
 										) : opportunityHistory.length === 0 ? (
 											<div className="rounded-lg border bg-muted/30 p-4 text-center">
-												<p className="text-muted-foreground">No hay cambios registrados</p>
+												<p className="text-muted-foreground">
+													No hay cambios registrados
+												</p>
 											</div>
 										) : (
 											<div className="space-y-3">
 												{opportunityHistory.map((change) => (
-													<div key={change.id} className="rounded-lg border bg-card p-4">
+													<div
+														key={change.id}
+														className="rounded-lg border bg-card p-4"
+													>
 														<div className="flex items-start justify-between">
 															<div className="flex-1 space-y-2">
 																<div className="flex items-center gap-2">
 																	{change.isOverride && (
-																		<Badge variant="outline" className="bg-orange-100 border-orange-300 text-orange-700">
+																		<Badge
+																			variant="outline"
+																			className="border-orange-300 bg-orange-100 text-orange-700"
+																		>
 																			Override
 																		</Badge>
 																	)}
 																	<span className="font-medium">
-																		{change.fromStage?.name || "Inicio"} → {change.toStage?.name}
+																		{change.fromStage?.name || "Inicio"} →{" "}
+																		{change.toStage?.name}
 																	</span>
 																</div>
 																{change.reason && (
-																	<p className="text-sm text-muted-foreground">{change.reason}</p>
+																	<p className="text-muted-foreground text-sm">
+																		{change.reason}
+																	</p>
 																)}
-																<div className="flex items-center gap-4 text-xs text-muted-foreground">
+																<div className="flex items-center gap-4 text-muted-foreground text-xs">
 																	<div className="flex items-center gap-1">
 																		<Clock className="h-3 w-3" />
-																		{new Date(change.changedAt).toLocaleString()}
+																		{new Date(
+																			change.changedAt,
+																		).toLocaleString()}
 																	</div>
 																	<div className="flex items-center gap-1">
 																		<Users className="h-3 w-3" />
-																		{change.changedBy?.name || "Usuario desconocido"}
+																		{change.changedBy?.name ||
+																			"Usuario desconocido"}
 																		{change.changedBy?.role && (
-																			<Badge variant="outline" className="ml-1 text-xs">
-																				{change.changedBy.role === "admin" ? "Admin" : 
-																				 change.changedBy.role === "sales" ? "Ventas" : 
-																				 change.changedBy.role === "analyst" ? "Analista" : 
-																				 change.changedBy.role}
+																			<Badge
+																				variant="outline"
+																				className="ml-1 text-xs"
+																			>
+																				{change.changedBy.role === "admin"
+																					? "Admin"
+																					: change.changedBy.role === "sales"
+																						? "Ventas"
+																						: change.changedBy.role ===
+																								"analyst"
+																							? "Analista"
+																							: change.changedBy.role}
 																			</Badge>
 																		)}
 																	</div>
@@ -1449,8 +1579,8 @@ function RouteComponent() {
 										)}
 									</div>
 								</TabsContent>
-								
-								<TabsContent value="documents" className="space-y-4 mt-6">
+
+								<TabsContent value="documents" className="mt-6 space-y-4">
 									<DocumentsManager opportunityId={selectedOpportunity.id} />
 								</TabsContent>
 							</Tabs>
@@ -1460,7 +1590,7 @@ function RouteComponent() {
 
 				{/* Edit Opportunity Dialog */}
 				<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-					<DialogContent className="min-w-[600px] max-w-4xl max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700">
+					<DialogContent className="scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-transparent dark:scrollbar-thumb-gray-700 max-h-[90vh] min-w-[56rem] max-w-5xl overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Editar Oportunidad</DialogTitle>
 						</DialogHeader>
@@ -1519,22 +1649,19 @@ function RouteComponent() {
 										{(field) => (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>Lead</Label>
-												<Select
-													value={field.state.value}
-													onValueChange={(value) => field.handleChange(value)}
-												>
-													<SelectTrigger className="w-full">
-														<SelectValue placeholder="Seleccionar lead" />
-													</SelectTrigger>
-													<SelectContent>
-														<SelectItem value="none">Sin lead</SelectItem>
-														{leadsQuery.data?.map((lead) => (
-															<SelectItem key={lead.id} value={lead.id}>
-																{lead.firstName} {lead.lastName}
-															</SelectItem>
-														))}
-													</SelectContent>
-												</Select>
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin lead" },
+														...(leadsQuery.data?.map((lead) => ({
+															value: lead.id,
+															label: `${lead.firstName} ${lead.lastName}`,
+														})) || []),
+													]}
+													value={field.state.value ?? null}
+													onChange={(value) => field.handleChange(value)}
+													placeholder="Seleccionar lead"
+													width="full"
+												/>
 											</div>
 										)}
 									</editOpportunityForm.Field>
@@ -1543,7 +1670,7 @@ function RouteComponent() {
 									<editOpportunityForm.Field name="value">
 										{(field) => (
 											<div className="space-y-2">
-												<Label htmlFor={field.name}>Valor del Negocio</Label>
+												<Label htmlFor={field.name}>Valor del Crédito</Label>
 												<Input
 													id={field.name}
 													name={field.name}
@@ -1552,6 +1679,60 @@ function RouteComponent() {
 													onBlur={field.handleBlur}
 													onChange={(e) => field.handleChange(e.target.value)}
 													placeholder="0.00"
+												/>
+											</div>
+										)}
+									</editOpportunityForm.Field>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div>
+									<editOpportunityForm.Field name="creditType">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Tipo de Crédito</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(
+															value as "autocompra" | "sobre_vehiculo",
+														)
+													}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar tipo" />
+													</SelectTrigger>
+													<SelectContent align="start">
+														<SelectItem value="autocompra">Autocompra</SelectItem>
+														<SelectItem value="sobre_vehiculo">
+															Sobre Vehículo
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</editOpportunityForm.Field>
+								</div>
+								<div>
+									<editOpportunityForm.Field name="vehicleId">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Vehículo</Label>
+												<Combobox
+													options={[
+														{ value: "none", label: "Sin vehículo" },
+														...(vehiclesQuery.data?.map((vehicle: any) => ({
+															value: vehicle.id,
+															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+														})) || []),
+													]}
+													value={field.state.value || "none"}
+													onChange={(value) =>
+														field.handleChange(value === "none" ? "" : value)
+													}
+													placeholder="Seleccionar vehículo"
+													width="full"
 												/>
 											</div>
 										)}
@@ -1737,7 +1918,9 @@ function RouteComponent() {
 									</Select>
 								</div>
 								<div className="space-y-2">
-									<Label htmlFor="stageChangeReason">Razón del cambio (opcional)</Label>
+									<Label htmlFor="stageChangeReason">
+										Razón del cambio (opcional)
+									</Label>
 									<Textarea
 										id="stageChangeReason"
 										value={stageChangeReason}
@@ -1762,6 +1945,38 @@ function RouteComponent() {
 										className="flex-1"
 										onClick={() => {
 											if (selectedStage && selectedOpportunity) {
+												const targetStage = salesStagesQuery.data?.find(
+													(stage) => stage.id === selectedStage,
+												);
+												const currentStage = selectedOpportunity.stage;
+
+												// Validate: cannot skip from <=20% to >30% (must go through analysis)
+												if (
+													targetStage &&
+													currentStage &&
+													currentStage.closurePercentage <= 20 &&
+													targetStage.closurePercentage > 30
+												) {
+													toast.error(
+														"Las oportunidades en etapas tempranas deben pasar primero por Recepción de documentación (30%) antes de avanzar. No puedes saltarte el proceso de análisis.",
+													);
+													return;
+												}
+
+												// Validate: moving from <=20% to >=30% requires a vehicle
+												if (
+													targetStage &&
+													currentStage &&
+													currentStage.closurePercentage <= 20 &&
+													targetStage.closurePercentage >= 30 &&
+													!selectedOpportunity.vehicleId
+												) {
+													toast.error(
+														"Para avanzar a esta etapa, la oportunidad debe tener un vehículo asignado. Por favor edita la oportunidad y asigna un vehículo.",
+													);
+													return;
+												}
+
 												updateOpportunityMutation.mutate({
 													id: selectedOpportunity.id,
 													stageId: selectedStage,
@@ -1837,11 +2052,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			}
 
 			// Use fetch directly for file upload
-			const response = await fetch(`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`, {
-				method: "POST",
-				body: formData,
-				credentials: "include",
-			});
+			const response = await fetch(
+				`${import.meta.env.VITE_SERVER_URL}/api/upload-opportunity-document`,
+				{
+					method: "POST",
+					body: formData,
+					credentials: "include",
+				},
+			);
 
 			if (!response.ok) {
 				const error = await response.json();
@@ -1860,11 +2078,15 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			}
 			// Invalidate documents query
 			queryClient.invalidateQueries({
-				queryKey: orpc.getOpportunityDocuments.queryKey({ input: { opportunityId } })
+				queryKey: orpc.getOpportunityDocuments.queryKey({
+					input: { opportunityId },
+				}),
 			});
 			// Invalidate validation query to update checklist
 			queryClient.invalidateQueries({
-				queryKey: orpc.validateOpportunityDocuments.queryKey({ input: { opportunityId } })
+				queryKey: orpc.validateOpportunityDocuments.queryKey({
+					input: { opportunityId },
+				}),
 			});
 		},
 		onError: (error: any) => {
@@ -1880,11 +2102,15 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			toast.success("Documento eliminado exitosamente");
 			// Invalidate documents query
 			queryClient.invalidateQueries({
-				queryKey: orpc.getOpportunityDocuments.queryKey({ input: { opportunityId } })
+				queryKey: orpc.getOpportunityDocuments.queryKey({
+					input: { opportunityId },
+				}),
 			});
 			// Invalidate validation query to update checklist
 			queryClient.invalidateQueries({
-				queryKey: orpc.validateOpportunityDocuments.queryKey({ input: { opportunityId } })
+				queryKey: orpc.validateOpportunityDocuments.queryKey({
+					input: { opportunityId },
+				}),
 			});
 		},
 		onError: (error: any) => {
@@ -1897,23 +2123,27 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		if (file) {
 			// Validate file
 			const allowedTypes = [
-				'application/pdf',
-				'image/jpeg',
-				'image/jpg',
-				'image/png',
-				'image/webp',
-				'application/msword',
-				'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+				"application/pdf",
+				"image/jpeg",
+				"image/jpg",
+				"image/png",
+				"image/webp",
+				"application/msword",
+				"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 			];
 
 			if (!allowedTypes.includes(file.type)) {
-				toast.error("Tipo de archivo no permitido. Solo se permiten PDF, imágenes y documentos Word.");
+				toast.error(
+					"Tipo de archivo no permitido. Solo se permiten PDF, imágenes y documentos Word.",
+				);
 				return;
 			}
 
 			const maxSize = 10 * 1024 * 1024; // 10MB
 			if (file.size > maxSize) {
-				toast.error("El archivo es demasiado grande. El tamaño máximo permitido es 10MB.");
+				toast.error(
+					"El archivo es demasiado grande. El tamaño máximo permitido es 10MB.",
+				);
 				return;
 			}
 
@@ -1944,7 +2174,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			{/* Upload Section */}
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-lg flex items-center gap-2">
+					<CardTitle className="flex items-center gap-2 text-lg">
 						<Upload className="h-5 w-5" />
 						Subir Documento
 					</CardTitle>
@@ -1985,17 +2215,18 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 							onChange={handleFileSelect}
 							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
 						/>
-						<p className="text-xs text-muted-foreground">
-							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX. Tamaño máximo: 10MB
+						<p className="text-muted-foreground text-xs">
+							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX. Tamaño
+							máximo: 10MB
 						</p>
 					</div>
 
 					{selectedFile && (
-						<div className="bg-muted rounded-lg p-3 flex items-center justify-between">
+						<div className="flex items-center justify-between rounded-lg bg-muted p-3">
 							<div className="flex items-center gap-2">
 								<FileText className="h-4 w-4 text-muted-foreground" />
 								<span className="text-sm">{selectedFile.name}</span>
-								<span className="text-xs text-muted-foreground">
+								<span className="text-muted-foreground text-xs">
 									({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
 								</span>
 							</div>
@@ -2027,40 +2258,61 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			{/* Documents List */}
 			<Card>
 				<CardHeader>
-					<CardTitle className="text-lg flex items-center gap-2">
+					<CardTitle className="flex items-center gap-2 text-lg">
 						<FileText className="h-5 w-5" />
 						Documentos Subidos
 					</CardTitle>
 				</CardHeader>
 				<CardContent>
 					{documentsQuery.isLoading ? (
-						<p className="text-center text-muted-foreground py-4">Cargando documentos...</p>
+						<p className="py-4 text-center text-muted-foreground">
+							Cargando documentos...
+						</p>
 					) : documentsQuery.data?.length === 0 ? (
-						<p className="text-center text-muted-foreground py-4">No hay documentos subidos</p>
+						<p className="py-4 text-center text-muted-foreground">
+							No hay documentos subidos
+						</p>
 					) : (
 						<div className="space-y-3">
 							{documentsQuery.data?.map((doc) => (
-								<div key={doc.id} className="flex items-center justify-between p-3 border rounded-lg">
-									<div className="flex items-center gap-3 flex-1">
-										<span className="text-2xl">{getDocumentIcon(doc.mimeType)}</span>
-										<div className="flex-1">
-											<div className="flex items-center gap-2">
-												<span className="font-medium text-sm">{doc.originalName}</span>
-												<Badge variant="outline" className="text-xs">
-													{documentTypeOptions.find(t => t.value === doc.documentType)?.label || doc.documentType}
+								<div
+									key={doc.id}
+									className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+								>
+									<div className="flex min-w-0 flex-1 items-center gap-3">
+										<span className="flex-shrink-0 text-2xl">
+											{getDocumentIcon(doc.mimeType)}
+										</span>
+										<div className="min-w-0 flex-1">
+											<div className="flex flex-wrap items-center gap-2">
+												<span className="break-words font-medium text-sm">
+													{doc.originalName}
+												</span>
+												<Badge
+													variant="outline"
+													className="flex-shrink-0 text-xs"
+												>
+													{documentTypeOptions.find(
+														(t) => t.value === doc.documentType,
+													)?.label || doc.documentType}
 												</Badge>
 											</div>
 											{doc.description && (
-												<p className="text-xs text-muted-foreground mt-1">{doc.description}</p>
+												<p className="mt-1 text-muted-foreground text-xs">
+													{doc.description}
+												</p>
 											)}
-											<div className="flex items-center gap-4 text-xs text-muted-foreground mt-1">
+											<div className="mt-1 flex items-center gap-4 text-muted-foreground text-xs">
 												<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-												<span>Subido por {doc.uploadedBy?.name || "Usuario desconocido"}</span>
+												<span>
+													Subido por{" "}
+													{doc.uploadedBy?.name || "Usuario desconocido"}
+												</span>
 												<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
 											</div>
 										</div>
 									</div>
-									<div className="flex items-center gap-2">
+									<div className="flex flex-shrink-0 items-center gap-2">
 										<Button
 											size="sm"
 											variant="outline"
@@ -2068,7 +2320,8 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 										>
 											Ver
 										</Button>
-										{(userProfile.data?.role === "admin" || doc.uploadedBy?.id === session?.user?.id) && (
+										{(userProfile.data?.role === "admin" ||
+											doc.uploadedBy?.id === session?.user?.id) && (
 											<Button
 												size="sm"
 												variant="ghost"

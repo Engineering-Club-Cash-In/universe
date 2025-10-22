@@ -249,11 +249,11 @@ export function useStep3({
 
   // Obtener fecha completa en formato: "02 de junio de 2025"
   const getFormattedContractDate = useCallback((): string => {
-    const day = getCurrentDay();
+    const day = numberToText(Number(getCurrentDay()));
     const month = getCurrentMonthText();
-    const year = getCurrentYear();
-    return `${day} de ${month} de 20${year}`;
-  }, [getCurrentDay, getCurrentMonthText, getCurrentYear]);
+    const year = numberToText(Number(getCurrentYear()));
+    return `${day} de ${month} de dos mil ${year}`;
+  }, [getCurrentDay, getCurrentMonthText, getCurrentYear, numberToText]);
 
   // Validar un campo específico
   const validateField = useCallback((field: Field, value: string): string => {

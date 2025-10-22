@@ -2,9 +2,9 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	Banknote,
 	Building,
 	Calendar,
-	DollarSign,
 	Filter,
 	HandshakeIcon,
 	MoreHorizontal,
@@ -317,11 +317,11 @@ function RouteComponent() {
 						<CardTitle className="font-medium text-sm">
 							Valor de Contratos
 						</CardTitle>
-						<DollarSign className="h-4 w-4 text-purple-500" />
+						<Banknote className="h-4 w-4 text-purple-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							${totalContractValue.toLocaleString()}
+							Q{totalContractValue.toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">Cartera total</p>
 					</CardContent>
@@ -603,7 +603,7 @@ function RouteComponent() {
 										<TableCell>
 											{clientData.contractValue ? (
 												<div className="flex items-center gap-1 font-medium text-green-600">
-													<DollarSign className="h-3 w-3" />$
+													<Banknote className="h-3 w-3" />Q
 													{Number.parseFloat(
 														clientData.contractValue,
 													).toLocaleString()}

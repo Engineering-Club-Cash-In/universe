@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	Activity,
 	AlertTriangle,
-	DollarSign,
+	Banknote,
 	FileText,
 	TrendingDown,
 	TrendingUp,

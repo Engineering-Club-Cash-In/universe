@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import {
 	AlertCircle,
+	Banknote,
 	CalendarClock,
 	Car,
 	CheckCircle2,
-	DollarSign,
 	FileText,
 	Mail,
 	MapPin,
@@ -187,7 +187,7 @@ function RouteComponent() {
 						<CardTitle className="font-medium text-sm">
 							Monto Total en Mora
 						</CardTitle>
-						<DollarSign className="h-4 w-4 text-muted-foreground" />
+						<Banknote className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
@@ -336,7 +336,7 @@ function RouteComponent() {
 													{contrato.clienteNombre}
 												</div>
 												<div className="flex items-center gap-1">
-													<DollarSign className="h-3 w-3" />Q
+													<Banknote className="h-3 w-3" />Q
 													{Number(contrato.montoEnMora).toLocaleString()}
 												</div>
 												<div className="flex items-center gap-1">

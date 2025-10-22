@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
+	Banknote,
 	BarChart3,
 	Briefcase,
 	Building2,
 	Calculator,
 	Car,
 	ChevronDown,
-	DollarSign,
 	FileText,
 	Gavel,
 	Key,
@@ -180,7 +180,7 @@ export default function Header() {
 								asChild
 							>
 								<Link to="/cobros">
-									<DollarSign className="mr-2 h-4 w-4" />
+									<Banknote className="mr-2 h-4 w-4" />
 									Cobros
 								</Link>
 							</Button>

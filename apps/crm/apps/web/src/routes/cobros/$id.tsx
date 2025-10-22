@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
+	Banknote,
 	CalendarClock,
 	Car,
 	Clock,
-	DollarSign,
 	FileText,
 	Mail,
 	MapPin,
@@ -224,7 +224,7 @@ function RouteComponent() {
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
-										<DollarSign className="h-4 w-4 text-muted-foreground" />
+										<Banknote className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Monto en Mora:</span>
 									</div>
 									<p className="font-bold text-lg text-red-600">
@@ -411,7 +411,7 @@ function RouteComponent() {
 					<Card>
 						<CardHeader>
 							<CardTitle className="flex items-center gap-2">
-								<DollarSign className="h-5 w-5" />
+								<Banknote className="h-5 w-5" />
 								Historial de Cuotas
 							</CardTitle>
 							<CardDescription>

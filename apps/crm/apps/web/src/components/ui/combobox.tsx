@@ -62,7 +62,7 @@ export function Combobox({
 			<PopoverContent
 				align="start"
 				className={cn(
-					"p-0 min-w-[300px]",
+					"min-w-[300px] p-0",
 					popOverWidth === "full"
 						? "w-[var(--radix-popover-trigger-width)]"
 						: popOverWidth === "auto"

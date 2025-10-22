@@ -143,7 +143,7 @@ function RouteComponent() {
 			monthlyIncome: "",
 			loanAmount: "",
 			occupation: "employee" as "owner" | "employee",
-			workTime: "1_to_5" as "1_to_5" | "5_to_10" | "10_plus",
+			workTime: "1_to_5" as "less_than_1" | "1_to_5" | "5_to_10" | "10_plus",
 			loanPurpose: "personal" as "personal" | "business",
 			ownsHome: false,
 			ownsVehicle: false,

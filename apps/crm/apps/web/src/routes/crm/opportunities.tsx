@@ -56,7 +56,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
-import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
+import { formatGuatemalaDate, getStatusLabel, formatDate } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 // Simple draggable opportunity card component
@@ -126,7 +126,7 @@ function DraggableOpportunityCard({
 				{opportunity.expectedCloseDate && (
 					<div className="flex items-center gap-1 text-muted-foreground text-xs">
 						<Calendar className="h-3 w-3" />
-						{formatGuatemalaDate(opportunity.expectedCloseDate)}
+						{formatDate(opportunity.expectedCloseDate)}
 					</div>
 				)}
 
@@ -495,7 +495,7 @@ function RouteComponent() {
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			value: "",
 			stageId: "",
-			probability: 0,
+			probability: undefined as number | undefined,
 			expectedCloseDate: "",
 			vendorId: "none",
 			notes: "",
@@ -536,7 +536,7 @@ function RouteComponent() {
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			value: "",
 			stageId: "",
-			probability: 0,
+			probability: undefined as number | undefined,
 			expectedCloseDate: "",
 			notes: "",
 			numeroCuotas: "",
@@ -1832,11 +1832,20 @@ function RouteComponent() {
 													type="number"
 													min="0"
 													max="100"
-													value={field.state.value}
+													value={field.state.value ?? ""}
 													onBlur={field.handleBlur}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value))
-													}
+													onChange={(e) => {
+														let value = e.target.value;
+														console.log("Input value:", value);
+														if (value === "") {
+															field.handleChange(undefined);
+														} else {
+															let numericValue = Number(value);
+															if (numericValue < 0) numericValue = 0;
+															if (numericValue > 100) numericValue = 100;
+															field.handleChange(numericValue);
+														}
+													}}
 													placeholder="0"
 												/>
 											</div>

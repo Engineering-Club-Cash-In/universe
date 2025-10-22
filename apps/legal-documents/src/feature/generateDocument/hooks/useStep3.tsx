@@ -124,27 +124,109 @@ export function useStep3({
     return today.getDate().toString().padStart(2, "0");
   }, []);
 
+  // Función reutilizable para convertir números (1-99) a texto en español
+  const numberToText = useCallback((num: number): string => {
+    if (num < 1 || num > 99) return num.toString();
+
+    // Números del 0 al 30
+    const basicNumbers: Record<number, string> = {
+      0: "cero",
+      1: "uno",
+      2: "dos",
+      3: "tres",
+      4: "cuatro",
+      5: "cinco",
+      6: "seis",
+      7: "siete",
+      8: "ocho",
+      9: "nueve",
+      10: "diez",
+      11: "once",
+      12: "doce",
+      13: "trece",
+      14: "catorce",
+      15: "quince",
+      16: "dieciséis",
+      17: "diecisiete",
+      18: "dieciocho",
+      19: "diecinueve",
+      20: "veinte",
+      21: "veintiuno",
+      22: "veintidós",
+      23: "veintitrés",
+      24: "veinticuatro",
+      25: "veinticinco",
+      26: "veintiséis",
+      27: "veintisiete",
+      28: "veintiocho",
+      29: "veintinueve",
+      30: "treinta",
+    };
+
+    // Si está en el mapeo básico, retornarlo
+    if (basicNumbers[num]) {
+      return basicNumbers[num];
+    }
+
+    // Para números entre 31-99
+    if (num > 30) {
+      const tens = Math.floor(num / 10);
+      const units = num % 10;
+
+      const tensText: Record<number, string> = {
+        3: "treinta",
+        4: "cuarenta",
+        5: "cincuenta",
+        6: "sesenta",
+        7: "setenta",
+        8: "ochenta",
+        9: "noventa",
+      };
+
+      const unitsText: Record<number, string> = {
+        1: "uno",
+        2: "dos",
+        3: "tres",
+        4: "cuatro",
+        5: "cinco",
+        6: "seis",
+        7: "siete",
+        8: "ocho",
+        9: "nueve",
+      };
+
+      if (units === 0) {
+        return tensText[tens] || num.toString();
+      }
+
+      return `${tensText[tens]} y ${unitsText[units]}`;
+    }
+
+    return num.toString();
+  }, []);
+
   // Obtener el día actual en formato texto (uno, dos, tres, etc.)
   const getCurrentDayText = useCallback((): string => {
     const day = parseInt(getCurrentDay());
-    const daysText: Record<number, string> = {
-      1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
-      6: "seis", 7: "siete", 8: "ocho", 9: "nueve", 10: "diez",
-      11: "once", 12: "doce", 13: "trece", 14: "catorce", 15: "quince",
-      16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve", 20: "veinte",
-      21: "veintiuno", 22: "veintidós", 23: "veintitrés", 24: "veinticuatro", 25: "veinticinco",
-      26: "veintiséis", 27: "veintisiete", 28: "veintiocho", 29: "veintinueve", 30: "treinta",
-      31: "treinta y uno"
-    };
-    return daysText[day] || "";
-  }, [getCurrentDay]);
+    return numberToText(day);
+  }, [getCurrentDay, numberToText]);
 
   // Obtener el mes actual en formato texto (enero, febrero, etc.)
   const getCurrentMonthText = useCallback((): string => {
     const today = new Date();
     const months = [
-      "enero", "febrero", "marzo", "abril", "mayo", "junio",
-      "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+      "enero",
+      "febrero",
+      "marzo",
+      "abril",
+      "mayo",
+      "junio",
+      "julio",
+      "agosto",
+      "septiembre",
+      "octubre",
+      "noviembre",
+      "diciembre",
     ];
     return months[today.getMonth()];
   }, []);
@@ -161,52 +243,17 @@ export function useStep3({
     const today = new Date();
     const fullYear = today.getFullYear();
     const lastTwoDigits = fullYear % 100; // Obtener últimos 2 dígitos (ej: 2025 -> 25)
-    
-    // Mapeo de números a texto
-    const numbersToText: Record<number, string> = {
-      0: "cero",
-      1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
-      6: "seis", 7: "siete", 8: "ocho", 9: "nueve", 10: "diez",
-      11: "once", 12: "doce", 13: "trece", 14: "catorce", 15: "quince",
-      16: "dieciséis", 17: "diecisiete", 18: "dieciocho", 19: "diecinueve",
-      20: "veinte",
-      21: "veintiuno", 22: "veintidós", 23: "veintitrés", 24: "veinticuatro",
-      25: "veinticinco", 26: "veintiséis", 27: "veintisiete", 28: "veintiocho",
-      29: "veintinueve", 30: "treinta"
-    };
 
-    // Para números entre 31-99
-    if (lastTwoDigits > 30) {
-      const tens = Math.floor(lastTwoDigits / 10);
-      const units = lastTwoDigits % 10;
-      
-      const tensText: Record<number, string> = {
-        3: "treinta", 4: "cuarenta", 5: "cincuenta",
-        6: "sesenta", 7: "setenta", 8: "ochenta", 9: "noventa"
-      };
-      
-      const unitsText: Record<number, string> = {
-        1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
-        6: "seis", 7: "siete", 8: "ocho", 9: "nueve"
-      };
-      
-      if (units === 0) {
-        return tensText[tens] || lastTwoDigits.toString();
-      }
-      
-      return `${tensText[tens]} y ${unitsText[units]}`;
-    }
-    
-    return numbersToText[lastTwoDigits] || lastTwoDigits.toString();
-  }, []);
+    return numberToText(lastTwoDigits);
+  }, [numberToText]);
 
   // Obtener fecha completa en formato: "02 de junio de 2025"
   const getFormattedContractDate = useCallback((): string => {
-    const day = getCurrentDay();
+    const day = numberToText(Number(getCurrentDay()));
     const month = getCurrentMonthText();
-    const year = getCurrentYear();
-    return `${day} de ${month} de 20${year}`;
-  }, [getCurrentDay, getCurrentMonthText, getCurrentYear]);
+    const year = numberToText(Number(getCurrentYear()));
+    return `${day} de ${month} de dos mil ${year}`;
+  }, [getCurrentDay, getCurrentMonthText, getCurrentYear, numberToText]);
 
   // Validar un campo específico
   const validateField = useCallback((field: Field, value: string): string => {
@@ -238,7 +285,7 @@ export function useStep3({
     const filteredFields = fields.filter(
       (field) =>
         field.iddocuments.some((docId) =>
-          selectedDocuments.includes(parseInt(docId))
+          selectedDocuments.includes(docId)
         ) && !HIDDEN_FIELDS.includes(field.key?.toLowerCase())
     );
 
@@ -460,7 +507,7 @@ export function useStep3({
             case "edad":
             case "age":
               initialValues[field.key] = String(
-                calculateAge(renapData.birthDate)
+                numberToText(calculateAge(renapData.birthDate))
               );
               return;
             case "ocupacion":
@@ -565,6 +612,7 @@ export function useStep3({
     getCurrentYear,
     getCurrentYearText,
     getFormattedContractDate,
+    numberToText,
   ]);
 
   // Función para validar sin mostrar errores
@@ -646,5 +694,6 @@ export function useStep3({
     handleFieldChange,
     handleSubmit,
     setSelectedDocuments,
+    numberToText, // Función utilitaria para convertir números a texto
   };
 }

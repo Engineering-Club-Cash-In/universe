@@ -41,7 +41,7 @@ fi
 # Step 2: Build image
 echo -e "${YELLOW}🔨 Step 2/4: Building image with ${CONTAINER_CMD}...${NC}"
 echo -e "Using API URL: ${VITE_API_URL}"
-if ${CONTAINER_CMD} build --build-arg VITE_API_URL=${VITE_API_URL} -t ${IMAGE_NAME} .; then
+if ${CONTAINER_CMD} build --platform=linux/amd64 --build-arg VITE_API_URL=${VITE_API_URL} -t ${IMAGE_NAME} .; then
     echo -e "${GREEN}✅ Build successful${NC}\n"
 else
     echo -e "${RED}❌ Build failed${NC}"

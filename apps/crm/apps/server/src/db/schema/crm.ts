@@ -233,6 +233,13 @@ export const opportunities = pgTable("opportunities", {
 	// Vehicle vendor relationship
 	vendorId: uuid("vendor_id"),
 
+	// Credit terms - Required for creating financing contract at 100%
+	numeroCuotas: integer("numero_cuotas"), // Loan term in months
+	tasaInteres: decimal("tasa_interes", { precision: 5, scale: 2 }), // Annual interest rate
+	cuotaMensual: decimal("cuota_mensual", { precision: 12, scale: 2 }), // Monthly payment amount
+	fechaInicio: timestamp("fecha_inicio"), // Contract start date
+	diaPagoMensual: integer("dia_pago_mensual"), // Payment day of month (1-31)
+
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),

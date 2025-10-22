@@ -1,4 +1,6 @@
+import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
 	Table,
@@ -8,8 +10,6 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2 } from "lucide-react";
 import { MiniAgentCredentialsModal } from "./miniagent-credentials-modal";
 
 interface User {
@@ -77,7 +77,7 @@ export function MiniAgentCredentialsTable({ users, onSave }: Props) {
 									variant="ghost"
 									onClick={() => handleConfigure(user)}
 								>
-									<Pencil className="h-4 w-4 mr-2" />
+									<Pencil className="mr-2 h-4 w-4" />
 									{user.hasCredentials ? "Editar" : "Configurar"}
 								</Button>
 							</TableCell>

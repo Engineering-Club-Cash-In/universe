@@ -1,32 +1,29 @@
 import { db } from "./index";
+import { auctionExpenses, auctionVehicles } from "./schema/auctionVehicles";
+import {
+	casosCobros,
+	contactosCobros,
+	contratosFinanciamiento,
+	conveniosPago,
+	cuotasPago,
+	notificacionesCobros,
+	recuperacionesVehiculo,
+} from "./schema/cobros";
 import {
 	clients,
 	companies,
 	creditAnalysis,
 	leads,
+	magicUrls,
 	opportunities,
 	salesStages,
-	magicUrls,
 } from "./schema/crm";
 import {
-	vehicles,
+	inspectionChecklistItems,
 	vehicleInspections,
 	vehiclePhotos,
-	inspectionChecklistItems,
+	vehicles,
 } from "./schema/vehicles";
-import {
-	contratosFinanciamiento,
-	cuotasPago,
-	casosCobros,
-	contactosCobros,
-	conveniosPago,
-	recuperacionesVehiculo,
-	notificacionesCobros,
-} from "./schema/cobros";
-import {
-	auctionVehicles,
-	auctionExpenses,
-} from "./schema/auctionVehicles";
 
 async function clearAllCRMData() {
 	console.log("🗑️ Clearing all CRM data...");

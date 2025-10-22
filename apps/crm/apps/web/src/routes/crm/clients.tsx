@@ -2,9 +2,9 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	Banknote,
 	Building,
 	Calendar,
-	DollarSign,
 	Filter,
 	HandshakeIcon,
 	MoreHorizontal,
@@ -13,8 +13,8 @@ import {
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { PERMISSIONS } from "server/src/types/roles";
+import { toast } from "sonner";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -42,7 +43,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/react-datepicker";
 import {
 	Select,
 	SelectContent,
@@ -50,7 +51,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { DatePicker } from "@/components/ui/react-datepicker";
 import {
 	Table,
 	TableBody,
@@ -59,6 +59,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
@@ -127,8 +128,12 @@ function RouteComponent() {
 				...value,
 				companyId: value.companyId,
 				contractValue: value.contractValue || undefined,
-				startDate: value.startDate ? value.startDate.toISOString().split('T')[0] : undefined,
-				endDate: value.endDate ? value.endDate.toISOString().split('T')[0] : undefined,
+				startDate: value.startDate
+					? value.startDate.toISOString().split("T")[0]
+					: undefined,
+				endDate: value.endDate
+					? value.endDate.toISOString().split("T")[0]
+					: undefined,
 				assignedTo: value.assignedTo || undefined,
 				notes: value.notes || undefined,
 			});
@@ -312,11 +317,11 @@ function RouteComponent() {
 						<CardTitle className="font-medium text-sm">
 							Valor de Contratos
 						</CardTitle>
-						<DollarSign className="h-4 w-4 text-purple-500" />
+						<Banknote className="h-4 w-4 text-purple-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							${totalContractValue.toLocaleString()}
+							Q{totalContractValue.toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">Cartera total</p>
 					</CardContent>
@@ -347,7 +352,7 @@ function RouteComponent() {
 									Agregar Cliente
 								</Button>
 							</DialogTrigger>
-							<DialogContent className="max-w-3xl min-w-2xl">
+							<DialogContent className="min-w-2xl max-w-3xl">
 								<DialogHeader>
 									<DialogTitle>Crear Nuevo Cliente</DialogTitle>
 								</DialogHeader>
@@ -367,26 +372,18 @@ function RouteComponent() {
 														<Label htmlFor={field.name}>
 															Empresa <span className="text-red-500">*</span>
 														</Label>
-														<Select
-															value={field.state.value}
-															onValueChange={(value) =>
-																field.handleChange(value)
+														<Combobox
+															options={
+																companiesQuery.data?.map((company) => ({
+																	value: company.id,
+																	label: company.name,
+																})) || []
 															}
-														>
-															<SelectTrigger>
-																<SelectValue placeholder="Seleccionar empresa" />
-															</SelectTrigger>
-															<SelectContent>
-																{companiesQuery.data?.map((company) => (
-																	<SelectItem
-																		key={company.id}
-																		value={company.id}
-																	>
-																		{company.name}
-																	</SelectItem>
-																))}
-															</SelectContent>
-														</Select>
+															value={field.state.value ?? null}
+															onChange={(value) => field.handleChange(value)}
+															placeholder="Seleccionar empresa"
+															width="full"
+														/>
 													</div>
 												)}
 											</createClientForm.Field>
@@ -443,35 +440,18 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>Asignado a</Label>
-														<Select
-															value={field.state.value}
-															onValueChange={(value) => field.handleChange(value)}
-														>
-															<SelectTrigger size="full">
-																<SelectValue placeholder="Seleccionar vendedor" />
-															</SelectTrigger>
-															<SelectContent size="full">
-																{crmUsersQuery.isLoading ? (
-																	<SelectItem value="" disabled>
-																		Cargando usuarios...
-																	</SelectItem>
-																) : crmUsersQuery.isError ? (
-																	<SelectItem value="" disabled>
-																		Error al cargar usuarios
-																	</SelectItem>
-																) : !crmUsersQuery.data || crmUsersQuery.data.length === 0 ? (
-																	<SelectItem value="" disabled>
-																		No hay usuarios disponibles
-																	</SelectItem>
-																) : (
-																	crmUsersQuery.data.map((user) => (
-																		<SelectItem key={user.id} value={user.id}>
-																			{user.name}
-																		</SelectItem>
-																	))
-																)}
-															</SelectContent>
-														</Select>
+														<Combobox
+															options={
+																crmUsersQuery.data?.map((user) => ({
+																	value: user.id,
+																	label: user.name,
+																})) || []
+															}
+															value={field.state.value ?? null}
+															onChange={(value) => field.handleChange(value)}
+															placeholder="Seleccionar vendedor"
+															width="full"
+														/>
 													</div>
 												)}
 											</createClientForm.Field>
@@ -623,7 +603,7 @@ function RouteComponent() {
 										<TableCell>
 											{clientData.contractValue ? (
 												<div className="flex items-center gap-1 font-medium text-green-600">
-													$
+													<Banknote className="h-3 w-3" />Q
 													{Number.parseFloat(
 														clientData.contractValue,
 													).toLocaleString()}

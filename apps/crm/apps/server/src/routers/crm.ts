@@ -1,7 +1,9 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
+import { vehicleInspections } from "@/db/schema";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
 import {
 	clients,
 	companies,
@@ -11,16 +13,19 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { documentRequirements, documentValidations, opportunityDocuments } from "../db/schema/documents";
+import {
+	documentRequirements,
+	documentValidations,
+	opportunityDocuments,
+} from "../db/schema/documents";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
-import { 
-	uploadFileToR2, 
-	getFileUrl, 
-	deleteFileFromR2, 
+import {
+	deleteFileFromR2,
 	generateUniqueFilename,
+	getFileUrl,
+	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
-import { vehicleInspections } from "@/db/schema";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -231,7 +236,9 @@ export const crmRouter = {
 				monthlyIncome: z.number().positive().optional(),
 				loanAmount: z.number().positive().optional(),
 				occupation: z.enum(["owner", "employee"]).optional(),
-				workTime: z.enum(["1_to_5", "5_to_10", "10_plus"]).optional(),
+				workTime: z
+					.enum(["less_than_1", "1_to_5", "5_to_10", "10_plus"])
+					.optional(),
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				ownsHome: z.boolean().default(false),
 				ownsVehicle: z.boolean().default(false),
@@ -291,7 +298,9 @@ export const crmRouter = {
 				monthlyIncome: z.number().positive().optional(),
 				loanAmount: z.number().positive().optional(),
 				occupation: z.enum(["owner", "employee"]).optional(),
-				workTime: z.enum(["1_to_5", "5_to_10", "10_plus"]).optional(),
+				workTime: z
+					.enum(["less_than_1", "1_to_5", "5_to_10", "10_plus"])
+					.optional(),
 				loanPurpose: z.enum(["personal", "business"]).optional(),
 				ownsHome: z.boolean().optional(),
 				ownsVehicle: z.boolean().optional(),
@@ -398,6 +407,8 @@ export const crmRouter = {
 				.select({
 					id: opportunities.id,
 					title: opportunities.title,
+					vehicleId: opportunities.vehicleId,
+					creditType: opportunities.creditType,
 					value: opportunities.value,
 					probability: opportunities.probability,
 					expectedCloseDate: opportunities.expectedCloseDate,
@@ -439,6 +450,8 @@ export const crmRouter = {
 			.select({
 				id: opportunities.id,
 				title: opportunities.title,
+				vehicleId: opportunities.vehicleId,
+				creditType: opportunities.creditType,
 				value: opportunities.value,
 				probability: opportunities.probability,
 				expectedCloseDate: opportunities.expectedCloseDate,
@@ -540,7 +553,7 @@ export const crmRouter = {
 				title: z.string().min(1, "Title is required").optional(),
 				leadId: z.string().uuid().optional(),
 				companyId: z.string().uuid().optional(),
-				vehicleId: z.string().uuid().optional(),
+				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
 				value: z.string().optional(),
 				stageId: z.string().uuid().optional(),
@@ -550,6 +563,12 @@ export const crmRouter = {
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				notes: z.string().optional(),
 				stageChangeReason: z.string().optional(),
+				// Credit terms
+				numeroCuotas: z.number().int().positive().optional(),
+				tasaInteres: z.string().optional(),
+				cuotaMensual: z.string().optional(),
+				fechaInicio: z.string().optional(),
+				diaPagoMensual: z.number().int().min(1).max(31).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -564,6 +583,173 @@ export const crmRouter = {
 
 			if (!currentOpportunity[0]) {
 				throw new Error("Opportunity not found");
+			}
+
+			// Validate credit terms if moving to 100% stage
+			if (input.stageId) {
+				const targetStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, input.stageId))
+					.limit(1);
+
+				if (targetStage[0]?.closurePercentage === 100) {
+					// Check all required fields for contract creation
+					const opp = currentOpportunity[0];
+					const missingFields: string[] = [];
+
+					if (!opp.vehicleId && !input.vehicleId)
+						missingFields.push("vehículo");
+					if (!opp.leadId) missingFields.push("lead/contacto");
+					if (!opp.value && !input.value)
+						missingFields.push("valor del crédito");
+
+					// Credit terms
+					const numeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
+					const tasaInteres = input.tasaInteres ?? opp.tasaInteres;
+					const cuotaMensual = input.cuotaMensual ?? opp.cuotaMensual;
+					const fechaInicio = input.fechaInicio ?? opp.fechaInicio;
+					const diaPagoMensual = input.diaPagoMensual ?? opp.diaPagoMensual;
+
+					if (!numeroCuotas) missingFields.push("número de cuotas");
+					if (!tasaInteres) missingFields.push("tasa de interés");
+					if (!cuotaMensual) missingFields.push("cuota mensual");
+					if (!fechaInicio) missingFields.push("fecha de inicio del contrato");
+					if (!diaPagoMensual) missingFields.push("día de pago mensual");
+
+					if (missingFields.length > 0) {
+						throw new Error(
+							`No se puede cerrar la oportunidad al 100%. Faltan los siguientes datos: ${missingFields.join(", ")}`,
+						);
+					}
+
+					// If moving to 100%, create client and contract
+					if (targetStage[0]?.closurePercentage === 100) {
+						// All validations passed - create client and contract
+						const opp = currentOpportunity[0];
+						const finalVehicleId = input.vehicleId ?? opp.vehicleId;
+						const finalValue = input.value ?? opp.value;
+						const finalNumeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
+						const finalTasaInteres = input.tasaInteres ?? opp.tasaInteres;
+						const finalCuotaMensual = input.cuotaMensual ?? opp.cuotaMensual;
+						const finalFechaInicio = input.fechaInicio ?? opp.fechaInicio;
+						const finalDiaPagoMensual =
+							input.diaPagoMensual ?? opp.diaPagoMensual;
+
+						if (!opp.leadId) {
+							throw new Error(
+								"No se puede crear el contrato sin un lead asociado",
+							);
+						}
+
+						// Get lead data to obtain companyId
+						const leadData = await db
+							.select()
+							.from(leads)
+							.where(eq(leads.id, opp.leadId))
+							.limit(1);
+
+						if (!leadData[0]) {
+							throw new Error("Lead no encontrado");
+						}
+
+						const lead = leadData[0];
+						const companyId = opp.companyId ?? lead.companyId;
+
+						if (!companyId) {
+							throw new Error(
+								"El lead debe tener una empresa asociada para crear el contrato",
+							);
+						}
+
+						// Check if client already exists for this lead/company
+						const existingClient = await db
+							.select()
+							.from(clients)
+							.where(
+								and(
+									eq(clients.companyId, companyId),
+									eq(clients.opportunityId, opp.id),
+								),
+							)
+							.limit(1);
+
+						let clientId: string;
+
+						if (existingClient.length > 0) {
+							clientId = existingClient[0].id;
+						} else {
+							// Create new client
+							const newClient = await db
+								.insert(clients)
+								.values({
+									companyId,
+									opportunityId: opp.id,
+									contactPerson: `${lead.firstName} ${lead.lastName}`,
+									contractValue: finalValue,
+									startDate: new Date(finalFechaInicio as string),
+									status: "active",
+									assignedTo: opp.assignedTo,
+									notes: `Cliente generado automáticamente desde oportunidad: ${opp.title}`,
+									createdBy: context.userId,
+								})
+								.returning();
+
+							clientId = newClient[0].id;
+						}
+
+						// Calculate contract end date
+						const fechaInicioDate = new Date(finalFechaInicio as string);
+						const fechaVencimiento = new Date(fechaInicioDate);
+						fechaVencimiento.setMonth(
+							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
+						);
+
+						// Create financing contract
+						const newContract = await db
+							.insert(contratosFinanciamiento)
+							.values({
+								clientId,
+								vehicleId: finalVehicleId as string,
+								montoFinanciado: finalValue as string,
+								cuotaMensual: finalCuotaMensual as string,
+								numeroCuotas: finalNumeroCuotas as number,
+								tasaInteres: finalTasaInteres as string,
+								fechaInicio: fechaInicioDate,
+								fechaVencimiento,
+								diaPagoMensual: finalDiaPagoMensual as number,
+								estado: "activo",
+								notes: `Contrato generado desde oportunidad: ${opp.title}`,
+								createdBy: context.userId,
+							})
+							.returning();
+
+						// Generate payment installments (cuotas)
+						const cuotasValues = [];
+						for (let i = 1; i <= (finalNumeroCuotas as number); i++) {
+							const fechaVencimientoCuota = new Date(fechaInicioDate);
+							fechaVencimientoCuota.setMonth(
+								fechaVencimientoCuota.getMonth() + i,
+							);
+							// Set to the payment day of the month
+							fechaVencimientoCuota.setDate(finalDiaPagoMensual as number);
+
+							cuotasValues.push({
+								contratoId: newContract[0].id,
+								numeroCuota: i,
+								fechaVencimiento: fechaVencimientoCuota,
+								montoCuota: finalCuotaMensual as string,
+								estadoMora: "al_dia" as const,
+								diasMora: 0,
+							});
+						}
+
+						await db.insert(cuotasPago).values(cuotasValues);
+
+						// Update opportunity to mark as won and set close date
+						updateData.status = "won";
+					}
+				}
 			}
 
 			// Sales users can only update opportunities assigned to them
@@ -618,6 +804,10 @@ export const crmRouter = {
 					expectedCloseDate: updateData.expectedCloseDate
 						? new Date(updateData.expectedCloseDate)
 						: undefined,
+					fechaInicio: updateData.fechaInicio
+						? new Date(updateData.fechaInicio)
+						: undefined,
+					...(updateData.status === "won" && { actualCloseDate: new Date() }),
 					updatedAt: new Date(),
 				})
 				.where(whereClause)
@@ -649,13 +839,19 @@ export const crmRouter = {
 		}),
 
 	// Analyst specific endpoints
-	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context: _ }) => {
-		// Get the stage ID for "Recepción de documentación y traslado a análisis"
-		const analysisStage = await db
-			.select()
-			.from(salesStages)
-			.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
-			.limit(1);
+	getOpportunitiesForAnalysis: analystProcedure.handler(
+		async ({ context: _ }) => {
+			// Get the stage ID for "Recepción de documentación y traslado a análisis"
+			const analysisStage = await db
+				.select()
+				.from(salesStages)
+				.where(
+					eq(
+						salesStages.name,
+						"Recepción de documentación y traslado a análisis",
+					),
+				)
+				.limit(1);
 
 			if (!analysisStage[0]) {
 				throw new Error("Analysis stage not found");
@@ -1309,9 +1505,8 @@ export const crmRouter = {
 					.where(eq(opportunityDocuments.id, input.documentId));
 
 				return { success: true };
-			} else {
-				throw new Error("No tienes permiso para eliminar este documento");
 			}
+			throw new Error("No tienes permiso para eliminar este documento");
 		}),
 
 	// Validate opportunity documents - Para analistas
@@ -1319,11 +1514,6 @@ export const crmRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			try {
-				console.log(
-					"[validateOpportunityDocuments] Starting validation for:",
-					input.opportunityId,
-				);
-
 				// 1. Obtener oportunidad con vehículo
 				const [opp] = await db
 					.select()
@@ -1331,26 +1521,14 @@ export const crmRouter = {
 					.where(eq(opportunities.id, input.opportunityId))
 					.limit(1);
 
-				console.log("[validateOpportunityDocuments] Opportunity found:", !!opp);
-
 				if (!opp) {
 					throw new Error("Oportunidad no encontrada");
 				}
 
-				console.log(
-					"[validateOpportunityDocuments] vehicleId:",
-					opp.vehicleId,
-					"creditType:",
-					opp.creditType,
-				);
-
-				// Si falta vehicleId o creditType, devolver validación fallida sin lanzar error
-				if (!opp.vehicleId || !opp.creditType) {
-					console.log(
-						"[validateOpportunityDocuments] Missing basic requirements - returning failed validation",
-					);
+				// Si falta creditType, no podemos determinar requisitos
+				if (!opp.creditType) {
 					return {
-						creditType: opp.creditType || "unknown",
+						creditType: "unknown",
 						vehicleInspected: false,
 						allDocumentsPresent: false,
 						canApprove: false,
@@ -1364,31 +1542,28 @@ export const crmRouter = {
 					};
 				}
 
-				// 2. Validar inspección del vehículo
-				console.log(
-					"[validateOpportunityDocuments] Checking vehicle inspection...",
-				);
-				const inspection = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opp.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
-					.limit(1);
+				// 2. Validar inspección del vehículo (solo si hay vehículo asociado)
+				let vehicleInspected = false;
+				let inspectionStatus = "pending";
+				if (opp.vehicleId) {
+					const inspection = await db
+						.select()
+						.from(vehicleInspections)
+						.where(
+							and(
+								eq(vehicleInspections.vehicleId, opp.vehicleId),
+								eq(vehicleInspections.status, "approved"),
+							),
+						)
+						.limit(1);
 
-				const vehicleInspected = inspection.length > 0;
-				console.log(
-					"[validateOpportunityDocuments] Vehicle inspected:",
-					vehicleInspected,
-				);
+					vehicleInspected = inspection.length > 0;
+					if (inspection.length > 0) {
+						inspectionStatus = inspection[0].status;
+					}
+				}
 
 				// 3. Obtener documentos requeridos según tipo de crédito
-				console.log(
-					"[validateOpportunityDocuments] Fetching required documents...",
-				);
 				const requiredDocs = await db
 					.select()
 					.from(documentRequirements)
@@ -1399,24 +1574,11 @@ export const crmRouter = {
 						),
 					);
 
-				console.log(
-					"[validateOpportunityDocuments] Required docs count:",
-					requiredDocs.length,
-				);
-
 				// 4. Obtener documentos subidos
-				console.log(
-					"[validateOpportunityDocuments] Fetching uploaded documents...",
-				);
 				const uploadedDocs = await db
 					.select()
 					.from(opportunityDocuments)
 					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
-
-				console.log(
-					"[validateOpportunityDocuments] Uploaded docs count:",
-					uploadedDocs.length,
-				);
 
 				// 5. Calcular documentos faltantes
 				const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
@@ -1425,11 +1587,6 @@ export const crmRouter = {
 
 				const allDocumentsPresent = missingDocs.length === 0;
 				const canApprove = allDocumentsPresent && vehicleInspected;
-
-				console.log(
-					"[validateOpportunityDocuments] Validation complete - canApprove:",
-					canApprove,
-				);
 
 				return {
 					creditType: opp.creditType,
@@ -1441,8 +1598,7 @@ export const crmRouter = {
 					missingDocuments: missingDocs,
 					vehicleInfo: {
 						id: opp.vehicleId,
-						inspectionStatus:
-							inspection.length > 0 ? inspection[0].status : "pending",
+						inspectionStatus,
 					},
 				};
 			} catch (error) {

@@ -1,8 +1,8 @@
+import { gte, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { insuranceCosts } from "../db/schema";
 import { publicProcedure } from "../lib/orpc";
-import { sql, lte, gte } from "drizzle-orm";
 
 /**
  * Función para calcular el costo de seguro basado en el tipo de vehículo y el monto asegurado
@@ -12,7 +12,7 @@ import { sql, lte, gte } from "drizzle-orm";
  */
 async function getInsuranceCost(
 	insuredAmount: number,
-	vehicleType: string
+	vehicleType: string,
 ): Promise<{ insuranceCost: number; membershipCost: number }> {
 	const GPS_COST = 148.2;
 
@@ -93,12 +93,12 @@ export const insuranceRouter = {
 						"microbus",
 					])
 					.default("particular"),
-			})
+			}),
 		)
 		.handler(async ({ input }) => {
 			const result = await getInsuranceCost(
 				input.insuredAmount,
-				input.vehicleType
+				input.vehicleType,
 			);
 			return result;
 		}),

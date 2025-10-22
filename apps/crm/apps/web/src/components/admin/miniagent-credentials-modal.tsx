@@ -1,6 +1,7 @@
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import {
 	Dialog,
 	DialogContent,
@@ -9,7 +10,6 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { client } from "@/utils/orpc";
@@ -69,9 +69,7 @@ export function MiniAgentCredentialsModal({
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			<DialogContent className="sm:max-w-[425px]">
 				<DialogHeader>
-					<DialogTitle>
-						Configurar credenciales de MiniAgent
-					</DialogTitle>
+					<DialogTitle>Configurar credenciales de MiniAgent</DialogTitle>
 					<DialogDescription>
 						Configura el email y contraseña de MiniAgent para {user.name}
 					</DialogDescription>

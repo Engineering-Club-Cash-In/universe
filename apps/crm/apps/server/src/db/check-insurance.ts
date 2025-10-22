@@ -1,6 +1,6 @@
+import { lte, sql } from "drizzle-orm";
 import { db } from "./index";
 import { insuranceCosts } from "./schema";
-import { lte, sql } from "drizzle-orm";
 
 async function checkInsurance() {
 	// Buscar para 50000 (el ejemplo del Excel)
@@ -30,7 +30,7 @@ async function checkInsurance() {
 	console.log("\nRegistros cercanos a 50000:");
 	around.forEach((r) => {
 		console.log(
-			`Price: ${r.price}, INREXSA: ${r.inrexsa}, Membership: ${r.membership}`
+			`Price: ${r.price}, INREXSA: ${r.inrexsa}, Membership: ${r.membership}`,
 		);
 	});
 

@@ -1,22 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
 import {
+	AlertCircle,
+	Banknote,
 	CalendarClock,
-	DollarSign,
+	Car,
+	CheckCircle2,
 	FileText,
 	Mail,
+	MapPin,
 	MessageCircle,
 	Phone,
+	Shield,
 	TrendingDown,
 	TrendingUp,
 	Users,
-	Car,
-	MapPin,
-	Shield,
-	AlertCircle,
-	CheckCircle2,
 } from "lucide-react";
+import { useState } from "react";
+import { PERMISSIONS } from "server/src/types/roles";
+import { ContactoModal } from "@/components/contacto-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,8 +30,6 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
-import { PERMISSIONS } from "server/src/types/roles";
-import { ContactoModal } from "@/components/contacto-modal";
 
 export const Route = createFileRoute("/cobros/")({
 	component: RouteComponent,
@@ -38,12 +38,12 @@ export const Route = createFileRoute("/cobros/")({
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
 	const navigate = useNavigate();
-	
+
 	// Obtener estadísticas del dashboard
 	const dashboardStats = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions(),
 		enabled: !!session,
-	})
+	});
 
 	// Obtener todos los contratos (al día, en mora, incobrables)
 	const todosLosContratos = useQuery({
@@ -51,16 +51,15 @@ function RouteComponent() {
 			input: {
 				limit: 20,
 				offset: 0,
-			}
+			},
 		}),
 		enabled: !!session,
-	})
-
+	});
 
 	const userProfile = useQuery({
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session,
-	})
+	});
 
 	const userRole = userProfile.data?.role;
 
@@ -69,7 +68,7 @@ function RouteComponent() {
 		return (
 			<div className="container mx-auto p-6">
 				<div className="text-center">
-					<h1 className="text-2xl font-bold text-gray-900 mb-4">
+					<h1 className="mb-4 font-bold text-2xl text-gray-900">
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
@@ -77,7 +76,7 @@ function RouteComponent() {
 					</p>
 				</div>
 			</div>
-		)
+		);
 	}
 
 	const stats = dashboardStats.data?.estatusStats || [];
@@ -85,59 +84,64 @@ function RouteComponent() {
 
 	// Crear embudo visual de estados
 	const embudoEstados = [
-		{ 
-			key: "al_dia", 
-			label: "Al Día", 
+		{
+			key: "al_dia",
+			label: "Al Día",
 			color: "bg-green-100 text-green-800",
-			icon: CheckCircle2
+			icon: CheckCircle2,
 		},
-		{ 
-			key: "mora_30", 
-			label: "Mora 30", 
+		{
+			key: "mora_30",
+			label: "Mora 30",
 			color: "bg-yellow-100 text-yellow-800",
-			icon: AlertCircle
+			icon: AlertCircle,
 		},
-		{ 
-			key: "mora_60", 
-			label: "Mora 60", 
+		{
+			key: "mora_60",
+			label: "Mora 60",
 			color: "bg-orange-100 text-orange-800",
-			icon: AlertCircle
+			icon: AlertCircle,
 		},
-		{ 
-			key: "mora_90", 
-			label: "Mora 90", 
+		{
+			key: "mora_90",
+			label: "Mora 90",
 			color: "bg-red-100 text-red-800",
-			icon: AlertCircle
+			icon: AlertCircle,
 		},
-		{ 
-			key: "mora_120", 
-			label: "Mora 120", 
+		{
+			key: "mora_120",
+			label: "Mora 120",
 			color: "bg-red-200 text-red-900",
-			icon: AlertCircle
+			icon: AlertCircle,
 		},
-		{ 
-			key: "incobrable", 
-			label: "Incobrable", 
+		{
+			key: "incobrable",
+			label: "Incobrable",
 			color: "bg-gray-100 text-gray-800",
-			icon: FileText
+			icon: FileText,
 		},
-		{ 
-			key: "completado", 
-			label: "Completado", 
+		{
+			key: "completado",
+			label: "Completado",
 			color: "bg-blue-100 text-blue-800",
-			icon: CheckCircle2
-		}
-	]
+			icon: CheckCircle2,
+		},
+	];
 
 	const getEstadoStats = (estado: string) => {
-		return stats.find(s => s.estadoMora === estado) || { totalCases: 0, montoTotal: "0" };
-	}
+		return (
+			stats.find((s) => s.estadoMora === estado) || {
+				totalCases: 0,
+				montoTotal: "0",
+			}
+		);
+	};
 
 	return (
-		<div className="container mx-auto p-6 space-y-6">
+		<div className="container mx-auto space-y-6 p-6">
 			<div className="flex items-center justify-between">
 				<div>
-					<h1 className="text-3xl font-bold">Dashboard de Cobros</h1>
+					<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
 					<p className="text-muted-foreground">
 						Gestión y seguimiento de cobranza
 					</p>
@@ -148,16 +152,16 @@ function RouteComponent() {
 			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
+						<CardTitle className="font-medium text-sm">
 							Total Casos Asignados
 						</CardTitle>
 						<Users className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">
+						<div className="font-bold text-2xl">
 							{dashboardStats.data?.totalCasosAsignados || 0}
 						</div>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							Casos bajo tu responsabilidad
 						</p>
 					</CardContent>
@@ -165,16 +169,14 @@ function RouteComponent() {
 
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
-							Contactos Hoy
-						</CardTitle>
+						<CardTitle className="font-medium text-sm">Contactos Hoy</CardTitle>
 						<Phone className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">
+						<div className="font-bold text-2xl">
 							{dashboardStats.data?.contactosHoy || 0}
 						</div>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							Interacciones realizadas hoy
 						</p>
 					</CardContent>
@@ -182,16 +184,19 @@ function RouteComponent() {
 
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
+						<CardTitle className="font-medium text-sm">
 							Monto Total en Mora
 						</CardTitle>
-						<DollarSign className="h-4 w-4 text-muted-foreground" />
+						<Banknote className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">
-							Q{stats.reduce((sum, s) => sum + Number(s.montoTotal || 0), 0).toLocaleString()}
+						<div className="font-bold text-2xl">
+							Q
+							{stats
+								.reduce((sum, s) => sum + Number(s.montoTotal || 0), 0)
+								.toLocaleString()}
 						</div>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							Suma de todos los montos en mora
 						</p>
 					</CardContent>
@@ -199,14 +204,12 @@ function RouteComponent() {
 
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
-							Efectividad
-						</CardTitle>
+						<CardTitle className="font-medium text-sm">Efectividad</CardTitle>
 						<TrendingUp className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">85%</div>
-						<p className="text-xs text-muted-foreground">
+						<div className="font-bold text-2xl">85%</div>
+						<p className="text-muted-foreground text-xs">
 							Tasa de recuperación mensual
 						</p>
 					</CardContent>
@@ -229,27 +232,25 @@ function RouteComponent() {
 						{embudoEstados.map((estado) => {
 							const stats = getEstadoStats(estado.key);
 							const Icon = estado.icon;
-							
+
 							return (
 								<div key={estado.key} className="text-center">
-									<Card className="border-2 hover:shadow-md transition-shadow cursor-pointer">
+									<Card className="cursor-pointer border-2 transition-shadow hover:shadow-md">
 										<CardContent className="p-4">
 											<div className="flex flex-col items-center gap-2">
 												<Icon className="h-8 w-8 text-muted-foreground" />
-												<Badge className={estado.color}>
-													{estado.label}
-												</Badge>
-												<div className="text-2xl font-bold">
+												<Badge className={estado.color}>{estado.label}</Badge>
+												<div className="font-bold text-2xl">
 													{stats.totalCases}
 												</div>
-												<div className="text-sm text-muted-foreground">
+												<div className="text-muted-foreground text-sm">
 													Q{Number(stats.montoTotal || 0).toLocaleString()}
 												</div>
 											</div>
 										</CardContent>
 									</Card>
 								</div>
-							)
+							);
 						})}
 					</div>
 				</CardContent>
@@ -262,15 +263,13 @@ function RouteComponent() {
 						<FileText className="h-5 w-5" />
 						Casos Recientes
 					</CardTitle>
-					<CardDescription>
-						Últimos casos de cobranza asignados
-					</CardDescription>
+					<CardDescription>Últimos casos de cobranza asignados</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<div className="space-y-4">
 						{contratos.length === 0 ? (
-							<div className="text-center py-8">
-								<FileText className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+							<div className="py-8 text-center">
+								<FileText className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
 								<p className="text-muted-foreground">
 									No hay contratos de financiamiento
 								</p>
@@ -278,116 +277,135 @@ function RouteComponent() {
 						) : (
 							contratos.slice(0, 10).map((contrato) => {
 								// Determinar estado visual según el tipo de contrato
-								const estadoVisual = contrato.estadoContrato === "activo" 
-									? (contrato.estadoMora || "al_dia")
-									: contrato.estadoContrato;
-								
-								const esAlDia = estadoVisual === "al_dia" || (!contrato.casoCobroId && contrato.estadoContrato === "activo");
+								const estadoVisual =
+									contrato.estadoContrato === "activo"
+										? contrato.estadoMora || "al_dia"
+										: contrato.estadoContrato;
+
+								const esAlDia =
+									estadoVisual === "al_dia" ||
+									(!contrato.casoCobroId &&
+										contrato.estadoContrato === "activo");
 								const linkId = contrato.casoCobroId || contrato.contratoId;
 								const tipoLink = contrato.casoCobroId ? "caso" : "contrato";
-								
+
 								return (
-								<div
-									key={contrato.contratoId}
-									className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
-								>
-									<div className="space-y-2">
-										<div className="flex items-center gap-4">
-											<div className="flex items-center gap-2">
-												<Car className="h-4 w-4 text-muted-foreground" />
-												<span className="font-medium">
-													{contrato.vehiculoMarca} {contrato.vehiculoModelo} {contrato.vehiculoYear}
-												</span>
-												<Badge variant="outline">
-													{contrato.vehiculoPlaca}
+									<div
+										key={contrato.contratoId}
+										className="flex items-center justify-between rounded-lg border p-4 transition-colors hover:bg-muted/50"
+									>
+										<div className="space-y-2">
+											<div className="flex items-center gap-4">
+												<div className="flex items-center gap-2">
+													<Car className="h-4 w-4 text-muted-foreground" />
+													<span className="font-medium">
+														{contrato.vehiculoMarca} {contrato.vehiculoModelo}{" "}
+														{contrato.vehiculoYear}
+													</span>
+													<Badge variant="outline">
+														{contrato.vehiculoPlaca}
+													</Badge>
+												</div>
+												<Badge
+													className={
+														estadoVisual === "al_dia"
+															? "bg-green-100 text-green-800"
+															: estadoVisual === "mora_30"
+																? "bg-yellow-100 text-yellow-800"
+																: estadoVisual === "mora_60"
+																	? "bg-orange-100 text-orange-800"
+																	: estadoVisual === "mora_90"
+																		? "bg-red-100 text-red-800"
+																		: estadoVisual === "mora_120"
+																			? "bg-red-200 text-red-900"
+																			: estadoVisual === "incobrable"
+																				? "bg-gray-100 text-gray-800"
+																				: estadoVisual === "completado"
+																					? "bg-blue-100 text-blue-800"
+																					: "bg-gray-100 text-gray-800"
+													}
+												>
+													{esAlDia
+														? "AL DÍA"
+														: estadoVisual?.replace("_", " ")?.toUpperCase()}
 												</Badge>
 											</div>
-											<Badge className={
-												estadoVisual === 'al_dia' ? 'bg-green-100 text-green-800' :
-												estadoVisual === 'mora_30' ? 'bg-yellow-100 text-yellow-800' :
-												estadoVisual === 'mora_60' ? 'bg-orange-100 text-orange-800' :
-												estadoVisual === 'mora_90' ? 'bg-red-100 text-red-800' :
-												estadoVisual === 'mora_120' ? 'bg-red-200 text-red-900' :
-												estadoVisual === 'incobrable' ? 'bg-gray-100 text-gray-800' :
-												estadoVisual === 'completado' ? 'bg-blue-100 text-blue-800' :
-												'bg-gray-100 text-gray-800'
-											}>
-												{esAlDia ? "AL DÍA" : estadoVisual?.replace('_', ' ')?.toUpperCase()}
-											</Badge>
-										</div>
-										<div className="flex items-center gap-4 text-sm text-muted-foreground">
-											<div className="flex items-center gap-1">
-												<Users className="h-3 w-3" />
-												{contrato.clienteNombre}
-											</div>
-											<div className="flex items-center gap-1">
-												Q{Number(contrato.montoEnMora).toLocaleString()}
-											</div>
-											<div className="flex items-center gap-1">
-												<CalendarClock className="h-3 w-3" />
-												{contrato.diasMoraMaximo} días
+											<div className="flex items-center gap-4 text-muted-foreground text-sm">
+												<div className="flex items-center gap-1">
+													<Users className="h-3 w-3" />
+													{contrato.clienteNombre}
+												</div>
+												<div className="flex items-center gap-1">
+													<Banknote className="h-3 w-3" />Q
+													{Number(contrato.montoEnMora).toLocaleString()}
+												</div>
+												<div className="flex items-center gap-1">
+													<CalendarClock className="h-3 w-3" />
+													{contrato.diasMoraMaximo} días
+												</div>
 											</div>
 										</div>
+
+										<div className="flex items-center gap-2">
+											{/* Botones de contacto solo para casos activos */}
+											{contrato.casoCobroId && !esAlDia && (
+												<>
+													<ContactoModal
+														casoCobroId={contrato.casoCobroId}
+														clienteNombre={contrato.clienteNombre || ""}
+														telefonoPrincipal={contrato.telefonoPrincipal || ""}
+														metodoInicial="llamada"
+													>
+														<Button variant="outline" size="sm">
+															<Phone className="h-4 w-4" />
+														</Button>
+													</ContactoModal>
+
+													<ContactoModal
+														casoCobroId={contrato.casoCobroId}
+														clienteNombre={contrato.clienteNombre || ""}
+														telefonoPrincipal={contrato.telefonoPrincipal || ""}
+														metodoInicial="whatsapp"
+													>
+														<Button variant="outline" size="sm">
+															<MessageCircle className="h-4 w-4" />
+														</Button>
+													</ContactoModal>
+
+													<ContactoModal
+														casoCobroId={contrato.casoCobroId}
+														clienteNombre={contrato.clienteNombre || ""}
+														telefonoPrincipal={contrato.telefonoPrincipal || ""}
+														metodoInicial="email"
+													>
+														<Button variant="outline" size="sm">
+															<Mail className="h-4 w-4" />
+														</Button>
+													</ContactoModal>
+												</>
+											)}
+
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() =>
+													navigate({
+														to: "/cobros/$id",
+														params: { id: linkId },
+														search: { tipo: tipoLink },
+													})
+												}
+											>
+												Ver Detalles
+											</Button>
+										</div>
 									</div>
-									
-									<div className="flex items-center gap-2">
-										{/* Botones de contacto solo para casos activos */}
-										{contrato.casoCobroId && !esAlDia && (
-											<>
-												<ContactoModal
-													casoCobroId={contrato.casoCobroId}
-													clienteNombre={contrato.clienteNombre || ""}
-													telefonoPrincipal={contrato.telefonoPrincipal || ""}
-													metodoInicial="llamada"
-												>
-													<Button variant="outline" size="sm">
-														<Phone className="h-4 w-4" />
-													</Button>
-												</ContactoModal>
-
-												<ContactoModal
-													casoCobroId={contrato.casoCobroId}
-													clienteNombre={contrato.clienteNombre || ""}
-													telefonoPrincipal={contrato.telefonoPrincipal || ""}
-													metodoInicial="whatsapp"
-												>
-													<Button variant="outline" size="sm">
-														<MessageCircle className="h-4 w-4" />
-													</Button>
-												</ContactoModal>
-
-												<ContactoModal
-													casoCobroId={contrato.casoCobroId}
-													clienteNombre={contrato.clienteNombre || ""}
-													telefonoPrincipal={contrato.telefonoPrincipal || ""}
-													metodoInicial="email"
-												>
-													<Button variant="outline" size="sm">
-														<Mail className="h-4 w-4" />
-													</Button>
-												</ContactoModal>
-											</>
-										)}
-
-										<Button 
-											variant="outline" 
-											size="sm"
-											onClick={() => navigate({ 
-												to: "/cobros/$id", 
-												params: { id: linkId },
-												search: { tipo: tipoLink }
-											})}
-										>
-											Ver Detalles
-										</Button>
-									</div>
-								</div>
-								)
+								);
 							})
 						)}
 					</div>
 				</CardContent>
 			</Card>
 		</div>
-	)
+	);
 }

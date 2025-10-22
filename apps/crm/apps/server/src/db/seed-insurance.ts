@@ -1,7 +1,7 @@
-import { db } from "./index";
-import { insuranceCosts } from "./schema";
 import * as fs from "fs";
 import * as path from "path";
+import { db } from "./index";
+import { insuranceCosts } from "./schema";
 
 async function seedInsurance() {
 	try {
@@ -23,9 +23,11 @@ async function seedInsurance() {
 					pickUp: item.pickUp.toFixed(2),
 					panelCamionMicrobus: item.panelCamionMicrobus.toFixed(2),
 					membership: item.membresia.toFixed(2),
-				}))
+				})),
 			);
-			console.log(`Insertados ${Math.min(i + batchSize, data.length)} / ${data.length}`);
+			console.log(
+				`Insertados ${Math.min(i + batchSize, data.length)} / ${data.length}`,
+			);
 		}
 
 		console.log("✓ Datos de seguros cargados exitosamente");

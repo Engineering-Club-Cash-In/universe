@@ -1,14 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
+	Banknote,
 	Building,
-	DollarSign,
 	HandshakeIcon,
 	Target,
 	TrendingUp,
 	Users,
 } from "lucide-react";
 import { useEffect } from "react";
+import { getRoleLabel, PERMISSIONS, ROLES } from "server/src/types/roles";
 import { Badge } from "@/components/ui/badge";
 import {
 	Card,
@@ -19,7 +20,6 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
-import { PERMISSIONS, ROLES, getRoleLabel } from "server/src/types/roles";
 
 export const Route = createFileRoute("/dashboard")({
 	component: RouteComponent,
@@ -246,7 +246,7 @@ function RouteComponent() {
 						{userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 							<Link to="/admin/reports">
 								<button className="flex w-full items-center gap-2 rounded-lg border p-3 transition-colors hover:bg-accent">
-									<DollarSign className="h-4 w-4" />
+									<Banknote className="h-4 w-4" />
 									<span className="text-sm">Ver Reportes</span>
 								</button>
 							</Link>

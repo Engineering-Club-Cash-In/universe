@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import {
 	ArrowLeft,
+	Banknote,
 	CalendarClock,
 	Car,
 	Clock,
-	DollarSign,
 	FileText,
 	Mail,
 	MapPin,
@@ -15,6 +15,7 @@ import {
 	User,
 	Users,
 } from "lucide-react";
+import { ContactoModal } from "@/components/contacto-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +28,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
-import { ContactoModal } from "@/components/contacto-modal";
 
 export const Route = createFileRoute("/cobros/$id")({
 	component: RouteComponent,
@@ -44,25 +44,23 @@ function RouteComponent() {
 	// Obtener detalles del contrato/caso usando la nueva API unificada
 	const casoDetails = useQuery({
 		...orpc.getDetallesContrato.queryOptions({
-			input: { id, tipo }
+			input: { id, tipo },
 		}),
 		enabled: !!session && !!id,
-		queryKey: ["getCasosCobros", id, tipo],
-	})
+	});
 
 	// Obtener historial de contactos (solo para casos)
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId: id }
+			input: { casoCobroId: id },
 		}),
 		enabled: !!session && !!id && tipo === "caso",
-		queryKey: ["getHistorialContactos", id],
-	})
+	});
 
 	// Obtener convenios de pago (solo para casos)
 	const conveniosPago = useQuery({
 		...orpc.getConveniosPago.queryOptions({
-			input: { casoCobroId: id }
+			input: { casoCobroId: id },
 		}),
 		enabled: !!session && !!id && tipo === "caso",
 	});
@@ -70,7 +68,7 @@ function RouteComponent() {
 	// Obtener historial de pagos del contrato
 	const historialPagos = useQuery({
 		...orpc.getHistorialPagos.queryOptions({
-			input: { contratoId: casoDetails.data?.contratoId || "" }
+			input: { contratoId: casoDetails.data?.contratoId || "" },
 		}),
 		enabled: !!session && !!casoDetails.data?.contratoId,
 	});
@@ -78,42 +76,46 @@ function RouteComponent() {
 	// Obtener información de recuperación si es caso incobrable
 	const recuperacionInfo = useQuery({
 		...orpc.getRecuperacionVehiculo.queryOptions({
-			input: { casoCobroId: id }
+			input: { casoCobroId: id },
 		}),
-		enabled: !!session && !!id && tipo === "caso" && casoDetails.data?.estadoMora === "incobrable",
+		enabled:
+			!!session &&
+			!!id &&
+			tipo === "caso" &&
+			casoDetails.data?.estadoMora === "incobrable",
 	});
 
 	if (casoDetails.isLoading) {
 		return (
 			<div className="container mx-auto p-6">
 				<div className="animate-pulse">
-					<div className="h-8 bg-gray-200 rounded mb-4"></div>
-					<div className="h-4 bg-gray-200 rounded mb-2"></div>
-					<div className="h-4 bg-gray-200 rounded mb-2"></div>
+					<div className="mb-4 h-8 rounded bg-gray-200" />
+					<div className="mb-2 h-4 rounded bg-gray-200" />
+					<div className="mb-2 h-4 rounded bg-gray-200" />
 				</div>
 			</div>
-		)
+		);
 	}
 
 	if (!casoDetails.data) {
 		return (
 			<div className="container mx-auto p-6">
 				<div className="text-center">
-					<h1 className="text-2xl font-bold text-gray-900 mb-4">
+					<h1 className="mb-4 font-bold text-2xl text-gray-900">
 						Caso No Encontrado
 					</h1>
-					<p className="text-gray-600 mb-4">
+					<p className="mb-4 text-gray-600">
 						No se encontró el caso de cobranza solicitado.
 					</p>
 					<Link to="/cobros">
 						<Button variant="outline">
-							<ArrowLeft className="h-4 w-4 mr-2" />
+							<ArrowLeft className="mr-2 h-4 w-4" />
 							Volver a Cobros
 						</Button>
 					</Link>
 				</div>
 			</div>
-		)
+		);
 	}
 
 	const caso = casoDetails.data;
@@ -130,9 +132,9 @@ function RouteComponent() {
 			mora_120: "bg-red-200 text-red-900",
 			pagado: "bg-green-100 text-green-800",
 			incobrable: "bg-gray-100 text-gray-800",
-		}
+		};
 		return colors[estado] || "bg-gray-100 text-gray-800";
-	}
+	};
 
 	const getMetodoIcon = (metodo: string) => {
 		switch (metodo) {
@@ -145,35 +147,53 @@ function RouteComponent() {
 			default:
 				return <Phone className="h-3 w-3" />;
 		}
-	}
+	};
 
 	const getEstadoContacto = (estado: string) => {
 		const estados: Record<string, { label: string; color: string }> = {
 			contactado: { label: "Contactado", color: "bg-green-100 text-green-800" },
-			promesa_pago: { label: "Promesa de Pago", color: "bg-blue-100 text-blue-800" },
-			no_contesta: { label: "No Contesta", color: "bg-yellow-100 text-yellow-800" },
-			acuerdo_parcial: { label: "Acuerdo Parcial", color: "bg-purple-100 text-purple-800" },
-			rechaza_pagar: { label: "Rechaza Pagar", color: "bg-red-100 text-red-800" },
-			numero_equivocado: { label: "Número Equivocado", color: "bg-gray-100 text-gray-800" },
-		}
-		return estados[estado] || { label: estado, color: "bg-gray-100 text-gray-800" };
-	}
+			promesa_pago: {
+				label: "Promesa de Pago",
+				color: "bg-blue-100 text-blue-800",
+			},
+			no_contesta: {
+				label: "No Contesta",
+				color: "bg-yellow-100 text-yellow-800",
+			},
+			acuerdo_parcial: {
+				label: "Acuerdo Parcial",
+				color: "bg-purple-100 text-purple-800",
+			},
+			rechaza_pagar: {
+				label: "Rechaza Pagar",
+				color: "bg-red-100 text-red-800",
+			},
+			numero_equivocado: {
+				label: "Número Equivocado",
+				color: "bg-gray-100 text-gray-800",
+			},
+		};
+		return (
+			estados[estado] || { label: estado, color: "bg-gray-100 text-gray-800" }
+		);
+	};
 
 	return (
-		<div className="container mx-auto p-6 space-y-6">
+		<div className="container mx-auto space-y-6 p-6">
 			{/* Header */}
 			<div className="flex items-center justify-between">
 				<div className="flex items-center gap-4">
 					<Link to="/cobros">
 						<Button variant="outline" size="sm">
-							<ArrowLeft className="h-4 w-4 mr-2" />
+							<ArrowLeft className="mr-2 h-4 w-4" />
 							Volver
 						</Button>
 					</Link>
 					<div>
-						<h1 className="text-2xl font-bold">Detalles del Caso</h1>
+						<h1 className="font-bold text-2xl">Detalles del Caso</h1>
 						<p className="text-muted-foreground">
-							{caso.vehiculoMarca} {caso.vehiculoModelo} {caso.vehiculoYear} - {caso.vehiculoPlaca}
+							{caso.vehiculoMarca} {caso.vehiculoModelo} {caso.vehiculoYear} -{" "}
+							{caso.vehiculoPlaca}
 						</p>
 					</div>
 				</div>
@@ -184,7 +204,7 @@ function RouteComponent() {
 
 			<div className="grid gap-6 lg:grid-cols-3">
 				{/* Información Principal */}
-				<div className="lg:col-span-2 space-y-6">
+				<div className="space-y-6 lg:col-span-2">
 					{/* Resumen del Caso */}
 					<Card>
 						<CardHeader>
@@ -204,10 +224,10 @@ function RouteComponent() {
 								</div>
 								<div className="space-y-2">
 									<div className="flex items-center gap-2 text-sm">
-										<DollarSign className="h-4 w-4 text-muted-foreground" />
+										<Banknote className="h-4 w-4 text-muted-foreground" />
 										<span className="font-medium">Monto en Mora:</span>
 									</div>
-									<p className="text-lg font-bold text-red-600">
+									<p className="font-bold text-lg text-red-600">
 										Q{Number(caso.montoEnMora).toLocaleString()}
 									</p>
 								</div>
@@ -240,21 +260,25 @@ function RouteComponent() {
 						<CardContent className="space-y-4">
 							<div className="grid grid-cols-2 gap-4">
 								<div>
-									<p className="text-sm text-muted-foreground">Teléfono Principal</p>
+									<p className="text-muted-foreground text-sm">
+										Teléfono Principal
+									</p>
 									<p className="font-medium">{caso.telefonoPrincipal}</p>
 								</div>
 								{caso.telefonoAlternativo && (
 									<div>
-										<p className="text-sm text-muted-foreground">Teléfono Alternativo</p>
+										<p className="text-muted-foreground text-sm">
+											Teléfono Alternativo
+										</p>
 										<p className="font-medium">{caso.telefonoAlternativo}</p>
 									</div>
 								)}
 								<div>
-									<p className="text-sm text-muted-foreground">Email</p>
+									<p className="text-muted-foreground text-sm">Email</p>
 									<p className="font-medium">{caso.emailContacto}</p>
 								</div>
 								<div>
-									<p className="text-sm text-muted-foreground">Dirección</p>
+									<p className="text-muted-foreground text-sm">Dirección</p>
 									<p className="font-medium">{caso.direccionContacto}</p>
 								</div>
 							</div>
@@ -314,50 +338,69 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent>
 							{contactos.length === 0 ? (
-								<div className="text-center py-8 text-muted-foreground">
+								<div className="py-8 text-center text-muted-foreground">
 									No hay contactos registrados para este caso
 								</div>
 							) : (
 								<div className="space-y-4">
 									{contactos.map((contacto: any) => {
-										const estadoInfo = getEstadoContacto(contacto.estadoContacto);
+										const estadoInfo = getEstadoContacto(
+											contacto.estadoContacto,
+										);
 										return (
-											<div key={contacto.id} className="border rounded-lg p-4">
-												<div className="flex items-start justify-between mb-2">
+											<div key={contacto.id} className="rounded-lg border p-4">
+												<div className="mb-2 flex items-start justify-between">
 													<div className="flex items-center gap-2">
 														{getMetodoIcon(contacto.metodoContacto)}
 														<span className="font-medium">
-															{contacto.metodoContacto?.charAt(0).toUpperCase() + contacto.metodoContacto?.slice(1)}
+															{contacto.metodoContacto
+																?.charAt(0)
+																.toUpperCase() +
+																contacto.metodoContacto?.slice(1)}
 														</span>
 														<Badge className={estadoInfo.color}>
 															{estadoInfo.label}
 														</Badge>
 													</div>
-													<p className="text-sm text-muted-foreground">
-														{contacto.fechaContacto ? new Date(contacto.fechaContacto).toLocaleDateString("es-GT") : "Sin fecha"}
+													<p className="text-muted-foreground text-sm">
+														{contacto.fechaContacto
+															? new Date(
+																	contacto.fechaContacto,
+																).toLocaleDateString("es-GT")
+															: "Sin fecha"}
 													</p>
 												</div>
-												<p className="text-sm mb-2">{contacto.comentarios}</p>
+												<p className="mb-2 text-sm">{contacto.comentarios}</p>
 												{contacto.acuerdosAlcanzados && (
-													<div className="bg-blue-50 p-2 rounded text-sm">
+													<div className="rounded bg-blue-50 p-2 text-sm">
 														<span className="font-medium">Acuerdos: </span>
 														{contacto.acuerdosAlcanzados}
 													</div>
 												)}
 												{contacto.compromisosPago && (
-													<div className="bg-green-50 p-2 rounded text-sm mt-2">
+													<div className="mt-2 rounded bg-green-50 p-2 text-sm">
 														<span className="font-medium">Compromisos: </span>
 														{contacto.compromisosPago}
 													</div>
 												)}
-												<div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
-													<span>Por: {contacto.realizadoPor || "Sin asignar"}</span>
+												<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
+													<span>
+														Por: {contacto.realizadoPor || "Sin asignar"}
+													</span>
 													{contacto.duracionLlamada && (
-														<span>Duración: {Math.floor((contacto.duracionLlamada || 0) / 60)}:{((contacto.duracionLlamada || 0) % 60).toString().padStart(2, "0")} min</span>
+														<span>
+															Duración:{" "}
+															{Math.floor((contacto.duracionLlamada || 0) / 60)}
+															:
+															{((contacto.duracionLlamada || 0) % 60)
+																.toString()
+																.padStart(2, "0")}{" "}
+															min
+														</span>
 													)}
 												</div>
 											</div>
-										)
+										);
 									})}
 								</div>
 							)}
@@ -368,7 +411,7 @@ function RouteComponent() {
 					<Card>
 						<CardHeader>
 							<CardTitle className="flex items-center gap-2">
-								<DollarSign className="h-5 w-5" />
+								<Banknote className="h-5 w-5" />
 								Historial de Cuotas
 							</CardTitle>
 							<CardDescription>
@@ -377,7 +420,7 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent>
 							{cuotas.length === 0 ? (
-								<div className="text-center py-8 text-muted-foreground">
+								<div className="py-8 text-center text-muted-foreground">
 									No hay historial de cuotas disponible
 								</div>
 							) : (
@@ -387,16 +430,21 @@ function RouteComponent() {
 										const esPagada = cuota.estadoMora === "pagado";
 										const tieneMora = Number(cuota.montoMora) > 0;
 										const pagoConMora = esPagada && tieneMora; // Pagado pero con mora
-										
+
 										return (
-											<div key={cuota.id} className="border rounded-lg p-3 hover:bg-muted/50">
-												<div className="flex items-center justify-between mb-2">
+											<div
+												key={cuota.id}
+												className="rounded-lg border p-3 hover:bg-muted/50"
+											>
+												<div className="mb-2 flex items-center justify-between">
 													<div className="flex items-center gap-3">
 														<span className="font-medium text-sm">
 															Cuota #{cuota.numeroCuota}
 														</span>
 														<Badge className={estadoBadge}>
-															{cuota.estadoMora?.replace("_", " ")?.toUpperCase()}
+															{cuota.estadoMora
+																?.replace("_", " ")
+																?.toUpperCase()}
 														</Badge>
 														{pagoConMora && (
 															<Badge className="bg-orange-100 text-orange-800 text-xs">
@@ -414,39 +462,60 @@ function RouteComponent() {
 															Q{Number(cuota.montoCuota).toLocaleString()}
 														</p>
 														{tieneMora && (
-															<p className="text-xs text-red-600">
-																+Q{Number(cuota.montoMora).toLocaleString()} mora
+															<p className="text-red-600 text-xs">
+																+Q{Number(cuota.montoMora).toLocaleString()}{" "}
+																mora
 															</p>
 														)}
 													</div>
 												</div>
-												
-												<div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+
+												<div className="grid grid-cols-2 gap-4 text-muted-foreground text-xs">
 													<div>
-														<span className="font-medium">Vencimiento:</span><br />
-														{new Date(cuota.fechaVencimiento).toLocaleDateString("es-GT")}
+														<span className="font-medium">Vencimiento:</span>
+														<br />
+														{new Date(
+															cuota.fechaVencimiento,
+														).toLocaleDateString("es-GT")}
 													</div>
 													{esPagada ? (
 														<div>
-															<span className="font-medium">Pagado:</span><br />
-															{cuota.fechaPago ? new Date(cuota.fechaPago).toLocaleDateString("es-GT") : "Sin fecha"}
+															<span className="font-medium">Pagado:</span>
 															<br />
-															<span className="text-green-600 font-medium">
-																Q{Number(cuota.montoPagado || 0).toLocaleString()}
+															{cuota.fechaPago
+																? new Date(cuota.fechaPago).toLocaleDateString(
+																		"es-GT",
+																	)
+																: "Sin fecha"}
+															<br />
+															<span className="font-medium text-green-600">
+																Q
+																{Number(
+																	cuota.montoPagado || 0,
+																).toLocaleString()}
 															</span>
 															{pagoConMora && (
-																<span className="block text-xs text-orange-600">
-																	(incluye Q{Number(cuota.montoMora).toLocaleString()} de mora)
+																<span className="block text-orange-600 text-xs">
+																	(incluye Q
+																	{Number(cuota.montoMora).toLocaleString()} de
+																	mora)
 																</span>
 															)}
 														</div>
 													) : (
 														<div>
-															<span className="font-medium">Estado:</span><br />
-															<span className="text-red-600">Pendiente de pago</span>
+															<span className="font-medium">Estado:</span>
+															<br />
+															<span className="text-red-600">
+																Pendiente de pago
+															</span>
 															{tieneMora && (
-																<span className="block text-xs text-red-600 font-medium">
-																	Total: Q{(Number(cuota.montoCuota) + Number(cuota.montoMora)).toLocaleString()}
+																<span className="block font-medium text-red-600 text-xs">
+																	Total: Q
+																	{(
+																		Number(cuota.montoCuota) +
+																		Number(cuota.montoMora)
+																	).toLocaleString()}
 																</span>
 															)}
 														</div>
@@ -473,24 +542,36 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent className="space-y-3">
 							<div>
-								<p className="text-sm text-muted-foreground">Monto Financiado</p>
-								<p className="font-medium">Q{Number(caso.montoFinanciado || 0).toLocaleString()}</p>
+								<p className="text-muted-foreground text-sm">
+									Monto Financiado
+								</p>
+								<p className="font-medium">
+									Q{Number(caso.montoFinanciado || 0).toLocaleString()}
+								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Cuota Mensual</p>
-								<p className="font-medium">Q{Number(caso.cuotaMensual || 0).toLocaleString()}</p>
+								<p className="text-muted-foreground text-sm">Cuota Mensual</p>
+								<p className="font-medium">
+									Q{Number(caso.cuotaMensual || 0).toLocaleString()}
+								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Cuotas Totales</p>
+								<p className="text-muted-foreground text-sm">Cuotas Totales</p>
 								<p className="font-medium">{caso.numeroCuotas}</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Día de Pago</p>
-								<p className="font-medium">Día {caso.diaPagoMensual || 15} de cada mes</p>
+								<p className="text-muted-foreground text-sm">Día de Pago</p>
+								<p className="font-medium">
+									Día {caso.diaPagoMensual || 15} de cada mes
+								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Fecha de Inicio</p>
-								<p className="font-medium">{caso.fechaInicio ? new Date(caso.fechaInicio).toLocaleDateString("es-GT") : "Sin fecha"}</p>
+								<p className="text-muted-foreground text-sm">Fecha de Inicio</p>
+								<p className="font-medium">
+									{caso.fechaInicio
+										? new Date(caso.fechaInicio).toLocaleDateString("es-GT")
+										: "Sin fecha"}
+								</p>
 							</div>
 						</CardContent>
 					</Card>
@@ -505,13 +586,13 @@ function RouteComponent() {
 						</CardHeader>
 						<CardContent className="space-y-3">
 							<div>
-								<p className="text-sm text-muted-foreground">Vehículo</p>
+								<p className="text-muted-foreground text-sm">Vehículo</p>
 								<p className="font-medium">
 									{caso.vehiculoMarca} {caso.vehiculoModelo} {caso.vehiculoYear}
 								</p>
 							</div>
 							<div>
-								<p className="text-sm text-muted-foreground">Placa</p>
+								<p className="text-muted-foreground text-sm">Placa</p>
 								<p className="font-medium">{caso.vehiculoPlaca}</p>
 							</div>
 						</CardContent>
@@ -531,11 +612,16 @@ function RouteComponent() {
 									<div className="flex items-center gap-2">
 										{getMetodoIcon(caso.metodoContactoProximo || "")}
 										<span className="font-medium">
-											{caso.metodoContactoProximo?.charAt(0).toUpperCase() + (caso.metodoContactoProximo?.slice(1) || "")}
+											{caso.metodoContactoProximo?.charAt(0).toUpperCase() +
+												(caso.metodoContactoProximo?.slice(1) || "")}
 										</span>
 									</div>
-									<p className="text-sm text-muted-foreground">
-										{caso.proximoContacto ? new Date(caso.proximoContacto).toLocaleDateString("es-GT") : "Sin fecha programada"}
+									<p className="text-muted-foreground text-sm">
+										{caso.proximoContacto
+											? new Date(caso.proximoContacto).toLocaleDateString(
+													"es-GT",
+												)
+											: "Sin fecha programada"}
 									</p>
 								</div>
 							</CardContent>
@@ -554,9 +640,11 @@ function RouteComponent() {
 							<CardContent>
 								<div className="space-y-3">
 									{convenios.map((convenio: any) => (
-										<div key={convenio.id} className="border rounded p-3">
-											<div className="flex items-center justify-between mb-2">
-												<Badge variant={convenio.activo ? "default" : "secondary"}>
+										<div key={convenio.id} className="rounded border p-3">
+											<div className="mb-2 flex items-center justify-between">
+												<Badge
+													variant={convenio.activo ? "default" : "secondary"}
+												>
 													{convenio.activo ? "Activo" : "Inactivo"}
 												</Badge>
 												{convenio.cumplido && (
@@ -565,12 +653,22 @@ function RouteComponent() {
 													</Badge>
 												)}
 											</div>
-											<div className="text-sm space-y-1">
-												<p><span className="font-medium">Monto:</span> Q{Number(convenio.montoAcordado).toLocaleString()}</p>
-												<p><span className="font-medium">Cuotas:</span> {convenio.cuotasCumplidas}/{convenio.numeroCuotasConvenio}</p>
-												<p><span className="font-medium">Cuota:</span> Q{Number(convenio.montoCuotaConvenio).toLocaleString()}</p>
+											<div className="space-y-1 text-sm">
+												<p>
+													<span className="font-medium">Monto:</span> Q
+													{Number(convenio.montoAcordado).toLocaleString()}
+												</p>
+												<p>
+													<span className="font-medium">Cuotas:</span>{" "}
+													{convenio.cuotasCumplidas}/
+													{convenio.numeroCuotasConvenio}
+												</p>
+												<p>
+													<span className="font-medium">Cuota:</span> Q
+													{Number(convenio.montoCuotaConvenio).toLocaleString()}
+												</p>
 												{convenio.condicionesEspeciales && (
-													<p className="text-xs text-muted-foreground mt-2">
+													<p className="mt-2 text-muted-foreground text-xs">
 														{convenio.condicionesEspeciales}
 													</p>
 												)}
@@ -594,63 +692,92 @@ function RouteComponent() {
 							<CardContent>
 								<div className="space-y-3">
 									<div>
-										<p className="text-sm text-muted-foreground">Tipo de Recuperación</p>
-										<Badge className={
-											recuperacion.tipoRecuperacion === "entrega_voluntaria" ? "bg-blue-100 text-blue-800" :
-											recuperacion.tipoRecuperacion === "tomado" ? "bg-orange-100 text-orange-800" :
-											recuperacion.tipoRecuperacion === "orden_secuestro" ? "bg-red-100 text-red-800" :
-											"bg-gray-100 text-gray-800"
-										}>
-											{recuperacion.tipoRecuperacion === "entrega_voluntaria" ? "Entrega Voluntaria" :
-											 recuperacion.tipoRecuperacion === "tomado" ? "Tomado" :
-											 recuperacion.tipoRecuperacion === "orden_secuestro" ? "Orden de Secuestro" :
-											 recuperacion.tipoRecuperacion}
+										<p className="text-muted-foreground text-sm">
+											Tipo de Recuperación
+										</p>
+										<Badge
+											className={
+												recuperacion.tipoRecuperacion === "entrega_voluntaria"
+													? "bg-blue-100 text-blue-800"
+													: recuperacion.tipoRecuperacion === "tomado"
+														? "bg-orange-100 text-orange-800"
+														: recuperacion.tipoRecuperacion ===
+																"orden_secuestro"
+															? "bg-red-100 text-red-800"
+															: "bg-gray-100 text-gray-800"
+											}
+										>
+											{recuperacion.tipoRecuperacion === "entrega_voluntaria"
+												? "Entrega Voluntaria"
+												: recuperacion.tipoRecuperacion === "tomado"
+													? "Tomado"
+													: recuperacion.tipoRecuperacion === "orden_secuestro"
+														? "Orden de Secuestro"
+														: recuperacion.tipoRecuperacion}
 										</Badge>
 									</div>
 
 									{recuperacion.fechaRecuperacion && (
 										<div>
-											<p className="text-sm text-muted-foreground">Fecha de Recuperación</p>
+											<p className="text-muted-foreground text-sm">
+												Fecha de Recuperación
+											</p>
 											<p className="font-medium">
-												{new Date(recuperacion.fechaRecuperacion).toLocaleDateString("es-GT")}
+												{new Date(
+													recuperacion.fechaRecuperacion,
+												).toLocaleDateString("es-GT")}
 											</p>
 										</div>
 									)}
 
 									{recuperacion.ordenSecuestro && (
-										<div className="border-l-4 border-red-500 pl-3 py-2 bg-red-50">
-											<h4 className="font-medium text-red-800 mb-1">Proceso Legal</h4>
+										<div className="border-red-500 border-l-4 bg-red-50 py-2 pl-3">
+											<h4 className="mb-1 font-medium text-red-800">
+												Proceso Legal
+											</h4>
 											{recuperacion.numeroExpediente && (
 												<p className="text-sm">
-													<span className="font-medium">Expediente:</span> {recuperacion.numeroExpediente}
+													<span className="font-medium">Expediente:</span>{" "}
+													{recuperacion.numeroExpediente}
 												</p>
 											)}
 											{recuperacion.juzgadoCompetente && (
 												<p className="text-sm">
-													<span className="font-medium">Juzgado:</span> {recuperacion.juzgadoCompetente}
+													<span className="font-medium">Juzgado:</span>{" "}
+													{recuperacion.juzgadoCompetente}
 												</p>
 											)}
 										</div>
 									)}
 
 									<div>
-										<p className="text-sm text-muted-foreground">Estado</p>
-										<Badge variant={recuperacion.completada ? "default" : "secondary"}>
+										<p className="text-muted-foreground text-sm">Estado</p>
+										<Badge
+											variant={
+												recuperacion.completada ? "default" : "secondary"
+											}
+										>
 											{recuperacion.completada ? "Completada" : "En Proceso"}
 										</Badge>
 									</div>
 
 									{recuperacion.observaciones && (
 										<div>
-											<p className="text-sm text-muted-foreground">Observaciones</p>
+											<p className="text-muted-foreground text-sm">
+												Observaciones
+											</p>
 											<p className="text-sm">{recuperacion.observaciones}</p>
 										</div>
 									)}
 
 									{recuperacion.responsableRecuperacion && (
 										<div>
-											<p className="text-sm text-muted-foreground">Responsable</p>
-											<p className="text-sm font-medium">{recuperacion.responsableRecuperacion}</p>
+											<p className="text-muted-foreground text-sm">
+												Responsable
+											</p>
+											<p className="font-medium text-sm">
+												{recuperacion.responsableRecuperacion}
+											</p>
 										</div>
 									)}
 								</div>
@@ -660,5 +787,5 @@ function RouteComponent() {
 				</div>
 			</div>
 		</div>
-	)
+	);
 }

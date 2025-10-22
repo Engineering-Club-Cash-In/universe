@@ -96,6 +96,8 @@ export const getOccupationLabel = (occupation: string) => {
 
 export const getWorkTimeLabel = (time: string) => {
 	switch (time) {
+		case "less_than_1":
+			return "Menos de un año";
 		case "1_to_5":
 			return "1 a 5 años";
 		case "5_to_10":

@@ -52,7 +52,7 @@ export function ContactoModal({
 			acuerdosAlcanzados: "",
 			compromisosPago: "",
 			requiereSeguimiento: false,
-			duracionLlamada: 0,
+			duracionLlamada: undefined as number | undefined,
 		},
 		onSubmit: async ({ value }) => {
 			createContactoMutation.mutate(value);
@@ -70,6 +70,11 @@ export function ContactoModal({
 			queryClient.invalidateQueries({ queryKey: ["getCasosCobros"] });
 			queryClient.invalidateQueries({ queryKey: ["getHistorialContactos"] });
 			form.reset();
+			// Cerrar el dialogo
+			document.querySelector<HTMLButtonElement>(
+				'[data-radix-dialog-close]'
+			)?.click();
+			
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al registrar el contacto");

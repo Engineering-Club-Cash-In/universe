@@ -60,6 +60,14 @@ export const formatGuatemalaDate = (date: string | Date) => {
 	});
 };
 
+export const formatDate = (date: string | Date) => {
+	const dateObj = typeof date === "string" ? new Date(date) : date;
+	const day = String(dateObj.getUTCDate()).padStart(2, "0");
+	const month = String(dateObj.getUTCMonth() + 1).padStart(2, "0");
+	const year = dateObj.getUTCFullYear();
+	return `${day}/${month}/${year}`;
+};
+
 export const getMaritalStatusLabel = (status: string) => {
 	switch (status) {
 		case "single":

@@ -1,13 +1,13 @@
+import { relations } from "drizzle-orm";
 import {
 	boolean,
+	integer,
 	pgEnum,
 	pgTable,
 	text,
 	timestamp,
 	uuid,
-	integer,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
 import { user } from "./auth";
 
 // Enums for notes
@@ -96,16 +96,19 @@ export const entityNotesRelations = relations(entityNotes, ({ one, many }) => ({
 	attachments: many(noteAttachments),
 }));
 
-export const noteAttachmentsRelations = relations(noteAttachments, ({ one }) => ({
-	note: one(entityNotes, {
-		fields: [noteAttachments.noteId],
-		references: [entityNotes.id],
+export const noteAttachmentsRelations = relations(
+	noteAttachments,
+	({ one }) => ({
+		note: one(entityNotes, {
+			fields: [noteAttachments.noteId],
+			references: [entityNotes.id],
+		}),
+		uploader: one(user, {
+			fields: [noteAttachments.uploadedBy],
+			references: [user.id],
+		}),
 	}),
-	uploader: one(user, {
-		fields: [noteAttachments.uploadedBy],
-		references: [user.id],
-	}),
-}));
+);
 
 // Export types for TypeScript
 export type EntityNote = typeof entityNotes.$inferSelect;

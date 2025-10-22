@@ -1,11 +1,11 @@
 // Single source of truth for role definitions
 export const ROLES = {
 	ADMIN: "admin",
-	SALES: "sales", 
+	SALES: "sales",
 	ANALYST: "analyst",
 } as const;
 
-export type UserRole = typeof ROLES[keyof typeof ROLES];
+export type UserRole = (typeof ROLES)[keyof typeof ROLES];
 
 // Role display configuration
 export const ROLE_CONFIG = {
@@ -20,7 +20,7 @@ export const ROLE_CONFIG = {
 		icon: "User",
 	},
 	[ROLES.ANALYST]: {
-		label: "Analista", 
+		label: "Analista",
 		color: "bg-purple-100 text-purple-800",
 		icon: "FileText",
 	},
@@ -28,12 +28,16 @@ export const ROLE_CONFIG = {
 
 // Permission checks
 export const PERMISSIONS = {
-	canAccessCRM: (role: string) => (role === ROLES.ADMIN || role === ROLES.SALES),
-	canAccessAnalysis: (role: string) => (role === ROLES.ADMIN || role === ROLES.ANALYST),
+	canAccessCRM: (role: string) => role === ROLES.ADMIN || role === ROLES.SALES,
+	canAccessAnalysis: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
 	canAccessAdmin: (role: string) => role === ROLES.ADMIN,
-	canCreateCompanies: (role: string) => (role === ROLES.ADMIN || role === ROLES.SALES),
-	canCreateLeads: (role: string) => (role === ROLES.ADMIN || role === ROLES.SALES),
-	canApproveOpportunities: (role: string) => (role === ROLES.ADMIN || role === ROLES.ANALYST),
+	canCreateCompanies: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+	canCreateLeads: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+	canApproveOpportunities: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
 } as const;
 
 // Helper functions

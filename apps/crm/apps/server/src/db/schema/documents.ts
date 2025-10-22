@@ -1,14 +1,14 @@
 import {
+	boolean,
+	integer,
+	pgEnum,
 	pgTable,
 	text,
 	timestamp,
 	uuid,
-	integer,
-	pgEnum,
-	boolean,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
-import { opportunities, creditTypeEnum } from "./crm";
+import { creditTypeEnum, opportunities } from "./crm";
 
 export const documentTypeEnum = pgEnum("document_type", [
 	"identification", // DPI, pasaporte

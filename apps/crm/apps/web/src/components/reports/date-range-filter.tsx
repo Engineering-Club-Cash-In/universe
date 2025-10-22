@@ -1,3 +1,7 @@
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import { Calendar as CalendarIcon } from "lucide-react";
+import type { DateRange } from "react-day-picker";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -6,10 +10,6 @@ import {
 	PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
-import { Calendar as CalendarIcon } from "lucide-react";
-import type { DateRange } from "react-day-picker";
 
 interface DateRangeFilterProps {
 	dateRange: DateRange | undefined;

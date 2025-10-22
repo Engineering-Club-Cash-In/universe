@@ -1,6 +1,7 @@
-import { z } from "zod";
 import { and, between, count, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db";
+import { auctionVehicles } from "../db/schema/auctionVehicles";
 import {
 	casosCobros,
 	contratosFinanciamiento,
@@ -14,8 +15,7 @@ import {
 	opportunities,
 	salesStages,
 } from "../db/schema/crm";
-import { vehicles, vehicleInspections } from "../db/schema/vehicles";
-import { auctionVehicles } from "../db/schema/auctionVehicles";
+import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import { protectedProcedure } from "../lib/orpc";
 
 // Schema para filtros de fecha
@@ -31,9 +31,7 @@ const dateRangeSchema = z.object({
 export const getDashboardExecutivo = protectedProcedure
 	.input(dateRangeSchema)
 	.handler(async ({ input }) => {
-		const startDate = input.startDate
-			? new Date(input.startDate)
-			: undefined;
+		const startDate = input.startDate ? new Date(input.startDate) : undefined;
 		const endDate = input.endDate ? new Date(input.endDate) : undefined;
 
 		// KPI 1: Cartera total activa
@@ -91,12 +89,13 @@ export const getDashboardExecutivo = protectedProcedure
 			.orderBy(salesStages.order);
 
 		// KPI 6: Conversión de leads
-		const leadsStats = await db.select({
-			status: leads.status,
-			total: count(leads.id),
-		})
-		.from(leads)
-		.groupBy(leads.status);
+		const leadsStats = await db
+			.select({
+				status: leads.status,
+				total: count(leads.id),
+			})
+			.from(leads)
+			.groupBy(leads.status);
 
 		// KPI 7: Nuevos contratos (últimos 6 meses)
 		const seisMonthsAgo = new Date();

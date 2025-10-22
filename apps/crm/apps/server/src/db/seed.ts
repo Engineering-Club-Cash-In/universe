@@ -2,6 +2,15 @@ import { eq } from "drizzle-orm";
 import { db } from "./index";
 import { user } from "./schema/auth";
 import {
+	casosCobros,
+	contactosCobros,
+	contratosFinanciamiento,
+	conveniosPago,
+	cuotasPago,
+	notificacionesCobros,
+	recuperacionesVehiculo,
+} from "./schema/cobros";
+import {
 	clients,
 	companies,
 	creditAnalysis,
@@ -9,22 +18,13 @@ import {
 	opportunities,
 	salesStages,
 } from "./schema/crm";
+import { documentRequirements } from "./schema/documents";
 import {
-	vehicles,
+	inspectionChecklistItems,
 	vehicleInspections,
 	vehiclePhotos,
-	inspectionChecklistItems,
+	vehicles,
 } from "./schema/vehicles";
-import {
-	contratosFinanciamiento,
-	cuotasPago,
-	casosCobros,
-	contactosCobros,
-	conveniosPago,
-	recuperacionesVehiculo,
-	notificacionesCobros,
-} from "./schema/cobros";
-import { documentRequirements } from "./schema/documents";
 
 const salesStagesData = [
 	{

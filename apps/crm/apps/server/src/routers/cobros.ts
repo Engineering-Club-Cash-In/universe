@@ -1,21 +1,21 @@
-import { and, eq, gte, count, desc, asc, sql, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { clients } from "../db/schema/crm";
-import { vehicles } from "../db/schema/vehicles";
 import {
-	contratosFinanciamiento,
-	cuotasPago,
 	casosCobros,
 	contactosCobros,
+	contratosFinanciamiento,
 	conveniosPago,
-	recuperacionesVehiculo,
+	cuotasPago,
+	estadoContactoEnum,
 	estadoMoraEnum,
 	metodoContactoEnum,
-	estadoContactoEnum,
+	recuperacionesVehiculo,
 } from "../db/schema/cobros";
-import { cobrosProcedure, adminProcedure } from "../lib/orpc";
+import { clients } from "../db/schema/crm";
+import { vehicles } from "../db/schema/vehicles";
+import { adminProcedure, cobrosProcedure } from "../lib/orpc";
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -29,7 +29,10 @@ export const cobrosRouter = {
 				montoTotal: sql<string>`COALESCE(SUM(CASE WHEN ${casosCobros.montoEnMora} IS NOT NULL THEN ${casosCobros.montoEnMora} ELSE 0 END), 0)`,
 			})
 			.from(contratosFinanciamiento)
-			.leftJoin(casosCobros, eq(contratosFinanciamiento.id, casosCobros.contratoId))
+			.leftJoin(
+				casosCobros,
+				eq(contratosFinanciamiento.id, casosCobros.contratoId),
+			)
 			.groupBy(contratosFinanciamiento.estado, casosCobros.estadoMora);
 
 		// Procesar estadísticas para el embudo
@@ -44,23 +47,31 @@ export const cobrosRouter = {
 			completado: { totalCases: 0, montoTotal: "0" },
 		};
 
-		estatusStats.forEach(stat => {
+		estatusStats.forEach((stat) => {
 			if (stat.estadoContrato === "completado") {
 				embudoStats.completado.totalCases += stat.totalCases;
-			} else if (stat.estadoContrato === "incobrable" || stat.estadoContrato === "recuperado") {
+			} else if (
+				stat.estadoContrato === "incobrable" ||
+				stat.estadoContrato === "recuperado"
+			) {
 				// Contratos incobrables y recuperados van al bucket "incobrable"
 				embudoStats.incobrable.totalCases += stat.totalCases;
 				const currentMonto = Number(embudoStats.incobrable.montoTotal);
-				embudoStats.incobrable.montoTotal = (currentMonto + Number(stat.montoTotal)).toString();
+				embudoStats.incobrable.montoTotal = (
+					currentMonto + Number(stat.montoTotal)
+				).toString();
 			} else if (stat.estadoContrato === "activo" && !stat.estadoMora) {
 				// Contratos activos sin caso de cobros = al día
 				embudoStats.al_dia.totalCases += stat.totalCases;
 			} else if (stat.estadoMora) {
 				// Casos con estado de mora específico
 				if (stat.estadoMora in embudoStats) {
-					embudoStats[stat.estadoMora as keyof typeof embudoStats].totalCases += stat.totalCases;
-					const currentMonto = Number(embudoStats[stat.estadoMora as keyof typeof embudoStats].montoTotal);
-					embudoStats[stat.estadoMora as keyof typeof embudoStats].montoTotal = 
+					embudoStats[stat.estadoMora as keyof typeof embudoStats].totalCases +=
+						stat.totalCases;
+					const currentMonto = Number(
+						embudoStats[stat.estadoMora as keyof typeof embudoStats].montoTotal,
+					);
+					embudoStats[stat.estadoMora as keyof typeof embudoStats].montoTotal =
 						(currentMonto + Number(stat.montoTotal)).toString();
 				}
 			}
@@ -71,12 +82,12 @@ export const cobrosRouter = {
 			.select({ count: count() })
 			.from(casosCobros)
 			.where(
-				context.userRole === "admin" 
+				context.userRole === "admin"
 					? eq(casosCobros.activo, true)
 					: and(
-						eq(casosCobros.activo, true),
-						eq(casosCobros.responsableCobros, context.userId)
-					)
+							eq(casosCobros.activo, true),
+							eq(casosCobros.responsableCobros, context.userId),
+						),
 			);
 
 		// Contactos realizados hoy
@@ -84,7 +95,10 @@ export const cobrosRouter = {
 			.select({ count: count() })
 			.from(contactosCobros)
 			.where(
-				gte(contactosCobros.fechaContacto, new Date(new Date().setHours(0, 0, 0, 0)))
+				gte(
+					contactosCobros.fechaContacto,
+					new Date(new Date().setHours(0, 0, 0, 0)),
+				),
 			);
 
 		return {
@@ -103,7 +117,7 @@ export const cobrosRouter = {
 			z.object({
 				limit: z.number().default(50),
 				offset: z.number().default(0),
-			})
+			}),
 		)
 		.handler(async ({ input }) => {
 			// Obtener todos los contratos con información de casos de cobros (si existen)
@@ -132,7 +146,10 @@ export const cobrosRouter = {
 				.from(contratosFinanciamiento)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-				.leftJoin(casosCobros, eq(contratosFinanciamiento.id, casosCobros.contratoId))
+				.leftJoin(
+					casosCobros,
+					eq(contratosFinanciamiento.id, casosCobros.contratoId),
+				)
 				.leftJoin(user, eq(contratosFinanciamiento.responsableCobros, user.id))
 				.limit(input.limit)
 				.offset(input.offset);
@@ -148,7 +165,7 @@ export const cobrosRouter = {
 				responsableCobros: z.string().optional(),
 				limit: z.number().default(50),
 				offset: z.number().default(0),
-			})
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			// Construir condiciones WHERE
@@ -160,7 +177,9 @@ export const cobrosRouter = {
 			}
 
 			if (input.responsableCobros) {
-				conditions.push(eq(casosCobros.responsableCobros, input.responsableCobros));
+				conditions.push(
+					eq(casosCobros.responsableCobros, input.responsableCobros),
+				);
 			}
 
 			// Si no es admin, solo ver casos asignados
@@ -194,11 +213,14 @@ export const cobrosRouter = {
 					responsableNombre: user.name,
 				})
 				.from(casosCobros)
-				.leftJoin(contratosFinanciamiento, eq(casosCobros.contratoId, contratosFinanciamiento.id))
+				.leftJoin(
+					contratosFinanciamiento,
+					eq(casosCobros.contratoId, contratosFinanciamiento.id),
+				)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 				.leftJoin(user, eq(casosCobros.responsableCobros, user.id))
-				.where(and(...conditions))
+				.where(and(...conditions));
 
 			const casos = await query
 				.orderBy(desc(casosCobros.diasMoraMaximo), desc(casosCobros.updatedAt))
@@ -212,12 +234,13 @@ export const cobrosRouter = {
 	getCasoCobroById: cobrosProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const whereClause = context.userRole === "admin"
-				? eq(casosCobros.id, input.id)
-				: and(
-					eq(casosCobros.id, input.id),
-					eq(casosCobros.responsableCobros, context.userId)
-				);
+			const whereClause =
+				context.userRole === "admin"
+					? eq(casosCobros.id, input.id)
+					: and(
+							eq(casosCobros.id, input.id),
+							eq(casosCobros.responsableCobros, context.userId),
+						);
 
 			const caso = await db
 				.select({
@@ -249,7 +272,10 @@ export const cobrosRouter = {
 					vehiculoPlaca: vehicles.licensePlate,
 				})
 				.from(casosCobros)
-				.leftJoin(contratosFinanciamiento, eq(casosCobros.contratoId, contratosFinanciamiento.id))
+				.leftJoin(
+					contratosFinanciamiento,
+					eq(casosCobros.contratoId, contratosFinanciamiento.id),
+				)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
 				.where(whereClause)
@@ -271,7 +297,7 @@ export const cobrosRouter = {
 				compromisosPago: z.string().optional(),
 				requiereSeguimiento: z.boolean().default(false),
 				fechaProximoContacto: z.date().optional(),
-			})
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			// Verificar que el usuario tenga acceso al caso
@@ -279,10 +305,12 @@ export const cobrosRouter = {
 				const caso = await db
 					.select()
 					.from(casosCobros)
-					.where(and(
-						eq(casosCobros.id, input.casoCobroId),
-						eq(casosCobros.responsableCobros, context.userId)
-					))
+					.where(
+						and(
+							eq(casosCobros.id, input.casoCobroId),
+							eq(casosCobros.responsableCobros, context.userId),
+						),
+					)
 					.limit(1);
 
 				if (!caso.length) {
@@ -319,7 +347,7 @@ export const cobrosRouter = {
 			z.object({
 				casoCobroId: z.string().uuid(),
 				limit: z.number().default(20),
-			})
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			// Verificar acceso al caso
@@ -327,10 +355,12 @@ export const cobrosRouter = {
 				const caso = await db
 					.select()
 					.from(casosCobros)
-					.where(and(
-						eq(casosCobros.id, input.casoCobroId),
-						eq(casosCobros.responsableCobros, context.userId)
-					))
+					.where(
+						and(
+							eq(casosCobros.id, input.casoCobroId),
+							eq(casosCobros.responsableCobros, context.userId),
+						),
+					)
 					.limit(1);
 
 				if (!caso.length) {
@@ -366,12 +396,16 @@ export const cobrosRouter = {
 		.input(
 			z.object({
 				casoCobroId: z.string().uuid(),
-				montoAcordado: z.string().regex(/^\d+(\.\d{1,2})?$/, "Formato de monto inválido"),
+				montoAcordado: z
+					.string()
+					.regex(/^\d+(\.\d{1,2})?$/, "Formato de monto inválido"),
 				numeroCuotasConvenio: z.number().min(1).max(60),
-				montoCuotaConvenio: z.string().regex(/^\d+(\.\d{1,2})?$/, "Formato de cuota inválido"),
+				montoCuotaConvenio: z
+					.string()
+					.regex(/^\d+(\.\d{1,2})?$/, "Formato de cuota inválido"),
 				fechaInicioConvenio: z.date(),
 				condicionesEspeciales: z.string().optional(),
-			})
+			}),
 		)
 		.handler(async ({ input, context }) => {
 			// Solo admin o usuario asignado pueden crear convenios
@@ -379,14 +413,18 @@ export const cobrosRouter = {
 				const caso = await db
 					.select()
 					.from(casosCobros)
-					.where(and(
-						eq(casosCobros.id, input.casoCobroId),
-						eq(casosCobros.responsableCobros, context.userId)
-					))
+					.where(
+						and(
+							eq(casosCobros.id, input.casoCobroId),
+							eq(casosCobros.responsableCobros, context.userId),
+						),
+					)
 					.limit(1);
 
 				if (!caso.length) {
-					throw new Error("No tienes permiso para crear convenios en este caso");
+					throw new Error(
+						"No tienes permiso para crear convenios en este caso",
+					);
 				}
 			}
 
@@ -410,10 +448,12 @@ export const cobrosRouter = {
 				const caso = await db
 					.select()
 					.from(casosCobros)
-					.where(and(
-						eq(casosCobros.id, input.casoCobroId),
-						eq(casosCobros.responsableCobros, context.userId)
-					))
+					.where(
+						and(
+							eq(casosCobros.id, input.casoCobroId),
+							eq(casosCobros.responsableCobros, context.userId),
+						),
+					)
 					.limit(1);
 
 				if (!caso.length) {
@@ -449,7 +489,7 @@ export const cobrosRouter = {
 			z.object({
 				casoCobroId: z.string().uuid(),
 				responsableCobros: z.string(),
-			})
+			}),
 		)
 		.handler(async ({ input }) => {
 			// Verificar que el responsable tenga rol de cobros
@@ -511,7 +551,10 @@ export const cobrosRouter = {
 			}
 
 			// Verificar permisos
-			if (context.userRole !== "admin" && caso[0].responsableCobros !== context.userId) {
+			if (
+				context.userRole !== "admin" &&
+				caso[0].responsableCobros !== context.userId
+			) {
 				throw new Error("No tienes permiso para ver este historial");
 			}
 
@@ -543,10 +586,12 @@ export const cobrosRouter = {
 				const caso = await db
 					.select()
 					.from(casosCobros)
-					.where(and(
-						eq(casosCobros.id, input.casoCobroId),
-						eq(casosCobros.responsableCobros, context.userId)
-					))
+					.where(
+						and(
+							eq(casosCobros.id, input.casoCobroId),
+							eq(casosCobros.responsableCobros, context.userId),
+						),
+					)
 					.limit(1);
 
 				if (!caso.length) {
@@ -567,7 +612,10 @@ export const cobrosRouter = {
 					responsableRecuperacion: user.name,
 				})
 				.from(recuperacionesVehiculo)
-				.leftJoin(user, eq(recuperacionesVehiculo.responsableRecuperacion, user.id))
+				.leftJoin(
+					user,
+					eq(recuperacionesVehiculo.responsableRecuperacion, user.id),
+				)
 				.where(eq(recuperacionesVehiculo.casoCobroId, input.casoCobroId))
 				.limit(1);
 
@@ -576,19 +624,22 @@ export const cobrosRouter = {
 
 	// Obtener detalles de contrato (puede ser caso de cobros o contrato directo)
 	getDetallesContrato: cobrosProcedure
-		.input(z.object({ 
-			id: z.string().uuid(),
-			tipo: z.enum(["caso", "contrato"]).default("caso")
-		}))
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				tipo: z.enum(["caso", "contrato"]).default("caso"),
+			}),
+		)
 		.handler(async ({ input, context }) => {
 			if (input.tipo === "caso") {
 				// Es un caso de cobros
-				const whereClause = context.userRole === "admin"
-					? eq(casosCobros.id, input.id)
-					: and(
-						eq(casosCobros.id, input.id),
-						eq(casosCobros.responsableCobros, context.userId)
-					);
+				const whereClause =
+					context.userRole === "admin"
+						? eq(casosCobros.id, input.id)
+						: and(
+								eq(casosCobros.id, input.id),
+								eq(casosCobros.responsableCobros, context.userId),
+							);
 
 				const caso = await db
 					.select({
@@ -621,52 +672,57 @@ export const cobrosRouter = {
 						vehiculoPlaca: vehicles.licensePlate,
 					})
 					.from(casosCobros)
-					.leftJoin(contratosFinanciamiento, eq(casosCobros.contratoId, contratosFinanciamiento.id))
+					.leftJoin(
+						contratosFinanciamiento,
+						eq(casosCobros.contratoId, contratosFinanciamiento.id),
+					)
 					.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-					.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
+					.leftJoin(
+						vehicles,
+						eq(contratosFinanciamiento.vehicleId, vehicles.id),
+					)
 					.where(whereClause)
 					.limit(1);
 
 				return caso[0] || null;
-			} else {
-				// Es un contrato directo (al día o completado)
-				const contrato = await db
-					.select({
-						// Simular estructura de caso
-						id: contratosFinanciamiento.id,
-						contratoId: contratosFinanciamiento.id,
-						estadoMora: sql<string>`'al_dia'`, // Simular estado al día
-						montoEnMora: sql<string>`'0'`,
-						diasMoraMaximo: sql<number>`0`,
-						cuotasVencidas: sql<number>`0`,
-						telefonoPrincipal: sql<string>`''`,
-						telefonoAlternativo: sql<string>`''`,
-						emailContacto: sql<string>`'cliente@email.com'`,
-						direccionContacto: sql<string>`''`,
-						proximoContacto: sql<Date | null>`null`,
-						metodoContactoProximo: sql<string | null>`null`,
-						// Datos del contrato
-						montoFinanciado: contratosFinanciamiento.montoFinanciado,
-						cuotaMensual: contratosFinanciamiento.cuotaMensual,
-						numeroCuotas: contratosFinanciamiento.numeroCuotas,
-						fechaInicio: contratosFinanciamiento.fechaInicio,
-						diaPagoMensual: contratosFinanciamiento.diaPagoMensual,
-						estadoContrato: contratosFinanciamiento.estado,
-						// Datos del cliente
-						clienteNombre: clients.contactPerson,
-						// Datos del vehículo
-						vehiculoMarca: vehicles.make,
-						vehiculoModelo: vehicles.model,
-						vehiculoYear: vehicles.year,
-						vehiculoPlaca: vehicles.licensePlate,
-					})
-					.from(contratosFinanciamiento)
-					.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-					.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-					.where(eq(contratosFinanciamiento.id, input.id))
-					.limit(1);
-
-				return contrato[0] || null;
 			}
+			// Es un contrato directo (al día o completado)
+			const contrato = await db
+				.select({
+					// Simular estructura de caso
+					id: contratosFinanciamiento.id,
+					contratoId: contratosFinanciamiento.id,
+					estadoMora: sql<string>`'al_dia'`, // Simular estado al día
+					montoEnMora: sql<string>`'0'`,
+					diasMoraMaximo: sql<number>`0`,
+					cuotasVencidas: sql<number>`0`,
+					telefonoPrincipal: sql<string>`''`,
+					telefonoAlternativo: sql<string>`''`,
+					emailContacto: sql<string>`'cliente@email.com'`,
+					direccionContacto: sql<string>`''`,
+					proximoContacto: sql<Date | null>`null`,
+					metodoContactoProximo: sql<string | null>`null`,
+					// Datos del contrato
+					montoFinanciado: contratosFinanciamiento.montoFinanciado,
+					cuotaMensual: contratosFinanciamiento.cuotaMensual,
+					numeroCuotas: contratosFinanciamiento.numeroCuotas,
+					fechaInicio: contratosFinanciamiento.fechaInicio,
+					diaPagoMensual: contratosFinanciamiento.diaPagoMensual,
+					estadoContrato: contratosFinanciamiento.estado,
+					// Datos del cliente
+					clienteNombre: clients.contactPerson,
+					// Datos del vehículo
+					vehiculoMarca: vehicles.make,
+					vehiculoModelo: vehicles.model,
+					vehiculoYear: vehicles.year,
+					vehiculoPlaca: vehicles.licensePlate,
+				})
+				.from(contratosFinanciamiento)
+				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
+				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
+				.where(eq(contratosFinanciamiento.id, input.id))
+				.limit(1);
+
+			return contrato[0] || null;
 		}),
 };

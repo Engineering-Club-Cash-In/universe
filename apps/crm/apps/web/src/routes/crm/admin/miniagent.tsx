@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { Loader2 } from "lucide-react";
 import { useEffect } from "react";
 import { toast } from "sonner";
+import { MiniAgentCredentialsTable } from "@/components/admin/miniagent-credentials-table";
 import {
 	Card,
 	CardContent,
@@ -11,8 +13,6 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
-import { Loader2 } from "lucide-react";
-import { MiniAgentCredentialsTable } from "@/components/admin/miniagent-credentials-table";
 
 export const Route = createFileRoute("/crm/admin/miniagent")({
 	component: RouteComponent,
@@ -74,7 +74,7 @@ function RouteComponent() {
 							<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
 						</div>
 					) : usersWithCredentials.isError ? (
-						<div className="text-center py-8 text-destructive">
+						<div className="py-8 text-center text-destructive">
 							Error al cargar usuarios: {usersWithCredentials.error.message}
 						</div>
 					) : (

@@ -9,6 +9,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect } from "react";
+import { getRoleLabel, PERMISSIONS, ROLES } from "server/src/types/roles";
 import { Badge } from "@/components/ui/badge";
 import {
 	Card,
@@ -19,7 +20,6 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
-import { PERMISSIONS, ROLES, getRoleLabel } from "server/src/types/roles";
 
 export const Route = createFileRoute("/dashboard")({
 	component: RouteComponent,

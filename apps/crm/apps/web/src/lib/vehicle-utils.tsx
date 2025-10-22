@@ -29,7 +29,7 @@ export function renderInspectionStatusBadge(status: string) {
 
 	return (
 		<Badge variant="outline" className={config.className}>
-			<Icon className="h-3 w-3 mr-1" />
+			<Icon className="mr-1 h-3 w-3" />
 			{config.label}
 		</Badge>
 	);

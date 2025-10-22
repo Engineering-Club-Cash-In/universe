@@ -12,11 +12,27 @@ import {
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import type { UserRole } from "server/src/types/roles";
+import {
+	ALL_ROLES,
+	getRoleColor,
+	getRoleLabel,
+	ROLE_CONFIG,
+	ROLES,
+} from "server/src/types/roles";
 import { toast } from "sonner";
 import { z } from "zod";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { ROLES, ROLE_CONFIG, ALL_ROLES, getRoleColor, getRoleLabel } from "server/src/types/roles";
-import type { UserRole } from "server/src/types/roles";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -57,16 +73,6 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
 
@@ -151,7 +157,6 @@ function RouteComponent() {
 	const handleDeleteUser = (userId: string) => {
 		setUserToDelete(userId);
 	};
-
 
 	const createUserForm = useForm({
 		defaultValues: {
@@ -399,15 +404,18 @@ function RouteComponent() {
 											<Badge className={getRoleColor(user.role)}>
 												{user.role === ROLES.ADMIN ? (
 													<>
-														<Shield className="mr-1 h-3 w-3" /> {getRoleLabel(user.role)}
+														<Shield className="mr-1 h-3 w-3" />{" "}
+														{getRoleLabel(user.role)}
 													</>
 												) : user.role === ROLES.ANALYST ? (
 													<>
-														<FileText className="mr-1 h-3 w-3" /> {getRoleLabel(user.role)}
+														<FileText className="mr-1 h-3 w-3" />{" "}
+														{getRoleLabel(user.role)}
 													</>
 												) : (
 													<>
-														<User className="mr-1 h-3 w-3" /> {getRoleLabel(user.role)}
+														<User className="mr-1 h-3 w-3" />{" "}
+														{getRoleLabel(user.role)}
 													</>
 												)}
 											</Badge>
@@ -475,12 +483,16 @@ function RouteComponent() {
 			</Card>
 
 			{/* Alert Dialog para confirmar eliminación */}
-			<AlertDialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+			<AlertDialog
+				open={!!userToDelete}
+				onOpenChange={(open) => !open && setUserToDelete(null)}
+			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>¿Eliminar usuario?</AlertDialogTitle>
 						<AlertDialogDescription>
-							Esta acción no se puede deshacer. El usuario será eliminado permanentemente del sistema.
+							Esta acción no se puede deshacer. El usuario será eliminado
+							permanentemente del sistema.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

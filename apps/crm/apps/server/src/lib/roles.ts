@@ -8,7 +8,7 @@ export const ROLES = {
 	COBROS: "cobros",
 } as const;
 
-export type UserRole = typeof ROLES[keyof typeof ROLES];
+export type UserRole = (typeof ROLES)[keyof typeof ROLES];
 
 // Role display configuration
 export const ROLE_CONFIG = {
@@ -37,49 +37,47 @@ export const ROLE_CONFIG = {
 // Permission definitions - these match the server-side access control
 export const PERMISSIONS = {
 	// CRM Module Access
-	canAccessCRM: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.SALES),
-	
-	// Analysis Module Access  
-	canAccessAnalysis: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.ANALYST),
-	
+	canAccessCRM: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+
+	// Analysis Module Access
+	canAccessAnalysis: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
 	// Admin Module Access
-	canAccessAdmin: (role: UserRole | string): boolean => 
-		role === ROLES.ADMIN,
-	
+	canAccessAdmin: (role: UserRole | string): boolean => role === ROLES.ADMIN,
+
 	// Entity Permissions
-	canCreateCompanies: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.SALES),
-	
-	canCreateLeads: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.SALES),
-	
-	canUpdateLeads: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.SALES),
-	
-	canDeleteLeads: (role: UserRole | string): boolean => 
-		role === ROLES.ADMIN,
-	
-	canApproveOpportunities: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.ANALYST),
-	
-	canExportReports: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.ANALYST),
-	
+	canCreateCompanies: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+
+	canCreateLeads: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+
+	canUpdateLeads: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+
+	canDeleteLeads: (role: UserRole | string): boolean => role === ROLES.ADMIN,
+
+	canApproveOpportunities: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
+	canExportReports: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.ANALYST,
+
 	// Cobros Module Access
-	canAccessCobros: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.COBROS),
-	
-	canManagePayments: (role: UserRole | string): boolean => 
-		(role === ROLES.ADMIN || role === ROLES.COBROS),
-	
+	canAccessCobros: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS,
+
+	canManagePayments: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS,
+
 	canViewPaymentReports: (role: UserRole | string): boolean =>
-		(role === ROLES.ADMIN || role === ROLES.COBROS || role === ROLES.ANALYST),
+		role === ROLES.ADMIN || role === ROLES.COBROS || role === ROLES.ANALYST,
 
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>
-		(role === ROLES.ADMIN || role === ROLES.SALES),
+		role === ROLES.ADMIN || role === ROLES.SALES,
 } as const;
 
 // Helper functions

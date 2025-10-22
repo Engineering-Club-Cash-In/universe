@@ -1,16 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import React, { useState, useEffect } from "react";
+import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle, CheckCircle, FileText, XCircle } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import {
 	Card,
 	CardContent,
@@ -35,16 +31,22 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
-import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 
 export const Route = createFileRoute("/crm/analysis")({
 	component: AnalysisPage,
 });
 
-type OpportunityForAnalysis = Awaited<ReturnType<typeof client.getOpportunitiesForAnalysis>>[0];
+type OpportunityForAnalysis = Awaited<
+	ReturnType<typeof client.getOpportunitiesForAnalysis>
+>[0];
 
 // Helper component to render action buttons with validation
 function OpportunityActions({
@@ -79,7 +81,9 @@ function OpportunityActions({
 			reasons.push("El vehículo no ha sido inspeccionado");
 		}
 		if (!validation.data.allDocumentsPresent) {
-			reasons.push(`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`);
+			reasons.push(
+				`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`,
+			);
 		}
 
 		return reasons.length > 0 ? reasons.join("\n") : "";
@@ -87,12 +91,8 @@ function OpportunityActions({
 
 	return (
 		<div className="flex gap-2">
-			<Button
-				size="sm"
-				variant="default"
-				onClick={onViewDocuments}
-			>
-				<FileText className="h-4 w-4 mr-1" />
+			<Button size="sm" variant="default" onClick={onViewDocuments}>
+				<FileText className="mr-1 h-4 w-4" />
 				Ver Documentos
 			</Button>
 			<TooltipProvider>
@@ -105,25 +105,21 @@ function OpportunityActions({
 								onClick={onApprove}
 								disabled={!canApprove || isLoading}
 							>
-								<CheckCircle className="h-4 w-4 mr-1" />
+								<CheckCircle className="mr-1 h-4 w-4" />
 								Aprobar
 							</Button>
 						</span>
 					</TooltipTrigger>
 					{!canApprove && !isLoading && (
 						<TooltipContent className="max-w-xs whitespace-pre-line">
-							<p className="font-semibold mb-1">No se puede aprobar:</p>
+							<p className="mb-1 font-semibold">No se puede aprobar:</p>
 							<p className="text-sm">{getDisabledReason()}</p>
 						</TooltipContent>
 					)}
 				</Tooltip>
 			</TooltipProvider>
-			<Button
-				size="sm"
-				variant="outline"
-				onClick={onReject}
-			>
-				<XCircle className="h-4 w-4 mr-1" />
+			<Button size="sm" variant="outline" onClick={onReject}>
+				<XCircle className="mr-1 h-4 w-4" />
 				Rechazar
 			</Button>
 		</div>
@@ -134,20 +130,27 @@ function AnalysisPage() {
 	const { data: session } = authClient.useSession();
 	const navigate = Route.useNavigate();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
-	
-	const [opportunities, setOpportunities] = useState<OpportunityForAnalysis[]>([]);
+
+	const [opportunities, setOpportunities] = useState<OpportunityForAnalysis[]>(
+		[],
+	);
 	const [isLoading, setIsLoading] = useState(true);
-	const [selectedOpportunity, setSelectedOpportunity] = useState<OpportunityForAnalysis | null>(null);
+	const [selectedOpportunity, setSelectedOpportunity] =
+		useState<OpportunityForAnalysis | null>(null);
 	const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
 	const [isApproving, setIsApproving] = useState(true);
 	const [reason, setReason] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 	const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
-	const [selectedOpportunityForDocs, setSelectedOpportunityForDocs] = useState<OpportunityForAnalysis | null>(null);
-	
+	const [selectedOpportunityForDocs, setSelectedOpportunityForDocs] =
+		useState<OpportunityForAnalysis | null>(null);
+
 	// Check authentication and role
 	useEffect(() => {
-		if (userProfile.data && !["admin", "analyst"].includes(userProfile.data.role)) {
+		if (
+			userProfile.data &&
+			!["admin", "analyst"].includes(userProfile.data.role)
+		) {
 			navigate({ to: "/dashboard" });
 		}
 	}, [userProfile.data, navigate]);
@@ -170,7 +173,10 @@ function AnalysisPage() {
 		loadOpportunities();
 	}, []);
 
-	const handleApprovalClick = (opportunity: OpportunityForAnalysis, approve: boolean) => {
+	const handleApprovalClick = (
+		opportunity: OpportunityForAnalysis,
+		approve: boolean,
+	) => {
 		setSelectedOpportunity(opportunity);
 		setIsApproving(approve);
 		setReason("");
@@ -194,13 +200,16 @@ function AnalysisPage() {
 			});
 
 			toast.success(
-				isApproving ? "Oportunidad aprobada" : "Oportunidad rechazada"
+				isApproving ? "Oportunidad aprobada" : "Oportunidad rechazada",
 			);
 
 			setIsApprovalDialogOpen(false);
 			loadOpportunities(); // Recargar lista
 		} catch (error: any) {
-			toast.error(error.message || `No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`);
+			toast.error(
+				error.message ||
+					`No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`,
+			);
 		} finally {
 			setIsSubmitting(false);
 		}
@@ -221,8 +230,8 @@ function AnalysisPage() {
 	return (
 		<div className="container mx-auto py-8">
 			<div className="mb-8">
-				<h1 className="text-3xl font-bold">Análisis de Documentación</h1>
-				<p className="text-muted-foreground mt-2">
+				<h1 className="font-bold text-3xl">Análisis de Documentación</h1>
+				<p className="mt-2 text-muted-foreground">
 					Revisa y aprueba las oportunidades en etapa de análisis
 				</p>
 			</div>
@@ -239,7 +248,8 @@ function AnalysisPage() {
 					<CardHeader>
 						<CardTitle>Oportunidades Pendientes</CardTitle>
 						<CardDescription>
-							{opportunities.length} oportunidad{opportunities.length !== 1 ? "es" : ""} esperando revisión
+							{opportunities.length} oportunidad
+							{opportunities.length !== 1 ? "es" : ""} esperando revisión
 						</CardDescription>
 					</CardHeader>
 					<CardContent>
@@ -264,9 +274,10 @@ function AnalysisPage() {
 											{opportunity.lead ? (
 												<div>
 													<p className="font-medium">
-														{opportunity.lead.firstName} {opportunity.lead.lastName}
+														{opportunity.lead.firstName}{" "}
+														{opportunity.lead.lastName}
 													</p>
-													<p className="text-sm text-muted-foreground">
+													<p className="text-muted-foreground text-sm">
 														{opportunity.lead.email}
 													</p>
 												</div>
@@ -276,7 +287,9 @@ function AnalysisPage() {
 										</TableCell>
 										<TableCell>
 											{opportunity.company?.name || (
-												<span className="text-muted-foreground">Sin empresa</span>
+												<span className="text-muted-foreground">
+													Sin empresa
+												</span>
 											)}
 										</TableCell>
 										<TableCell>
@@ -290,7 +303,9 @@ function AnalysisPage() {
 										</TableCell>
 										<TableCell>
 											{opportunity.expectedCloseDate ? (
-												new Date(opportunity.expectedCloseDate).toLocaleDateString("es-GT")
+												new Date(
+													opportunity.expectedCloseDate,
+												).toLocaleDateString("es-GT")
 											) : (
 												<span className="text-muted-foreground">Sin fecha</span>
 											)}
@@ -312,28 +327,31 @@ function AnalysisPage() {
 			)}
 
 			{/* Dialog de aprobación/rechazo */}
-			<Dialog open={isApprovalDialogOpen} onOpenChange={setIsApprovalDialogOpen}>
+			<Dialog
+				open={isApprovalDialogOpen}
+				onOpenChange={setIsApprovalDialogOpen}
+			>
 				<DialogContent className="max-w-md">
 					<DialogHeader>
 						<DialogTitle>
 							{isApproving ? "Aprobar" : "Rechazar"} Oportunidad
 						</DialogTitle>
-						<DialogDescription>
-							{selectedOpportunity && (
-								<div className="mt-2">
-									<p className="font-medium">{selectedOpportunity.title}</p>
-									{selectedOpportunity.lead && (
-										<p className="text-sm">
-											Lead: {selectedOpportunity.lead.firstName} {selectedOpportunity.lead.lastName}
-										</p>
-									)}
-								</div>
-							)}
-						</DialogDescription>
+						{selectedOpportunity && (
+							<DialogDescription>
+								{selectedOpportunity.title}
+								{selectedOpportunity.lead && (
+									<>
+										{" - Lead: "}
+										{selectedOpportunity.lead.firstName}{" "}
+										{selectedOpportunity.lead.lastName}
+									</>
+								)}
+							</DialogDescription>
+						)}
 					</DialogHeader>
 					<div className="grid gap-4 py-4">
 						<div className="grid gap-2">
-							<label htmlFor="reason" className="text-sm font-medium">
+							<label htmlFor="reason" className="font-medium text-sm">
 								{isApproving ? "Comentarios (opcional)" : "Razón del rechazo"}
 							</label>
 							<Textarea
@@ -363,39 +381,46 @@ function AnalysisPage() {
 							disabled={isSubmitting || (!isApproving && !reason.trim())}
 							variant={isApproving ? "default" : "destructive"}
 						>
-							{isSubmitting ? "Procesando..." : isApproving ? "Aprobar" : "Rechazar"}
+							{isSubmitting
+								? "Procesando..."
+								: isApproving
+									? "Aprobar"
+									: "Rechazar"}
 						</Button>
 					</DialogFooter>
 				</DialogContent>
 			</Dialog>
 
 			{/* Dialog de documentos */}
-			<Dialog open={isDocumentsDialogOpen} onOpenChange={setIsDocumentsDialogOpen}>
-				<DialogContent className="min-w-[800px] max-w-6xl w-[90vw] max-h-[90vh] overflow-y-auto">
+			<Dialog
+				open={isDocumentsDialogOpen}
+				onOpenChange={setIsDocumentsDialogOpen}
+			>
+				<DialogContent className="max-h-[90vh] min-w-[80vw] max-w-6xl overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>
-							Documentos de la Oportunidad
-						</DialogTitle>
-						<DialogDescription>
-							{selectedOpportunityForDocs && (
-								<div className="mt-2">
-									<p className="font-medium">{selectedOpportunityForDocs.title}</p>
-									{selectedOpportunityForDocs.lead && (
-										<p className="text-sm">
-											Lead: {selectedOpportunityForDocs.lead.firstName} {selectedOpportunityForDocs.lead.lastName}
-										</p>
-									)}
-								</div>
-							)}
-						</DialogDescription>
+						<DialogTitle>Documentos de la Oportunidad</DialogTitle>
+						{selectedOpportunityForDocs && (
+							<DialogDescription>
+								{selectedOpportunityForDocs.title}
+								{selectedOpportunityForDocs.lead && (
+									<>
+										{" - Lead: "}
+										{selectedOpportunityForDocs.lead.firstName}{" "}
+										{selectedOpportunityForDocs.lead.lastName}
+									</>
+								)}
+							</DialogDescription>
+						)}
 					</DialogHeader>
-					<div className="py-4 space-y-6">
+					<div className="w-full space-y-6 py-4">
 						{selectedOpportunityForDocs && (
 							<>
 								<DocumentValidationChecklist
 									opportunityId={selectedOpportunityForDocs.id}
 								/>
-								<DocumentsViewer opportunityId={selectedOpportunityForDocs.id} />
+								<DocumentsViewer
+									opportunityId={selectedOpportunityForDocs.id}
+								/>
 							</>
 						)}
 					</div>
@@ -451,26 +476,34 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 	}
 
 	return (
-		<div className="space-y-4">
+		<div className="w-full space-y-4">
 			{documentsQuery.data.map((doc) => (
-				<Card key={doc.id}>
-					<CardContent className="p-4">
-						<div className="flex items-center justify-between">
-							<div className="flex items-center gap-3 flex-1">
-								<span className="text-2xl">{getDocumentIcon(doc.mimeType)}</span>
-								<div className="flex-1">
-									<div className="flex items-center gap-2">
-										<span className="font-medium">{doc.originalName}</span>
+				<Card key={doc.id} className="w-full">
+					<CardContent className="w-full p-4">
+						<div className="flex flex-wrap items-center justify-between gap-4">
+							<div className="flex min-w-0 flex-1 items-center gap-3">
+								<span className="text-2xl">
+									{getDocumentIcon(doc.mimeType)}
+								</span>
+								<div className="min-w-0 flex-1">
+									<div className="flex flex-wrap items-center gap-2">
+										<span className="truncate font-medium">
+											{doc.originalName}
+										</span>
 										<Badge variant="outline" className="text-xs">
 											{documentTypeLabels[doc.documentType] || doc.documentType}
 										</Badge>
 									</div>
 									{doc.description && (
-										<p className="text-sm text-muted-foreground mt-1">{doc.description}</p>
+										<p className="mt-1 text-muted-foreground text-sm">
+											{doc.description}
+										</p>
 									)}
-									<div className="flex items-center gap-4 text-xs text-muted-foreground mt-2">
+									<div className="mt-2 flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
 										<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-										<span>Subido por {doc.uploadedBy?.name || "Usuario desconocido"}</span>
+										<span>
+											Subido por {doc.uploadedBy?.name || "Usuario desconocido"}
+										</span>
 										<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
 									</div>
 								</div>
@@ -479,8 +512,9 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 								size="sm"
 								variant="default"
 								onClick={() => window.open(doc.url, "_blank")}
+								className="flex-shrink-0"
 							>
-								<FileText className="h-4 w-4 mr-1" />
+								<FileText className="mr-1 h-4 w-4" />
 								Ver Documento
 							</Button>
 						</div>

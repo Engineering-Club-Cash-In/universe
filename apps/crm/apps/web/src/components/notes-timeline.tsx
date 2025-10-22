@@ -102,7 +102,9 @@ export function NotesTimeline({
 			setNewNote("");
 			setNoteType("general");
 			queryClient.invalidateQueries({
-				queryKey: orpc.getEntityNotes.queryKey({ input: { entityType, entityId } }),
+				queryKey: orpc.getEntityNotes.queryKey({
+					input: { entityType, entityId },
+				}),
 			});
 		},
 		onError: (error: any) => {
@@ -122,7 +124,9 @@ export function NotesTimeline({
 			setEditingNoteId(null);
 			setEditingContent("");
 			queryClient.invalidateQueries({
-				queryKey: orpc.getEntityNotes.queryKey({ input: { entityType, entityId } }),
+				queryKey: orpc.getEntityNotes.queryKey({
+					input: { entityType, entityId },
+				}),
 			});
 		},
 		onError: (error: any) => {
@@ -139,7 +143,9 @@ export function NotesTimeline({
 			}),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
-				queryKey: orpc.getEntityNotes.queryKey({ input: { entityType, entityId } }),
+				queryKey: orpc.getEntityNotes.queryKey({
+					input: { entityType, entityId },
+				}),
 			});
 		},
 		onError: (error: any) => {
@@ -153,7 +159,9 @@ export function NotesTimeline({
 		onSuccess: () => {
 			toast.success("Nota eliminada exitosamente");
 			queryClient.invalidateQueries({
-				queryKey: orpc.getEntityNotes.queryKey({ input: { entityType, entityId } }),
+				queryKey: orpc.getEntityNotes.queryKey({
+					input: { entityType, entityId },
+				}),
 			});
 		},
 		onError: (error: any) => {
@@ -199,14 +207,14 @@ export function NotesTimeline({
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle className="text-lg flex items-center gap-2">
+				<CardTitle className="flex items-center gap-2 text-lg">
 					<MessageCircle className="h-5 w-5" />
 					{title}
 				</CardTitle>
 			</CardHeader>
 			<CardContent className="space-y-4">
 				{/* Formulario para crear nueva nota */}
-				<div className="space-y-3 p-4 bg-muted/50 rounded-lg">
+				<div className="space-y-3 rounded-lg bg-muted/50 p-4">
 					<div className="space-y-2">
 						<Label htmlFor="noteType">Tipo de Nota</Label>
 						<Select
@@ -249,7 +257,7 @@ export function NotesTimeline({
 				{/* Timeline de notas */}
 				<div className="space-y-3">
 					{notesQuery.isLoading && (
-						<p className="text-center text-muted-foreground py-4">
+						<p className="py-4 text-center text-muted-foreground">
 							Cargando notas...
 						</p>
 					)}
@@ -264,7 +272,7 @@ export function NotesTimeline({
 					{notesQuery.data?.map((note) => (
 						<div
 							key={note.id}
-							className={`p-4 border rounded-lg space-y-2 ${
+							className={`space-y-2 rounded-lg border p-4 ${
 								note.isPinned ? "border-primary bg-primary/5" : ""
 							}`}
 						>
@@ -278,7 +286,7 @@ export function NotesTimeline({
 									</Badge>
 									{note.isPinned && (
 										<Badge variant="outline">
-											<Pin className="h-3 w-3 mr-1" />
+											<Pin className="mr-1 h-3 w-3" />
 											Fijada
 										</Badge>
 									)}
@@ -333,7 +341,9 @@ export function NotesTimeline({
 											onClick={() => handleUpdateNote(note.id)}
 											disabled={updateNoteMutation.isPending}
 										>
-											{updateNoteMutation.isPending ? "Guardando..." : "Guardar"}
+											{updateNoteMutation.isPending
+												? "Guardando..."
+												: "Guardar"}
 										</Button>
 										<Button size="sm" variant="outline" onClick={cancelEditing}>
 											Cancelar
@@ -341,10 +351,10 @@ export function NotesTimeline({
 									</div>
 								</div>
 							) : (
-								<p className="text-sm whitespace-pre-wrap">{note.content}</p>
+								<p className="whitespace-pre-wrap text-sm">{note.content}</p>
 							)}
 
-							<div className="text-xs text-muted-foreground">
+							<div className="text-muted-foreground text-xs">
 								{new Date(note.createdAt).toLocaleString("es-GT", {
 									dateStyle: "medium",
 									timeStyle: "short",

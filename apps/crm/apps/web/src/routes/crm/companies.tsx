@@ -45,7 +45,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
 	Select,
 	SelectContent,
@@ -61,6 +60,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
 
@@ -904,23 +904,37 @@ function RouteComponent() {
 													<DropdownMenuContent align="end">
 														<DropdownMenuLabel>Acciones</DropdownMenuLabel>
 														<DropdownMenuSeparator />
-														<DropdownMenuItem onClick={() => handleViewDetails(company)}>
+														<DropdownMenuItem
+															onClick={() => handleViewDetails(company)}
+														>
 															Ver Detalles
 														</DropdownMenuItem>
-														<DropdownMenuItem onClick={() => {
-															navigate({ to: "/crm/leads", search: { companyId: company.id } });
-														}}>
+														<DropdownMenuItem
+															onClick={() => {
+																navigate({
+																	to: "/crm/leads",
+																	search: { companyId: company.id },
+																});
+															}}
+														>
 															Crear Prospecto
 														</DropdownMenuItem>
-														<DropdownMenuItem onClick={() => {
-															navigate({ to: "/crm/opportunities", search: { companyId: company.id } });
-														}}>
+														<DropdownMenuItem
+															onClick={() => {
+																navigate({
+																	to: "/crm/opportunities",
+																	search: { companyId: company.id },
+																});
+															}}
+														>
 															Crear Oportunidad
 														</DropdownMenuItem>
 														{userProfile.data?.role === "admin" && (
 															<>
 																<DropdownMenuSeparator />
-																<DropdownMenuItem onClick={() => handleEditCompany(company)}>
+																<DropdownMenuItem
+																	onClick={() => handleEditCompany(company)}
+																>
 																	Editar Empresa
 																</DropdownMenuItem>
 															</>
@@ -946,15 +960,25 @@ function RouteComponent() {
 					{selectedCompany && (
 						<div className="space-y-6">
 							<div>
-								<h3 className="text-xl font-semibold">{selectedCompany.name}</h3>
+								<h3 className="font-semibold text-xl">
+									{selectedCompany.name}
+								</h3>
 								<div className="mt-2 flex gap-2">
 									{selectedCompany.industry && (
-										<Badge className={getIndustryBadgeColor(selectedCompany.industry)} variant="outline">
+										<Badge
+											className={getIndustryBadgeColor(
+												selectedCompany.industry,
+											)}
+											variant="outline"
+										>
 											{selectedCompany.industry}
 										</Badge>
 									)}
 									{selectedCompany.size && (
-										<Badge className={getSizeBadgeColor(selectedCompany.size)} variant="outline">
+										<Badge
+											className={getSizeBadgeColor(selectedCompany.size)}
+											variant="outline"
+										>
 											{selectedCompany.size}
 										</Badge>
 									)}
@@ -977,7 +1001,12 @@ function RouteComponent() {
 								{selectedCompany.website && (
 									<div className="flex items-center gap-2">
 										<Globe className="h-4 w-4 text-muted-foreground" />
-										<a href={selectedCompany.website} target="_blank" rel="noopener noreferrer" className="hover:underline">
+										<a
+											href={selectedCompany.website}
+											target="_blank"
+											rel="noopener noreferrer"
+											className="hover:underline"
+										>
 											{selectedCompany.website}
 										</a>
 									</div>
@@ -993,7 +1022,9 @@ function RouteComponent() {
 							{selectedCompany.notes && (
 								<div>
 									<Label className="font-semibold">Notas</Label>
-									<p className="mt-2 text-sm text-muted-foreground">{selectedCompany.notes}</p>
+									<p className="mt-2 text-muted-foreground text-sm">
+										{selectedCompany.notes}
+									</p>
 								</div>
 							)}
 
@@ -1011,7 +1042,7 @@ function RouteComponent() {
 
 			{/* Edit Dialog */}
 			<Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-				<DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Editar Empresa</DialogTitle>
 					</DialogHeader>
@@ -1028,7 +1059,8 @@ function RouteComponent() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name}>
-											Nombre de la Empresa <span className="text-red-500">*</span>
+											Nombre de la Empresa{" "}
+											<span className="text-red-500">*</span>
 										</Label>
 										<Input
 											id={field.name}
@@ -1061,10 +1093,16 @@ function RouteComponent() {
 													<SelectItem value="technology">Tecnología</SelectItem>
 													<SelectItem value="finance">Finanzas</SelectItem>
 													<SelectItem value="healthcare">Salud</SelectItem>
-													<SelectItem value="retail">Venta al por menor</SelectItem>
-													<SelectItem value="manufacturing">Manufactura</SelectItem>
+													<SelectItem value="retail">
+														Venta al por menor
+													</SelectItem>
+													<SelectItem value="manufacturing">
+														Manufactura
+													</SelectItem>
 													<SelectItem value="education">Educación</SelectItem>
-													<SelectItem value="consulting">Consultoría</SelectItem>
+													<SelectItem value="consulting">
+														Consultoría
+													</SelectItem>
 													<SelectItem value="other">Otro</SelectItem>
 												</SelectContent>
 											</Select>
@@ -1086,11 +1124,19 @@ function RouteComponent() {
 												</SelectTrigger>
 												<SelectContent>
 													<SelectItem value="none">Sin tamaño</SelectItem>
-													<SelectItem value="startup">Startup (1-10)</SelectItem>
+													<SelectItem value="startup">
+														Startup (1-10)
+													</SelectItem>
 													<SelectItem value="small">Pequeña (11-50)</SelectItem>
-													<SelectItem value="medium">Mediana (51-200)</SelectItem>
-													<SelectItem value="large">Grande (201-1000)</SelectItem>
-													<SelectItem value="enterprise">Corporativa (1000+)</SelectItem>
+													<SelectItem value="medium">
+														Mediana (51-200)
+													</SelectItem>
+													<SelectItem value="large">
+														Grande (201-1000)
+													</SelectItem>
+													<SelectItem value="enterprise">
+														Corporativa (1000+)
+													</SelectItem>
 												</SelectContent>
 											</Select>
 										</div>

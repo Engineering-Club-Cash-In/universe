@@ -1,5 +1,6 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
+import { vehicleInspections } from "@/db/schema";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
@@ -11,16 +12,19 @@ import {
 	opportunityStageHistory,
 	salesStages,
 } from "../db/schema/crm";
-import { documentRequirements, documentValidations, opportunityDocuments } from "../db/schema/documents";
+import {
+	documentRequirements,
+	documentValidations,
+	opportunityDocuments,
+} from "../db/schema/documents";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
-import { 
-	uploadFileToR2, 
-	getFileUrl, 
-	deleteFileFromR2, 
+import {
+	deleteFileFromR2,
 	generateUniqueFilename,
+	getFileUrl,
+	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
-import { vehicleInspections } from "@/db/schema";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -398,6 +402,8 @@ export const crmRouter = {
 				.select({
 					id: opportunities.id,
 					title: opportunities.title,
+					vehicleId: opportunities.vehicleId,
+					creditType: opportunities.creditType,
 					value: opportunities.value,
 					probability: opportunities.probability,
 					expectedCloseDate: opportunities.expectedCloseDate,
@@ -439,6 +445,8 @@ export const crmRouter = {
 			.select({
 				id: opportunities.id,
 				title: opportunities.title,
+				vehicleId: opportunities.vehicleId,
+				creditType: opportunities.creditType,
 				value: opportunities.value,
 				probability: opportunities.probability,
 				expectedCloseDate: opportunities.expectedCloseDate,
@@ -540,7 +548,7 @@ export const crmRouter = {
 				title: z.string().min(1, "Title is required").optional(),
 				leadId: z.string().uuid().optional(),
 				companyId: z.string().uuid().optional(),
-				vehicleId: z.string().uuid().optional(),
+				vehicleId: z.string().uuid().nullable().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]).optional(),
 				value: z.string().optional(),
 				stageId: z.string().uuid().optional(),
@@ -649,13 +657,19 @@ export const crmRouter = {
 		}),
 
 	// Analyst specific endpoints
-	getOpportunitiesForAnalysis: analystProcedure.handler(async ({ context: _ }) => {
-		// Get the stage ID for "Recepción de documentación y traslado a análisis"
-		const analysisStage = await db
-			.select()
-			.from(salesStages)
-			.where(eq(salesStages.name, "Recepción de documentación y traslado a análisis"))
-			.limit(1);
+	getOpportunitiesForAnalysis: analystProcedure.handler(
+		async ({ context: _ }) => {
+			// Get the stage ID for "Recepción de documentación y traslado a análisis"
+			const analysisStage = await db
+				.select()
+				.from(salesStages)
+				.where(
+					eq(
+						salesStages.name,
+						"Recepción de documentación y traslado a análisis",
+					),
+				)
+				.limit(1);
 
 			if (!analysisStage[0]) {
 				throw new Error("Analysis stage not found");
@@ -1309,9 +1323,8 @@ export const crmRouter = {
 					.where(eq(opportunityDocuments.id, input.documentId));
 
 				return { success: true };
-			} else {
-				throw new Error("No tienes permiso para eliminar este documento");
 			}
+			throw new Error("No tienes permiso para eliminar este documento");
 		}),
 
 	// Validate opportunity documents - Para analistas
@@ -1319,11 +1332,6 @@ export const crmRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			try {
-				console.log(
-					"[validateOpportunityDocuments] Starting validation for:",
-					input.opportunityId,
-				);
-
 				// 1. Obtener oportunidad con vehículo
 				const [opp] = await db
 					.select()
@@ -1331,26 +1339,14 @@ export const crmRouter = {
 					.where(eq(opportunities.id, input.opportunityId))
 					.limit(1);
 
-				console.log("[validateOpportunityDocuments] Opportunity found:", !!opp);
-
 				if (!opp) {
 					throw new Error("Oportunidad no encontrada");
 				}
 
-				console.log(
-					"[validateOpportunityDocuments] vehicleId:",
-					opp.vehicleId,
-					"creditType:",
-					opp.creditType,
-				);
-
-				// Si falta vehicleId o creditType, devolver validación fallida sin lanzar error
-				if (!opp.vehicleId || !opp.creditType) {
-					console.log(
-						"[validateOpportunityDocuments] Missing basic requirements - returning failed validation",
-					);
+				// Si falta creditType, no podemos determinar requisitos
+				if (!opp.creditType) {
 					return {
-						creditType: opp.creditType || "unknown",
+						creditType: "unknown",
 						vehicleInspected: false,
 						allDocumentsPresent: false,
 						canApprove: false,
@@ -1364,31 +1360,28 @@ export const crmRouter = {
 					};
 				}
 
-				// 2. Validar inspección del vehículo
-				console.log(
-					"[validateOpportunityDocuments] Checking vehicle inspection...",
-				);
-				const inspection = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opp.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
-					.limit(1);
+				// 2. Validar inspección del vehículo (solo si hay vehículo asociado)
+				let vehicleInspected = false;
+				let inspectionStatus: string = "pending";
+				if (opp.vehicleId) {
+					const inspection = await db
+						.select()
+						.from(vehicleInspections)
+						.where(
+							and(
+								eq(vehicleInspections.vehicleId, opp.vehicleId),
+								eq(vehicleInspections.status, "approved"),
+							),
+						)
+						.limit(1);
 
-				const vehicleInspected = inspection.length > 0;
-				console.log(
-					"[validateOpportunityDocuments] Vehicle inspected:",
-					vehicleInspected,
-				);
+					vehicleInspected = inspection.length > 0;
+					if (inspection.length > 0) {
+						inspectionStatus = inspection[0].status;
+					}
+				}
 
 				// 3. Obtener documentos requeridos según tipo de crédito
-				console.log(
-					"[validateOpportunityDocuments] Fetching required documents...",
-				);
 				const requiredDocs = await db
 					.select()
 					.from(documentRequirements)
@@ -1399,24 +1392,11 @@ export const crmRouter = {
 						),
 					);
 
-				console.log(
-					"[validateOpportunityDocuments] Required docs count:",
-					requiredDocs.length,
-				);
-
 				// 4. Obtener documentos subidos
-				console.log(
-					"[validateOpportunityDocuments] Fetching uploaded documents...",
-				);
 				const uploadedDocs = await db
 					.select()
 					.from(opportunityDocuments)
 					.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
-
-				console.log(
-					"[validateOpportunityDocuments] Uploaded docs count:",
-					uploadedDocs.length,
-				);
 
 				// 5. Calcular documentos faltantes
 				const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
@@ -1425,11 +1405,6 @@ export const crmRouter = {
 
 				const allDocumentsPresent = missingDocs.length === 0;
 				const canApprove = allDocumentsPresent && vehicleInspected;
-
-				console.log(
-					"[validateOpportunityDocuments] Validation complete - canApprove:",
-					canApprove,
-				);
 
 				return {
 					creditType: opp.creditType,
@@ -1441,8 +1416,7 @@ export const crmRouter = {
 					missingDocuments: missingDocs,
 					vehicleInfo: {
 						id: opp.vehicleId,
-						inspectionStatus:
-							inspection.length > 0 ? inspection[0].status : "pending",
+						inspectionStatus,
 					},
 				};
 			} catch (error) {

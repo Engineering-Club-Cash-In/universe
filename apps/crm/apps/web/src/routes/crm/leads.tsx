@@ -12,9 +12,9 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import { z } from "zod";
-import { PERMISSIONS } from "server/src/types/roles";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -43,7 +44,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
 	Select,
 	SelectContent,
@@ -59,6 +59,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
 import {
 	formatCurrency,
@@ -87,7 +88,9 @@ type Lead = Awaited<ReturnType<typeof client.getLeads>>[0] & {
 	fit?: boolean | null;
 	scoredAt?: Date | null;
 };
-type CreditAnalysis = Awaited<ReturnType<typeof client.getCreditAnalysisByLeadId>>;
+type CreditAnalysis = Awaited<
+	ReturnType<typeof client.getCreditAnalysisByLeadId>
+>;
 
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
@@ -121,7 +124,7 @@ function RouteComponent() {
 	});
 	const creditAnalysisQuery = useQuery({
 		queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
-		queryFn: selectedLead?.id 
+		queryFn: selectedLead?.id
 			? () => client.getCreditAnalysisByLeadId({ leadId: selectedLead.id })
 			: () => Promise.resolve(null),
 		enabled: !!selectedLead?.id && isDetailsDialogOpen,
@@ -258,16 +261,14 @@ function RouteComponent() {
 
 	// Handle opening create modal with pre-filled company
 	useEffect(() => {
-		console.log('[LEADS] Open effect:', {
-			hasCompanyId: !!search.companyId,
-			companiesDataReady: !!companiesQuery.data,
-			processedId: processedCompanyIdRef.current,
-			searchCompanyId: search.companyId
-		});
-
-		if (search.companyId && companiesQuery.data && processedCompanyIdRef.current !== search.companyId) {
-			const company = companiesQuery.data.find(c => c.id === search.companyId);
-			console.log('[LEADS] Found company:', company?.name);
+		if (
+			search.companyId &&
+			companiesQuery.data &&
+			processedCompanyIdRef.current !== search.companyId
+		) {
+			const company = companiesQuery.data.find(
+				(c) => c.id === search.companyId,
+			);
 			if (company) {
 				// Pre-fill company field
 				createLeadForm.setFieldValue("companyId", search.companyId);
@@ -275,7 +276,6 @@ function RouteComponent() {
 				setIsCreateDialogOpen(true);
 				// Mark as processed to prevent re-opening
 				processedCompanyIdRef.current = search.companyId;
-				console.log('[LEADS] Modal opened, marked as processed');
 			}
 		}
 	}, [search.companyId, companiesQuery.data]);
@@ -285,16 +285,8 @@ function RouteComponent() {
 		const wasOpen = prevOpenRef.current;
 		prevOpenRef.current = isCreateDialogOpen;
 
-		console.log('[LEADS] Close effect:', {
-			wasOpen,
-			isNowOpen: isCreateDialogOpen,
-			processedId: processedCompanyIdRef.current,
-			searchCompanyId: search.companyId
-		});
-
 		// Only clear when modal transitions from open to closed
 		if (wasOpen && !isCreateDialogOpen && processedCompanyIdRef.current) {
-			console.log('[LEADS] Clearing search param and ref');
 			processedCompanyIdRef.current = null;
 			if (search.companyId) {
 				navigate({ to: "/crm/leads", search: {}, replace: true });
@@ -705,29 +697,19 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>Empresa</Label>
-														<Select
-															value={field.state.value}
-															onValueChange={(value) =>
-																field.handleChange(value)
-															}
-														>
-															<SelectTrigger>
-																<SelectValue placeholder="Seleccionar empresa" />
-															</SelectTrigger>
-															<SelectContent>
-																<SelectItem value="none">
-																	Sin empresa
-																</SelectItem>
-																{companiesQuery.data?.map((company) => (
-																	<SelectItem
-																		key={company.id}
-																		value={company.id}
-																	>
-																		{company.name}
-																	</SelectItem>
-																))}
-															</SelectContent>
-														</Select>
+														<Combobox
+															options={[
+																{ value: "none", label: "Sin empresa" },
+																...(companiesQuery.data?.map((company) => ({
+																	value: company.id,
+																	label: company.name,
+																})) || []),
+															]}
+															value={field.state.value ?? null}
+															onChange={(value) => field.handleChange(value)}
+															placeholder="Seleccionar empresa"
+															width="full"
+														/>
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -1020,7 +1002,11 @@ function RouteComponent() {
 																value={field.state.value}
 																onValueChange={(value) =>
 																	field.handleChange(
-																		value as "1_to_5" | "5_to_10" | "10_plus",
+																		value as
+																			| "less_than_1"
+																			| "1_to_5"
+																			| "5_to_10"
+																			| "10_plus",
 																	)
 																}
 															>
@@ -1028,6 +1014,9 @@ function RouteComponent() {
 																	<SelectValue placeholder="Seleccionar tiempo" />
 																</SelectTrigger>
 																<SelectContent>
+																	<SelectItem value="less_than_1">
+																		Menos de un año
+																	</SelectItem>
 																	<SelectItem value="1_to_5">
 																		1 a 5 años
 																	</SelectItem>
@@ -1384,28 +1373,38 @@ function RouteComponent() {
 							<div className="grid grid-cols-2 gap-6">
 								{/* Personal Information */}
 								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Información Personal</h3>
+									<h3 className="font-semibold text-lg">
+										Información Personal
+									</h3>
 									<div className="grid grid-cols-2 gap-4">
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Nombre</Label>
-											<p className="text-sm font-medium">
+											<Label className="font-medium text-muted-foreground text-sm">
+												Nombre
+											</Label>
+											<p className="font-medium text-sm">
 												{selectedLead.firstName} {selectedLead.lastName}
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">DPI</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												DPI
+											</Label>
 											<p className="text-sm">
 												{selectedLead.dpi || "No especificado"}
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Edad</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Edad
+											</Label>
 											<p className="text-sm">
 												{selectedLead.age || "No especificado"}
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Estado Civil</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Estado Civil
+											</Label>
 											<p className="text-sm">
 												{selectedLead.maritalStatus
 													? getMaritalStatusLabel(selectedLead.maritalStatus)
@@ -1413,13 +1412,15 @@ function RouteComponent() {
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Dependientes
 											</Label>
 											<p className="text-sm">{selectedLead.dependents || 0}</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Cargo</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Cargo
+											</Label>
 											<p className="text-sm">
 												{selectedLead.jobTitle || "No especificado"}
 											</p>
@@ -1434,7 +1435,7 @@ function RouteComponent() {
 									</h3>
 									<div className="space-y-3">
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Correo Electrónico
 											</Label>
 											<div className="flex items-center gap-2">
@@ -1443,7 +1444,9 @@ function RouteComponent() {
 											</div>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Teléfono</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Teléfono
+											</Label>
 											<div className="flex items-center gap-2">
 												<Phone className="h-4 w-4 text-muted-foreground" />
 												<p className="text-sm">
@@ -1452,7 +1455,9 @@ function RouteComponent() {
 											</div>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Empresa</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Empresa
+											</Label>
 											<div className="flex items-center gap-2">
 												<Building className="h-4 w-4 text-muted-foreground" />
 												<p className="text-sm">
@@ -1468,30 +1473,32 @@ function RouteComponent() {
 							<div className="grid grid-cols-2 gap-6">
 								{/* Financial Information */}
 								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Información Financiera</h3>
+									<h3 className="font-semibold text-lg">
+										Información Financiera
+									</h3>
 									<div className="grid grid-cols-2 gap-4">
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Ingreso Mensual
 											</Label>
-											<p className="text-sm font-medium">
+											<p className="font-medium text-sm">
 												{selectedLead.monthlyIncome
 													? formatCurrency(selectedLead.monthlyIncome)
 													: "No especificado"}
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Monto a Financiar
 											</Label>
-											<p className="text-sm font-medium">
+											<p className="font-medium text-sm">
 												{selectedLead.loanAmount
 													? formatCurrency(selectedLead.loanAmount)
 													: "No especificado"}
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Propósito del Préstamo
 											</Label>
 											<p className="text-sm">
@@ -1508,7 +1515,9 @@ function RouteComponent() {
 									<h3 className="font-semibold text-lg">Información Laboral</h3>
 									<div className="grid grid-cols-2 gap-4">
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Ocupación</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Ocupación
+											</Label>
 											<p className="text-sm">
 												{selectedLead.occupation
 													? getOccupationLabel(selectedLead.occupation)
@@ -1516,7 +1525,7 @@ function RouteComponent() {
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Tiempo en el Trabajo
 											</Label>
 											<p className="text-sm">
@@ -1554,7 +1563,9 @@ function RouteComponent() {
 												checked={selectedLead.hasCreditCard ?? false}
 												disabled
 											/>
-											<Label className="text-sm">Tiene Tarjeta de Crédito</Label>
+											<Label className="text-sm">
+												Tiene Tarjeta de Crédito
+											</Label>
 										</div>
 									</div>
 								</div>
@@ -1564,7 +1575,9 @@ function RouteComponent() {
 									<h3 className="font-semibold text-lg">Estado del Lead</h3>
 									<div className="space-y-3">
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Fuente</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Fuente
+											</Label>
 											<Badge
 												className={getSourceBadgeColor(selectedLead.source)}
 												variant="outline"
@@ -1573,7 +1586,9 @@ function RouteComponent() {
 											</Badge>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Estado</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Estado
+											</Label>
 											<Badge
 												className={getStatusBadgeColor(selectedLead.status)}
 												variant="outline"
@@ -1586,16 +1601,20 @@ function RouteComponent() {
 
 								{/* Additional Information */}
 								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Información del Sistema</h3>
+									<h3 className="font-semibold text-lg">
+										Información del Sistema
+									</h3>
 									<div className="space-y-3">
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">Asignado a</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Asignado a
+											</Label>
 											<p className="text-sm">
 												{selectedLead.assignedUser?.name || "No asignado"}
 											</p>
 										</div>
 										<div>
-											<Label className="font-medium text-sm text-muted-foreground">
+											<Label className="font-medium text-muted-foreground text-sm">
 												Fecha de Creación
 											</Label>
 											<p className="text-sm">
@@ -1612,18 +1631,22 @@ function RouteComponent() {
 									<h3 className="font-semibold text-lg">Análisis de Riesgo</h3>
 									<div className="grid grid-cols-3 gap-4">
 										<div className="space-y-2">
-											<Label className="font-medium text-sm text-muted-foreground">Score Crediticio</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Score Crediticio
+											</Label>
 											<div className="flex items-center gap-2">
 												<div className="relative h-8 w-full rounded-full bg-gray-200">
 													<div
-														className={`absolute left-0 top-0 h-full rounded-full ${
+														className={`absolute top-0 left-0 h-full rounded-full ${
 															Number(selectedLead.score) >= 0.7
 																? "bg-green-500"
 																: Number(selectedLead.score) >= 0.4
 																	? "bg-yellow-500"
 																	: "bg-red-500"
 														}`}
-														style={{ width: `${Number(selectedLead.score) * 100}%` }}
+														style={{
+															width: `${Number(selectedLead.score) * 100}%`,
+														}}
 													/>
 												</div>
 												<span className="font-bold text-lg">
@@ -1632,20 +1655,24 @@ function RouteComponent() {
 											</div>
 										</div>
 										<div className="space-y-2">
-											<Label className="font-medium text-sm text-muted-foreground">Estado de Aprobación</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Estado de Aprobación
+											</Label>
 											<Badge
 												variant={selectedLead.fit ? "default" : "secondary"}
 												className={
 													selectedLead.fit
-														? "bg-green-500 hover:bg-green-600 text-lg px-4 py-1"
-														: "text-lg px-4 py-1"
+														? "bg-green-500 px-4 py-1 text-lg hover:bg-green-600"
+														: "px-4 py-1 text-lg"
 												}
 											>
 												{selectedLead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
 											</Badge>
 										</div>
 										<div className="space-y-2">
-											<Label className="font-medium text-sm text-muted-foreground">Fecha de Análisis</Label>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Fecha de Análisis
+											</Label>
 											<p className="text-sm">
 												{selectedLead.scoredAt
 													? formatGuatemalaDate(selectedLead.scoredAt)
@@ -1659,26 +1686,39 @@ function RouteComponent() {
 							{/* Credit Analysis Section - Análisis de Capacidad de Pago */}
 							{creditAnalysisQuery.data && (
 								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Análisis de Capacidad de Pago</h3>
-									
+									<h3 className="font-semibold text-lg">
+										Análisis de Capacidad de Pago
+									</h3>
+
 									{/* Income and Expenses Summary */}
 									<div className="grid grid-cols-2 gap-6">
 										<div className="space-y-4">
-											<h4 className="font-medium text-base">Ingresos Mensuales</h4>
+											<h4 className="font-medium text-base">
+												Ingresos Mensuales
+											</h4>
 											<div className="space-y-3 rounded-lg bg-green-50 p-4">
 												<div className="flex justify-between">
-													<span className="text-sm text-muted-foreground">Ingresos Fijos:</span>
+													<span className="text-muted-foreground text-sm">
+														Ingresos Fijos:
+													</span>
 													<span className="font-medium">
 														{creditAnalysisQuery.data.monthlyFixedIncome
-															? formatCurrency(creditAnalysisQuery.data.monthlyFixedIncome)
+															? formatCurrency(
+																	creditAnalysisQuery.data.monthlyFixedIncome,
+																)
 															: "-"}
 													</span>
 												</div>
 												<div className="flex justify-between">
-													<span className="text-sm text-muted-foreground">Ingresos Variables:</span>
+													<span className="text-muted-foreground text-sm">
+														Ingresos Variables:
+													</span>
 													<span className="font-medium">
 														{creditAnalysisQuery.data.monthlyVariableIncome
-															? formatCurrency(creditAnalysisQuery.data.monthlyVariableIncome)
+															? formatCurrency(
+																	creditAnalysisQuery.data
+																		.monthlyVariableIncome,
+																)
 															: "-"}
 													</span>
 												</div>
@@ -1686,10 +1726,17 @@ function RouteComponent() {
 													<div className="flex justify-between">
 														<span className="font-medium">Total Ingresos:</span>
 														<span className="font-bold text-green-600">
-															{creditAnalysisQuery.data.monthlyFixedIncome && creditAnalysisQuery.data.monthlyVariableIncome
+															{creditAnalysisQuery.data.monthlyFixedIncome &&
+															creditAnalysisQuery.data.monthlyVariableIncome
 																? formatCurrency(
-																		Number(creditAnalysisQuery.data.monthlyFixedIncome) +
-																		Number(creditAnalysisQuery.data.monthlyVariableIncome)
+																		Number(
+																			creditAnalysisQuery.data
+																				.monthlyFixedIncome,
+																		) +
+																			Number(
+																				creditAnalysisQuery.data
+																					.monthlyVariableIncome,
+																			),
 																	)
 																: "-"}
 														</span>
@@ -1697,23 +1744,34 @@ function RouteComponent() {
 												</div>
 											</div>
 										</div>
-										
+
 										<div className="space-y-4">
-											<h4 className="font-medium text-base">Gastos Mensuales</h4>
+											<h4 className="font-medium text-base">
+												Gastos Mensuales
+											</h4>
 											<div className="space-y-3 rounded-lg bg-red-50 p-4">
 												<div className="flex justify-between">
-													<span className="text-sm text-muted-foreground">Gastos Fijos:</span>
+													<span className="text-muted-foreground text-sm">
+														Gastos Fijos:
+													</span>
 													<span className="font-medium">
 														{creditAnalysisQuery.data.monthlyFixedExpenses
-															? formatCurrency(creditAnalysisQuery.data.monthlyFixedExpenses)
+															? formatCurrency(
+																	creditAnalysisQuery.data.monthlyFixedExpenses,
+																)
 															: "-"}
 													</span>
 												</div>
 												<div className="flex justify-between">
-													<span className="text-sm text-muted-foreground">Gastos Variables:</span>
+													<span className="text-muted-foreground text-sm">
+														Gastos Variables:
+													</span>
 													<span className="font-medium">
 														{creditAnalysisQuery.data.monthlyVariableExpenses
-															? formatCurrency(creditAnalysisQuery.data.monthlyVariableExpenses)
+															? formatCurrency(
+																	creditAnalysisQuery.data
+																		.monthlyVariableExpenses,
+																)
 															: "-"}
 													</span>
 												</div>
@@ -1721,10 +1779,17 @@ function RouteComponent() {
 													<div className="flex justify-between">
 														<span className="font-medium">Total Gastos:</span>
 														<span className="font-bold text-red-600">
-															{creditAnalysisQuery.data.monthlyFixedExpenses && creditAnalysisQuery.data.monthlyVariableExpenses
+															{creditAnalysisQuery.data.monthlyFixedExpenses &&
+															creditAnalysisQuery.data.monthlyVariableExpenses
 																? formatCurrency(
-																		Number(creditAnalysisQuery.data.monthlyFixedExpenses) +
-																		Number(creditAnalysisQuery.data.monthlyVariableExpenses)
+																		Number(
+																			creditAnalysisQuery.data
+																				.monthlyFixedExpenses,
+																		) +
+																			Number(
+																				creditAnalysisQuery.data
+																					.monthlyVariableExpenses,
+																			),
 																	)
 																: "-"}
 														</span>
@@ -1738,12 +1803,18 @@ function RouteComponent() {
 									<div className="rounded-lg bg-blue-50 p-4">
 										<div className="flex items-center justify-between">
 											<div>
-												<Label className="font-medium text-sm text-muted-foreground">Disponibilidad Económica</Label>
-												<p className="text-sm text-muted-foreground">Capacidad de ahorro mensual</p>
+												<Label className="font-medium text-muted-foreground text-sm">
+													Disponibilidad Económica
+												</Label>
+												<p className="text-muted-foreground text-sm">
+													Capacidad de ahorro mensual
+												</p>
 											</div>
-											<span className="text-2xl font-bold text-blue-600">
+											<span className="font-bold text-2xl text-blue-600">
 												{creditAnalysisQuery.data.economicAvailability
-													? formatCurrency(creditAnalysisQuery.data.economicAvailability)
+													? formatCurrency(
+															creditAnalysisQuery.data.economicAvailability,
+														)
 													: "-"}
 											</span>
 										</div>
@@ -1754,34 +1825,50 @@ function RouteComponent() {
 										<h4 className="font-medium text-base">Capacidad de Pago</h4>
 										<div className="grid grid-cols-4 gap-4">
 											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-xs text-muted-foreground">Pago Mínimo</Label>
-												<p className="mt-1 text-lg font-bold text-orange-600">
+												<Label className="text-muted-foreground text-xs">
+													Pago Mínimo
+												</Label>
+												<p className="mt-1 font-bold text-lg text-orange-600">
 													{creditAnalysisQuery.data.minPayment
-														? formatCurrency(creditAnalysisQuery.data.minPayment)
+														? formatCurrency(
+																creditAnalysisQuery.data.minPayment,
+															)
 														: "-"}
 												</p>
 											</div>
 											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-xs text-muted-foreground">Pago Ajustado</Label>
-												<p className="mt-1 text-lg font-bold text-blue-600">
+												<Label className="text-muted-foreground text-xs">
+													Pago Ajustado
+												</Label>
+												<p className="mt-1 font-bold text-blue-600 text-lg">
 													{creditAnalysisQuery.data.adjustedPayment
-														? formatCurrency(creditAnalysisQuery.data.adjustedPayment)
+														? formatCurrency(
+																creditAnalysisQuery.data.adjustedPayment,
+															)
 														: "-"}
 												</p>
 											</div>
 											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-xs text-muted-foreground">Pago Máximo</Label>
-												<p className="mt-1 text-lg font-bold text-green-600">
+												<Label className="text-muted-foreground text-xs">
+													Pago Máximo
+												</Label>
+												<p className="mt-1 font-bold text-green-600 text-lg">
 													{creditAnalysisQuery.data.maxPayment
-														? formatCurrency(creditAnalysisQuery.data.maxPayment)
+														? formatCurrency(
+																creditAnalysisQuery.data.maxPayment,
+															)
 														: "-"}
 												</p>
 											</div>
 											<div className="rounded-lg border bg-primary/5 p-4 text-center">
-												<Label className="text-xs text-muted-foreground">Crédito Máximo</Label>
-												<p className="mt-1 text-lg font-bold text-primary">
+												<Label className="text-muted-foreground text-xs">
+													Crédito Máximo
+												</Label>
+												<p className="mt-1 font-bold text-lg text-primary">
 													{creditAnalysisQuery.data.maxCreditAmount
-														? formatCurrency(creditAnalysisQuery.data.maxCreditAmount)
+														? formatCurrency(
+																creditAnalysisQuery.data.maxCreditAmount,
+															)
 														: "-"}
 												</p>
 											</div>
@@ -1789,8 +1876,9 @@ function RouteComponent() {
 									</div>
 
 									{/* Analysis Date */}
-									<div className="text-right text-sm text-muted-foreground">
-										Análisis realizado: {formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
+									<div className="text-right text-muted-foreground text-sm">
+										Análisis realizado:{" "}
+										{formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
 									</div>
 								</div>
 							)}
@@ -1798,7 +1886,9 @@ function RouteComponent() {
 							{/* Notes Section - Full Width */}
 							{selectedLead.notes && (
 								<div className="space-y-2">
-									<Label className="font-medium text-sm text-muted-foreground">Notas (Antiguas)</Label>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Notas (Antiguas)
+									</Label>
 									<p className="rounded-md bg-muted p-4 text-sm">
 										{selectedLead.notes}
 									</p>

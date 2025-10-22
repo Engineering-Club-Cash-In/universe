@@ -43,6 +43,13 @@
 			"when": 1758250128476,
 			"tag": "0005_cheerful_medusa",
 			"breakpoints": true
+		},
+		{
+			"idx": 6,
+			"version": "7",
+			"when": 1761172213373,
+			"tag": "0006_certain_leopardon",
+			"breakpoints": true
 		}
 	]
 }

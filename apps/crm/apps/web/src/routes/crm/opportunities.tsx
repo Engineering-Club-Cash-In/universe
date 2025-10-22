@@ -1,20 +1,15 @@
-import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
 import {
 	draggable,
 	dropTargetForElements,
-	monitorForElements,
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import { autoScrollForElements } from "@atlaskit/pragmatic-drag-and-drop-auto-scroll/element";
-import { DropIndicator } from "@atlaskit/pragmatic-drag-and-drop-react-drop-indicator/box";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-	AlertCircle,
+	Banknote,
 	Building,
 	Calendar,
 	Clock,
-	DollarSign,
 	FileText,
 	Filter,
 	History,
@@ -32,7 +27,6 @@ import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { NotesTimeline } from "@/components/notes-timeline";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,7 +36,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -124,7 +118,7 @@ function DraggableOpportunityCard({
 
 				{opportunity.value && (
 					<div className="flex items-center gap-1 font-medium text-green-600 text-xs">
-						<DollarSign className="h-3 w-3" />$
+						<Banknote className="h-3 w-3" />Q
 						{Number.parseFloat(opportunity.value).toLocaleString()}
 					</div>
 				)}
@@ -153,7 +147,7 @@ function DraggableOpportunityCard({
 						<div className="flex justify-between text-xs">
 							<span className="text-muted-foreground">Ponderado:</span>
 							<span className="font-medium text-blue-600">
-								$
+								Q
 								{(
 									(Number.parseFloat(opportunity.value) *
 										(opportunity.probability ||
@@ -242,13 +236,13 @@ function DroppableStageColumn({
 				<CardTitle className="font-medium text-sm">{stage.name}</CardTitle>
 				<div className="space-y-1">
 					<CardDescription className="text-xs">
-						${totalValue.toLocaleString()} valor total
+						Q{totalValue.toLocaleString()} valor total
 					</CardDescription>
 					<CardDescription className="text-blue-600 text-xs">
-						${stageWeightedValue.toLocaleString()} ponderado
+						Q{stageWeightedValue.toLocaleString()} ponderado
 					</CardDescription>
 					<CardDescription className="text-muted-foreground text-xs">
-						${stageAvgDeal.toLocaleString()} promedio/negocio
+						Q{stageAvgDeal.toLocaleString()} promedio/negocio
 					</CardDescription>
 				</div>
 			</CardHeader>
@@ -318,6 +312,20 @@ function RouteComponent() {
 		) {
 			toast.error(
 				"Las oportunidades en etapas tempranas deben pasar primero por Recepción de documentación (30%) antes de avanzar. No puedes saltarte el proceso de análisis.",
+			);
+			return;
+		}
+
+		// Validate: cannot manually move from 30% to 40% (only analysis approval can do this)
+		if (
+			opportunity &&
+			targetStage &&
+			currentStage &&
+			currentStage.closurePercentage === 30 &&
+			targetStage.closurePercentage >= 40
+		) {
+			toast.error(
+				"No puedes mover manualmente una oportunidad de Recepción de documentación (30%) a etapas superiores. El equipo de análisis debe aprobar los documentos para que la oportunidad avance automáticamente al 40%.",
 			);
 			return;
 		}
@@ -404,6 +412,31 @@ function RouteComponent() {
 			editOpportunityForm.setFieldValue(
 				"notes",
 				selectedOpportunity.notes || "",
+			);
+			// Términos de crédito
+			editOpportunityForm.setFieldValue(
+				"numeroCuotas",
+				selectedOpportunity.numeroCuotas?.toString() || "",
+			);
+			editOpportunityForm.setFieldValue(
+				"tasaInteres",
+				selectedOpportunity.tasaInteres || "",
+			);
+			editOpportunityForm.setFieldValue(
+				"cuotaMensual",
+				selectedOpportunity.cuotaMensual || "",
+			);
+			editOpportunityForm.setFieldValue(
+				"fechaInicio",
+				selectedOpportunity.fechaInicio
+					? new Date(selectedOpportunity.fechaInicio)
+							.toISOString()
+							.split("T")[0]
+					: "",
+			);
+			editOpportunityForm.setFieldValue(
+				"diaPagoMensual",
+				selectedOpportunity.diaPagoMensual?.toString() || "",
 			);
 		}
 		setIsDetailsDialogOpen(false);
@@ -506,6 +539,11 @@ function RouteComponent() {
 			probability: 0,
 			expectedCloseDate: "",
 			notes: "",
+			numeroCuotas: "",
+			tasaInteres: "",
+			cuotaMensual: "",
+			fechaInicio: "",
+			diaPagoMensual: "",
 		},
 		validators: {
 			onChange: ({ value }) => {
@@ -531,6 +569,15 @@ function RouteComponent() {
 					expectedCloseDate: value.expectedCloseDate || undefined,
 					notes: value.notes || undefined,
 					probability: value.probability || undefined,
+					numeroCuotas: value.numeroCuotas
+						? Number.parseInt(value.numeroCuotas, 10)
+						: undefined,
+					tasaInteres: value.tasaInteres ? value.tasaInteres : undefined,
+					cuotaMensual: value.cuotaMensual ? value.cuotaMensual : undefined,
+					fechaInicio: value.fechaInicio || undefined,
+					diaPagoMensual: value.diaPagoMensual
+						? Number.parseInt(value.diaPagoMensual, 10)
+						: undefined,
 				});
 			}
 		},
@@ -580,6 +627,11 @@ function RouteComponent() {
 			expectedCloseDate?: string;
 			notes?: string;
 			stageChangeReason?: string;
+			numeroCuotas?: number;
+			tasaInteres?: string;
+			cuotaMensual?: string;
+			fechaInicio?: string;
+			diaPagoMensual?: number;
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -631,7 +683,7 @@ function RouteComponent() {
 			// Return a context object with the snapshotted value
 			return { previousOpportunities };
 		},
-		onSuccess: async (data, variables) => {
+		onSuccess: async (_data, variables) => {
 			toast.success("Oportunidad actualizada exitosamente");
 			setIsEditDialogOpen(false);
 			setIsChangeStageDialogOpen(false);
@@ -669,7 +721,7 @@ function RouteComponent() {
 				}
 			}
 		},
-		onError: (error: any, variables, context) => {
+		onError: (error: any, _variables, context) => {
 			// If the mutation fails, use the context returned from onMutate to roll back
 			if (context?.previousOpportunities) {
 				queryClient.setQueryData(
@@ -702,7 +754,7 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
-	}, [session, isPending, userProfile.data?.role]);
+	}, [session, isPending, userProfile.data?.role, navigate]);
 
 	// Handle opening create modal with pre-filled company leads
 	useEffect(() => {
@@ -726,7 +778,7 @@ function RouteComponent() {
 			// Mark as processed to prevent re-opening
 			processedCompanyIdRef.current = search.companyId;
 		}
-	}, [search.companyId, leadsQuery.data]);
+	}, [search.companyId, leadsQuery.data, createOpportunityForm.setFieldValue]);
 
 	// Clear search param when modal closes (only on transition from open to closed)
 	useEffect(() => {
@@ -802,7 +854,7 @@ function RouteComponent() {
 		opportunitiesQuery.data?.filter((opp) => opp.status === "won").length || 0;
 	const lostOpportunities =
 		opportunitiesQuery.data?.filter((opp) => opp.status === "lost").length || 0;
-	const openOpportunities =
+	const _openOpportunities =
 		opportunitiesQuery.data?.filter((opp) => opp.status === "open").length || 0;
 
 	// Calculate win rate from closed deals only
@@ -869,11 +921,11 @@ function RouteComponent() {
 						<CardTitle className="font-medium text-sm">
 							Valor de Oportunidades
 						</CardTitle>
-						<DollarSign className="h-4 w-4 text-muted-foreground" />
+						<Banknote className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							${totalValue.toLocaleString()}
+							Q{totalValue.toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							{totalOpportunities} oportunidades
@@ -885,11 +937,11 @@ function RouteComponent() {
 						<CardTitle className="font-medium text-sm">
 							Valor Ponderado
 						</CardTitle>
-						<DollarSign className="h-4 w-4 text-blue-500" />
+						<Banknote className="h-4 w-4 text-blue-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							${weightedValue.toLocaleString()}
+							Q{weightedValue.toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Ajustado por probabilidad
@@ -917,7 +969,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							${avgDealSize.toLocaleString()}
+							Q{avgDealSize.toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">Por oportunidad</p>
 					</CardContent>
@@ -1181,8 +1233,9 @@ function RouteComponent() {
 												<Select
 													value={
 														field.state.value ||
-														salesStagesQuery.data?.find((s) => s.closurePercentage === 1)
-															?.id ||
+														salesStagesQuery.data?.find(
+															(s) => s.closurePercentage === 1,
+														)?.id ||
 														undefined
 													}
 													onValueChange={(value) => field.handleChange(value)}
@@ -1447,7 +1500,7 @@ function RouteComponent() {
 												Valor Ponderado
 											</span>
 											<span className="font-bold text-2xl text-blue-600">
-												$
+												Q
 												{(
 													(Number.parseFloat(selectedOpportunity.value || "0") *
 														(selectedOpportunity.probability ||
@@ -1704,7 +1757,9 @@ function RouteComponent() {
 														<SelectValue placeholder="Seleccionar tipo" />
 													</SelectTrigger>
 													<SelectContent align="start">
-														<SelectItem value="autocompra">Autocompra</SelectItem>
+														<SelectItem value="autocompra">
+															Autocompra
+														</SelectItem>
 														<SelectItem value="sobre_vehiculo">
 															Sobre Vehículo
 														</SelectItem>
@@ -1825,6 +1880,197 @@ function RouteComponent() {
 									)}
 								</editOpportunityForm.Field>
 							</div>
+
+							{/* Términos de Crédito - Mostrar cuando se acerca al 100% */}
+							<editOpportunityForm.Subscribe>
+								{(formState) => {
+									const selectedStageData = salesStagesQuery.data?.find(
+										(s) => s.id === formState.values.stageId,
+									);
+									const showCreditTerms =
+										selectedStageData &&
+										selectedStageData.closurePercentage >= 80;
+
+									return showCreditTerms ? (
+										<div className="space-y-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/20">
+											<div className="flex items-center gap-2">
+												<div className="flex h-8 w-8 items-center justify-center rounded-full bg-yellow-500 text-white">
+													<span className="font-bold text-sm">!</span>
+												</div>
+												<div>
+													<h3 className="font-semibold text-sm">
+														Términos de Crédito Requeridos
+													</h3>
+													<p className="text-muted-foreground text-xs">
+														Esta oportunidad está cerca del cierre. Complete los
+														términos de crédito para poder cerrarla al 100%.
+													</p>
+												</div>
+											</div>
+
+											<div className="grid grid-cols-2 gap-4">
+												<div>
+													<editOpportunityForm.Field name="numeroCuotas">
+														{(field) => (
+															<div className="space-y-2">
+																<Label htmlFor={field.name}>
+																	Número de Cuotas{" "}
+																	{selectedStageData.closurePercentage ===
+																		100 && (
+																		<span className="text-red-500">*</span>
+																	)}
+																</Label>
+																<Input
+																	id={field.name}
+																	name={field.name}
+																	type="number"
+																	min="1"
+																	max="84"
+																	value={field.state.value}
+																	onBlur={field.handleBlur}
+																	onChange={(e) =>
+																		field.handleChange(e.target.value)
+																	}
+																	placeholder="12, 24, 36, 48, 60, 72, 84"
+																/>
+																<p className="text-muted-foreground text-xs">
+																	Plazo del crédito en meses
+																</p>
+															</div>
+														)}
+													</editOpportunityForm.Field>
+												</div>
+
+												<div>
+													<editOpportunityForm.Field name="tasaInteres">
+														{(field) => (
+															<div className="space-y-2">
+																<Label htmlFor={field.name}>
+																	Tasa de Interés (%){" "}
+																	{selectedStageData.closurePercentage ===
+																		100 && (
+																		<span className="text-red-500">*</span>
+																	)}
+																</Label>
+																<Input
+																	id={field.name}
+																	name={field.name}
+																	type="number"
+																	step="0.01"
+																	min="0"
+																	max="100"
+																	value={field.state.value}
+																	onBlur={field.handleBlur}
+																	onChange={(e) =>
+																		field.handleChange(e.target.value)
+																	}
+																	placeholder="15.50"
+																/>
+																<p className="text-muted-foreground text-xs">
+																	Tasa de interés anual
+																</p>
+															</div>
+														)}
+													</editOpportunityForm.Field>
+												</div>
+
+												<div>
+													<editOpportunityForm.Field name="cuotaMensual">
+														{(field) => (
+															<div className="space-y-2">
+																<Label htmlFor={field.name}>
+																	Cuota Mensual (Q){" "}
+																	{selectedStageData.closurePercentage ===
+																		100 && (
+																		<span className="text-red-500">*</span>
+																	)}
+																</Label>
+																<Input
+																	id={field.name}
+																	name={field.name}
+																	type="number"
+																	step="0.01"
+																	min="0"
+																	value={field.state.value}
+																	onBlur={field.handleBlur}
+																	onChange={(e) =>
+																		field.handleChange(e.target.value)
+																	}
+																	placeholder="2500.00"
+																/>
+																<p className="text-muted-foreground text-xs">
+																	Monto de cada cuota mensual
+																</p>
+															</div>
+														)}
+													</editOpportunityForm.Field>
+												</div>
+
+												<div>
+													<editOpportunityForm.Field name="fechaInicio">
+														{(field) => (
+															<div className="space-y-2">
+																<Label htmlFor={field.name}>
+																	Fecha de Inicio{" "}
+																	{selectedStageData.closurePercentage ===
+																		100 && (
+																		<span className="text-red-500">*</span>
+																	)}
+																</Label>
+																<Input
+																	id={field.name}
+																	name={field.name}
+																	type="date"
+																	value={field.state.value}
+																	onBlur={field.handleBlur}
+																	onChange={(e) =>
+																		field.handleChange(e.target.value)
+																	}
+																/>
+																<p className="text-muted-foreground text-xs">
+																	Fecha de inicio del contrato
+																</p>
+															</div>
+														)}
+													</editOpportunityForm.Field>
+												</div>
+
+												<div>
+													<editOpportunityForm.Field name="diaPagoMensual">
+														{(field) => (
+															<div className="space-y-2">
+																<Label htmlFor={field.name}>
+																	Día de Pago Mensual{" "}
+																	{selectedStageData.closurePercentage ===
+																		100 && (
+																		<span className="text-red-500">*</span>
+																	)}
+																</Label>
+																<Input
+																	id={field.name}
+																	name={field.name}
+																	type="number"
+																	min="1"
+																	max="31"
+																	value={field.state.value}
+																	onBlur={field.handleBlur}
+																	onChange={(e) =>
+																		field.handleChange(e.target.value)
+																	}
+																	placeholder="15"
+																/>
+																<p className="text-muted-foreground text-xs">
+																	Día del mes para realizar el pago (1-31)
+																</p>
+															</div>
+														)}
+													</editOpportunityForm.Field>
+												</div>
+											</div>
+										</div>
+									) : null;
+								}}
+							</editOpportunityForm.Subscribe>
 
 							<editOpportunityForm.Subscribe>
 								{(state) => (
@@ -1963,6 +2209,18 @@ function RouteComponent() {
 													return;
 												}
 
+												// Validate: cannot manually move from 30% to 40% (only analysis approval can do this)
+												if (
+													targetStage &&
+													currentStage &&
+													currentStage.closurePercentage === 30 &&
+													targetStage.closurePercentage >= 40
+												) {
+													toast.error(
+														"No puedes mover manualmente una oportunidad de Recepción de documentación (30%) a etapas superiores. El equipo de análisis debe aprobar los documentos para que la oportunidad avance automáticamente al 40%.",
+													);
+													return;
+												}
 												// Validate: moving from <=20% to >=30% requires a vehicle
 												if (
 													targetStage &&
@@ -1975,6 +2233,39 @@ function RouteComponent() {
 														"Para avanzar a esta etapa, la oportunidad debe tener un vehículo asignado. Por favor edita la oportunidad y asigna un vehículo.",
 													);
 													return;
+												}
+
+												// Validate: moving to 100% requires credit terms
+												if (
+													targetStage &&
+													targetStage.closurePercentage === 100
+												) {
+													const missingFields: string[] = [];
+
+													if (!selectedOpportunity.vehicleId)
+														missingFields.push("vehículo");
+													if (!selectedOpportunity.leadId)
+														missingFields.push("lead/contacto");
+													if (!selectedOpportunity.value)
+														missingFields.push("valor del crédito");
+													if (!selectedOpportunity.numeroCuotas)
+														missingFields.push("número de cuotas");
+													if (!selectedOpportunity.tasaInteres)
+														missingFields.push("tasa de interés");
+													if (!selectedOpportunity.cuotaMensual)
+														missingFields.push("cuota mensual");
+													if (!selectedOpportunity.fechaInicio)
+														missingFields.push("fecha de inicio del contrato");
+													if (!selectedOpportunity.diaPagoMensual)
+														missingFields.push("día de pago mensual");
+
+													if (missingFields.length > 0) {
+														toast.error(
+															`No se puede cerrar la oportunidad al 100%. Faltan los siguientes datos: ${missingFields.join(", ")}. Por favor edita la oportunidad y completa todos los términos de crédito.`,
+															{ duration: 8000 },
+														);
+														return;
+													}
 												}
 
 												updateOpportunityMutation.mutate({

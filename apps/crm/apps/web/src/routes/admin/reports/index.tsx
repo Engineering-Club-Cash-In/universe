@@ -1,28 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
-import { authClient } from "@/lib/auth-client";
-import { orpc } from "@/utils/orpc";
-import { ReportCard } from "@/components/reports/report-card";
-import { DateRangeFilter } from "@/components/reports/date-range-filter";
 import {
 	Activity,
 	AlertTriangle,
-	DollarSign,
+	Banknote,
 	FileText,
 	TrendingDown,
 	TrendingUp,
 	Users,
 	Wallet,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import {
 	Bar,
@@ -39,6 +27,18 @@ import {
 	XAxis,
 	YAxis,
 } from "recharts";
+import { toast } from "sonner";
+import { DateRangeFilter } from "@/components/reports/date-range-filter";
+import { ReportCard } from "@/components/reports/report-card";
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from "@/components/ui/card";
+import { authClient } from "@/lib/auth-client";
+import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/admin/reports/")({
 	component: RouteComponent,
@@ -70,7 +70,7 @@ function RouteComponent() {
 			},
 		}),
 		enabled: userProfile.data?.role === "admin",
-	})
+	});
 
 	useEffect(() => {
 		if (!session && !isPending) {
@@ -96,7 +96,7 @@ function RouteComponent() {
 			style: "currency",
 			currency: "GTQ",
 		}).format(num);
-	}
+	};
 
 	const moraData = dashboardData.data?.morosidad || [];
 	const totalEnMora = moraData
@@ -127,7 +127,7 @@ function RouteComponent() {
 										: "Incobrable",
 			value: Number(m.montoTotal || 0),
 			count: m.totalCuotas,
-		}))
+		}));
 
 	const pipelineData = (dashboardData.data?.pipeline || []).map((p) => ({
 		etapa: p.etapa,
@@ -141,7 +141,7 @@ function RouteComponent() {
 			contratos: c.total,
 			monto: Number(c.monto || 0),
 		}),
-	)
+	);
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -160,7 +160,7 @@ function RouteComponent() {
 
 			{/* Enlaces a otros reportes - TODO: Implementar rutas */}
 			<div className="grid gap-4 md:grid-cols-4">
-				<div className="rounded-lg border bg-card p-4 text-card-foreground shadow-sm opacity-50">
+				<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
 					<div className="flex items-center gap-2">
 						<AlertTriangle className="h-5 w-5 text-orange-500" />
 						<span className="font-semibold">Cobranza</span>
@@ -169,7 +169,7 @@ function RouteComponent() {
 						Gestión de mora y recuperación (Próximamente)
 					</p>
 				</div>
-				<div className="rounded-lg border bg-card p-4 text-card-foreground shadow-sm opacity-50">
+				<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
 					<div className="flex items-center gap-2">
 						<Wallet className="h-5 w-5 text-blue-500" />
 						<span className="font-semibold">Cartera</span>
@@ -178,7 +178,7 @@ function RouteComponent() {
 						Análisis de créditos activos (Próximamente)
 					</p>
 				</div>
-				<div className="rounded-lg border bg-card p-4 text-card-foreground shadow-sm opacity-50">
+				<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
 					<div className="flex items-center gap-2">
 						<Activity className="h-5 w-5 text-green-500" />
 						<span className="font-semibold">Inventario</span>
@@ -187,7 +187,7 @@ function RouteComponent() {
 						Estado de vehículos (Próximamente)
 					</p>
 				</div>
-				<div className="rounded-lg border bg-card p-4 text-card-foreground shadow-sm opacity-50">
+				<div className="rounded-lg border bg-card p-4 text-card-foreground opacity-50 shadow-sm">
 					<div className="flex items-center gap-2">
 						<TrendingDown className="h-5 w-5 text-red-500" />
 						<span className="font-semibold">Subastas</span>
@@ -264,16 +264,13 @@ function RouteComponent() {
 											}`}
 											fill={
 												COLORS[
-													moraData[index]
-														?.estadoMora as keyof typeof COLORS
+													moraData[index]?.estadoMora as keyof typeof COLORS
 												]
 											}
 										/>
 									))}
 								</Pie>
-								<Tooltip
-									formatter={(value: number) => formatCurrency(value)}
-								/>
+								<Tooltip formatter={(value: number) => formatCurrency(value)} />
 							</PieChart>
 						</ResponsiveContainer>
 					</CardContent>
@@ -290,7 +287,12 @@ function RouteComponent() {
 						<ResponsiveContainer width="100%" height={300}>
 							<BarChart data={pipelineData}>
 								<CartesianGrid strokeDasharray="3 3" />
-								<XAxis dataKey="etapa" angle={-45} textAnchor="end" height={100} />
+								<XAxis
+									dataKey="etapa"
+									angle={-45}
+									textAnchor="end"
+									height={100}
+								/>
 								<YAxis />
 								<Tooltip />
 								<Legend />
@@ -307,9 +309,7 @@ function RouteComponent() {
 				<Card className="md:col-span-2">
 					<CardHeader>
 						<CardTitle>Tendencia de Nuevos Contratos</CardTitle>
-						<CardDescription>
-							Últimos 6 meses de actividad
-						</CardDescription>
+						<CardDescription>Últimos 6 meses de actividad</CardDescription>
 					</CardHeader>
 					<CardContent>
 						<ResponsiveContainer width="100%" height={300}>
@@ -320,9 +320,7 @@ function RouteComponent() {
 								<YAxis yAxisId="right" orientation="right" />
 								<Tooltip
 									formatter={(value: number, name: string) =>
-										name === "monto"
-											? formatCurrency(value)
-											: value
+										name === "monto" ? formatCurrency(value) : value
 									}
 								/>
 								<Legend />
@@ -376,5 +374,5 @@ function RouteComponent() {
 				</CardContent>
 			</Card>
 		</div>
-	)
+	);
 }

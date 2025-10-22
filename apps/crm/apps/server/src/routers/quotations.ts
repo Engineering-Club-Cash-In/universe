@@ -1,8 +1,8 @@
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { quotations, vehicles } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
-import { eq, and, desc } from "drizzle-orm";
 import { ROLES } from "../lib/roles";
 
 /**
@@ -22,8 +22,8 @@ function calculateMonthlyPayment(
 
 	if (r === 0) return principal / termMonths;
 
-	const factor = Math.pow(1 + r, termMonths);
-	const baseMonthlyPayment = principal * (r * factor) / (factor - 1);
+	const factor = (1 + r) ** termMonths;
+	const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
 
 	// Agregar seguro y GPS a la cuota mensual
 	return baseMonthlyPayment + insuranceCost + gpsCost;
@@ -54,8 +54,9 @@ function generateAmortizationTable(
 
 	// Calcular la cuota base (sin seguro ni GPS)
 	const rWithVAT = r * (1 + VAT);
-	const factor = Math.pow(1 + rWithVAT, termMonths);
-	const baseMonthlyPayment = totalFinanced * (rWithVAT * factor) / (factor - 1);
+	const factor = (1 + rWithVAT) ** termMonths;
+	const baseMonthlyPayment =
+		(totalFinanced * (rWithVAT * factor)) / (factor - 1);
 
 	// Período 0 (inicial)
 	const initialInterest = balance * r;
@@ -101,7 +102,15 @@ export const quotationsRouter = {
 				vehicleLine: z.string().optional(),
 				vehicleModel: z.string().optional(),
 				vehicleType: z
-					.enum(["particular", "uber", "pickup", "nuevo", "panel", "camion", "microbus"])
+					.enum([
+						"particular",
+						"uber",
+						"pickup",
+						"nuevo",
+						"panel",
+						"camion",
+						"microbus",
+					])
 					.default("particular"),
 				vehicleValue: z.number().positive(),
 				insuredAmount: z.number().positive(),
@@ -280,10 +289,7 @@ export const quotationsRouter = {
 			}
 
 			const userRole = context.userRole;
-			if (
-				userRole !== ROLES.ADMIN &&
-				existing.salesUserId !== context.userId
-			) {
+			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
 				throw new Error("No tienes permiso para editar esta cotización");
 			}
 
@@ -317,10 +323,7 @@ export const quotationsRouter = {
 			}
 
 			const userRole = context.userRole;
-			if (
-				userRole !== ROLES.ADMIN &&
-				existing.salesUserId !== context.userId
-			) {
+			if (userRole !== ROLES.ADMIN && existing.salesUserId !== context.userId) {
 				throw new Error("No tienes permiso para eliminar esta cotización");
 			}
 

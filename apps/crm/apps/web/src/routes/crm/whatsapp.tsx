@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import {
 	Card,
@@ -11,8 +13,6 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { orpc } from "@/utils/orpc";
-import { PERMISSIONS } from "server/src/types/roles";
-import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/crm/whatsapp")({
 	component: RouteComponent,
@@ -33,7 +33,11 @@ function RouteComponent() {
 	useEffect(() => {
 		if (!session && !isPending) {
 			navigate({ to: "/login" });
-		} else if (session && userRole && !PERMISSIONS.canAccessWhatsApp(userRole)) {
+		} else if (
+			session &&
+			userRole &&
+			!PERMISSIONS.canAccessWhatsApp(userRole)
+		) {
 			navigate({ to: "/dashboard" });
 			toast.error(
 				"Acceso denegado: esta sección es solo para ventas y administradores",
@@ -59,16 +63,16 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto h-[calc(100vh-4rem)] p-6">
-			<Card className="h-full flex flex-col">
+			<Card className="flex h-full flex-col">
 				<CardHeader>
 					<CardTitle>Chat de WhatsApp - MiniAgent</CardTitle>
 					<CardDescription>
 						Gestiona conversaciones de WhatsApp con clientes y prospectos
 					</CardDescription>
 				</CardHeader>
-				<CardContent className="flex-1 p-0 relative">
+				<CardContent className="relative flex-1 p-0">
 					{iframeLoading && (
-						<div className="absolute inset-0 flex items-center justify-center bg-background/80 backdrop-blur-sm z-10">
+						<div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 backdrop-blur-sm">
 							<div className="flex flex-col items-center gap-2">
 								<Loader2 className="h-8 w-8 animate-spin text-primary" />
 								<p className="text-muted-foreground text-sm">
@@ -80,7 +84,7 @@ function RouteComponent() {
 
 					<iframe
 						src="https://miniagent.wittysuite.com/chat"
-						className="h-full w-full border-0 rounded-b-lg"
+						className="h-full w-full rounded-b-lg border-0"
 						title="MiniAgent WhatsApp"
 						allow="microphone; camera; clipboard-read; clipboard-write"
 						onLoad={handleIframeLoad}

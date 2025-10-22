@@ -1,4 +1,9 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+	DeleteObjectCommand,
+	GetObjectCommand,
+	PutObjectCommand,
+	S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 // Configuración de Cloudflare R2
@@ -9,7 +14,9 @@ const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "crm-documents";
 
 // Verificar que las variables de entorno estén configuradas
 if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY) {
-	console.warn("⚠️  R2 storage credentials not configured. File uploads will fail.");
+	console.warn(
+		"⚠️  R2 storage credentials not configured. File uploads will fail.",
+	);
 }
 
 // Crear cliente S3 para Cloudflare R2
@@ -26,11 +33,11 @@ export const r2Client = new S3Client({
 export function generateUniqueFilename(originalName: string): string {
 	const timestamp = Date.now();
 	const randomString = Math.random().toString(36).substring(2, 8);
-	const extension = originalName.split('.').pop();
-	const baseName = originalName.split('.').slice(0, -1).join('.');
+	const extension = originalName.split(".").pop();
+	const baseName = originalName.split(".").slice(0, -1).join(".");
 	// Sanitizar el nombre del archivo
-	const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9-_]/g, '_');
-	
+	const sanitizedBaseName = baseName.replace(/[^a-zA-Z0-9-_]/g, "_");
+
 	return `${timestamp}-${randomString}-${sanitizedBaseName}.${extension}`;
 }
 
@@ -41,22 +48,26 @@ export async function uploadFileToR2(
 	opportunityId: string,
 ): Promise<{ key: string; url: string }> {
 	const key = `opportunities/${opportunityId}/${filename}`;
-	
+
 	const command = new PutObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
 		ContentType: file.type,
 	});
-	
+
 	await r2Client.send(command);
-	
+
 	// Generar URL firmada para acceso temporal (24 horas)
-	const url = await getSignedUrl(r2Client, new GetObjectCommand({
-		Bucket: R2_BUCKET_NAME,
-		Key: key,
-	}), { expiresIn: 86400 }); // 24 horas
-	
+	const url = await getSignedUrl(
+		r2Client,
+		new GetObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+		}),
+		{ expiresIn: 86400 },
+	); // 24 horas
+
 	return { key, url };
 }
 
@@ -68,28 +79,27 @@ export async function uploadVehiclePhotoToR2(
 	category: string,
 ): Promise<{ key: string; url: string }> {
 	const key = `vehicles/${vehicleId}/photos/${category}/${filename}`;
-	
+
 	const command = new PutObjectCommand({
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 		Body: Buffer.from(await file.arrayBuffer()),
 		ContentType: file.type,
 	});
-	
+
 	await r2Client.send(command);
-	
+
 	// Si tienes un dominio personalizado configurado en R2, úsalo:
 	const R2_PUBLIC_DOMAIN = process.env.R2_PUBLIC_DOMAIN; // ej: "images.tudominio.com"
-	
+
 	if (R2_PUBLIC_DOMAIN) {
 		// URL pública permanente con dominio personalizado
 		const publicUrl = `https://${R2_PUBLIC_DOMAIN}/${key}`;
 		return { key, url: publicUrl };
-	} else {
-		// Fallback: URL pública directa de R2 (requiere bucket público)
-		const publicUrl = `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
-		return { key, url: publicUrl };
 	}
+	// Fallback: URL pública directa de R2 (requiere bucket público)
+	const publicUrl = `https://${R2_BUCKET_NAME}.${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/${key}`;
+	return { key, url: publicUrl };
 }
 
 // Obtener URL firmada para un archivo
@@ -98,7 +108,7 @@ export async function getFileUrl(key: string): Promise<string> {
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 	});
-	
+
 	// Generar URL firmada válida por 1 hora
 	return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
 }
@@ -109,20 +119,20 @@ export async function deleteFileFromR2(key: string): Promise<void> {
 		Bucket: R2_BUCKET_NAME,
 		Key: key,
 	});
-	
+
 	await r2Client.send(command);
 }
 
 // Tipos de documentos permitidos
 export const ALLOWED_DOCUMENT_TYPES = [
-	'application/pdf',
-	'image/jpeg',
-	'image/jpg',
-	'image/png',
-	'image/webp',
-	'image/avif', // Agregado soporte para AVIF
-	'application/msword',
-	'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+	"application/pdf",
+	"image/jpeg",
+	"image/jpg",
+	"image/png",
+	"image/webp",
+	"image/avif", // Agregado soporte para AVIF
+	"application/msword",
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ];
 
 // Tamaño máximo del archivo (10MB)
@@ -133,16 +143,18 @@ export function validateFile(file: File): { valid: boolean; error?: string } {
 	if (!ALLOWED_DOCUMENT_TYPES.includes(file.type)) {
 		return {
 			valid: false,
-			error: 'Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF) y documentos Word.',
+			error:
+				"Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF) y documentos Word.",
 		};
 	}
-	
+
 	if (file.size > MAX_FILE_SIZE) {
 		return {
 			valid: false,
-			error: 'El archivo es demasiado grande. El tamaño máximo permitido es 10MB.',
+			error:
+				"El archivo es demasiado grande. El tamaño máximo permitido es 10MB.",
 		};
 	}
-	
+
 	return { valid: true };
 }

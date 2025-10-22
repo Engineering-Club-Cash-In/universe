@@ -1,4 +1,12 @@
-import { pgTable, text, uuid, timestamp, decimal, integer, pgEnum } from "drizzle-orm/pg-core";
+import {
+	decimal,
+	integer,
+	pgEnum,
+	pgTable,
+	text,
+	timestamp,
+	uuid,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { opportunities } from "./crm";
 import { vehicles } from "./vehicles";
@@ -42,7 +50,10 @@ export const quotations = pgTable("quotations", {
 	vehicleModel: text("vehicle_model"),
 	vehicleType: vehicleTypeEnum("vehicle_type").notNull().default("particular"),
 	vehicleValue: decimal("vehicle_value", { precision: 12, scale: 2 }).notNull(),
-	insuredAmount: decimal("insured_amount", { precision: 12, scale: 2 }).notNull(),
+	insuredAmount: decimal("insured_amount", {
+		precision: 12,
+		scale: 2,
+	}).notNull(),
 
 	// Datos del financiamiento
 	downPayment: decimal("down_payment", { precision: 12, scale: 2 }).notNull(),
@@ -75,8 +86,14 @@ export const quotations = pgTable("quotations", {
 		precision: 12,
 		scale: 2,
 	}).notNull(), // valor - enganche
-	totalFinanced: decimal("total_financed", { precision: 12, scale: 2 }).notNull(), // amount + costos
-	monthlyPayment: decimal("monthly_payment", { precision: 12, scale: 2 }).notNull(),
+	totalFinanced: decimal("total_financed", {
+		precision: 12,
+		scale: 2,
+	}).notNull(), // amount + costos
+	monthlyPayment: decimal("monthly_payment", {
+		precision: 12,
+		scale: 2,
+	}).notNull(),
 
 	// Estado
 	status: quotationStatusEnum("status").notNull().default("draft"),

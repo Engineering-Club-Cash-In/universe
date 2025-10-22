@@ -1,9 +1,146 @@
 {
-	"id": "eb50c126-1296-45b5-8d7e-a47892345239",
-	"prevId": "93c7aff3-d0be-4fe3-8181-a4d7a3369cf9",
+	"id": "8c493ee7-87e2-4e6d-abe6-7302aacb470c",
+	"prevId": "eb50c126-1296-45b5-8d7e-a47892345239",
 	"version": "7",
 	"dialect": "postgresql",
 	"tables": {
+		"public.auction_expenses": {
+			"name": "auction_expenses",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"auction_id": {
+					"name": "auction_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"description": {
+					"name": "description",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"amount": {
+					"name": "amount",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"auction_expenses_auction_id_auction_vehicles_id_fk": {
+					"name": "auction_expenses_auction_id_auction_vehicles_id_fk",
+					"tableFrom": "auction_expenses",
+					"tableTo": "auction_vehicles",
+					"columnsFrom": ["auction_id"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.auction_vehicles": {
+			"name": "auction_vehicles",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"vehicle_id": {
+					"name": "vehicle_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"description": {
+					"name": "description",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"status": {
+					"name": "status",
+					"type": "auction_status",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'pending'"
+				},
+				"market_value": {
+					"name": "market_value",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"auction_price": {
+					"name": "auction_price",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"loss_value": {
+					"name": "loss_value",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"auction_vehicles_vehicle_id_vehicles_id_fk": {
+					"name": "auction_vehicles_vehicle_id_vehicles_id_fk",
+					"tableFrom": "auction_vehicles",
+					"tableTo": "vehicles",
+					"columnsFrom": ["vehicle_id"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
 		"public.account": {
 			"name": "account",
 			"schema": "",
@@ -151,6 +288,12 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"impersonated_by": {
+					"name": "impersonated_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
 				"user_id": {
 					"name": "user_id",
 					"type": "text",
@@ -223,6 +366,25 @@
 					"primaryKey": false,
 					"notNull": true,
 					"default": "'sales'"
+				},
+				"banned": {
+					"name": "banned",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": false,
+					"default": false
+				},
+				"ban_reason": {
+					"name": "ban_reason",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"ban_expires": {
+					"name": "ban_expires",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": false
 				},
 				"created_at": {
 					"name": "created_at",
@@ -391,6 +553,12 @@
 					"primaryKey": false,
 					"notNull": false,
 					"default": true
+				},
+				"notes": {
+					"name": "notes",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
 				},
 				"created_at": {
 					"name": "created_at",
@@ -626,6 +794,12 @@
 				},
 				"responsable_cobros": {
 					"name": "responsable_cobros",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"notes": {
+					"name": "notes",
 					"type": "text",
 					"primaryKey": false,
 					"notNull": false
@@ -1895,6 +2069,18 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"bank_statements_2": {
+					"name": "bank_statements_2",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"bank_statements_3": {
+					"name": "bank_statements_3",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
 				"created_at": {
 					"name": "created_at",
 					"type": "timestamp",
@@ -2025,6 +2211,14 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"credit_type": {
+					"name": "credit_type",
+					"type": "credit_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'autocompra'"
+				},
 				"value": {
 					"name": "value",
 					"type": "numeric(12, 2)",
@@ -2073,6 +2267,36 @@
 				"vendor_id": {
 					"name": "vendor_id",
 					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"numero_cuotas": {
+					"name": "numero_cuotas",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"tasa_interes": {
+					"name": "tasa_interes",
+					"type": "numeric(5, 2)",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"cuota_mensual": {
+					"name": "cuota_mensual",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"fecha_inicio": {
+					"name": "fecha_inicio",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"dia_pago_mensual": {
+					"name": "dia_pago_mensual",
+					"type": "integer",
 					"primaryKey": false,
 					"notNull": false
 				},
@@ -2331,6 +2555,135 @@
 			"checkConstraints": {},
 			"isRLSEnabled": false
 		},
+		"public.document_requirements": {
+			"name": "document_requirements",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"credit_type": {
+					"name": "credit_type",
+					"type": "credit_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"document_type": {
+					"name": "document_type",
+					"type": "document_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"required": {
+					"name": "required",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true,
+					"default": true
+				},
+				"description": {
+					"name": "description",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.document_validations": {
+			"name": "document_validations",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"opportunity_id": {
+					"name": "opportunity_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"validated_by": {
+					"name": "validated_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"validated_at": {
+					"name": "validated_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"all_documents_present": {
+					"name": "all_documents_present",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"vehicle_inspected": {
+					"name": "vehicle_inspected",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"missing_documents": {
+					"name": "missing_documents",
+					"type": "text[]",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"notes": {
+					"name": "notes",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"document_validations_opportunity_id_opportunities_id_fk": {
+					"name": "document_validations_opportunity_id_opportunities_id_fk",
+					"tableFrom": "document_validations",
+					"tableTo": "opportunities",
+					"columnsFrom": ["opportunity_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				},
+				"document_validations_validated_by_user_id_fk": {
+					"name": "document_validations_validated_by_user_id_fk",
+					"tableFrom": "document_validations",
+					"tableTo": "user",
+					"columnsFrom": ["validated_by"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
 		"public.opportunity_documents": {
 			"name": "opportunity_documents",
 			"schema": "",
@@ -2423,6 +2776,541 @@
 					"columnsFrom": ["uploaded_by"],
 					"columnsTo": ["id"],
 					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.insurance_costs": {
+			"name": "insurance_costs",
+			"schema": "",
+			"columns": {
+				"price": {
+					"name": "price",
+					"type": "integer",
+					"primaryKey": true,
+					"notNull": true
+				},
+				"inrexsa": {
+					"name": "inrexsa",
+					"type": "numeric(10, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"pick_up": {
+					"name": "pick_up",
+					"type": "numeric(10, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"panel_camion_microbus": {
+					"name": "panel_camion_microbus",
+					"type": "numeric(10, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"membership": {
+					"name": "membership",
+					"type": "numeric(10, 2)",
+					"primaryKey": false,
+					"notNull": true
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.miniagent_credentials": {
+			"name": "miniagent_credentials",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"user_id": {
+					"name": "user_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"email": {
+					"name": "email",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"password": {
+					"name": "password",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"miniagent_credentials_user_id_user_id_fk": {
+					"name": "miniagent_credentials_user_id_user_id_fk",
+					"tableFrom": "miniagent_credentials",
+					"tableTo": "user",
+					"columnsFrom": ["user_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {
+				"miniagent_credentials_user_id_unique": {
+					"name": "miniagent_credentials_user_id_unique",
+					"nullsNotDistinct": false,
+					"columns": ["user_id"]
+				}
+			},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.entity_notes": {
+			"name": "entity_notes",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"entity_type": {
+					"name": "entity_type",
+					"type": "entity_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"entity_id": {
+					"name": "entity_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"content": {
+					"name": "content",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"note_type": {
+					"name": "note_type",
+					"type": "note_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'general'"
+				},
+				"is_pinned": {
+					"name": "is_pinned",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true,
+					"default": false
+				},
+				"created_by": {
+					"name": "created_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"edited_by": {
+					"name": "edited_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"is_deleted": {
+					"name": "is_deleted",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true,
+					"default": false
+				},
+				"deleted_by": {
+					"name": "deleted_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"deleted_at": {
+					"name": "deleted_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"entity_notes_created_by_user_id_fk": {
+					"name": "entity_notes_created_by_user_id_fk",
+					"tableFrom": "entity_notes",
+					"tableTo": "user",
+					"columnsFrom": ["created_by"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				},
+				"entity_notes_edited_by_user_id_fk": {
+					"name": "entity_notes_edited_by_user_id_fk",
+					"tableFrom": "entity_notes",
+					"tableTo": "user",
+					"columnsFrom": ["edited_by"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				},
+				"entity_notes_deleted_by_user_id_fk": {
+					"name": "entity_notes_deleted_by_user_id_fk",
+					"tableFrom": "entity_notes",
+					"tableTo": "user",
+					"columnsFrom": ["deleted_by"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.note_attachments": {
+			"name": "note_attachments",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"note_id": {
+					"name": "note_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"filename": {
+					"name": "filename",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"original_name": {
+					"name": "original_name",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"mime_type": {
+					"name": "mime_type",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"size": {
+					"name": "size",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"file_path": {
+					"name": "file_path",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"uploaded_by": {
+					"name": "uploaded_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"uploaded_at": {
+					"name": "uploaded_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"note_attachments_note_id_entity_notes_id_fk": {
+					"name": "note_attachments_note_id_entity_notes_id_fk",
+					"tableFrom": "note_attachments",
+					"tableTo": "entity_notes",
+					"columnsFrom": ["note_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				},
+				"note_attachments_uploaded_by_user_id_fk": {
+					"name": "note_attachments_uploaded_by_user_id_fk",
+					"tableFrom": "note_attachments",
+					"tableTo": "user",
+					"columnsFrom": ["uploaded_by"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.quotations": {
+			"name": "quotations",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"opportunity_id": {
+					"name": "opportunity_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"vehicle_id": {
+					"name": "vehicle_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"sales_user_id": {
+					"name": "sales_user_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"vehicle_brand": {
+					"name": "vehicle_brand",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"vehicle_line": {
+					"name": "vehicle_line",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"vehicle_model": {
+					"name": "vehicle_model",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"vehicle_type": {
+					"name": "vehicle_type",
+					"type": "vehicle_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'particular'"
+				},
+				"vehicle_value": {
+					"name": "vehicle_value",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"insured_amount": {
+					"name": "insured_amount",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"down_payment": {
+					"name": "down_payment",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"down_payment_percentage": {
+					"name": "down_payment_percentage",
+					"type": "numeric(5, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"term_months": {
+					"name": "term_months",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"interest_rate": {
+					"name": "interest_rate",
+					"type": "numeric(5, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"insurance_cost": {
+					"name": "insurance_cost",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'0'"
+				},
+				"gps_cost": {
+					"name": "gps_cost",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'0'"
+				},
+				"transfer_cost": {
+					"name": "transfer_cost",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'0'"
+				},
+				"admin_cost": {
+					"name": "admin_cost",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'0'"
+				},
+				"membership_cost": {
+					"name": "membership_cost",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'0'"
+				},
+				"amount_to_finance": {
+					"name": "amount_to_finance",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"total_financed": {
+					"name": "total_financed",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"monthly_payment": {
+					"name": "monthly_payment",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"status": {
+					"name": "status",
+					"type": "quotation_status",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'draft'"
+				},
+				"notes": {
+					"name": "notes",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"quotations_opportunity_id_opportunities_id_fk": {
+					"name": "quotations_opportunity_id_opportunities_id_fk",
+					"tableFrom": "quotations",
+					"tableTo": "opportunities",
+					"columnsFrom": ["opportunity_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				},
+				"quotations_vehicle_id_vehicles_id_fk": {
+					"name": "quotations_vehicle_id_vehicles_id_fk",
+					"tableFrom": "quotations",
+					"tableTo": "vehicles",
+					"columnsFrom": ["vehicle_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				},
+				"quotations_sales_user_id_user_id_fk": {
+					"name": "quotations_sales_user_id_user_id_fk",
+					"tableFrom": "quotations",
+					"tableTo": "user",
+					"columnsFrom": ["sales_user_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
 					"onUpdate": "no action"
 				}
 			},
@@ -2752,7 +3640,8 @@
 				},
 				"status": {
 					"name": "status",
-					"type": "text",
+					"type": "inspection_status",
+					"typeSchema": "public",
 					"primaryKey": false,
 					"notNull": true,
 					"default": "'pending'"
@@ -2951,6 +3840,12 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"notes": {
+					"name": "notes",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
 				"created_at": {
 					"name": "created_at",
 					"type": "timestamp",
@@ -3077,7 +3972,8 @@
 				},
 				"status": {
 					"name": "status",
-					"type": "text",
+					"type": "vehicle_status",
+					"typeSchema": "public",
 					"primaryKey": false,
 					"notNull": true,
 					"default": "'pending'"
@@ -3174,6 +4070,12 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"notes": {
+					"name": "notes",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
 				"created_at": {
 					"name": "created_at",
 					"type": "timestamp",
@@ -3229,6 +4131,11 @@
 		}
 	},
 	"enums": {
+		"public.auction_status": {
+			"name": "auction_status",
+			"schema": "public",
+			"values": ["pending", "sold"]
+		},
 		"public.user_role": {
 			"name": "user_role",
 			"schema": "public",
@@ -3296,6 +4203,11 @@
 			"schema": "public",
 			"values": ["active", "inactive", "churned"]
 		},
+		"public.credit_type": {
+			"name": "credit_type",
+			"schema": "public",
+			"values": ["autocompra", "sobre_vehiculo"]
+		},
 		"public.lead_source": {
 			"name": "lead_source",
 			"schema": "public",
@@ -3337,7 +4249,7 @@
 		"public.work_time": {
 			"name": "work_time",
 			"schema": "public",
-			"values": ["1_to_5", "5_to_10", "10_plus"]
+			"values": ["less_than_1", "1_to_5", "5_to_10", "10_plus"]
 		},
 		"public.document_type": {
 			"name": "document_type",
@@ -3352,6 +4264,53 @@
 				"credit_report",
 				"other"
 			]
+		},
+		"public.entity_type": {
+			"name": "entity_type",
+			"schema": "public",
+			"values": [
+				"lead",
+				"opportunity",
+				"client",
+				"company",
+				"vehicle",
+				"vendor",
+				"contract",
+				"collection_case"
+			]
+		},
+		"public.note_type": {
+			"name": "note_type",
+			"schema": "public",
+			"values": ["general", "follow_up", "important", "internal"]
+		},
+		"public.quotation_status": {
+			"name": "quotation_status",
+			"schema": "public",
+			"values": ["draft", "sent", "accepted", "rejected"]
+		},
+		"public.vehicle_type": {
+			"name": "vehicle_type",
+			"schema": "public",
+			"values": [
+				"particular",
+				"uber",
+				"pickup",
+				"nuevo",
+				"panel",
+				"camion",
+				"microbus"
+			]
+		},
+		"public.inspection_status": {
+			"name": "inspection_status",
+			"schema": "public",
+			"values": ["pending", "approved", "rejected", "auction"]
+		},
+		"public.vehicle_status": {
+			"name": "vehicle_status",
+			"schema": "public",
+			"values": ["pending", "available", "sold", "maintenance", "auction"]
 		}
 	},
 	"schemas": {},

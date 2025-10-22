@@ -62,7 +62,9 @@ export const notesRouter = {
 					"collection_case",
 				]),
 				entityId: z.string().uuid(),
-				content: z.string().min(1, "El contenido de la nota no puede estar vacío"),
+				content: z
+					.string()
+					.min(1, "El contenido de la nota no puede estar vacío"),
 				noteType: z
 					.enum(["general", "follow_up", "important", "internal"])
 					.default("general"),
@@ -90,7 +92,9 @@ export const notesRouter = {
 		.input(
 			z.object({
 				noteId: z.string().uuid(),
-				content: z.string().min(1, "El contenido de la nota no puede estar vacío"),
+				content: z
+					.string()
+					.min(1, "El contenido de la nota no puede estar vacío"),
 				noteType: z
 					.enum(["general", "follow_up", "important", "internal"])
 					.optional(),

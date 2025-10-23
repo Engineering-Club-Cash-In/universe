@@ -81,7 +81,7 @@ export function useGenerateComponent() {
           case 2:
             return !!(formData.renapData && formData.dpi);
           case 3:
-            return step3Valid;
+            return true;
           case 4:
             return true; // El step 4 es solo visualización
           default:

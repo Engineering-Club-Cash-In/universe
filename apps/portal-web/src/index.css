@@ -1,0 +1,75 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "PlusJakarta";
+  src: url("/PlusJakartaSans-VariableFont_wght.ttf") format("truetype");
+  font-weight: 100 700;
+   font-style: normal;
+  font-display: swap;
+}
+
+/* Font Face */
+@font-face {
+  font-family: "Hero";
+  src: url("/hero-regular.otf") format("opentype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hero";
+  src: url("/hero-bold.otf") format("opentype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hero";
+  src: url("/hero-light.otf") format("opentype");
+  font-weight: 200;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Configuración de tema */
+@theme {
+  --font-hero: "Hero", sans-serif;
+    --font-plus-jakarta: "PlusJakarta", sans-serif;
+  --color-primary: rgba(216, 231, 16, 0.87);
+  --color-secondary: rgb(79, 87, 247);
+  --color-dark: #0f0f0f;
+  --color-light: #ffffff;
+
+  --text-header-1: 72px;
+  --text-header-1--font-weight: 700;
+  --text-header-1--line-height: 1.2;
+
+  --text-header-2: 64px;
+  --text-header-2--font-weight: 400;
+  --text-header-2--line-height: 1.2;
+
+  --text-header-3: 48px;
+  --text-header-3--font-weight: 700;
+  --text-header-3--line-height: 1.2;
+
+  --text-header-4: 40px;
+  --text-header-4--font-weight: 400;
+  --text-header-4--line-height: 1.2;
+
+  --text-header-body: 30px;
+  --text-header-body--font-weight: 700;
+  --text-header-body--line-height: 1.2;
+
+  --text-body: 24px;
+  --text-body--font-weight: 400;
+  --text-body--line-height: 1.2;
+}
+
+/* Clases personalizadas */
+@layer base {
+  body {
+    font-family: var(--font-hero);
+  }
+}

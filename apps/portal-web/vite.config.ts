@@ -3,6 +3,7 @@ import { defineConfig } from "vite";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
+import path from "path";
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -16,4 +17,10 @@ export default defineConfig({
     tailwindcss(),
     // ...,
   ],
+  resolve: {
+    alias: {
+      "@components": path.resolve(__dirname, "./src/components"),
+      "@features": path.resolve(__dirname, "./src/features"),
+    },
+  },
 });

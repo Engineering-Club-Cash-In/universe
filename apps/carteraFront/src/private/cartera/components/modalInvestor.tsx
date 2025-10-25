@@ -9,7 +9,7 @@ interface InvestorModalProps {
   open: boolean;
   onClose: () => void;
   mode: "create" | "update";
-  initialData?: InvestorPayload; // Para edición
+  initialData?: InvestorPayload;
 }
 
 export function InvestorModal({ open, onClose, mode, initialData }: InvestorModalProps) {
@@ -17,7 +17,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const queryClient = useQueryClient();
 
   const { register, handleSubmit, reset } = useForm<InvestorPayload>({
-    defaultValues: initialData || {
+    defaultValues: {
       nombre: "",
       emite_factura: false,
       reinversion: false,
@@ -27,17 +27,30 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     },
   });
 
-  // Reset form cuando cambie initialData
+  // ✅ ESTO ES LO CLAVE - Resetea cuando cambie initialData o mode
   useEffect(() => {
-    if (initialData) reset(initialData);
-  }, [initialData, reset]);
+    if (mode === "update" && initialData) {
+      console.log("Reseteando con initialData:", initialData);
+      reset(initialData);
+    } else if (mode === "create") {
+      reset({
+        nombre: "",
+        emite_factura: false,
+        reinversion: false,
+        banco: "",
+        tipo_cuenta: "",
+        numero_cuenta: "",
+      });
+    }
+  }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
     if (mode === "create") {
       insertInvestor.mutate(data, {
         onSuccess: () => {
           alert("✅ Inversionista creado correctamente.");
-          queryClient.invalidateQueries({ queryKey: ["investors"] }); // Refetch de la lista
+          queryClient.invalidateQueries({ queryKey: ["investors"] });
+          reset(); // ✅ Limpia el form
           onClose();
         },
         onError: () => {
@@ -50,7 +63,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
         {
           onSuccess: () => {
             alert("✅ Inversionista actualizado correctamente.");
-            queryClient.invalidateQueries({ queryKey: ["investors"] }); // Refetch de la lista
+            queryClient.invalidateQueries({ queryKey: ["investors"] });
             onClose();
           },
           onError: () => {
@@ -84,27 +97,26 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
 
           {/* Banco */}
           <div>
-  <label className="block text-sm text-blue-800 mb-1">Banco</label>
-  <select
-    {...register("banco")}
-    className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-    defaultValue=""
-  >
-    <option value="">Seleccione un banco</option>
-    <option value="GyT">GyT</option>
-    <option value="BAM">BAM</option>
-    <option value="BI">BI</option>
-    <option value="BANRURAL">BANRURAL</option>
-    <option value="PROMERICA">PROMERICA</option>
-    <option value="BANTRAB">BANTRAB</option>
-    <option value="BAC">BAC</option>
-    <option value="NEXA">NEXA</option>
-    <option value="INDUSTRIAL">INDUSTRIAL</option>
-    <option value="INTERBANCO">INTERBANCO</option>
-    <option value="INTERBANCO/RICHARD">INTERBANCO/RICHARD</option>
-    <option value="BI/MENFER S.A.">BI/MENFER S.A.</option>
-  </select>
-</div>
+            <label className="block text-sm text-blue-800 mb-1">Banco</label>
+            <select
+              {...register("banco")}
+              className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            >
+              <option value="">Seleccione un banco</option>
+              <option value="GyT">GyT</option>
+              <option value="BAM">BAM</option>
+              <option value="BI">BI</option>
+              <option value="BANRURAL">BANRURAL</option>
+              <option value="PROMERICA">PROMERICA</option>
+              <option value="BANTRAB">BANTRAB</option>
+              <option value="BAC">BAC</option>
+              <option value="NEXA">NEXA</option>
+              <option value="INDUSTRIAL">INDUSTRIAL</option>
+              <option value="INTERBANCO">INTERBANCO</option>
+              <option value="INTERBANCO/RICHARD">INTERBANCO/RICHARD</option>
+              <option value="BI/MENFER S.A.">BI/MENFER S.A.</option>
+            </select>
+          </div>
 
           {/* Tipo de cuenta */}
           <div>
@@ -112,11 +124,10 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             <select
               {...register("tipo_cuenta")}
               className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-              defaultValue=""
             >
               <option value="">Seleccione una opción</option>
               <option value="AHORRO">Ahorros</option>
-              <option value="MONTERIA">Monetaria</option>
+              <option value="MONETARIA">Monetaria</option>
             </select>
           </div>
 

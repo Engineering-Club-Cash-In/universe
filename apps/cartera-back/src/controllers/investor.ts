@@ -9,7 +9,7 @@ import {
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db/schema";
-import { eq, and, sql, inArray, ilike } from "drizzle-orm";
+import { eq, and, sql, inArray, ilike, like } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 export const insertInvestor = async ({ body, set }: any) => {
   try {
@@ -209,9 +209,12 @@ export async function processAndReplaceCreditInvestors(
   }
 
   // 2. Fetch all investors for this credit
-  const investors = await db.query.creditos_inversionistas.findMany({
-    where: (ci, { eq }) => eq(ci.inversionista_id, inversionista_id),
-  });
+ const investors = await db.query.creditos_inversionistas.findMany({
+  where: (ci, { eq, and }) => and(
+    eq(ci.inversionista_id, inversionista_id),
+    eq(ci.credito_id, credito_id)  
+  ),
+});
 
   if (investors.length === 0) {
     return [];
@@ -417,6 +420,7 @@ export async function resumeInvestor(
       banco: inversionistas.banco,
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
+      
     })
     .from(inversionistas)
     .where(eq(inversionistas.inversionista_id, investorId))
@@ -1124,11 +1128,11 @@ export const findOrCreateInvestor = async (
   nombre: string,
   emite_factura: boolean = true
 ) => {
-  // 1. Buscar inversionista por nombre exacto
+  // 1. Buscar inversionista por nombre con LIKE
   const existingInvestor = await db
     .select()
     .from(inversionistas)
-    .where(eq(inversionistas.nombre, nombre))
+    .where(like(inversionistas.nombre, `%${nombre}%`))
     .limit(1);
 
   if (existingInvestor.length > 0) {

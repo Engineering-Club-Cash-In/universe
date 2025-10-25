@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"; 
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { PaymentsCredits } from "./private/cartera/components/PaymentsCredits";
 import { ListaCreditosPagos } from "./private/cartera/components/CreditsPaymentsData";
 import { PagoForm } from "./private/cartera/components/PagoForm";
@@ -10,6 +10,7 @@ import LoginPage from "./public/login";
 import { useAuth } from "./Provider/authProvider";
 import AdvisorsManager from "./private/cartera/components/advisor";
 import MorasManager from "./private/cartera/components/Latefee";
+import CreditosPorAsesorManager from "./private/cartera/components/resumeAdvisor";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -26,7 +27,13 @@ function PublicRoute({ children }: { children: JSX.Element }) {
 }
 
 // 🎯 Restricción por roles
-function RoleRoute({ children, allowedRoles }: { children: JSX.Element; allowedRoles: string[] }) {
+function RoleRoute({
+  children,
+  allowedRoles,
+}: {
+  children: JSX.Element;
+  allowedRoles: string[];
+}) {
   const { user } = useAuth(); // 👉 aquí tu contexto ya devuelve user con { role }
   if (!user) return <Navigate to="/login" replace />;
   if (!allowedRoles.includes(user.role)) {
@@ -107,7 +114,7 @@ function App() {
               </RoleRoute>
             }
           />
-           <Route
+          <Route
             path="mora"
             element={
               <RoleRoute allowedRoles={["ADMIN"]}>
@@ -115,7 +122,14 @@ function App() {
               </RoleRoute>
             }
           />
-
+          <Route
+            path="resumenAsesores"
+            element={
+              <RoleRoute allowedRoles={["ADMIN", "ASESOR"]}>
+                <CreditosPorAsesorManager />
+              </RoleRoute>
+            }
+          />
           {/* Solo ADMIN puede manejar usuarios */}
           <Route
             path="usuarios"

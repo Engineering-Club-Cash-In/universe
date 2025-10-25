@@ -53,6 +53,7 @@ export interface InversionistaReporte {
   inversionista_id: number;
   inversionista: string;
   emite_factura: boolean;
+  nombre_inversionista: string;
   reinversion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;

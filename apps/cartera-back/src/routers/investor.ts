@@ -182,4 +182,27 @@ export const inversionistasRouter = new Elysia()
     url,
     filename,
   };
-});
+})
+  .get(
+    "/resumen-global",
+    async ({ query }) => {
+      const { inversionistaId, mes, anio, excel } = query;
+
+      const result = await resumenGlobalInversionistas(
+        inversionistaId ? Number(inversionistaId) : undefined,
+        mes ? Number(mes) : undefined,
+        anio ? Number(anio) : undefined,
+        excel === "true" || excel === true
+      );
+
+      return result;
+    },
+    {
+      query: t.Object({
+        inversionistaId: t.Optional(t.String()),
+        mes: t.Optional(t.String()),
+        anio: t.Optional(t.String()),
+        excel: t.Optional(t.String()), // "true" | "false"
+      }),
+    }
+  );

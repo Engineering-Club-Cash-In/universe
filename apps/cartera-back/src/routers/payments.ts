@@ -1,8 +1,7 @@
 import { Elysia, t } from "elysia";
 import { 
   getAllPagosWithCreditAndInversionistas,
-  getPayments,
-  reversePayment,
+  getPayments, 
   liquidatePagosCreditoInversionistas,
   falsePayment,
   getPagosConInversionistas,
@@ -15,6 +14,7 @@ import { aplicarPagoAlCredito, insertPayment } from "../controllers/registerPaym
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { pagos_credito } from "../database/db";
+import { reversePayment } from "../controllers/reversePayment";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),

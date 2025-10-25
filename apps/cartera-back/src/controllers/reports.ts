@@ -11,6 +11,8 @@ export async function getCreditosWithUserByMesAnioExcel(
     perPage?: number;
     numero_credito_sifco?: string;
     estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
+    asesor_id?: number;
+    nombre_usuario?: string;
     excel?: boolean;
   }
 ) {
@@ -23,7 +25,9 @@ export async function getCreditosWithUserByMesAnioExcel(
     rest.page ?? 1,
     rest.perPage ?? 10,
     rest.numero_credito_sifco,
-    rest.estado
+    rest.estado,
+    rest.asesor_id,
+    rest.nombre_usuario
   );
 
   if (!excel) return result; // si no piden excel, devolvemos JSON normal

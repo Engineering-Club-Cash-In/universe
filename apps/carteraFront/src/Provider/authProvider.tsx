@@ -1,9 +1,17 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
+
+// 🔥 Constante global para la URL del backend
+const BACK_URL = import.meta.env.VITE_BACK_URL || "https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site";
+
+console.log("🔍 Backend URL configurada:", BACK_URL);
 
 interface User {
   id: number;
   email: string;
   role: "ADMIN" | "ASESOR";
+  asesor_id?: number;
+  admin_id?: number;
 }
 
 interface AuthContextType {
@@ -27,12 +35,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 🔹 Verificar token al cargar la app
   useEffect(() => {
+    
     const savedAccess = localStorage.getItem("accessToken");
     const savedRefresh = localStorage.getItem("refreshToken");
     const savedUser = localStorage.getItem("user");
 
     if (savedAccess && savedRefresh) {
-      fetch(`${import.meta.env.VITE_BACK_URL}/auth/verify?token=${savedAccess}`)
+      fetch(`${BACK_URL}/auth/verify?token=${savedAccess}`)
         .then((res) => {
           if (res.status === 401) throw new Error("Token expirado");
           return res.json();
@@ -45,10 +54,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             else if (data.data) setUser(data.data);
           } else {
             console.warn("Token inválido:", data.error);
-            refreshSession(); // 👈 intenta refrescar sesión
+            refreshSession();
           }
         })
-        .catch(() => refreshSession()) // 👈 si falla la verificación → refresca
+        .catch(() => refreshSession())
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -58,6 +67,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // 🔹 Login
   const login = (user: User, access: string, refresh: string) => {
     setUser(user);
+    
     setAccessToken(access);
     setRefreshToken(refresh);
 
@@ -81,7 +91,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (!refreshToken) return logout();
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACK_URL}/auth/refresh`, {
+      const res = await fetch(`${BACK_URL}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
@@ -120,9 +130,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-// eslint-disable-next-line react-refresh/only-export-components
+// 🎯 Custom Hook para usar el contexto
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth debe usarse dentro de AuthProvider");
-  return ctx;
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth debe ser usado dentro de un AuthProvider");
+  }
+  return context;
 };

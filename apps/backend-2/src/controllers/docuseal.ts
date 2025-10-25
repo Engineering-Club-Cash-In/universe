@@ -136,6 +136,7 @@ export async function getDocumentsByDpiController(
       "pagare_unico_libre_protesto",
       "carta_emision_cheques",
       "garantia_mobiliaria",
+      "declaracion_vendedor"
     ] as const;
 
     // Validar todos los nombres

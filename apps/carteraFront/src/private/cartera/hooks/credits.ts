@@ -1,9 +1,15 @@
+/* eslint-disable @typescript-eslint/no-unused-expressions */
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getCreditosPaginados, type GetCreditosResponse } from "../services/services";
 
-// Hook actualizado: el filtro por SIFCO se va al backend
-export function useCreditosPaginadosWithFilters() {
+// 🆕 Interfaz para opciones iniciales
+interface UseCreditosOptions {
+  initialAsesorId?: number;
+}
+
+// Hook actualizado con filtros de asesor y nombre de usuario
+export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   // Opciones de meses y años
   const meses = [
     { value: 0, label: "Seleccione mes " },
@@ -25,13 +31,26 @@ export function useCreditosPaginadosWithFilters() {
   const [estado, setEstado] = useState<
     "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
   >("ACTIVO");
-
-  // 👇 Nuevo state para Excel
   const [excel, setExcel] = useState(false);
 
-  // React Query consulta filtrando por SIFCO directamente en el backend
+  // 🆕 Nuevos states para filtros con valor inicial
+  const [asesorId, setAsesorId] = useState<number | undefined>(options?.initialAsesorId);
+  const [nombreUsuario, setNombreUsuario] = useState("");
+
+  // React Query consulta con todos los filtros
   const query = useQuery<GetCreditosResponse, Error>({
-    queryKey: ["creditos-paginados", mes, anio, page, perPage, creditoSifco, estado, excel],
+    queryKey: [
+      "creditos-paginados",
+      mes,
+      anio,
+      page,
+      perPage,
+      creditoSifco,
+      estado,
+      excel,
+      asesorId,
+      nombreUsuario,
+    ],
     queryFn: () =>
       getCreditosPaginados({
         mes,
@@ -40,22 +59,54 @@ export function useCreditosPaginadosWithFilters() {
         perPage,
         numero_credito_sifco: creditoSifco.trim() !== "" ? creditoSifco : undefined,
         estado,
-        excel, // 👈 ya viaja al backend
+        excel,
+        asesor_id: asesorId,
+        nombre_usuario: nombreUsuario.trim() !== "" ? nombreUsuario : undefined,
       }),
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
   });
-
   const handleSifco = (valor: string) => {
     setCreditoSifco(valor);
     setPage(1);
   };
+
   const handleExcel = (valor: boolean) => {
     setExcel(valor);
- 
-  }
+  };
+
   const clearSifco = () => {
     setCreditoSifco("");
+    setPage(1);
+  };
+
+  // 🆕 Handler para asesor
+  const handleAsesorId = (valor: number | undefined) => {
+    setAsesorId(valor);
+    setPage(1);
+  };
+
+  const clearAsesorId = () => {
+    setAsesorId(undefined);
+    setPage(1);
+  };
+
+  // 🆕 Handler para nombre de usuario
+  const handleNombreUsuario = (valor: string) => {
+    setNombreUsuario(valor);
+    setPage(1);
+  };
+
+  const clearNombreUsuario = () => {
+    setNombreUsuario("");
+    setPage(1);
+  };
+
+  // 🆕 Limpiar todos los filtros
+  const clearAllFilters = () => {
+    setCreditoSifco("");
+    setNombreUsuario("");
+    setAsesorId(options?.initialAsesorId); // 👈 Volver al inicial
     setPage(1);
   };
 
@@ -69,9 +120,18 @@ export function useCreditosPaginadosWithFilters() {
 
   return {
     ...query,
-    mes, setMes, anio, setAnio, page, setPage, perPage, setPerPage,
-    creditoSifco, setCreditoSifco,
-    meses, years,
+    mes,
+    setMes,
+    anio,
+    setAnio,
+    page,
+    setPage,
+    perPage,
+    setPerPage,
+    creditoSifco,
+    setCreditoSifco,
+    meses,
+    years,
     handleMes: (e: React.ChangeEvent<HTMLSelectElement>) => {
       setMes(Number(e.target.value));
       setPage(1);
@@ -90,6 +150,18 @@ export function useCreditosPaginadosWithFilters() {
     estado,
     estados,
     excel,
-    handleExcel, // 👈 ya podés activar/desactivar exportación Excel
+    handleExcel,
+    // 🆕 Nuevos exports para asesor
+    asesorId,
+    setAsesorId,
+    handleAsesorId,
+    clearAsesorId,
+    // 🆕 Nuevos exports para nombre usuario
+    nombreUsuario,
+    setNombreUsuario,
+    handleNombreUsuario,
+    clearNombreUsuario,
+    // 🆕 Limpiar todos
+    clearAllFilters,
   };
 }

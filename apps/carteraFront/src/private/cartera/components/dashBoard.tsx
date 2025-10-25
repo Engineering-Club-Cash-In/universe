@@ -64,6 +64,12 @@ const menuOptions = [
     path: "/mora",
     roles: ["ADMIN"],
   },
+  {
+    key: "summary-advisors",
+    label: "Resumen de Asesores",
+    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/resumenAsesores",
+    roles: ["ADMIN","ASESOR"],}
 ];
 
 export function DashBoardCartera() {

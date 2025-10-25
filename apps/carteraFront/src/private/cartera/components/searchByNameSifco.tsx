@@ -28,15 +28,17 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
   const [selectedSifco, setSelectedSifco] = useState<string | undefined>(undefined);
 
   // Aplana los SIFCOs
-  const opciones: OpcionSifco[] = useMemo(() => (
-    data.flatMap(u =>
-      u.numeros_credito_sifco.map(sifco => ({
-        usuario_id: u.usuario_id,
-        nombre: u.nombre,
-        sifco,
-      }))
-    )
-  ), [data]);
+const opciones: OpcionSifco[] = useMemo(() => {
+  const usuarios = data || []; // 👈 Sin .data porque el servicio ya retorna el array
+  
+  return usuarios.flatMap(u =>
+    u.numeros_credito_sifco.map(sifco => ({
+      usuario_id: u.usuario_id,
+      nombre: u.nombre,
+      sifco,
+    }))
+  );
+}, [data]);
 
   // Filtra en tiempo real por nombre o sifco
   const opcionesFiltradas = useMemo(

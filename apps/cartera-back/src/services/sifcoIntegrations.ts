@@ -20,7 +20,7 @@ import {
  * Axios client para consumir SIFCO
  */
 const sifcoApi = axios.create({
-  baseURL: process.env.SIFCO_URL || "http://localhost:9000",
+  baseURL:  "http://localhost:9000",
   headers: {
     "Content-Type": "application/json",
     Authorization: `OAuth ${process.env.SIFCO_TOKEN}`,
@@ -158,6 +158,7 @@ export async function consultarEstadoCuentaPrestamo(numeroPrestamo: string) {
   const { data } = await sifcoApi.post<
     ServiceResponse<WSCrEstadoCuentaResponse>
   >("/api/creditos/estado-cuenta", request); 
+  console.log("🧾 Respuesta estado cuenta:", data);
   return data.data; // 👈 devolvemos WSCrEstadoCuentaResponse
 }
 /** ================================

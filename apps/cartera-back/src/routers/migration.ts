@@ -7,6 +7,7 @@ import { leerCreditoPorNumeroSIFCO } from "../services/excel";
 import { authMiddleware } from "./midleware";
 import { listarCreditosConDetalle } from "../migration/migrationCredits";
 import z from "zod";
+import { procesarCreditosMora } from "../migration/migrationLateFee";
 // ✅ Schema para sync de pagos desde SIFCO (param opcional)
 const syncCreditPaymentsSchema = z.object({
   numero_credito_sifco: z.string().min(1).optional(),
@@ -16,9 +17,11 @@ const syncCreditPaymentsSchema = z.object({
  * ⚠️ para producción deberías meterlo en un bucket o carpeta compartida
  */
 const excelPath = path.resolve(
-  "C:/Users/Kelvin Palacios/Documents/analis de datos/septiembre2025.csv"
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/octubre2025.csv"
 );
-
+const csvMoraPath = path.resolve(
+  "C:/Users/Kelvin Palacios/Documents/analis de datos/moraGeneral.csv"
+);
 export const sifcoRouter = new Elysia()
  
   /**
@@ -223,5 +226,41 @@ export const sifcoRouter = new Elysia()
         tags: ["Pagos", "Sync"],
       },
     }
-  );
+  ).post(
+  "/sync-creditos-mora",
+  async ({ set }) => {
+    try {
+      console.log("[sync-creditos-mora] Iniciando procesamiento de mora...");
+
+      // Procesamos el CSV y actualizamos créditos
+      const resultado = await procesarCreditosMora(csvMoraPath);
+
+      set.status = 200;
+      return {
+        ok: true,
+        message: "Procesamiento de créditos en mora completado",
+        summary: {
+          procesados: resultado.procesados,
+          errores: resultado.errores,
+          total: resultado.procesados + resultado.errores
+        },
+        detalles: resultado.detalles
+      };
+    } catch (error: any) {
+      console.error("[ERROR] /sync-creditos-mora:", error?.message || error);
+      set.status = 500;
+      return {
+        ok: false,
+        message: "Error al procesar créditos en mora",
+        error: error?.message ?? String(error),
+      };
+    }
+  },
+  {
+    detail: {
+      summary: "Procesa y actualiza créditos en mora desde CSV",
+      tags: ["Mora", "Sync"],
+    },
+  }
+)
 

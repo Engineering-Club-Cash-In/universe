@@ -106,7 +106,7 @@ interface PagoData {
   cuota: string;
   cuota_interes: string;
   cuota_id?: number;
-  fecha_pago: string;
+  fecha_pago?: string | null;
   abono_capital: string;
   abono_interes: string;
   abono_iva_12: string;
@@ -116,7 +116,7 @@ interface PagoData {
   abono_gps?: string;
   pago_del_mes: string;
   monto_boleta: string;
-  fecha_filtro: string;
+  fecha_vencimiento: string;
   renuevo_o_nuevo: string;
   capital_restante: string;
   interes_restante: string;
@@ -513,7 +513,7 @@ const insertPayments = async (
     abono_gps: creditData.gps ? "0" : undefined,
     pago_del_mes: "0",
     monto_boleta: "0",
-    fecha_filtro: fechas[0],
+    fecha_vencimiento: fechas[0],
     renuevo_o_nuevo: "",
     capital_restante: creditDataForInsert.capital,
     interes_restante: creditDataForInsert.cuota_interes,
@@ -575,7 +575,7 @@ const insertPayments = async (
       cuota: creditDataForInsert.cuota,
       cuota_interes: creditDataForInsert.cuota_interes,
       cuota_id: cuota.cuota_id,
-      fecha_pago: cuota.fecha_vencimiento,
+      fecha_pago: null,
       abono_capital: "0",
       abono_interes: "0",
       abono_iva_12: "0",
@@ -585,7 +585,7 @@ const insertPayments = async (
       abono_gps:  "0",
       pago_del_mes: cuotaMensual.toString(),
       monto_boleta: "0",
-      fecha_filtro: cuota.fecha_vencimiento,
+      fecha_vencimiento: cuota.fecha_vencimiento,
       renuevo_o_nuevo: "",
       capital_restante: capitalRestanteMes.round(2).toString(),
       interes_restante: interesRestanteMes.round(2).toString(),

@@ -58,7 +58,8 @@ export function PagoForm() {
     montoBaseBadDebt,
     handleResetCredito,
     resetBuscador,
-    setResetBuscador
+    setResetBuscador,
+    mora
   } = usePagoForm();
  
   return (
@@ -180,6 +181,7 @@ export function PagoForm() {
                 cuotasAtrasadasInfo={cuotasAtrasadasInfo ?? { cuotas: [] }}
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
+                mora={mora || 0}
               />
             )
           )}

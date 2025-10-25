@@ -1,5 +1,5 @@
 // routes/inversionistas.ts
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import {
   actualizarEstadoCredito,
   cancelCredit,
@@ -33,7 +33,7 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import { updateCredit } from "../controllers/updateCredit";
+import { updateAllInstallments, updateCredit } from "../controllers/updateCredit";
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
   monto: z.number({ invalid_type_error: "monto debe ser numérico" }),
@@ -53,7 +53,8 @@ const RouterBodySchema = z.object({
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
 });
 export const creditRouter = new Elysia()
-  .use(authMiddleware)
+ 
+//.use(authMiddleware)
   // Crear nuevo crédito
   .post("/newCredit", async ({ body, set }) => {
     return await insertCredit({ body, set });
@@ -91,8 +92,10 @@ export const creditRouter = new Elysia()
     page = "1",
     perPage = "10",
     numero_credito_sifco,
-    estado, // 👈 obligatorio
-    excel,  // 👈 nuevo parámetro
+    estado,           // 👈 obligatorio
+    excel,            // 👈 para generar Excel
+    asesor_id,        // 👈 NUEVO
+    nombre_usuario,   // 👈 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -114,7 +117,13 @@ export const creditRouter = new Elysia()
     | "CANCELADO"
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
-    | "MOROSO"
+    | "MOROSO";
+  
+  // 🆕 Convertir asesor_id a número si existe
+  const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
+  
+  // 🆕 Nombre de usuario (string)
+  const nombreUsuarioParam = nombre_usuario ? String(nombre_usuario) : undefined;
 
   if (
     isNaN(mesNum) ||
@@ -125,6 +134,12 @@ export const creditRouter = new Elysia()
   ) {
     set.status = 400;
     return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
+  }
+
+  // 🆕 Validar asesor_id si se envía
+  if (asesor_id && isNaN(asesorIdNum!)) {
+    set.status = 400;
+    return { message: "Parámetro 'asesor_id' debe ser un número válido." };
   }
 
   // Llamar servicio
@@ -138,6 +153,8 @@ export const creditRouter = new Elysia()
         perPage: perPageNum,
         numero_credito_sifco: numeroCreditoSifco,
         estado: estadoParam,
+        asesor_id: asesorIdNum,           // 👈 NUEVO
+        nombre_usuario: nombreUsuarioParam, // 👈 NUEVO
         excel: true,
       });
       set.status = 200;
@@ -150,7 +167,10 @@ export const creditRouter = new Elysia()
         pageNum,
         perPageNum,
         numeroCreditoSifco,
-        estadoParam
+        estadoParam,  
+        asesorIdNum,           // 👈 NUEVO
+        nombreUsuarioParam,    // 👈 NUEVO
+        
       );
       set.status = 200;
       return result;
@@ -160,7 +180,6 @@ export const creditRouter = new Elysia()
     return { message: "Error obteniendo créditos", error: String(error) };
   }
 })
-
 
   .post("/cancelCredit", async ({ body, set }) => {
     // Validar que venga el creditId en el body
@@ -629,4 +648,37 @@ export const creditRouter = new Elysia()
       filename,
       size: fileBuffer.length,
     };
-  });
+  })
+
+/**
+ * POST /api/installments/update-all
+ * Actualiza las cuotas de todos los créditos o uno específico
+ * Body (opcional): { numero_credito_sifco?: string }
+ */
+.post('/update-all', async ({ body, set }) => {
+  try {
+    const { numero_credito_sifco } = body;
+
+    await updateAllInstallments({ numero_credito_sifco });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: numero_credito_sifco 
+        ? `Crédito ${numero_credito_sifco} actualizado correctamente`
+        : 'Todos los créditos actualizados correctamente',
+    };
+  } catch (error) {
+    console.error('Error en update-all:', error);
+    set.status = 500;
+    return {
+      success: false,
+      message: 'Error al actualizar las cuotas',
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    };
+  }
+}, {
+  body: t.Object({
+    numero_credito_sifco: t.Optional(t.String())
+  })
+});

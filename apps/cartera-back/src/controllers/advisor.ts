@@ -1,8 +1,9 @@
 // controllers/advisors.ts
 import { db } from '../database/index';
-import { asesores, platform_users } from '../database/db/schema';
-import { eq } from 'drizzle-orm';
+import { asesores, creditos, moras_credito, platform_users } from '../database/db/schema';
+import { and, eq, like, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
+import Big from 'big.js';
 export const insertAdvisor = async ({ body, set }: any) => {
   try {
     let asesoresToInsert = [];
@@ -65,33 +66,69 @@ export const insertAdvisor = async ({ body, set }: any) => {
  * @param activo Estado del asesor (por default: true)
  * @returns Asesor encontrado o recién creado
  */
+/**
+ * Busca un asesor por nombre. Si no existe, lo crea.
+ * @param nombre Nombre del asesor
+ * @param activo Estado del asesor (por default: true)
+ * @returns Asesor encontrado o recién creado
+ */
 export const findOrCreateAdvisorByName = async (
   nombre: string,
   activo: boolean = true
 ) => {
-  // Buscar asesor por nombre exacto
-  const existingAdvisor = await db
+  const normalizedSearch = nombre
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+  console.log(`\n🔍 ========================================`);
+  console.log(`🔍 Buscando: "${nombre}"`);
+  console.log(`🔍 Normalizado: "${normalizedSearch}"`);
+  console.log(`🔍 Length: ${normalizedSearch.length}`);
+  console.log(`🔍 Bytes: [${Array.from(normalizedSearch).map(c => c.charCodeAt(0)).join(', ')}]`);
+
+  const allAdvisors = await db
     .select()
     .from(asesores)
-    .where(eq(asesores.nombre, nombre))
-    .limit(1);
+    .innerJoin(platform_users, eq(asesores.asesor_id, platform_users.asesor_id));
 
-  if (existingAdvisor.length > 0) {
-    return existingAdvisor[0];
+  console.log(`\n📋 Asesores en BD (${allAdvisors.length}):`);
+  
+  let encontrado = null;
+  
+  for (const advisor of allAdvisors) {
+    const dbName = advisor.asesores.nombre
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+    
+    console.log(`   - "${advisor.asesores.nombre}" → normalizado: "${dbName}" (length: ${dbName.length})`);
+    console.log(`     Bytes: [${Array.from(dbName).map(c => c.charCodeAt(0)).join(', ')}]`);
+    console.log(`     Match: ${dbName === normalizedSearch ? '✅ SÍ' : '❌ NO'}`);
+    
+    if (dbName === normalizedSearch) {
+      encontrado = advisor;
+    }
   }
 
-  // Si no existe, crear asesor
-  const [newAdvisor] = await db
-    .insert(asesores)
-    .values({
-      nombre,
-      activo
-    })
-    .returning();
+  if (encontrado) {
+    console.log(`\n✅ ENCONTRADO: ID ${encontrado.asesores.asesor_id} - "${encontrado.asesores.nombre}"`);
+    console.log(`========================================\n`);
+    return encontrado.asesores;
+  }
 
-  return newAdvisor;
+  const nombreSinTildes = nombre
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+  console.log(`\n➕ NO ENCONTRADO - Creando: "${nombreSinTildes}"`);
+  console.log(`========================================\n`);
+
+ 
 };
-
 // GET: Obtener asesores (uno o todos, usando id o nombre como filtro)
 
 export const getAdvisors = async ({ query, set }: any) => {
@@ -234,3 +271,92 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
     };
   }
 };
+
+
+/**
+ * 📘 Controller: Get credits grouped by advisor
+ * --------------------------------------------
+ * Fetches all active advisors and computes:
+ *  - Total capital
+ *  - Total debt
+ *  - Credits "al día" and "morosos"
+ *
+ * Supports optional filtering by "numero_credito_sifco".
+ * Uses Big.js for precise decimal operations.
+ */
+export async function getCreditosPorAsesorController(numero_credito_sifco?: string) {
+  // 1️⃣ Fetch all active advisors
+  const listaAsesores = await db
+    .select()
+    .from(asesores)
+    .where(eq(asesores.activo, true));
+
+  // 2️⃣ Procesar cada asesor
+  const resultados = await Promise.all(
+    listaAsesores.map(async (asesor) => {
+      // Condiciones dinámicas
+      const condiciones = [eq(creditos.asesor_id, asesor.asesor_id)];
+      if (numero_credito_sifco) {
+        condiciones.push(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+      }
+
+      // 3️⃣ Traer créditos con JOIN a moras activas
+      const listaCreditos = await db
+        .select({
+          credito_id: creditos.credito_id,
+          numero_credito_sifco: creditos.numero_credito_sifco,
+          capital: creditos.capital,
+          deudatotal: creditos.deudatotal,
+          statusCredit: creditos.statusCredit,
+          monto_mora: moras_credito.monto_mora,
+          cuotas_atrasadas: moras_credito.cuotas_atrasadas,
+        })
+        .from(creditos)
+        .leftJoin(moras_credito, and(
+          eq(moras_credito.credito_id, creditos.credito_id),
+          eq(moras_credito.activa, true)
+        ))
+        .where(and(...condiciones));
+
+      // 4️⃣ Acumuladores globales
+      let totalCapital = new Big(0);
+      let totalDeuda = new Big(0);
+      let totalMora = new Big(0);
+      let totalCuotasAtrasadas = 0;
+      let creditosAlDia = 0;
+      let creditosMorosos = 0;
+
+      // 5️⃣ Iterar créditos
+      for (const c of listaCreditos) {
+        const capital = new Big(c.capital || 0);
+        const deuda = new Big(c.deudatotal || 0);
+        const mora = new Big(c.monto_mora || 0);
+        const cuotas = c.cuotas_atrasadas || 0;
+
+        totalCapital = totalCapital.plus(capital);
+        totalDeuda = totalDeuda.plus(deuda);
+        totalMora = totalMora.plus(mora);
+        totalCuotasAtrasadas += cuotas;
+
+        if (c.statusCredit === "ACTIVO") creditosAlDia++;
+        if (c.statusCredit === "MOROSO") creditosMorosos++;
+      }
+
+      // 6️⃣ Retornar resumen por asesor
+      return {
+        asesor_id: asesor.asesor_id,
+        asesor: asesor.nombre,
+        total_creditos: listaCreditos.length,
+        total_capital: totalCapital.toFixed(2),
+        total_deuda: totalDeuda.toFixed(2),
+        total_mora: totalMora.toFixed(2),
+        total_cuotas_atrasadas: totalCuotasAtrasadas,
+        creditos_al_dia: creditosAlDia,
+        creditos_morosos: creditosMorosos,
+        creditos: listaCreditos,
+      };
+    })
+  );
+
+  return resultados;
+}

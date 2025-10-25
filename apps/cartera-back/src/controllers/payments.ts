@@ -37,203 +37,7 @@ export const pagoSchema = z.object({
   cuotaApagar: z.number().min(1),
   url_boletas: z.array(z.string().max(500)),
 });
-
-export const reversePaymentSchema = z.object({
-  credito_id: z.number().int().positive(),
-  pago_id: z.number().int().positive(),
-});
-
-/**
- * Reverses a payment for a credit:
- * - Validates input
- * - Fetches and checks payment and credit data
- * - Updates the credit values (capital, debt, etc.)
- * - Sets the payment as not paid and resets its values
- *
- * @param body - Request body with credito_id and pago_id
- * @param set - Response handler (e.g., to set status)
- * @returns Detailed result object
- */
-export const reversePayment = async ({ body, set }: any) => {
-  try {
-    // 1. Validate input
-    const parseResult = reversePaymentSchema.safeParse(body);
-    if (!parseResult.success) {
-      set.status = 400;
-      return {
-        message: "Validation failed",
-        errors: parseResult.error.flatten().fieldErrors,
-      };
-    }
-    const { credito_id, pago_id } = parseResult.data;
-
-    // 2. Fetch payment to reverse
-    const [pago] = await db
-      .select()
-      .from(pagos_credito)
-      .where(
-        and(
-          eq(pagos_credito.credito_id, credito_id),
-          eq(pagos_credito.pago_id, pago_id)
-        )
-      )
-      .limit(1);
-
-    if (!pago) {
-      set.status = 404;
-      return { message: "Payment not found" };
-    }
-    if (!pago.pagado) {
-      set.status = 400;
-      return { message: "Payment is not marked as paid" };
-    }
-
-    // 3. Fetch credit data
-    const [creditData] = await db
-      .select()
-      .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          eq(creditos.statusCredit, "ACTIVO")
-        )
-      );
-    if (!creditData) {
-      set.status = 404;
-      return { message: "Credit not found" };
-    }
-    const [user] = await db
-      .select()
-      .from(usuarios)
-      .where(eq(usuarios.usuario_id, creditData.usuario_id))
-      .limit(1);
-    // 4. Recalculate credit values (using Big.js for money calculations)
-    const nuevoCapital = new Big(creditData.capital).add(
-      pago.abono_capital ?? 0
-    );
-    const cuota_interes = new Big(nuevoCapital)
-      .times(new Big(creditData.porcentaje_interes).div(100))
-      .round(2);
-    const iva_12 = cuota_interes.times(0.12).round(2);
-    const deudatotal = new Big(nuevoCapital)
-      .plus(cuota_interes)
-      .plus(iva_12)
-      .plus(creditData.seguro_10_cuotas ?? 0)
-      .plus(creditData.gps ?? 0)
-      .plus(creditData.membresias_pago ?? 0);
-    if (pago.mora && Number(pago.mora) > 0) {
-      await updateMora({
-        credito_id,
-        monto_cambio: Number(pago.mora),
-        tipo: "INCREMENTO",
-        activa: true,
-      });
-    }
-    // 5. Update the credit record with new values
-    await db
-      .update(creditos)
-      .set({
-        capital: nuevoCapital.toString(),
-        deudatotal: deudatotal.toString(),
-        cuota_interes: cuota_interes.toString(),
-        iva_12: iva_12.toString(),
-      })
-      .where(eq(creditos.credito_id, credito_id));
-    const abonoBig = new Big(pago.abono_capital ?? 0);
-    await processAndReplaceCreditInvestorsReverse(
-      credito_id,
-      abonoBig.toNumber(),
-      true,
-      pago_id
-    );
-
-    // 6. Reset the payment record
-    await db
-      .update(cuotas_credito)
-      .set({ pagado: false })
-      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
-    await db
-      .update(pagos_credito)
-      .set({
-        credito_id: creditData.credito_id,
-        cuota: creditData.cuota,
-        cuota_interes: creditData.cuota_interes,
-
-        abono_capital: "0",
-        abono_interes: "0",
-        abono_iva_12: "0",
-        abono_interes_ci: "0",
-        abono_iva_ci: "0",
-        abono_seguro: creditData.seguro_10_cuotas ? "0" : undefined,
-        abono_gps: creditData.gps ? "0" : undefined,
-        pago_del_mes: "0",
-        monto_boleta: "0",
-
-        capital_restante: nuevoCapital.toString(),
-        interes_restante: creditData.cuota_interes,
-        iva_12_restante: creditData.iva_12,
-        seguro_restante: creditData.seguro_10_cuotas?.toString() ?? "0",
-        gps_restante: creditData.gps?.toString() ?? "0",
-        total_restante: creditData.deudatotal,
-
-        membresias: creditData.membresias,
-        membresias_pago: creditData.membresias_pago?.toString() ?? "",
-        membresias_mes: creditData.membresias?.toString() ?? "",
-        otros: "",
-        mora: "0",
-        monto_boleta_cuota: "0",
-        seguro_total: creditData.seguro_10_cuotas?.toString() ?? "0",
-        pagado: false,
-        facturacion: "si", // default
-        mes_pagado: "", // cleared until paid
-        seguro_facturado: creditData.seguro_10_cuotas?.toString() ?? "0",
-        gps_facturado: creditData.gps?.toString() ?? "0",
-        reserva: "0",
-        observaciones: "",
-      })
-      .where(eq(pagos_credito.pago_id, pago_id));
-
-    // Eliminar las boletas asociadas a este pago
-    await db.delete(boletas).where(eq(boletas.pago_id, pago_id));
-    // Eliminar el pago de inversionistas asociado a este pago
-    await db
-      .delete(pagos_credito_inversionistas)
-      .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-
-    let saldo_a_favor = new Big(user.saldo_a_favor ?? 0).minus(
-      pago.monto_boleta ?? 0
-    );
-    if (saldo_a_favor.lt(0)) {
-      saldo_a_favor = new Big(0);
-    }
-    await db
-      .update(usuarios)
-      .set({ saldo_a_favor: saldo_a_favor.toString() })
-      .where(eq(usuarios.usuario_id, user.usuario_id));
-    // 7. Return elegant result
-    set.status = 200;
-    return {
-      message: "Payment reversed successfully",
-      data: {
-        reversedPaymentId: pago_id,
-        updatedCredit: {
-          credito_id: creditData.credito_id,
-          capital: nuevoCapital.toString(),
-          deudatotal: deudatotal.toString(),
-          cuota_interes: cuota_interes.toString(),
-          iva_12: iva_12.toString(),
-        },
-      },
-    };
-  } catch (error) {
-    console.error("[reversePayment] Error:", error);
-    set.status = 500;
-    return {
-      message: "Internal server error",
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-};
+ 
 
 export const insertPaymentPast = async ({ body, set }: any) => {
   try {
@@ -454,7 +258,7 @@ export const insertPaymentPast = async ({ body, set }: any) => {
             numero_cuota: cuota.numero_cuota,
             llamada: llamada ?? "",
             fecha_pago,
-            fecha_filtro: fecha_pago,
+            fecha_vencimiento: fecha_pago,
             renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
             tipoCredito: "Renuevo",
             membresias: credito.membresias ?? 0,
@@ -670,7 +474,7 @@ export const insertPaymentPast = async ({ body, set }: any) => {
           cuota_id: cuota.cuota_id,
           llamada: llamada ?? "",
           fecha_pago,
-          fecha_filtro: fecha_pago,
+          fecha_vencimiento: fecha_pago,
           renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
           tipoCredito: "Renuevo",
           membresias: credito.membresias ?? 0,
@@ -792,7 +596,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         total_restante: pagos_credito.total_restante,
         llamada: pagos_credito.llamada,
         fecha_pago: pagos_credito.fecha_pago,
-        fecha_filtro: pagos_credito.fecha_filtro,
+        fecha_vencimiento: pagos_credito.fecha_vencimiento,
         renuevo_o_nuevo: pagos_credito.renuevo_o_nuevo,
         membresias: pagos_credito.membresias,
         membresias_pago: pagos_credito.membresias_pago,
@@ -825,7 +629,7 @@ export async function getAllPagosWithCreditAndInversionistas(
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )
       .where(eq(creditos.numero_credito_sifco, credito_sifco))
-      .orderBy(pagos_credito.fecha_pago);
+      .orderBy(cuotas_credito.numero_cuota);
 
     const pagoIds = pagos.map((p) => p.pago_id);
 
@@ -1033,23 +837,42 @@ export async function insertPagosCreditoInversionistas(
   credito_id: number,
   excludeCube: boolean = false
 ) {
-  console.log(
-    `Insertando pagos_credito_inversionistas para pago_id: ${pago_id}, credito_id: ${credito_id}`
-  );
+   console.log("\n🔍 ========== INICIO insertPagosCreditoInversionistas ==========");
+  console.log("📥 Parámetros:");
+  console.log(`   pago_id: ${pago_id}`);
+  console.log(`   credito_id: ${credito_id}`);
+  console.log(`   excludeCube: ${excludeCube}`);
+
   // 1. Buscar inversionistas del crédito
   const inversionistasData = await db.query.creditos_inversionistas.findMany({
     where: (ci, { eq }) => eq(ci.credito_id, credito_id),
   });
 
+  console.log(`\n📊 Inversionistas encontrados: ${inversionistasData.length}`);
+
   if (!inversionistasData.length) {
+    console.error("❌ No hay inversionistas registrados para este crédito");
     throw new Error("No hay inversionistas registrados para este crédito");
   }
+
   const currentPago = await db.query.pagos_credito.findFirst({
     where: (p, { eq }) => eq(p.pago_id, pago_id),
   });
+
+  console.log("\n💳 Pago actual encontrado:");
+  console.log("   pago_id:", currentPago?.pago_id);
+  console.log("   cuota:", currentPago?.cuota);
+
   const currentCredit = await db.query.creditos.findFirst({
     where: (c, { eq }) => eq(c.credito_id, credito_id),
   });
+
+  console.log("\n🏦 Crédito actual:");
+  console.log("   credito_id:", currentCredit?.credito_id);
+  console.log("   membresias_pago:", currentCredit?.membresias_pago);
+  console.log("   gps:", currentCredit?.gps);
+  console.log("   seguro_10_cuotas:", currentCredit?.seguro_10_cuotas);
+
   const inversionistasWithName = await Promise.all(
     inversionistasData.map(async (inv) => {
       const [invRow] = await db
@@ -1062,9 +885,17 @@ export async function insertPagosCreditoInversionistas(
       };
     })
   );
+
+  console.log("\n👥 Inversionistas con nombres:");
+  inversionistasWithName.forEach((inv, idx) => {
+    console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
+  });
+
   if (!inversionistasWithName.length) {
-    throw new Error("No se encontraron inversionistas ");
+    console.error("❌ No se encontraron inversionistas");
+    throw new Error("No se encontraron inversionistas");
   }
+
   const filteredInversionistas = excludeCube
     ? inversionistasWithName.filter(
         (inv) =>
@@ -1073,7 +904,10 @@ export async function insertPagosCreditoInversionistas(
       )
     : inversionistasWithName;
 
-  console.log(filteredInversionistas);
+  console.log(`\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}): ${filteredInversionistas.length}`);
+  filteredInversionistas.forEach((inv, idx) => {
+    console.log(`   ${idx + 1}. ${inv.nombre}`);
+  });
 
   const indexMayorCuota = filteredInversionistas.reduce(
     (maxIdx, inv, idx, arr) =>
@@ -1084,13 +918,22 @@ export async function insertPagosCreditoInversionistas(
         : maxIdx,
     0
   );
-  console.log(
-    `Mayor cuota encontrada en el índice: ${indexMayorCuota}, valor: ${inversionistasWithName[indexMayorCuota].cuota_inversionista}`
-  );
+
+  console.log(`\n🏆 Mayor cuota encontrada:`);
+  console.log(`   Índice: ${indexMayorCuota}`);
+  console.log(`   Inversionista: ${filteredInversionistas[indexMayorCuota].nombre}`);
+  console.log(`   Valor cuota: ${filteredInversionistas[indexMayorCuota].cuota_inversionista}`);
+
   // 3. Calcular e insertar el abono proporcional de cada inversionista
   const inserts = filteredInversionistas.map(async (inv, idx) => {
+    console.log(`\n--- 💼 Procesando inversionista ${idx + 1}/${filteredInversionistas.length} ---`);
+    console.log(`   Nombre: ${inv.nombre}`);
+    console.log(`   inversionista_id: ${inv.inversionista_id}`);
+
     const isCube =
       inv.nombre.trim().toLowerCase() === "cube investments s.a.".toLowerCase();
+
+    console.log(`   ¿Es Cube? ${isCube ? "SÍ ✅" : "NO ❌"}`);
 
     const bigInteres = isCube
       ? new Big(inv.monto_cash_in ?? 0)
@@ -1099,10 +942,18 @@ export async function insertPagosCreditoInversionistas(
     const bigIVA = isCube
       ? new Big(inv.iva_cash_in ?? 0)
       : new Big(inv.iva_inversionista);
-    console.log("cuotaInversionista", inv.cuota_inversionista);
+
+    console.log(`   💵 Interés a usar: ${bigInteres.toString()} (${isCube ? "monto_cash_in" : "monto_inversionista"})`);
+    console.log(`   🧾 IVA a usar: ${bigIVA.toString()} (${isCube ? "iva_cash_in" : "iva_inversionista"})`);
+
+    console.log(`   💰 cuota_inversionista original: ${inv.cuota_inversionista}`);
+
     let abono_capital = isCube
       ? new Big(inv?.cuota_inversionista ?? 0)
       : new Big(inv.cuota_inversionista ?? 0);
+
+    console.log(`   💰 abono_capital inicial: ${abono_capital.toString()}`);
+
     const totalMontos = new Big(inv.monto_cash_in ?? 0).plus(
       new Big(inv.monto_inversionista ?? 0)
     );
@@ -1110,12 +961,17 @@ export async function insertPagosCreditoInversionistas(
       new Big(inv.iva_inversionista ?? 0)
     );
 
+    console.log(`   📊 totalMontos (cash_in + inversionista): ${totalMontos.toString()}`);
+    console.log(`   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`);
+
     if (idx === indexMayorCuota && !excludeCube) {
-      console.log(
-        `Abono al mayor inversionista (${inv.nombre}) con cuota ${inv.cuota_inversionista}`
-      );
-      // Si es el mayor inversionista, le resta TODO menos los cargos adicionales
-      // Al mayor, le restas TODO
+      console.log(`   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`);
+      console.log(`   📉 Restando:`);
+      console.log(`      - totalIVA: ${totalIVA.toString()}`);
+      console.log(`      - totalMontos: ${totalMontos.toString()}`);
+      console.log(`      - membresias_pago: ${currentCredit?.membresias_pago ?? 0}`);
+      console.log(`      - gps: ${currentCredit?.gps ?? 0}`);
+      console.log(`      - seguro_10_cuotas: ${currentCredit?.seguro_10_cuotas ?? 0}`);
 
       abono_capital = abono_capital
         .minus(totalIVA)
@@ -1123,23 +979,37 @@ export async function insertPagosCreditoInversionistas(
         .minus(new Big(currentCredit?.membresias_pago ?? 0))
         .minus(new Big(currentCredit?.gps ?? 0))
         .minus(new Big(currentCredit?.seguro_10_cuotas ?? 0));
+
+      console.log(`   ✅ abono_capital después de restas: ${abono_capital.toString()}`);
     } else {
-      // Al resto, solo interes e iva
+      console.log(`   📌 Inversionista regular - Solo resta interés e IVA`);
+      console.log(`   📉 Restando:`);
+      console.log(`      - totalIVA: ${totalIVA.toString()}`);
+      console.log(`      - totalMontos: ${totalMontos.toString()}`);
+
       abono_capital = abono_capital.minus(totalIVA).minus(totalMontos);
+
+      console.log(`   ✅ abono_capital después de restas: ${abono_capital.toString()}`);
     }
-    console.log("abono_capital", abono_capital.toString());
+
+    console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
+    console.log(`      credito_id: ${credito_id}`);
+    console.log(`      abono_capital: ${abono_capital.toNumber()}`);
+    console.log(`      addition: false (RESTA)`);
+    console.log(`      inversionista_id: ${inv.inversionista_id}`);
+
     await processAndReplaceCreditInvestors(
       credito_id,
       abono_capital.toNumber(),
       false,
       inv.inversionista_id
     );
-    console.log("PORCENTAJE CASHIN", inv.porcentaje_cash_in);
-    console.log(
-      "PORCENTAJE INVERSOR",
-      inv.porcentaje_participacion_inversionista
-    );
-    return {
+
+    console.log(`   📊 Porcentajes:`);
+    console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
+    console.log(`      porcentaje_participacion_inversionista: ${inv.porcentaje_participacion_inversionista}`);
+
+    const resultado = {
       pago_id,
       inversionista_id: inv.inversionista_id,
       credito_id,
@@ -1152,7 +1022,19 @@ export async function insertPagosCreditoInversionistas(
       cuota: currentPago?.cuota ?? "0",
       estado_liquidacion: "NO_LIQUIDADO" as const,
     };
+
+    console.log(`   ✅ Resultado final para ${inv.nombre}:`, {
+      abono_capital: resultado.abono_capital,
+      abono_interes: resultado.abono_interes,
+      abono_iva_12: resultado.abono_iva_12,
+      porcentaje_participacion: resultado.porcentaje_participacion,
+    });
+
+    return resultado;
   });
+
+  console.log("\n✅ ========== FIN insertPagosCreditoInversionistas ==========\n");
+
 
   // 4. Insertar todos los registros
   const resolvedInserts = await Promise.all(inserts);
@@ -1315,7 +1197,7 @@ export async function insertarPago({
       total_restante: pagos_credito.total_restante,
       llamada: pagos_credito.llamada,
       fecha_pago: pagos_credito.fecha_pago,
-      fecha_filtro: pagos_credito.fecha_filtro,
+      fecha_vencimiento: pagos_credito.fecha_vencimiento,
       renuevo_o_nuevo: pagos_credito.renuevo_o_nuevo,
       membresias: pagos_credito.membresias,
       membresias_pago: pagos_credito.membresias_pago,
@@ -1645,10 +1527,12 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
     if (numeroCredito) whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
     if (usuarioNombre) whereClauses.push(`u.nombre ILIKE '%${usuarioNombre}%'`);
-    if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago::date) = ${anio}`);
-    if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago::date) = ${mes}`);
-    if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago::date) = ${dia}`);
-      whereClauses.push(`p.validation_status IN ('validated', 'pending')`);
+  // ✅ Convertir a zona horaria de Guatemala (America/Guatemala = UTC-6)
+    if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${anio}`);
+    if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${mes}`);
+    if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${dia}`);
+    
+      whereClauses.push(`p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`);
 
     if (inversionistaId) {
       whereClauses.push(`
@@ -1662,7 +1546,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     }
 
     // ✅ Solo créditos activos
-    whereClauses.push(`c."statusCredit" = 'ACTIVO'`);
+whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION')`);
     const whereSQL = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
     // 🧩 Query principal

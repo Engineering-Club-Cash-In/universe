@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useRef, useState } from "react";
-import { X } from "lucide-react";
+import {   useRef, useState } from "react";
+import { FileSpreadsheet, Loader2, Search, SearchIcon, User, UserIcon, X, XIcon } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
 import { Eye, Pencil, XCircle } from "lucide-react";
@@ -15,11 +15,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import React from "react";
-import {
-  CalendarDays,
+import { 
   Hash,
-  Info,
-  Layers3,
+  Info, 
   ListOrdered,
   RefreshCw,
 } from "lucide-react";
@@ -36,6 +34,9 @@ import { useIsMobile } from "../hooks/useIsMobile";
 import InfoEstadoCredito from "./infoCredit";
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+    const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+const userAsesorId = user?.asesor_id;
   const navigate = useNavigate();
   const {
     data,
@@ -130,7 +131,8 @@ export function ListaCreditosPagos() {
     setSelectedCreditId(creditId);
     setModalOpen(true);
   };
-
+console.log("👥 Advisors:", advisors);
+console.log("🎯 Asesor ID actual:", asesorId);
   // Cuando cierras el modal, resetea ambos states (opcional)
   const handleCloseModal = () => {
     setModalOpen(false);
@@ -162,8 +164,10 @@ export function ListaCreditosPagos() {
       </div>
     );
   }
+// eslint-disable-next-line react-hooks/rules-of-hooks
 
   return (
+    
     <div
       className={`
    fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8
@@ -369,6 +373,122 @@ export function ListaCreditosPagos() {
   </button>
       </div>
 
+  {/* Filtro por Estado */}
+  <label className="flex items-center gap-2 font-medium text-blue-800">
+    <AlertCircle className="w-5 h-5" />
+    <div className="relative w-full">
+      <select
+        className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full appearance-none pr-8"
+        value={estado}
+        onChange={(e) => {
+          setEstado(
+            e.target.value as
+              | "ACTIVO"
+              | "CANCELADO"
+              | "INCOBRABLE"
+              | "PENDIENTE_CANCELACION"
+              | "MOROSO"
+          );
+          setPage(1);
+        }}
+      >
+        <option value="">Seleccionar estado</option>
+        {estados.map((est) => (
+          <option
+            key={est.value}
+            value={est.value}
+            style={{
+              backgroundColor: est.color.includes("bg-green")
+                ? "#bbf7d0"
+                : est.color.includes("bg-red")
+                  ? "#fecaca"
+                  : est.color.includes("bg-yellow")
+                    ? "#fef9c3"
+                    : est.color.includes("bg-blue")
+                      ? "#dbeafe"
+                      : est.color.includes("bg-purple")
+                        ? "#e9d5ff"
+                        : undefined,
+              color: est.color.includes("text-green")
+                ? "#166534"
+                : est.color.includes("text-red")
+                  ? "#991b1b"
+                  : est.color.includes("text-yellow")
+                    ? "#a16207"
+                    : est.color.includes("text-blue")
+                      ? "#1e40af"
+                      : est.color.includes("text-purple")
+                        ? "#6b21a8"
+                        : undefined,
+            }}
+          >
+            {est.label}
+          </option>
+        ))}
+      </select>
+      {estado && (
+        <span
+          className={`absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-bold pointer-events-none ${
+            estadoSeleccionado?.color || ""
+          }`}
+        >
+          {estadoSeleccionado?.label}
+        </span>
+      )}
+    </div>
+  </label>
+
+  {/* Items por página */}
+  <label className="flex items-center gap-2 font-medium text-blue-800">
+    <ListOrdered className="w-5 h-5" />
+    <select
+      className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+      value={perPage}
+      onChange={handlePerPage}
+    >
+      {[5, 10, 20, 50, 100, 200].map((n) => (
+        <option key={n} value={n}>
+          {n} por página
+        </option>
+      ))}
+    </select>
+  </label>
+
+  {/* Botón Descargar Excel */}
+  <button
+    type="button"
+    onClick={async () => {
+      try {
+        handleExcel(true);
+        const response = await refetch();
+
+        if (response.data && "excelUrl" in response.data) {
+          const url = (response.data as any).excelUrl;
+          window.open(url, "_blank");
+        } else {
+          alert("No se pudo generar el Excel 😢");
+        }
+      } catch (err) {
+        console.error("❌ Error generando Excel:", err);
+        alert("Error al generar el Excel");
+      } finally {
+        handleExcel(false);
+      }
+    }}
+    className="px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
+  >
+    <FileSpreadsheet className="w-5 h-5" />
+    Descargar Excel
+  </button>
+</div>
+   {isFetching && !isLoading && (
+        <div className="absolute top-2 right-2 z-10">
+          <div className="flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-2 rounded-lg shadow-md">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm font-medium">Actualizando...</span>
+          </div>
+        </div>
+      )}
       {/* Tabla, sin scroll horizontal, diseño responsivo */}
 
       {isMobile ? (
@@ -967,7 +1087,7 @@ export function ListaCreditosPagos() {
                         ))}
                       </div>
                     </div>
-                  </div>
+                  </div> )}
                 </div>
               )}
             </div>

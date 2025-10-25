@@ -43,7 +43,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       .where(
         and(
           eq(creditos.numero_credito_sifco, numero_credito_sifco),
-          inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION"])
+          inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION","MOROSO"])
         )
       )
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
@@ -140,7 +140,11 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     // La cuota actual del mes es la de número `mesesTranscurridos`
     const cuotaActual = cuotaActualData.numero_cuota;
-
+    const moraActual = await db.select().from(moras_credito).where(  
+      and(
+        eq(moras_credito.credito_id, creditoId), 
+      )
+    );
     return {
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
@@ -149,6 +153,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasPendientes: cuotasPendientes, // Todas las cuotas vencidas y no pagadas
       cuotasAtrasadas: cuotasAtrasadas,
       cuotasPagadas, // Todas las cuotas pagadas
+      moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
     };
   } catch (error) {
     console.error("[getCreditoByNumero] Error:", error);
@@ -211,7 +216,9 @@ export async function getCreditosWithUserByMesAnio(
   page: number = 1,
   perPage: number = 10,
   numero_credito_sifco?: string,
-  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
+  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO",
+  asesor_id?: number,        // 👈 NUEVO
+  nombre_usuario?: string    // 👈 NUEVO
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -220,7 +227,7 @@ export async function getCreditosWithUserByMesAnio(
   totalPages: number;
 }> {
   console.log(
-    `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}`
+    `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}, asesor_id: ${asesor_id}, nombre_usuario: ${nombre_usuario}`
   );
 
   const offset = (page - 1) * perPage;
@@ -235,15 +242,33 @@ export async function getCreditosWithUserByMesAnio(
       if (mes !== 0 && anio !== 0) {
         console.log(`🔎 Filtrando por mes/año: ${mes}/${anio}`);
         conditions.push(
-          sql`EXTRACT(MONTH FROM ${creditos.fecha_creacion}) = ${mes}`,
-          sql`EXTRACT(YEAR FROM ${creditos.fecha_creacion}) = ${anio}`
+          sql`EXTRACT(MONTH FROM ${creditos.fecha_creacion} AT TIME ZONE 'America/Guatemala') = ${mes}`,
+          sql`EXTRACT(YEAR FROM ${creditos.fecha_creacion} AT TIME ZONE 'America/Guatemala') = ${anio}`
         );
       }
     }
-    if (estado && estado.length > 0) {
-      console.log(`🔎 Filtrando por estado: ${estado}`);
-      conditions.push(eq(creditos.statusCredit, estado));
+      console.log(`🔎 Filtrando por nombre de usuario: ${nombre_usuario}`);
+  
+    
+  if (estado && estado.length > 0) {
+  if (estado === "ACTIVO") {
+    console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
+    conditions.push(
+      sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`
+    );
+  } else {
+    console.log(`🔎 Filtrando por estado: ${estado}`);
+    conditions.push(eq(creditos.statusCredit, estado));
+  }
+}
+     if (asesor_id) {
+      console.log(`🔎 Filtrando por asesor_id: ${asesor_id}`);
+      conditions.push(eq(creditos.asesor_id, asesor_id));
     }
+    if (nombre_usuario && nombre_usuario.length > 0) {
+  console.log(`🔎 Filtrando por nombre de usuario: ${nombre_usuario}`);
+  conditions.push(sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario}%`}`);
+}
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);
   }
@@ -502,8 +527,8 @@ export async function getCreditosWithUserByMesAnio(
         cancelacion,
         rubros,
         incobrable,
-        mora,                    // 👈 objeto de mora completo
-        deuda_total_con_mora,    // 👈 suma con Big.js
+        mora,
+        deuda_total_con_mora,
       };
     });
     console.log(`✅ Créditos mapeados: ${data.length}`);
@@ -1024,6 +1049,7 @@ export async function resetCredit({
         gps_facturado: credito.gps?.toString() ?? "0",
         reserva: "0",
         observaciones: "",
+        validationStatus:"reset"as const
       })
       .returning();
 
@@ -1271,7 +1297,7 @@ export async function syncScheduleOnTermsChange({
         abono_gps: Number(credit.gps ?? 0) > 0 ? "0" : undefined,
         pago_del_mes: "0",
         monto_boleta: "0",
-        fecha_filtro: c.fecha_vencimiento,
+        fecha_vencimiento: c.fecha_vencimiento,
         renuevo_o_nuevo: "",
         capital_restante: new Big(credit.capital ?? 0).toString(),
         interes_restante: new Big(credit.porcentaje_interes ?? 0)

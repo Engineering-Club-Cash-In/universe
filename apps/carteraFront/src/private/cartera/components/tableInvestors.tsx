@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   Table,
   TableBody,
@@ -7,13 +8,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, Edit } from "lucide-react";
 import { useGetInvestors } from "../hooks/getInvestor";
 import { useCatalogs } from "../hooks/catalogs";
-import type { Investor, InvestorPayload } from "../services/services";
+import { inversionistasService, type Investor, type InvestorPayload } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
 import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport";
 import { Spinner } from "./spinner";
+import { InvestorModal } from "./modalInvestor"; 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50];
 
 export function TableInvestors() {
@@ -30,8 +32,12 @@ export function TableInvestors() {
     investors: Investor[];
     loading: boolean;
   };
- 
-  // Consulta con paginación y filtro por id
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"create" | "update">("create");
+  const [selectedInvestorData, setSelectedInvestorData] = useState<
+    InvestorPayload | undefined
+  >();
+  // Consulta con pag inación y filtro por id
   const { data, isLoading, isError, isFetching, refetch } = useGetInvestors({
     id: selectedInvestor !== "" ? Number(selectedInvestor) : undefined,
     page,
@@ -39,7 +45,7 @@ export function TableInvestors() {
   });
   const tienePagosPendientes =
     data?.inversionistas.some((inv) =>
-      inv.creditosData.some((cred) => cred.pagos && cred.pagos.length > 0)
+      (inv.creditos ?? []).some((cred) => (cred.pagos ?? []).length > 0)
     ) ?? false;
 
   console.log(
@@ -53,7 +59,50 @@ export function TableInvestors() {
     (page - 1) * perPage + (data?.inversionistas?.length ?? 0),
     data?.totalItems ?? 0
   );
+  const handleCreateInvestor = () => {
+    setModalMode("create");
+    setSelectedInvestorData(undefined);
+    setModalOpen(true);
+  };
+ 
+  const handleDescargarExcel = async () => {
+    try {
+      const result = await inversionistasService.getResumenGlobal({
+ 
+        excel: true,
+      });
 
+      if ("success" in result && result.success) {
+        // Abrir en nueva pestaña o descargar
+        window.open(result.url, "_blank");
+        alert(`✅ Excel generado: ${result.filename}`);
+      }
+    } catch (err) {
+      alert("❌ Error al generar el Excel");
+      console.error(err);
+    }
+  };
+
+  const handleEditInvestor = (inv: any) => {
+    setModalMode("update");
+    console.log(inv)
+    setSelectedInvestorData({
+      inversionista_id: inv.inversionista_id,
+      nombre: inv.nombre_inversionista,
+      emite_factura: inv.emite_factura,
+      reinversion: inv.reinversion ?? false,
+      banco: inv.banco ?? "",
+      tipo_cuenta: inv.tipo_cuenta ?? "",
+      numero_cuenta: inv.numero_cuenta ?? "",
+    });
+    setModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setModalOpen(false);
+    setSelectedInvestorData(undefined);
+    refetch(); // Refresca la tabla después de crear/editar
+  };
   return (
     <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <h2 className="text-3xl font-extrabold text-blue-700 mb-6 text-center">
@@ -119,7 +168,39 @@ export function TableInvestors() {
           </div>
         )}
       </div>
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+  {/* Crear Inversionista */}
+  <button
+    onClick={handleCreateInvestor}
+    className="px-4 py-2 rounded-lg bg-green-500 text-white font-bold hover:bg-green-600 transition flex items-center gap-2 justify-center"
+  >
+    <span className="text-xl">➕</span>
+    Crear Inversionista
+  </button>
 
+  {/* Descargar Resumen Global Excel */}
+  <div className="relative group">
+    <button
+      onClick={handleDescargarExcel}
+      className="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700 transition flex items-center gap-2 justify-center"
+    >
+      <Download className="w-5 h-5" />
+      Descargar Resumen Global
+    </button>
+    
+    {/* Tooltip */}
+    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block w-64 bg-gray-900 text-white text-xs rounded-lg py-2 px-3 z-50">
+      <div className="text-center">
+        ℹ️ Este reporte muestra solo los <span className="font-bold text-yellow-300">pagos NO liquidados</span> de todos los inversionistas
+      </div>
+      {/* Flechita del tooltip */}
+      <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-gray-900"></div>
+    </div>
+  </div>
+</div>
+<div className="flex flex-wrap items-center gap-3 mb-5">
+  {/* Crear Inversionista */}
+  
       {/* Tabla principal */}
       {isLoading || isFetching ? (
         <div className="p-8 text-blue-600 text-lg">
@@ -170,7 +251,7 @@ export function TableInvestors() {
                         )}
                       </TableCell>
                       <TableCell className="font-bold text-blue-800">
-                        {inv.inversionista}
+                        {inv.nombre_inversionista}
                       </TableCell>
                       <TableCell className="text-blue-700">
                         Q
@@ -236,6 +317,16 @@ export function TableInvestors() {
                             ) : (
                               "Liquidar"
                             )}
+                          </button>
+                          <button
+                            className="px-3 py-1 rounded-lg bg-yellow-500 text-white font-bold hover:bg-yellow-600 transition inline-flex items-center justify-center gap-2"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Evita que se expanda/colapse la fila
+                              handleEditInvestor(inv);
+                            }}
+                          >
+                            <Edit className="w-4 h-4" />
+                            Editar
                           </button>
                         </div>
                       </TableCell>
@@ -345,9 +436,6 @@ export function TableInvestors() {
                                   <TableHead className="text-indigo-700 font-bold">
                                     % Interés
                                   </TableHead>
-                                  <TableHead className="text-indigo-700 font-bold">
-                                    Plazo
-                                  </TableHead>
 
                                   <TableHead className="text-indigo-700 font-bold">
                                     Credito Capital
@@ -371,7 +459,7 @@ export function TableInvestors() {
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
-                                {inv.creditosData.length === 0 ? (
+                                {(inv.creditos ?? []).length === 0 ? (
                                   <TableRow>
                                     <TableCell
                                       colSpan={15}
@@ -382,7 +470,7 @@ export function TableInvestors() {
                                     </TableCell>
                                   </TableRow>
                                 ) : (
-                                  inv.creditosData.map((cred) => (
+                                  inv.creditos.map((cred) => (
                                     <>
                                       <TableRow
                                         key={cred.credito_id}
@@ -423,9 +511,7 @@ export function TableInvestors() {
                                         <TableCell className="text-indigo-700 font-bold">
                                           {cred.porcentaje_interes}%
                                         </TableCell>
-                                        <TableCell className="text-blue-900 font-bold">
-                                          {cred.meses_en_credito}
-                                        </TableCell>
+
                                         <TableCell className="text-blue-900 font-bold">
                                           Q
                                           {Number(cred.capital).toLocaleString(
@@ -643,7 +729,6 @@ export function TableInvestors() {
           </div>
         </div>
       )}
-
       {/* LISTA MOBILE - SOLO EN MOBILE */}
       <div className="  xl:hidden flex flex-col gap-4">
         {data?.inversionistas.map((inv, idx) => (
@@ -660,7 +745,7 @@ export function TableInvestors() {
               }}
             >
               <span className="font-bold text-blue-900 text-lg flex items-center gap-2">
-                {inv.inversionista}
+                {inv.nombre_inversionista}{" "}
               </span>
               {expandedRow === idx ? (
                 <ChevronUp className="w-5 h-5 text-blue-500" />
@@ -787,221 +872,262 @@ export function TableInvestors() {
               >
                 Liquidar
               </button>
+              <button
+                className="px-3 py-1 rounded-lg bg-yellow-500 text-white font-bold hover:bg-yellow-600 transition inline-flex items-center justify-center gap-2"
+                onClick={(e) => {
+                  e.stopPropagation(); // Evita que se expanda/colapse la fila
+                  handleEditInvestor(inv);
+                }}
+              >
+                <Edit className="w-4 h-4" />
+                Editar
+              </button>
             </div>
 
             {/* COLLAPSE: Créditos Asociados */}
-            {expandedRow === idx && (
-              <div className="mt-2">
-                <div className="font-bold text-blue-900 mb-2">
-                  Créditos asociados:
-                </div>
-                {inv.creditosData.length === 0 ? (
-                  <div className="text-gray-500 text-center">
-                    Este inversionista no tiene créditos asociados.
-                  </div>
-                ) : (
-                  inv.creditosData.map((cred) => (
+         {expandedRow === idx && (
+  <div className="mt-2">
+    <div className="font-bold text-blue-900 mb-2">
+      Créditos asociados:
+    </div>
+    {(inv.creditos ?? []).length === 0 ? (
+      <div className="text-gray-500 text-center py-4">
+        Este inversionista no tiene créditos asociados.
+      </div>
+    ) : (
+      inv.creditos.map((cred) => (
+        <div
+          key={cred.credito_id}
+          className="mb-4 border-2 border-blue-200 rounded-xl p-4 bg-gradient-to-br from-blue-50 to-indigo-50 shadow-sm"
+        >
+          {/* HEADER DEL CRÉDITO */}
+          <button
+            className="w-full flex justify-between items-center mb-3"
+            onClick={() =>
+              setExpandedCredit(
+                expandedCredit === cred.credito_id
+                  ? null
+                  : cred.credito_id
+              )
+            }
+          >
+            <span className="font-bold text-lg text-indigo-700">
+              📋 Crédito: {cred.numero_credito_sifco}
+            </span>
+            {expandedCredit === cred.credito_id ? (
+              <ChevronUp className="w-5 h-5 text-indigo-500" />
+            ) : (
+              <ChevronDown className="w-5 h-5 text-indigo-400" />
+            )}
+          </button>
+
+          {/* INFO GENERAL - MINI CARDS */}
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            {/* Cliente */}
+            <div className="bg-white rounded-lg p-3 shadow-sm border border-blue-100">
+              <div className="text-xs text-gray-500 mb-1">Cliente</div>
+              <div className="font-semibold text-blue-900 text-sm">
+                {cred.nombre_usuario}
+              </div>
+            </div>
+
+            {/* NIT */}
+            <div className="bg-white rounded-lg p-3 shadow-sm border border-blue-100">
+              <div className="text-xs text-gray-500 mb-1">NIT</div>
+              <div className="font-semibold text-blue-900 text-sm">
+                {cred.nit_usuario}
+              </div>
+            </div>
+
+            {/* Capital Aportado */}
+            <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 shadow-sm border border-green-200">
+              <div className="text-xs text-green-700 mb-1">💰 Capital Aportado</div>
+              <div className="font-bold text-green-900 text-sm">
+                Q{Number(cred.monto_aportado).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+
+            {/* % Interés */}
+            <div className="bg-gradient-to-br from-purple-50 to-violet-50 rounded-lg p-3 shadow-sm border border-purple-200">
+              <div className="text-xs text-purple-700 mb-1">📊 % Interés</div>
+              <div className="font-bold text-purple-900 text-sm">
+                {cred.porcentaje_interes}%
+              </div>
+            </div>
+
+            {/* Capital Total Crédito */}
+            <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-lg p-3 shadow-sm border border-blue-200">
+              <div className="text-xs text-blue-700 mb-1">🏦 Capital Crédito</div>
+              <div className="font-bold text-blue-900 text-sm">
+                Q{Number(cred.capital).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+
+            {/* Total a Recibir */}
+            <div className="bg-gradient-to-br from-yellow-50 to-amber-50 rounded-lg p-3 shadow-sm border border-yellow-300">
+              <div className="text-xs text-yellow-700 mb-1">✨ Total a Recibir</div>
+              <div className="font-bold text-yellow-900 text-sm">
+                Q{Number(cred.total_cuota).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* TOTALES - MINI CARDS */}
+          <div className="grid grid-cols-2 gap-2 mb-3">
+            <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
+              <div className="text-xs text-gray-600">Abono Capital</div>
+              <div className="font-semibold text-blue-900 text-xs">
+                Q{Number(cred.total_abono_capital).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
+              <div className="text-xs text-gray-600">Abono Interés</div>
+              <div className="font-semibold text-blue-900 text-xs">
+                Q{Number(cred.total_abono_interes).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
+              <div className="text-xs text-gray-600">IVA</div>
+              <div className="font-semibold text-blue-900 text-xs">
+                Q{Number(cred.total_abono_iva).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-lg p-2 shadow-sm border border-gray-200">
+              <div className="text-xs text-gray-600">ISR</div>
+              <div className="font-semibold text-blue-900 text-xs">
+                Q{Number(cred.total_isr).toLocaleString("es-GT", {
+                  minimumFractionDigits: 2,
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* COLLAPSE: Pagos no liquidados */}
+          {expandedCredit === cred.credito_id && (
+            <div className="mt-4 pt-4 border-t-2 border-blue-200">
+              <div className="font-extrabold text-blue-700 mb-3 flex items-center gap-2 text-base">
+                <span className="inline-block text-2xl">💸</span>
+                Pagos No Liquidados
+              </div>
+
+              {cred.pagos && cred.pagos.length > 0 ? (
+                <div className="space-y-3">
+                  {cred.pagos.map((pago, pagoIdx) => (
                     <div
-                      key={cred.credito_id}
-                      className="mb-3 border rounded-lg p-2 bg-blue-50"
+                      key={pagoIdx}
+                      className="bg-white border-2 border-indigo-200 rounded-xl p-3 shadow-md"
                     >
-                      <button
-                        className="w-full flex justify-between items-center"
-                        onClick={() =>
-                          setExpandedCredit(
-                            expandedCredit === cred.credito_id
-                              ? null
-                              : cred.credito_id
-                          )
-                        }
-                      >
-                        <span className="font-semibold text-indigo-700">
-                          # Crédito: {cred.numero_credito_sifco}
-                        </span>
-                        {expandedCredit === cred.credito_id ? (
-                          <ChevronUp className="w-5 h-5 text-indigo-500" />
-                        ) : (
-                          <ChevronDown className="w-5 h-5 text-indigo-400" />
-                        )}
-                      </button>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-sm text-blue-900">
-                        <div>
-                          <span className="font-bold">Cliente: </span>
-                          {cred.nombre_usuario}
+                      {/* Header del Pago */}
+                      <div className="flex justify-between items-center mb-3 pb-2 border-b border-gray-200">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">📅</span>
+                          <div>
+                            <div className="font-bold text-indigo-900 text-sm">
+                              {pago.mes ?? "--"}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              {pago.fecha_pago
+                                ? new Date(pago.fecha_pago).toLocaleDateString("es-GT")
+                                : "--"}
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <span className="font-bold">NIT: </span>
-                          {cred.nit_usuario}
-                        </div>
-                        <div>
-                          <span className="font-bold">Capital: </span>Q
-                          {Number(cred.monto_aportado).toLocaleString("es-GT", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </div>
-                        <div>
-                          <span className="font-bold">% Interés: </span>
-                          {cred.porcentaje_interes}%
-                        </div>
-                        <div>
-                          <span className="font-bold">Plazo: </span>
-                          {cred.meses_en_credito}
-                        </div>
-                        <div>
-                          <span className="font-bold">Crédito Capital: </span>Q
-                          {Number(cred.capital).toLocaleString("es-GT", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </div>
-                        <div>
-                          <span className="font-bold">
-                            Suma Abono Capital:{" "}
-                          </span>
-                          Q
-                          {Number(cred.total_abono_capital).toLocaleString(
-                            "es-GT",
-                            { minimumFractionDigits: 2 }
-                          )}
-                        </div>
-                        <div>
-                          <span className="font-bold">
-                            Suma Abono Interés:{" "}
-                          </span>
-                          Q
-                          {Number(cred.total_abono_interes).toLocaleString(
-                            "es-GT",
-                            { minimumFractionDigits: 2 }
-                          )}
-                        </div>
-                        <div>
-                          <span className="font-bold">Suma Abono IVA: </span>Q
-                          {Number(cred.total_abono_iva).toLocaleString(
-                            "es-GT",
-                            { minimumFractionDigits: 2 }
-                          )}
-                        </div>
-                        <div>
-                          <span className="font-bold">Suma ISR: </span>Q
-                          {Number(cred.total_isr).toLocaleString("es-GT", {
-                            minimumFractionDigits: 2,
-                          })}
-                        </div>
-                        <div>
-                          <span className="font-bold">Total a Recibir: </span>Q
-                          {Number(cred.total_cuota).toLocaleString("es-GT", {
-                            minimumFractionDigits: 2,
-                          })}
+                        <div className="text-right">
+                          <div className="text-xs text-gray-500">% Inversor</div>
+                          <div className="font-bold text-indigo-700">
+                            {Number(pago.porcentaje_inversor)}%
+                          </div>
                         </div>
                       </div>
-                      {/* COLLAPSE: Pagos no liquidados */}
-                      {expandedCredit === cred.credito_id && (
-                        <div className="mt-3">
-                          <div className="font-extrabold text-blue-700 mb-2 flex items-center gap-2 text-lg">
-                            <span className="inline-block text-2xl">💸</span>
-                            Pagos No Liquidados:
+
+                      {/* Mini Cards de Montos */}
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-2 border border-blue-200">
+                          <div className="text-xs text-blue-700">💵 Abono Capital</div>
+                          <div className="font-bold text-blue-900 text-sm">
+                            Q{Number(pago.abono_capital).toLocaleString("es-GT", {
+                              minimumFractionDigits: 2,
+                            })}
                           </div>
-                          {cred.pagos && cred.pagos.length > 0 ? (
-                            cred.pagos.map((pago, pagoIdx) => (
-                              <div
-                                key={pagoIdx}
-                                className="border rounded-lg p-2 mb-2 bg-white text-blue-900 text-sm"
-                              >
-                                <div>
-                                  <span className="font-bold text-indigo-700">
-                                    % Inversionista:{" "}
-                                  </span>
-                                  {Number(pago.porcentaje_inversor)} %
-                                </div>
-                                <div>
-                                  <span className="font-bold text-indigo-700">
-                                    % Tasa Interés Inversor:{" "}
-                                  </span>
-                                  {Number(pago.tasaInteresInvesor)} %
-                                </div>
-                                <div>
-                                  <span className="font-bold text-violet-700">
-                                    Cuota Inversionista:{" "}
-                                  </span>
-                                  Q
-                                  {Number(pago.abono_interes).toLocaleString(
-                                    "es-GT",
-                                    { minimumFractionDigits: 2 }
-                                  )}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-violet-700">
-                                    IVA:{" "}
-                                  </span>
-                                  Q
-                                  {Number(pago.abono_iva).toLocaleString(
-                                    "es-GT",
-                                    { minimumFractionDigits: 2 }
-                                  )}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-yellow-700">
-                                    ISR:{" "}
-                                  </span>
-                                  Q
-                                  {Number(pago.isr).toLocaleString("es-GT", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-blue-700">
-                                    Abono Capital:{" "}
-                                  </span>
-                                  Q
-                                  {Number(pago.abono_capital).toLocaleString(
-                                    "es-GT",
-                                    { minimumFractionDigits: 2 }
-                                  )}
-                                </div>
-                                <div>
-                                  <span className="font-bold text-indigo-700">
-                                    % Inversor:{" "}
-                                  </span>
-                                  Q
-                                  {Number(
-                                    pago.abonoGeneralInteres
-                                  ).toLocaleString("es-GT", {
-                                    minimumFractionDigits: 2,
-                                  })}
-                                </div>
-                                <div>
-                                  <span className="font-semibold text-blue-900">
-                                    Mes:{" "}
-                                  </span>
-                                  {pago.mes ?? "--"}
-                                </div>
-                                <div>
-                                  <span className="font-semibold text-blue-900">
-                                    Fecha Pago:{" "}
-                                  </span>
-                                  {pago.fecha_pago
-                                    ? new Date(
-                                        pago.fecha_pago
-                                      ).toLocaleDateString("es-GT")
-                                    : "--"}
-                                </div>
-                              </div>
-                            ))
-                          ) : (
-                            <div className="text-gray-500">
-                              Sin pagos no liquidados.
-                            </div>
-                          )}
                         </div>
-                      )}
+
+                        <div className="bg-gradient-to-br from-violet-50 to-violet-100 rounded-lg p-2 border border-violet-200">
+                          <div className="text-xs text-violet-700">💰 Cuota Inversor</div>
+                          <div className="font-bold text-violet-900 text-sm">
+                            Q{Number(pago.abono_interes).toLocaleString("es-GT", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-2 border border-green-200">
+                          <div className="text-xs text-green-700">📈 IVA</div>
+                          <div className="font-bold text-green-900 text-sm">
+                            Q{Number(pago.abono_iva).toLocaleString("es-GT", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-2 border border-yellow-200">
+                          <div className="text-xs text-yellow-700">📉 ISR</div>
+                          <div className="font-bold text-yellow-900 text-sm">
+                            Q{Number(pago.isr).toLocaleString("es-GT", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </div>
+                        </div>
+
+                        <div className="col-span-2 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-lg p-2 border border-indigo-300">
+                          <div className="text-xs text-indigo-700">💎 Total Inversor</div>
+                          <div className="font-bold text-indigo-900 text-base">
+                            Q{Number(pago.abonoGeneralInteres).toLocaleString("es-GT", {
+                              minimumFractionDigits: 2,
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Tasa Interés */}
+                      <div className="mt-2 pt-2 border-t border-gray-200 text-center">
+                        <span className="text-xs text-gray-600">Tasa Interés Inversor: </span>
+                        <span className="font-semibold text-purple-700">
+                          {Number(pago.tasaInteresInvesor)}%
+                        </span>
+                      </div>
                     </div>
-                  ))
-                )}
-              </div>
-            )}
+                  ))}
+                </div>
+              ) : (
+                <div className="text-gray-500 text-center py-4 bg-gray-50 rounded-lg">
+                  Sin pagos no liquidados.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))
+    )}
+  </div>
+)}
           </div>
         ))}
       </div>
-
       {/* Paginación abajo */}
       {data && (
         <div className="flex items-center justify-between mt-6">
@@ -1024,6 +1150,14 @@ export function TableInvestors() {
           </button>
         </div>
       )}
+      {/* Modal */}
+      <InvestorModal
+        open={modalOpen}
+        onClose={handleCloseModal}
+        mode={modalMode}
+        initialData={selectedInvestorData}
+      />
+      </div>
     </div>
   );
 }

@@ -181,6 +181,7 @@ export interface GetCreditoByNumeroActivoResponse {
   credito: Credito;
   usuario: Usuario;
   cuotaActual: number;
+  moraActual: number;
   cuotaActualPagada: boolean;
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
@@ -252,13 +253,14 @@ export interface CreditoUsuarioPago {
   usuarios: Usuario;
   inversionistas: AporteInversionista[];
   resumen: ResumenCreditos;
-  aseor: Asesor;
+  asesor: Asesor; // 👈 corregí el typo "aseor" -> "asesor"
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
   rubros: Rubro[];
-   mora: Mora | null;
+  mora: Mora | null;
   deuda_total_con_mora: string;
 }
+
 export interface Mora {
   mora_id: number;
   credito_id: number;
@@ -269,14 +271,16 @@ export interface Mora {
   created_at: string;
   updated_at?: string;
 }
+
 export interface Rubro {
   nombre_rubro: string;
   monto: number;
 }
+
 export interface Credito {
   credito_id: number;
   usuario_id: number;
-  otros:number;
+  otros: number;
   fecha_creacion: string;
   numero_credito_sifco: string;
   capital: string;
@@ -308,21 +312,18 @@ export interface Usuario {
   telefono: string;
   dpi: string;
   email: string;
-  saldo_a_favor: number
- 
+  saldo_a_favor: number;
 }
-
 
 export interface Asesor {
   asesorId: number;
   nombre: string;
   activo: boolean;
 }
- 
+
 export interface AporteInversionista {
   nombre: ReactNode;
   emite_factura: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   cuota_inversionista(cuota_inversionista: any): unknown;
   credito_id: number;
   inversionista: {
@@ -330,7 +331,6 @@ export interface AporteInversionista {
     nombre: string;
     dpi: string;
     correo: string;
-   
   };
   porcentaje_participacion_inversionista: string;
   monto_aportado: string;
@@ -355,7 +355,9 @@ export const getCreditosPaginados = async (params: {
   perPage?: number;
   numero_credito_sifco?: string;
   estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
-  excel: boolean; // 👈 nuevo parámetro
+  excel: boolean;
+  asesor_id?: number;        // 👈 NUEVO
+  nombre_usuario?: string;   // 👈 NUEVO
 }): Promise<GetCreditosResponse> => {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
   const response = await api.get(`${BACK_URL}/getAllCredits`, {
@@ -365,14 +367,20 @@ export const getCreditosPaginados = async (params: {
       page: params.page ?? 1,
       perPage: params.perPage ?? 10,
       estado: params.estado,
-      excel: params.excel, // 👈 nuevo parámetro
+      excel: params.excel,
       ...(params.numero_credito_sifco && {
         numero_credito_sifco: params.numero_credito_sifco,
+      }),
+      ...(params.asesor_id && {           // 👈 NUEVO
+        asesor_id: params.asesor_id,
+      }),
+      ...(params.nombre_usuario && {      // 👈 NUEVO
+        nombre_usuario: params.nombre_usuario,
       }),
     },
   });
   return response.data;
-};export interface ExcelResponse {
+};;export interface ExcelResponse {
   excelUrl: string;
 }
 export interface PagoData {
@@ -617,8 +625,9 @@ export interface SubtotalInversionista {
 export interface InversionistaConCreditos {
   inversionista_id: number;
   inversionista: string;
+  nombre_inversionista: string;
   emite_factura: boolean;
-  creditosData: CreditoInversionistaData[];
+  creditos: CreditoInversionistaData[];
   subtotal: SubtotalInversionista;
     reinversion: boolean;           // 🔹 nuevo
   banco: string | null;           // 🔹 nuevo
@@ -873,8 +882,10 @@ export interface UsuarioConCreditosSifco {
  * Servicio para obtener usuarios con sus números de crédito SIFCO
  */
 export async function getUsersWithSifco(): Promise<UsuarioConCreditosSifco[]> {
-  const { data } = await api.get<UsuarioConCreditosSifco[]>(`${API_URL}/users-with-sifco`);
-  return data;
+  const { data } = await api.get<{ success: boolean; data: UsuarioConCreditosSifco[] }>(
+    `${API_URL}/users-with-sifco`
+  );
+  return data.data; // 👈 Retornar solo el array de usuarios
 }
 
 /** Supported output format */
@@ -1354,4 +1365,118 @@ export const pagosService = {
       throw error;
     }
   },
+};
+export interface CreditoInfo {
+  credito_id: number;
+  numero_credito_sifco: string;
+  capital: string;
+  deudatotal: string;
+  statusCredit:
+    | "ACTIVO"
+    | "CANCELADO"
+    | "INCOBRABLE"
+    | "PENDIENTE_CANCELACION"
+    | "MOROSO";
+  monto_mora: string; // 💰 Total de mora por crédito
+  cuotas_atrasadas: number; // 📆 Cuotas vencidas
+}
+
+export interface AsesorResumen {
+  asesor_id: number;
+  asesor: string;
+  total_creditos: number;
+  total_capital: string;
+  total_deuda: string;
+  total_mora: string; // 💰 Mora total por asesor
+  total_cuotas_atrasadas: number; // 📆 Cuotas vencidas totales
+  creditos_al_dia: number;
+  creditos_morosos: number;
+  creditos: CreditoInfo[];
+}
+
+export interface ResponseCreditosPorAsesor {
+  success: boolean;
+  message: string;
+  data: AsesorResumen[];
+}
+
+/**
+ * 🔹 Servicio: Obtiene los créditos agrupados por asesor con mora y cuotas atrasadas
+ * -------------------------------------------------------------------------------
+ * @param numero_credito_sifco (opcional) - Filtra por número de crédito SIFCO
+ * @returns Promise<ResponseCreditosPorAsesor>
+ */
+export const getCreditosPorAsesorService = async (
+  numero_credito_sifco?: string
+): Promise<ResponseCreditosPorAsesor> => {
+  const params = numero_credito_sifco ? { numero_credito_sifco } : {};
+  const { data } = await api.get<ResponseCreditosPorAsesor>(
+    `/creditos-por-asesor`,
+    { params }
+  );
+  return data;
+};
+
+// types/inversionistas.types.ts
+
+export interface InversionistaResumen {
+  inversionista_id: number;
+  nombre: string;
+  emite_factura: boolean;
+  reinversion: boolean;
+  banco: string | null;
+  tipo_cuenta: string | null;
+  numero_cuenta: string | null;
+  total_abono_capital: number;
+  total_abono_interes: number;
+  total_abono_iva: number;
+  total_isr: number;
+  total_a_recibir: number;
+}
+
+export interface ResumenGlobalParams {
+  inversionistaId?: number;
+  mes?: number;
+  anio?: number;
+  excel?: boolean;
+}
+
+export interface ResumenGlobalExcelResponse {
+  success: boolean;
+  url: string;
+  filename: string;
+}
+
+export type ResumenGlobalResponse = 
+  | InversionistaResumen[] 
+  | ResumenGlobalExcelResponse;
+
+
+
+export const inversionistasService = {
+  
+  // 📊 Obtener resumen global
+  getResumenGlobal: async (params: ResumenGlobalParams): Promise<ResumenGlobalResponse> => {
+    const queryParams = new URLSearchParams();
+    
+    if (params.inversionistaId) {
+      queryParams.append("inversionistaId", params.inversionistaId.toString());
+    }
+    if (params.mes) {
+      queryParams.append("mes", params.mes.toString());
+    }
+    if (params.anio) {
+      queryParams.append("anio", params.anio.toString());
+    }
+    if (params.excel !== undefined) {
+      queryParams.append("excel", params.excel.toString());
+    }
+
+    const { data } = await api.get(
+      `/resumen-global?${queryParams.toString()}`
+    );
+    
+    return data;
+  },
+
 };

@@ -14,117 +14,119 @@ const updateInstallments = async ({
   nueva_cuota 
 }: UpdateInstallmentsParams): Promise<void> => {
   
-  // 1. Obtener información del crédito
-  const [credito] = await db
-    .select({
-      credito_id: creditos.credito_id,
-      capital: creditos.capital,
-      deudatotal: creditos.deudatotal,
-      porcentaje_interes: creditos.porcentaje_interes,
-      cuota_interes: creditos.cuota_interes,
-      iva_12: creditos.iva_12,
-      seguro_10_cuotas: creditos.seguro_10_cuotas,
-      gps: creditos.gps,
-      membresias_pago: creditos.membresias_pago,
-    })
-    .from(creditos)
-    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco));
+  // 1️⃣ Obtener crédito y pagos en paralelo (en lugar de secuencial)
+  const [creditoResult, pagosNoPagados] = await Promise.all([
+    db
+      .select({
+        credito_id: creditos.credito_id,
+        capital: creditos.capital,
+        deudatotal: creditos.deudatotal,
+        porcentaje_interes: creditos.porcentaje_interes,
+        cuota_interes: creditos.cuota_interes,
+        iva_12: creditos.iva_12,
+        seguro_10_cuotas: creditos.seguro_10_cuotas,
+        gps: creditos.gps,
+        membresias_pago: creditos.membresias_pago,
+      })
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      .limit(1),
+    
+    // 🔥 Optimización: Hacer el WHERE con subconsulta en lugar de dos queries
+    db
+      .select()
+      .from(pagos_credito)
+      .where(
+        and(
+          eq(pagos_credito.credito_id, 
+            db.select({ id: creditos.credito_id })
+              .from(creditos)
+              .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+              .limit(1)
+          ),
+          eq(pagos_credito.pagado, false)
+        )
+      )
+      .orderBy(pagos_credito.cuota_id)
+  ]);
 
+  const credito = creditoResult[0];
+
+  // 2️⃣ Validaciones
   if (!credito) {
     throw new Error(`No se encontró el crédito con número SIFCO: ${numero_credito_sifco}`);
   }
-
-  // 2. Obtener los pagos que NO están pagados, ordenados por cuota_id
-  const pagosNoPagados = await db
-    .select()
-    .from(pagos_credito)
-    .where(
-      and(
-        eq(pagos_credito.credito_id, credito.credito_id),
-        eq(pagos_credito.pagado, false)
-      )
-    )
-    .orderBy(pagos_credito.cuota_id);
 
   if (pagosNoPagados.length === 0) {
     throw new Error("No hay cuotas pendientes por actualizar");
   }
 
-  // 3. Capital en memoria SIEMPRE viene del crédito
-  let capitalEnMemoria = new Big(credito.capital);
-
-  // Montos fijos por mes
+  // 3️⃣ Pre-calcular constantes una sola vez (fuera del loop)
+  const capitalInicial = new Big(credito.capital);
   const seguroFijoPorMes = new Big(credito.seguro_10_cuotas ?? 0);
   const gpsFijoPorMes = new Big(credito.gps ?? 0);
   const membresiasFijoPorMes = new Big(credito.membresias_pago ?? 0);
   const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
-
-  // Nueva cuota mensual
   const cuotaMensual = new Big(nueva_cuota);
+  const cuotaInteresCredito = credito.cuota_interes;
 
-  // Deuda total del crédito (temporal, viene del crédito)
-  const deudaTotalCredito = new Big(credito.deudatotal);
+  // Capital en memoria
+  let capitalEnMemoria = capitalInicial;
 
-  // 4. Recorrer y actualizar cada pago no pagado
-  for (const pago of pagosNoPagados) {
-    // Calcular interés e IVA del MES basado en el capital en memoria
+  // 4️⃣ Preparar todas las actualizaciones en memoria primero (batch)
+  const actualizaciones = pagosNoPagados.map((pago) => {
+    // Cálculos del mes
     const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
     const ivaMes = interesMes.times(0.12).round(2);
 
-    // Abonos fijos del mes
-    const abonoSeguro = seguroFijoPorMes;
-    const abonoGps = gpsFijoPorMes;
-    const abonoMembresias = membresiasFijoPorMes;
-
-    // Calcular abono a capital del MES
-    const montosExtras = interesMes.plus(ivaMes).plus(abonoSeguro).plus(abonoGps).plus(abonoMembresias);
+    // Abono a capital
+    const montosExtras = interesMes.plus(ivaMes).plus(seguroFijoPorMes).plus(gpsFijoPorMes).plus(membresiasFijoPorMes);
     const abonoCapital = cuotaMensual.minus(montosExtras);
 
-    // Restar el abono del capital en memoria
+    // Actualizar capital en memoria
     capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
     if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
 
-    // Restantes del MES
-    const capitalRestanteMes = abonoCapital;
-    const interesRestanteMes = interesMes;
-    const ivaRestanteMes = ivaMes;
-    const seguroRestanteMes = abonoSeguro;
-    const gpsRestanteMes = abonoGps;
-
-    // 5. Actualizar el pago
-    await db
-      .update(pagos_credito)
-      .set({
+    // Retornar objeto de actualización
+    return {
+      pago_id: pago.pago_id,
+      datos: {
         cuota: cuotaMensual.toString(),
-        cuota_interes: credito.cuota_interes,  // Del crédito
+        cuota_interes: cuotaInteresCredito,
         pago_del_mes: cuotaMensual.toString(),
-        capital_restante: capitalRestanteMes.round(2).toString(),
-        interes_restante: interesRestanteMes.round(2).toString(),
-        iva_12_restante: ivaRestanteMes.round(2).toString(),
-        seguro_restante: seguroRestanteMes.toString(),
-        gps_restante: gpsRestanteMes.toString(),
+        capital_restante: abonoCapital.round(2).toString(),
+        interes_restante: interesMes.round(2).toString(),
+        iva_12_restante: ivaMes.round(2).toString(),
+        seguro_restante: seguroFijoPorMes.toString(),
+        gps_restante: gpsFijoPorMes.toString(),
         total_restante: capitalEnMemoria.round(2).toString(),
         membresias: membresiasFijoPorMes.toString(),
         membresias_pago: membresiasFijoPorMes.toString(),
         membresias_mes: membresiasFijoPorMes.toString(),
-      })
-      .where(eq(pagos_credito.pago_id, pago.pago_id));
-  }
+      }
+    };
+  });
 
-  // 6. Actualizar la cuota en el crédito principal
-  await db
-    .update(creditos)
-    .set({
-      cuota: cuotaMensual.toString(),
-    })
-    .where(eq(creditos.credito_id, credito.credito_id));
+  // 5️⃣ Ejecutar TODAS las actualizaciones en paralelo (batch update)
+  await Promise.all([
+    // Actualizar todos los pagos
+    ...actualizaciones.map(({ pago_id, datos }) =>
+      db
+        .update(pagos_credito)
+        .set(datos)
+        .where(eq(pagos_credito.pago_id, pago_id))
+    ),
+    // Actualizar el crédito
+    db
+      .update(creditos)
+      .set({ cuota: cuotaMensual.toString() })
+      .where(eq(creditos.credito_id, credito.credito_id))
+  ]);
 
   console.log(`✅ Se actualizaron ${pagosNoPagados.length} cuotas para el crédito ${numero_credito_sifco}`);
 };
 
 export { updateInstallments };
-
- 
 
 // ========================================
 // TIPOS E INTERFACES
@@ -631,5 +633,93 @@ if (changes) {
     console.error("Error al actualizar el crédito:", error);
     set.status = 500;
     return { message: "Error al actualizar el crédito" };
+  }
+};
+interface UpdateAllInstallmentsParams {
+  numero_credito_sifco?: string; // Opcional por si querés uno específico
+}
+
+export const updateAllInstallments = async ({
+  numero_credito_sifco
+}: UpdateAllInstallmentsParams = {}): Promise<void> => {
+  try {
+    console.log("\n🔄 ========== ACTUALIZANDO CUOTAS ==========");
+
+    // 1️⃣ Query optimizada con construcción condicional más limpia
+    const whereConditions = numero_credito_sifco
+      ? and(
+          eq(creditos.statusCredit, 'ACTIVO'),
+          eq(creditos.numero_credito_sifco, numero_credito_sifco)
+        )
+      : eq(creditos.statusCredit, 'ACTIVO');
+
+    // 2️⃣ Query única con límite condicional inline
+    let query = db
+      .select({
+        numero_credito_sifco: creditos.numero_credito_sifco,
+        cuota: creditos.cuota,
+      })
+      .from(creditos)
+      .where(whereConditions);
+
+    if (numero_credito_sifco) {
+      query = query.limit(1) as any;
+    }
+
+    const creditosAActualizar = await query;
+
+    // 3️⃣ Early return si no hay datos
+    if (creditosAActualizar.length === 0) {
+      const mensaje = numero_credito_sifco
+        ? `Crédito ${numero_credito_sifco} no encontrado o no está activo`
+        : 'No hay créditos activos para actualizar';
+      console.log(`⚠️ ${mensaje}`);
+      return;
+    }
+
+    console.log(`📋 Total de créditos a actualizar: ${creditosAActualizar.length}\n`);
+
+    // 4️⃣ Procesamiento con Promise.allSettled (paralelo en lugar de secuencial)
+    const resultados = await Promise.allSettled(
+      creditosAActualizar.map(async (credito) => {
+        console.log(`⏳ Procesando: ${credito.numero_credito_sifco} - Cuota: Q${credito.cuota}`);
+        
+        await updateInstallments({
+          numero_credito_sifco: credito.numero_credito_sifco,
+          nueva_cuota: Number(credito.cuota)
+        });
+        
+        console.log(`   ✅ ${credito.numero_credito_sifco} actualizado correctamente\n`);
+        return credito.numero_credito_sifco;
+      })
+    );
+
+    // 5️⃣ Análisis de resultados más eficiente
+    const exitosos = resultados.filter(r => r.status === 'fulfilled');
+    const fallidos = resultados.filter(r => r.status === 'rejected') as PromiseRejectedResult[];
+    
+    const errores = fallidos.map((resultado, idx) => ({
+      credito: creditosAActualizar[resultados.indexOf(resultado)].numero_credito_sifco,
+      error: resultado.reason instanceof Error ? resultado.reason.message : String(resultado.reason)
+    }));
+
+    // 6️⃣ Resumen final
+    console.log("📊 ========== RESUMEN ==========");
+    console.log(`✅ Exitosos: ${exitosos.length}`);
+    console.log(`❌ Fallidos: ${fallidos.length}`);
+    console.log(`📋 Total procesados: ${creditosAActualizar.length}`);
+    
+    if (errores.length > 0) {
+      console.log("\n⚠️ Errores detallados:");
+      errores.forEach(({ credito, error }) => {
+        console.log(`   - ${credito}: ${error}`);
+      });
+    }
+    
+    console.log("🎉 Proceso completado\n");
+
+  } catch (error) {
+    console.error('\n❌ Error crítico en updateAllInstallments:', error);
+    throw error;
   }
 };

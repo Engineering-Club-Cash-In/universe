@@ -59,7 +59,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
     pagada: boolean;
     data?: any;
   } | null>(null);
-
+  const [mora, setMora] = useState<number>(0);
   const [cuotasAtrasadasInfo, setCuotasAtrasadasInfo] = useState<{
     total: number;
     cuotas: any[];
@@ -210,7 +210,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
 
       // FLUJO ACTIVO: el mismo de siempre
       setCuotaSeleccionada(result.cuotasAtrasadas?.[0]?.numero_cuota ?? 0);
-
+      setMora(result.moraActual || 0);
       setCuotaActualInfo({
         numero: result.cuotaActual,
         pagada: !!result.cuotaActualPagada,
@@ -320,8 +320,10 @@ useEffect(() => {
     const otrosNum = Number(otros || 0); 
 
     // Calcula el monto real de la boleta
-    const montoBoletaReal = Number(monto_boleta) - otrosNum ;
-    if (montoBoletaReal < 0) {
+    const montoBoletaReal = Number(monto_boleta) - otrosNum - mora;
+    const montoBoletaSinMora = Number(monto_boleta) - otrosNum;
+
+    if (montoBoletaSinMora < 0) {
       alert(
         "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
       );
@@ -359,10 +361,11 @@ useEffect(() => {
       return;
     }
     // eslint-disable-next-line react-hooks/rules-of-hooks
-
-    if (montoBoletaReal > cuota) {
+   const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
+const cuotaRedondeada = Math.round(cuota * 100) / 100;
+    if (montoRedondeado > cuotaRedondeada) {
       setModalMode("excedente");
-      setExcedente(montoBoletaReal - cuota);
+      setExcedente(montoRedondeado - cuotaRedondeada);
       setModalExcesoOpen(true);
       // No submit todavía
     } else {
@@ -548,6 +551,7 @@ async function handleResetCredito() {
     handleResetCredito,
     setArchivosParaSubir,
     resetBuscador,
-    setResetBuscador
+    setResetBuscador,
+    mora
   };
 }

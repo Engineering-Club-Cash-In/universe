@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { creditos, usuarios } from "../database/db/schema";
 import { db } from "../database";
-import { eq, inArray } from "drizzle-orm"; // Import eq for query conditions
+import { eq, inArray, and } from "drizzle-orm"; // Import eq for query conditions
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
   VEHICULO = "Vehículo",
@@ -101,8 +101,29 @@ export interface UsuarioConCreditosSifco {
   numeros_credito_sifco: string[];
 }
 
-export async function getUsersWithSifco(): Promise<UsuarioConCreditosSifco[]> {
+export async function getUsersWithSifco(user?: any): Promise<UsuarioConCreditosSifco[]> {
   try {
+    // 🔐 Obtener info del usuario
+    const isAdmin = user?.role === "ADMIN";
+    const asesorId = user?.asesor_id;
+
+    console.log("👤 Usuario autenticado:", { role: user?.role, asesor_id: asesorId, isAdmin });
+
+    // 📌 Construir condiciones dinámicas
+    const conditions: any[] = [
+      inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION", "MOROSO"])
+    ];
+    console.log(asesorId)
+    // 🔒 Si NO es admin y tiene asesor_id, filtrar solo sus créditos
+if (!isAdmin && asesorId !== null && asesorId !== undefined) {
+      console.log(`🔒 Usuario es asesor. Filtrando por asesor_id: ${asesorId}`);
+      conditions.push(eq(creditos.asesor_id, asesorId));
+    } else if (isAdmin) {
+      console.log(`✅ Usuario es ADMIN. Mostrando todos los créditos`);
+    } else {
+      console.log(`⚠️ Usuario sin asesor_id asignado. Mostrando todos los créditos`);
+    }
+
     // 1. Hacemos INNER JOIN para traer solo usuarios CON crédito
     const rows = await db
       .select({
@@ -116,9 +137,9 @@ export async function getUsersWithSifco(): Promise<UsuarioConCreditosSifco[]> {
       })
       .from(usuarios)
       .innerJoin(creditos, eq(usuarios.usuario_id, creditos.usuario_id))
-      .where(
-        inArray(creditos.statusCredit, ["ACTIVO", "PENDIENTE_CANCELACION"])
-      );
+      .where(and(...conditions));
+
+    console.log(`📊 Registros encontrados: ${rows.length}`);
 
     // 2. Agrupamos los SIFCOs por usuario
     const agrupado: Record<number, UsuarioConCreditosSifco> = {};
@@ -140,9 +161,13 @@ export async function getUsersWithSifco(): Promise<UsuarioConCreditosSifco[]> {
       );
     }
 
-    return Object.values(agrupado);
+    const result = Object.values(agrupado);
+    console.log(`✅ Usuarios agrupados: ${result.length}`);
+
+    return result;
   } catch (error) {
-    console.error("[ERROR] getUsuariosConCreditosSifco:", error);
+    console.error("[ERROR] getUsersWithSifco:", error);
     throw new Error("No se pudieron obtener los usuarios con créditos SIFCO.");
   }
 }
+ 

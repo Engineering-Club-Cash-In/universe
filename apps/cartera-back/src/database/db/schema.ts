@@ -208,7 +208,9 @@ export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros",
 export const paymentValidationStatus = pgEnum('payment_validation_status', [
   'no_required',    // No necesita validación (pagos normales/automáticos)
   'pending',        // Pendiente de validación
-  'validated'       // Validado
+  'validated',        // Validado
+  'capital',
+  'reset'
 ]);
 
 export const pagos_credito = customSchema.table("pagos_credito", {
@@ -219,7 +221,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   cuota_id: integer("cuota_id")
     .references(() => cuotas_credito.cuota_id)
     .notNull(),
-  fecha_pago: date("fecha_pago").notNull().defaultNow(), //esto viene del credito
+  fecha_pago: date("fecha_pago").defaultNow(), //esto viene del credito 
   abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
   abono_interes: numeric("abono_interes", { precision: 18, scale: 2 }), // aca jala el interes del credito si ? pero solo si  el monto de la boleta  es igual al de la cuota
@@ -234,7 +236,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
 
   monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input
   numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), // input
-  fecha_filtro: date("fecha_filtro").defaultNow(), // viene del credito
+  fecha_vencimiento: date("fecha_vencimiento").defaultNow(), // viene del credito
 
   renuevo_o_nuevo: varchar("renuevo_o_nuevo", { length: 50 }), //input
 
@@ -411,6 +413,7 @@ export const tipoCuentaEnum = pgEnum("tipo_cuenta_enum", [
   "MONETARIA",
   "MONETARIA Q",
   "MONETARIA $",
+  "Capital"
 ]);
 
 

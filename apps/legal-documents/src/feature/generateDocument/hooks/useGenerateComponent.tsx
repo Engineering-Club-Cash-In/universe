@@ -126,10 +126,26 @@ export function useGenerateComponent() {
             ) || [];
 
           // Construir los campos con sus valores
-          const fields = documentFields.map((field) => ({
-            key: field.name, // Usar el nombre del campo como key
-            value: formData.fieldValues?.[field.key] || "",
-          }));
+          const fields = documentFields.map((field) => {
+            let value = formData.fieldValues?.[field.key] || "";
+            
+            // Aplicar lógica de guiones bajos si:
+            // 1. El campo es double_line (is_double_line = true)
+            // 2. El documento NO tiene large_spacing (large_spacing = false)
+            // 3. El valor tiene menos de 92 caracteres
+            if (field.is_double_line && !document.large_spacing && value.length < 92) {
+              const currentLength = value.length;
+              const underscoresNeeded = 92 - currentLength;
+              const underscores = "_".repeat(underscoresNeeded);
+              value += " " + underscores;
+              console.log(`➕ Agregando ${underscoresNeeded} guiones bajos al campo ${field.name} (${currentLength} → 92 caracteres)`);
+            }
+            
+            return {
+              key: field.name, // Usar el nombre del campo como key
+              value: value,
+            };
+          });
 
           return {
             id: document.id,

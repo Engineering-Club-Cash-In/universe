@@ -128,19 +128,25 @@ export function useGenerateComponent() {
           // Construir los campos con sus valores
           const fields = documentFields.map((field) => {
             let value = formData.fieldValues?.[field.key] || "";
-            
-            // Aplicar lógica de guiones bajos si:
-            // 1. El campo es double_line (is_double_line = true)
-            // 2. El documento NO tiene large_spacing (large_spacing = false)
-            // 3. El valor tiene menos de 92 caracteres
-            if (field.is_double_line && !document.large_spacing && value.length < 92) {
+
+            if (field.is_double_line) {
+              // para cada documento se requiere diferente mínimo de caracteres para el doble renglón
+              const minCharacters = document.count_doble_line ?? 160;
               const currentLength = value.length;
-              const underscoresNeeded = 92 - currentLength;
-              const underscores = "_".repeat(underscoresNeeded);
-              value += " " + underscores;
-              console.log(`➕ Agregando ${underscoresNeeded} guiones bajos al campo ${field.name} (${currentLength} → 92 caracteres)`);
+              // contar cuantas mayúsculas hay en el texto, cada mayúscula cuenta como 1.25 caracteres
+              const uppercaseCount = (value.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length;
+              // redondear hacia arriba la cantidad de caracteres que aportan las mayúsculas
+              const length = currentLength + Math.ceil(uppercaseCount / 4);
+              if (length < minCharacters) {
+                const underscoresNeeded = minCharacters - length;
+                const underscores = "-".repeat(underscoresNeeded);
+                value += " " + underscores;
+                console.log(
+                  `➕ Agregando ${underscoresNeeded} guiones al campo ${field.name} (${currentLength} → ${minCharacters} caracteres)`
+                );
+              }
             }
-            
+
             return {
               key: field.name, // Usar el nombre del campo como key
               value: value,

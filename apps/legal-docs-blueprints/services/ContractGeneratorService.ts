@@ -11,6 +11,7 @@ import {
   ContractTemplateConfig,
   AnyContractData
 } from '../types/contract';
+import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -108,6 +109,52 @@ export class ContractGeneratorService {
   }
 
   /**
+   * Prepara los datos agregando términos de género traducidos si aplica
+   */
+  private prepareDataWithGender(
+    contractType: ContractType,
+    data: Record<string, any>
+  ): Record<string, any> {
+    // Solo aplicar traducción de género para contratos que lo requieran
+    if (contractType !== ContractType.USO_CARRO_USADO) {
+      return data;
+    }
+
+    // Verificar si el contrato tiene información de género
+    if (!data.client_gender || !data.client_marital_status || !data.client_nationality) {
+      // Si no tiene los campos de género, retornar data sin modificar
+      console.warn('⚠ Advertencia: Contrato sin campos de género. Se recomienda agregar client_gender, client_marital_status y client_nationality');
+      return data;
+    }
+
+    // Validar género y estado civil
+    if (!GenderTranslator.isValidGender(data.client_gender)) {
+      throw new Error(`Género inválido: ${data.client_gender}. Debe ser 'male' o 'female'`);
+    }
+
+    if (!GenderTranslator.isValidMaritalStatus(data.client_marital_status)) {
+      throw new Error(`Estado civil inválido: ${data.client_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
+    }
+
+    // Generar términos de género traducidos
+    const genderedData = GenderTranslator.generateGenderedData(
+      data.client_gender as Gender,
+      data.client_marital_status as MaritalStatus,
+      data.client_nationality as string
+    );
+
+    // Combinar datos originales con términos traducidos
+    const enhancedData = {
+      ...data,
+      ...genderedData
+    };
+
+    console.log(`✓ Términos de género aplicados: ${data.client_gender} → ${genderedData.title_with_article}`);
+
+    return enhancedData;
+  }
+
+  /**
    * Genera un contrato basado en el tipo y los datos proporcionados
    */
   public async generateContract(
@@ -143,31 +190,34 @@ export class ContractGeneratorService {
         nullGetter: () => '', // Reemplazar nulls con string vacío
       });
 
-      // 5. Renderizar con los datos
-      doc.render(data);
+      // 5. Preparar datos con términos de género si aplica
+      const preparedData = this.prepareDataWithGender(contractType, data);
 
-      // 6. Generar buffer del DOCX
+      // 6. Renderizar con los datos
+      doc.render(preparedData);
+
+      // 7. Generar buffer del DOCX
       const docxBuffer = doc.getZip().generate({
         type: 'nodebuffer',
         compression: 'DEFLATE',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       });
 
-      // 7. Generar nombres de archivo
+      // 8. Generar nombres de archivo
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('.')[0];
       const prefix = options.filenamePrefix || data.client_name?.replace(/\s+/g, '_') || 'contract';
       const baseFilename = `${prefix}_${contractType}_${timestamp}`;
 
-      // 8. Asegurar que el directorio de salida existe
+      // 9. Asegurar que el directorio de salida existe
       await fs.mkdir(this.outputDir, { recursive: true });
 
-      // 9. Guardar DOCX
+      // 10. Guardar DOCX
       const docxFilename = `${baseFilename}.docx`;
       const docxPath = path.join(this.outputDir, docxFilename);
       await fs.writeFile(docxPath, docxBuffer);
       console.log(`✓ DOCX generado: ${docxFilename}`);
 
-      // 10. Generar PDF si se solicita
+      // 11. Generar PDF si se solicita
       let pdfPath: string | undefined;
       if (options.generatePdf !== false) { // Por defecto genera PDF
         try {

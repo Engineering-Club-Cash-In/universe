@@ -71,10 +71,9 @@ export function ContactoModal({
 			queryClient.invalidateQueries({ queryKey: ["getHistorialContactos"] });
 			form.reset();
 			// Cerrar el dialogo
-			document.querySelector<HTMLButtonElement>(
-				'[data-radix-dialog-close]'
-			)?.click();
-			
+			document
+				.querySelector<HTMLButtonElement>("[data-radix-dialog-close]")
+				?.click();
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al registrar el contacto");

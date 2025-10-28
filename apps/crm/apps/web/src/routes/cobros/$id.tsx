@@ -5,6 +5,8 @@ import {
 	Banknote,
 	CalendarClock,
 	Car,
+	ChevronLeft,
+	ChevronRight,
 	Clock,
 	FileText,
 	Mail,
@@ -15,6 +17,7 @@ import {
 	User,
 	Users,
 } from "lucide-react";
+import { useState } from "react";
 import { ContactoModal } from "@/components/contacto-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,10 +39,62 @@ export const Route = createFileRoute("/cobros/$id")({
 	}),
 });
 
+// Componente de paginación reutilizable
+function Pagination({
+	currentPage,
+	totalItems,
+	itemsPerPage,
+	onPageChange,
+}: {
+	currentPage: number;
+	totalItems: number;
+	itemsPerPage: number;
+	onPageChange: (page: number) => void;
+}) {
+	const totalPages = Math.ceil(totalItems / itemsPerPage);
+
+	if (totalPages <= 1) return null;
+
+	return (
+		<div className="flex items-center justify-between border-t pt-4">
+			<p className="text-muted-foreground text-sm">
+				Mostrando {(currentPage - 1) * itemsPerPage + 1} -{" "}
+				{Math.min(currentPage * itemsPerPage, totalItems)} de {totalItems}
+			</p>
+			<div className="flex items-center gap-2">
+				<Button
+					variant="outline"
+					size="sm"
+					onClick={() => onPageChange(currentPage - 1)}
+					disabled={currentPage === 1}
+				>
+					<ChevronLeft className="h-4 w-4" />
+				</Button>
+				<span className="text-sm">
+					Página {currentPage} de {totalPages}
+				</span>
+				<Button
+					variant="outline"
+					size="sm"
+					onClick={() => onPageChange(currentPage + 1)}
+					disabled={currentPage === totalPages}
+				>
+					<ChevronRight className="h-4 w-4" />
+				</Button>
+			</div>
+		</div>
+	);
+}
+
 function RouteComponent() {
 	const { id } = Route.useParams();
 	const { tipo } = Route.useSearch();
 	const { data: session } = authClient.useSession();
+
+	// Estados de paginación
+	const [contactosPage, setContactosPage] = useState(1);
+	const [cuotasPage, setCuotasPage] = useState(1);
+	const ITEMS_PER_PAGE = 5; // Reducido a 5 para testing, cambia a 10 en producción
 
 	// Obtener detalles del contrato/caso usando la nueva API unificada
 	const casoDetails = useQuery({
@@ -342,8 +397,14 @@ function RouteComponent() {
 									No hay contactos registrados para este caso
 								</div>
 							) : (
-								<div className="space-y-4">
-									{contactos.map((contacto: any) => {
+								<>
+									<div className="space-y-4">
+										{contactos
+											.slice(
+												(contactosPage - 1) * ITEMS_PER_PAGE,
+												contactosPage * ITEMS_PER_PAGE,
+											)
+											.map((contacto: any) => {
 										const estadoInfo = getEstadoContacto(
 											contacto.estadoContacto,
 										);
@@ -402,7 +463,14 @@ function RouteComponent() {
 											</div>
 										);
 									})}
-								</div>
+									</div>
+									<Pagination
+										currentPage={contactosPage}
+										totalItems={contactos.length}
+										itemsPerPage={ITEMS_PER_PAGE}
+										onPageChange={setContactosPage}
+									/>
+								</>
 							)}
 						</CardContent>
 					</Card>
@@ -424,8 +492,14 @@ function RouteComponent() {
 									No hay historial de cuotas disponible
 								</div>
 							) : (
-								<div className="space-y-2">
-									{cuotas.map((cuota: any) => {
+								<>
+									<div className="space-y-2">
+										{cuotas
+											.slice(
+												(cuotasPage - 1) * ITEMS_PER_PAGE,
+												cuotasPage * ITEMS_PER_PAGE,
+											)
+											.map((cuota: any) => {
 										const estadoBadge = getEstadoBadge(cuota.estadoMora);
 										const esPagada = cuota.estadoMora === "pagado";
 										const tieneMora = Number(cuota.montoMora) > 0;
@@ -524,7 +598,14 @@ function RouteComponent() {
 											</div>
 										);
 									})}
-								</div>
+									</div>
+									<Pagination
+										currentPage={cuotasPage}
+										totalItems={cuotas.length}
+										itemsPerPage={ITEMS_PER_PAGE}
+										onPageChange={setCuotasPage}
+									/>
+								</>
 							)}
 						</CardContent>
 					</Card>
@@ -532,6 +613,36 @@ function RouteComponent() {
 
 				{/* Sidebar */}
 				<div className="space-y-6">
+					{/* Próximo Contacto */}
+					{caso.proximoContacto && (
+						<Card>
+							<CardHeader>
+								<CardTitle className="flex items-center gap-2">
+									<CalendarClock className="h-5 w-5" />
+									Próximo Contacto
+								</CardTitle>
+							</CardHeader>
+							<CardContent>
+								<div className="space-y-2">
+									<div className="flex items-center gap-2">
+										{getMetodoIcon(caso.metodoContactoProximo || "")}
+										<span className="font-medium">
+											{caso.metodoContactoProximo?.charAt(0).toUpperCase() +
+												(caso.metodoContactoProximo?.slice(1) || "")}
+										</span>
+									</div>
+									<p className="text-muted-foreground text-sm">
+										{caso.proximoContacto
+											? new Date(caso.proximoContacto).toLocaleDateString(
+													"es-GT",
+												)
+											: "Sin fecha programada"}
+									</p>
+								</div>
+							</CardContent>
+						</Card>
+					)}
+
 					{/* Información del Contrato */}
 					<Card>
 						<CardHeader>
@@ -597,36 +708,6 @@ function RouteComponent() {
 							</div>
 						</CardContent>
 					</Card>
-
-					{/* Próximo Contacto */}
-					{caso.proximoContacto && (
-						<Card>
-							<CardHeader>
-								<CardTitle className="flex items-center gap-2">
-									<CalendarClock className="h-5 w-5" />
-									Próximo Contacto
-								</CardTitle>
-							</CardHeader>
-							<CardContent>
-								<div className="space-y-2">
-									<div className="flex items-center gap-2">
-										{getMetodoIcon(caso.metodoContactoProximo || "")}
-										<span className="font-medium">
-											{caso.metodoContactoProximo?.charAt(0).toUpperCase() +
-												(caso.metodoContactoProximo?.slice(1) || "")}
-										</span>
-									</div>
-									<p className="text-muted-foreground text-sm">
-										{caso.proximoContacto
-											? new Date(caso.proximoContacto).toLocaleDateString(
-													"es-GT",
-												)
-											: "Sin fecha programada"}
-									</p>
-								</div>
-							</CardContent>
-						</Card>
-					)}
 
 					{/* Convenios Activos */}
 					{convenios.length > 0 && (

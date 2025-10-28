@@ -65,7 +65,7 @@ function RouteComponent() {
 		<div className="container mx-auto h-[calc(100vh-4rem)] p-6">
 			<Card className="flex h-full flex-col">
 				<CardHeader>
-					<CardTitle>Chat de WhatsApp - MiniAgent</CardTitle>
+					<CardTitle>Bot de Whatsapp - Club Cash In</CardTitle>
 					<CardDescription>
 						Gestiona conversaciones de WhatsApp con clientes y prospectos
 					</CardDescription>

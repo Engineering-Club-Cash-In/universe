@@ -1,3 +1,5 @@
+import { Gender, MaritalStatus } from '../services/GenderTranslator';
+
 /**
  * Tipos de contratos soportados por el sistema
  */
@@ -47,6 +49,21 @@ export interface UsoCarroUsadoData extends BaseContractData {
 
   /** Edad del cliente (ej: "treinta y dos") */
   client_age: string;
+
+  /** Género del cliente para adaptar términos del contrato */
+  client_gender: Gender;
+
+  /** Estado civil neutral (será traducido según género: single → soltero/soltera) */
+  client_marital_status: MaritalStatus;
+
+  /** Ocupación o profesión del cliente (ej: "comerciante", "ingeniero") */
+  client_occupation: string;
+
+  /** Nacionalidad base para generar gentilicio con género (ej: "guatemalteco" → guatemalteco/guatemalteca) */
+  client_nationality: string;
+
+  /** Título académico o profesional opcional, ya en género correcto (ej: "Licenciada", "Ingeniera", "Doctor") */
+  client_degree?: string;
 
   /** Código Único de Identificación (DPI) completo */
   client_cui: string;

@@ -33,6 +33,7 @@ export interface Document {
   serialid: string;
   url_insercion: string;
   large_spacing: boolean;
+  count_doble_line: number;
 }
 
 export interface Field {

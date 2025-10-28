@@ -345,7 +345,7 @@ function VehiclesDashboard() {
 															)}
 														</TableCell>
 														<TableCell className="text-right">
-															<DropdownMenu>
+															<DropdownMenu modal={false}>
 																<DropdownMenuTrigger asChild>
 																	<Button
 																		variant="ghost"
@@ -552,7 +552,8 @@ function VehiclesDashboard() {
 				onOpenChange={(open) => {
 					setIsDetailsOpen(open);
 					if (!open) {
-						setActiveTab("general"); // Reset tab when closing
+						setActiveTab("general");
+						setSelectedVehicle(null); // Limpiar vehículo seleccionado
 					}
 				}}
 			>
@@ -662,7 +663,6 @@ function VehiclesDashboard() {
 									<div className="space-y-4">
 										{selectedVehicle.inspections.map(
 											(inspection: any, index: number) => {
-												console.log("Inspection data:", inspection);
 												return (
 													<Card key={inspection.id || index}>
 														<CardHeader>

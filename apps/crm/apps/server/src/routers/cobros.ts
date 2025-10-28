@@ -132,6 +132,7 @@ export const cobrosRouter = {
 					estadoContrato: contratosFinanciamiento.estado,
 					montoFinanciado: contratosFinanciamiento.montoFinanciado,
 					cuotaMensual: contratosFinanciamiento.cuotaMensual,
+					diaPagoMensual: contratosFinanciamiento.diaPagoMensual,
 					responsableCobros: contratosFinanciamiento.responsableCobros,
 					// Datos del caso de cobros (si existe)
 					casoCobroId: casosCobros.id,
@@ -539,42 +540,85 @@ export const cobrosRouter = {
 	getHistorialPagos: cobrosProcedure
 		.input(z.object({ contratoId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			// Verificar acceso al caso
-			const caso = await db
-				.select()
-				.from(casosCobros)
-				.where(eq(casosCobros.contratoId, input.contratoId))
-				.limit(1);
+			try {
+				console.log("📋 getHistorialPagos - Inicio", {
+					contratoId: input.contratoId,
+					userId: context.userId,
+					userRole: context.userRole,
+				});
 
-			if (!caso.length) {
-				throw new Error("Contrato no encontrado");
+				// Verificar que el contrato existe
+				console.log("🔍 Verificando existencia del contrato:", input.contratoId);
+				const contrato = await db
+					.select({
+						id: contratosFinanciamiento.id,
+						responsableCobros: contratosFinanciamiento.responsableCobros,
+						estado: contratosFinanciamiento.estado,
+					})
+					.from(contratosFinanciamiento)
+					.where(eq(contratosFinanciamiento.id, input.contratoId))
+					.limit(1);
+
+				console.log("✅ Resultado búsqueda contrato:", {
+					encontrado: contrato.length > 0,
+					estado: contrato[0]?.estado,
+					responsable: contrato[0]?.responsableCobros,
+				});
+
+				if (!contrato.length) {
+					console.error("❌ Contrato no encontrado");
+					throw new Error("Contrato no encontrado");
+				}
+
+				// Verificar permisos (admin o responsable del contrato)
+				console.log("🔐 Verificando permisos:", {
+					esAdmin: context.userRole === "admin",
+					responsableContrato: contrato[0].responsableCobros,
+					usuarioActual: context.userId,
+					tienePermiso:
+						context.userRole === "admin" ||
+						contrato[0].responsableCobros === context.userId,
+				});
+
+				if (
+					context.userRole !== "admin" &&
+					contrato[0].responsableCobros !== context.userId
+				) {
+					console.error("❌ Sin permisos para ver historial");
+					throw new Error("No tienes permiso para ver este historial");
+				}
+
+				// Obtener cuotas
+				console.log("📊 Obteniendo cuotas de pago...");
+				const cuotas = await db
+					.select({
+						id: cuotasPago.id,
+						numeroCuota: cuotasPago.numeroCuota,
+						fechaVencimiento: cuotasPago.fechaVencimiento,
+						montoCuota: cuotasPago.montoCuota,
+						fechaPago: cuotasPago.fechaPago,
+						montoPagado: cuotasPago.montoPagado,
+						montoMora: cuotasPago.montoMora,
+						estadoMora: cuotasPago.estadoMora,
+						diasMora: cuotasPago.diasMora,
+					})
+					.from(cuotasPago)
+					.where(eq(cuotasPago.contratoId, input.contratoId))
+					.orderBy(asc(cuotasPago.numeroCuota));
+
+				console.log("✅ Cuotas obtenidas:", {
+					cantidad: cuotas.length,
+				});
+
+				return cuotas;
+			} catch (error) {
+				console.error("💥 Error en getHistorialPagos:", {
+					error: error instanceof Error ? error.message : error,
+					stack: error instanceof Error ? error.stack : undefined,
+					contratoId: input.contratoId,
+				});
+				throw error;
 			}
-
-			// Verificar permisos
-			if (
-				context.userRole !== "admin" &&
-				caso[0].responsableCobros !== context.userId
-			) {
-				throw new Error("No tienes permiso para ver este historial");
-			}
-
-			const cuotas = await db
-				.select({
-					id: cuotasPago.id,
-					numeroCuota: cuotasPago.numeroCuota,
-					fechaVencimiento: cuotasPago.fechaVencimiento,
-					montoCuota: cuotasPago.montoCuota,
-					fechaPago: cuotasPago.fechaPago,
-					montoPagado: cuotasPago.montoPagado,
-					montoMora: cuotasPago.montoMora,
-					estadoMora: cuotasPago.estadoMora,
-					diasMora: cuotasPago.diasMora,
-				})
-				.from(cuotasPago)
-				.where(eq(cuotasPago.contratoId, input.contratoId))
-				.orderBy(asc(cuotasPago.numeroCuota));
-
-			return cuotas;
 		}),
 
 	// Obtener información de recuperación de vehículo

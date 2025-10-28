@@ -90,7 +90,8 @@ function RouteComponent() {
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	// *fix #12
-	const usersQuery = useQuery({ ...orpc.getAllUsers.queryOptions(),
+	const usersQuery = useQuery({
+		...orpc.getAllUsers.queryOptions(),
 		queryKey: ["getAllUsers"],
 	});
 
@@ -141,12 +142,15 @@ function RouteComponent() {
 		console.log("Session:", userProfile.data);
 		if (!session && !isPending) {
 			navigate({ to: "/login" });
-		} else if (session && userProfile.data !== undefined && userProfile.data?.role !== "admin") {
+		} else if (
+			session &&
+			userProfile.data !== undefined &&
+			userProfile.data?.role !== "admin"
+		) {
 			navigate({ to: "/dashboard" });
 			toast.error("Access denied: Admin role required");
 		}
 	}, [session, isPending, userProfile.data]);
-
 
 	const handleRoleChange = (userId: string, newRole: UserRole) => {
 		updateRoleMutation.mutate({ userId, role: newRole });
@@ -176,15 +180,13 @@ function RouteComponent() {
 		},
 	});
 
-	
 	if (isPending || userProfile.isPending) {
 		return <div>Loading...</div>;
 	}
-	
+
 	if (userProfile === undefined) {
 		return null;
 	}
-
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">

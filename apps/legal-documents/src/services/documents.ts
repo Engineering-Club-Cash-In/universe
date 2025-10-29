@@ -19,10 +19,17 @@ export interface DocumentField {
   value: string
 }
 
+export interface Contracts {
+  contractType: string
+  data: Record<string, string>
+  options: {
+    generatePdf: boolean
+    filenamePrefix: string
+  }
+}
+
 export interface DocumentSubmission {
-  id: number
-  email: string
-  fields: DocumentField[]
+  contracts: Contracts[]
 }
 
 export interface DocumentValue {
@@ -72,6 +79,7 @@ export interface GenerateDocumentsResponse {
 
 // API Service
 const API_URL = import.meta.env.VITE_API_URL
+const DOCUMENTS_API_URL = import.meta.env.VITE_API_URL_DOCUMENTS
 
 export const documentsService = {
   // Obtener todos los tipos de documentos disponibles
@@ -127,19 +135,12 @@ export const documentsService = {
 
   // Generar documentos
   generateDocuments: async (
-    payload: DocumentSubmission[]
+    payload: DocumentSubmission
   ): Promise<GenerateDocumentsResponse> => {
     try {
       // Validación básica del payload
-      if (!Array.isArray(payload) || payload.length === 0) {
-        throw new ValidationError(
-          'Debe proporcionar al menos un documento',
-          [{ field: 'payload', error: 'Array vacío o inválido' }]
-        );
-      }
-
       const response = await fetchWithRetry(
-        `${API_URL}/docuSeal/submissions`,
+        `${DOCUMENTS_API_URL}/contracts/batch`,
         {
           method: 'POST',
           headers: {
@@ -147,7 +148,7 @@ export const documentsService = {
           },
           body: JSON.stringify(payload),
           maxRetries: 2,
-          timeout: 60000, // 60 segundos para generación de documentos
+          timeout: 120000, // 120 segundos para generación de documentos
         }
       );
 

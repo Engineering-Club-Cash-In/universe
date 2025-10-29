@@ -10,6 +10,7 @@ export enum ContractType {
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   COBERTURA_INREXSA = 'cobertura_inrexsa',
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
+  DECLARACION_DE_VENDEDOR = 'declaracion_de_vendedor',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda',
   ARRENDAMIENTO = 'arrendamiento',
   COMPRAVENTA = 'compraventa',
@@ -509,11 +510,86 @@ export interface PagareUnicoLibreProtestoData extends BaseContractData {
   payment_date_day: string;
 }
 
+// ===== DECLARACIÓN DE VENDEDOR =====
+/**
+ * Datos para generar declaración de vendedor de vehículo
+ * Este documento requiere género manual (gender_letter: 'o' o 'a')
+ */
+export interface DeclaracionDeVendedorData extends BaseContractData {
+  contractType: ContractType.DECLARACION_DE_VENDEDOR;
+
+  // ===== FECHA DEL DOCUMENTO =====
+  /** Día del documento (ej: "28") */
+  date_day: string;
+
+  /** Mes del documento (ej: "octubre") */
+  date_month: string;
+
+  /** Año del documento en palabras (ej: "veinticinco" para 2025) */
+  date_year_letters: string;
+
+  // ===== DATOS DEL DEUDOR/VENDEDOR =====
+  /** Nombre completo del vendedor (ej: "CARLOS ALBERTO MENDEZ LOPEZ") */
+  debtor_name: string;
+
+  /** DPI en letras (ej: "DOS MIL QUINIENTOS CUARENTA Y CINCO") */
+  debtor_dpi_letters: string;
+
+  /** DPI en números (ej: "2545 67890 1234") */
+  debtor_dpi_numbers: string;
+
+  /** Letra de género: 'o' para masculino, 'a' para femenino (ej: identificado/identificada) */
+  gender_letter: string;
+
+  // ===== DATOS DEL VEHÍCULO =====
+  /** Tipo de vehículo (ej: "Automóvil", "Pickup", "SUV") */
+  vehicle_type: string;
+
+  /** Marca del vehículo */
+  vehicle_brand: string;
+
+  /** Color del vehículo */
+  vehicle_color: string;
+
+  /** Uso del vehículo (ej: "Particular", "Comercial") */
+  vehicle_usage: string;
+
+  /** Número de chasis */
+  vehicle_chassis: string;
+
+  /** Tipo de combustible (ej: "Gasolina", "Diésel") */
+  vehicle_fuel: string;
+
+  /** Número de motor */
+  vehicle_engine: string;
+
+  /** Serie del vehículo */
+  vehicle_series: string;
+
+  /** Línea o estilo del vehículo */
+  vehicle_line: string;
+
+  /** Modelo (año) del vehículo */
+  vehicle_model: string;
+
+  /** Centímetros cúbicos */
+  vehicle_cc: string;
+
+  /** Número de asientos */
+  vehicle_seats: string;
+
+  /** Número de cilindros */
+  vehicle_cylinders: string;
+
+  /** Código ISCV */
+  vehicle_iscv: string;
+}
+
 // ===== TIPOS UNION PARA TODOS LOS CONTRATOS =====
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | PagareUnicoLibreProtestoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | PagareUnicoLibreProtestoData | DeclaracionDeVendedorData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

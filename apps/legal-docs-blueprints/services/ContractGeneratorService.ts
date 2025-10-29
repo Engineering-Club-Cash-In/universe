@@ -205,6 +205,37 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Registrar carta carro nuevo
+    this.registerTemplate({
+      type: ContractType.CARTA_CARRO_NUEVO,
+      templateFilename: 'carta_carro_nuevo.docx',
+      description: 'Carta de conformidad para adquisición de carro nuevo',
+      requiredFields: [
+        'date_day',
+        'date_month',
+        'date_year_numbers',
+        'debtor_name',
+        'debtor_dpi_letters',
+        'debtor_dpi_numbers',
+        'gender_letter',
+        'vehicle_type',
+        'vehicle_brand',
+        'vehicle_color',
+        'vehicle_usage',
+        'vehicle_chassis',
+        'vehicle_fuel',
+        'vehicle_engine',
+        'vehicle_series',
+        'vehicle_line',
+        'vehicle_model',
+        'vehicle_cc',
+        'vehicle_seats',
+        'vehicle_cylinders',
+        'vehicle_iscv',
+        'business_name'
+      ]
+    });
+
     // Aquí se pueden registrar más templates a futuro:
     // this.registerTemplate({
     //   type: ContractType.RECONOCIMIENTO_DEUDA,

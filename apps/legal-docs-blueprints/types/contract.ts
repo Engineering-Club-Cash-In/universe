@@ -5,6 +5,7 @@ import { Gender, MaritalStatus } from '../services/GenderTranslator';
  */
 export enum ContractType {
   USO_CARRO_USADO = 'uso_carro_usado',
+  GARANTIA_MOBILIARIA = 'garantia_mobiliaria',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda',
   ARRENDAMIENTO = 'arrendamiento',
   COMPRAVENTA = 'compraventa',
@@ -150,11 +151,150 @@ export interface UsoCarroUsadoData extends BaseContractData {
   user_name_final: string;
 }
 
+/**
+ * Interfaz para el contrato de garantía mobiliaria
+ * Basado en el documento: garantia_mobiliaria_hombre.docx
+ */
+export interface GarantiaMobiliariaData extends BaseContractData {
+  contractType: ContractType.GARANTIA_MOBILIARIA;
+
+  // ===== DATOS DE LA FECHA DEL CONTRATO =====
+  /** Día del contrato (ej: "28") */
+  contract_day: string;
+
+  /** Mes del contrato (ej: "octubre") */
+  contract_month: string;
+
+  /** Año del contrato en palabras (ej: "dos mil veinticinco") */
+  contract_year: string;
+
+  // ===== DATOS DEL DEUDOR/DEUDOR GARANTE (misma persona que depositario) =====
+  /** Nombre completo del deudor */
+  debtor_name: string;
+
+  /** Edad del deudor en palabras (ej: "treinta y cinco") */
+  debtor_age: string;
+
+  /** Edad de José Andrés (firmante CCI) en palabras (ej: "cuarenta y cinco") */
+  andres_age: string;
+
+  /** Género del deudor para adaptar términos del contrato */
+  debtor_gender: Gender;
+
+  /** Estado civil neutral (será traducido según género: single → soltero/soltera) */
+  debtor_marital_status: MaritalStatus;
+
+  /** Ocupación o profesión del deudor (ej: "comerciante", "ingeniero") */
+  debtor_occupation: string;
+
+  /** Nacionalidad base para generar gentilicio con género (ej: "guatemalteco") */
+  debtor_nationality: string;
+
+  /** Título académico o profesional opcional, ya en género correcto */
+  debtor_degree?: string;
+
+  /** Código Único de Identificación (DPI) completo */
+  debtor_cui: string;
+
+  /** Dirección completa del deudor */
+  debtor_address: string;
+
+  /** Correo electrónico del deudor */
+  debtor_email: string;
+
+  // ===== DATOS DE LA DEUDA ORIGINAL =====
+  /** Fecha completa de la deuda original en formato legal (ej: "quince de enero del año dos mil veinticinco") */
+  original_debt_date: string;
+
+  /** Monto de la deuda original en texto (ej: "cincuenta mil quetzales") */
+  original_debt_amount_text: string;
+
+  /** Monto de la deuda original en número (ej: "Q.50,000.00") */
+  original_debt_amount_number: string;
+
+  // ===== DATOS DE LA GARANTÍA =====
+  /** Duración de la garantía en meses en texto (ej: "veinticuatro") */
+  guarantee_duration_months: string;
+
+  /** Día de vencimiento de la garantía (ej: "28") */
+  guarantee_end_date_day: string;
+
+  /** Mes de vencimiento de la garantía (ej: "octubre") */
+  guarantee_end_date_month: string;
+
+  /** Año de vencimiento de la garantía - solo la parte después de "dos mil" (ej: "veintisiete" para 2027) */
+  guarantee_end_date_year: string;
+
+  /** Monto garantizado en texto (ej: "sesenta mil quetzales") */
+  guaranteed_amount_text: string;
+
+  /** Monto garantizado en número (ej: "Q.60,000.00") */
+  guaranteed_amount_number: string;
+
+  // ===== DATOS DEL VEHÍCULO EN GARANTÍA =====
+  /** Tipo de vehículo (ej: "Automóvil", "Pickup", "SUV") */
+  vehicle_type: string;
+
+  /** Marca del vehículo */
+  vehicle_brand: string;
+
+  /** Línea o modelo del vehículo */
+  vehicle_line: string;
+
+  /** Modelo (año) del vehículo */
+  vehicle_model: string;
+
+  /** Color del vehículo */
+  vehicle_color: string;
+
+  /** Número de placa */
+  vehicle_plate: string;
+
+  /** Número de chasis */
+  vehicle_chassis: string;
+
+  /** Número de motor */
+  vehicle_motor: string;
+
+  /** Tipo de combustible */
+  vehicle_fuel: string;
+
+  /** Centímetros cúbicos */
+  vehicle_cc: string;
+
+  /** Número de cilindros */
+  vehicle_cylinders: string;
+
+  /** Número de asientos */
+  vehicle_seats: string;
+
+  /** Número de puertas */
+  vehicle_doors: string;
+
+  /** Número de ejes */
+  vehicle_axles: string;
+
+  /** Uso del vehículo (ej: "Particular", "Comercial") */
+  vehicle_use: string;
+
+  /** Serie del vehículo */
+  vehicle_series: string;
+
+  /** Código ISCV */
+  vehicle_iscv: string;
+
+  /** Valor estimado del vehículo en texto (ej: "ochenta mil quetzales") */
+  vehicle_estimated_value_text: string;
+
+  /** Valor estimado del vehículo en número (ej: "Q.80,000.00") */
+  vehicle_estimated_value_number: string;
+}
+
 // ===== TIPOS UNION PARA TODOS LOS CONTRATOS =====
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

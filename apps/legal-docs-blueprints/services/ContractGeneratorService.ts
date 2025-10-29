@@ -44,19 +44,11 @@ export class ContractGeneratorService {
         templateFilename: "contrato_uso_carro_usado.docx",
         description: "Contrato privado de uso de bien mueble (vehículo usado)",
         requiredFields: [
-          "contract_day",
-          "contract_month",
-          "contract_year",
-          "client_name",
-          "vehicle_brand",
-          "vehicle_model",
+          "nombreCompleto",
         ],
       }
     );
 
-
-
-   
     this.registerTemplate({
       type: ContractType.RECONOCIMIENTO_DEUDA,
       templateFilename: 'reconocimiento_deuda/reconocimiento_deuda_template.docx',
@@ -70,19 +62,7 @@ export class ContractGeneratorService {
       templateFilename: 'garantia_mobiliaria.docx',
       description: 'Contrato de garantía mobiliaria con vehículo',
       requiredFields: [
-        'contract_day',
-        'contract_month',
-        'contract_year',
-        'debtor_name',
-        'debtor_age',
-        'debtor_gender',
-        'debtor_marital_status',
-        'debtor_nationality',
-        'vehicle_brand',
-        'original_debt_amount_text',
-        'original_debt_amount_number',
-        'guaranteed_amount_text',
-        'guaranteed_amount_number'
+        'nombreCompleto',
       ]
     });
 
@@ -92,18 +72,7 @@ export class ContractGeneratorService {
       templateFilename: 'carta_emision_cheques.docx',
       description: 'Carta de emisión de cheques / Solicitud de desembolso',
       requiredFields: [
-        'document_day',
-        'document_month',
-        'document_year',
-        'creditor_name',
-        'debtor_name',
-        'original_contract_day',
-        'original_contract_month',
-        'original_contract_year',
-        'disbursement_amount_text',
-        'disbursement_amount_number',
-        'beneficiarios', // Array de beneficiarios para tabla
-        'debtor_dpi'
+        'nombreCompleto',
       ]
     });
 
@@ -113,26 +82,7 @@ export class ContractGeneratorService {
       templateFilename: 'descargo_responsabilidades.docx',
       description: 'Descargo de responsabilidades de vehículo',
       requiredFields: [
-        'date_day',
-        'date_month',
-        'date_year',
-        'debtor_name',
-        'debtor_dpi_letters',
-        'debtor_dpi_number',
-        'vehicle_type',
-        'vehicle_brand',
-        'vehicle_color',
-        'vehicle_use',
-        'vehicle_chassis',
-        'vehicle_fuel',
-        'vehicle_engine',
-        'vehicle_series',
-        'vehicle_line',
-        'vehicle_model',
-        'vehicle_cc',
-        'vehicle_seats',
-        'vehicle_cylinders',
-        'vehicle_iscv'
+        'nombreCompleto',
       ]
     });
 
@@ -142,8 +92,7 @@ export class ContractGeneratorService {
       templateFilename: 'cobertura_inrexsa.docx',
       description: 'Carta de cobertura INREXSA',
       requiredFields: [
-        'debtor_name',
-        'full_date'
+        'nombreCompleto',
       ]
     });
 
@@ -153,25 +102,7 @@ export class ContractGeneratorService {
       templateFilename: 'pagare_unico_libre_de_protesto.docx',
       description: 'Pagaré único libre de protesto',
       requiredFields: [
-        'date_day',
-        'date_month',
-        'date_year',
-        'nominal_value_letters',
-        'nominal_value_numbers',
-        'debtor_name',
-        'debtor_age_letters',
-        'debtor_civil_status',
-        'debtor_occupation',
-        'debtor_nationality',
-        'debtors_dpi_letters',
-        'debtors_dpi_numbers',
-        'debtors_address',
-        'due_date_day',
-        'due_date_month',
-        'due_date_year',
-        'payment_value_letters',
-        'payment_value_numbers',
-        'payment_date_day'
+        'nombreCompleto',
       ]
     });
 
@@ -372,6 +303,89 @@ export class ContractGeneratorService {
 
     // Otros tipos de contrato sin género dinámico
     return data;
+  }
+
+  /**
+   * Genera múltiples contratos de manera secuencial (uno tras otro)
+   * @param contracts - Array de solicitudes de contratos a generar
+   * @returns Array de respuestas con el resultado de cada generación
+   */
+  public async generateContractsBatch(
+    contracts: Array<{
+      contractType: ContractType;
+      data: Record<string, any>;
+      options?: { generatePdf?: boolean; filenamePrefix?: string };
+    }>
+  ): Promise<{
+    results: ContractGenerationResponse[];
+    summary: {
+      total: number;
+      successful: number;
+      failed: number;
+      duration: number;
+    };
+  }> {
+    const startTime = Date.now();
+    const results: ContractGenerationResponse[] = [];
+
+    console.log(`\n🔄 Iniciando generación de ${contracts.length} contratos en batch...\n`);
+
+    // Procesar cada contrato de manera secuencial
+    for (let i = 0; i < contracts.length; i++) {
+      const { contractType, data, options } = contracts[i];
+      
+      console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
+      
+      try {
+        const result = await this.generateContract(contractType, data, options);
+        results.push(result);
+        
+        if (result.success) {
+          console.log(`  ✅ Éxito: ${result.message}`);
+        } else {
+          console.error(`  ❌ Error: ${result.error}`);
+        }
+      } catch (error: any) {
+        // Capturar errores inesperados
+        console.error(`  ❌ Error inesperado: ${error.message}`);
+        results.push({
+          success: false,
+          contractType,
+          message: 'Error inesperado durante la generación',
+          error: error.message || 'Error desconocido'
+        });
+      }
+      
+      // Pequeña pausa entre contratos para evitar sobrecarga
+      if (i < contracts.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    }
+
+    const endTime = Date.now();
+    const duration = endTime - startTime;
+
+    // Calcular estadísticas
+    const successful = results.filter(r => r.success).length;
+    const failed = results.filter(r => !r.success).length;
+
+    const summary = {
+      total: contracts.length,
+      successful,
+      failed,
+      duration
+    };
+
+    console.log(`\n📊 Resumen de generación batch:`);
+    console.log(`   Total: ${summary.total}`);
+    console.log(`   ✅ Exitosos: ${summary.successful}`);
+    console.log(`   ❌ Fallidos: ${summary.failed}`);
+    console.log(`   ⏱️  Duración: ${(duration / 1000).toFixed(2)}s`);
+
+    return {
+      results,
+      summary
+    };
   }
 
   /**

@@ -4,7 +4,7 @@ import { Gender, MaritalStatus } from '../services/GenderTranslator';
  * Tipos de contratos soportados por el sistema
  */
 export enum ContractType {
-  USO_CARRO_USADO = 'uso_carro_usado',
+  USO_CARRO_USADO = 'contrato_privado_uso_carro_usado',
   GARANTIA_MOBILIARIA = 'garantia_mobiliaria',
   CARTA_EMISION_CHEQUES = 'carta_emision_cheques',
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
@@ -12,9 +12,7 @@ export enum ContractType {
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
   DECLARACION_DE_VENDEDOR = 'declaracion_de_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
-  RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda',
-  ARRENDAMIENTO = 'arrendamiento',
-  COMPRAVENTA = 'compraventa',
+  RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda_feb_2025',
   // Agrega más tipos aquí según sea necesario
 }
 

@@ -32,6 +32,8 @@ export interface Document {
   genero: string;
   serialid: string;
   url_insercion: string;
+  large_spacing: boolean;
+  count_doble_line: number;
 }
 
 export interface Field {
@@ -43,6 +45,7 @@ export interface Field {
   relation: string;
   description: string | null;
   default: string | null;
+  is_double_line: boolean;
 }
 
 interface DocumentByDpiResponse {

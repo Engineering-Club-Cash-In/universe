@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DatePicker } from "@/components/ui/react-datepicker";
 import {
 	Select,
 	SelectContent,
@@ -56,7 +57,11 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
-import { formatGuatemalaDate, getStatusLabel, formatDate } from "@/lib/crm-formatters";
+import {
+	formatDate,
+	formatGuatemalaDate,
+	getStatusLabel,
+} from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
 // Simple draggable opportunity card component
@@ -1284,13 +1289,19 @@ function RouteComponent() {
 												<Label htmlFor={field.name}>
 													Fecha de Cierre Esperada
 												</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													type="date"
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) => field.handleChange(e.target.value)}
+												<DatePicker
+													date={
+														field.state.value
+															? new Date(field.state.value)
+															: undefined
+													}
+													onDateChange={(date) => {
+														field.handleChange(
+															date ? date.toISOString().split("T")[0] : "",
+														);
+														field.handleBlur();
+													}}
+													placeholder="Seleccionar fecha de cierre"
 												/>
 											</div>
 										)}
@@ -1835,7 +1846,7 @@ function RouteComponent() {
 													value={field.state.value ?? ""}
 													onBlur={field.handleBlur}
 													onChange={(e) => {
-														let value = e.target.value;
+														const value = e.target.value;
 														console.log("Input value:", value);
 														if (value === "") {
 															field.handleChange(undefined);
@@ -1857,13 +1868,19 @@ function RouteComponent() {
 										{(field) => (
 											<div className="space-y-2">
 												<Label htmlFor={field.name}>Fecha de Cierre</Label>
-												<Input
-													id={field.name}
-													name={field.name}
-													type="date"
-													value={field.state.value}
-													onBlur={field.handleBlur}
-													onChange={(e) => field.handleChange(e.target.value)}
+												<DatePicker
+													date={
+														field.state.value
+															? new Date(field.state.value)
+															: undefined
+													}
+													onDateChange={(date) => {
+														field.handleChange(
+															date ? date.toISOString().split("T")[0] : "",
+														);
+														field.handleBlur();
+													}}
+													placeholder="Seleccionar fecha de cierre"
 												/>
 											</div>
 										)}
@@ -2026,15 +2043,21 @@ function RouteComponent() {
 																		<span className="text-red-500">*</span>
 																	)}
 																</Label>
-																<Input
-																	id={field.name}
-																	name={field.name}
-																	type="date"
-																	value={field.state.value}
-																	onBlur={field.handleBlur}
-																	onChange={(e) =>
-																		field.handleChange(e.target.value)
+																<DatePicker
+																	date={
+																		field.state.value
+																			? new Date(field.state.value)
+																			: undefined
 																	}
+																	onDateChange={(date) => {
+																		field.handleChange(
+																			date
+																				? date.toISOString().split("T")[0]
+																				: "",
+																		);
+																		field.handleBlur();
+																	}}
+																	placeholder="Seleccionar fecha de inicio"
 																/>
 																<p className="text-muted-foreground text-xs">
 																	Fecha de inicio del contrato

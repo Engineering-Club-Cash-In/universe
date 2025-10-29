@@ -41,7 +41,8 @@ export class ContractGeneratorService {
     this.registerTemplate(
       {
         type: ContractType.USO_CARRO_USADO,
-        templateFilename: "contrato_uso_carro_usado.docx",
+        templateFilename: "contrato_uso_carro_usado/contrato_uso_carro_usado.docx",
+        templateFilenameFemale: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer.docx", 
         description: "Contrato privado de uso de bien mueble (vehículo usado)",
         requiredFields: [
           "nombreCompleto",
@@ -52,6 +53,7 @@ export class ContractGeneratorService {
     this.registerTemplate({
       type: ContractType.RECONOCIMIENTO_DEUDA,
       templateFilename: 'reconocimiento_deuda/reconocimiento_deuda_template.docx',
+      templateFilenameFemale: 'reconocimiento_deuda/reconocimiento_deuda_template-mujer.docx',
       description: 'Contrato de reconocimiento de deuda',
       requiredFields: ['nombreCompleto']
     });
@@ -59,7 +61,8 @@ export class ContractGeneratorService {
     // Registrar contrato de garantía mobiliaria
     this.registerTemplate({
       type: ContractType.GARANTIA_MOBILIARIA,
-      templateFilename: 'garantia_mobiliaria.docx',
+      templateFilename: 'garantia_mobiliaria/garantia_mobiliaria.docx',
+      templateFilenameFemale: 'garantia_mobiliaria/garantia_mobiliaria-mujer.docx',
       description: 'Contrato de garantía mobiliaria con vehículo',
       requiredFields: [
         'nombreCompleto',
@@ -69,7 +72,8 @@ export class ContractGeneratorService {
     // Registrar carta de emisión de cheques
     this.registerTemplate({
       type: ContractType.CARTA_EMISION_CHEQUES,
-      templateFilename: 'carta_emision_cheques.docx',
+      templateFilename: 'carta_emision_cheques/carta_emision_cheques.docx',
+      templateFilenameFemale: 'carta_emision_cheques/carta_emision_cheques-mujer.docx',
       description: 'Carta de emisión de cheques / Solicitud de desembolso',
       requiredFields: [
         'nombreCompleto',
@@ -79,7 +83,8 @@ export class ContractGeneratorService {
     // Registrar descargo de responsabilidades
     this.registerTemplate({
       type: ContractType.DESCARGO_RESPONSABILIDADES,
-      templateFilename: 'descargo_responsabilidades.docx',
+      templateFilename: 'descargo_responsabilidades/descargo_responsabilidades.docx',
+      templateFilenameFemale: 'descargo_responsabilidades/descargo_responsabilidades-mujer.docx',
       description: 'Descargo de responsabilidades de vehículo',
       requiredFields: [
         'nombreCompleto',
@@ -90,6 +95,7 @@ export class ContractGeneratorService {
     this.registerTemplate({
       type: ContractType.COBERTURA_INREXSA,
       templateFilename: 'cobertura_inrexsa.docx',
+      templateFilenameFemale: 'cobertura_inrexsa.docx',
       description: 'Carta de cobertura INREXSA',
       requiredFields: [
         'nombreCompleto',
@@ -99,7 +105,8 @@ export class ContractGeneratorService {
     // Registrar pagaré único libre de protesto
     this.registerTemplate({
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
-      templateFilename: 'pagare_unico_libre_de_protesto.docx',
+      templateFilename: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto.docx',
+      templateFilenameFemale: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-mujer.docx',
       description: 'Pagaré único libre de protesto',
       requiredFields: [
         'nombreCompleto',
@@ -109,7 +116,8 @@ export class ContractGeneratorService {
     // Registrar declaración de vendedor
     this.registerTemplate({
       type: ContractType.DECLARACION_DE_VENDEDOR,
-      templateFilename: 'declaracion_de_vendedor.docx',
+      templateFilename: 'declaracion_vendedor/declaracion_de_vendedor.docx',
+      templateFilenameFemale: 'declaracion_vendedor/declaracion_de_vendedor-mujer.docx',
       description: 'Declaración de vendedor de vehículo',
       requiredFields: []
     });
@@ -117,46 +125,44 @@ export class ContractGeneratorService {
     // Registrar carta carro nuevo
     this.registerTemplate({
       type: ContractType.CARTA_CARRO_NUEVO,
-      templateFilename: 'carta_carro_nuevo.docx',
+      templateFilename: 'carta_carro_nuevo/carta_carro_nuevo.docx',
+      templateFilenameFemale: 'carta_carro_nuevo/carta_carro_nuevo-mujer.docx',
       description: 'Carta de conformidad para adquisición de carro nuevo',
       requiredFields: []
     });
 
     this.registerTemplate({
       type: ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
-      templateFilename: 'carta_aceptacion_gps.docx',
+      templateFilename: 'carta_aceptacion_gps/carta_aceptacion_gps.docx',
+      templateFilenameFemale: 'carta_aceptacion_gps/carta_aceptacion_gps-mujer.docx',
       description: 'Carta de aceptación para instalación de GPS en vehículo',
       requiredFields: []
     }); 
 
     this.registerTemplate({
       type: ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
-      templateFilename: 'carta_solicitud_traspaso_vehiculo.docx',
+      templateFilename: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo.docx',
+      templateFilenameFemale: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-mujer.docx',
       description: 'Carta de solicitud de traspaso de vehículo',
       requiredFields: []
     });
 
     this.registerTemplate({
       type: ContractType.CONTRATO_PRIVADO_USO,
-      templateFilename: 'contrato_privado_uso_nuevo.docx',
+      templateFilename: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo.docx',
+      templateFilenameFemale: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-mujer.docx',
       description: 'Contrato privado de uso de bien mueble',
       requiredFields: []
     });
 
     this.registerTemplate({
       type: ContractType.SOLICITUD_COMPRA_VEHICULO,
-      templateFilename: 'solicitud_compra_vehiculo.docx',
+      templateFilename: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo.docx',
+      templateFilenameFemale: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer.docx',
       description: 'Carta de solicitud de compra de vehículo',
       requiredFields: []
     });
 
-    // Aquí se pueden registrar más templates a futuro:
-    // this.registerTemplate({
-    //   type: ContractType.RECONOCIMIENTO_DEUDA,
-    //   templateFilename: 'contrato_reconocimiento_deuda.docx',
-    //   description: 'Contrato de reconocimiento de deuda',
-    //   requiredFields: ['client_name', 'loan_amount', 'interest_rate']
-    // });
   }
 
   /**
@@ -377,7 +383,7 @@ export class ContractGeneratorService {
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { generatePdf?: boolean; filenamePrefix?: string } = {}
+    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
@@ -396,7 +402,7 @@ export class ContractGeneratorService {
       }
 
       // 3. Cargar template
-      const templatePath = path.join(this.templatesDir, config.templateFilename);
+      const templatePath = path.join(this.templatesDir, options.gender === "female" ? config.templateFilenameFemale : config.templateFilename);
       const templateContent = await fs.readFile(templatePath, 'binary');
       const zip = new PizZip(templateContent);
 
@@ -407,11 +413,8 @@ export class ContractGeneratorService {
         nullGetter: () => '', // Reemplazar nulls con string vacío
       });
 
-      // 5. Preparar datos con términos de género si aplica
-      const preparedData = this.prepareDataWithGender(contractType, data);
-
       // 6. Renderizar con los datos
-      doc.render(preparedData);
+      doc.render(data);
 
       // 7. Generar buffer del DOCX
       const docxBuffer = doc.getZip().generate({

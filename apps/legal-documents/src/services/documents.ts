@@ -23,6 +23,7 @@ export interface Contracts {
   contractType: string
   data: Record<string, string>
   options: {
+    gender: "male" | "female"
     generatePdf: boolean
     filenamePrefix: string
   }

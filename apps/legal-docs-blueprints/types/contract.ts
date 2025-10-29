@@ -718,6 +718,8 @@ export interface ContractTemplateConfig {
   /** Nombre del archivo template en /templates */
   templateFilename: string;
 
+  templateFilenameFemale: string;
+
   /** Descripción del contrato */
   description: string;
 

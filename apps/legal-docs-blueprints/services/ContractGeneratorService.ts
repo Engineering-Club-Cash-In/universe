@@ -111,29 +111,7 @@ export class ContractGeneratorService {
       type: ContractType.DECLARACION_DE_VENDEDOR,
       templateFilename: 'declaracion_de_vendedor.docx',
       description: 'Declaración de vendedor de vehículo',
-      requiredFields: [
-        'date_day',
-        'date_month',
-        'date_year_letters',
-        'debtor_name',
-        'debtor_dpi_letters',
-        'debtor_dpi_numbers',
-        'gender_letter',
-        'vehicle_type',
-        'vehicle_brand',
-        'vehicle_color',
-        'vehicle_usage',
-        'vehicle_chassis',
-        'vehicle_fuel',
-        'vehicle_engine',
-        'vehicle_series',
-        'vehicle_line',
-        'vehicle_model',
-        'vehicle_cc',
-        'vehicle_seats',
-        'vehicle_cylinders',
-        'vehicle_iscv'
-      ]
+      requiredFields: []
     });
 
     // Registrar carta carro nuevo
@@ -141,30 +119,35 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_CARRO_NUEVO,
       templateFilename: 'carta_carro_nuevo.docx',
       description: 'Carta de conformidad para adquisición de carro nuevo',
-      requiredFields: [
-        'date_day',
-        'date_month',
-        'date_year_numbers',
-        'debtor_name',
-        'debtor_dpi_letters',
-        'debtor_dpi_numbers',
-        'gender_letter',
-        'vehicle_type',
-        'vehicle_brand',
-        'vehicle_color',
-        'vehicle_usage',
-        'vehicle_chassis',
-        'vehicle_fuel',
-        'vehicle_engine',
-        'vehicle_series',
-        'vehicle_line',
-        'vehicle_model',
-        'vehicle_cc',
-        'vehicle_seats',
-        'vehicle_cylinders',
-        'vehicle_iscv',
-        'business_name'
-      ]
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
+      templateFilename: 'carta_aceptacion_gps.docx',
+      description: 'Carta de aceptación para instalación de GPS en vehículo',
+      requiredFields: []
+    }); 
+
+    this.registerTemplate({
+      type: ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
+      templateFilename: 'carta_solicitud_traspaso_vehiculo.docx',
+      description: 'Carta de solicitud de traspaso de vehículo',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CONTRATO_PRIVADO_USO,
+      templateFilename: 'contrato_privado_uso_nuevo.docx',
+      description: 'Contrato privado de uso de bien mueble',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.SOLICITUD_COMPRA_VEHICULO,
+      templateFilename: 'solicitud_compra_vehiculo.docx',
+      description: 'Carta de solicitud de compra de vehículo',
+      requiredFields: []
     });
 
     // Aquí se pueden registrar más templates a futuro:

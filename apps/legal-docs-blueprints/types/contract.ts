@@ -6,6 +6,8 @@ import { Gender, MaritalStatus } from '../services/GenderTranslator';
 export enum ContractType {
   USO_CARRO_USADO = 'uso_carro_usado',
   GARANTIA_MOBILIARIA = 'garantia_mobiliaria',
+  CARTA_EMISION_CHEQUES = 'carta_emision_cheques',
+  DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda',
   ARRENDAMIENTO = 'arrendamiento',
   COMPRAVENTA = 'compraventa',
@@ -290,11 +292,141 @@ export interface GarantiaMobiliariaData extends BaseContractData {
   vehicle_estimated_value_number: string;
 }
 
+// ===== CARTA DE EMISIÓN DE CHEQUES =====
+/**
+ * Datos para generar carta de emisión de cheques / solicitud de desembolso
+ * Este documento NO requiere género dinámico (redacción neutral)
+ */
+export interface CartaEmisionChequesData extends BaseContractData {
+  contractType: ContractType.CARTA_EMISION_CHEQUES;
+
+  // ===== FECHA DEL DOCUMENTO =====
+  /** Día del documento (ej: "23" o "veintitrés") */
+  document_day: string;
+
+  /** Mes del documento (ej: "octubre") */
+  document_month: string;
+
+  /** Año del documento - solo últimos 2 dígitos (ej: "25" para 2025) */
+  document_year: string;
+
+  // ===== FECHA DEL CONTRATO ORIGINAL =====
+  /** Día del contrato original (ej: "15" o "quince") */
+  original_contract_day: string;
+
+  /** Mes del contrato original (ej: "enero") */
+  original_contract_month: string;
+
+  /** Año del contrato original - solo parte después de "dos mil" (ej: "veinticinco") */
+  original_contract_year: string;
+
+  // ===== PARTES DEL CONTRATO =====
+  /** Nombre o razón social de la entidad acreedora (ej: "CREDITO CAPITALES IMMOBILIARIS, SOCIEDAD ANÓNIMA") */
+  creditor_name: string;
+
+  /** Nombre completo del deudor que firma (ej: "JUAN RAMIRO MORALES PINEDA") */
+  debtor_name: string;
+
+  /** DPI del deudor */
+  debtor_dpi: string;
+
+  // ===== MONTO Y CUENTA =====
+  /** Monto del desembolso en texto completo (ej: "CIENTO CUARENTA Y SEIS MIL NOVECIENTOS SETENTA QUETZALES CON SESENTA CENTAVOS (Q.146,970.60)") */
+  disbursement_amount_text: string;
+
+  /** Monto del desembolso en formato numérico (ej: "Q.146,970.60") */
+  disbursement_amount_number: string;
+
+  // ===== BENEFICIARIOS (tabla con múltiples filas) =====
+  /**
+   * Lista de beneficiarios para la tabla de transferencias
+   * Puede tener 1 o más beneficiarios. Si solo hay 1, solo se mostrará 1 fila.
+   */
+  beneficiarios: Array<{
+    /** Cuenta bancaria o nombre del beneficiario */
+    account_or_beneficiary: string;
+    /** Monto a transferir (ej: "146,970.60" - sin "Q.") */
+    amount: string;
+  }>;
+}
+
+// ===== DESCARGO DE RESPONSABILIDADES =====
+/**
+ * Datos para generar descargo de responsabilidades de vehículo
+ * Este documento NO requiere género dinámico (redacción neutral)
+ */
+export interface DescargoResponsabilidadesData extends BaseContractData {
+  contractType: ContractType.DESCARGO_RESPONSABILIDADES;
+
+  // ===== FECHA DEL DOCUMENTO =====
+  /** Día del documento (ej: "28") */
+  date_day: string;
+
+  /** Mes del documento (ej: "octubre") */
+  date_month: string;
+
+  /** Año del documento (ej: "dos mil veinticinco") */
+  date_year: string;
+
+  // ===== DATOS DEL DEUDOR =====
+  /** Nombre completo del deudor (ej: "JUAN RAMIRO MORALES PINEDA") */
+  debtor_name: string;
+
+  /** DPI en letras (ej: "DOS MIL TRESCIENTOS CUARENTA Y CINCO") */
+  debtor_dpi_letters: string;
+
+  /** DPI en número (ej: "2345 67890 1234") */
+  debtor_dpi_number: string;
+
+  // ===== DATOS DEL VEHÍCULO =====
+  /** Tipo de vehículo (ej: "Automóvil", "Pickup", "SUV") */
+  vehicle_type: string;
+
+  /** Marca del vehículo */
+  vehicle_brand: string;
+
+  /** Color del vehículo */
+  vehicle_color: string;
+
+  /** Uso del vehículo (ej: "Particular", "Comercial") */
+  vehicle_use: string;
+
+  /** Número de chasis */
+  vehicle_chassis: string;
+
+  /** Tipo de combustible (ej: "Gasolina", "Diésel") */
+  vehicle_fuel: string;
+
+  /** Número de motor */
+  vehicle_engine: string;
+
+  /** Serie del vehículo */
+  vehicle_series: string;
+
+  /** Línea o modelo del vehículo */
+  vehicle_line: string;
+
+  /** Modelo (año) del vehículo */
+  vehicle_model: string;
+
+  /** Centímetros cúbicos */
+  vehicle_cc: string;
+
+  /** Número de asientos */
+  vehicle_seats: string;
+
+  /** Número de cilindros */
+  vehicle_cylinders: string;
+
+  /** Código ISCV */
+  vehicle_iscv: string;
+}
+
 // ===== TIPOS UNION PARA TODOS LOS CONTRATOS =====
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

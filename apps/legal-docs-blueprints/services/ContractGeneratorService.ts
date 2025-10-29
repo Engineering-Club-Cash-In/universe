@@ -74,6 +74,56 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Registrar carta de emisión de cheques
+    this.registerTemplate({
+      type: ContractType.CARTA_EMISION_CHEQUES,
+      templateFilename: 'carta_emision_cheques.docx',
+      description: 'Carta de emisión de cheques / Solicitud de desembolso',
+      requiredFields: [
+        'document_day',
+        'document_month',
+        'document_year',
+        'creditor_name',
+        'debtor_name',
+        'original_contract_day',
+        'original_contract_month',
+        'original_contract_year',
+        'disbursement_amount_text',
+        'disbursement_amount_number',
+        'beneficiarios', // Array de beneficiarios para tabla
+        'debtor_dpi'
+      ]
+    });
+
+    // Registrar descargo de responsabilidades
+    this.registerTemplate({
+      type: ContractType.DESCARGO_RESPONSABILIDADES,
+      templateFilename: 'descargo_responsabilidades.docx',
+      description: 'Descargo de responsabilidades de vehículo',
+      requiredFields: [
+        'date_day',
+        'date_month',
+        'date_year',
+        'debtor_name',
+        'debtor_dpi_letters',
+        'debtor_dpi_number',
+        'vehicle_type',
+        'vehicle_brand',
+        'vehicle_color',
+        'vehicle_use',
+        'vehicle_chassis',
+        'vehicle_fuel',
+        'vehicle_engine',
+        'vehicle_series',
+        'vehicle_line',
+        'vehicle_model',
+        'vehicle_cc',
+        'vehicle_seats',
+        'vehicle_cylinders',
+        'vehicle_iscv'
+      ]
+    });
+
     // Aquí se pueden registrar más templates a futuro:
     // this.registerTemplate({
     //   type: ContractType.RECONOCIMIENTO_DEUDA,

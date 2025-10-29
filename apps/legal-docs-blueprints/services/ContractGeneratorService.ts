@@ -52,6 +52,28 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Registrar contrato de garantía mobiliaria
+    this.registerTemplate({
+      type: ContractType.GARANTIA_MOBILIARIA,
+      templateFilename: 'garantia_mobiliaria.docx',
+      description: 'Contrato de garantía mobiliaria con vehículo',
+      requiredFields: [
+        'contract_day',
+        'contract_month',
+        'contract_year',
+        'debtor_name',
+        'debtor_age',
+        'debtor_gender',
+        'debtor_marital_status',
+        'debtor_nationality',
+        'vehicle_brand',
+        'original_debt_amount_text',
+        'original_debt_amount_number',
+        'guaranteed_amount_text',
+        'guaranteed_amount_number'
+      ]
+    });
+
     // Aquí se pueden registrar más templates a futuro:
     // this.registerTemplate({
     //   type: ContractType.RECONOCIMIENTO_DEUDA,
@@ -115,43 +137,79 @@ export class ContractGeneratorService {
     contractType: ContractType,
     data: Record<string, any>
   ): Record<string, any> {
-    // Solo aplicar traducción de género para contratos que lo requieran
-    if (contractType !== ContractType.USO_CARRO_USADO) {
-      return data;
+    // ==== CONTRATO DE USO DE CARRO USADO ====
+    if (contractType === ContractType.USO_CARRO_USADO) {
+      // Verificar si el contrato tiene información de género
+      if (!data.client_gender || !data.client_marital_status || !data.client_nationality) {
+        console.warn('⚠ Advertencia: Contrato sin campos de género. Se recomienda agregar client_gender, client_marital_status y client_nationality');
+        return data;
+      }
+
+      // Validar género y estado civil
+      if (!GenderTranslator.isValidGender(data.client_gender)) {
+        throw new Error(`Género inválido: ${data.client_gender}. Debe ser 'male' o 'female'`);
+      }
+
+      if (!GenderTranslator.isValidMaritalStatus(data.client_marital_status)) {
+        throw new Error(`Estado civil inválido: ${data.client_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
+      }
+
+      // Generar términos de género traducidos
+      const genderedData = GenderTranslator.generateGenderedData(
+        data.client_gender as Gender,
+        data.client_marital_status as MaritalStatus,
+        data.client_nationality as string
+      );
+
+      console.log(`✓ Términos de género aplicados: ${data.client_gender} → ${genderedData.title_with_article}`);
+
+      return {
+        ...data,
+        ...genderedData
+      };
     }
 
-    // Verificar si el contrato tiene información de género
-    if (!data.client_gender || !data.client_marital_status || !data.client_nationality) {
-      // Si no tiene los campos de género, retornar data sin modificar
-      console.warn('⚠ Advertencia: Contrato sin campos de género. Se recomienda agregar client_gender, client_marital_status y client_nationality');
-      return data;
+    // ==== CONTRATO DE GARANTÍA MOBILIARIA ====
+    if (contractType === ContractType.GARANTIA_MOBILIARIA) {
+      // Verificar si el contrato tiene información de género del deudor
+      if (!data.debtor_gender || !data.debtor_marital_status || !data.debtor_nationality) {
+        console.warn('⚠ Advertencia: Contrato sin campos de género del deudor. Se recomienda agregar debtor_gender, debtor_marital_status y debtor_nationality');
+        return data;
+      }
+
+      // Validar género y estado civil
+      if (!GenderTranslator.isValidGender(data.debtor_gender)) {
+        throw new Error(`Género inválido: ${data.debtor_gender}. Debe ser 'male' o 'female'`);
+      }
+
+      if (!GenderTranslator.isValidMaritalStatus(data.debtor_marital_status)) {
+        throw new Error(`Estado civil inválido: ${data.debtor_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
+      }
+
+      // Generar términos de género traducidos
+      const genderedData = GenderTranslator.generateGenderedData(
+        data.debtor_gender as Gender,
+        data.debtor_marital_status as MaritalStatus,
+        data.debtor_nationality as string
+      );
+
+      // Para garantía mobiliaria, también agregar términos con prefijo "debtor_"
+      const debtorGenderedData = {
+        debtor_marital_status_gendered: genderedData.client_marital_status_gendered,
+        debtor_nationality_gendered: genderedData.client_nationality_gendered
+      };
+
+      console.log(`✓ Términos de género del deudor aplicados: ${data.debtor_gender} → ${genderedData.debtor}`);
+
+      return {
+        ...data,
+        ...genderedData,
+        ...debtorGenderedData
+      };
     }
 
-    // Validar género y estado civil
-    if (!GenderTranslator.isValidGender(data.client_gender)) {
-      throw new Error(`Género inválido: ${data.client_gender}. Debe ser 'male' o 'female'`);
-    }
-
-    if (!GenderTranslator.isValidMaritalStatus(data.client_marital_status)) {
-      throw new Error(`Estado civil inválido: ${data.client_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
-    }
-
-    // Generar términos de género traducidos
-    const genderedData = GenderTranslator.generateGenderedData(
-      data.client_gender as Gender,
-      data.client_marital_status as MaritalStatus,
-      data.client_nationality as string
-    );
-
-    // Combinar datos originales con términos traducidos
-    const enhancedData = {
-      ...data,
-      ...genderedData
-    };
-
-    console.log(`✓ Términos de género aplicados: ${data.client_gender} → ${genderedData.title_with_article}`);
-
-    return enhancedData;
+    // Otros tipos de contrato sin género dinámico
+    return data;
   }
 
   /**

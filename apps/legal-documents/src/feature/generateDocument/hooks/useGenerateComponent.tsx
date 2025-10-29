@@ -81,7 +81,7 @@ export function useGenerateComponent() {
           case 2:
             return !!(formData.renapData && formData.dpi);
           case 3:
-            return step3Valid;
+            return true;
           case 4:
             return true; // El step 4 es solo visualización
           default:
@@ -126,10 +126,32 @@ export function useGenerateComponent() {
             ) || [];
 
           // Construir los campos con sus valores
-          const fields = documentFields.map((field) => ({
-            key: field.name, // Usar el nombre del campo como key
-            value: formData.fieldValues?.[field.key] || "",
-          }));
+          const fields = documentFields.map((field) => {
+            let value = formData.fieldValues?.[field.key] || "";
+
+            if (field.is_double_line) {
+              // para cada documento se requiere diferente mínimo de caracteres para el doble renglón
+              const minCharacters = document.count_doble_line ?? 160;
+              const currentLength = value.length;
+              // contar cuantas mayúsculas hay en el texto, cada mayúscula cuenta como 1.25 caracteres
+              const uppercaseCount = (value.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length;
+              // redondear hacia arriba la cantidad de caracteres que aportan las mayúsculas
+              const length = currentLength + Math.ceil(uppercaseCount / 4);
+              if (length < minCharacters) {
+                const underscoresNeeded = minCharacters - length;
+                const underscores = "-".repeat(underscoresNeeded);
+                value += " " + underscores;
+                console.log(
+                  `➕ Agregando ${underscoresNeeded} guiones al campo ${field.name} (${currentLength} → ${minCharacters} caracteres)`
+                );
+              }
+            }
+
+            return {
+              key: field.name, // Usar el nombre del campo como key
+              value: value,
+            };
+          });
 
           return {
             id: document.id,

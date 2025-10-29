@@ -38,18 +38,30 @@ export class ContractGeneratorService {
    */
   private initializeTemplateRegistry(): void {
     // Registrar contrato de uso de carro usado
+    this.registerTemplate(
+      {
+        type: ContractType.USO_CARRO_USADO,
+        templateFilename: "contrato_uso_carro_usado.docx",
+        description: "Contrato privado de uso de bien mueble (vehículo usado)",
+        requiredFields: [
+          "contract_day",
+          "contract_month",
+          "contract_year",
+          "client_name",
+          "vehicle_brand",
+          "vehicle_model",
+        ],
+      }
+    );
+
+
+
+   
     this.registerTemplate({
-      type: ContractType.USO_CARRO_USADO,
-      templateFilename: 'contrato_uso_carro_usado.docx',
-      description: 'Contrato privado de uso de bien mueble (vehículo usado)',
-      requiredFields: [
-        'contract_day',
-        'contract_month',
-        'contract_year',
-        'client_name',
-        'vehicle_brand',
-        'vehicle_model'
-      ]
+      type: ContractType.RECONOCIMIENTO_DEUDA,
+      templateFilename: 'reconocimiento_deuda/reconocimiento_deuda_template.docx',
+      description: 'Contrato de reconocimiento de deuda',
+      requiredFields: ['nombreCompleto']
     });
 
     // Registrar contrato de garantía mobiliaria

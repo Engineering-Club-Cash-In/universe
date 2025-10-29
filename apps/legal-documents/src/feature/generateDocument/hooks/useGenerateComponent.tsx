@@ -154,6 +154,7 @@ export function useGenerateComponent() {
           return {
             options: {
               generatePdf: true,
+              gender: formData.renapData?.gender === "M" ? "male" : "female",
               filenamePrefix: document.nombre_documento + "_" + Date.now(),
             },
             // convertir el array de fields a un objeto key-value

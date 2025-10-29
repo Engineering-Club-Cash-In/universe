@@ -124,6 +124,26 @@ Cuando el contrato menciona a ambas partes (típicamente dos personas de diferen
 - "responsable de cualquier daño a tercero, **{to_same}**, y a su vínculo familiar"
 - "como depositario **{of_same}**"
 
+### 8. Términos Específicos para Garantía Mobiliaria
+
+| Masculino | Femenino | Variable |
+|-----------|----------|----------|
+| el deudor | la deudora | `{debtor}` |
+| al deudor | a la deudora | `{to_debtor}` |
+| el Deudor Garante | la Deudora Garante | `{debtor_guarantor}` |
+| el Depositario | la Depositaria | `{depositary}` |
+| el propietario | la propietaria | `{owner}` |
+| al propietario | a la propietaria | `{to_owner}` |
+| autorizado | autorizada | `{authorized}` |
+
+**Ejemplos en contexto:**
+- "**{debtor}** se obliga a pagar la suma de..."
+- "**{debtor_guarantor}** constituye garantía mobiliaria sobre..."
+- "actúa en calidad de **{depositary}** del bien mueble"
+- "**{owner}** del vehículo que se describe"
+
+**Nota:** En contratos de garantía mobiliaria, el Deudor, Deudor Garante y Depositario son la misma persona.
+
 ---
 
 ## Proceso para Nuevas Plantillas
@@ -324,8 +344,10 @@ unzip -p output/contrato.docx word/document.xml | grep -o '<w:t[^>]*>[^<]*señor
 | `services/GenderTranslator.ts` | Lógica de traducción de género |
 | `types/contract.ts` | Interfaces TypeScript con campos de género |
 | `services/ContractGeneratorService.ts` | Integración de género en generación |
-| `scripts/prepare-gender-template.py` | Script para preparar templates DOCX |
-| `test-contract.ts` | Tests de ambos géneros |
+| `scripts/prepare-gender-template.py` | Script para preparar template de uso de carro |
+| `scripts/prepare-garantia-mobiliaria-template.py` | Script para preparar template de garantía mobiliaria |
+| `test-contract.ts` | Tests de uso de carro (ambos géneros) |
+| `test-garantia-mobiliaria.ts` | Tests de garantía mobiliaria (ambos géneros) |
 
 ---
 

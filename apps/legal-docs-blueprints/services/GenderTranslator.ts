@@ -26,6 +26,15 @@ interface GenderTerms {
   // Pronombres
   to_same: string;                  // al mismo / a la misma
   of_same: string;                  // del mismo / de la misma
+
+  // Términos específicos para garantía mobiliaria
+  debtor: string;                   // el deudor / la deudora
+  to_debtor: string;                // al deudor / a la deudora
+  debtor_guarantor: string;         // el Deudor Garante / la Deudora Garante
+  depositary: string;               // el Depositario / la Depositaria
+  owner: string;                    // el propietario / la propietaria
+  to_owner: string;                 // al propietario / a la propietaria
+  authorized: string;               // autorizado / autorizada
 }
 
 export class GenderTranslator {
@@ -40,7 +49,14 @@ export class GenderTranslator {
       direct: 'directo',
       informed_plural: 'enterados',
       to_same: 'al mismo',
-      of_same: 'del mismo'
+      of_same: 'del mismo',
+      debtor: 'el deudor',
+      to_debtor: 'al deudor',
+      debtor_guarantor: 'el Deudor Garante',
+      depositary: 'el Depositario',
+      owner: 'el propietario',
+      to_owner: 'al propietario',
+      authorized: 'autorizado'
     },
     female: {
       title: 'señora',
@@ -52,7 +68,14 @@ export class GenderTranslator {
       direct: 'directa',
       informed_plural: 'enteradas',
       to_same: 'a la misma',
-      of_same: 'de la misma'
+      of_same: 'de la misma',
+      debtor: 'la deudora',
+      to_debtor: 'a la deudora',
+      debtor_guarantor: 'la Deudora Garante',
+      depositary: 'la Depositaria',
+      owner: 'la propietaria',
+      to_owner: 'a la propietaria',
+      authorized: 'autorizada'
     }
   };
 

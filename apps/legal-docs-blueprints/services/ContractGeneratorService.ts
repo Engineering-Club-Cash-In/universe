@@ -63,6 +63,125 @@ export class ContractGeneratorService {
       description: 'Contrato de reconocimiento de deuda',
       requiredFields: ['nombreCompleto']
     });
+
+    // Registrar contrato de garantía mobiliaria
+    this.registerTemplate({
+      type: ContractType.GARANTIA_MOBILIARIA,
+      templateFilename: 'garantia_mobiliaria.docx',
+      description: 'Contrato de garantía mobiliaria con vehículo',
+      requiredFields: [
+        'contract_day',
+        'contract_month',
+        'contract_year',
+        'debtor_name',
+        'debtor_age',
+        'debtor_gender',
+        'debtor_marital_status',
+        'debtor_nationality',
+        'vehicle_brand',
+        'original_debt_amount_text',
+        'original_debt_amount_number',
+        'guaranteed_amount_text',
+        'guaranteed_amount_number'
+      ]
+    });
+
+    // Registrar carta de emisión de cheques
+    this.registerTemplate({
+      type: ContractType.CARTA_EMISION_CHEQUES,
+      templateFilename: 'carta_emision_cheques.docx',
+      description: 'Carta de emisión de cheques / Solicitud de desembolso',
+      requiredFields: [
+        'document_day',
+        'document_month',
+        'document_year',
+        'creditor_name',
+        'debtor_name',
+        'original_contract_day',
+        'original_contract_month',
+        'original_contract_year',
+        'disbursement_amount_text',
+        'disbursement_amount_number',
+        'beneficiarios', // Array de beneficiarios para tabla
+        'debtor_dpi'
+      ]
+    });
+
+    // Registrar descargo de responsabilidades
+    this.registerTemplate({
+      type: ContractType.DESCARGO_RESPONSABILIDADES,
+      templateFilename: 'descargo_responsabilidades.docx',
+      description: 'Descargo de responsabilidades de vehículo',
+      requiredFields: [
+        'date_day',
+        'date_month',
+        'date_year',
+        'debtor_name',
+        'debtor_dpi_letters',
+        'debtor_dpi_number',
+        'vehicle_type',
+        'vehicle_brand',
+        'vehicle_color',
+        'vehicle_use',
+        'vehicle_chassis',
+        'vehicle_fuel',
+        'vehicle_engine',
+        'vehicle_series',
+        'vehicle_line',
+        'vehicle_model',
+        'vehicle_cc',
+        'vehicle_seats',
+        'vehicle_cylinders',
+        'vehicle_iscv'
+      ]
+    });
+
+    // Registrar cobertura INREXSA
+    this.registerTemplate({
+      type: ContractType.COBERTURA_INREXSA,
+      templateFilename: 'cobertura_inrexsa.docx',
+      description: 'Carta de cobertura INREXSA',
+      requiredFields: [
+        'debtor_name',
+        'full_date'
+      ]
+    });
+
+    // Registrar pagaré único libre de protesto
+    this.registerTemplate({
+      type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
+      templateFilename: 'pagare_unico_libre_de_protesto.docx',
+      description: 'Pagaré único libre de protesto',
+      requiredFields: [
+        'date_day',
+        'date_month',
+        'date_year',
+        'nominal_value_letters',
+        'nominal_value_numbers',
+        'debtor_name',
+        'debtor_age_letters',
+        'debtor_civil_status',
+        'debtor_occupation',
+        'debtor_nationality',
+        'debtors_dpi_letters',
+        'debtors_dpi_numbers',
+        'debtors_address',
+        'due_date_day',
+        'due_date_month',
+        'due_date_year',
+        'payment_value_letters',
+        'payment_value_numbers',
+        'payment_date_day'
+      ]
+    });
+
+    // Aquí se pueden registrar más templates a futuro:
+    // this.registerTemplate({
+    //   type: ContractType.RECONOCIMIENTO_DEUDA,
+    //   templateFilename: 'contrato_reconocimiento_deuda.docx',
+    //   description: 'Contrato de reconocimiento de deuda',
+    //   requiredFields: ['client_name', 'loan_amount', 'interest_rate']
+    // });
   }
 
   /**
@@ -119,43 +238,79 @@ export class ContractGeneratorService {
     contractType: ContractType,
     data: Record<string, any>
   ): Record<string, any> {
-    // Solo aplicar traducción de género para contratos que lo requieran
-    if (contractType !== ContractType.USO_CARRO_USADO) {
-      return data;
+    // ==== CONTRATO DE USO DE CARRO USADO ====
+    if (contractType === ContractType.USO_CARRO_USADO) {
+      // Verificar si el contrato tiene información de género
+      if (!data.client_gender || !data.client_marital_status || !data.client_nationality) {
+        console.warn('⚠ Advertencia: Contrato sin campos de género. Se recomienda agregar client_gender, client_marital_status y client_nationality');
+        return data;
+      }
+
+      // Validar género y estado civil
+      if (!GenderTranslator.isValidGender(data.client_gender)) {
+        throw new Error(`Género inválido: ${data.client_gender}. Debe ser 'male' o 'female'`);
+      }
+
+      if (!GenderTranslator.isValidMaritalStatus(data.client_marital_status)) {
+        throw new Error(`Estado civil inválido: ${data.client_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
+      }
+
+      // Generar términos de género traducidos
+      const genderedData = GenderTranslator.generateGenderedData(
+        data.client_gender as Gender,
+        data.client_marital_status as MaritalStatus,
+        data.client_nationality as string
+      );
+
+      console.log(`✓ Términos de género aplicados: ${data.client_gender} → ${genderedData.title_with_article}`);
+
+      return {
+        ...data,
+        ...genderedData
+      };
     }
 
-    // Verificar si el contrato tiene información de género
-    if (!data.client_gender || !data.client_marital_status || !data.client_nationality) {
-      // Si no tiene los campos de género, retornar data sin modificar
-      console.warn('⚠ Advertencia: Contrato sin campos de género. Se recomienda agregar client_gender, client_marital_status y client_nationality');
-      return data;
+    // ==== CONTRATO DE GARANTÍA MOBILIARIA ====
+    if (contractType === ContractType.GARANTIA_MOBILIARIA) {
+      // Verificar si el contrato tiene información de género del deudor
+      if (!data.debtor_gender || !data.debtor_marital_status || !data.debtor_nationality) {
+        console.warn('⚠ Advertencia: Contrato sin campos de género del deudor. Se recomienda agregar debtor_gender, debtor_marital_status y debtor_nationality');
+        return data;
+      }
+
+      // Validar género y estado civil
+      if (!GenderTranslator.isValidGender(data.debtor_gender)) {
+        throw new Error(`Género inválido: ${data.debtor_gender}. Debe ser 'male' o 'female'`);
+      }
+
+      if (!GenderTranslator.isValidMaritalStatus(data.debtor_marital_status)) {
+        throw new Error(`Estado civil inválido: ${data.debtor_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
+      }
+
+      // Generar términos de género traducidos
+      const genderedData = GenderTranslator.generateGenderedData(
+        data.debtor_gender as Gender,
+        data.debtor_marital_status as MaritalStatus,
+        data.debtor_nationality as string
+      );
+
+      // Para garantía mobiliaria, también agregar términos con prefijo "debtor_"
+      const debtorGenderedData = {
+        debtor_marital_status_gendered: genderedData.client_marital_status_gendered,
+        debtor_nationality_gendered: genderedData.client_nationality_gendered
+      };
+
+      console.log(`✓ Términos de género del deudor aplicados: ${data.debtor_gender} → ${genderedData.debtor}`);
+
+      return {
+        ...data,
+        ...genderedData,
+        ...debtorGenderedData
+      };
     }
 
-    // Validar género y estado civil
-    if (!GenderTranslator.isValidGender(data.client_gender)) {
-      throw new Error(`Género inválido: ${data.client_gender}. Debe ser 'male' o 'female'`);
-    }
-
-    if (!GenderTranslator.isValidMaritalStatus(data.client_marital_status)) {
-      throw new Error(`Estado civil inválido: ${data.client_marital_status}. Debe ser 'single', 'married', 'widowed' o 'divorced'`);
-    }
-
-    // Generar términos de género traducidos
-    const genderedData = GenderTranslator.generateGenderedData(
-      data.client_gender as Gender,
-      data.client_marital_status as MaritalStatus,
-      data.client_nationality as string
-    );
-
-    // Combinar datos originales con términos traducidos
-    const enhancedData = {
-      ...data,
-      ...genderedData
-    };
-
-    console.log(`✓ Términos de género aplicados: ${data.client_gender} → ${genderedData.title_with_article}`);
-
-    return enhancedData;
+    // Otros tipos de contrato sin género dinámico
+    return data;
   }
 
   /**

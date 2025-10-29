@@ -13,9 +13,9 @@ export enum ContractType {
   DECLARACION_DE_VENDEDOR = 'declaracion_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda_feb_2025',
-  CARTA_SOLICITUD_TRASPASO_VEHICULO = 'carta_solicitud_traspaso_vehiculo',
-  CONTRATO_PRIVADO_USO = 'contrato_privado_uso',
-  SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo',
+  CARTA_SOLICITUD_TRASPASO_VEHICULO = 'carta_traspaso_vehiculo_rdbe',
+  CONTRATO_PRIVADO_USO = 'contrato_privado_uso_carro_nuevo',
+  SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
   CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps'
   // Agrega más tipos aquí según sea necesario
 }

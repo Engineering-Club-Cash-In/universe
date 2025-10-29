@@ -8,6 +8,8 @@ export enum ContractType {
   GARANTIA_MOBILIARIA = 'garantia_mobiliaria',
   CARTA_EMISION_CHEQUES = 'carta_emision_cheques',
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
+  COBERTURA_INREXSA = 'cobertura_inrexsa',
+  PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda',
   ARRENDAMIENTO = 'arrendamiento',
   COMPRAVENTA = 'compraventa',
@@ -422,11 +424,96 @@ export interface DescargoResponsabilidadesData extends BaseContractData {
   vehicle_iscv: string;
 }
 
+// ===== COBERTURA INREXSA =====
+/**
+ * Datos para generar carta de cobertura INREXSA
+ * Documento simple con solo nombre y fecha completa
+ */
+export interface CoberturaInrexsaData extends BaseContractData {
+  contractType: ContractType.COBERTURA_INREXSA;
+
+  /** Nombre completo del deudor/solicitante */
+  debtor_name: string;
+
+  /** Fecha completa del documento (ej: "Guatemala 28 de octubre de dos mil veinticinco") */
+  full_date: string;
+}
+
+// ===== PAGARÉ ÚNICO LIBRE DE PROTESTO =====
+/**
+ * Datos para generar pagaré único libre de protesto
+ */
+export interface PagareUnicoLibreProtestoData extends BaseContractData {
+  contractType: ContractType.PAGARE_UNICO_LIBRE_PROTESTO;
+
+  // ===== FECHA DEL DOCUMENTO =====
+  /** Día del documento (ej: "28") */
+  date_day: string;
+
+  /** Mes del documento (ej: "octubre") */
+  date_month: string;
+
+  /** Año del documento en formato corto (ej: "25" para año 2025) */
+  date_year: string;
+
+  // ===== VALOR NOMINAL =====
+  /** Valor nominal en letras (ej: "CINCUENTA MIL QUETZALES") */
+  nominal_value_letters: string;
+
+  /** Valor nominal en números (ej: "Q.50,000.00") */
+  nominal_value_numbers: string;
+
+  // ===== DATOS DEL DEUDOR =====
+  /** Nombre completo del deudor */
+  debtor_name: string;
+
+  /** Edad en letras (ej: "treinta y cinco") */
+  debtor_age_letters: string;
+
+  /** Estado civil (ej: "soltero", "casado") */
+  debtor_civil_status: string;
+
+  /** Ocupación del deudor (ej: "comerciante", "ingeniero") */
+  debtor_occupation: string;
+
+  /** Nacionalidad del deudor (ej: "guatemalteco", "mexicano") */
+  debtor_nationality: string;
+
+  /** DPI en letras (ej: "DOS TRES CUATRO CINCO SEIS SIETE OCHO NUEVE CERO UNO DOS TRES CUATRO") */
+  debtors_dpi_letters: string;
+
+  /** DPI en números (ej: "2345 67890 1234") */
+  debtors_dpi_numbers: string;
+
+  /** Dirección completa del deudor para notificaciones */
+  debtors_address: string;
+
+  // ===== FECHA DE VENCIMIENTO =====
+  /** Día de vencimiento (ej: "15") */
+  due_date_day: string;
+
+  /** Mes de vencimiento (ej: "diciembre") */
+  due_date_month: string;
+
+  /** Año de vencimiento en palabras (ej: "dos mil veintiséis") */
+  due_date_year: string;
+
+  // ===== PAGOS =====
+  /** Valor de pago mensual en letras (ej: "DOS MIL QUINIENTOS QUETZALES") */
+  payment_value_letters: string;
+
+  /** Valor de pago mensual en números (ej: "Q.2,500.00") */
+  payment_value_numbers: string;
+
+  /** Día de pago mensual (ej: "15") */
+  payment_date_day: string;
+}
+
 // ===== TIPOS UNION PARA TODOS LOS CONTRATOS =====
 /**
  * Union type que incluye todos los tipos de contratos disponibles
  */
-export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
+export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | CartaEmisionChequesData | DescargoResponsabilidadesData | CoberturaInrexsaData | PagareUnicoLibreProtestoData; // | ReconocimientoDeudaData | ArrendamientoData | etc...
 
 /**
  * Interfaz para la respuesta de generación de contrato

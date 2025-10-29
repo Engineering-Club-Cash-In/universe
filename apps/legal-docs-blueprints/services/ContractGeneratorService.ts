@@ -124,6 +124,45 @@ export class ContractGeneratorService {
       ]
     });
 
+    // Registrar cobertura INREXSA
+    this.registerTemplate({
+      type: ContractType.COBERTURA_INREXSA,
+      templateFilename: 'cobertura_inrexsa.docx',
+      description: 'Carta de cobertura INREXSA',
+      requiredFields: [
+        'debtor_name',
+        'full_date'
+      ]
+    });
+
+    // Registrar pagaré único libre de protesto
+    this.registerTemplate({
+      type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
+      templateFilename: 'pagare_unico_libre_de_protesto.docx',
+      description: 'Pagaré único libre de protesto',
+      requiredFields: [
+        'date_day',
+        'date_month',
+        'date_year',
+        'nominal_value_letters',
+        'nominal_value_numbers',
+        'debtor_name',
+        'debtor_age_letters',
+        'debtor_civil_status',
+        'debtor_occupation',
+        'debtor_nationality',
+        'debtors_dpi_letters',
+        'debtors_dpi_numbers',
+        'debtors_address',
+        'due_date_day',
+        'due_date_month',
+        'due_date_year',
+        'payment_value_letters',
+        'payment_value_numbers',
+        'payment_date_day'
+      ]
+    });
+
     // Aquí se pueden registrar más templates a futuro:
     // this.registerTemplate({
     //   type: ContractType.RECONOCIMIENTO_DEUDA,

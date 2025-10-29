@@ -10,9 +10,13 @@ export enum ContractType {
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   COBERTURA_INREXSA = 'cobertura_inrexsa',
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
-  DECLARACION_DE_VENDEDOR = 'declaracion_de_vendedor',
+  DECLARACION_DE_VENDEDOR = 'declaracion_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda_feb_2025',
+  CARTA_SOLICITUD_TRASPASO_VEHICULO = 'carta_solicitud_traspaso_vehiculo',
+  CONTRATO_PRIVADO_USO = 'contrato_privado_uso',
+  SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo',
+  CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps'
   // Agrega más tipos aquí según sea necesario
 }
 

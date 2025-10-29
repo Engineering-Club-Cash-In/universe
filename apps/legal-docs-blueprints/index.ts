@@ -106,6 +106,92 @@ app.post('/generatecontrato', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /contracts/batch - Genera múltiples contratos de manera secuencial
+ *
+ * Body:
+ * {
+ *   "contracts": [
+ *     {
+ *       "contractType": "reconocimiento_deuda",
+ *       "data": { ...campos... },
+ *       "options": { "generatePdf": true, "filenamePrefix": "cliente_001" }
+ *     },
+ *     {
+ *       "contractType": "garantia_mobiliaria",
+ *       "data": { ...campos... },
+ *       "options": { "generatePdf": true }
+ *     }
+ *   ]
+ * }
+ */
+app.post('/contracts/batch', async (req: Request, res: Response) => {
+  try {
+    const { contracts } = req.body;
+
+    // Validar que se envió el array de contratos
+    if (!contracts || !Array.isArray(contracts)) {
+      return res.status(400).json({
+        success: false,
+        error: 'El campo "contracts" es requerido y debe ser un array'
+      });
+    }
+
+    // Validar que el array no esté vacío
+    if (contracts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'El array "contracts" no puede estar vacío'
+      });
+    }
+
+    // Validar cada contrato en el array
+    for (let i = 0; i < contracts.length; i++) {
+      const contract = contracts[i];
+      
+      if (!contract.contractType) {
+        return res.status(400).json({
+          success: false,
+          error: `Contrato en posición ${i}: falta el campo "contractType"`,
+          availableTypes: Object.values(ContractType)
+        });
+      }
+
+      if (!Object.values(ContractType).includes(contract.contractType)) {
+        return res.status(400).json({
+          success: false,
+          error: `Contrato en posición ${i}: tipo inválido "${contract.contractType}"`,
+          availableTypes: Object.values(ContractType)
+        });
+      }
+
+      if (!contract.data || Object.keys(contract.data).length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Contrato en posición ${i}: falta el campo "data" o está vacío`
+        });
+      }
+    }
+
+    console.log(`\n🚀 Generando batch de ${contracts.length} contratos...`);
+
+    // Generar todos los contratos
+    const result = await contractGenerator.generateContractsBatch(contracts);
+
+    // Responder con los resultados
+    res.status(200).json(result);
+
+  } catch (error: any) {
+    console.error('Error en /contracts/batch:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Error interno del servidor',
+      message: error.message,
+      results: []
+    });
+  }
+});
+
+/**
  * POST /contracts/:type - Endpoint alternativo por tipo específico
  * Ejemplo: POST /contracts/uso_carro_usado
  */
@@ -159,6 +245,7 @@ app.get('/', (req: Request, res: Response) => {
       health: 'GET /health',
       listContracts: 'GET /contracts/types',
       generateContract: 'POST /generatecontrato',
+      generateBatch: 'POST /contracts/batch',
       generateByType: 'POST /contracts/:type'
     },
     examples: {
@@ -202,6 +289,7 @@ app.listen(PORT, () => {
 ║  • GET  /health                - Health check             ║
 ║  • GET  /contracts/types       - Lista contratos          ║
 ║  • POST /generatecontrato      - Genera contrato          ║
+║  • POST /contracts/batch       - Genera múltiples         ║
 ║  • POST /contracts/:type       - Genera por tipo          ║
 ╚═══════════════════════════════════════════════════════════╝
   `);

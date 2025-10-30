@@ -304,7 +304,10 @@ const app = new Elysia()
     }
   };
 })
-  .listen(PORT);
+  .listen({
+    port: PORT,
+    hostname: '0.0.0.0'
+  });
 
 console.log(`
 ╔═══════════════════════════════════════════════════════════╗

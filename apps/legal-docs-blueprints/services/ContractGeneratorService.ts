@@ -610,4 +610,6 @@ export class ContractGeneratorService {
 }
 
 // Exportar instancia singleton por defecto
-export const contractGenerator = new ContractGeneratorService();
+export const contractGenerator = new ContractGeneratorService({
+  gotenbergUrl: process.env.GOTENBERG_URL || 'http://localhost:3000'
+});

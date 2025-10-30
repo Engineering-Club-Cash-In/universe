@@ -1,11 +1,12 @@
 import { NavBar } from "@components/ui";
-import { HowItWorks, FindYourIdealModel } from "./sections";
+import { CarrouselStart, HowItWorks, FindYourIdealModel } from "./sections";
 
 export const HomePage = () => {
   return (
     <div>
-      <NavBar />
-      <div className="w-full">
+      <CarrouselStart />
+      <div className="w-full mt-12 p-8">
+        <NavBar />
         <HowItWorks />
         <FindYourIdealModel />
       </div>

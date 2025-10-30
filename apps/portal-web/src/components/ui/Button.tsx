@@ -14,7 +14,7 @@ export const Button: React.FC<ButtonProps> = ({
   className = "",
 }) => {
   const sizeClasses = {
-    lg: "w-[225px] h-[59px] px-7 py-[10px] text-[22px]",
+    lg: "w-[225px] h-[59px] px-7 py-[10px] text-body",
     md: "w-[180px] h-12 px-5 py-2 text-lg",
     sm: "w-[150px] h-10 px-4 py-1.5 text-base",
   };

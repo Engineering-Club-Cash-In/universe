@@ -98,79 +98,112 @@ async function findSignatureLinesInPDF(
 
     // 3. Buscar el patrón en cada página y obtener coordenadas reales
     const pattern = patternConfig.pattern;
-    const fields: DocumensoField[] = [];
-    let foundMatches = 0;
+    const foundPositions: Array<{
+      pageNum: number;
+      pdfX: number;
+      pdfY: number;
+      pageHeight: number;
+      scaleFactor: number;
+    }> = [];
 
-    // Buscar en cada página (empezando desde la última para evitar detectar patrones incorrectos)
-    for (let pageNum = pageCount; pageNum >= 1 && foundMatches < patternConfig.signerCount; pageNum--) {
+    // Buscar en cada página y guardar TODAS las posiciones encontradas
+    for (let pageNum = pageCount; pageNum >= 1; pageNum--) {
       const page = await pdfDocument.getPage(pageNum);
       const textContent = await page.getTextContent();
       const viewport = page.getViewport({ scale: 1.0 });
       const pageHeight = viewport.height;
+      const SCALE_FACTOR = pageHeight / 93.6;
 
       // Buscar el patrón en los items de texto de esta página
-      for (let i = 0; i < textContent.items.length && foundMatches < patternConfig.signerCount; i++) {
+      for (let i = 0; i < textContent.items.length; i++) {
         const item = textContent.items[i] as any;
         const itemText = item.str;
 
         // Verificar si este item contiene el patrón
-        // Para patrones largos con guiones, buscar solo el inicio (ej: "f)" en lugar de "f)____...")
-        // porque pdfjs puede fragmentar el texto
-        const patternStart = pattern.split('_')[0]; // "f)" de "f)____..."
+        const patternStart = pattern.split('_')[0];
         const matchesPattern = itemText.includes(pattern) ||
                                itemText.trim() === pattern.trim() ||
                                (patternStart.length >= 2 && itemText.trim().startsWith(patternStart));
 
         if (matchesPattern) {
-          // Obtener coordenadas del texto
-          // transform es [a, b, c, d, e, f] donde e=x, f=y
           const pdfX = item.transform[4];
           const pdfY = item.transform[5];
 
-          // Documenso usa un sistema de unidades donde multiplica por ~8-13x
-          // El factor de escala debe ser proporcional a la altura de la página
-          // Páginas de 936pt usan factor 10, así que: SCALE_FACTOR = pageHeight / 93.6
-          const SCALE_FACTOR = pageHeight / 93.6;
-
-          // Convertir coordenadas: PDF usa origen inferior-izquierda, Documenso superior-izquierda
-          // Ajuste en X: +80 para mover a la derecha
-          // Sin ajuste en Y: usar coordenadas exactas del patrón
-          const baseX = (pdfX + 80) / SCALE_FACTOR;
-          const baseY = (pageHeight - pdfY) / SCALE_FACTOR;
-
-          // Aplicar offsets manuales si están configurados
-          const documensoX = baseX + (patternConfig.xOffset || 0);
-          const documensoY = baseY + (patternConfig.yOffset || 0);
-
-          console.log(`✓ Patrón encontrado en página ${pageNum} - PDF (${pdfX.toFixed(1)}, ${pdfY.toFixed(1)}) → Documenso (${documensoX.toFixed(1)}, ${documensoY.toFixed(1)}) [SCALE: ${SCALE_FACTOR.toFixed(2)}]`);
-
-          // Guardar coordenadas en log
-          await logCoordinates(contractType, pattern, pageNum, pageHeight, SCALE_FACTOR, pdfX, pdfY, documensoX, documensoY);
-
-          // Campo de firma sobre la línea de firma
-          fields.push({
-            type: 'SIGNATURE',
-            recipientId: `recipient-${foundMatches}`,
-            page: pageNum,
-            positionX: documensoX,
-            positionY: documensoY,
-            width: 25,   // Tamaño razonable para firma (~200px en pantalla)
-            height: 7,   // Altura razonable (~60px en pantalla)
-            required: true,
+          foundPositions.push({
+            pageNum,
+            pdfX,
+            pdfY,
+            pageHeight,
+            scaleFactor: SCALE_FACTOR,
           });
 
-          foundMatches++;
-          console.log(`✓ Campo ${foundMatches} posicionado en página ${pageNum} at (${documensoX.toFixed(1)}, ${documensoY.toFixed(1)})`);
+          console.log(`✓ Patrón ${foundPositions.length} encontrado en página ${pageNum} - PDF (${pdfX.toFixed(1)}, ${pdfY.toFixed(1)})`);
+          
+          // Si ya encontramos suficientes, salir
+          if (foundPositions.length >= patternConfig.signerCount) {
+            break;
+          }
         }
+      }
+      
+      // Si ya encontramos suficientes, salir del loop de páginas
+      if (foundPositions.length >= patternConfig.signerCount) {
+        break;
       }
     }
 
-    console.log(`✓ Total encontradas: ${foundMatches} ocurrencias (esperadas: ${patternConfig.signerCount})`);
+    console.log(`✓ Total encontradas: ${foundPositions.length} ocurrencias (esperadas: ${patternConfig.signerCount})`);
 
-    if (foundMatches === 0) {
+    if (foundPositions.length === 0) {
       console.warn(`⚠️ No se encontró el patrón "${pattern}" en el PDF`);
-      // Fallback: posicionar en última página, cerca del fondo
       return generateFallbackFields(pdfDoc, patternConfig.signerCount);
+    }
+
+    // 4. INVERTIR el orden: el último encontrado será recipient-0 (Representante)
+    //    y el primero encontrado será recipient-1 (Cliente)
+    foundPositions.reverse();
+    console.log(`🔄 Orden invertido: Último encontrado (Representante) → recipient-0, Primero encontrado (Cliente) → recipient-1`);
+
+    // 5. Crear los campos con el orden correcto
+    const fields: DocumensoField[] = [];
+    
+    for (let index = 0; index < Math.min(foundPositions.length, patternConfig.signerCount); index++) {
+      const pos = foundPositions[index];
+      const { pageNum, pdfX, pdfY, pageHeight, scaleFactor } = pos;
+
+      // Aplicar ajuste en X según el firmante
+      let xAdjustment = 80; // Ajuste base para Representante
+      
+      //! Si es la segunda firma (Cliente) y es en la misma línea, aplicar ajuste grande
+      if (index === 0 && patternConfig.xOffsetSignatureSameLine) {
+        xAdjustment = patternConfig.xOffsetSignatureSameLine; // Aumentar ajuste significativamente
+        console.log(`📍 Segunda firma (Cliente): aplicando ajuste X grande = +${patternConfig.xOffsetSignatureSameLine}`);
+      }
+
+      const baseX = (pdfX + xAdjustment) / scaleFactor;
+      const baseY = (pageHeight - pdfY) / scaleFactor;
+
+      // Aplicar offsets manuales si están configurados
+      const documensoX = baseX + (patternConfig.xOffset || 0);
+      const documensoY = baseY + (patternConfig.yOffset || 0);
+
+      const roleName = index === 0 ? 'Representante' : 'Cliente';
+      console.log(`✓ Campo ${index} (${roleName}) en página ${pageNum} - PDF (${pdfX.toFixed(1)}, ${pdfY.toFixed(1)}) + ajuste ${xAdjustment} → Documenso (${documensoX.toFixed(1)}, ${documensoY.toFixed(1)}) [SCALE: ${scaleFactor.toFixed(2)}]`);
+
+      // Guardar coordenadas en log
+      await logCoordinates(contractType, pattern, pageNum, pageHeight, scaleFactor, pdfX, pdfY, documensoX, documensoY);
+
+      // Campo de firma sobre la línea de firma
+      fields.push({
+        type: 'SIGNATURE',
+        recipientId: `recipient-${index}`,
+        page: pageNum,
+        positionX: documensoX,
+        positionY: documensoY,
+        width: 25,
+        height: 7,
+        required: true,
+      });
     }
 
     return { pageCount, fields };

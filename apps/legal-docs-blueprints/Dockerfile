@@ -7,6 +7,9 @@ COPY package.json ./
 
 RUN bun install --production
 
+# Copy templates first (explicitly to ensure they're included)
+COPY templates ./templates
+
 # Copy source code
 COPY . .
 

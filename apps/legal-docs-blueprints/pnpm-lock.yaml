@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@documenso/sdk-typescript':
+        specifier: ^0.4.0
+        version: 0.4.0
       axios:
         specifier: ^1.7.2
         version: 1.13.1
@@ -44,6 +47,15 @@ importers:
         version: 5.9.3
 
 packages:
+
+  '@documenso/sdk-typescript@0.4.0':
+    resolution: {integrity: sha512-aVOZLhe+l9mSIQ2VdMhD4hVuttIYTFG2e8X2f/7S45FyOpU7RaYRdHQQ5L7JTaH4zecyMzx/5YtiCF+N2Elzjg==}
+    hasBin: true
+    peerDependencies:
+      '@modelcontextprotocol/sdk': '>=1.5.0 <1.10.0'
+    peerDependenciesMeta:
+      '@modelcontextprotocol/sdk':
+        optional: true
 
   '@esbuild/aix-ppc64@0.25.11':
     resolution: {integrity: sha512-Xt1dOL13m8u0WE8iplx9Ibbm+hFAO0GsU2P34UNoDGvZYkY8ifSiy6Zuc1lYxfG7svWE2fzqCUmFp5HCn51gJg==}
@@ -597,7 +609,14 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
 snapshots:
+
+  '@documenso/sdk-typescript@0.4.0':
+    dependencies:
+      zod: 3.25.76
 
   '@esbuild/aix-ppc64@0.25.11':
     optional: true
@@ -1137,3 +1156,5 @@ snapshots:
   utils-merge@1.0.1: {}
 
   vary@1.1.2: {}
+
+  zod@3.25.76: {}

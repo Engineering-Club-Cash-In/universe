@@ -22,6 +22,7 @@ export interface DocumentField {
 export interface Contracts {
   contractType: string
   data: Record<string, string>
+  emails?: string[]
   options: {
     gender: "male" | "female"
     generatePdf: boolean
@@ -70,6 +71,7 @@ export interface DocumentResult {
   success: boolean
   nameDocument: DocumentType[]
   data: DocumentSubmissionData[]
+  signing_links?: string[]
 }
 
 export interface GenerateDocumentsResponse {

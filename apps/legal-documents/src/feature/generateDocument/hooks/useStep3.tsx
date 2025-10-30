@@ -685,6 +685,239 @@ export function useStep3({
     onValidationChange,
   ]);
 
+  // Función para auto-llenar campos con datos fake (DEV MODE)
+  const autoFillWithFakeData = useCallback(() => {
+    const fakeValues: Record<string, string> = {};
+
+    relevantFields.forEach((field) => {
+      const fieldKeyLower = field.key?.toLowerCase();
+
+      // Datos fake específicos por campo - valores fijos que cumplen con regex
+      const specificFakes: Record<string, string> = {
+        // Fechas - números y texto
+        dia: '20',
+        diatexto: 'veinte',
+        dia_texto: 'veinte',
+        mestexto: 'octubre',
+        mes_texto: 'octubre',
+        ano: '25',
+        año: '25',
+        añotexto: 'veinticinco',
+        anotexto: 'veinticinco',
+        ano_texto: 'veinticinco',
+        año_texto: 'veinticinco',
+        fechainicio: 'veinte de octubre de dos mil veinticinco',
+        fecha_inicio: 'veinte de octubre de dos mil veinticinco',
+        fechainiciocontrato: 'veinte de octubre de dos mil veinticinco',
+
+        // Fechas vencimiento
+        diatextovencimiento: 'quince',
+        dia_texto_vencimiento: 'quince',
+        diavencimientotexto: 'quince',
+        mestextovencimiento: 'enero',
+        mes_texto_vencimiento: 'enero',
+        mesvencimientotexto: 'enero',
+        anotextovencimiento: 'veintiséis',
+        ano_texto_vencimiento: 'veintiséis',
+        anovencimientotexto: 'veintiséis',
+        diavencimiento: '15',
+        mesvencimiento: '01',
+        anovencimiento: '26',
+        diapago: 'día quince',
+        diapagotexto: 'día quince',
+
+        // Nombres y personas
+        nombrecompleto: 'JUAN CARLOS PEREZ LOPEZ',
+        nombre_completo: 'JUAN CARLOS PEREZ LOPEZ',
+        fullname: 'JUAN CARLOS PEREZ LOPEZ',
+        nombrevendedor: 'MARIA RODRIGUEZ GARCIA',
+        nombre_vendedor: 'MARIA RODRIGUEZ GARCIA',
+        nombreandres: 'ANDRES LOPEZ MARTINEZ',
+        nombre_andres: 'ANDRES LOPEZ MARTINEZ',
+
+        // Documentos
+        dpi: '2584756981234',
+        cui: '2584756981234',
+        dpiandres: 'dos mil quinientos ochenta y cuatro millones setecientos cincuenta y seis mil novecientos ochenta y uno mil doscientos treinta y cuatro',
+        dpi_andres: 'dos mil quinientos ochenta y cuatro millones setecientos cincuenta y seis mil novecientos ochenta y uno mil doscientos treinta y cuatro',
+        dpitexto: 'dos mil quinientos ochenta y cuatro millones setecientos cincuenta y seis mil novecientos ochenta y uno mil doscientos treinta y cuatro (2584756981234)',
+        dpi_texto: 'dos mil quinientos ochenta y cuatro millones setecientos cincuenta y seis mil novecientos ochenta y uno mil doscientos treinta y cuatro (2584756981234)',
+        dpitextovendedor: 'dos mil quinientos ochenta y cuatro millones setecientos cincuenta y seis mil novecientos ochenta y uno mil doscientos treinta y cuatro (2584756981234)',
+        dpi_texto_vendedor: 'dos mil quinientos ochenta y cuatro millones setecientos cincuenta y seis mil novecientos ochenta y uno mil doscientos treinta y cuatro (2584756981234)',
+        dpivendedor: '2584756981234',
+        dpi_vendedor: '2584756981234',
+
+        // Ubicación
+        direccion: 'ZONA 10, 5TA AVENIDA 12-45',
+        ciudad: 'guatemala',
+        municipio: 'guatemala',
+        departamento: 'guatemala',
+
+        // Vehículos - todo en mayúsculas
+        marca: 'TOYOTA',
+        marcavehiculo: 'TOYOTA',
+        marca_vehiculo: 'TOYOTA',
+        vehicle_brand: 'TOYOTA',
+        linea: 'COROLLA',
+        lineavehiculo: 'COROLLA',
+        linea_vehiculo: 'COROLLA',
+        vehicle_line: 'COROLLA',
+        modelo: '2024',
+        modelovehiculo: '2024',
+        modelo_vehiculo: '2024',
+        vehicle_model: '2024',
+        year: '2024',
+        placa: 'P123ABC',
+        placavehiculo: 'P123ABC',
+        placa_vehiculo: 'P123ABC',
+        vehicle_plate: 'P123ABC',
+        plate: 'P123ABC',
+        color: 'BLANCO',
+        colorvehiculo: 'BLANCO',
+        color_vehiculo: 'BLANCO',
+        vehicle_color: 'BLANCO',
+        chasis: 'JT2AE92E5G0012345',
+        chasisvehiculo: 'JT2AE92E5G0012345',
+        chasis_vehiculo: 'JT2AE92E5G0012345',
+        vehicle_chasis: 'JT2AE92E5G0012345',
+        vin: 'JT2AE92E5G0012345',
+        motor: 'Z1234567890',
+        motorvehiculo: 'Z1234567890',
+        motor_vehiculo: 'Z1234567890',
+        vehicle_motor: 'Z1234567890',
+        tipo: 'SEDAN',
+        tipovehiculo: 'SEDAN',
+        tipo_vehiculo: 'SEDAN',
+        vehicle_type: 'SEDAN',
+        uso: 'PARTICULAR',
+        usovehiculo: 'PARTICULAR',
+        uso_vehiculo: 'PARTICULAR',
+        combustible: 'GASOLINA',
+        combustiblevehiculo: 'GASOLINA',
+        combustible_vehiculo: 'GASOLINA',
+        serie: 'ABC123456',
+        serievehiculo: 'ABC123456',
+        serie_vehiculo: 'ABC123456',
+        cm3: '1800',
+        cm3vehiculo: '1800',
+        cm3_vehiculo: '1800',
+        asientos: '5',
+        asientosvehiculo: '5',
+        asientos_vehiculo: '5',
+        cilindros: '4',
+        cilindrosvehiculo: '4',
+        cilindros_vehiculo: '4',
+        iscv: '12345',
+        iscvvehiculo: '12345',
+        iscv_vehiculo: '12345',
+
+        // Contacto
+        telefono: '55551234',
+        phone: '55551234',
+        celular: '41234567',
+        cellphone: '41234567',
+        email: 'juan.perez@example.com',
+        correo: 'juan.perez@example.com',
+
+        // Financiero - con formato de texto
+        monto: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        montotexto: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        monto_texto: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        amount: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        precio: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        price: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        cuota: 'CINCO MIL QUETZALES (Q5,000.00)',
+        cuotamensual: 'CINCO MIL QUETZALES (Q5,000.00)',
+        cuota_mensual: 'CINCO MIL QUETZALES (Q5,000.00)',
+        payment: 'CINCO MIL QUETZALES (Q5,000.00)',
+        plazo: 'TREINTA MESES (30)',
+        plazotexto: 'TREINTA MESES (30)',
+        plazo_texto: 'TREINTA MESES (30)',
+        totalapagar: '150000',
+        total_apagar: '150000',
+        cantidadcuotas: '30',
+        cantidad_cuotas: '30',
+        cantidadcuotastexto: 'treinta',
+        cantidad_cuotas_texto: 'treinta',
+
+        // Otros datos en letras
+        ocupacion: 'comerciante',
+        occupation: 'comerciante',
+        profesion: 'comerciante',
+        edad: 'treinta y cinco',
+        age: 'treinta y cinco',
+        edadandres: 'cuarenta',
+        edad_andres: 'cuarenta',
+        edadrichard: 'treinta y dos',
+        edad_richard: 'treinta y dos',
+        nacionalidad: 'guatemalteco',
+        nationality: 'guatemalteco',
+        estadocivil: 'casado',
+        civil_status: 'casado',
+
+        // Empresa y entidades
+        empresa: 'CASH IN S.A.',
+        entidad: 'Banco Industrial',
+        tipoentidad: 'Banco',
+        tipo_entidad: 'Banco',
+
+        // Financiero - montos con formato texto y número
+        capitaladeudado: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        capital_adeudado: 'CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)',
+        mesesprestamo: 'TREINTA MESES (30)',
+        meses_prestamo: 'TREINTA MESES (30)',
+        cuotasmensuales: 'CINCO MIL QUETZALES (Q5,000.00)',
+        cuotas_mensuales: 'CINCO MIL QUETZALES (Q5,000.00)',
+        porcentajedeudanumero: '15',
+        porcentaje_deuda_numero: '15',
+        porcentajemoranumero: '20',
+        porcentaje_mora_numero: '20',
+        cantidad: '150,000',
+        valor: '75,000',
+        valor2: '75,000',
+        plazo: '30',
+        plazo_texto: 'treinta',
+
+        // Inversionista y cuentas
+        inversionista: 'Juan Perez Lopez',
+        nombrebeneficiario: 'Maria Rodriguez',
+        nombre_beneficiario: 'Maria Rodriguez',
+        cuenta: '1234567890',
+        cuenta2: '0987654321',
+        montocuenta: '75000',
+        monto_cuenta: '75000',
+        montocuenta2: '75000',
+        monto_cuenta2: '75000',
+      };
+
+      // Intentar usar valor específico
+      if (specificFakes[fieldKeyLower]) {
+        fakeValues[field.key] = specificFakes[fieldKeyLower];
+        return;
+      }
+
+      // Fallback: valor genérico basado en descripción o nombre del campo
+      if (fieldKeyLower.includes('nombre')) {
+        fakeValues[field.key] = 'JUAN PEREZ LOPEZ';
+      } else if (fieldKeyLower.includes('direccion') || fieldKeyLower.includes('address')) {
+        fakeValues[field.key] = 'ZONA 10, 5TA AVENIDA 12-45';
+      } else if (fieldKeyLower.includes('monto') || fieldKeyLower.includes('precio') || fieldKeyLower.includes('amount')) {
+        fakeValues[field.key] = 'CIEN MIL QUETZALES (Q100,000.00)';
+      } else if (fieldKeyLower.includes('fecha') || fieldKeyLower.includes('date')) {
+        fakeValues[field.key] = 'veinte de octubre de dos mil veinticinco';
+      } else if (fieldKeyLower.includes('dpi') || fieldKeyLower.includes('cui')) {
+        fakeValues[field.key] = '2584756981234';
+      } else {
+        // Fallback final: texto genérico en minúsculas
+        fakeValues[field.key] = 'valor de prueba';
+      }
+    });
+
+    setFieldValues(fakeValues);
+    onChange("fieldValues", fakeValues);
+    console.log('🎲 Campos auto-llenados con datos fake:', fakeValues);
+  }, [relevantFields, onChange]);
+
   return {
     fieldValues,
     fieldErrors,
@@ -695,5 +928,6 @@ export function useStep3({
     handleSubmit,
     setSelectedDocuments,
     numberToText, // Función utilitaria para convertir números a texto
+    autoFillWithFakeData, // Nueva función para dev mode
   };
 }

@@ -114,12 +114,14 @@ app.post('/generatecontrato', async (req: Request, res: Response) => {
  *     {
  *       "contractType": "reconocimiento_deuda",
  *       "data": { ...campos... },
- *       "options": { "generatePdf": true, "filenamePrefix": "cliente_001" }
+ *       "emails": ["cliente@ejemplo.com", "cci@ejemplo.com"],
+ *       "options": { "generatePdf": true, "filenamePrefix": "cliente_001", "gender": "male" }
  *     },
  *     {
  *       "contractType": "garantia_mobiliaria",
  *       "data": { ...campos... },
- *       "options": { "generatePdf": true }
+ *       "emails": ["cliente@ejemplo.com"],
+ *       "options": { "generatePdf": true, "gender": "female" }
  *     }
  *   ]
  * }
@@ -198,8 +200,19 @@ app.post('/contracts/batch', async (req: Request, res: Response) => {
 app.post('/contracts/:type', async (req: Request, res: Response) => {
   try {
     const contractType = req.params.type as ContractType;
-    const data = req.body;
-    const options = req.query.pdf === 'false' ? { generatePdf: false } : {};
+    const { emails, gender, ...data } = req.body;
+
+    // Construir opciones desde query params y body
+    const options: any = {};
+    if (req.query.pdf === 'false') {
+      options.generatePdf = false;
+    }
+    if (emails && Array.isArray(emails)) {
+      options.emails = emails;
+    }
+    if (gender) {
+      options.gender = gender;
+    }
 
     // Validar tipo
     if (!Object.values(ContractType).includes(contractType)) {

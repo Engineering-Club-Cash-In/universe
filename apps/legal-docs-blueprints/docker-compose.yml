@@ -32,7 +32,6 @@ services:
     networks:
       - legal-docs-network
     volumes:
-      - ./templates:/app/templates:ro
       - ./output:/app/output
 
 networks:

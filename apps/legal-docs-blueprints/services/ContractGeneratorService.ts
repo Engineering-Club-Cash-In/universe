@@ -462,6 +462,8 @@ export class ContractGeneratorService {
 
       // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
       let signingLinks: string[] | undefined;
+      let shouldCleanupFiles = false;
+
       if (options.emails && options.emails.length > 0 && pdfBuffer) {
         try {
           console.log(`🔗 Creando documento en Documenso para firma...`);
@@ -481,9 +483,23 @@ export class ContractGeneratorService {
           );
 
           console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
+
+          // Marcar para limpieza: archivo subido exitosamente a Documenso/R2
+          shouldCleanupFiles = true;
         } catch (documensoError) {
           console.error('⚠ Error al crear documento en Documenso:', documensoError);
           // No fallar si Documenso falla, los archivos ya están generados
+        }
+      }
+
+      // 13. Limpiar archivos locales si se subieron exitosamente a R2
+      if (shouldCleanupFiles) {
+        try {
+          await this.cleanupLocalFiles(docxPath, pdfPath);
+          console.log(`🗑️  Archivos locales eliminados (ya están en R2)`);
+        } catch (cleanupError) {
+          console.warn('⚠ Error al limpiar archivos locales:', cleanupError);
+          // No fallar si la limpieza falla
         }
       }
 
@@ -591,6 +607,25 @@ export class ContractGeneratorService {
       data,
       { generatePdf }
     );
+  }
+
+  /**
+   * Limpia archivos locales después de subir exitosamente a R2
+   */
+  private async cleanupLocalFiles(docxPath: string, pdfPath?: string): Promise<void> {
+    const filesToDelete = [docxPath];
+    if (pdfPath) {
+      filesToDelete.push(pdfPath);
+    }
+
+    for (const filePath of filesToDelete) {
+      try {
+        await fs.unlink(filePath);
+        console.log(`  ✓ Eliminado: ${path.basename(filePath)}`);
+      } catch (error) {
+        console.warn(`  ⚠ No se pudo eliminar ${path.basename(filePath)}:`, error);
+      }
+    }
   }
 
   /**

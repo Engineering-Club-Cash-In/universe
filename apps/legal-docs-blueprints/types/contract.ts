@@ -677,7 +677,15 @@ export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | Carta
  * Interfaz para la respuesta de generación de contrato
  */
 export interface ContractGenerationResponse {
+  templateId?: number;
   success: boolean;
+  nameDocument?: {
+    enum: string;
+    label: string;
+  }[];
+  data?: {
+    [key: string]: any;
+  }[];
   contractType: ContractType;
   docx_path?: string;
   pdf_path?: string;

@@ -830,9 +830,9 @@ export function useStep3({
         cuotamensual: 'CINCO MIL QUETZALES (Q5,000.00)',
         cuota_mensual: 'CINCO MIL QUETZALES (Q5,000.00)',
         payment: 'CINCO MIL QUETZALES (Q5,000.00)',
-        plazo: 'TREINTA MESES (30)',
-        plazotexto: 'TREINTA MESES (30)',
-        plazo_texto: 'TREINTA MESES (30)',
+        plazo: '30',
+        plazotexto: 'treinta',
+        plazo_texto: 'treinta',
         totalapagar: '150000',
         total_apagar: '150000',
         cantidadcuotas: '30',
@@ -875,8 +875,6 @@ export function useStep3({
         cantidad: '150,000',
         valor: '75,000',
         valor2: '75,000',
-        plazo: '30',
-        plazo_texto: 'treinta',
 
         // Inversionista y cuentas
         inversionista: 'Juan Perez Lopez',

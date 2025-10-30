@@ -309,6 +309,8 @@ export class ContractGeneratorService {
       options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female" };
     }>
   ): Promise<{
+    success: boolean;
+    message: string;
     results: ContractGenerationResponse[];
     summary: {
       total: number;
@@ -521,9 +523,9 @@ export class ContractGeneratorService {
       });
 
       return {
-        templateId: 0, // ID genérico para Documenso
+        templateId: Math.floor(Math.random() * 100000), // ID de template simulado
         success: true,
-        nameDocument: [{ enum: contractType, label: contractType }],
+        nameDocument: [{ enum: contractType, label: config.description }],
         data: submissionData,
         signing_links: signingLinks,
         // Campos adicionales para backward compatibility

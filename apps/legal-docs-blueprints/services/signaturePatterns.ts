@@ -16,6 +16,8 @@ export interface SignaturePatternConfig {
   yOffset?: number;
   /** Offset en X para ajustar posición horizontal (opcional, en unidades Documenso) */
   xOffset?: number;
+  // Offset en X cuando las firmas están en la misma línea (opcional, en unidades Documenso) */
+  xOffsetSignatureSameLine?: number;
 }
 
 export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
@@ -58,7 +60,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'f)_____________________________',
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
-    xOffset: 1.5  // Un punto y medio a la derecha
+    xOffset: 1.5,  // Un punto y medio a la derecha
+    xOffsetSignatureSameLine: 220  // Mover firma 4 puntos a la derecha
   },
 
   [ContractType.USO_CARRO_USADO]: {
@@ -66,7 +69,9 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     signerCount: 2,
     signers: ['Deudor', 'Richard/CCI'],
     yOffset: -1.5,  // Subir 1.5 puntos
-    xOffset: 0.5    // Medio punto a la derecha
+    xOffset: 0.5,    // Medio punto a la derecha
+    xOffsetSignatureSameLine: 220  // Mover firma 4 puntos a la derecha
+
   },
 
   [ContractType.DECLARACION_DE_VENDEDOR]: {
@@ -100,7 +105,8 @@ export const signaturePatterns: Record<ContractType, SignaturePatternConfig> = {
     pattern: 'f)___________________________',
     signerCount: 2,
     signers: ['Andrés', 'Deudor'],
-    yOffset: -3.5  // Subir 3.5 puntos
+    yOffset: -3.5,  // Subir 3.5 puntos,
+    xOffsetSignatureSameLine: 250  // Mover firma 5 puntos a la derecha
   },
 
   [ContractType.SOLICITUD_COMPRA_VEHICULO]: {

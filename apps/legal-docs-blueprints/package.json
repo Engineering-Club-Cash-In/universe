@@ -4,29 +4,37 @@
   "description": "Sistema de generación de contratos legales con DOCX y PDF",
   "main": "index.ts",
   "scripts": {
-    "dev": "tsx watch index.ts",
-    "start": "tsx index.ts",
+    "dev": "bun --watch index.ts",
+    "start": "bun index.ts",
     "build": "tsc",
-    "test": "tsx test-contract.ts",
+    "test": "bun test-contract.ts",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f gotenberg"
   },
-  "keywords": ["docx", "pdf", "contracts", "legal"],
+  "keywords": [
+    "docx",
+    "pdf",
+    "contracts",
+    "legal"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "docxtemplater": "^3.50.0",
-    "pizzip": "^3.1.7",
+    "@documenso/sdk-typescript": "^0.4.0",
     "axios": "^1.7.2",
-    "form-data": "^4.0.0",
+    "cors": "^2.8.5",
+    "docxtemplater": "^3.50.0",
     "express": "^4.19.2",
-    "cors": "^2.8.5"
+    "form-data": "^4.0.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^5.4.296",
+    "pizzip": "^3.1.7"
   },
   "devDependencies": {
-    "@types/node": "^20.14.10",
-    "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.14.10",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"
   }

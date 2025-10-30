@@ -12,6 +12,8 @@ import {
   AnyContractData
 } from '../types/contract';
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
+import { documensoService } from './DocumensoService';
+import { getRequiredEmailCount } from '../config/docusealConfig';
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -303,7 +305,8 @@ export class ContractGeneratorService {
     contracts: Array<{
       contractType: ContractType;
       data: Record<string, any>;
-      options?: { generatePdf?: boolean; filenamePrefix?: string };
+      emails?: string[];
+      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female" };
     }>
   ): Promise<{
     results: ContractGenerationResponse[];
@@ -321,12 +324,12 @@ export class ContractGeneratorService {
 
     // Procesar cada contrato de manera secuencial
     for (let i = 0; i < contracts.length; i++) {
-      const { contractType, data, options } = contracts[i];
-      
+      const { contractType, data, emails, options } = contracts[i];
+
       console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
-      
+
       try {
-        const result = await this.generateContract(contractType, data, options);
+        const result = await this.generateContract(contractType, data, { ...options, emails });
         results.push(result);
         
         if (result.success) {
@@ -372,6 +375,8 @@ export class ContractGeneratorService {
     console.log(`   ⏱️  Duración: ${(duration / 1000).toFixed(2)}s`);
 
     return {
+      success: true,
+      message: `${summary.successful} de ${summary.total} contratos generados exitosamente`,
       results,
       summary
     };
@@ -383,7 +388,7 @@ export class ContractGeneratorService {
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string } = { gender: "male" }
+    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[] } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
@@ -439,9 +444,10 @@ export class ContractGeneratorService {
 
       // 11. Generar PDF si se solicita
       let pdfPath: string | undefined;
+      let pdfBuffer: Buffer | undefined;
       if (options.generatePdf !== false) { // Por defecto genera PDF
         try {
-          const pdfBuffer = await this.convertToPdf(docxBuffer);
+          pdfBuffer = await this.convertToPdf(docxBuffer);
           const pdfFilename = `${baseFilename}.pdf`;
           pdfPath = path.join(this.outputDir, pdfFilename);
           await fs.writeFile(pdfPath, pdfBuffer);
@@ -452,8 +458,75 @@ export class ContractGeneratorService {
         }
       }
 
+      // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
+      let signingLinks: string[] | undefined;
+      if (options.emails && options.emails.length > 0 && pdfBuffer) {
+        try {
+          console.log(`🔗 Creando documento en Documenso para firma...`);
+
+          // Validar número de emails
+          const requiredEmails = getRequiredEmailCount(contractType);
+          if (options.emails.length !== requiredEmails) {
+            console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
+          }
+
+          // Crear documento y obtener links de firma (detección automática de posiciones)
+          signingLinks = await documensoService.createDocumentAndGetSigningLinks(
+            baseFilename,
+            pdfBuffer,
+            contractType,
+            options.emails
+          );
+
+          console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
+        } catch (documensoError) {
+          console.error('⚠ Error al crear documento en Documenso:', documensoError);
+          // No fallar si Documenso falla, los archivos ya están generados
+        }
+      }
+
+      // Construir datos de firmantes para el frontend
+      const submissionData = (options.emails || []).map((email, index) => {
+        const signingLink = signingLinks?.[index] || '';
+
+        return {
+          id: index + 1,
+          slug: `documenso-${Date.now()}-${index}`,
+          uuid: `uuid-${Date.now()}-${index}`,
+          name: null,
+          email: email,
+          phone: null,
+          completed_at: null,
+          declined_at: null,
+          external_id: null,
+          submission_id: index + 1,
+          metadata: { contractType, generatedAt: new Date().toISOString() },
+          opened_at: null,
+          sent_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status: 'pending',
+          application_key: null,
+          values: Object.entries(data).map(([field, value]) => ({
+            field,
+            value: value as string | number | null
+          })),
+          preferences: {
+            send_email: true,
+            send_sms: false
+          },
+          role: 'SIGNER',
+          embed_src: signingLink // Link de firma de Documenso
+        };
+      });
+
       return {
+        templateId: 0, // ID genérico para Documenso
         success: true,
+        nameDocument: [{ enum: contractType, label: contractType }],
+        data: submissionData,
+        signing_links: signingLinks,
+        // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,
         pdf_path: pdfPath,
@@ -465,7 +538,11 @@ export class ContractGeneratorService {
       console.error('Error generando contrato:', error);
 
       return {
+        templateId: 0,
         success: false,
+        nameDocument: [{ enum: contractType, label: contractType }],
+        data: [],
+        signing_links: undefined,
         contractType,
         message: 'Error al generar contrato',
         error: error.message || 'Error desconocido'

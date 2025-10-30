@@ -683,6 +683,7 @@ export interface ContractGenerationResponse {
   pdf_path?: string;
   docx_url?: string;
   pdf_url?: string;
+  signing_links?: string[];
   message: string;
   error?: string;
   generatedAt?: string;
@@ -737,9 +738,13 @@ export interface GenerateContractRequest {
   /** Datos específicos del contrato */
   data: Record<string, any>;
 
+  /** Emails de los firmantes (número depende del tipo de contrato) */
+  emails?: string[];
+
   /** Opciones adicionales */
   options?: {
     generatePdf?: boolean;
     filenamePrefix?: string;
+    gender?: "male" | "female";
   };
 }

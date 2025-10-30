@@ -160,6 +160,8 @@ export function useGenerateComponent() {
             // convertir el array de fields a un objeto key-value
             data: Object.assign({}, ...fields),
             contractType: document.nombre_documento,
+            // Agregar email del cliente (por ahora solo 1, se puede expandir para múltiples firmantes)
+            emails: email ? [email] : undefined,
           };
         }) || [];
 
@@ -174,7 +176,7 @@ export function useGenerateComponent() {
       console.log("Respuesta del servidor:", result);
 
       // Guardar la respuesta y avanzar al Step 4
-      setDocumentsResponse(null);
+      setDocumentsResponse(result);
       setCurrentStep(4);
     } catch (error) {
       console.error("Error generando documentos:", error);

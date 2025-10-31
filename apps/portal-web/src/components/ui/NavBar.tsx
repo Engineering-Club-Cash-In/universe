@@ -1,16 +1,25 @@
+import React from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "./Link";
 
 export const NavBar = () => {
+  const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
+
   const defaultNavItems = [
     { label: "Sobre nosotros", href: "#about" },
     { label: "Solicita tu crédito", href: "#credit" },
-    { label: "Compra- vende", href: "#trade" },
+    { label: "Compra - vende", href: "#trade" },
     { label: "Invierte con nosotros", href: "#invest" },
+  ];
+
+  const userMenuItems = [
+    { label: "Inicia sesión", href: "/login" },
+    { label: "Regístrate", href: "/register" },
   ];
 
   return (
     <nav
-      className="fixed top-8 sm:top-12 left-4 sm:left-8 right-4 sm:right-8 flex items-center justify-center lg:justify-between z-50 gap-4"
+      className="sticky top-8 sm:top-12 left-4 sm:left-8 right-16 sm:right-8 flex items-center justify-center lg:justify-between z-50 gap-4 mx-28"
       aria-label="Main navigation"
     >
       <div className="hidden lg:block shrink-0"></div>
@@ -64,9 +73,81 @@ export const NavBar = () => {
         </div>
       </div>
 
-      {/* Icono de usuario en la esquina derecha */}
-      <div className="ml-4 flex items-center justify-center cursor-pointer hover:bg-light/10 transition-colors">
-        User
+      {/* Icono de usuario con menú desplegable */}
+      <div className="relative ml-4">
+        <motion.div
+          className="flex items-center justify-center cursor-pointer hover:text-primary transition-colors"
+          onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.95 }}
+          transition={{ type: "spring", stiffness: 400, damping: 17 }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="36"
+            height="36"
+            viewBox="0 0 36 36"
+            fill="none"
+            className="transition-colors"
+          >
+            <circle
+              cx="18"
+              cy="10.5"
+              r="6"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M8.65092 25.2508C9.57272 22.5319 12.2717 21 15.1426 21H20.8574C23.7283 21 26.4273 22.5319 27.3491 25.2508C27.8733 26.797 28.3373 28.6275 28.4652 30.5007C28.5028 31.0517 28.0523 31.5 27.5 31.5H8.5C7.94772 31.5 7.49717 31.0517 7.53479 30.5007C7.66267 28.6275 8.12668 26.797 8.65092 25.2508Z"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </motion.div>
+
+        {/* Menú desplegable */}
+        <AnimatePresence>
+          {isUserMenuOpen && (
+            <div className="absolute left-1/2 -translate-x-1/2 mt-4">
+              <motion.div
+                initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 500,
+                  damping: 30,
+                }}
+                className="w-48 rounded-lg overflow-hidden shadow-lg"
+                style={{
+                  fill: "#0F0F0F",
+                  strokeWidth: "1px",
+                  stroke: "#FFF",
+                  border: "1px solid #FFF",
+                  backgroundColor: "#0F0F0F",
+                }}
+              >
+                {userMenuItems.map((item) => (
+                  <motion.div
+                    key={item.href}
+                    whileHover={{ backgroundColor: "#1a1a1a" }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    <Link
+                      href={item.href}
+                      className="block px-4 py-3 text-white hover:text-primary transition-colors"
+                      onClick={() => setIsUserMenuOpen(false)}
+                    >
+                      {item.label}
+                    </Link>
+                  </motion.div>
+                ))}
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
       </div>
     </nav>
   );

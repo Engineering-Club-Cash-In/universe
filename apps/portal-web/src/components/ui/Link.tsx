@@ -7,6 +7,7 @@ interface LinkProps {
   className?: string;
   external?: boolean;
   ariaLabel?: string;
+  onClick?: () => void;
 }
 
 export const Link: React.FC<LinkProps> = ({
@@ -15,6 +16,7 @@ export const Link: React.FC<LinkProps> = ({
   className = "",
   external = false,
   ariaLabel,
+  onClick,
 }) => {
   const baseClasses = "hover:text-primary transition-color";
   const combinedClasses = `${baseClasses} ${className}`.trim();
@@ -45,6 +47,11 @@ export const Link: React.FC<LinkProps> = ({
         // Set focus for accessibility
         targetElement.focus({ preventScroll: true });
       }
+      
+      // Call optional onClick handler
+      if (onClick) {
+        onClick();
+      }
     };
 
     return (
@@ -61,6 +68,12 @@ export const Link: React.FC<LinkProps> = ({
 
   // External link
   if (isExternal) {
+    const handleExternalClick = () => {
+      if (onClick) {
+        onClick();
+      }
+    };
+
     return (
       <a
         href={href}
@@ -68,6 +81,7 @@ export const Link: React.FC<LinkProps> = ({
         target="_blank"
         rel="noopener noreferrer"
         aria-label={ariaLabel || `${children} (opens in new tab)`}
+        onClick={handleExternalClick}
       >
         {children}
         <span className="sr-only"> (opens in new tab)</span>
@@ -76,8 +90,19 @@ export const Link: React.FC<LinkProps> = ({
   }
 
   // Internal link with router
+  const handleInternalClick = () => {
+    if (onClick) {
+      onClick();
+    }
+  };
+
   return (
-    <RouterLink to={href} className={combinedClasses} aria-label={ariaLabel}>
+    <RouterLink 
+      to={href} 
+      className={combinedClasses} 
+      aria-label={ariaLabel}
+      onClick={handleInternalClick}
+    >
       {children}
     </RouterLink>
   );

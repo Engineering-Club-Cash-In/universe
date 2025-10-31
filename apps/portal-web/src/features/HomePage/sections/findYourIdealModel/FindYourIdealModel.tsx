@@ -9,11 +9,11 @@ import { Button } from "@components/ui";
 import { IconLeftArrow, IconRightArrow } from "@components/icons";
 
 const carBrands = [
-  { name: "Audi", image: Audi },
-  { name: "BMW", image: BMW },
-  { name: "Mercedes", image: Mercedes },
-  { name: "Volkswagen", image: Volkswagen },
-  { name: "Ford", image: Ford },
+  { name: "Audi", image: Audi, width: 300, height: 175 },
+  { name: "BMW", image: BMW, width: 175, height: 175 },
+  { name: "Mercedes", image: Mercedes, width: 275, height: 175 },
+  { name: "Volkswagen", image: Volkswagen, width: 175, height: 175 },
+  { name: "Ford", image: Ford, width: 500, height: 175 },
 ];
 
 export const FindYourIdealModel: React.FC = () => {
@@ -21,7 +21,9 @@ export const FindYourIdealModel: React.FC = () => {
   const [isAutoPlaying, setIsAutoPlaying] = React.useState(true);
   const [direction, setDirection] = React.useState(0);
   const autoPlayRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const pauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 
   // Función para avanzar automáticamente
   const autoAdvance = React.useCallback(() => {
@@ -86,31 +88,19 @@ export const FindYourIdealModel: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-44 px-4">
+    <section className="text-center w-full mt-44 ">
       <div>
         <h2 className="text-header-2 mb-24">Encuentra tu modelo ideal</h2>
       </div>
 
-      <div className="flex items-center justify-between gap-8 mt-16 w-full">
-        {/* Left Arrow */}
-        <motion.button
-          onClick={handlePrevious}
-          className="cursor-pointer"
-          whileHover={{ scale: 1.15, opacity: 0.9 }}
-          whileTap={{ scale: 0.9 }}
-          transition={{ type: "spring", stiffness: 400, damping: 17 }}
-          aria-label="Previous brand"
-        >
-          <IconLeftArrow />
-        </motion.button>
-
+      <div className="relative w-full mt-16">
         {/* Carousel Container */}
         <div className="relative w-full flex items-center justify-center overflow-visible">
-          <div className="flex items-center justify-between w-full gap-8">
+          <div className="grid grid-cols-3 w-full gap-8 ">
             <AnimatePresence mode="popLayout" initial={false}>
               {getVisibleBrands().map((brand) => {
                 const isCenter = brand.position === 0;
-                
+
                 return (
                   <motion.div
                     key={`${brand.name}-${currentIndex}`}
@@ -138,7 +128,7 @@ export const FindYourIdealModel: React.FC = () => {
                       damping: 30,
                       opacity: { duration: 0.4 },
                     }}
-                    className="shrink-0"
+                    className="flex items-center justify-center"
                     style={{
                       boxShadow: !isCenter
                         ? "0 3.35px 3.35px 0 rgba(0, 0, 0, 0.25)"
@@ -150,7 +140,11 @@ export const FindYourIdealModel: React.FC = () => {
                     <img
                       src={brand.image}
                       alt={brand.name}
-                      className="w-48 h-48 object-contain"
+                      className="object-contain"
+                      style={{
+                        width: brand.width,
+                        height: brand.height,
+                      }}
                     />
                   </motion.div>
                 );
@@ -159,23 +153,37 @@ export const FindYourIdealModel: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Arrow */}
-        <motion.button
-          onClick={handleNext}
-          className="cursor-pointer"
-          whileHover={{ scale: 1.15, opacity: 0.9 }}
-          whileTap={{ scale: 0.9 }}
-          transition={{ type: "spring", stiffness: 400, damping: 17 }}
-          aria-label="Next brand"
-        >
-          <IconRightArrow />
-        </motion.button>
+        {/* Navigation Arrows - Positioned over side images */}
+        <div className="absolute inset-0 flex items-center justify-between pointer-events-none z-20">
+          {/* Left Arrow - Over left image */}
+          <motion.button
+            onClick={handlePrevious}
+            className="cursor-pointer pointer-events-auto"
+            whileHover={{ scale: 1.15, opacity: 0.9 }}
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 400, damping: 17 }}
+            aria-label="Previous brand"
+          >
+            <IconLeftArrow />
+          </motion.button>
+
+          {/* Right Arrow - Over right image */}
+          <motion.button
+            onClick={handleNext}
+            className="cursor-pointer pointer-events-auto"
+            whileHover={{ scale: 1.15, opacity: 0.9 }}
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 400, damping: 17 }}
+            aria-label="Next brand"
+          >
+            <IconRightArrow />
+          </motion.button>
+        </div>
       </div>
 
       <div className="mt-24 flex justify-center">
         <Button size="lg">Ver Marketplace</Button>
       </div>
-
     </section>
   );
 };

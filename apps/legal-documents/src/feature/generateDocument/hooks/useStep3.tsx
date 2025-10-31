@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useDebounce } from "@uidotdev/usehooks";
 import { type Document, type Field, type RenapData } from "./useStep2";
 
@@ -29,6 +29,9 @@ export function useStep3({
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [selectedDocuments, setSelectedDocuments] = useState<number[]>([]);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+
+  // Ref para rastrear el último estado de validación notificado
+  const lastValidationStateRef = useRef<boolean | null>(null);
 
   // Inicializar documentos seleccionados (todos por defecto)
   useEffect(() => {
@@ -635,20 +638,23 @@ export function useStep3({
 
   // Efecto para notificar cambios de validación al componente padre (con debouncing)
   useEffect(() => {
+    let isValid: boolean;
+
     if (hasSubmitted || shouldValidate) {
       // Si ya se intentó hacer submit o se debe validar, usar validación completa
-      const isValid = validateAllFields();
+      isValid = validateAllFields();
       console.log("🔍 Validación completa Step3:", { isValid });
-      if (onValidationChange) {
-        onValidationChange(isValid);
-      }
     } else {
       // Antes del submit, validar pero no mostrar errores
-      const isValid = validateWithoutErrors();
+      isValid = validateWithoutErrors();
       console.log("🔍 Validación silenciosa Step3:", { isValid });
-      if (onValidationChange) {
-        onValidationChange(isValid);
-      }
+    }
+
+    // Solo notificar si el estado de validación cambió
+    if (onValidationChange && lastValidationStateRef.current !== isValid) {
+      console.log("📤 Step3 setting validation to:", isValid);
+      lastValidationStateRef.current = isValid;
+      onValidationChange(isValid);
     }
   }, [
     debouncedFieldValues, // Usar valores debounced en lugar de fieldValues directos
@@ -671,7 +677,11 @@ export function useStep3({
           fieldsCount: fields.length,
           isValid,
         });
-        if (onValidationChange) {
+
+        // Solo notificar si el estado de validación cambió
+        if (onValidationChange && lastValidationStateRef.current !== isValid) {
+          console.log("📤 Step3 setting validation to:", isValid);
+          lastValidationStateRef.current = isValid;
           onValidationChange(isValid);
         }
       }, 100);

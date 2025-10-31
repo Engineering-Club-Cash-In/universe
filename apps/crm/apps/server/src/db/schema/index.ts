@@ -4,6 +4,7 @@ export * from "./cobros";
 export * from "./crm";
 export * from "./documents";
 export * from "./insurance";
+export * from "./legal-contracts";
 export * from "./miniagent-credentials";
 export * from "./notes";
 export * from "./quotations";

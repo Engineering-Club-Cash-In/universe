@@ -6,6 +6,7 @@ import { authRouter } from "./auth";
 import { cobrosRouter } from "./cobros";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { legalContractsRouter } from "./legal-contracts";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
@@ -83,6 +84,19 @@ export const appRouter = {
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
+
+	// Legal Contracts routes (Jurídico)
+	createLegalContract: legalContractsRouter.createLegalContract,
+	listLegalContractsByLead: legalContractsRouter.listLegalContractsByLead,
+	listLegalContractsByOpportunity:
+		legalContractsRouter.listLegalContractsByOpportunity,
+	getLegalContract: legalContractsRouter.getLegalContract,
+	assignOpportunityToContract: legalContractsRouter.assignOpportunityToContract,
+	updateContractStatus: legalContractsRouter.updateContractStatus,
+	deleteContract: legalContractsRouter.deleteContract,
+	getOpportunitiesByLead: legalContractsRouter.getOpportunitiesByLead,
+	getUserPermissions: legalContractsRouter.getUserPermissions,
+	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

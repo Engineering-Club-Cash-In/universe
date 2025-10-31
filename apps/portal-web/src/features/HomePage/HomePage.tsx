@@ -1,5 +1,5 @@
 import { NavBar } from "@components/ui";
-import { CarrouselStart, HowItWorks, FindYourIdealModel } from "./sections";
+import { CarrouselStart, HowItWorks, FindYourIdealModel, Testimonies } from "./sections";
 
 export const HomePage = () => {
   return (
@@ -9,6 +9,7 @@ export const HomePage = () => {
         <NavBar />
         <HowItWorks />
         <FindYourIdealModel />
+        <Testimonies />
       </div>
     </div>
   );

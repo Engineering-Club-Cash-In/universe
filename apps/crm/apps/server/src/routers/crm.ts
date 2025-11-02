@@ -26,6 +26,7 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
+import { createCreditoInCarteraBack, isCarteraBackEnabled } from "../services/cartera-back-integration";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -705,7 +706,7 @@ export const crmRouter = {
 							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
 						);
 
-						// Create financing contract
+						// Create financing contract (local CRM)
 						const newContract = await db
 							.insert(contratosFinanciamiento)
 							.values({
@@ -724,27 +725,91 @@ export const crmRouter = {
 							})
 							.returning();
 
-						// Generate payment installments (cuotas)
-						const cuotasValues = [];
-						for (let i = 1; i <= (finalNumeroCuotas as number); i++) {
-							const fechaVencimientoCuota = new Date(fechaInicioDate);
-							fechaVencimientoCuota.setMonth(
-								fechaVencimientoCuota.getMonth() + i,
-							);
-							// Set to the payment day of the month
-							fechaVencimientoCuota.setDate(finalDiaPagoMensual as number);
+						// Generate SIFCO credit number (unique identifier)
+						const timestamp = Date.now();
+						const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+						const numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 
-							cuotasValues.push({
-								contratoId: newContract[0].id,
-								numeroCuota: i,
-								fechaVencimiento: fechaVencimientoCuota,
-								montoCuota: finalCuotaMensual as string,
-								estadoMora: "al_dia" as const,
-								diasMora: 0,
-							});
+						// Integrate with cartera-back (dual-write)
+						let carteraBackSuccess = false;
+						let carteraBackError: string | undefined;
+
+						if (isCarteraBackEnabled()) {
+							try {
+								// TODO: Get or create usuario_id in cartera-back
+								// For now, we'll use a placeholder (this needs to be implemented)
+								const usuarioId = 1; // PLACEHOLDER - needs proper implementation
+
+								const creditoResult = await createCreditoInCarteraBack({
+									opportunityId: opp.id,
+									contratoFinanciamientoId: newContract[0].id,
+									userId: context.userId,
+									usuario_id: usuarioId,
+									numero_credito_sifco: numeroSifco,
+									capital: Number.parseFloat(finalValue as string),
+									porcentaje_interes: Number.parseFloat(finalTasaInteres as string),
+									plazo: finalNumeroCuotas as number,
+									cuota: Number.parseFloat(finalCuotaMensual as string),
+									tipoCredito: opp.creditType || "autocompra",
+									fecha_creacion: fechaInicioDate.toISOString(),
+									observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
+								});
+
+								carteraBackSuccess = creditoResult.success;
+								carteraBackError = creditoResult.error;
+
+								if (creditoResult.success) {
+									console.log(`[CRM] Credit synced to cartera-back: ${numeroSifco}`);
+								} else {
+									console.error(`[CRM] Failed to sync credit to cartera-back: ${carteraBackError}`);
+								}
+							} catch (error) {
+								carteraBackError = error instanceof Error ? error.message : String(error);
+								console.error("[CRM] Error syncing to cartera-back:", carteraBackError);
+							}
 						}
 
-						await db.insert(cuotasPago).values(cuotasValues);
+						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
+						// When cartera-back is enabled, installments are managed there
+						if (!isCarteraBackEnabled()) {
+							const cuotasValues = [];
+							for (let i = 1; i <= (finalNumeroCuotas as number); i++) {
+								const fechaVencimientoCuota = new Date(fechaInicioDate);
+								fechaVencimientoCuota.setMonth(
+									fechaVencimientoCuota.getMonth() + i,
+								);
+								// Set to the payment day of the month
+								fechaVencimientoCuota.setDate(finalDiaPagoMensual as number);
+
+								cuotasValues.push({
+									contratoId: newContract[0].id,
+									numeroCuota: i,
+									fechaVencimiento: fechaVencimientoCuota,
+									montoCuota: finalCuotaMensual as string,
+									estadoMora: "al_dia" as const,
+									diasMora: 0,
+								});
+							}
+
+							await db.insert(cuotasPago).values(cuotasValues);
+						} else {
+							console.log("[CRM] Skipping local cuotas generation - managed by cartera-back");
+						}
+
+						// Update contract notes with sync status
+						if (isCarteraBackEnabled()) {
+							const syncNote = carteraBackSuccess
+								? `\n✓ Sincronizado con cartera-back: ${numeroSifco}`
+								: `\n⚠ Error sincronizando con cartera-back: ${carteraBackError}`;
+
+							await db
+								.update(contratosFinanciamiento)
+								.set({
+									notes: `${newContract[0].notes}${syncNote}`,
+									updatedAt: new Date(),
+								})
+								.where(eq(contratosFinanciamiento.id, newContract[0].id));
+						}
 
 						// Update opportunity to mark as won and set close date
 						updateData.status = "won";

@@ -15,7 +15,15 @@ import {
 } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
+import { carteraBackReferences } from "../db/schema/cartera-back";
 import { adminProcedure, cobrosProcedure } from "../lib/orpc";
+import {
+	createPagoInCarteraBack,
+	getCreditoReferenceByNumeroSifco,
+	isCarteraBackPaymentsEnabled,
+} from "../services/cartera-back-integration";
+import { carteraBackClient } from "../services/cartera-back-client";
+import { sincronizarCasosCobros, getUltimasSincronizaciones } from "../services/sync-casos-cobros";
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -768,5 +776,407 @@ export const cobrosRouter = {
 				.limit(1);
 
 			return contrato[0] || null;
+		}),
+
+	// ========================================================================
+	// INTEGRACIÓN CON CARTERA-BACK - PAGOS
+	// ========================================================================
+
+	// Registrar pago en cartera-back
+	registrarPago: cobrosProcedure
+		.input(
+			z.object({
+				numeroSifco: z.string(),
+				cuotaId: z.number().optional(),
+				fechaPago: z.string(), // ISO date string
+				montoBoleta: z.number(),
+				numeroAutorizacion: z.string().optional(),
+				observaciones: z.string().optional(),
+				casoCobroId: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verify the credit exists and user has access
+			const reference = await getCreditoReferenceByNumeroSifco(input.numeroSifco);
+
+			if (!reference) {
+				throw new Error(`Crédito ${input.numeroSifco} no encontrado en el sistema`);
+			}
+
+			// Register payment in cartera-back
+			const result = await createPagoInCarteraBack({
+				credito_numero_sifco: input.numeroSifco,
+				cuota_id: input.cuotaId,
+				fecha_pago: input.fechaPago,
+				monto_boleta: input.montoBoleta,
+				numeroAutorizacion: input.numeroAutorizacion,
+				observaciones: input.observaciones,
+				casoCobroId: input.casoCobroId,
+				userId: context.userId,
+			});
+
+			if (!result.success) {
+				throw new Error(`Error registrando pago: ${result.error}`);
+			}
+
+			return {
+				success: true,
+				pago_id: result.pago_id,
+				message: "Pago registrado exitosamente",
+			};
+		}),
+
+	// Obtener historial de pagos de un crédito desde cartera-back
+	getHistorialPagosCarteraBack: cobrosProcedure
+		.input(
+			z.object({
+				numeroSifco: z.string(),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			if (!isCarteraBackPaymentsEnabled()) {
+				throw new Error("Integración de pagos con cartera-back no está habilitada");
+			}
+
+			try {
+				const pagos = await carteraBackClient.getPagosByCredito(input.numeroSifco);
+
+				return {
+					numeroSifco: input.numeroSifco,
+					totalPagos: pagos.length,
+					pagos: pagos.map((pago) => ({
+						pagoId: pago.pago_id,
+						fechaPago: pago.fecha_pago,
+						cuotaId: pago.cuota_id,
+						montoBoleta: pago.monto_boleta,
+						abonoCapital: pago.abono_capital,
+						abonoInteres: pago.abono_interes,
+						abonoIva: pago.abono_iva_12,
+						abonoSeguro: pago.abono_seguro,
+						abonoGps: pago.abono_gps,
+						mora: pago.mora,
+						capitalRestante: pago.capital_restante,
+						totalRestante: pago.total_restante,
+						numeroAutorizacion: pago.numeroAutorizacion,
+						observaciones: pago.observaciones,
+						pagado: pago.pagado,
+						validationStatus: pago.validationStatus,
+						// Investor distribution
+						distribucionInversionistas: pago.pagos_inversionistas?.map((pi) => ({
+							inversionistaId: pi.inversionista_id,
+							inversionistaNombre: pi.inversionista?.nombre,
+							abonoCapital: pi.abono_capital,
+							abonoInteres: pi.abono_interes,
+							abonoIva: pi.abono_iva_12,
+							porcentajeParticipacion: pi.porcentaje_participacion,
+							estadoLiquidacion: pi.estado_liquidacion,
+						})),
+					})),
+				};
+			} catch (error) {
+				throw new Error(
+					`Error obteniendo historial de pagos: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+
+	// Obtener detalles completos de un crédito desde cartera-back
+	getCreditoCarteraBack: cobrosProcedure
+		.input(
+			z.object({
+				numeroSifco: z.string(),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			if (!isCarteraBackPaymentsEnabled()) {
+				throw new Error("Integración con cartera-back no está habilitada");
+			}
+
+			try {
+				const credito = await carteraBackClient.getCredito(input.numeroSifco);
+
+				return {
+					creditoId: credito.credito_id,
+					numeroSifco: credito.numero_credito_sifco,
+					fechaCreacion: credito.fecha_creacion,
+					capital: credito.capital,
+					porcentajeInteres: credito.porcentaje_interes,
+					deudaTotal: credito.deudatotal,
+					cuota: credito.cuota,
+					plazo: credito.plazo,
+					statusCredit: credito.statusCredit,
+					observaciones: credito.observaciones,
+					// Cliente
+					usuario: {
+						usuarioId: credito.usuario.usuario_id,
+						nombre: credito.usuario.nombre,
+						nit: credito.usuario.nit,
+						categoria: credito.usuario.categoria,
+						saldoAFavor: credito.usuario.saldo_a_favor,
+					},
+					// Asesor
+					asesor: credito.asesor
+						? {
+								asesorId: credito.asesor.asesor_id,
+								nombre: credito.asesor.nombre,
+								activo: credito.asesor.activo,
+							}
+						: null,
+					// Cuotas
+					cuotas: credito.cuotas.map((cuota) => ({
+						cuotaId: cuota.cuota_id,
+						numeroCuota: cuota.numero_cuota,
+						fechaVencimiento: cuota.fecha_vencimiento,
+						pagado: cuota.pagado,
+					})),
+					// Moras
+					moras: credito.moras?.map((mora) => ({
+						moraId: mora.mora_id,
+						activa: mora.activa,
+						porcentajeMora: mora.porcentaje_mora,
+						montoMora: mora.monto_mora,
+						cuotasAtrasadas: mora.cuotas_atrasadas,
+					})),
+					// Inversionistas
+					inversionistas: credito.creditos_inversionistas?.map((ci) => ({
+						inversionistaId: ci.inversionista_id,
+						inversionistaNombre: ci.inversionista?.nombre,
+						porcentajeParticipacion: ci.porcentaje_participacion_inversionista,
+						montoAportado: ci.monto_aportado,
+						cuotaInversionista: ci.cuota_inversionista,
+					})),
+					// Calculated fields
+					cuotasPagadas: credito.cuotas_pagadas,
+					cuotasPendientes: credito.cuotas_pendientes,
+					capitalRestante: credito.capital_restante,
+					interesRestante: credito.interes_restante,
+					totalRestante: credito.total_restante,
+					diasMora: credito.dias_mora,
+					montoMora: credito.monto_mora,
+					cuotasAtrasadas: credito.cuotas_atrasadas,
+				};
+			} catch (error) {
+				throw new Error(
+					`Error obteniendo crédito de cartera-back: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+
+	// ========================================================================
+	// SINCRONIZACIÓN DE CASOS DE COBROS
+	// ========================================================================
+
+	// Ejecutar sincronización de casos de cobros (admin only)
+	sincronizarCasosCobros: adminProcedure
+		.input(
+			z.object({
+				mes: z.number().min(1).max(12).optional(),
+				anio: z.number().min(2000).max(2100).optional(),
+				forceSyncAll: z.boolean().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const result = await sincronizarCasosCobros({
+				mes: input.mes,
+				anio: input.anio,
+				forceSyncAll: input.forceSyncAll,
+				userId: context.user.id,
+			});
+
+			return {
+				success: result.success,
+				casosCreados: result.casosCreados,
+				casosActualizados: result.casosActualizados,
+				casosCerrados: result.casosCerrados,
+				errors: result.errors,
+				duracionMs: result.duration,
+				mensaje:
+					result.errors.length > 0
+						? `Sincronización completada con ${result.errors.length} errores`
+						: "Sincronización completada exitosamente",
+			};
+		}),
+
+	// Obtener historial de sincronizaciones recientes
+	getHistorialSincronizaciones: adminProcedure
+		.input(
+			z.object({
+				limit: z.number().min(1).max(100).optional().default(10),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			const sincronizaciones = await getUltimasSincronizaciones(input.limit);
+
+			return {
+				total: sincronizaciones.length,
+				sincronizaciones,
+			};
+		}),
+
+	// ========================================================================
+	// INVERSIONISTAS
+	// ========================================================================
+
+	// Listar todos los inversionistas
+	getInversionistas: cobrosProcedure
+		.input(
+			z.object({
+				page: z.number().min(1).optional().default(1),
+				perPage: z.number().min(1).max(100).optional().default(20),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			if (!isCarteraBackPaymentsEnabled()) {
+				throw new Error("Integración con cartera-back no está habilitada");
+			}
+
+			try {
+				const result = await carteraBackClient.getInvestors({
+					page: input.page,
+					perPage: input.perPage,
+				});
+
+				return {
+					inversionistas: result.data.map((inv) => ({
+						inversionistaId: inv.inversionista_id,
+						nombre: inv.nombre,
+						emiteFactura: inv.emite_factura,
+						reinversion: inv.reinversion,
+						banco: inv.banco,
+						tipoCuenta: inv.tipo_cuenta,
+						numeroCuenta: inv.numero_cuenta,
+					})),
+					pagination: {
+						page: result.page,
+						perPage: result.perPage,
+						total: result.total,
+						totalPages: result.totalPages,
+					},
+				};
+			} catch (error) {
+				throw new Error(
+					`Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+
+	// Obtener detalle de un inversionista con sus créditos
+	getDetalleInversionista: cobrosProcedure
+		.input(
+			z.object({
+				inversionistaId: z.number(),
+				page: z.number().min(1).optional().default(1),
+				perPage: z.number().min(1).max(100).optional().default(10),
+				numeroCreditoSifco: z.string().optional(),
+				nombreUsuario: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			if (!isCarteraBackPaymentsEnabled()) {
+				throw new Error("Integración con cartera-back no está habilitada");
+			}
+
+			try {
+				const reporte = await carteraBackClient.getInvestorReport({
+					id: input.inversionistaId,
+					page: input.page,
+					perPage: input.perPage,
+					numeroCreditoSifco: input.numeroCreditoSifco,
+					nombreUsuario: input.nombreUsuario,
+				});
+
+				return {
+					inversionista: {
+						inversionistaId: reporte.inversionista.inversionista_id,
+						nombre: reporte.inversionista.nombre,
+						emiteFactura: reporte.inversionista.emite_factura,
+						reinversion: reporte.inversionista.reinversion,
+						banco: reporte.inversionista.banco,
+						tipoCuenta: reporte.inversionista.tipo_cuenta,
+						numeroCuenta: reporte.inversionista.numero_cuenta,
+					},
+					creditos: reporte.creditos.map((creditoData) => ({
+						// Datos del crédito
+						creditoId: creditoData.credito.credito_id,
+						numeroSifco: creditoData.credito.numero_credito_sifco,
+						capital: creditoData.credito.capital,
+						statusCredit: creditoData.credito.statusCredit,
+						fechaCreacion: creditoData.credito.fecha_creacion,
+						// Datos del cliente
+						clienteNombre: creditoData.usuario.nombre,
+						clienteNit: creditoData.usuario.nit,
+						// Participación del inversionista
+						porcentajeParticipacion:
+							creditoData.participacion.porcentaje_participacion_inversionista,
+						montoAportado: creditoData.participacion.monto_aportado,
+						cuotaInversionista: creditoData.participacion.cuota_inversionista,
+						// Montos recuperados
+						montoRecuperado: creditoData.montoRecuperado,
+						montoPendiente: creditoData.montoPendiente,
+						// Pagos
+						totalPagos: creditoData.pagos.length,
+						pagos: creditoData.pagos.map((pagoDetalle) => ({
+							pagoId: pagoDetalle.pago.pago_id,
+							fechaPago: pagoDetalle.pago.fecha_pago,
+							montoBoleta: pagoDetalle.pago.monto_boleta,
+							abonoCapital: pagoDetalle.distribucion.abono_capital,
+							abonoInteres: pagoDetalle.distribucion.abono_interes,
+							abonoIva: pagoDetalle.distribucion.abono_iva_12,
+							estadoLiquidacion: pagoDetalle.distribucion.estado_liquidacion,
+						})),
+					})),
+					totales: {
+						montoTotalAportado: reporte.totales.montoTotalAportado,
+						montoTotalRecuperado: reporte.totales.montoTotalRecuperado,
+						montoTotalPendiente: reporte.totales.montoTotalPendiente,
+						creditosActivos: reporte.totales.creditosActivos,
+						creditosCancelados: reporte.totales.creditosCancelados,
+						porcentajeRecuperacion: reporte.totales.porcentajeRecuperacion,
+					},
+				};
+			} catch (error) {
+				throw new Error(
+					`Error obteniendo detalle de inversionista: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+
+	// Obtener inversionistas de un crédito específico
+	getInversionistasDelCredito: cobrosProcedure
+		.input(
+			z.object({
+				numeroSifco: z.string(),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			if (!isCarteraBackPaymentsEnabled()) {
+				throw new Error("Integración con cartera-back no está habilitada");
+			}
+
+			try {
+				const credito = await carteraBackClient.getCredito(input.numeroSifco);
+
+				return {
+					numeroSifco: credito.numero_credito_sifco,
+					capital: credito.capital,
+					statusCredit: credito.statusCredit,
+					inversionistas:
+						credito.creditos_inversionistas?.map((ci) => ({
+							inversionistaId: ci.inversionista_id,
+							inversionistaNombre: ci.inversionista?.nombre,
+							porcentajeParticipacion: ci.porcentaje_participacion_inversionista,
+							montoAportado: ci.monto_aportado,
+							cuotaInversionista: ci.cuota_inversionista,
+							porcentajeCashIn: ci.porcentaje_cash_in,
+							ivaInversionista: ci.iva_inversionista,
+							montoInversionista: ci.monto_inversionista,
+							montoCashIn: ci.monto_cash_in,
+						})) || [],
+				};
+			} catch (error) {
+				throw new Error(
+					`Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
 		}),
 };

@@ -1,5 +1,6 @@
 export * from "./auctionVehicles";
 export * from "./auth";
+export * from "./cartera-back";
 export * from "./cobros";
 export * from "./crm";
 export * from "./documents";

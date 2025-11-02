@@ -11,6 +11,7 @@ import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
 import * as reportsRouter from "./reports";
+import { reportesCarteraRouter } from "./reportes-cartera";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
 export const appRouter = {
@@ -84,6 +85,15 @@ export const appRouter = {
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
+	// Cartera-back integration endpoints
+	registrarPago: cobrosRouter.registrarPago,
+	getHistorialPagosCarteraBack: cobrosRouter.getHistorialPagosCarteraBack,
+	getCreditoCarteraBack: cobrosRouter.getCreditoCarteraBack,
+	sincronizarCasosCobros: cobrosRouter.sincronizarCasosCobros,
+	getHistorialSincronizaciones: cobrosRouter.getHistorialSincronizaciones,
+	getInversionistas: cobrosRouter.getInversionistas,
+	getDetalleInversionista: cobrosRouter.getDetalleInversionista,
+	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
@@ -136,6 +146,9 @@ export const appRouter = {
 	getReporteCartera: reportsRouter.getReporteCartera,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
+	// Reportes unificados (cartera-back + CRM)
+	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
+	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,

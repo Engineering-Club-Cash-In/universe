@@ -157,8 +157,8 @@ export function useGenerateComponent() {
               gender: formData.renapData?.gender === "M" ? "male" : "female",
               filenamePrefix: document.nombre_documento + "_" + Date.now(),
             },
-            // convertir el array de fields a un objeto key-value
-            data: Object.assign({}, ...fields),
+            // convertir el array de fields a un objeto key-value, incluyendo el DPI
+            data: Object.assign({}, ...fields, { dpi: formData.dpi }),
             contractType: document.nombre_documento,
             // Agregar email del cliente (por ahora solo 1, se puede expandir para múltiples firmantes)
             emails: email ? [email] : undefined,

@@ -1,9 +1,9 @@
-version: '3.8'
-
 services:
   gotenberg:
     image: gotenberg/gotenberg:8
     restart: unless-stopped
+    ports:
+      - "3030:3000"
     environment:
       - GOTENBERG_LOG_LEVEL=INFO
     healthcheck:
@@ -26,6 +26,9 @@ services:
       - GOTENBERG_URL=http://gotenberg:3000
       - DOCUMENSO_API_TOKEN=${DOCUMENSO_API_TOKEN}
       - DOCUMENSO_BASE_URL=${DOCUMENSO_BASE_URL}
+      - CRM_API_URL=${CRM_API_URL:-http://host.docker.internal:3000}
+      - CRM_SERVICE_ACCOUNT_EMAIL=${CRM_SERVICE_ACCOUNT_EMAIL}
+      - CRM_SERVICE_ACCOUNT_PASSWORD=${CRM_SERVICE_ACCOUNT_PASSWORD}
     depends_on:
       gotenberg:
         condition: service_healthy
@@ -33,6 +36,8 @@ services:
       - legal-docs-network
     volumes:
       - ./output:/app/output
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   legal-docs-network:

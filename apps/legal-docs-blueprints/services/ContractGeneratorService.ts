@@ -14,6 +14,7 @@ import {
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { getRequiredEmailCount } from '../config/docusealConfig';
+import { crmApiService } from './CrmApiService';
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -537,6 +538,45 @@ export class ContractGeneratorService {
           embed_src: signingLink // Link de firma de Documenso
         };
       });
+
+      // 14. Guardar contrato en CRM (si hay DPI y signing links)
+      if (data.dpi && signingLinks && signingLinks.length > 0) {
+        const templateId = Math.floor(Math.random() * 100000);
+
+        // Preparar response completo para guardar en CRM
+        const fullApiResponse = {
+          templateId,
+          success: true,
+          nameDocument: [{ enum: contractType, label: config.description }],
+          data: submissionData,
+          signing_links: signingLinks,
+          contractType,
+          docx_path: docxPath,
+          pdf_path: pdfPath,
+          message: `Contrato ${contractType} generado exitosamente`,
+          generatedAt: new Date().toISOString()
+        };
+
+        // Llamar al CRM de manera no-bloqueante
+        crmApiService.saveContractSilently({
+          dpi: data.dpi,
+          contractType,
+          contractName: config.description,
+          signingLinks,
+          templateId,
+          apiResponse: fullApiResponse,
+        }).catch(err => {
+          console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
+          // No bloquear la respuesta si falla el guardado en CRM
+        });
+      } else {
+        if (!data.dpi) {
+          console.warn('[ContractGeneratorService] No se guardará en CRM: falta DPI en los datos');
+        }
+        if (!signingLinks || signingLinks.length === 0) {
+          console.warn('[ContractGeneratorService] No se guardará en CRM: no hay signing links');
+        }
+      }
 
       return {
         templateId: Math.floor(Math.random() * 100000), // ID de template simulado

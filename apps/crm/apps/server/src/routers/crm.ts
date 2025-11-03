@@ -991,10 +991,19 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Get current opportunity with stage info
+			// Get current opportunity with stage info and lead data
 			const opportunity = await db
-				.select()
+				.select({
+					id: opportunities.id,
+					vehicleId: opportunities.vehicleId,
+					creditType: opportunities.creditType,
+					stageId: opportunities.stageId,
+					notes: opportunities.notes,
+					leadId: opportunities.leadId,
+					clientType: leads.clientType,
+				})
 				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
@@ -1028,14 +1037,19 @@ export const crmRouter = {
 					throw new Error("El vehículo debe tener una inspección aprobada");
 				}
 
-				// Validar documentos requeridos
+				// Validar documentos requeridos según tipo de cliente
+				const clientType = opportunity[0].clientType || "individual";
 				const requiredDocs = await db
 					.select()
-					.from(documentRequirements)
+					.from(documentRequirementsByClientType)
 					.where(
 						and(
-							eq(documentRequirements.creditType, opportunity[0].creditType),
-							eq(documentRequirements.required, true),
+							eq(documentRequirementsByClientType.clientType, clientType),
+							eq(
+								documentRequirementsByClientType.creditType,
+								opportunity[0].creditType,
+							),
+							eq(documentRequirementsByClientType.required, true),
 						),
 					);
 
@@ -1050,14 +1064,33 @@ export const crmRouter = {
 
 				if (missingDocs.length > 0) {
 					const docLabels: Record<string, string> = {
-						identification: "Identificación",
+						identification: "Identificación (DPI/Pasaporte)",
 						income_proof: "Comprobante de Ingresos",
-						bank_statement: "Estado de Cuenta",
+						bank_statement: "Estado de Cuenta Bancario",
 						business_license: "Patente de Comercio",
-						property_deed: "Escrituras",
+						property_deed: "Escrituras de Propiedad",
 						vehicle_title: "Tarjeta de Circulación",
 						credit_report: "Reporte Crediticio",
-						other: "Otros",
+						other: "Otro",
+						// Documentos específicos por cliente
+						dpi: "DPI",
+						licencia: "Licencia",
+						recibo_luz: "Recibo de luz",
+						recibo_adicional: "Recibo adicional",
+						formularios: "Formularios",
+						estados_cuenta_1: "Estado de cuenta mes 1",
+						estados_cuenta_2: "Estado de cuenta mes 2",
+						estados_cuenta_3: "Estado de cuenta mes 3",
+						patente_comercio: "Patente de comercio",
+						representacion_legal: "Representación Legal",
+						constitucion_sociedad: "Constitución de sociedad",
+						patente_mercantil: "Patente mercantil",
+						iva_1: "Formulario IVA mes 1",
+						iva_2: "Formulario IVA mes 2",
+						iva_3: "Formulario IVA mes 3",
+						estado_financiero: "Estado financiero",
+						clausula_consentimiento: "Cláusula de consentimiento",
+						minutas: "Minutas",
 					};
 					const missingLabels = missingDocs
 						.map((d) => docLabels[d] || d)
@@ -1606,10 +1639,17 @@ export const crmRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			try {
-				// 1. Obtener oportunidad con vehículo
+				// 1. Obtener oportunidad con información del lead
 				const [opp] = await db
-					.select()
+					.select({
+						id: opportunities.id,
+						creditType: opportunities.creditType,
+						vehicleId: opportunities.vehicleId,
+						leadId: opportunities.leadId,
+						clientType: leads.clientType,
+					})
 					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
 					.where(eq(opportunities.id, input.opportunityId))
 					.limit(1);
 
@@ -1655,16 +1695,19 @@ export const crmRouter = {
 					}
 				}
 
-				// 3. Obtener documentos requeridos según tipo de crédito
+				// 3. Obtener documentos requeridos según tipo de cliente y crédito
+				const clientType = opp.clientType || "individual";
 				const requiredDocs = await db
 					.select()
-					.from(documentRequirements)
+					.from(documentRequirementsByClientType)
 					.where(
 						and(
-							eq(documentRequirements.creditType, opp.creditType),
-							eq(documentRequirements.required, true),
+							eq(documentRequirementsByClientType.clientType, clientType),
+							eq(documentRequirementsByClientType.creditType, opp.creditType),
+							eq(documentRequirementsByClientType.required, true),
 						),
-					);
+					)
+					.orderBy(documentRequirementsByClientType.order);
 
 				// 4. Obtener documentos subidos
 				const uploadedDocs = await db
@@ -2039,7 +2082,9 @@ export const crmRouter = {
 			checklistData.canApprove =
 				checklistData.sections.documentos.completed &&
 				checklistData.sections.verificaciones.completed &&
-				(opportunity.vehicleId ? checklistData.sections.vehiculo.completed : true); // Only require vehicle section if there's a vehicle
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.completed
+					: true); // Only require vehicle section if there's a vehicle
 
 			// Save initial checklist
 			await db.insert(analysisChecklists).values({
@@ -2136,8 +2181,9 @@ export const crmRouter = {
 
 			const totalItems =
 				checklistData.sections.documentos.items.length + // client docs
-				checklistData.sections.verificaciones.items.filter((i: any) => i.required)
-					.length + // client verifications
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required,
+				).length + // client verifications
 				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
 					? checklistData.sections.vehiculo.documentos.items.length
@@ -2176,7 +2222,7 @@ export const crmRouter = {
 				checklistData.sections.documentos.completed &&
 				checklistData.sections.verificaciones.completed &&
 				(opportunity?.vehicleId
-					? checklistData.sections.vehiculo?.completed ?? false
+					? (checklistData.sections.vehiculo?.completed ?? false)
 					: true);
 
 			// Update checklist
@@ -2280,8 +2326,9 @@ export const crmRouter = {
 			// Recalculate overall progress
 			const totalItems =
 				checklistData.sections.documentos.items.length + // client docs
-				checklistData.sections.verificaciones.items.filter((i: any) => i.required)
-					.length + // client verifications
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required,
+				).length + // client verifications
 				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
 					? checklistData.sections.vehiculo.documentos.items.length
@@ -2320,7 +2367,7 @@ export const crmRouter = {
 				checklistData.sections.documentos.completed &&
 				checklistData.sections.verificaciones.completed &&
 				(opportunity?.vehicleId
-					? checklistData.sections.vehiculo?.completed ?? false
+					? (checklistData.sections.vehiculo?.completed ?? false)
 					: true);
 
 			// Update checklist

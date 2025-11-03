@@ -19,7 +19,7 @@ export const NavBar = () => {
 
   return (
     <nav
-      className="sticky top-8 sm:top-12 left-4 sm:left-8 right-16 sm:right-8 flex items-center justify-center lg:justify-between z-50 gap-4 mx-28"
+      className="sticky top-6 sm:top-8 left-4 sm:left-8 right-16 sm:right-8 flex items-center justify-center lg:justify-between z-50 gap-4 mx-28"
       aria-label="Main navigation"
     >
       <div className="hidden lg:block shrink-0"></div>

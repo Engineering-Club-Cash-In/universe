@@ -5,6 +5,7 @@ import {
   FindYourIdealModel,
   Testimonies,
   Footer,
+  GraphLine
 } from "./sections";
 
 export const HomePage = () => {
@@ -25,6 +26,7 @@ export const HomePage = () => {
         <NavBar />
         <HowItWorks />
         <FindYourIdealModel />
+        <GraphLine />
         <Testimonies />
       </div>
       <Footer />

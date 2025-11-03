@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileUp, Loader2, Trash2, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,6 +11,7 @@ import {
 	DialogTitle,
 	DialogTrigger,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import {
 	Select,
 	SelectContent,
@@ -18,7 +19,6 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { client } from "@/utils/orpc";
 
@@ -37,7 +37,8 @@ const documentTypeLabels: Record<string, string> = {
 	dpi_representante_legal_vehiculo: "DPI del Representante Legal",
 	pago_impuesto_circulacion: "Comprobante de Pago Impuesto de Circulación",
 	consulta_sat: "Captura de Pantalla Consulta SAT",
-	consulta_garantias_mobiliarias: "Certificación de Garantías Mobiliarias (RGM)",
+	consulta_garantias_mobiliarias:
+		"Certificación de Garantías Mobiliarias (RGM)",
 };
 
 export function VehicleDocumentUpload({
@@ -55,7 +56,6 @@ export function VehicleDocumentUpload({
 	const { data: documents, isLoading } = useQuery({
 		queryKey: ["vehicleDocuments", vehicleId],
 		queryFn: async () => {
-			// @ts-expect-error - TypeScript cache issue, endpoint exists
 			return await client.getVehicleDocuments({ vehicleId });
 		},
 	});
@@ -78,7 +78,6 @@ export function VehicleDocumentUpload({
 				reader.readAsDataURL(data.file);
 			});
 
-			// @ts-expect-error - TypeScript cache issue
 			return await client.uploadVehicleDocument({
 				vehicleId,
 				documentType: data.documentType,
@@ -93,7 +92,9 @@ export function VehicleDocumentUpload({
 		},
 		onSuccess: () => {
 			toast.success("Documento subido exitosamente");
-			queryClient.invalidateQueries({ queryKey: ["vehicleDocuments", vehicleId] });
+			queryClient.invalidateQueries({
+				queryKey: ["vehicleDocuments", vehicleId],
+			});
 			setOpen(false);
 			setSelectedFile(null);
 			setDocumentType("");
@@ -107,12 +108,13 @@ export function VehicleDocumentUpload({
 	// Delete mutation
 	const deleteMutation = useMutation({
 		mutationFn: async (documentId: string) => {
-			// @ts-expect-error - TypeScript cache issue
 			return await client.deleteVehicleDocument({ documentId });
 		},
 		onSuccess: () => {
 			toast.success("Documento eliminado exitosamente");
-			queryClient.invalidateQueries({ queryKey: ["vehicleDocuments", vehicleId] });
+			queryClient.invalidateQueries({
+				queryKey: ["vehicleDocuments", vehicleId],
+			});
 		},
 		onError: (error: Error) => {
 			toast.error(`Error al eliminar documento: ${error.message}`);
@@ -145,7 +147,9 @@ export function VehicleDocumentUpload({
 	};
 
 	// Get uploaded document types
-	const uploadedTypes = new Set(documents?.map((d: any) => d.documentType) || []);
+	const uploadedTypes = new Set(
+		documents?.map((d: any) => d.documentType) || [],
+	);
 
 	return (
 		<div className="space-y-4">
@@ -215,7 +219,9 @@ export function VehicleDocumentUpload({
 						{/* Upload Button */}
 						<Button
 							onClick={handleUpload}
-							disabled={!selectedFile || !documentType || uploadMutation.isPending}
+							disabled={
+								!selectedFile || !documentType || uploadMutation.isPending
+							}
 							className="w-full"
 						>
 							{uploadMutation.isPending ? (
@@ -250,10 +256,13 @@ export function VehicleDocumentUpload({
 										{documentTypeLabels[doc.documentType] || doc.documentType}
 									</p>
 									<p className="text-muted-foreground text-xs">
-										{doc.originalName} • {new Date(doc.uploadedAt).toLocaleDateString()}
+										{doc.originalName} •{" "}
+										{new Date(doc.uploadedAt).toLocaleDateString()}
 									</p>
 									{doc.description && (
-										<p className="text-muted-foreground text-xs">{doc.description}</p>
+										<p className="text-muted-foreground text-xs">
+											{doc.description}
+										</p>
 									)}
 								</div>
 								<div className="flex items-center gap-2">

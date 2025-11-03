@@ -91,9 +91,7 @@ export const vehicles = pgTable("vehicles", {
 	status: vehicleStatusEnum("status").notNull().default("pending"),
 
 	// Owner type - determines document requirements for analysis
-	ownerType: vehicleOwnerTypeEnum("owner_type")
-		.notNull()
-		.default("individual"),
+	ownerType: vehicleOwnerTypeEnum("owner_type").notNull().default("individual"),
 
 	// Company relationship
 	companyId: uuid("company_id").references(() => companies.id),

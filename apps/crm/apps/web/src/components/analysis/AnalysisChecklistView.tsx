@@ -116,7 +116,6 @@ export function AnalysisChecklistView({
 		completed: boolean,
 	) => {
 		try {
-			// @ts-expect-error - TypeScript cache issue, endpoint exists
 			await client.updateAnalysisChecklistVehicleVerification({
 				opportunityId,
 				verificationType,
@@ -374,7 +373,12 @@ export function AnalysisChecklistView({
 											</span>
 										</div>
 										{checklist.sections.vehiculo.inspectionId && (
-											<Button variant="outline" size="sm" className="mt-2" asChild>
+											<Button
+												variant="outline"
+												size="sm"
+												className="mt-2"
+												asChild
+											>
 												<a
 													href={`/crm/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
 													target="_blank"
@@ -391,12 +395,16 @@ export function AnalysisChecklistView({
 										checklist.sections.vehiculo.documentos.items.length > 0 && (
 											<div className="border-b pb-4">
 												<div className="mb-3 flex items-center justify-between">
-													<h4 className="font-medium text-sm">Documentos del Vehículo</h4>
+													<h4 className="font-medium text-sm">
+														Documentos del Vehículo
+													</h4>
 													<Badge variant="outline">
 														{checklist.sections.vehiculo.documentos.items.filter(
 															(i: any) => i.uploaded,
 														).length ?? 0}{" "}
-														/ {checklist.sections.vehiculo.documentos.items.length ?? 0}
+														/{" "}
+														{checklist.sections.vehiculo.documentos.items
+															.length ?? 0}
 													</Badge>
 												</div>
 												<div className="space-y-2">
@@ -416,7 +424,9 @@ export function AnalysisChecklistView({
 																		<p className="font-medium text-sm">
 																			{item.documentType
 																				.replace(/_/g, " ")
-																				.replace(/\b\w/g, (l: string) => l.toUpperCase())}
+																				.replace(/\b\w/g, (l: string) =>
+																					l.toUpperCase(),
+																				)}
 																		</p>
 																		{item.required && (
 																			<span className="text-muted-foreground text-xs">
@@ -425,7 +435,11 @@ export function AnalysisChecklistView({
 																		)}
 																	</div>
 																</div>
-																<Badge variant={item.uploaded ? "default" : "secondary"}>
+																<Badge
+																	variant={
+																		item.uploaded ? "default" : "secondary"
+																	}
+																>
 																	{item.uploaded ? "Subido" : "Pendiente"}
 																</Badge>
 															</div>
@@ -437,10 +451,13 @@ export function AnalysisChecklistView({
 
 									{/* Verificaciones del Vehículo */}
 									{checklist.sections.vehiculo.verificaciones &&
-										checklist.sections.vehiculo.verificaciones.items.length > 0 && (
+										checklist.sections.vehiculo.verificaciones.items.length >
+											0 && (
 											<div>
 												<div className="mb-3 flex items-center justify-between">
-													<h4 className="font-medium text-sm">Verificaciones Externas</h4>
+													<h4 className="font-medium text-sm">
+														Verificaciones Externas
+													</h4>
 													<Badge variant="outline">
 														{checklist.sections.vehiculo.verificaciones.items.filter(
 															(i: any) => i.required && i.completed,
@@ -470,7 +487,9 @@ export function AnalysisChecklistView({
 																	className="mt-1"
 																/>
 																<div className="flex-1">
-																	<p className="font-medium text-sm">{item.name}</p>
+																	<p className="font-medium text-sm">
+																		{item.name}
+																	</p>
 																	{item.required ? (
 																		<span className="text-muted-foreground text-xs">
 																			Requerido

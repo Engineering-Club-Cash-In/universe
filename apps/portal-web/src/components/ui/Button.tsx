@@ -1,4 +1,5 @@
 import React from "react";
+import { motion } from "framer-motion";
 
 interface ButtonProps {
   children: string;
@@ -20,21 +21,30 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   return (
-    <button
+    <motion.button
       onClick={onClick}
+      whileHover={{
+        scale: 1.05,
+        boxShadow: "0 0 6px rgba(116, 116, 116, 0.5)",
+      }}
+      whileTap={{ scale: 0.95 }}
+      transition={{
+        type: "spring",
+        stiffness: 400,
+        damping: 17,
+      }}
       className={`
         ${sizeClasses[size]}
         flex items-center justify-center
         border border-white/65 rounded-full bg-transparent
         font-semibold text-inherit cursor-pointer
-        transition-all duration-200 ease-in-out
-        hover:border-0 hover:shadow-[0_0_6px_rgba(116,116,116,0.5)] hover:bg-[rgba(15,15,15,1)]
-        active:border-0 active:shadow-[0_0_6px_rgba(116,116,116,0.5)] active:bg-[rgba(15,15,15,1)]
+        hover:border-0 hover:bg-[rgba(15,15,15,1)]
+        active:border-0 active:bg-[rgba(15,15,15,1)]
         ${className}
       `}
     >
       {children}
-    </button>
+    </motion.button>
   );
 };
 

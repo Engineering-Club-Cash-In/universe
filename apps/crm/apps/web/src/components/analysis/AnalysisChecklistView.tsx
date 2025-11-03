@@ -28,11 +28,17 @@ interface ChecklistItem {
 	description?: string;
 	name?: string;
 	type?: string;
+	documentType?: string;
 	uploaded?: boolean;
 	required: boolean;
 	completed?: boolean;
 	verifiedBy?: string;
 	verifiedAt?: string;
+}
+
+interface ChecklistSubsection {
+	completed: boolean;
+	items: ChecklistItem[];
 }
 
 interface ChecklistSection {
@@ -41,6 +47,10 @@ interface ChecklistSection {
 	inspected?: boolean;
 	vehicleId?: string;
 	inspectionId?: string;
+	ownerType?: string;
+	// Vehicle subsections
+	documentos?: ChecklistSubsection;
+	verificaciones?: ChecklistSubsection;
 }
 
 interface Checklist {
@@ -98,6 +108,24 @@ export function AnalysisChecklistView({
 			onUpdate?.();
 		} catch (error) {
 			console.error("Error updating verification:", error);
+		}
+	};
+
+	const handleVehicleVerificationChange = async (
+		verificationType: string,
+		completed: boolean,
+	) => {
+		try {
+			// @ts-expect-error - TypeScript cache issue, endpoint exists
+			await client.updateAnalysisChecklistVehicleVerification({
+				opportunityId,
+				verificationType,
+				completed,
+			});
+			await refetch();
+			onUpdate?.();
+		} catch (error) {
+			console.error("Error updating vehicle verification:", error);
 		}
 	};
 
@@ -303,9 +331,7 @@ export function AnalysisChecklistView({
 							<div className="flex items-center justify-between">
 								<div className="flex items-center gap-2">
 									<Truck className="h-5 w-5" />
-									<CardTitle className="text-lg">
-										Inspección de Vehículo
-									</CardTitle>
+									<CardTitle className="text-lg">Vehículo</CardTitle>
 								</div>
 								<div className="flex items-center gap-2">
 									{checklist.sections.vehiculo.completed ? (
@@ -315,13 +341,13 @@ export function AnalysisChecklistView({
 									)}
 									<Badge
 										variant={
-											checklist.sections.vehiculo.inspected
+											checklist.sections.vehiculo.completed
 												? "default"
 												: "secondary"
 										}
 									>
-										{checklist.sections.vehiculo.inspected
-											? "Aprobada"
+										{checklist.sections.vehiculo.completed
+											? "Completo"
 											: "Pendiente"}
 									</Badge>
 								</div>
@@ -331,23 +357,143 @@ export function AnalysisChecklistView({
 					<CollapsibleContent>
 						<CardContent>
 							{checklist.sections.vehiculo.vehicleId ? (
-								<div className="space-y-2">
-									<p className="text-muted-foreground text-sm">
-										{checklist.sections.vehiculo.inspected
-											? "✅ El vehículo ha sido inspeccionado y aprobado"
-											: "⚠️ El vehículo está pendiente de inspección"}
-									</p>
-									{checklist.sections.vehiculo.inspectionId && (
-										<Button variant="outline" size="sm" asChild>
-											<a
-												href={`/crm/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
-												target="_blank"
-												rel="noopener noreferrer"
-											>
-												Ver inspección
-											</a>
-										</Button>
-									)}
+								<div className="space-y-4">
+									{/* Inspección */}
+									<div className="border-b pb-4">
+										<h4 className="mb-2 font-medium text-sm">Inspección</h4>
+										<div className="flex items-center gap-2">
+											{checklist.sections.vehiculo.inspected ? (
+												<CheckCircle2 className="h-4 w-4 text-green-600" />
+											) : (
+												<Circle className="h-4 w-4 text-muted-foreground" />
+											)}
+											<span className="text-muted-foreground text-sm">
+												{checklist.sections.vehiculo.inspected
+													? "✅ El vehículo ha sido inspeccionado y aprobado"
+													: "⚠️ El vehículo está pendiente de inspección"}
+											</span>
+										</div>
+										{checklist.sections.vehiculo.inspectionId && (
+											<Button variant="outline" size="sm" className="mt-2" asChild>
+												<a
+													href={`/crm/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
+													target="_blank"
+													rel="noopener noreferrer"
+												>
+													Ver inspección
+												</a>
+											</Button>
+										)}
+									</div>
+
+									{/* Documentos del Vehículo */}
+									{checklist.sections.vehiculo.documentos &&
+										checklist.sections.vehiculo.documentos.items.length > 0 && (
+											<div className="border-b pb-4">
+												<div className="mb-3 flex items-center justify-between">
+													<h4 className="font-medium text-sm">Documentos del Vehículo</h4>
+													<Badge variant="outline">
+														{checklist.sections.vehiculo.documentos.items.filter(
+															(i: any) => i.uploaded,
+														).length ?? 0}{" "}
+														/ {checklist.sections.vehiculo.documentos.items.length ?? 0}
+													</Badge>
+												</div>
+												<div className="space-y-2">
+													{checklist.sections.vehiculo.documentos.items.map(
+														(item: any, index: number) => (
+															<div
+																key={index}
+																className="flex items-center justify-between border-b py-2 last:border-0"
+															>
+																<div className="flex items-center gap-3">
+																	{item.uploaded ? (
+																		<CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600" />
+																	) : (
+																		<Circle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+																	)}
+																	<div>
+																		<p className="font-medium text-sm">
+																			{item.documentType
+																				.replace(/_/g, " ")
+																				.replace(/\b\w/g, (l: string) => l.toUpperCase())}
+																		</p>
+																		{item.required && (
+																			<span className="text-muted-foreground text-xs">
+																				Requerido
+																			</span>
+																		)}
+																	</div>
+																</div>
+																<Badge variant={item.uploaded ? "default" : "secondary"}>
+																	{item.uploaded ? "Subido" : "Pendiente"}
+																</Badge>
+															</div>
+														),
+													)}
+												</div>
+											</div>
+										)}
+
+									{/* Verificaciones del Vehículo */}
+									{checklist.sections.vehiculo.verificaciones &&
+										checklist.sections.vehiculo.verificaciones.items.length > 0 && (
+											<div>
+												<div className="mb-3 flex items-center justify-between">
+													<h4 className="font-medium text-sm">Verificaciones Externas</h4>
+													<Badge variant="outline">
+														{checklist.sections.vehiculo.verificaciones.items.filter(
+															(i: any) => i.required && i.completed,
+														).length ?? 0}{" "}
+														/{" "}
+														{checklist.sections.vehiculo.verificaciones.items.filter(
+															(i: any) => i.required,
+														).length ?? 0}
+													</Badge>
+												</div>
+												<div className="space-y-2">
+													{checklist.sections.vehiculo.verificaciones.items.map(
+														(item: any, index: number) => (
+															<div
+																key={index}
+																className="flex items-start gap-3 border-b py-2 last:border-0"
+															>
+																<Checkbox
+																	checked={item.completed}
+																	onCheckedChange={(checked) =>
+																		handleVehicleVerificationChange(
+																			item.type,
+																			checked as boolean,
+																		)
+																	}
+																	disabled={!item.required}
+																	className="mt-1"
+																/>
+																<div className="flex-1">
+																	<p className="font-medium text-sm">{item.name}</p>
+																	{item.required ? (
+																		<span className="text-muted-foreground text-xs">
+																			Requerido
+																		</span>
+																	) : (
+																		<span className="text-muted-foreground text-xs">
+																			Opcional
+																		</span>
+																	)}
+																	{item.verifiedBy && (
+																		<p className="mt-1 text-muted-foreground text-xs">
+																			Verificado{" "}
+																			{item.verifiedAt &&
+																				`el ${new Date(item.verifiedAt).toLocaleDateString()}`}
+																		</p>
+																	)}
+																</div>
+															</div>
+														),
+													)}
+												</div>
+											</div>
+										)}
 								</div>
 							) : (
 								<p className="text-muted-foreground text-sm">

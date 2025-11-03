@@ -3,15 +3,22 @@
  * Sincroniza casos de cobros del CRM con créditos morosos de cartera-back
  */
 
-import { eq, and, desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import { casosCobros, contratosFinanciamiento, estadoMoraEnum } from "../db/schema/cobros";
-import { leads } from "../db/schema/crm";
 import { user } from "../db/schema/auth";
-import { carteraBackReferences, carteraBackSyncLog } from "../db/schema/cartera-back";
+import {
+	carteraBackReferences,
+	carteraBackSyncLog,
+} from "../db/schema/cartera-back";
+import {
+	casosCobros,
+	contratosFinanciamiento,
+	type estadoMoraEnum,
+} from "../db/schema/cobros";
+import { leads } from "../db/schema/crm";
+import type { StatusCreditEnum } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
-import type { StatusCreditEnum } from "../types/cartera-back";
 
 type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
 
@@ -22,7 +29,10 @@ type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
 /**
  * Mapea el estado de cartera-back a estado de mora del CRM
  */
-function mapearEstadoMora(diasMora: number, statusCredit: StatusCreditEnum): EstadoMoraEnum {
+function mapearEstadoMora(
+	diasMora: number,
+	statusCredit: StatusCreditEnum,
+): EstadoMoraEnum {
 	// Si el crédito está cancelado o incobrable, usar esos estados
 	if (statusCredit === "CANCELADO") return "pagado";
 	if (statusCredit === "INCOBRABLE") return "incobrable";
@@ -39,9 +49,14 @@ function mapearEstadoMora(diasMora: number, statusCredit: StatusCreditEnum): Est
 /**
  * Determina si un crédito debe tener caso de cobros activo
  */
-function debeCrearCasoCobros(statusCredit: StatusCreditEnum, diasMora: number): boolean {
+function debeCrearCasoCobros(
+	statusCredit: StatusCreditEnum,
+	diasMora: number,
+): boolean {
 	// Solo crear casos para créditos activos o morosos con días de mora > 0
-	return (statusCredit === "ACTIVO" || statusCredit === "MOROSO") && diasMora > 0;
+	return (
+		(statusCredit === "ACTIVO" || statusCredit === "MOROSO") && diasMora > 0
+	);
 }
 
 // ============================================================================
@@ -73,7 +88,12 @@ async function asignarAgenteAutomatico(): Promise<string | null> {
 			const casos = await db
 				.select()
 				.from(casosCobros)
-				.where(and(eq(casosCobros.responsableCobros, usuario.id), eq(casosCobros.activo, true)));
+				.where(
+					and(
+						eq(casosCobros.responsableCobros, usuario.id),
+						eq(casosCobros.activo, true),
+					),
+				);
 
 			return {
 				userId: usuario.id,
@@ -159,23 +179,35 @@ export async function sincronizarCasosCobros(
 			perPage: 1000, // TODO: Implementar paginación
 		});
 
-		console.log(`[SyncCobros] Encontrados ${creditosResponse.data.length} créditos en cartera-back`);
+		console.log(
+			`[SyncCobros] Encontrados ${creditosResponse.data.length} créditos en cartera-back`,
+		);
 
 		// 2. Procesar cada crédito
 		for (const credito of creditosResponse.data) {
 			try {
 				// Obtener detalles completos del crédito
-				const creditoCompleto = await carteraBackClient.getCredito(credito.numero_credito_sifco);
+				const creditoCompleto = await carteraBackClient.getCredito(
+					credito.numero_credito_sifco,
+				);
 
 				// Calcular días de mora y estado
 				const diasMora = creditoCompleto.dias_mora || 0;
-				const estadoMora = mapearEstadoMora(diasMora, creditoCompleto.statusCredit);
+				const estadoMora = mapearEstadoMora(
+					diasMora,
+					creditoCompleto.statusCredit,
+				);
 
 				// Verificar si existe referencia en CRM
 				const reference = await db
 					.select()
 					.from(carteraBackReferences)
-					.where(eq(carteraBackReferences.numeroCreditoSifco, credito.numero_credito_sifco))
+					.where(
+						eq(
+							carteraBackReferences.numeroCreditoSifco,
+							credito.numero_credito_sifco,
+						),
+					)
 					.limit(1);
 
 				if (reference.length === 0) {
@@ -202,7 +234,9 @@ export async function sincronizarCasosCobros(
 					.limit(1);
 
 				if (contrato.length === 0) {
-					console.warn(`[SyncCobros] Contrato ${contratoId} no encontrado, saltando`);
+					console.warn(
+						`[SyncCobros] Contrato ${contratoId} no encontrado, saltando`,
+					);
 					continue;
 				}
 
@@ -217,10 +251,15 @@ export async function sincronizarCasosCobros(
 				const casoExistente = await db
 					.select()
 					.from(casosCobros)
-					.where(eq(casosCobros.numeroCreditoSifco, credito.numero_credito_sifco))
+					.where(
+						eq(casosCobros.numeroCreditoSifco, credito.numero_credito_sifco),
+					)
 					.limit(1);
 
-				const debeCrearCaso = debeCrearCasoCobros(creditoCompleto.statusCredit, diasMora);
+				const debeCrearCaso = debeCrearCasoCobros(
+					creditoCompleto.statusCredit,
+					diasMora,
+				);
 
 				if (casoExistente.length > 0) {
 					// ACTUALIZAR CASO EXISTENTE
@@ -241,7 +280,9 @@ export async function sincronizarCasosCobros(
 							.where(eq(casosCobros.id, caso.id));
 
 						result.casosActualizados++;
-						console.log(`[SyncCobros] ✓ Actualizado caso ${caso.id} - ${credito.numero_credito_sifco}`);
+						console.log(
+							`[SyncCobros] ✓ Actualizado caso ${caso.id} - ${credito.numero_credito_sifco}`,
+						);
 					} else {
 						// El crédito ya no está en mora → cerrar caso
 						if (caso.activo) {

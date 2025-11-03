@@ -31,12 +31,12 @@ interface ContractsListProps {
 export function ContractsList({ contracts, onUpdate }: ContractsListProps) {
 	if (contracts.length === 0) {
 		return (
-			<div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-gray-300 py-12 text-center">
+			<div className="flex flex-col items-center justify-center rounded-lg border border-gray-300 border-dashed py-12 text-center">
 				<FileX className="mb-3 h-12 w-12 text-gray-400" />
-				<h3 className="mb-1 text-lg font-semibold text-gray-900">
+				<h3 className="mb-1 font-semibold text-gray-900 text-lg">
 					No hay contratos
 				</h3>
-				<p className="text-sm text-gray-500">
+				<p className="text-gray-500 text-sm">
 					Los contratos registrados aparecerán aquí
 				</p>
 			</div>

@@ -3,9 +3,18 @@
  * Tables for linking CRM data with cartera-back financial system
  */
 
-import { boolean, decimal, integer, pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import {
+	boolean,
+	decimal,
+	integer,
+	pgTable,
+	text,
+	timestamp,
+	uuid,
+	varchar,
+} from "drizzle-orm/pg-core";
+import { casosCobros, contratosFinanciamiento } from "./cobros";
 import { opportunities } from "./crm";
-import { contratosFinanciamiento, casosCobros } from "./cobros";
 
 // ============================================================================
 // CARTERA-BACK REFERENCES
@@ -19,20 +28,31 @@ export const carteraBackReferences = pgTable("cartera_back_references", {
 	id: uuid("id").primaryKey().defaultRandom(),
 
 	// CRM references (optional - for historical tracking)
-	opportunityId: uuid("opportunity_id").references(() => opportunities.id, { onDelete: "set null" }),
-	contratoFinanciamientoId: uuid("contrato_financiamiento_id").references(() => contratosFinanciamiento.id, { onDelete: "set null" }),
+	opportunityId: uuid("opportunity_id").references(() => opportunities.id, {
+		onDelete: "set null",
+	}),
+	contratoFinanciamientoId: uuid("contrato_financiamiento_id").references(
+		() => contratosFinanciamiento.id,
+		{ onDelete: "set null" },
+	),
 
 	// Cartera-back references (required)
 	carteraCreditoId: integer("cartera_credito_id").notNull(), // credito_id from cartera-back
-	numeroCreditoSifco: varchar("numero_credito_sifco", { length: 40 }).notNull().unique(), // SIFCO external ID
+	numeroCreditoSifco: varchar("numero_credito_sifco", { length: 40 })
+		.notNull()
+		.unique(), // SIFCO external ID
 
 	// Sync metadata
-	syncedAt: timestamp("synced_at", { withTimezone: true }).defaultNow().notNull(),
+	syncedAt: timestamp("synced_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
 	lastSyncStatus: text("last_sync_status"), // "success", "error", "pending"
 	lastSyncError: text("last_sync_error"), // Error message if sync failed
 
 	// Audit
-	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
 	createdBy: text("created_by").notNull(), // user ID who created the link
 });
 
@@ -57,11 +77,15 @@ export const pagoReferences = pgTable("pago_references", {
 	fechaPago: timestamp("fecha_pago", { withTimezone: true }).notNull(),
 
 	// CRM references
-	casoCobroId: uuid("caso_cobro_id").references(() => casosCobros.id, { onDelete: "set null" }), // Optional link to collection case
+	casoCobroId: uuid("caso_cobro_id").references(() => casosCobros.id, {
+		onDelete: "set null",
+	}), // Optional link to collection case
 
 	// Registration metadata
 	registradoPor: text("registrado_por").notNull(), // user ID who registered payment
-	registradoEn: timestamp("registrado_en", { withTimezone: true }).defaultNow().notNull(),
+	registradoEn: timestamp("registrado_en", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
 
 	// Sync status
 	syncStatus: text("sync_status").default("synced").notNull(), // "synced", "pending", "error"
@@ -91,7 +115,9 @@ export const carteraBackSyncLog = pgTable("cartera_back_sync_log", {
 	responsePayload: text("response_payload"), // JSON string of response received
 
 	// Timing
-	startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(),
+	startedAt: timestamp("started_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
 	completedAt: timestamp("completed_at", { withTimezone: true }),
 	durationMs: integer("duration_ms"), // Duration in milliseconds
 
@@ -122,8 +148,12 @@ export const carteraBackFeatureFlags = pgTable("cartera_back_feature_flags", {
 	allowedRoles: text("allowed_roles"), // JSON array of roles
 
 	// Metadata
-	createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-	updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	createdAt: timestamp("created_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
+	updatedAt: timestamp("updated_at", { withTimezone: true })
+		.defaultNow()
+		.notNull(),
 	updatedBy: text("updated_by"), // user ID who last updated
 });
 
@@ -140,5 +170,7 @@ export type NewPagoReference = typeof pagoReferences.$inferInsert;
 export type CarteraBackSyncLog = typeof carteraBackSyncLog.$inferSelect;
 export type NewCarteraBackSyncLog = typeof carteraBackSyncLog.$inferInsert;
 
-export type CarteraBackFeatureFlag = typeof carteraBackFeatureFlags.$inferSelect;
-export type NewCarteraBackFeatureFlag = typeof carteraBackFeatureFlags.$inferInsert;
+export type CarteraBackFeatureFlag =
+	typeof carteraBackFeatureFlags.$inferSelect;
+export type NewCarteraBackFeatureFlag =
+	typeof carteraBackFeatureFlags.$inferInsert;

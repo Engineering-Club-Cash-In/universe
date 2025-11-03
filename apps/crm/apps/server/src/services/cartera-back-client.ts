@@ -10,23 +10,23 @@ import type {
 	CarteraBackError,
 	CarteraBackValidationError,
 	CarteraCredito,
+	CarteraInversionista,
+	CarteraPagoCredito,
+	CarteraUsuario,
 	CreateCreditoInput,
 	CreatePagoInput,
 	CreateUsuarioInput,
+	CreditActionInput,
 	CreditoConInversionistas,
 	GetAllCreditsParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
 	GetPaymentsParams,
 	InversionistaReporte,
-	PaginatedResponse,
-	CarteraPagoCredito,
-	CarteraUsuario,
-	CarteraInversionista,
-	ReversePagoInput,
 	LiquidatePagosInversionistasInput,
+	PaginatedResponse,
+	ReversePagoInput,
 	UpdateCreditoInput,
-	CreditActionInput,
 } from "../types/cartera-back";
 
 // ============================================================================
@@ -49,7 +49,9 @@ const DEFAULT_CONFIG: CarteraBackClientConfig = {
 	baseUrl: process.env.CARTERA_BACK_URL || "http://localhost:7000",
 	apiKey: process.env.CARTERA_BACK_API_KEY,
 	timeout: Number.parseInt(process.env.CARTERA_BACK_TIMEOUT || "30000"),
-	retryAttempts: Number.parseInt(process.env.CARTERA_BACK_RETRY_ATTEMPTS || "3"),
+	retryAttempts: Number.parseInt(
+		process.env.CARTERA_BACK_RETRY_ATTEMPTS || "3",
+	),
 	retryDelay: 1000,
 	circuitBreakerThreshold: 5,
 	circuitBreakerTimeout: 60000,
@@ -100,7 +102,9 @@ class CircuitBreaker {
 		this.lastFailureTime = Date.now();
 		if (this.failureCount >= this.threshold) {
 			this.state = "OPEN";
-			console.error(`[CarteraBack] Circuit breaker opened after ${this.failureCount} failures`);
+			console.error(
+				`[CarteraBack] Circuit breaker opened after ${this.failureCount} failures`,
+			);
 		}
 	}
 
@@ -200,7 +204,9 @@ export class CarteraBackClient {
 			...options,
 			headers: {
 				"Content-Type": "application/json",
-				...(this.config.apiKey && { Authorization: `Bearer ${this.config.apiKey}` }),
+				...(this.config.apiKey && {
+					Authorization: `Bearer ${this.config.apiKey}`,
+				}),
 				...options.headers,
 			},
 			signal: AbortSignal.timeout(this.config.timeout),
@@ -224,14 +230,20 @@ export class CarteraBackClient {
 						}
 
 						if (res.status === 401 || res.status === 403) {
-							throw new Error(`Authentication failed: ${errorData.error || errorData.message}`);
+							throw new Error(
+								`Authentication failed: ${errorData.error || errorData.message}`,
+							);
 						}
 
 						if (res.status === 400) {
-							throw new Error(`Validation failed: ${errorData.error || errorData.message}`);
+							throw new Error(
+								`Validation failed: ${errorData.error || errorData.message}`,
+							);
 						}
 
-						throw new Error(`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`);
+						throw new Error(
+							`HTTP ${res.status}: ${errorData.error || errorData.message || errorText}`,
+						);
 					}
 
 					return res;
@@ -260,7 +272,9 @@ export class CarteraBackClient {
 				// Wait before retry (exponential backoff)
 				if (attempt < this.config.retryAttempts) {
 					const delay = this.config.retryDelay * 2 ** attempt;
-					console.log(`[CarteraBack] Retry ${attempt + 1}/${this.config.retryAttempts} after ${delay}ms`);
+					console.log(
+						`[CarteraBack] Retry ${attempt + 1}/${this.config.retryAttempts} after ${delay}ms`,
+					);
 					await new Promise((resolve) => setTimeout(resolve, delay));
 				}
 			}
@@ -279,11 +293,18 @@ export class CarteraBackClient {
 			return new Error(error.message) as CarteraBackValidationError;
 		}
 
-		if (error.message.includes("Circuit breaker is OPEN") || error.name === "AbortError") {
-			return new Error(`Failed to connect to cartera-back: ${error.message}`) as CarteraBackConnectionError;
+		if (
+			error.message.includes("Circuit breaker is OPEN") ||
+			error.name === "AbortError"
+		) {
+			return new Error(
+				`Failed to connect to cartera-back: ${error.message}`,
+			) as CarteraBackConnectionError;
 		}
 
-		return new Error(`Cartera-back error: ${error.message}`) as CarteraBackError;
+		return new Error(
+			`Cartera-back error: ${error.message}`,
+		) as CarteraBackError;
 	}
 
 	// ========================================================================
@@ -311,16 +332,21 @@ export class CarteraBackClient {
 
 	async createUsuario(input: CreateUsuarioInput): Promise<CarteraUsuario> {
 		this.cache.invalidate("usuarios");
-		const response = await this.request<CarteraBackApiResponse<CarteraUsuario>>("/users", {
-			method: "POST",
-			body: JSON.stringify(input),
-		});
+		const response = await this.request<CarteraBackApiResponse<CarteraUsuario>>(
+			"/users",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
 		if (!response.data) throw new Error("No data returned from createUsuario");
 		return response.data;
 	}
 
 	async getUsuariosWithSifco(): Promise<CarteraUsuario[]> {
-		const response = await this.request<CarteraBackApiResponse<CarteraUsuario[]>>(
+		const response = await this.request<
+			CarteraBackApiResponse<CarteraUsuario[]>
+		>(
 			"/users-with-sifco",
 			{ method: "GET" },
 			true, // use cache
@@ -334,26 +360,34 @@ export class CarteraBackClient {
 
 	async createCredito(input: CreateCreditoInput): Promise<CarteraCredito> {
 		this.cache.invalidate("creditos");
-		const response = await this.request<CarteraBackApiResponse<CarteraCredito>>("/newCredit", {
-			method: "POST",
-			body: JSON.stringify(input),
-		});
+		const response = await this.request<CarteraBackApiResponse<CarteraCredito>>(
+			"/newCredit",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
 		if (!response.data) throw new Error("No data returned from createCredito");
 		return response.data;
 	}
 
 	async updateCredito(input: UpdateCreditoInput): Promise<CarteraCredito> {
 		this.cache.invalidate(`credito:${input.credito_id}`);
-		const response = await this.request<CarteraBackApiResponse<CarteraCredito>>("/updateCredit", {
-			method: "POST",
-			body: JSON.stringify(input),
-		});
+		const response = await this.request<CarteraBackApiResponse<CarteraCredito>>(
+			"/updateCredit",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
 		if (!response.data) throw new Error("No data returned from updateCredito");
 		return response.data;
 	}
 
 	async getCredito(numeroSifco: string): Promise<CreditoConInversionistas> {
-		const response = await this.request<CarteraBackApiResponse<CreditoConInversionistas>>(
+		const response = await this.request<
+			CarteraBackApiResponse<CreditoConInversionistas>
+		>(
 			`/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 			{ method: "GET" },
 			true, // use cache
@@ -362,18 +396,24 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
-	async getAllCreditos(params: GetAllCreditsParams): Promise<PaginatedResponse<CarteraCredito>> {
+	async getAllCreditos(
+		params: GetAllCreditsParams,
+	): Promise<PaginatedResponse<CarteraCredito>> {
 		const queryParams = new URLSearchParams({
 			mes: params.mes.toString(),
 			anio: params.anio.toString(),
 			...(params.estado && { estado: params.estado }),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.numero_credito_sifco && { numero_credito_sifco: params.numero_credito_sifco }),
+			...(params.numero_credito_sifco && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
 			excel: "false",
 		});
 
-		const response = await this.request<CarteraBackApiResponse<PaginatedResponse<CarteraCredito>>>(
+		const response = await this.request<
+			CarteraBackApiResponse<PaginatedResponse<CarteraCredito>>
+		>(
 			`/getAllCredits?${queryParams}`,
 			{ method: "GET" },
 			true, // use cache
@@ -383,15 +423,16 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
-	async creditAction(input: CreditActionInput): Promise<{ success: boolean; message: string }> {
+	async creditAction(
+		input: CreditActionInput,
+	): Promise<{ success: boolean; message: string }> {
 		this.cache.invalidate(`credito:${input.creditId}`);
-		const response = await this.request<CarteraBackApiResponse<{ success: boolean; message: string }>>(
-			"/creditAction",
-			{
-				method: "POST",
-				body: JSON.stringify(input),
-			},
-		);
+		const response = await this.request<
+			CarteraBackApiResponse<{ success: boolean; message: string }>
+		>("/creditAction", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response.data || { success: false, message: "No response" };
 	}
 
@@ -402,7 +443,9 @@ export class CarteraBackClient {
 	async createPago(input: CreatePagoInput): Promise<CarteraPagoCredito> {
 		this.cache.invalidate(`credito:${input.credito_numero_sifco}`);
 		this.cache.invalidate("pagos");
-		const response = await this.request<CarteraBackApiResponse<CarteraPagoCredito>>("/newPayment", {
+		const response = await this.request<
+			CarteraBackApiResponse<CarteraPagoCredito>
+		>("/newPayment", {
 			method: "POST",
 			body: JSON.stringify(input),
 		});
@@ -410,21 +453,24 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
-	async reversePago(input: ReversePagoInput): Promise<{ success: boolean; message: string }> {
+	async reversePago(
+		input: ReversePagoInput,
+	): Promise<{ success: boolean; message: string }> {
 		this.cache.invalidate(`credito:${input.credito_id}`);
 		this.cache.invalidate("pagos");
-		const response = await this.request<CarteraBackApiResponse<{ success: boolean; message: string }>>(
-			"/reversePayment",
-			{
-				method: "POST",
-				body: JSON.stringify(input),
-			},
-		);
+		const response = await this.request<
+			CarteraBackApiResponse<{ success: boolean; message: string }>
+		>("/reversePayment", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response.data || { success: false, message: "No response" };
 	}
 
 	async getPagosByCredito(numeroSifco: string): Promise<CarteraPagoCredito[]> {
-		const response = await this.request<CarteraBackApiResponse<CarteraPagoCredito[]>>(
+		const response = await this.request<
+			CarteraBackApiResponse<CarteraPagoCredito[]>
+		>(
 			`/paymentByCredit?numero_credito_sifco=${encodeURIComponent(numeroSifco)}&excel=false`,
 			{ method: "GET" },
 			true, // use cache
@@ -432,20 +478,22 @@ export class CarteraBackClient {
 		return response.data || [];
 	}
 
-	async getPayments(params: GetPaymentsParams): Promise<PaginatedResponse<CarteraPagoCredito>> {
+	async getPayments(
+		params: GetPaymentsParams,
+	): Promise<PaginatedResponse<CarteraPagoCredito>> {
 		const queryParams = new URLSearchParams({
 			mes: params.mes.toString(),
 			anio: params.anio.toString(),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.numero_credito_sifco && { numero_credito_sifco: params.numero_credito_sifco }),
+			...(params.numero_credito_sifco && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
 		});
 
-		const response = await this.request<CarteraBackApiResponse<PaginatedResponse<CarteraPagoCredito>>>(
-			`/payments?${queryParams}`,
-			{ method: "GET" },
-			true,
-		);
+		const response = await this.request<
+			CarteraBackApiResponse<PaginatedResponse<CarteraPagoCredito>>
+		>(`/payments?${queryParams}`, { method: "GET" }, true);
 
 		if (!response.data) throw new Error("No data returned from getPayments");
 		return response.data;
@@ -455,13 +503,12 @@ export class CarteraBackClient {
 		input: LiquidatePagosInversionistasInput,
 	): Promise<{ success: boolean; message: string }> {
 		this.cache.invalidate("inversionistas");
-		const response = await this.request<CarteraBackApiResponse<{ success: boolean; message: string }>>(
-			"/liquidate-pagos-inversionistas",
-			{
-				method: "POST",
-				body: JSON.stringify(input),
-			},
-		);
+		const response = await this.request<
+			CarteraBackApiResponse<{ success: boolean; message: string }>
+		>("/liquidate-pagos-inversionistas", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response.data || { success: false, message: "No response" };
 	}
 
@@ -469,38 +516,41 @@ export class CarteraBackClient {
 	// INVERSIONISTAS (INVESTORS)
 	// ========================================================================
 
-	async getInvestors(params: GetInvestorsParams = {}): Promise<PaginatedResponse<CarteraInversionista>> {
+	async getInvestors(
+		params: GetInvestorsParams = {},
+	): Promise<PaginatedResponse<CarteraInversionista>> {
 		const queryParams = new URLSearchParams({
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
 		});
 
-		const response = await this.request<CarteraBackApiResponse<PaginatedResponse<CarteraInversionista>>>(
-			`/investor?${queryParams}`,
-			{ method: "GET" },
-			true,
-		);
+		const response = await this.request<
+			CarteraBackApiResponse<PaginatedResponse<CarteraInversionista>>
+		>(`/investor?${queryParams}`, { method: "GET" }, true);
 
 		if (!response.data) throw new Error("No data returned from getInvestors");
 		return response.data;
 	}
 
-	async getInvestorReport(params: GetInvestorReportParams): Promise<InversionistaReporte> {
+	async getInvestorReport(
+		params: GetInvestorReportParams,
+	): Promise<InversionistaReporte> {
 		const queryParams = new URLSearchParams({
 			id: params.id.toString(),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.numeroCreditoSifco && { numeroCreditoSifco: params.numeroCreditoSifco }),
+			...(params.numeroCreditoSifco && {
+				numeroCreditoSifco: params.numeroCreditoSifco,
+			}),
 			...(params.nombreUsuario && { nombreUsuario: params.nombreUsuario }),
 		});
 
-		const response = await this.request<CarteraBackApiResponse<InversionistaReporte>>(
-			`/getInvestors?${queryParams}`,
-			{ method: "GET" },
-			true,
-		);
+		const response = await this.request<
+			CarteraBackApiResponse<InversionistaReporte>
+		>(`/getInvestors?${queryParams}`, { method: "GET" }, true);
 
-		if (!response.data) throw new Error("No data returned from getInvestorReport");
+		if (!response.data)
+			throw new Error("No data returned from getInvestorReport");
 		return response.data;
 	}
 

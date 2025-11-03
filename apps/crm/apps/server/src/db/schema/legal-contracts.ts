@@ -1,11 +1,11 @@
 import {
+	integer,
+	jsonb,
 	pgEnum,
 	pgTable,
 	text,
 	timestamp,
 	uuid,
-	integer,
-	jsonb,
 } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { leads, opportunities } from "./crm";

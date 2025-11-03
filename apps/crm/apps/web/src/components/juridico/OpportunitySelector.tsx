@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -69,7 +69,7 @@ export function OpportunitySelector({
 
 	if (isLoadingOpportunities) {
 		return (
-			<div className="flex items-center gap-2 text-sm text-muted-foreground">
+			<div className="flex items-center gap-2 text-muted-foreground text-sm">
 				<Loader2 className="h-4 w-4 animate-spin" />
 				Cargando oportunidades...
 			</div>
@@ -78,7 +78,7 @@ export function OpportunitySelector({
 
 	if (!opportunities || opportunities.length === 0) {
 		return (
-			<div className="text-sm text-muted-foreground">
+			<div className="text-muted-foreground text-sm">
 				No hay oportunidades para este lead
 			</div>
 		);

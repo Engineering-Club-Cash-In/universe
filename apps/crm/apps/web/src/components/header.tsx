@@ -19,8 +19,8 @@ import {
 	UserCircle,
 	Users,
 } from "lucide-react";
-import { PERMISSIONS } from "@/lib/roles";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 import { ModeToggle } from "./mode-toggle";

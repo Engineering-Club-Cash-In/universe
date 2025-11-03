@@ -88,7 +88,7 @@ export const FindYourIdealModel: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-44 ">
+    <section className="text-center w-full mt-44 overflow-x-hidden ">
       <div>
         <h2 className="text-header-2 mb-24">Encuentra tu modelo ideal</h2>
       </div>

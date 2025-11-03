@@ -20,12 +20,12 @@ export const HowItWorks: React.FC = () => {
   ];
 
   return (
-    <section className="text-center w-full mt-44 px-4">
+    <section className="text-center w-full mt-44 px-20">
       <div>
         <h2 className="text-header-2 mb-24">¿Cómo funciona?</h2>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-6">
+      <div className="flex flex-col md:flex-row gap-20">
         {items.map((item, index) => (
           <div
             key={index}

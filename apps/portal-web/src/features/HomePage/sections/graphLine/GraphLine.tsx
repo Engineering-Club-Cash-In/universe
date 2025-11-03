@@ -1,71 +1,35 @@
 import { Button } from "@components/ui";
 import { ResponsiveLine } from "@nivo/line";
-
-interface dataProps {
-  value: number;
-  yearsX: number;
-}
+import { useGraphLine } from "./hooks/useGraphLine";
 
 export const GraphLine = () => {
-  const dataBono: dataProps[] = [
-    { value: 100, yearsX: 0 },
-    { value: 120, yearsX: 1 },
-    { value: 150, yearsX: 2 },
-    { value: 180, yearsX: 3 },
-    { value: 220, yearsX: 4 },
-    { value: 270, yearsX: 5 },
-  ];
+  const { chartData, isLoading, isError } = useGraphLine();
 
-  const dataBanco: dataProps[] = [
-    { value: 100, yearsX: 0 },
-    { value: 110, yearsX: 1 },
-    { value: 115, yearsX: 2 },
-    { value: 120, yearsX: 3 },
-    { value: 125, yearsX: 4 },
-    { value: 130, yearsX: 5 },
-  ];
+  if (isLoading) {
+    return (
+      <section className="text-center w-full mt-36 px-12">
+        <div>
+          <h2 className="text-header-2 mb-2">¿Listo para invertir?</h2>
+        </div>
+        <div className="w-full h-[500px] bg-dark rounded-lg p-6 flex items-center justify-center">
+          <p className="text-white">Cargando datos...</p>
+        </div>
+      </section>
+    );
+  }
 
-  const dataSP: dataProps[] = [
-    { value: 100, yearsX: 0 },
-    { value: 130, yearsX: 1 },
-    { value: 160, yearsX: 2 },
-    { value: 200, yearsX: 3 },
-    { value: 250, yearsX: 4 },
-    { value: 300, yearsX: 5 },
-  ];
-
-  const dataCashin: dataProps[] = [
-    { value: 100, yearsX: 0 },
-    { value: 140, yearsX: 1 },
-    { value: 190, yearsX: 2 },
-    { value: 250, yearsX: 3 },
-    { value: 320, yearsX: 4 },
-    { value: 400, yearsX: 5 },
-  ];
-
-  // Transform data to Nivo format
-  const chartData = [
-    {
-      id: "Bonos Tesoro GT (7%)",
-      color: "#EF4444", // Anaranjado
-      data: dataBono.map((d) => ({ x: d.yearsX, y: d.value })),
-    },
-    {
-      id: "CD Banco (5.5%)",
-      color: "#FF8C42", // Rojo
-      data: dataBanco.map((d) => ({ x: d.yearsX, y: d.value })),
-    },
-    {
-      id: "S&P 500 (10.44%)",
-      color: "#3B82F6", // Azul
-      data: dataSP.map((d) => ({ x: d.yearsX, y: d.value })),
-    },
-    {
-      id: "Cashin (14.11%)",
-      color: "#10B981", // Verde
-      data: dataCashin.map((d) => ({ x: d.yearsX, y: d.value })),
-    },
-  ];
+  if (isError) {
+    return (
+      <section className="text-center w-full mt-36 px-12">
+        <div>
+          <h2 className="text-header-2 mb-2">¿Listo para invertir?</h2>
+        </div>
+        <div className="w-full h-[500px] bg-dark rounded-lg p-6 flex items-center justify-center">
+          <p className="text-red-500">Error al cargar los datos</p>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="text-center w-full mt-36 px-12">

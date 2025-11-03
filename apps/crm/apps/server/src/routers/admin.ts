@@ -27,6 +27,7 @@ export const adminRouter = {
 				name: user.name,
 				email: user.email,
 				role: user.role,
+				banned: user.banned,
 				emailVerified: user.emailVerified,
 				createdAt: user.createdAt,
 				updatedAt: user.updatedAt,
@@ -60,6 +61,35 @@ export const adminRouter = {
 
 			if (updatedUser.length === 0) {
 				throw new Error("User not found");
+			}
+
+			return updatedUser[0];
+		}),
+
+	toggleUserSuspension: adminProcedure
+		.input(
+			z.object({
+				userId: z.string(),
+				banned: z.boolean(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Prevent suspending own account
+			if (input.userId === context.session?.user?.id) {
+				throw new Error("No puedes suspender tu propia cuenta");
+			}
+
+			const updatedUser = await db
+				.update(user)
+				.set({
+					banned: input.banned,
+					updatedAt: new Date(),
+				})
+				.where(eq(user.id, input.userId))
+				.returning();
+
+			if (updatedUser.length === 0) {
+				throw new Error("Usuario no encontrado");
 			}
 
 			return updatedUser[0];

@@ -26,6 +26,7 @@ export const appRouter = {
 	adminOnlyData: adminRouter.getStats,
 	getAllUsers: adminRouter.getAllUsers,
 	updateUserRole: adminRouter.updateUserRole,
+	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
 

@@ -1,8 +1,8 @@
+import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { db } from "../db";
-import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { leads } from "../db/schema/crm";
-import { eq, desc } from "drizzle-orm";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { auth } from "../lib/auth";
 
 const app = new Hono();
@@ -19,19 +19,25 @@ app.post("/", async (c) => {
 		const session = await auth.api.getSession({ headers: c.req.raw.headers });
 
 		if (!session?.user) {
-			return c.json({
-				success: false,
-				error: "No autorizado - se requiere autenticación"
-			}, 401);
+			return c.json(
+				{
+					success: false,
+					error: "No autorizado - se requiere autenticación",
+				},
+				401,
+			);
 		}
 
 		// 2. Verificar que el usuario sea la cuenta de servicio
 		const serviceAccountEmail = "legaldocs@clubcashin.com";
 		if (session.user.email !== serviceAccountEmail) {
-			return c.json({
-				success: false,
-				error: "No autorizado - se requiere cuenta de servicio"
-			}, 403);
+			return c.json(
+				{
+					success: false,
+					error: "No autorizado - se requiere cuenta de servicio",
+				},
+				403,
+			);
 		}
 
 		// 3. Parsear body
@@ -43,15 +49,18 @@ app.post("/", async (c) => {
 			signingLinks,
 			templateId,
 			apiResponse,
-			opportunityId
+			opportunityId,
 		} = body;
 
 		// 4. Validar campos requeridos
 		if (!dpi || !contractType || !contractName) {
-			return c.json({
-				success: false,
-				error: "Faltan campos requeridos: dpi, contractType, contractName"
-			}, 400);
+			return c.json(
+				{
+					success: false,
+					error: "Faltan campos requeridos: dpi, contractType, contractName",
+				},
+				400,
+			);
 		}
 
 		// 5. Buscar lead por DPI (usar el más reciente si hay duplicados)
@@ -63,16 +72,20 @@ app.post("/", async (c) => {
 			.limit(1);
 
 		if (foundLeads.length === 0) {
-			return c.json({
-				success: false,
-				error: `No se encontró lead con DPI: ${dpi}`
-			}, 404);
+			return c.json(
+				{
+					success: false,
+					error: `No se encontró lead con DPI: ${dpi}`,
+				},
+				404,
+			);
 		}
 
 		const lead = foundLeads[0];
 
 		// 6. Extraer signing links del array
-		const [clientLink, representativeLink, ...additionalLinks] = signingLinks || [];
+		const [clientLink, representativeLink, ...additionalLinks] =
+			signingLinks || [];
 
 		// 7. Crear contrato en la base de datos
 		const [newContract] = await db
@@ -84,7 +97,8 @@ app.post("/", async (c) => {
 				contractName,
 				clientSigningLink: clientLink || null,
 				representativeSigningLink: representativeLink || null,
-				additionalSigningLinks: additionalLinks.length > 0 ? additionalLinks : null,
+				additionalSigningLinks:
+					additionalLinks.length > 0 ? additionalLinks : null,
 				templateId: templateId || null,
 				apiResponse: apiResponse || null,
 				status: "pending",
@@ -94,24 +108,30 @@ app.post("/", async (c) => {
 			.returning();
 
 		// 8. Retornar éxito
-		return c.json({
-			success: true,
-			data: {
-				contractId: newContract.id,
-				leadId: lead.id,
-				leadName: `${lead.firstName} ${lead.lastName}`,
-				contractType: newContract.contractType,
-				contractName: newContract.contractName,
-				status: newContract.status,
+		return c.json(
+			{
+				success: true,
+				data: {
+					contractId: newContract.id,
+					leadId: lead.id,
+					leadName: `${lead.firstName} ${lead.lastName}`,
+					contractType: newContract.contractType,
+					contractName: newContract.contractName,
+					status: newContract.status,
+				},
 			},
-		}, 201);
-
+			201,
+		);
 	} catch (error) {
 		console.error("[ERROR] /api/contracts/external:", error);
-		return c.json({
-			success: false,
-			error: error instanceof Error ? error.message : "Error interno del servidor"
-		}, 500);
+		return c.json(
+			{
+				success: false,
+				error:
+					error instanceof Error ? error.message : "Error interno del servidor",
+			},
+			500,
+		);
 	}
 });
 

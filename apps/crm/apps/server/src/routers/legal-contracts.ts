@@ -1,14 +1,14 @@
+import { ORPCError } from "@orpc/server";
 import { and, count, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import {
-	generatedLegalContracts,
-	contractStatusEnum,
-} from "../db/schema/legal-contracts";
 import { leads, opportunities } from "../db/schema/crm";
-import { juridicoProcedure, adminProcedure } from "../lib/orpc";
+import {
+	contractStatusEnum,
+	generatedLegalContracts,
+} from "../db/schema/legal-contracts";
+import { adminProcedure, juridicoProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
-import { ORPCError } from "@orpc/server";
 
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal

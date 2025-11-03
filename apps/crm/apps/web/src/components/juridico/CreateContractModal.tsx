@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Loader2, Plus, X } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -246,7 +246,7 @@ export function CreateContractModal({
 											key={index}
 											className="flex items-center gap-2 rounded-md border border-border bg-muted/50 p-2"
 										>
-											<p className="flex-1 truncate text-sm font-mono">
+											<p className="flex-1 truncate font-mono text-sm">
 												{link}
 											</p>
 											<Button

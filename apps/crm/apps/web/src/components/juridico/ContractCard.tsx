@@ -81,9 +81,7 @@ export function ContractCard({
 							<FileText className="h-5 w-5 text-amber-600" />
 						</div>
 						<div className="flex-1">
-							<CardTitle className="text-lg">
-								{contract.contractName}
-							</CardTitle>
+							<CardTitle className="text-lg">{contract.contractName}</CardTitle>
 							<CardDescription className="mt-1">
 								Generado el {formattedDate}
 							</CardDescription>
@@ -101,7 +99,7 @@ export function ContractCard({
 			<CardContent className="space-y-4 pt-6">
 				{/* Tipo de contrato */}
 				<div>
-					<p className="text-sm font-medium text-muted-foreground">
+					<p className="font-medium text-muted-foreground text-sm">
 						Tipo de contrato
 					</p>
 					<p className="mt-1 text-sm">{contract.contractType}</p>
@@ -109,7 +107,7 @@ export function ContractCard({
 
 				{/* Asignación de oportunidad */}
 				<div>
-					<p className="mb-2 text-sm font-medium text-muted-foreground">
+					<p className="mb-2 font-medium text-muted-foreground text-sm">
 						Oportunidad asignada
 					</p>
 					{canAssignLegal ? (
@@ -125,19 +123,19 @@ export function ContractCard({
 							{Number(opportunity.value || 0).toLocaleString()}
 						</div>
 					) : (
-						<div className="text-sm text-muted-foreground">Sin asignar</div>
+						<div className="text-muted-foreground text-sm">Sin asignar</div>
 					)}
 				</div>
 
 				{/* Links de documentos */}
 				<div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
-					<p className="text-sm font-medium">Enlaces de firma</p>
+					<p className="font-medium text-sm">Enlaces de firma</p>
 
 					{/* Link del cliente */}
 					{contract.clientSigningLink && (
-						<div className="space-y-2 rounded-md border-l-4 border-blue-500 bg-blue-50/50 p-3">
+						<div className="space-y-2 rounded-md border-blue-500 border-l-4 bg-blue-50/50 p-3">
 							<div className="flex items-center justify-between">
-								<p className="text-sm font-medium text-blue-900">
+								<p className="font-medium text-blue-900 text-sm">
 									👤 Link del Cliente
 								</p>
 								<div className="flex gap-2">
@@ -166,7 +164,7 @@ export function ContractCard({
 									</Button>
 								</div>
 							</div>
-							<p className="truncate text-xs font-mono text-blue-700">
+							<p className="truncate font-mono text-blue-700 text-xs">
 								{contract.clientSigningLink}
 							</p>
 						</div>
@@ -174,9 +172,9 @@ export function ContractCard({
 
 					{/* Link del representante */}
 					{contract.representativeSigningLink && (
-						<div className="space-y-2 rounded-md border-l-4 border-green-500 bg-green-50/50 p-3">
+						<div className="space-y-2 rounded-md border-green-500 border-l-4 bg-green-50/50 p-3">
 							<div className="flex items-center justify-between">
-								<p className="text-sm font-medium text-green-900">
+								<p className="font-medium text-green-900 text-sm">
 									🏢 Link del Representante
 								</p>
 								<div className="flex gap-2">
@@ -184,7 +182,9 @@ export function ContractCard({
 										size="sm"
 										variant="outline"
 										className="h-8"
-										onClick={() => openLink(contract.representativeSigningLink!)}
+										onClick={() =>
+											openLink(contract.representativeSigningLink!)
+										}
 									>
 										<ExternalLink className="mr-1 h-3 w-3" />
 										Abrir
@@ -205,7 +205,7 @@ export function ContractCard({
 									</Button>
 								</div>
 							</div>
-							<p className="truncate text-xs font-mono text-green-700">
+							<p className="truncate font-mono text-green-700 text-xs">
 								{contract.representativeSigningLink}
 							</p>
 						</div>
@@ -217,10 +217,10 @@ export function ContractCard({
 						contract.additionalSigningLinks.map((link, index) => (
 							<div
 								key={index}
-								className="space-y-2 rounded-md border-l-4 border-purple-500 bg-purple-50/50 p-3"
+								className="space-y-2 rounded-md border-purple-500 border-l-4 bg-purple-50/50 p-3"
 							>
 								<div className="flex items-center justify-between">
-									<p className="text-sm font-medium text-purple-900">
+									<p className="font-medium text-purple-900 text-sm">
 										👥 Link Adicional {index + 1}
 									</p>
 									<div className="flex gap-2">
@@ -246,7 +246,7 @@ export function ContractCard({
 										</Button>
 									</div>
 								</div>
-								<p className="truncate text-xs font-mono text-purple-700">
+								<p className="truncate font-mono text-purple-700 text-xs">
 									{link}
 								</p>
 							</div>

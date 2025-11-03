@@ -2,6 +2,7 @@ import { and, asc, count, desc, eq, gte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
+import { carteraBackReferences } from "../db/schema/cartera-back";
 import {
 	casosCobros,
 	contactosCobros,
@@ -15,15 +16,17 @@ import {
 } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { carteraBackReferences } from "../db/schema/cartera-back";
 import { adminProcedure, cobrosProcedure } from "../lib/orpc";
+import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
 	getCreditoReferenceByNumeroSifco,
 	isCarteraBackPaymentsEnabled,
 } from "../services/cartera-back-integration";
-import { carteraBackClient } from "../services/cartera-back-client";
-import { sincronizarCasosCobros, getUltimasSincronizaciones } from "../services/sync-casos-cobros";
+import {
+	getUltimasSincronizaciones,
+	sincronizarCasosCobros,
+} from "../services/sync-casos-cobros";
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
@@ -556,7 +559,10 @@ export const cobrosRouter = {
 				});
 
 				// Verificar que el contrato existe
-				console.log("🔍 Verificando existencia del contrato:", input.contratoId);
+				console.log(
+					"🔍 Verificando existencia del contrato:",
+					input.contratoId,
+				);
 				const contrato = await db
 					.select({
 						id: contratosFinanciamiento.id,
@@ -797,10 +803,14 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Verify the credit exists and user has access
-			const reference = await getCreditoReferenceByNumeroSifco(input.numeroSifco);
+			const reference = await getCreditoReferenceByNumeroSifco(
+				input.numeroSifco,
+			);
 
 			if (!reference) {
-				throw new Error(`Crédito ${input.numeroSifco} no encontrado en el sistema`);
+				throw new Error(
+					`Crédito ${input.numeroSifco} no encontrado en el sistema`,
+				);
 			}
 
 			// Register payment in cartera-back
@@ -835,11 +845,15 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				throw new Error("Integración de pagos con cartera-back no está habilitada");
+				throw new Error(
+					"Integración de pagos con cartera-back no está habilitada",
+				);
 			}
 
 			try {
-				const pagos = await carteraBackClient.getPagosByCredito(input.numeroSifco);
+				const pagos = await carteraBackClient.getPagosByCredito(
+					input.numeroSifco,
+				);
 
 				return {
 					numeroSifco: input.numeroSifco,
@@ -862,15 +876,17 @@ export const cobrosRouter = {
 						pagado: pago.pagado,
 						validationStatus: pago.validationStatus,
 						// Investor distribution
-						distribucionInversionistas: pago.pagos_inversionistas?.map((pi) => ({
-							inversionistaId: pi.inversionista_id,
-							inversionistaNombre: pi.inversionista?.nombre,
-							abonoCapital: pi.abono_capital,
-							abonoInteres: pi.abono_interes,
-							abonoIva: pi.abono_iva_12,
-							porcentajeParticipacion: pi.porcentaje_participacion,
-							estadoLiquidacion: pi.estado_liquidacion,
-						})),
+						distribucionInversionistas: pago.pagos_inversionistas?.map(
+							(pi) => ({
+								inversionistaId: pi.inversionista_id,
+								inversionistaNombre: pi.inversionista?.nombre,
+								abonoCapital: pi.abono_capital,
+								abonoInteres: pi.abono_interes,
+								abonoIva: pi.abono_iva_12,
+								porcentajeParticipacion: pi.porcentaje_participacion,
+								estadoLiquidacion: pi.estado_liquidacion,
+							}),
+						),
 					})),
 				};
 			} catch (error) {
@@ -1164,7 +1180,8 @@ export const cobrosRouter = {
 						credito.creditos_inversionistas?.map((ci) => ({
 							inversionistaId: ci.inversionista_id,
 							inversionistaNombre: ci.inversionista?.nombre,
-							porcentajeParticipacion: ci.porcentaje_participacion_inversionista,
+							porcentajeParticipacion:
+								ci.porcentaje_participacion_inversionista,
 							montoAportado: ci.monto_aportado,
 							cuotaInversionista: ci.cuota_inversionista,
 							porcentajeCashIn: ci.porcentaje_cash_in,

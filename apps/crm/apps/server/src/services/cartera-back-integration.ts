@@ -4,6 +4,15 @@
  */
 
 import { eq } from "drizzle-orm";
+import { db } from "../db";
+import {
+	carteraBackReferences,
+	carteraBackSyncLog,
+	type NewCarteraBackReference,
+	type NewCarteraBackSyncLog,
+	type NewPagoReference,
+	pagoReferences,
+} from "../db/schema";
 import type {
 	CarteraCredito,
 	CarteraPagoCredito,
@@ -11,15 +20,6 @@ import type {
 	CreatePagoInput,
 } from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
-import { db } from "../db";
-import {
-	carteraBackReferences,
-	carteraBackSyncLog,
-	type NewCarteraBackReference,
-	type NewCarteraBackSyncLog,
-	pagoReferences,
-	type NewPagoReference,
-} from "../db/schema";
 
 // ============================================================================
 // FEATURE FLAGS
@@ -149,7 +149,9 @@ export async function createCreditoInCarteraBack(
 	params: CreateCreditoParams,
 ): Promise<CreateCreditoResult> {
 	if (!isCarteraBackEnabled()) {
-		console.log("[CarteraBackSync] Integration disabled, skipping credit creation");
+		console.log(
+			"[CarteraBackSync] Integration disabled, skipping credit creation",
+		);
 		return { success: false, error: "Cartera-back integration is disabled" };
 	}
 
@@ -267,8 +269,13 @@ export async function createPagoInCarteraBack(
 	params: CreatePagoParams,
 ): Promise<CreatePagoResult> {
 	if (!isCarteraBackPaymentsEnabled()) {
-		console.log("[CarteraBackSync] Payments integration disabled, skipping payment creation");
-		return { success: false, error: "Cartera-back payments integration is disabled" };
+		console.log(
+			"[CarteraBackSync] Payments integration disabled, skipping payment creation",
+		);
+		return {
+			success: false,
+			error: "Cartera-back payments integration is disabled",
+		};
 	}
 
 	const startTime = Date.now();
@@ -354,7 +361,7 @@ export async function createPagoInCarteraBack(
 
 export async function getCreditoReferenceByOpportunityId(
 	opportunityId: string,
-): Promise<(typeof carteraBackReferences.$inferSelect) | null> {
+): Promise<typeof carteraBackReferences.$inferSelect | null> {
 	const result = await db
 		.select()
 		.from(carteraBackReferences)
@@ -366,7 +373,7 @@ export async function getCreditoReferenceByOpportunityId(
 
 export async function getCreditoReferenceByNumeroSifco(
 	numeroSifco: string,
-): Promise<(typeof carteraBackReferences.$inferSelect) | null> {
+): Promise<typeof carteraBackReferences.$inferSelect | null> {
 	const result = await db
 		.select()
 		.from(carteraBackReferences)
@@ -378,7 +385,7 @@ export async function getCreditoReferenceByNumeroSifco(
 
 export async function getPagoReference(
 	pagoId: number,
-): Promise<(typeof pagoReferences.$inferSelect) | null> {
+): Promise<typeof pagoReferences.$inferSelect | null> {
 	const result = await db
 		.select()
 		.from(pagoReferences)

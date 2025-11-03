@@ -7,15 +7,40 @@
 // ENUMS
 // ============================================================================
 
-export type StatusCreditEnum = "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
+export type StatusCreditEnum =
+	| "ACTIVO"
+	| "CANCELADO"
+	| "INCOBRABLE"
+	| "PENDIENTE_CANCELACION"
+	| "MOROSO";
 
-export type EstadoLiquidacionEnum = "NO_LIQUIDADO" | "POR_LIQUIDAR" | "LIQUIDADO";
+export type EstadoLiquidacionEnum =
+	| "NO_LIQUIDADO"
+	| "POR_LIQUIDAR"
+	| "LIQUIDADO";
 
 export type ValidationStatusEnum = "no_required" | "pending" | "validated";
 
-export type BancoEnum = "GyT" | "BAM" | "BI" | "BANRURAL" | "PROMERICA" | "BANTRAB" | "BAC" | "NEXA" | "INDUSTRIAL" | "INTERBANCO";
+export type BancoEnum =
+	| "GyT"
+	| "BAM"
+	| "BI"
+	| "BANRURAL"
+	| "PROMERICA"
+	| "BANTRAB"
+	| "BAC"
+	| "NEXA"
+	| "INDUSTRIAL"
+	| "INTERBANCO";
 
-export type TipoCuentaEnum = "AHORRO" | "AHORRO Q" | "AHORROS" | "AHORRO $" | "MONETARIA" | "MONETARIA Q" | "MONETARIA $";
+export type TipoCuentaEnum =
+	| "AHORRO"
+	| "AHORRO Q"
+	| "AHORROS"
+	| "AHORRO $"
+	| "MONETARIA"
+	| "MONETARIA Q"
+	| "MONETARIA $";
 
 // ============================================================================
 // USUARIOS (CLIENTES)
@@ -466,7 +491,10 @@ export class CarteraBackAuthError extends CarteraBackError {
 }
 
 export class CarteraBackValidationError extends CarteraBackError {
-	constructor(message: string, public validationErrors?: Record<string, string[]>) {
+	constructor(
+		message: string,
+		public validationErrors?: Record<string, string[]>,
+	) {
 		super(message, 400);
 		this.name = "CarteraBackValidationError";
 	}

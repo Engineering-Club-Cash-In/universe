@@ -87,7 +87,10 @@ export const PERMISSIONS = {
 
 	// Juridico Module Access
 	canAccessJuridico: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.JURIDICO || role === ROLES.SALES || role === ROLES.ANALYST,
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.SALES ||
+		role === ROLES.ANALYST,
 
 	canCreateLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,

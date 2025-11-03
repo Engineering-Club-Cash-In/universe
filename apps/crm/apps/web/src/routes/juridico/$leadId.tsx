@@ -1,7 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Plus, User } from "lucide-react";
 import { useState } from "react";
+import { ContractsList } from "@/components/juridico/ContractsList";
+import { CreateContractModal } from "@/components/juridico/CreateContractModal";
+import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -9,9 +12,6 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ContractsList } from "@/components/juridico/ContractsList";
-import { CreateContractModal } from "@/components/juridico/CreateContractModal";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { orpc } from "@/utils/orpc";
 
@@ -22,8 +22,11 @@ export const Route = createFileRoute("/juridico/$leadId")({
 function RouteComponent() {
 	const { leadId } = Route.useParams();
 	const navigate = Route.useNavigate();
-	const { canViewLegal, canCreateLegal, isLoading: isLoadingPermissions } =
-		useJuridicoPermissions();
+	const {
+		canViewLegal,
+		canCreateLegal,
+		isLoading: isLoadingPermissions,
+	} = useJuridicoPermissions();
 
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
@@ -59,7 +62,7 @@ function RouteComponent() {
 			<div className="space-y-4">
 				<Link
 					to="/juridico"
-					className="inline-flex items-center text-sm text-muted-foreground hover:text-foreground"
+					className="inline-flex items-center text-muted-foreground text-sm hover:text-foreground"
 				>
 					<ArrowLeft className="mr-2 h-4 w-4" />
 					Volver a Jurídico
@@ -71,7 +74,7 @@ function RouteComponent() {
 							<User className="h-6 w-6 text-blue-600" />
 						</div>
 						<div>
-							<h1 className="text-3xl font-bold">
+							<h1 className="font-bold text-3xl">
 								{leadInfo
 									? `${leadInfo.firstName} ${leadInfo.lastName}`
 									: "Cargando..."}
@@ -102,13 +105,13 @@ function RouteComponent() {
 					<CardContent>
 						<div className="grid gap-4 md:grid-cols-2">
 							<div>
-								<p className="text-sm font-medium text-muted-foreground">
+								<p className="font-medium text-muted-foreground text-sm">
 									Email
 								</p>
 								<p className="mt-1">{leadInfo.email || "No disponible"}</p>
 							</div>
 							<div>
-								<p className="text-sm font-medium text-muted-foreground">
+								<p className="font-medium text-muted-foreground text-sm">
 									Teléfono
 								</p>
 								<p className="mt-1">{leadInfo.phone || "No disponible"}</p>

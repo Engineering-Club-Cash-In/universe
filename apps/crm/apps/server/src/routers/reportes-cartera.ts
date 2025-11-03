@@ -6,8 +6,8 @@
 import { and, count, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { carteraBackReferences } from "../db/schema/cartera-back";
+import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
 import { clients } from "../db/schema/crm";
 import { adminProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
@@ -27,7 +27,9 @@ export const reportesCarteraRouter = {
 			z.object({
 				mes: z.number().min(1).max(12),
 				anio: z.number().min(2000).max(2100),
-				estado: z.enum(["ACTIVO", "MOROSO", "CANCELADO", "INCOBRABLE"]).optional(),
+				estado: z
+					.enum(["ACTIVO", "MOROSO", "CANCELADO", "INCOBRABLE"])
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context: _ }) => {
@@ -55,7 +57,12 @@ export const reportesCarteraRouter = {
 							const reference = await db
 								.select()
 								.from(carteraBackReferences)
-								.where(eq(carteraBackReferences.numeroCreditoSifco, credito.numero_credito_sifco))
+								.where(
+									eq(
+										carteraBackReferences.numeroCreditoSifco,
+										credito.numero_credito_sifco,
+									),
+								)
 								.limit(1);
 
 							if (reference.length === 0) {
@@ -96,7 +103,10 @@ export const reportesCarteraRouter = {
 							let ultimoContacto: Date | null = null;
 
 							if (casoCobros.length > 0) {
-								const contactos = await db.execute<{ total: number; ultimo: string | null }>(
+								const contactos = await db.execute<{
+									total: number;
+									ultimo: string | null;
+								}>(
 									sql`
 										SELECT COUNT(*) as total, MAX(fecha_contacto) as ultimo
 										FROM contactos_cobros
@@ -128,7 +138,9 @@ export const reportesCarteraRouter = {
 							// Verificar si tiene recuperación de vehículo
 							let tieneRecuperacion = false;
 							if (casoCobros.length > 0) {
-								const recuperacionesResult = await db.execute<{ total: number }>(
+								const recuperacionesResult = await db.execute<{
+									total: number;
+								}>(
 									sql`
 										SELECT COUNT(*) as total
 										FROM recuperaciones_vehiculo
@@ -136,7 +148,8 @@ export const reportesCarteraRouter = {
 										AND completada = false
 									`,
 								);
-								tieneRecuperacion = Number(recuperacionesResult.rows[0]?.total) > 0;
+								tieneRecuperacion =
+									Number(recuperacionesResult.rows[0]?.total) > 0;
 							}
 
 							// Obtener detalles completos desde cartera-back
@@ -173,8 +186,10 @@ export const reportesCarteraRouter = {
 								tieneConvenio,
 								tieneRecuperacion,
 								// Inversionistas
-								tieneInversionistas: (creditoCompleto.creditos_inversionistas?.length || 0) > 0,
-								numeroInversionistas: creditoCompleto.creditos_inversionistas?.length || 0,
+								tieneInversionistas:
+									(creditoCompleto.creditos_inversionistas?.length || 0) > 0,
+								numeroInversionistas:
+									creditoCompleto.creditos_inversionistas?.length || 0,
 							};
 						} catch (error) {
 							console.error(
@@ -197,7 +212,8 @@ export const reportesCarteraRouter = {
 						if ("error" in credito && credito.error) return acc;
 
 						const capital = Number.parseFloat(credito.capital) || 0;
-						const capitalRestante = Number.parseFloat(credito.capitalRestante ?? "0") || 0;
+						const capitalRestante =
+							Number.parseFloat(credito.capitalRestante ?? "0") || 0;
 						const montoMora = Number.parseFloat(credito.montoMora ?? "0") || 0;
 
 						acc.montoDesembolsado += capital;
@@ -208,7 +224,8 @@ export const reportesCarteraRouter = {
 						if (credito.statusCredit === "ACTIVO") acc.creditosActivos++;
 						if (credito.statusCredit === "MOROSO") acc.creditosMorosos++;
 						if (credito.statusCredit === "CANCELADO") acc.creditosCancelados++;
-						if (credito.statusCredit === "INCOBRABLE") acc.creditosIncobrables++;
+						if (credito.statusCredit === "INCOBRABLE")
+							acc.creditosIncobrables++;
 
 						if (credito.tieneConvenio) acc.creditosConConvenio++;
 						if (credito.tieneRecuperacion) acc.creditosConRecuperacion++;
@@ -231,15 +248,18 @@ export const reportesCarteraRouter = {
 
 				// Calcular métricas
 				const totalCreditos = creditosEnriquecidos.length;
-				const tasaMorosidad = totalCreditos > 0
-					? (totales.creditosMorosos / totalCreditos) * 100
-					: 0;
-				const tasaRecuperacion = totales.montoDesembolsado > 0
-					? (totales.montoRecuperado / totales.montoDesembolsado) * 100
-					: 0;
-				const tasaIncumplimiento = totales.montoDesembolsado > 0
-					? (totales.montoEnMora / totales.montoDesembolsado) * 100
-					: 0;
+				const tasaMorosidad =
+					totalCreditos > 0
+						? (totales.creditosMorosos / totalCreditos) * 100
+						: 0;
+				const tasaRecuperacion =
+					totales.montoDesembolsado > 0
+						? (totales.montoRecuperado / totales.montoDesembolsado) * 100
+						: 0;
+				const tasaIncumplimiento =
+					totales.montoDesembolsado > 0
+						? (totales.montoEnMora / totales.montoDesembolsado) * 100
+						: 0;
 
 				const duracion = Date.now() - startTime;
 
@@ -262,7 +282,11 @@ export const reportesCarteraRouter = {
 							totales.creditosMorosos > 0
 								? (
 										creditosEnriquecidos.reduce(
-											(acc, c) => acc + ("numeroContactos" in c && c.numeroContactos ? c.numeroContactos : 0),
+											(acc, c) =>
+												acc +
+												("numeroContactos" in c && c.numeroContactos
+													? c.numeroContactos
+													: 0),
 											0,
 										) / totales.creditosMorosos
 									).toFixed(1)
@@ -330,7 +354,10 @@ export const reportesCarteraRouter = {
 				totalRecuperaciones: Number(row.total_recuperaciones),
 				tasaCierre:
 					Number(row.total_casos) > 0
-						? ((Number(row.casos_cerrados) / Number(row.total_casos)) * 100).toFixed(2)
+						? (
+								(Number(row.casos_cerrados) / Number(row.total_casos)) *
+								100
+							).toFixed(2)
 						: "0",
 				promedioContactosPorCaso:
 					Number(row.total_casos) > 0
@@ -346,9 +373,18 @@ export const reportesCarteraRouter = {
 				agentes: agenteStats,
 				totales: {
 					totalCasos: agenteStats.reduce((acc, a) => acc + a.totalCasos, 0),
-					totalContactos: agenteStats.reduce((acc, a) => acc + a.totalContactos, 0),
-					totalConvenios: agenteStats.reduce((acc, a) => acc + a.totalConvenios, 0),
-					totalRecuperaciones: agenteStats.reduce((acc, a) => acc + a.totalRecuperaciones, 0),
+					totalContactos: agenteStats.reduce(
+						(acc, a) => acc + a.totalContactos,
+						0,
+					),
+					totalConvenios: agenteStats.reduce(
+						(acc, a) => acc + a.totalConvenios,
+						0,
+					),
+					totalRecuperaciones: agenteStats.reduce(
+						(acc, a) => acc + a.totalRecuperaciones,
+						0,
+					),
 				},
 			};
 		}),

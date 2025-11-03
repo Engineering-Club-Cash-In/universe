@@ -1,5 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
 import { FileText, Loader2, Scale, Search, User } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -21,8 +23,6 @@ import {
 } from "@/components/ui/table";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { orpc } from "@/utils/orpc";
-import { format } from "date-fns";
-import { es } from "date-fns/locale";
 
 export const Route = createFileRoute("/juridico/")({
 	component: RouteComponent,
@@ -64,7 +64,7 @@ function RouteComponent() {
 						<Scale className="h-6 w-6 text-amber-600" />
 					</div>
 					<div>
-						<h1 className="text-3xl font-bold">Jurídico</h1>
+						<h1 className="font-bold text-3xl">Jurídico</h1>
 						<p className="text-muted-foreground">
 							Gestión de contratos y documentos legales
 						</p>
@@ -76,16 +76,16 @@ function RouteComponent() {
 			<div className="grid gap-4 md:grid-cols-3">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
+						<CardTitle className="font-medium text-sm">
 							Total de Personas
 						</CardTitle>
 						<User className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">
+						<div className="font-bold text-2xl">
 							{leadsWithContracts?.length || 0}
 						</div>
-						<p className="text-xs text-muted-foreground">
+						<p className="text-muted-foreground text-xs">
 							Con contratos registrados
 						</p>
 					</CardContent>
@@ -93,31 +93,31 @@ function RouteComponent() {
 
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
+						<CardTitle className="font-medium text-sm">
 							Total de Contratos
 						</CardTitle>
 						<FileText className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">
+						<div className="font-bold text-2xl">
 							{leadsWithContracts?.reduce(
 								(sum, lead) => sum + lead.contractCount,
 								0,
 							) || 0}
 						</div>
-						<p className="text-xs text-muted-foreground">En el sistema</p>
+						<p className="text-muted-foreground text-xs">En el sistema</p>
 					</CardContent>
 				</Card>
 
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="text-sm font-medium">
+						<CardTitle className="font-medium text-sm">
 							Generación Reciente
 						</CardTitle>
 						<FileText className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="text-2xl font-bold">
+						<div className="font-bold text-2xl">
 							{leadsWithContracts?.filter((lead) => {
 								if (!lead.latestContractDate) return false;
 								const daysSince =
@@ -126,7 +126,7 @@ function RouteComponent() {
 								return daysSince <= 7;
 							}).length || 0}
 						</div>
-						<p className="text-xs text-muted-foreground">Últimos 7 días</p>
+						<p className="text-muted-foreground text-xs">Últimos 7 días</p>
 					</CardContent>
 				</Card>
 			</div>
@@ -141,7 +141,7 @@ function RouteComponent() {
 
 					{/* Barra de búsqueda */}
 					<div className="relative">
-						<Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+						<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 						<Input
 							placeholder="Buscar por nombre, DPI o email..."
 							value={searchQuery}
@@ -172,9 +172,7 @@ function RouteComponent() {
 									<TableRow
 										key={lead.id}
 										className="cursor-pointer hover:bg-muted/50"
-										onClick={() =>
-											navigate({ to: `/juridico/${lead.id}` })
-										}
+										onClick={() => navigate({ to: `/juridico/${lead.id}` })}
 									>
 										<TableCell className="font-medium">
 											{lead.firstName} {lead.lastName}
@@ -208,7 +206,7 @@ function RouteComponent() {
 													</div>
 												</div>
 											) : (
-												<span className="text-sm text-muted-foreground">
+												<span className="text-muted-foreground text-sm">
 													N/A
 												</span>
 											)}
@@ -217,7 +215,7 @@ function RouteComponent() {
 											<Link
 												to="/juridico/$leadId"
 												params={{ leadId: lead.id }}
-												className="text-sm font-medium text-primary hover:underline"
+												className="font-medium text-primary text-sm hover:underline"
 												onClick={(e) => e.stopPropagation()}
 											>
 												Ver detalles →
@@ -230,12 +228,12 @@ function RouteComponent() {
 					) : (
 						<div className="flex flex-col items-center justify-center py-12 text-center">
 							<FileText className="mb-3 h-12 w-12 text-gray-400" />
-							<h3 className="mb-1 text-lg font-semibold text-gray-900">
+							<h3 className="mb-1 font-semibold text-gray-900 text-lg">
 								{searchQuery
 									? "No se encontraron resultados"
 									: "No hay contratos registrados"}
 							</h3>
-							<p className="text-sm text-gray-500">
+							<p className="text-gray-500 text-sm">
 								{searchQuery
 									? "Intenta con otros términos de búsqueda"
 									: "Los contratos registrados aparecerán aquí"}

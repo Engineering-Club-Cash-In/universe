@@ -55,13 +55,15 @@ export const PERMISSIONS = {
 	canAccessWhatsApp: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.SALES,
 	canAccessJuridico: (role: string) =>
-		role === ROLES.ADMIN || role === ROLES.JURIDICO || role === ROLES.SALES || role === ROLES.ANALYST,
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.SALES ||
+		role === ROLES.ANALYST,
 	canCreateLegalContracts: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 	canAssignLegalContracts: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
-	canDeleteLegalContracts: (role: string) =>
-		role === ROLES.ADMIN,
+	canDeleteLegalContracts: (role: string) => role === ROLES.ADMIN,
 } as const;
 
 // Helper functions

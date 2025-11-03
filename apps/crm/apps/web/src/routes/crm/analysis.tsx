@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle, CheckCircle, FileText, XCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -67,12 +68,24 @@ function OpportunityActions({
 		enabled: !!opportunity.id,
 	});
 
-	const canApprove = validation.data?.canApprove ?? false;
-	const isLoading = validation.isLoading;
+	const checklist = useQuery({
+		queryKey: ["getAnalysisChecklist", opportunity.id],
+		queryFn: async () => {
+			return await client.getAnalysisChecklist({
+				opportunityId: opportunity.id,
+			});
+		},
+		enabled: !!opportunity.id,
+	});
+
+	const canApprove =
+		(validation.data?.canApprove ?? false) &&
+		((checklist.data as any)?.canApprove ?? false);
+	const isLoading = validation.isLoading || checklist.isLoading;
 
 	// Build tooltip message for why approve is disabled
 	const getDisabledReason = () => {
-		if (!validation.data) return "Cargando validación...";
+		if (!validation.data || !checklist.data) return "Cargando validación...";
 
 		const reasons: string[] = [];
 		if (!validation.data.vehicleInfo?.id) {
@@ -83,6 +96,13 @@ function OpportunityActions({
 		if (!validation.data.allDocumentsPresent) {
 			reasons.push(
 				`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`,
+			);
+		}
+
+		const checklistData = checklist.data as any;
+		if (checklistData && !checklistData.canApprove) {
+			reasons.push(
+				"Debe completar todas las verificaciones del checklist de análisis",
 			);
 		}
 
@@ -415,6 +435,10 @@ function AnalysisPage() {
 					<div className="w-full space-y-6 py-4">
 						{selectedOpportunityForDocs && (
 							<>
+								<AnalysisChecklistView
+									opportunityId={selectedOpportunityForDocs.id}
+									onUpdate={loadOpportunities}
+								/>
 								<DocumentValidationChecklist
 									opportunityId={selectedOpportunityForDocs.id}
 								/>

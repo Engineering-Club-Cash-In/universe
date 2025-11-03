@@ -14,7 +14,9 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import {
+	analysisChecklists,
 	documentRequirements,
+	documentRequirementsByClientType,
 	documentValidations,
 	opportunityDocuments,
 } from "../db/schema/documents";
@@ -26,7 +28,10 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
-import { createCreditoInCarteraBack, isCarteraBackEnabled } from "../services/cartera-back-integration";
+import {
+	createCreditoInCarteraBack,
+	isCarteraBackEnabled,
+} from "../services/cartera-back-integration";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -230,6 +235,9 @@ export const crmRouter = {
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				clientType: z
+					.enum(["individual", "comerciante", "empresa"])
+					.default("individual"),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
@@ -727,7 +735,9 @@ export const crmRouter = {
 
 						// Generate SIFCO credit number (unique identifier)
 						const timestamp = Date.now();
-						const randomSuffix = Math.floor(Math.random() * 1000).toString().padStart(3, "0");
+						const randomSuffix = Math.floor(Math.random() * 1000)
+							.toString()
+							.padStart(3, "0");
 						const numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 
 						// Integrate with cartera-back (dual-write)
@@ -747,7 +757,9 @@ export const crmRouter = {
 									usuario_id: usuarioId,
 									numero_credito_sifco: numeroSifco,
 									capital: Number.parseFloat(finalValue as string),
-									porcentaje_interes: Number.parseFloat(finalTasaInteres as string),
+									porcentaje_interes: Number.parseFloat(
+										finalTasaInteres as string,
+									),
 									plazo: finalNumeroCuotas as number,
 									cuota: Number.parseFloat(finalCuotaMensual as string),
 									tipoCredito: opp.creditType || "autocompra",
@@ -759,13 +771,21 @@ export const crmRouter = {
 								carteraBackError = creditoResult.error;
 
 								if (creditoResult.success) {
-									console.log(`[CRM] Credit synced to cartera-back: ${numeroSifco}`);
+									console.log(
+										`[CRM] Credit synced to cartera-back: ${numeroSifco}`,
+									);
 								} else {
-									console.error(`[CRM] Failed to sync credit to cartera-back: ${carteraBackError}`);
+									console.error(
+										`[CRM] Failed to sync credit to cartera-back: ${carteraBackError}`,
+									);
 								}
 							} catch (error) {
-								carteraBackError = error instanceof Error ? error.message : String(error);
-								console.error("[CRM] Error syncing to cartera-back:", carteraBackError);
+								carteraBackError =
+									error instanceof Error ? error.message : String(error);
+								console.error(
+									"[CRM] Error syncing to cartera-back:",
+									carteraBackError,
+								);
 							}
 						}
 
@@ -793,7 +813,9 @@ export const crmRouter = {
 
 							await db.insert(cuotasPago).values(cuotasValues);
 						} else {
-							console.log("[CRM] Skipping local cuotas generation - managed by cartera-back");
+							console.log(
+								"[CRM] Skipping local cuotas generation - managed by cartera-back",
+							);
 						}
 
 						// Update contract notes with sync status
@@ -1670,5 +1692,343 @@ export const crmRouter = {
 				console.error("[validateOpportunityDocuments] ERROR:", error);
 				throw error;
 			}
+		}),
+
+	// Get document requirements by client type
+	getDocumentRequirementsByClientType: crmProcedure
+		.input(
+			z.object({
+				clientType: z.enum(["individual", "comerciante", "empresa"]),
+				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const requirements = await db
+				.select()
+				.from(documentRequirementsByClientType)
+				.where(
+					and(
+						eq(documentRequirementsByClientType.clientType, input.clientType),
+						eq(documentRequirementsByClientType.creditType, input.creditType),
+					),
+				)
+				.orderBy(documentRequirementsByClientType.order);
+
+			return requirements;
+		}),
+
+	// Get analysis checklist for an opportunity
+	getAnalysisChecklist: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// Get opportunity with lead info
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					creditType: opportunities.creditType,
+					vehicleId: opportunities.vehicleId,
+					leadId: opportunities.leadId,
+					clientType: leads.clientType,
+				})
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Check if checklist already exists
+			const [existingChecklist] = await db
+				.select()
+				.from(analysisChecklists)
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (existingChecklist) {
+				return existingChecklist.checklistData;
+			}
+
+			// Get required documents for this client type
+			const requiredDocs = await db
+				.select()
+				.from(documentRequirementsByClientType)
+				.where(
+					and(
+						eq(
+							documentRequirementsByClientType.clientType,
+							opportunity.clientType || "individual",
+						),
+						eq(
+							documentRequirementsByClientType.creditType,
+							opportunity.creditType,
+						),
+					),
+				)
+				.orderBy(documentRequirementsByClientType.order);
+
+			// Get uploaded documents
+			const uploadedDocs = await db
+				.select()
+				.from(opportunityDocuments)
+				.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+
+			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+
+			// Check vehicle inspection
+			let vehicleInspected = false;
+			let inspectionId = null;
+			if (opportunity.vehicleId) {
+				const [inspection] = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+
+				if (inspection) {
+					vehicleInspected = true;
+					inspectionId = inspection.id;
+				}
+			}
+
+			// Check if credit analysis exists
+			let creditAnalysisExists = null;
+			if (opportunity.leadId) {
+				[creditAnalysisExists] = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, opportunity.leadId))
+					.limit(1);
+			}
+
+			// Create initial checklist structure
+			const checklistData = {
+				sections: {
+					documentos: {
+						completed:
+							requiredDocs.length > 0 &&
+							requiredDocs.every((doc) => uploadedTypes.has(doc.documentType)),
+						items: requiredDocs.map((doc) => ({
+							documentType: doc.documentType,
+							required: doc.required,
+							description: doc.description,
+							uploaded: uploadedTypes.has(doc.documentType),
+							documentId: uploadedDocs.find(
+								(ud) => ud.documentType === doc.documentType,
+							)?.id,
+						})),
+					},
+					verificaciones: {
+						completed: false,
+						items: [
+							{
+								name: "RTU - Validar que no sea PEP",
+								type: "rtu_pep",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "RTU - Confirmar empresa registrada",
+								type: "rtu_empresa",
+								required: opportunity.clientType !== "individual",
+								completed: false,
+							},
+							{
+								name: "Revisar cliente/empresa en internet y redes sociales",
+								type: "revision_internet",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Confirmación de referencias",
+								type: "confirmacion_referencias",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Confirmación de lugar de trabajo",
+								type: "confirmacion_trabajo",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Confirmación de negocio propio",
+								type: "confirmacion_negocio",
+								required: opportunity.clientType !== "individual",
+								completed: false,
+							},
+							{
+								name: "Análisis de capacidad de pago",
+								type: "capacidad_pago",
+								required: true,
+								completed: !!creditAnalysisExists,
+								analysisId: creditAnalysisExists?.id,
+							},
+							{
+								name: "Consulta Infornet",
+								type: "infornet",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Verificación de dirección domicilio",
+								type: "verificacion_direccion",
+								required: true,
+								completed: false,
+							},
+						],
+					},
+					vehiculo: {
+						completed: vehicleInspected,
+						vehicleId: opportunity.vehicleId,
+						inspected: vehicleInspected,
+						inspectionId,
+					},
+				},
+				overallProgress: 0,
+				canApprove: false,
+			};
+
+			// Calculate overall progress
+			const totalItems =
+				checklistData.sections.documentos.items.length +
+				checklistData.sections.verificaciones.items.filter((i) => i.required)
+					.length +
+				1; // +1 for vehicle
+			const completedItems =
+				checklistData.sections.documentos.items.filter((i) => i.uploaded)
+					.length +
+				checklistData.sections.verificaciones.items.filter(
+					(i) => i.required && i.completed,
+				).length +
+				(vehicleInspected ? 1 : 0);
+			checklistData.overallProgress = Math.round(
+				(completedItems / totalItems) * 100,
+			);
+
+			// Can approve if all sections are completed
+			checklistData.sections.verificaciones.completed =
+				checklistData.sections.verificaciones.items
+					.filter((i) => i.required)
+					.every((i) => i.completed);
+			checklistData.canApprove =
+				checklistData.sections.documentos.completed &&
+				checklistData.sections.verificaciones.completed &&
+				checklistData.sections.vehiculo.completed;
+
+			// Save initial checklist
+			await db.insert(analysisChecklists).values({
+				opportunityId: input.opportunityId,
+				checklistData,
+			});
+
+			return checklistData;
+		}),
+
+	// Update analysis checklist verification
+	updateAnalysisChecklistVerification: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				verificationType: z.string(),
+				completed: z.boolean(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get existing checklist
+			const [existing] = await db
+				.select()
+				.from(analysisChecklists)
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!existing) {
+				throw new Error("Checklist no encontrado");
+			}
+
+			const checklistData = existing.checklistData as any;
+
+			// Update the specific verification
+			const item = checklistData.sections.verificaciones.items.find(
+				(i: any) => i.type === input.verificationType,
+			);
+
+			if (item) {
+				item.completed = input.completed;
+				if (input.completed) {
+					item.verifiedBy = context.userId;
+					item.verifiedAt = new Date().toISOString();
+				} else {
+					delete item.verifiedBy;
+					delete item.verifiedAt;
+				}
+			}
+
+			// Recalculate completion status
+			checklistData.sections.verificaciones.completed =
+				checklistData.sections.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			// Recalculate overall progress
+			const [opportunity] = await db
+				.select({ vehicleId: opportunities.vehicleId })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			let vehicleInspected = false;
+			if (opportunity?.vehicleId) {
+				const [inspection] = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+				vehicleInspected = !!inspection;
+			}
+
+			const totalItems =
+				checklistData.sections.documentos.items.length +
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required,
+				).length +
+				1;
+			const completedItems =
+				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
+					.length +
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required && i.completed,
+				).length +
+				(vehicleInspected ? 1 : 0);
+			checklistData.overallProgress = Math.round(
+				(completedItems / totalItems) * 100,
+			);
+
+			checklistData.canApprove =
+				checklistData.sections.documentos.completed &&
+				checklistData.sections.verificaciones.completed &&
+				vehicleInspected;
+
+			// Update checklist
+			await db
+				.update(analysisChecklists)
+				.set({
+					checklistData,
+					updatedAt: new Date(),
+				})
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId));
+
+			return checklistData;
 		}),
 };

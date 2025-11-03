@@ -32,6 +32,13 @@ export const inspectionStatusEnum = pgEnum("inspection_status", [
 	"auction", // vehículo enviado a remate
 ]);
 
+// Vehicle owner type - determines document requirements
+export const vehicleOwnerTypeEnum = pgEnum("vehicle_owner_type", [
+	"individual", // Persona individual
+	"empresa_individual", // Empresa individual (comerciante)
+	"sociedad_anonima", // S.A, Ltda, etc.
+]);
+
 // Vehicle Vendors table - Sellers of vehicles
 export const vehicleVendors = pgTable("vehicle_vendors", {
 	id: uuid("id").defaultRandom().primaryKey(),
@@ -82,6 +89,11 @@ export const vehicles = pgTable("vehicles", {
 
 	// Status
 	status: vehicleStatusEnum("status").notNull().default("pending"),
+
+	// Owner type - determines document requirements for analysis
+	ownerType: vehicleOwnerTypeEnum("owner_type")
+		.notNull()
+		.default("individual"),
 
 	// Company relationship
 	companyId: uuid("company_id").references(() => companies.id),
@@ -202,6 +214,56 @@ export const inspectionChecklistItems = pgTable("inspection_checklist_items", {
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Vehicle Documents table - Documents specific to vehicles (registration, title, etc.)
+export const vehicleDocuments = pgTable("vehicle_documents", {
+	id: uuid("id").defaultRandom().primaryKey(),
+	vehicleId: uuid("vehicle_id")
+		.references(() => vehicles.id, { onDelete: "cascade" })
+		.notNull(),
+
+	// File information
+	filename: text("filename").notNull(), // Generated unique filename
+	originalName: text("original_name").notNull(), // Original filename from user
+	mimeType: text("mime_type").notNull(),
+	size: integer("size").notNull(), // File size in bytes
+
+	// Document classification - will reference documentType enum from documents.ts
+	documentType: text("document_type").notNull(),
+
+	// Storage location
+	filePath: text("file_path").notNull(), // Path in R2 storage
+
+	// Optional metadata
+	description: text("description"),
+
+	// Audit fields
+	uploadedBy: uuid("uploaded_by").notNull(), // User who uploaded
+	uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+});
+
+// Vehicle Document Requirements table - Defines which documents are required per owner type
+export const vehicleDocumentRequirements = pgTable(
+	"vehicle_document_requirements",
+	{
+		id: uuid("id").defaultRandom().primaryKey(),
+
+		// Owner type this requirement applies to
+		ownerType: vehicleOwnerTypeEnum("owner_type").notNull(),
+
+		// Document type required
+		documentType: text("document_type").notNull(),
+
+		// Whether this document is mandatory
+		required: boolean("required").notNull().default(true),
+
+		// Display order in UI
+		order: integer("order").notNull().default(0),
+
+		// Timestamps
+		createdAt: timestamp("created_at").defaultNow().notNull(),
+	},
+);
+
 // Relations
 export const vehicleVendorsRelations = relations(
 	vehicleVendors,
@@ -213,6 +275,7 @@ export const vehicleVendorsRelations = relations(
 export const vehiclesRelations = relations(vehicles, ({ many, one }) => ({
 	inspections: many(vehicleInspections),
 	photos: many(vehiclePhotos),
+	documents: many(vehicleDocuments),
 	company: one(companies, {
 		fields: [vehicles.companyId],
 		references: [companies.id],
@@ -256,6 +319,16 @@ export const inspectionChecklistItemsRelations = relations(
 	}),
 );
 
+export const vehicleDocumentsRelations = relations(
+	vehicleDocuments,
+	({ one }) => ({
+		vehicle: one(vehicles, {
+			fields: [vehicleDocuments.vehicleId],
+			references: [vehicles.id],
+		}),
+	}),
+);
+
 // Export types for TypeScript
 export type VehicleVendor = typeof vehicleVendors.$inferSelect;
 export type NewVehicleVendor = typeof vehicleVendors.$inferInsert;
@@ -273,3 +346,11 @@ export type InspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferSelect;
 export type NewInspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferInsert;
+
+export type VehicleDocument = typeof vehicleDocuments.$inferSelect;
+export type NewVehicleDocument = typeof vehicleDocuments.$inferInsert;
+
+export type VehicleDocumentRequirement =
+	typeof vehicleDocumentRequirements.$inferSelect;
+export type NewVehicleDocumentRequirement =
+	typeof vehicleDocumentRequirements.$inferInsert;

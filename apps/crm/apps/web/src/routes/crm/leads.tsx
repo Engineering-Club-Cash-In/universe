@@ -138,6 +138,7 @@ function RouteComponent() {
 			phone: "",
 			age: "",
 			dpi: "",
+			clientType: "individual" as "individual" | "comerciante" | "empresa",
 			maritalStatus: "single" as "single" | "married" | "divorced" | "widowed",
 			dependents: "0",
 			monthlyIncome: "",
@@ -201,6 +202,7 @@ function RouteComponent() {
 				loanAmount: value.loanAmount
 					? Number.parseFloat(value.loanAmount)
 					: undefined,
+				clientType: value.clientType,
 				maritalStatus: value.maritalStatus || undefined,
 				occupation: value.occupation || undefined,
 				workTime: value.workTime || undefined,
@@ -843,6 +845,44 @@ function RouteComponent() {
 											</div>
 										</div>
 										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createLeadForm.Field name="clientType">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Tipo de Cliente{" "}
+																<span className="text-red-500">*</span>
+															</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(
+																		value as
+																			| "individual"
+																			| "comerciante"
+																			| "empresa",
+																	)
+																}
+															>
+																<SelectTrigger id={field.name}>
+																	<SelectValue />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="individual">
+																		Cliente Individual
+																	</SelectItem>
+																	<SelectItem value="comerciante">
+																		Comerciante Individual
+																	</SelectItem>
+																	<SelectItem value="empresa">
+																		Empresa (S.A, Ltda, etc.)
+																	</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
 											<div>
 												<createLeadForm.Field name="maritalStatus">
 													{(field) => (

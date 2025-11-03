@@ -31,18 +31,18 @@ export const Testimonies = () => {
       </div>
 
       {/* Grid de testimonios */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-36 w-full justify-center items-center mt-16 px-24">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-36 w-full mt-16 px-28">
         {testimonies.map((testimony, index) => (
           <div
             key={index}
             className="relative overflow-hidden rounded-lg group cursor-pointer flex items-center justify-center"
           >
             {/* Imagen de fondo */}
-            <div className="aspect-4/5 relative">
+            <div className="aspect-4/5 relative w-full">
               <img
                 src={testimony.imageUrl}
                 alt={testimony.name}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover object-center"
               />
 
               {/* Overlay negro transparente con contenido */}

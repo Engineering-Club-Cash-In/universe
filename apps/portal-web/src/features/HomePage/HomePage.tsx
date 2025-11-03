@@ -5,6 +5,7 @@ import {
   FindYourIdealModel,
   Testimonies,
   Footer,
+  GraphLine
 } from "./sections";
 
 export const HomePage = () => {
@@ -21,10 +22,11 @@ export const HomePage = () => {
           className="absolute top-0 left-0 right-0 h-[200px] pointer-events-none z-40"
         />
       </div>
-      <div className="w-full mt-12 p-8 ">
+      <div className="w-full mt-10 p-8 ">
         <NavBar />
         <HowItWorks />
         <FindYourIdealModel />
+        <GraphLine />
         <Testimonies />
       </div>
       <Footer />

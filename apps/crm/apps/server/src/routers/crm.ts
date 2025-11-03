@@ -1,6 +1,11 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { vehicleInspections } from "@/db/schema";
+import {
+	vehicleDocumentRequirements,
+	vehicleDocuments,
+	vehicleInspections,
+	vehicles,
+} from "@/db/schema";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
@@ -1776,26 +1781,61 @@ export const crmRouter = {
 
 			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
 
-			// Check vehicle inspection
+			// Check vehicle inspection and get vehicle info
 			let vehicleInspected = false;
 			let inspectionId = null;
+			let vehicleOwnerType = null;
+			let vehicleData = null;
 			if (opportunity.vehicleId) {
-				const [inspection] = await db
+				// Get vehicle info including ownerType
+				const [vehicle] = await db
 					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
+					.from(vehicles)
+					.where(eq(vehicles.id, opportunity.vehicleId))
 					.limit(1);
 
-				if (inspection) {
-					vehicleInspected = true;
-					inspectionId = inspection.id;
+				if (vehicle) {
+					vehicleData = vehicle;
+					vehicleOwnerType = vehicle.ownerType;
+
+					// Check inspection
+					const [inspection] = await db
+						.select()
+						.from(vehicleInspections)
+						.where(
+							and(
+								eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+								eq(vehicleInspections.status, "approved"),
+							),
+						)
+						.limit(1);
+
+					if (inspection) {
+						vehicleInspected = true;
+						inspectionId = inspection.id;
+					}
 				}
 			}
+
+			// Get required vehicle documents based on ownerType
+			let requiredVehicleDocs: any[] = [];
+			let uploadedVehicleDocs: any[] = [];
+			if (opportunity.vehicleId && vehicleOwnerType) {
+				requiredVehicleDocs = await db
+					.select()
+					.from(vehicleDocumentRequirements)
+					.where(eq(vehicleDocumentRequirements.ownerType, vehicleOwnerType))
+					.orderBy(vehicleDocumentRequirements.order);
+
+				uploadedVehicleDocs = await db
+					.select()
+					.from(vehicleDocuments)
+					.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId));
+			}
+
+			const uploadedVehicleTypes = new Set(
+				uploadedVehicleDocs.map((d) => d.documentType),
+			);
 
 			// Check if credit analysis exists
 			let creditAnalysisExists = null;
@@ -1885,29 +1925,107 @@ export const crmRouter = {
 						],
 					},
 					vehiculo: {
-						completed: vehicleInspected,
+						completed: false, // Will be calculated below
 						vehicleId: opportunity.vehicleId,
+						ownerType: vehicleOwnerType,
 						inspected: vehicleInspected,
 						inspectionId,
+						// Vehicle documents subsection
+						documentos: {
+							completed:
+								requiredVehicleDocs.length > 0 &&
+								requiredVehicleDocs.every((doc) =>
+									uploadedVehicleTypes.has(doc.documentType),
+								),
+							items: requiredVehicleDocs.map((doc) => ({
+								documentType: doc.documentType,
+								required: doc.required,
+								uploaded: uploadedVehicleTypes.has(doc.documentType),
+								documentId: uploadedVehicleDocs.find(
+									(ud) => ud.documentType === doc.documentType,
+								)?.id,
+							})),
+						},
+						// Vehicle verifications subsection (manual checkboxes)
+						verificaciones: {
+							completed: false,
+							items: [
+								{
+									name: "Consulta WhatsApp con AutoEfectivo",
+									type: "whatsapp_autoefectivo",
+									required: true,
+									completed: false,
+								},
+								{
+									name: "Consulta WhatsApp con INREXA",
+									type: "whatsapp_inrexa",
+									required: true,
+									completed: false,
+								},
+								{
+									name: "Consulta SAT (Portal web)",
+									type: "consulta_sat_portal",
+									required: true,
+									completed: false,
+								},
+								{
+									name: "Consulta Garantías Mobiliarias (RGM)",
+									type: "consulta_rgm",
+									required: true,
+									completed: false,
+								},
+							],
+						},
 					},
 				},
 				overallProgress: 0,
 				canApprove: false,
 			};
 
+			// Calculate vehicle section completion
+			checklistData.sections.vehiculo.verificaciones.completed =
+				checklistData.sections.vehiculo.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			checklistData.sections.vehiculo.completed =
+				vehicleInspected &&
+				checklistData.sections.vehiculo.documentos.completed &&
+				checklistData.sections.vehiculo.verificaciones.completed;
+
 			// Calculate overall progress
 			const totalItems =
-				checklistData.sections.documentos.items.length +
+				checklistData.sections.documentos.items.length + // client docs
 				checklistData.sections.verificaciones.items.filter((i) => i.required)
-					.length +
-				1; // +1 for vehicle
+					.length + // client verifications
+				(opportunity.vehicleId ? 1 : 0) + // vehicle inspection
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.documentos.items.length
+					: 0) + // vehicle docs
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0); // vehicle verifications
+
 			const completedItems =
 				checklistData.sections.documentos.items.filter((i) => i.uploaded)
-					.length +
+					.length + // client docs uploaded
 				checklistData.sections.verificaciones.items.filter(
 					(i) => i.required && i.completed,
-				).length +
-				(vehicleInspected ? 1 : 0);
+				).length + // client verifications completed
+				(vehicleInspected ? 1 : 0) + // vehicle inspection
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.uploaded,
+						).length
+					: 0) + // vehicle docs uploaded
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required && i.completed,
+						).length
+					: 0); // vehicle verifications completed
+
 			checklistData.overallProgress = Math.round(
 				(completedItems / totalItems) * 100,
 			);
@@ -1917,10 +2035,11 @@ export const crmRouter = {
 				checklistData.sections.verificaciones.items
 					.filter((i) => i.required)
 					.every((i) => i.completed);
+
 			checklistData.canApprove =
 				checklistData.sections.documentos.completed &&
 				checklistData.sections.verificaciones.completed &&
-				checklistData.sections.vehiculo.completed;
+				(opportunity.vehicleId ? checklistData.sections.vehiculo.completed : true); // Only require vehicle section if there's a vehicle
 
 			// Save initial checklist
 			await db.insert(analysisChecklists).values({
@@ -1998,19 +2117,57 @@ export const crmRouter = {
 				vehicleInspected = !!inspection;
 			}
 
+			// Recalculate vehicle section if exists
+			if (opportunity?.vehicleId && checklistData.sections.vehiculo) {
+				// Recalculate vehicle verifications completion
+				if (checklistData.sections.vehiculo.verificaciones) {
+					checklistData.sections.vehiculo.verificaciones.completed =
+						checklistData.sections.vehiculo.verificaciones.items
+							.filter((i: any) => i.required)
+							.every((i: any) => i.completed);
+				}
+
+				// Recalculate vehicle section completion
+				checklistData.sections.vehiculo.completed =
+					vehicleInspected &&
+					(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+					(checklistData.sections.vehiculo.verificaciones?.completed ?? false);
+			}
+
 			const totalItems =
-				checklistData.sections.documentos.items.length +
-				checklistData.sections.verificaciones.items.filter(
-					(i: any) => i.required,
-				).length +
-				1;
+				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.verificaciones.items.filter((i: any) => i.required)
+					.length + // client verifications
+				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.length
+					: 0) + // vehicle docs
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0); // vehicle verifications
+
 			const completedItems =
 				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
-					.length +
+					.length + // client docs uploaded
 				checklistData.sections.verificaciones.items.filter(
 					(i: any) => i.required && i.completed,
-				).length +
-				(vehicleInspected ? 1 : 0);
+				).length + // client verifications completed
+				(vehicleInspected ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.uploaded,
+						).length
+					: 0) + // vehicle docs uploaded
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required && i.completed,
+						).length
+					: 0); // vehicle verifications completed
+
 			checklistData.overallProgress = Math.round(
 				(completedItems / totalItems) * 100,
 			);
@@ -2018,7 +2175,153 @@ export const crmRouter = {
 			checklistData.canApprove =
 				checklistData.sections.documentos.completed &&
 				checklistData.sections.verificaciones.completed &&
-				vehicleInspected;
+				(opportunity?.vehicleId
+					? checklistData.sections.vehiculo?.completed ?? false
+					: true);
+
+			// Update checklist
+			await db
+				.update(analysisChecklists)
+				.set({
+					checklistData,
+					updatedAt: new Date(),
+				})
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId));
+
+			return checklistData;
+		}),
+
+	// Update vehicle verification in analysis checklist
+	updateAnalysisChecklistVehicleVerification: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				verificationType: z.string(),
+				completed: z.boolean(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get existing checklist
+			const [existing] = await db
+				.select()
+				.from(analysisChecklists)
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!existing) {
+				throw new Error("Checklist no encontrado");
+			}
+
+			const checklistData = existing.checklistData as any;
+
+			// Verify vehicle section exists
+			if (!checklistData.sections.vehiculo?.verificaciones) {
+				throw new Error(
+					"La sección de verificaciones de vehículo no existe en este checklist",
+				);
+			}
+
+			// Update the specific vehicle verification
+			const item = checklistData.sections.vehiculo.verificaciones.items.find(
+				(i: any) => i.type === input.verificationType,
+			);
+
+			if (item) {
+				item.completed = input.completed;
+				if (input.completed) {
+					item.verifiedBy = context.userId;
+					item.verifiedAt = new Date().toISOString();
+				} else {
+					delete item.verifiedBy;
+					delete item.verifiedAt;
+				}
+			}
+
+			// Recalculate vehicle verifications completion
+			checklistData.sections.vehiculo.verificaciones.completed =
+				checklistData.sections.vehiculo.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			// Get opportunity and vehicle inspection status
+			const [opportunity] = await db
+				.select({ vehicleId: opportunities.vehicleId })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			let vehicleInspected = false;
+			if (opportunity?.vehicleId) {
+				const [inspection] = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+				vehicleInspected = !!inspection;
+			}
+
+			// Recalculate vehicle section completion
+			checklistData.sections.vehiculo.completed =
+				vehicleInspected &&
+				(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+				checklistData.sections.vehiculo.verificaciones.completed;
+
+			// Recalculate client verificaciones completion
+			checklistData.sections.verificaciones.completed =
+				checklistData.sections.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			// Recalculate overall progress
+			const totalItems =
+				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.verificaciones.items.filter((i: any) => i.required)
+					.length + // client verifications
+				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.length
+					: 0) + // vehicle docs
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0); // vehicle verifications
+
+			const completedItems =
+				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
+					.length + // client docs uploaded
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required && i.completed,
+				).length + // client verifications completed
+				(vehicleInspected ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.uploaded,
+						).length
+					: 0) + // vehicle docs uploaded
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required && i.completed,
+						).length
+					: 0); // vehicle verifications completed
+
+			checklistData.overallProgress = Math.round(
+				(completedItems / totalItems) * 100,
+			);
+
+			checklistData.canApprove =
+				checklistData.sections.documentos.completed &&
+				checklistData.sections.verificaciones.completed &&
+				(opportunity?.vehicleId
+					? checklistData.sections.vehiculo?.completed ?? false
+					: true);
 
 			// Update checklist
 			await db

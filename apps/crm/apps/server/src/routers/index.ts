@@ -54,6 +54,8 @@ export const appRouter = {
 	getAnalysisChecklist: crmRouter.getAnalysisChecklist,
 	updateAnalysisChecklistVerification:
 		crmRouter.updateAnalysisChecklistVerification,
+	updateAnalysisChecklistVehicleVerification:
+		crmRouter.updateAnalysisChecklistVehicleVerification,
 	getClients: crmRouter.getClients,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,

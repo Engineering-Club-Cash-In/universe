@@ -10,8 +10,8 @@ import { legalContractsRouter } from "./legal-contracts";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
-import * as reportsRouter from "./reports";
 import { reportesCarteraRouter } from "./reportes-cartera";
+import * as reportsRouter from "./reports";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
 export const appRouter = {
@@ -49,6 +49,11 @@ export const appRouter = {
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
 	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
 	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
+	getDocumentRequirementsByClientType:
+		crmRouter.getDocumentRequirementsByClientType,
+	getAnalysisChecklist: crmRouter.getAnalysisChecklist,
+	updateAnalysisChecklistVerification:
+		crmRouter.updateAnalysisChecklistVerification,
 	getClients: crmRouter.getClients,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,

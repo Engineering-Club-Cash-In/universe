@@ -1,6 +1,6 @@
 {
-	"id": "950829f9-d14e-49ed-ad64-5852c39fb15e",
-	"prevId": "8c493ee7-87e2-4e6d-abe6-7302aacb470c",
+	"id": "a3ce3f40-f941-40cc-91ab-09b768b8855e",
+	"prevId": "950829f9-d14e-49ed-ad64-5852c39fb15e",
 	"version": "7",
 	"dialect": "postgresql",
 	"tables": {
@@ -462,6 +462,383 @@
 			"checkConstraints": {},
 			"isRLSEnabled": false
 		},
+		"public.cartera_back_feature_flags": {
+			"name": "cartera_back_feature_flags",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"flag_name": {
+					"name": "flag_name",
+					"type": "varchar(100)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"enabled": {
+					"name": "enabled",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true,
+					"default": false
+				},
+				"description": {
+					"name": "description",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"rollout_percentage": {
+					"name": "rollout_percentage",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true,
+					"default": 0
+				},
+				"allowed_users": {
+					"name": "allowed_users",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"allowed_roles": {
+					"name": "allowed_roles",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_by": {
+					"name": "updated_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {
+				"cartera_back_feature_flags_flag_name_unique": {
+					"name": "cartera_back_feature_flags_flag_name_unique",
+					"nullsNotDistinct": false,
+					"columns": ["flag_name"]
+				}
+			},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.cartera_back_references": {
+			"name": "cartera_back_references",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"opportunity_id": {
+					"name": "opportunity_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"contrato_financiamiento_id": {
+					"name": "contrato_financiamiento_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"cartera_credito_id": {
+					"name": "cartera_credito_id",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"numero_credito_sifco": {
+					"name": "numero_credito_sifco",
+					"type": "varchar(40)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"synced_at": {
+					"name": "synced_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"last_sync_status": {
+					"name": "last_sync_status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"last_sync_error": {
+					"name": "last_sync_error",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"created_by": {
+					"name": "created_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"cartera_back_references_opportunity_id_opportunities_id_fk": {
+					"name": "cartera_back_references_opportunity_id_opportunities_id_fk",
+					"tableFrom": "cartera_back_references",
+					"tableTo": "opportunities",
+					"columnsFrom": ["opportunity_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				},
+				"cartera_back_references_contrato_financiamiento_id_contratos_financiamiento_id_fk": {
+					"name": "cartera_back_references_contrato_financiamiento_id_contratos_financiamiento_id_fk",
+					"tableFrom": "cartera_back_references",
+					"tableTo": "contratos_financiamiento",
+					"columnsFrom": ["contrato_financiamiento_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {
+				"cartera_back_references_numero_credito_sifco_unique": {
+					"name": "cartera_back_references_numero_credito_sifco_unique",
+					"nullsNotDistinct": false,
+					"columns": ["numero_credito_sifco"]
+				}
+			},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.cartera_back_sync_log": {
+			"name": "cartera_back_sync_log",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"operation": {
+					"name": "operation",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"entity_type": {
+					"name": "entity_type",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"entity_id": {
+					"name": "entity_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"status": {
+					"name": "status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"error_message": {
+					"name": "error_message",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"request_payload": {
+					"name": "request_payload",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"response_payload": {
+					"name": "response_payload",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"started_at": {
+					"name": "started_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"completed_at": {
+					"name": "completed_at",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"duration_ms": {
+					"name": "duration_ms",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"user_id": {
+					"name": "user_id",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"source": {
+					"name": "source",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'crm'"
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.pago_references": {
+			"name": "pago_references",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"cartera_pago_id": {
+					"name": "cartera_pago_id",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"numero_credito_sifco": {
+					"name": "numero_credito_sifco",
+					"type": "varchar(40)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"cuota_numero": {
+					"name": "cuota_numero",
+					"type": "integer",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"monto_boleta": {
+					"name": "monto_boleta",
+					"type": "numeric(12, 2)",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"fecha_pago": {
+					"name": "fecha_pago",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"caso_cobro_id": {
+					"name": "caso_cobro_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"registrado_por": {
+					"name": "registrado_por",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"registrado_en": {
+					"name": "registrado_en",
+					"type": "timestamp with time zone",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"sync_status": {
+					"name": "sync_status",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'synced'"
+				},
+				"sync_error": {
+					"name": "sync_error",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"pago_references_caso_cobro_id_casos_cobros_id_fk": {
+					"name": "pago_references_caso_cobro_id_casos_cobros_id_fk",
+					"tableFrom": "pago_references",
+					"tableTo": "casos_cobros",
+					"columnsFrom": ["caso_cobro_id"],
+					"columnsTo": ["id"],
+					"onDelete": "set null",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {
+				"pago_references_cartera_pago_id_unique": {
+					"name": "pago_references_cartera_pago_id_unique",
+					"nullsNotDistinct": false,
+					"columns": ["cartera_pago_id"]
+				}
+			},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
 		"public.casos_cobros": {
 			"name": "casos_cobros",
 			"schema": "",
@@ -478,6 +855,12 @@
 					"type": "uuid",
 					"primaryKey": false,
 					"notNull": true
+				},
+				"numero_credito_sifco": {
+					"name": "numero_credito_sifco",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
 				},
 				"estado_mora": {
 					"name": "estado_mora",
@@ -1843,6 +2226,14 @@
 					"primaryKey": false,
 					"notNull": false
 				},
+				"client_type": {
+					"name": "client_type",
+					"type": "client_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "'individual'"
+				},
 				"marital_status": {
 					"name": "marital_status",
 					"type": "marital_status",
@@ -2555,6 +2946,89 @@
 			"checkConstraints": {},
 			"isRLSEnabled": false
 		},
+		"public.analysis_checklists": {
+			"name": "analysis_checklists",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"opportunity_id": {
+					"name": "opportunity_id",
+					"type": "uuid",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"checklist_data": {
+					"name": "checklist_data",
+					"type": "jsonb",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"completed_by": {
+					"name": "completed_by",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"completed_at": {
+					"name": "completed_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"created_at": {
+					"name": "created_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				},
+				"updated_at": {
+					"name": "updated_at",
+					"type": "timestamp",
+					"primaryKey": false,
+					"notNull": true,
+					"default": "now()"
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {
+				"analysis_checklists_opportunity_id_opportunities_id_fk": {
+					"name": "analysis_checklists_opportunity_id_opportunities_id_fk",
+					"tableFrom": "analysis_checklists",
+					"tableTo": "opportunities",
+					"columnsFrom": ["opportunity_id"],
+					"columnsTo": ["id"],
+					"onDelete": "cascade",
+					"onUpdate": "no action"
+				},
+				"analysis_checklists_completed_by_user_id_fk": {
+					"name": "analysis_checklists_completed_by_user_id_fk",
+					"tableFrom": "analysis_checklists",
+					"tableTo": "user",
+					"columnsFrom": ["completed_by"],
+					"columnsTo": ["id"],
+					"onDelete": "no action",
+					"onUpdate": "no action"
+				}
+			},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {
+				"analysis_checklists_opportunity_id_unique": {
+					"name": "analysis_checklists_opportunity_id_unique",
+					"nullsNotDistinct": false,
+					"columns": ["opportunity_id"]
+				}
+			},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
 		"public.document_requirements": {
 			"name": "document_requirements",
 			"schema": "",
@@ -2590,6 +3064,66 @@
 				"description": {
 					"name": "description",
 					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				}
+			},
+			"indexes": {},
+			"foreignKeys": {},
+			"compositePrimaryKeys": {},
+			"uniqueConstraints": {},
+			"policies": {},
+			"checkConstraints": {},
+			"isRLSEnabled": false
+		},
+		"public.document_requirements_by_client_type": {
+			"name": "document_requirements_by_client_type",
+			"schema": "",
+			"columns": {
+				"id": {
+					"name": "id",
+					"type": "uuid",
+					"primaryKey": true,
+					"notNull": true,
+					"default": "gen_random_uuid()"
+				},
+				"client_type": {
+					"name": "client_type",
+					"type": "client_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"credit_type": {
+					"name": "credit_type",
+					"type": "credit_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"document_type": {
+					"name": "document_type",
+					"type": "document_type",
+					"typeSchema": "public",
+					"primaryKey": false,
+					"notNull": true
+				},
+				"required": {
+					"name": "required",
+					"type": "boolean",
+					"primaryKey": false,
+					"notNull": true,
+					"default": true
+				},
+				"description": {
+					"name": "description",
+					"type": "text",
+					"primaryKey": false,
+					"notNull": false
+				},
+				"order": {
+					"name": "order",
+					"type": "integer",
 					"primaryKey": false,
 					"notNull": false
 				}
@@ -4340,6 +4874,11 @@
 			"schema": "public",
 			"values": ["active", "inactive", "churned"]
 		},
+		"public.client_type": {
+			"name": "client_type",
+			"schema": "public",
+			"values": ["individual", "comerciante", "empresa"]
+		},
 		"public.credit_type": {
 			"name": "credit_type",
 			"schema": "public",
@@ -4392,14 +4931,39 @@
 			"name": "document_type",
 			"schema": "public",
 			"values": [
-				"identification",
-				"income_proof",
-				"bank_statement",
-				"business_license",
-				"property_deed",
-				"vehicle_title",
-				"credit_report",
-				"other"
+				"dpi",
+				"licencia",
+				"recibo_luz",
+				"recibo_adicional",
+				"formularios",
+				"estados_cuenta_1",
+				"estados_cuenta_2",
+				"estados_cuenta_3",
+				"patente_comercio",
+				"representacion_legal",
+				"constitucion_sociedad",
+				"patente_mercantil",
+				"iva_1",
+				"iva_2",
+				"iva_3",
+				"estado_financiero",
+				"clausula_consentimiento",
+				"minutas"
+			]
+		},
+		"public.verification_type": {
+			"name": "verification_type",
+			"schema": "public",
+			"values": [
+				"rtu_pep",
+				"rtu_empresa",
+				"revision_internet",
+				"confirmacion_referencias",
+				"confirmacion_trabajo",
+				"confirmacion_negocio",
+				"capacidad_pago",
+				"infornet",
+				"verificacion_direccion"
 			]
 		},
 		"public.contract_status": {

@@ -18,9 +18,13 @@ import {
 	opportunities,
 	salesStages,
 } from "./schema/crm";
-import { documentRequirements } from "./schema/documents";
+import {
+	documentRequirements,
+	documentRequirementsByClientType,
+} from "./schema/documents";
 import {
 	inspectionChecklistItems,
+	vehicleDocumentRequirements,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
@@ -193,6 +197,751 @@ async function seedDocumentRequirements() {
 		console.log("✅ Document requirements seeded successfully!");
 	} catch (error) {
 		console.error("❌ Error seeding document requirements:", error);
+	}
+}
+
+// Document requirements by client type - Matriz completa de requisitos
+const documentRequirementsByClientTypeData = [
+	// INDIVIDUAL - AUTOCOMPRA
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "dpi" as const,
+		required: true,
+		description: "DPI vigente",
+		order: 1,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "licencia" as const,
+		required: true,
+		description: "Licencia vigente",
+		order: 2,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "recibo_luz" as const,
+		required: true,
+		description: "Recibo de luz (no mayor a 2 meses)",
+		order: 3,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "recibo_adicional" as const,
+		required: true,
+		description: "Recibo adicional con misma dirección",
+		order: 4,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "formularios" as const,
+		required: true,
+		description: "Formularios completamente llenos",
+		order: 5,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_1" as const,
+		required: true,
+		description: "Estado de cuenta mes 1 (últimos 3 meses)",
+		order: 6,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_2" as const,
+		required: true,
+		description: "Estado de cuenta mes 2 (últimos 3 meses)",
+		order: 7,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_3" as const,
+		required: true,
+		description: "Estado de cuenta mes 3 (últimos 3 meses)",
+		order: 8,
+	},
+
+	// INDIVIDUAL - SOBRE VEHICULO
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "dpi" as const,
+		required: true,
+		description: "DPI vigente",
+		order: 1,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "licencia" as const,
+		required: true,
+		description: "Licencia vigente",
+		order: 2,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "recibo_luz" as const,
+		required: true,
+		description: "Recibo de luz (no mayor a 2 meses)",
+		order: 3,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "recibo_adicional" as const,
+		required: true,
+		description: "Recibo adicional con misma dirección",
+		order: 4,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "formularios" as const,
+		required: true,
+		description: "Formularios completamente llenos",
+		order: 5,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_1" as const,
+		required: true,
+		description: "Estado de cuenta mes 1 (últimos 3 meses)",
+		order: 6,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_2" as const,
+		required: true,
+		description: "Estado de cuenta mes 2 (últimos 3 meses)",
+		order: 7,
+	},
+	{
+		clientType: "individual" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_3" as const,
+		required: true,
+		description: "Estado de cuenta mes 3 (últimos 3 meses)",
+		order: 8,
+	},
+
+	// COMERCIANTE - AUTOCOMPRA
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "dpi" as const,
+		required: true,
+		description: "DPI vigente",
+		order: 1,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "licencia" as const,
+		required: true,
+		description: "Licencia vigente",
+		order: 2,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "recibo_luz" as const,
+		required: true,
+		description: "Recibo de luz (no mayor a 2 meses)",
+		order: 3,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "recibo_adicional" as const,
+		required: true,
+		description: "Recibo adicional con misma dirección",
+		order: 4,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "formularios" as const,
+		required: true,
+		description: "Formularios completamente llenos",
+		order: 5,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_1" as const,
+		required: true,
+		description: "Estado de cuenta mes 1 (últimos 3 meses)",
+		order: 6,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_2" as const,
+		required: true,
+		description: "Estado de cuenta mes 2 (últimos 3 meses)",
+		order: 7,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_3" as const,
+		required: true,
+		description: "Estado de cuenta mes 3 (últimos 3 meses)",
+		order: 8,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "autocompra" as const,
+		documentType: "patente_comercio" as const,
+		required: true,
+		description: "Patente de comercio",
+		order: 9,
+	},
+
+	// COMERCIANTE - SOBRE VEHICULO
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "dpi" as const,
+		required: true,
+		description: "DPI vigente",
+		order: 1,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "licencia" as const,
+		required: true,
+		description: "Licencia vigente",
+		order: 2,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "recibo_luz" as const,
+		required: true,
+		description: "Recibo de luz (no mayor a 2 meses)",
+		order: 3,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "recibo_adicional" as const,
+		required: true,
+		description: "Recibo adicional con misma dirección",
+		order: 4,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "formularios" as const,
+		required: true,
+		description: "Formularios completamente llenos",
+		order: 5,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_1" as const,
+		required: true,
+		description: "Estado de cuenta mes 1 (últimos 3 meses)",
+		order: 6,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_2" as const,
+		required: true,
+		description: "Estado de cuenta mes 2 (últimos 3 meses)",
+		order: 7,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_3" as const,
+		required: true,
+		description: "Estado de cuenta mes 3 (últimos 3 meses)",
+		order: 8,
+	},
+	{
+		clientType: "comerciante" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "patente_comercio" as const,
+		required: true,
+		description: "Patente de comercio",
+		order: 9,
+	},
+
+	// EMPRESA (S.A) - AUTOCOMPRA
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "dpi" as const,
+		required: true,
+		description: "DPI vigente del representante legal",
+		order: 1,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "licencia" as const,
+		required: true,
+		description: "Licencia vigente",
+		order: 2,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "recibo_luz" as const,
+		required: true,
+		description: "Recibo de luz (no mayor a 2 meses)",
+		order: 3,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "recibo_adicional" as const,
+		required: true,
+		description: "Recibo adicional con misma dirección",
+		order: 4,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "formularios" as const,
+		required: true,
+		description: "Formularios completamente llenos",
+		order: 5,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_1" as const,
+		required: true,
+		description: "Estado de cuenta mes 1 (últimos 3 meses)",
+		order: 6,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_2" as const,
+		required: true,
+		description: "Estado de cuenta mes 2 (últimos 3 meses)",
+		order: 7,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "estados_cuenta_3" as const,
+		required: true,
+		description: "Estado de cuenta mes 3 (últimos 3 meses)",
+		order: 8,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "representacion_legal" as const,
+		required: true,
+		description: "Representación Legal",
+		order: 9,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "constitucion_sociedad" as const,
+		required: true,
+		description: "Constitución de sociedad",
+		order: 10,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "patente_mercantil" as const,
+		required: true,
+		description: "Patente de comercio y mercantil",
+		order: 11,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "iva_1" as const,
+		required: true,
+		description: "Formulario IVA mes 1 (últimos 3 presentados)",
+		order: 12,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "iva_2" as const,
+		required: true,
+		description: "Formulario IVA mes 2 (últimos 3 presentados)",
+		order: 13,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "iva_3" as const,
+		required: true,
+		description: "Formulario IVA mes 3 (últimos 3 presentados)",
+		order: 14,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "estado_financiero" as const,
+		required: true,
+		description: "Estado financiero del último año",
+		order: 15,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "clausula_consentimiento" as const,
+		required: true,
+		description: "Cláusula de consentimiento de la empresa",
+		order: 16,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "autocompra" as const,
+		documentType: "minutas" as const,
+		required: true,
+		description: "Minutas (revisión por Jurídico)",
+		order: 17,
+	},
+
+	// EMPRESA (S.A) - SOBRE VEHICULO
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "dpi" as const,
+		required: true,
+		description: "DPI vigente del representante legal",
+		order: 1,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "licencia" as const,
+		required: true,
+		description: "Licencia vigente",
+		order: 2,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "recibo_luz" as const,
+		required: true,
+		description: "Recibo de luz (no mayor a 2 meses)",
+		order: 3,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "recibo_adicional" as const,
+		required: true,
+		description: "Recibo adicional con misma dirección",
+		order: 4,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "formularios" as const,
+		required: true,
+		description: "Formularios completamente llenos",
+		order: 5,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_1" as const,
+		required: true,
+		description: "Estado de cuenta mes 1 (últimos 3 meses)",
+		order: 6,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_2" as const,
+		required: true,
+		description: "Estado de cuenta mes 2 (últimos 3 meses)",
+		order: 7,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estados_cuenta_3" as const,
+		required: true,
+		description: "Estado de cuenta mes 3 (últimos 3 meses)",
+		order: 8,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "representacion_legal" as const,
+		required: true,
+		description: "Representación Legal",
+		order: 9,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "constitucion_sociedad" as const,
+		required: true,
+		description: "Constitución de sociedad",
+		order: 10,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "patente_mercantil" as const,
+		required: true,
+		description: "Patente de comercio y mercantil",
+		order: 11,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "iva_1" as const,
+		required: true,
+		description: "Formulario IVA mes 1 (últimos 3 presentados)",
+		order: 12,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "iva_2" as const,
+		required: true,
+		description: "Formulario IVA mes 2 (últimos 3 presentados)",
+		order: 13,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "iva_3" as const,
+		required: true,
+		description: "Formulario IVA mes 3 (últimos 3 presentados)",
+		order: 14,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "estado_financiero" as const,
+		required: true,
+		description: "Estado financiero del último año",
+		order: 15,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "clausula_consentimiento" as const,
+		required: true,
+		description: "Cláusula de consentimiento de la empresa",
+		order: 16,
+	},
+	{
+		clientType: "empresa" as const,
+		creditType: "sobre_vehiculo" as const,
+		documentType: "minutas" as const,
+		required: true,
+		description: "Minutas (revisión por Jurídico)",
+		order: 17,
+	},
+];
+
+// Vehicle Document Requirements Data - Documentos requeridos por tipo de propiedad del vehículo
+const vehicleDocumentRequirementsData = [
+	// INDIVIDUAL - Persona individual
+	{
+		ownerType: "individual" as const,
+		documentType: "tarjeta_circulacion" as const,
+		required: true,
+		order: 1,
+	},
+	{
+		ownerType: "individual" as const,
+		documentType: "titulo_propiedad" as const,
+		required: true,
+		order: 2,
+	},
+	{
+		ownerType: "individual" as const,
+		documentType: "dpi_dueno" as const,
+		required: true,
+		order: 3,
+	},
+	{
+		ownerType: "individual" as const,
+		documentType: "pago_impuesto_circulacion" as const,
+		required: true,
+		order: 4,
+	},
+	{
+		ownerType: "individual" as const,
+		documentType: "consulta_sat" as const,
+		required: true,
+		order: 5,
+	},
+	{
+		ownerType: "individual" as const,
+		documentType: "consulta_garantias_mobiliarias" as const,
+		required: true,
+		order: 6,
+	},
+
+	// EMPRESA INDIVIDUAL - Comerciante
+	{
+		ownerType: "empresa_individual" as const,
+		documentType: "tarjeta_circulacion" as const,
+		required: true,
+		order: 1,
+	},
+	{
+		ownerType: "empresa_individual" as const,
+		documentType: "titulo_propiedad" as const,
+		required: true,
+		order: 2,
+	},
+	{
+		ownerType: "empresa_individual" as const,
+		documentType: "patente_comercio_vehiculo" as const,
+		required: true,
+		order: 3,
+	},
+	{
+		ownerType: "empresa_individual" as const,
+		documentType: "pago_impuesto_circulacion" as const,
+		required: true,
+		order: 4,
+	},
+	{
+		ownerType: "empresa_individual" as const,
+		documentType: "consulta_sat" as const,
+		required: true,
+		order: 5,
+	},
+	{
+		ownerType: "empresa_individual" as const,
+		documentType: "consulta_garantias_mobiliarias" as const,
+		required: true,
+		order: 6,
+	},
+
+	// SOCIEDAD ANONIMA - S.A, Ltda, etc.
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "tarjeta_circulacion" as const,
+		required: true,
+		order: 1,
+	},
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "titulo_propiedad" as const,
+		required: true,
+		order: 2,
+	},
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "representacion_legal_vehiculo" as const,
+		required: true,
+		order: 3,
+	},
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "dpi_representante_legal_vehiculo" as const,
+		required: true,
+		order: 4,
+	},
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "pago_impuesto_circulacion" as const,
+		required: true,
+		order: 5,
+	},
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "consulta_sat" as const,
+		required: true,
+		order: 6,
+	},
+	{
+		ownerType: "sociedad_anonima" as const,
+		documentType: "consulta_garantias_mobiliarias" as const,
+		required: true,
+		order: 7,
+	},
+];
+
+async function seedDocumentRequirementsByClientType() {
+	console.log("Seeding document requirements by client type...");
+
+	try {
+		// Check if requirements already exist
+		const existingRequirements = await db
+			.select()
+			.from(documentRequirementsByClientType);
+
+		if (existingRequirements.length > 0) {
+			console.log(
+				"Document requirements by client type already exist, skipping seed...",
+			);
+			return;
+		}
+
+		// Insert the document requirements
+		await db
+			.insert(documentRequirementsByClientType)
+			.values(documentRequirementsByClientTypeData);
+
+		console.log("✅ Document requirements by client type seeded successfully!");
+		console.log(
+			`   - ${documentRequirementsByClientTypeData.length} requirements created`,
+		);
+	} catch (error) {
+		console.error(
+			"❌ Error seeding document requirements by client type:",
+			error,
+		);
+	}
+}
+
+async function seedVehicleDocumentRequirements() {
+	console.log("Seeding vehicle document requirements...");
+
+	try {
+		// Check if requirements already exist
+		const existingRequirements = await db
+			.select()
+			.from(vehicleDocumentRequirements);
+
+		if (existingRequirements.length > 0) {
+			console.log(
+				"Vehicle document requirements already exist, skipping seed...",
+			);
+			return;
+		}
+
+		// Insert the vehicle document requirements
+		await db
+			.insert(vehicleDocumentRequirements)
+			.values(vehicleDocumentRequirementsData);
+
+		console.log("✅ Vehicle document requirements seeded successfully!");
+		console.log(
+			`   - ${vehicleDocumentRequirementsData.length} requirements created`,
+		);
+	} catch (error) {
+		console.error("❌ Error seeding vehicle document requirements:", error);
 	}
 }
 
@@ -2256,6 +3005,8 @@ async function main() {
 	await seedSalesStages();
 	const stagesList = await db.select().from(salesStages);
 	await seedDocumentRequirements();
+	await seedDocumentRequirementsByClientType();
+	await seedVehicleDocumentRequirements();
 
 	const companiesList = await seedCompanies(usersList);
 	const leadsList = await seedLeads(usersList, companiesList);

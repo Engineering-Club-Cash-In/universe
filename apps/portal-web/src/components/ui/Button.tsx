@@ -5,6 +5,7 @@ interface ButtonProps {
   children: string;
   size?: "lg" | "md" | "sm";
   onClick?: () => void;
+  type?: "button" | "submit" | "reset";
   className?: string;
 }
 
@@ -12,6 +13,7 @@ export const Button: React.FC<ButtonProps> = ({
   children,
   size = "lg",
   onClick,
+  type = "button",
   className = "",
 }) => {
   const sizeClasses = {
@@ -37,11 +39,12 @@ export const Button: React.FC<ButtonProps> = ({
         ${sizeClasses[size]}
         flex items-center justify-center
         border border-white/65 rounded-full bg-transparent
-        font-semibold text-inherit cursor-pointer
-        hover:border-0 hover:bg-[rgba(15,15,15,1)]
-        active:border-0 active:bg-[rgba(15,15,15,1)]
+        font-semibold text-[rgba(255,255,255,0.65)] cursor-pointer
+        hover:border-0 hover:bg-[rgba(15,15,15,1)] hover:text-white
+        active:border-0 active:bg-[rgba(15,15,15,1)] active:text-white
         ${className}
       `}
+      type={type}
     >
       {children}
     </motion.button>

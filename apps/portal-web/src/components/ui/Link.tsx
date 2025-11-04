@@ -8,6 +8,7 @@ interface LinkProps {
   external?: boolean;
   ariaLabel?: string;
   onClick?: () => void;
+  underline?: boolean;
 }
 
 export const Link: React.FC<LinkProps> = ({
@@ -17,8 +18,9 @@ export const Link: React.FC<LinkProps> = ({
   external = false,
   ariaLabel,
   onClick,
+  underline = false,
 }) => {
-  const baseClasses = "hover:text-primary transition-color";
+  const baseClasses = "hover:text-primary transition-color" + (underline ? " underline" : "");
   const combinedClasses = `${baseClasses} ${className}`.trim();
 
   // Check if link is external

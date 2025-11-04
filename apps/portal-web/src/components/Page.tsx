@@ -11,9 +11,8 @@ export const Page: FC<PageProps> = ({ children, url = "/Layer_1.svg" }) => {
       className="flex flex-col gap-4 bg-dark text-light min-h-screen"
       style={{
         backgroundImage: `url(${url})`,
-        backgroundSize: "cover",
+         backgroundSize: "100% auto",
         backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
       }}
     >
       {children}

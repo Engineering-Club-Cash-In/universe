@@ -13,10 +13,20 @@ export interface LoginCredentials {
   rememberMe?: boolean;
 }
 
+export interface RegisterCredentials {
+  fullName: string;
+  phone: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  acceptTerms: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
   name?: string;
+  phone?: string;
 }
 
 export interface AuthResponse {

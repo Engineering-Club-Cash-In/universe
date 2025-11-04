@@ -1,4 +1,4 @@
-import type { LoginCredentials, AuthResponse } from "@/lib/auth";
+import type { LoginCredentials, RegisterCredentials, AuthResponse } from "@/lib/auth";
 
 // Servicio ficticio de autenticación
 // TODO: Reemplazar con la API real cuando esté disponible
@@ -21,6 +21,28 @@ export const authService = {
           reject(new Error("Credenciales inválidas"));
         }
       }, 1000);
+    });
+  },
+
+  register: async (credentials: RegisterCredentials): Promise<AuthResponse> => {
+    // Simulación de llamada a API de registro
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        // Simulación de validación
+        if (credentials.email && credentials.password && credentials.acceptTerms) {
+          resolve({
+            user: {
+              id: "2",
+              email: credentials.email,
+              name: credentials.fullName,
+              phone: credentials.phone,
+            },
+            token: "fake-jwt-token-" + Date.now(),
+          });
+        } else {
+          reject(new Error("Datos de registro inválidos"));
+        }
+      }, 1500);
     });
   },
 

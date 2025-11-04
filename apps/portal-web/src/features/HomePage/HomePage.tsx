@@ -4,9 +4,9 @@ import {
   HowItWorks,
   FindYourIdealModel,
   Testimonies,
-  Footer,
   GraphLine
 } from "./sections";
+import { Footer } from "@features/footer";
 
 export const HomePage = () => {
   return (

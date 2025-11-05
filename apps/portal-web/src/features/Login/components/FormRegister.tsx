@@ -3,7 +3,7 @@ import { IconGoogle } from "@components/icons";
 import { useRegister } from "../hook/useRegister";
 
 export const FormRegister = () => {
-  const { formik, handleGoogleRegister, isLoading } = useRegister();
+  const { formik, handleGoogleRegister, isLoading, isGoogleLoading } = useRegister();
 
   return (
     <div className="w-full flex justify-center mb-20 mt-6 items-center">
@@ -59,8 +59,9 @@ export const FormRegister = () => {
             icon={<IconGoogle />} 
             onClick={handleGoogleRegister} 
             variant="lg"
+            isLoading={isGoogleLoading}
           >
-            Google
+            {isGoogleLoading ? "Redirigiendo a Google..." : "Google"}
           </ButtonIcon>
           <CheckBox
             checked={formik.values.acceptTerms}

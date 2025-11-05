@@ -1,10 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import { useEffect } from "react";
-import { authService } from "../services/authService";
+import { useEffect, useState } from "react";
 import type { LoginCredentials } from "@/lib/auth";
+import { authClient } from "@/lib/auth";
 
 const REMEMBERED_EMAIL_KEY = "remembered-email";
 
@@ -20,25 +19,18 @@ const validationSchema = Yup.object({
 });
 
 export const useLogin = () => {
-  const navigate = useNavigate();
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
-  // Mutation para el login
+  // Mutation para el login con better-auth
   const loginMutation = useMutation({
-    mutationFn: authService.login,
-    onSuccess: (data, variables) => {
-      // Guardar token en localStorage
-      localStorage.setItem("auth-token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-
-      // Recordar usuario si está activado
-      if (variables.rememberMe) {
-        localStorage.setItem(REMEMBERED_EMAIL_KEY, variables.email);
-      } else {
-        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
-      }
-
-      // Redirigir al perfil
-      navigate({ to: "/profile" });
+    mutationFn: async (credentials: LoginCredentials) => {
+      const result = await authClient.signIn.email({
+        email: credentials.email,
+        password: credentials.password,
+        rememberMe: credentials.rememberMe,
+        callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+      });
+      return result;
     },
   });
 
@@ -65,14 +57,31 @@ export const useLogin = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleGoogleLogin = () => {
-    // TODO: Implementar login con Google usando better-auth
-    console.log("Google login - Por implementar");
+  const handleGoogleLogin = async () => {
+    // Iniciar el flujo de OAuth con better-auth
+    try {
+      setIsGoogleLoading(true);
+      
+      // Iniciar el flujo de OAuth con Google
+      await authClient.signIn.social({
+        provider: "google",
+        callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+      }, {
+        onError: (error) => {
+          console.error("Error during Google login:", error);
+          setIsGoogleLoading(false);
+        }
+      });
+    } catch (error) {
+      console.error("Error during Google login:", error);
+      setIsGoogleLoading(false);
+    }
   };
 
   return {
     formik,
     handleGoogleLogin,
     isLoading: loginMutation.isPending,
+    isGoogleLoading,
   };
 };

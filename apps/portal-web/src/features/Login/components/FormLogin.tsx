@@ -3,7 +3,7 @@ import { IconGoogle } from "@components/icons";
 import { useLogin } from "../hook/useLogin";
 
 export const FormLogin = () => {
-  const { formik, handleGoogleLogin, isLoading } = useLogin();
+  const { formik, handleGoogleLogin, isLoading, isGoogleLoading } = useLogin();
 
   return (
     <div className="w-full flex justify-center mb-20 mt-16 items-center">
@@ -32,8 +32,9 @@ export const FormLogin = () => {
             icon={<IconGoogle />} 
             onClick={handleGoogleLogin} 
             variant="lg"
+            isLoading={isGoogleLoading}
           >
-            Google
+            {isGoogleLoading ? "Redirigiendo a Google..." : "Google"}
           </ButtonIcon>
           <CheckBox
             checked={formik.values.rememberMe ?? false}

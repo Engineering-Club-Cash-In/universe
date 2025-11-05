@@ -1,17 +1,15 @@
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import { useFormik } from "formik";
 import * as Yup from "yup";
-import { authService } from "../services/authService";
+import { useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
+import { authClient } from "@/lib/auth";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
   fullName: Yup.string()
     .min(3, "El nombre debe tener al menos 3 caracteres")
     .required("El nombre completo es requerido"),
-  phone: Yup.string()
-    .required("El número telefónico es requerido"),
+  phone: Yup.string().required("El número telefónico es requerido"),
   email: Yup.string()
     .email("Correo electrónico inválido")
     .required("El correo electrónico es requerido"),
@@ -31,20 +29,8 @@ const validationSchema = Yup.object({
 });
 
 export const useRegister = () => {
-  const navigate = useNavigate();
-
-  // Mutation para el registro
-  const registerMutation = useMutation({
-    mutationFn: authService.register,
-    onSuccess: (data) => {
-      // Guardar token en localStorage
-      localStorage.setItem("auth-token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
-
-      // Redirigir al perfil
-      navigate({ to: "/profile" });
-    },
-  });
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Formik
   const formik = useFormik<RegisterCredentials>({
@@ -57,19 +43,51 @@ export const useRegister = () => {
       acceptTerms: false,
     },
     validationSchema,
-    onSubmit: (values) => {
-      registerMutation.mutate(values);
+    onSubmit: async (values) => {
+      try {
+        setIsLoading(true);
+        await authClient.signUp.email({
+          email: values.email,
+          password: values.password,
+          name: values.fullName,
+          callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+          // Better-auth no tiene campo phone por defecto, se puede agregar como dato adicional si es necesario
+        });
+      } catch (error) {
+        console.error("Error during registration:", error);
+      } finally {
+        setIsLoading(false);
+      }
     },
   });
 
-  const handleGoogleRegister = () => {
-    // TODO: Implementar registro con Google usando better-auth
-    console.log("Google register - Por implementar");
+  const handleGoogleRegister = async () => {
+    try {
+      setIsGoogleLoading(true);
+
+      // Iniciar el flujo de OAuth con Google
+      await authClient.signIn.social(
+        {
+          provider: "google",
+          callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+        },
+        {
+          onError: (error) => {
+            console.error("Error during Google register:", error);
+            setIsGoogleLoading(false);
+          },
+        }
+      );
+    } catch (error) {
+      console.error("Error during Google register:", error);
+      setIsGoogleLoading(false);
+    }
   };
 
   return {
     formik,
     handleGoogleRegister,
-    isLoading: registerMutation.isPending,
+    isLoading,
+    isGoogleLoading,
   };
 };

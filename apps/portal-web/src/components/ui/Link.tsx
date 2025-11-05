@@ -93,6 +93,12 @@ export const Link: React.FC<LinkProps> = ({
 
   // Internal link with router
   const handleInternalClick = () => {
+    // Scroll to top when navigating
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+    
     if (onClick) {
       onClick();
     }

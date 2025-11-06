@@ -2,28 +2,82 @@ import { NavBar } from "@components/ui";
 import { Footer } from "@features/footer";
 import { useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import type { User } from "@/lib/auth";
+import { authClient } from "@/lib/auth";
+
+interface UserData {
+  id: string;
+  email: string;
+  name?: string;
+  phone?: string;
+}
 
 export const Profile = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Obtener información del usuario del localStorage
-    const userData = localStorage.getItem("user");
-    if (userData) {
-      setUser(JSON.parse(userData));
-    }
-  }, []);
+    const loadUserSession = async () => {
+      try {
+        // Obtener la sesión directamente de better-auth
+        const sessionData = await authClient.getSession();
+        
+        if (sessionData?.data?.user) {
+          const userData = sessionData.data.user as UserData;
+          setUser({
+            id: userData.id,
+            email: userData.email,
+            name: userData.name,
+            phone: userData.phone, // Si el backend lo tiene
+          });
+        } else {
+          // Si no hay sesión, redirigir al login
+          navigate({ to: "/login" });
+        }
+      } catch (error) {
+        console.error("Error loading session:", error);
+        navigate({ to: "/login" });
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  const handleLogout = () => {
-    // Limpiar localStorage
-    localStorage.removeItem("auth-token");
-    localStorage.removeItem("user");
-    
-    // Redirigir al login
-    navigate({ to: "/login" });
+    loadUserSession();
+  }, [navigate]);
+
+  const handleLogout = async () => {
+    try {
+      // Cerrar sesión con better-auth
+      await authClient.signOut();
+      
+      // Limpiar localStorage (solo el token de recordar email)
+      localStorage.removeItem("remembered-email");
+      
+      // Redirigir al login
+      navigate({ to: "/login" });
+    } catch (error) {
+      console.error("Error during logout:", error);
+      navigate({ to: "/login" });
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div>
+        <div className="w-full mt-4 p-8">
+          <NavBar />
+          <div className="max-w-4xl mx-auto mt-16 mb-20">
+            <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8">
+              <div className="flex justify-center items-center py-12">
+                <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div>

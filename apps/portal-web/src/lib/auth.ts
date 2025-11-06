@@ -1,9 +1,10 @@
-import { betterAuth } from "better-auth";
+import { createAuthClient } from "better-auth/client";
 
-// Configuración de better-auth para el cliente
-export const authClient = betterAuth({
-  baseURL: import.meta.env.VITE_API_URL || "http://localhost:3000",
-  // Aquí se configurará la conexión con el backend cuando esté listo
+export const authClient = createAuthClient({
+  baseURL: import.meta.env.VITE_BETTER_AUTH_URL,
+  fetchOptions: {
+    credentials: "include",
+  },
 });
 
 // Tipos para la autenticación
@@ -13,10 +14,20 @@ export interface LoginCredentials {
   rememberMe?: boolean;
 }
 
+export interface RegisterCredentials {
+  fullName: string;
+  phone: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  acceptTerms: boolean;
+}
+
 export interface User {
   id: string;
   email: string;
   name?: string;
+  phone?: string;
 }
 
 export interface AuthResponse {

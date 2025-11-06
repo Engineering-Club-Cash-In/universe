@@ -1,6 +1,6 @@
 # Auth Google Service
 
-Servicio de autenticación con Google usando Better Auth, Express, Drizzle ORM y PostgreSQL.
+Servicio de autenticación con Google usando Better Auth, Hono, Drizzle ORM y PostgreSQL.
 
 ## 🚀 Características
 
@@ -11,6 +11,7 @@ Servicio de autenticación con Google usando Better Auth, Express, Drizzle ORM y
 - ✅ Rate Limiting para seguridad
 - ✅ Validación de variables de entorno
 - ✅ Sistema de roles (ADMIN, INVESTOR, DEBTOR, SELLER, CLIENT)
+- ✅ **Hono Framework** - Ultra rápido y ligero
 - ✅ TypeScript
 - ✅ Hot reload con tsx
 

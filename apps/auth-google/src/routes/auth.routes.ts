@@ -1,42 +1,40 @@
-import { Router } from "express";
-import type { Request, Response, NextFunction } from "express";
+import { Hono } from "hono";
 import { auth } from "../lib/auth";
 
-const router = Router();
+const authRoutes = new Hono();
 
 // Proxy de todas las rutas de Better Auth
-router.all("/*", async (req: Request, res: Response, next: NextFunction) => {
+authRoutes.all("/*", async (c) => {
   try {
-    // Convertir los headers de Express a objeto plano
+    // Convertir los headers de Hono a objeto plano
     const headers: Record<string, string> = {};
-    Object.entries(req.headers).forEach(([key, value]) => {
-      if (value) {
-        headers[key] = Array.isArray(value) ? value[0] : value;
-      }
+    c.req.raw.headers.forEach((value, key) => {
+      headers[key] = value;
     });
 
     // Asegurar que content-type esté presente para POST/PUT/PATCH
-    if (!headers['content-type'] && !["GET", "HEAD", "DELETE"].includes(req.method)) {
-      headers['content-type'] = 'application/json';
+    if (
+      !headers["content-type"] &&
+      !["GET", "HEAD", "DELETE"].includes(c.req.method)
+    ) {
+      headers["content-type"] = "application/json";
     }
 
-    // Construir la URL completa incluyendo query params
-    const protocol = req.protocol || 'http';
-    const host = req.get('host') || 'localhost:3000';
-    const fullUrl = `${protocol}://${host}${req.originalUrl}`;
+    // Construir la URL completa
+    const url = new URL(c.req.url);
 
     // Preparar el body según el método HTTP
     let body: string | undefined = undefined;
-    if (!["GET", "HEAD"].includes(req.method)) {
-      // Si hay body, convertirlo a JSON string si es objeto
-      if (req.body && Object.keys(req.body).length > 0) {
-        body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    if (!["GET", "HEAD"].includes(c.req.method)) {
+      const rawBody = await c.req.text();
+      if (rawBody && rawBody.length > 0) {
+        body = rawBody;
       }
     }
 
     // Crear Request compatible con Better Auth usando fetch API global
-    const authRequest = new globalThis.Request(fullUrl, {
-      method: req.method,
+    const authRequest = new globalThis.Request(url.toString(), {
+      method: c.req.method,
       headers: headers,
       body: body,
     });
@@ -44,20 +42,28 @@ router.all("/*", async (req: Request, res: Response, next: NextFunction) => {
     // Procesar con Better Auth
     const authResponse = await auth.handler(authRequest);
 
-    // Convertir Response de Better Auth a Response de Express
-    res.status(authResponse.status);
-    
+    // Convertir Response de Better Auth a Response de Hono
+    const responseBody = await authResponse.text();
+
     // Copiar headers
+    const responseHeaders: Record<string, string> = {};
     authResponse.headers.forEach((value, key) => {
-      res.setHeader(key, value);
+      responseHeaders[key] = value;
     });
 
-    // Enviar body
-    const responseBody = await authResponse.text();
-    res.send(responseBody);
+    return c.text(responseBody, authResponse.status as any, responseHeaders);
   } catch (error) {
-    next(error);
+    console.error("Auth route error:", error);
+    return c.json(
+      {
+        success: false,
+        error: {
+          message: error instanceof Error ? error.message : "Unknown error",
+        },
+      },
+      500
+    );
   }
 });
 
-export default router;
+export default authRoutes;

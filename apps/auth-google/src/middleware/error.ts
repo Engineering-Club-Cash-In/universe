@@ -1,4 +1,5 @@
-import { Request, Response, NextFunction } from "express";
+import { Context } from "hono";
+import { HTTPException } from "hono/http-exception";
 
 export interface AppError extends Error {
   statusCode?: number;
@@ -17,34 +18,50 @@ export class ApiError extends Error implements AppError {
   }
 }
 
-export const errorHandler = (
-  err: AppError,
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const statusCode = err.statusCode || 500;
-  const message = err.message || "Internal Server Error";
-
-  console.error(`[Error] ${statusCode} - ${message}`);
+export const errorHandler = (err: Error | HTTPException, c: Context) => {
+  console.error(`[Error] ${err.message}`);
+  
   if (process.env.NODE_ENV === "development") {
     console.error(err.stack);
   }
 
-  res.status(statusCode).json({
-    success: false,
-    error: {
-      message,
-      ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
+  if (err instanceof HTTPException) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          message: err.message,
+          ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
+        },
+      },
+      err.status
+    );
+  }
+
+  const statusCode = (err as AppError).statusCode || 500;
+  const message = err.message || "Internal Server Error";
+
+  return c.json(
+    {
+      success: false,
+      error: {
+        message,
+        ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
+      },
     },
-  });
+    statusCode as any
+  );
 };
 
-export const notFoundHandler = (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  const error = new ApiError(404, `Route ${req.originalUrl} not found`);
-  next(error);
+export const notFoundHandler = (c: Context) => {
+  return c.json(
+    {
+      success: false,
+      error: {
+        message: `Route ${c.req.path} not found`,
+        code: "NOT_FOUND",
+      },
+    },
+    404
+  );
 };

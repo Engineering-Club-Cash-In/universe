@@ -1,48 +1,49 @@
-import express from "express";
-import cors from "cors";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { logger } from "hono/logger";
+import { serve } from "@hono/node-server";
 import { testConnection } from "./db/connection";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error";
-import { apiLimiter, authLimiter, signUpLimiter } from "./middleware/rateLimiter";
+import {
+  apiLimiter,
+  authLimiter,
+  signUpLimiter,
+} from "./middleware/rateLimiter";
 import { env } from "./config/env";
 
-const app = express();
-const PORT = env.PORT;
+const app = new Hono();
 
 // Middlewares
+app.use("*", logger());
 app.use(
+  "*",
   cors({
     origin: env.CORS_ORIGIN,
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
-    exposedHeaders: ["Set-Cookie"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowHeaders: ["Content-Type", "Authorization", "Cookie"],
+    exposeHeaders: ["Set-Cookie"],
   })
 );
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // Rate limiting
-app.use("/api", apiLimiter);
-
-// Logger middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
+app.use("/api/*", apiLimiter);
 
 // Routes
-app.use("/health", healthRoutes);
+app.route("/health", healthRoutes);
 
 // Apply specific rate limiters to auth routes
-app.use("/api/auth/sign-in", authLimiter);
-app.use("/api/auth/sign-up", signUpLimiter);
-app.use("/api/auth", authRoutes);
+app.use("/api/auth/sign-in/*", authLimiter);
+app.use("/api/auth/sign-up/*", signUpLimiter);
+app.route("/api/auth", authRoutes);
 
-// Error handlers
-app.use(notFoundHandler);
-app.use(errorHandler);
+// 404 handler
+app.notFound(notFoundHandler);
+
+// Error handler
+app.onError(errorHandler);
 
 // Iniciar servidor
 const startServer = async () => {
@@ -54,19 +55,26 @@ const startServer = async () => {
       process.exit(1);
     }
 
-    // Iniciar servidor
-    app.listen(PORT, () => {
-      console.log(`
+    // Iniciar servidor con Hono + Node.js adapter
+    serve(
+      {
+        fetch: app.fetch,
+        port: env.PORT,
+      },
+      (info) => {
+        console.log(`
 ╔═══════════════════════════════════════════════╗
 ║   🚀 Auth Google Service Running              ║
-║   📡 Port: ${PORT}                              ║
+║   📡 Port: ${info.port}                              ║
 ║   🌍 Environment: ${env.NODE_ENV}            ║
 ║   🔐 Better Auth: Enabled                     ║
 ║   🗄️  Database: Connected                      ║
 ║   🛡️  Rate Limiting: Enabled                   ║
+║   ⚡ Hono Framework: Active                    ║
 ╚═══════════════════════════════════════════════╝
       `);
-    });
+      }
+    );
   } catch (error) {
     console.error("Failed to start server:", error);
     process.exit(1);

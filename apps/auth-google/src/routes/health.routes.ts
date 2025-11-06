@@ -1,13 +1,13 @@
-import { Router } from "express";
+import { Hono } from "hono";
 import { testConnection } from "../db/connection";
 
-const router = Router();
+const health = new Hono();
 
 // Health check endpoint
-router.get("/", async (req, res) => {
+health.get("/", async (c) => {
   const dbConnected = await testConnection();
-  
-  res.json({
+
+  return c.json({
     success: true,
     timestamp: new Date().toISOString(),
     service: "auth-google",
@@ -16,4 +16,4 @@ router.get("/", async (req, res) => {
   });
 });
 
-export default router;
+export default health;

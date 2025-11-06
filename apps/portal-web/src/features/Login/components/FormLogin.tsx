@@ -3,61 +3,54 @@ import { IconGoogle } from "@components/icons";
 import { useLogin } from "../hook/useLogin";
 
 export const FormLogin = () => {
-  const {
-    formData,
-    handleEmailChange,
-    handlePasswordChange,
-    handleRememberMeChange,
-    handleSubmit,
-    handleGoogleLogin,
-    isLoading,
-    error,
-  } = useLogin();
+  const { formik, handleGoogleLogin, isLoading, isGoogleLoading } = useLogin();
 
   return (
     <div className="w-full flex justify-center mb-20 mt-16 items-center">
       <div className="w-[500px] flex flex-col text-center">
         <h2 className="text-header-2">Inicia sesión</h2>
-        <form className="w-full mt-10 flex flex-col gap-6" onSubmit={handleSubmit}>
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500 rounded-lg text-red-500 text-sm">
-              {error.message}
-            </div>
-          )}
+        <form className="w-full mt-10 flex flex-col gap-6" onSubmit={formik.handleSubmit}>
           <Input
-            value={formData.email}
-            onChange={handleEmailChange}
+            name="email"
+            value={formik.values.email}
+            onChange={(value) => formik.setFieldValue("email", value)}
+            onBlur={formik.handleBlur}
             placeholder="Correo electrónico"
             type="email"
+            error={formik.touched.email && formik.errors.email ? formik.errors.email : undefined}
           />
           <Input
-            value={formData.password}
-            onChange={handlePasswordChange}
+            name="password"
+            value={formik.values.password}
+            onChange={(value) => formik.setFieldValue("password", value)}
+            onBlur={formik.handleBlur}
             placeholder="Contraseña"
             type="password"
+            error={formik.touched.password && formik.errors.password ? formik.errors.password : undefined}
           />
           <ButtonIcon 
             icon={<IconGoogle />} 
             onClick={handleGoogleLogin} 
             variant="lg"
+            isLoading={isGoogleLoading}
           >
-            Google
+            {isGoogleLoading ? "Redirigiendo a Google..." : "Google"}
           </ButtonIcon>
           <CheckBox
-            checked={formData.rememberMe ?? false}
-            onChange={handleRememberMeChange}
+            checked={formik.values.rememberMe ?? false}
+            onChange={(checked) => formik.setFieldValue("rememberMe", checked)}
             label="Recordar usuario"
           />
           <div className="flex justify-center items-center mt-4 flex-col gap-8">
-            <Button type="submit">
-              {isLoading ? "Iniciando sesión..." : "Iniciar sesión"}
+            <Button type="submit" isLoading={isLoading}>
+              Iniciar sesión
             </Button>
-            <Link href="reset-password" underline>
+            <Link href="/reset-password" underline>
               ¿Olvidaste tu contraseña?
             </Link>
             <div className="flex justify-center items-center flex-col">
               <span>¿No tienes una cuenta?</span>
-              <Link href="register" underline>
+              <Link href="/register" underline>
                 Regístrate
               </Link>
             </div>

@@ -5,8 +5,10 @@ import React from "react";
 interface CheckBoxProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
-  label?: string;
+  label?: string | React.ReactNode;
   className?: string;
+  isLabelLink?: boolean;
+  labelHref?: string;
 }
 
 export const CheckBox: React.FC<CheckBoxProps> = ({
@@ -14,6 +16,8 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
   onChange,
   label,
   className = "",
+  isLabelLink = false,
+  labelHref,
 }) => {
   return (
     <label className={`flex items-center gap-3 cursor-pointer ${className}`}>
@@ -39,7 +43,21 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
         {!checked && <IconCheck />}
       </motion.div>
       {label && (
-        <span className="font-[Hero] text-sm select-none">{label}</span>
+        <>
+          {isLabelLink && labelHref ? (
+            <a
+              href={labelHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-[Hero] text-[16px] select-none underline hover:text-white/80 transition-colors"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {label}
+            </a>
+          ) : (
+            <span className="font-[Hero] text-sm select-none">{label}</span>
+          )}
+        </>
       )}
       <input
         type="checkbox"

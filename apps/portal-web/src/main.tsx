@@ -9,7 +9,15 @@ import "./index.css";
 import { routeTree } from "./routeTree.gen";
 
 // Create a new router instance
-const router = createRouter({ routeTree });
+const router = createRouter({ 
+  routeTree,
+  defaultPreload: 'intent',
+});
+
+// Add scroll to top on every navigation
+router.subscribe('onLoad', () => {
+  window.scrollTo(0, 0);
+});
 
 // Create a client for React Query
 const queryClient = new QueryClient({

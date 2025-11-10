@@ -89,6 +89,8 @@ function SearchableSelectContent({
 }) {
   const { search, setSearch } = React.useContext(SearchableSelectContext)
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const [inputValue, setInputValue] = React.useState("")
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null)
 
   // Auto-focus the search input when content opens
   React.useEffect(() => {
@@ -97,6 +99,35 @@ function SearchableSelectContent({
     }, 0)
     return () => clearTimeout(timer)
   }, [])
+
+  // Sincronizar inputValue con search cuando cambie externamente
+  React.useEffect(() => {
+    setInputValue(search)
+  }, [search])
+
+  // Limpiar timeout al desmontar
+  React.useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current)
+      }
+    }
+  }, [])
+
+  // Función para manejar el cambio con debounce
+  const handleSearchChange = (value: string) => {
+    setInputValue(value)
+
+    // Limpiar timeout anterior si existe
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current)
+    }
+
+    // Aplicar el filtro después de 300ms
+    debounceTimerRef.current = setTimeout(() => {
+      setSearch(value)
+    }, 800)
+  }
 
   return (
     <SelectPrimitive.Portal>
@@ -116,7 +147,7 @@ function SearchableSelectContent({
             // Focus input and append the key
             if (inputRef.current) {
               inputRef.current.focus()
-              setSearch(search + e.key)
+              handleSearchChange(inputValue + e.key)
             }
           }
         }}
@@ -127,8 +158,8 @@ function SearchableSelectContent({
           <Input
             ref={inputRef}
             placeholder={searchPlaceholder}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            value={inputValue}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="h-8 border-0 px-0 py-0 shadow-none focus-visible:ring-0"
             onKeyDown={(e) => {
               // Prevent select from closing on Enter or Space

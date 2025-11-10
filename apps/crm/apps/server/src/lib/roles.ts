@@ -6,6 +6,7 @@ export const ROLES = {
 	SALES: "sales",
 	ANALYST: "analyst",
 	COBROS: "cobros",
+	JURIDICO: "juridico",
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -31,6 +32,11 @@ export const ROLE_CONFIG = {
 		label: "Cobros",
 		color: "bg-green-100 text-green-800",
 		icon: "DollarSign" as const,
+	},
+	[ROLES.JURIDICO]: {
+		label: "Jurídico",
+		color: "bg-amber-100 text-amber-800",
+		icon: "Scale" as const,
 	},
 } as const;
 
@@ -78,6 +84,22 @@ export const PERMISSIONS = {
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES,
+
+	// Juridico Module Access
+	canAccessJuridico: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.SALES ||
+		role === ROLES.ANALYST,
+
+	canCreateLegalContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+
+	canAssignLegalContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+
+	canDeleteLegalContracts: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN,
 } as const;
 
 // Helper functions

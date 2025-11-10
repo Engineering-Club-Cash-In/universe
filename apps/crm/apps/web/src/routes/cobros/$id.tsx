@@ -405,64 +405,73 @@ function RouteComponent() {
 												contactosPage * ITEMS_PER_PAGE,
 											)
 											.map((contacto: any) => {
-										const estadoInfo = getEstadoContacto(
-											contacto.estadoContacto,
-										);
-										return (
-											<div key={contacto.id} className="rounded-lg border p-4">
-												<div className="mb-2 flex items-start justify-between">
-													<div className="flex items-center gap-2">
-														{getMetodoIcon(contacto.metodoContacto)}
-														<span className="font-medium">
-															{contacto.metodoContacto
-																?.charAt(0)
-																.toUpperCase() +
-																contacto.metodoContacto?.slice(1)}
-														</span>
-														<Badge className={estadoInfo.color}>
-															{estadoInfo.label}
-														</Badge>
+												const estadoInfo = getEstadoContacto(
+													contacto.estadoContacto,
+												);
+												return (
+													<div
+														key={contacto.id}
+														className="rounded-lg border p-4"
+													>
+														<div className="mb-2 flex items-start justify-between">
+															<div className="flex items-center gap-2">
+																{getMetodoIcon(contacto.metodoContacto)}
+																<span className="font-medium">
+																	{contacto.metodoContacto
+																		?.charAt(0)
+																		.toUpperCase() +
+																		contacto.metodoContacto?.slice(1)}
+																</span>
+																<Badge className={estadoInfo.color}>
+																	{estadoInfo.label}
+																</Badge>
+															</div>
+															<p className="text-muted-foreground text-sm">
+																{contacto.fechaContacto
+																	? new Date(
+																			contacto.fechaContacto,
+																		).toLocaleDateString("es-GT")
+																	: "Sin fecha"}
+															</p>
+														</div>
+														<p className="mb-2 text-sm">
+															{contacto.comentarios}
+														</p>
+														{contacto.acuerdosAlcanzados && (
+															<div className="rounded bg-blue-50 p-2 text-sm">
+																<span className="font-medium">Acuerdos: </span>
+																{contacto.acuerdosAlcanzados}
+															</div>
+														)}
+														{contacto.compromisosPago && (
+															<div className="mt-2 rounded bg-green-50 p-2 text-sm">
+																<span className="font-medium">
+																	Compromisos:{" "}
+																</span>
+																{contacto.compromisosPago}
+															</div>
+														)}
+														<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
+															<span>
+																Por: {contacto.realizadoPor || "Sin asignar"}
+															</span>
+															{contacto.duracionLlamada && (
+																<span>
+																	Duración:{" "}
+																	{Math.floor(
+																		(contacto.duracionLlamada || 0) / 60,
+																	)}
+																	:
+																	{((contacto.duracionLlamada || 0) % 60)
+																		.toString()
+																		.padStart(2, "0")}{" "}
+																	min
+																</span>
+															)}
+														</div>
 													</div>
-													<p className="text-muted-foreground text-sm">
-														{contacto.fechaContacto
-															? new Date(
-																	contacto.fechaContacto,
-																).toLocaleDateString("es-GT")
-															: "Sin fecha"}
-													</p>
-												</div>
-												<p className="mb-2 text-sm">{contacto.comentarios}</p>
-												{contacto.acuerdosAlcanzados && (
-													<div className="rounded bg-blue-50 p-2 text-sm">
-														<span className="font-medium">Acuerdos: </span>
-														{contacto.acuerdosAlcanzados}
-													</div>
-												)}
-												{contacto.compromisosPago && (
-													<div className="mt-2 rounded bg-green-50 p-2 text-sm">
-														<span className="font-medium">Compromisos: </span>
-														{contacto.compromisosPago}
-													</div>
-												)}
-												<div className="mt-2 flex items-center justify-between text-muted-foreground text-xs">
-													<span>
-														Por: {contacto.realizadoPor || "Sin asignar"}
-													</span>
-													{contacto.duracionLlamada && (
-														<span>
-															Duración:{" "}
-															{Math.floor((contacto.duracionLlamada || 0) / 60)}
-															:
-															{((contacto.duracionLlamada || 0) % 60)
-																.toString()
-																.padStart(2, "0")}{" "}
-															min
-														</span>
-													)}
-												</div>
-											</div>
-										);
-									})}
+												);
+											})}
 									</div>
 									<Pagination
 										currentPage={contactosPage}
@@ -500,104 +509,109 @@ function RouteComponent() {
 												cuotasPage * ITEMS_PER_PAGE,
 											)
 											.map((cuota: any) => {
-										const estadoBadge = getEstadoBadge(cuota.estadoMora);
-										const esPagada = cuota.estadoMora === "pagado";
-										const tieneMora = Number(cuota.montoMora) > 0;
-										const pagoConMora = esPagada && tieneMora; // Pagado pero con mora
+												const estadoBadge = getEstadoBadge(cuota.estadoMora);
+												const esPagada = cuota.estadoMora === "pagado";
+												const tieneMora = Number(cuota.montoMora) > 0;
+												const pagoConMora = esPagada && tieneMora; // Pagado pero con mora
 
-										return (
-											<div
-												key={cuota.id}
-												className="rounded-lg border p-3 hover:bg-muted/50"
-											>
-												<div className="mb-2 flex items-center justify-between">
-													<div className="flex items-center gap-3">
-														<span className="font-medium text-sm">
-															Cuota #{cuota.numeroCuota}
-														</span>
-														<Badge className={estadoBadge}>
-															{cuota.estadoMora
-																?.replace("_", " ")
-																?.toUpperCase()}
-														</Badge>
-														{pagoConMora && (
-															<Badge className="bg-orange-100 text-orange-800 text-xs">
-																Pagado con Mora
-															</Badge>
-														)}
-														{!esPagada && tieneMora && (
-															<Badge variant="destructive" className="text-xs">
-																{cuota.diasMora} días mora
-															</Badge>
-														)}
-													</div>
-													<div className="text-right">
-														<p className="font-medium text-sm">
-															Q{Number(cuota.montoCuota).toLocaleString()}
-														</p>
-														{tieneMora && (
-															<p className="text-red-600 text-xs">
-																+Q{Number(cuota.montoMora).toLocaleString()}{" "}
-																mora
-															</p>
-														)}
-													</div>
-												</div>
-
-												<div className="grid grid-cols-2 gap-4 text-muted-foreground text-xs">
-													<div>
-														<span className="font-medium">Vencimiento:</span>
-														<br />
-														{new Date(
-															cuota.fechaVencimiento,
-														).toLocaleDateString("es-GT")}
-													</div>
-													{esPagada ? (
-														<div>
-															<span className="font-medium">Pagado:</span>
-															<br />
-															{cuota.fechaPago
-																? new Date(cuota.fechaPago).toLocaleDateString(
-																		"es-GT",
-																	)
-																: "Sin fecha"}
-															<br />
-															<span className="font-medium text-green-600">
-																Q
-																{Number(
-																	cuota.montoPagado || 0,
-																).toLocaleString()}
-															</span>
-															{pagoConMora && (
-																<span className="block text-orange-600 text-xs">
-																	(incluye Q
-																	{Number(cuota.montoMora).toLocaleString()} de
-																	mora)
+												return (
+													<div
+														key={cuota.id}
+														className="rounded-lg border p-3 hover:bg-muted/50"
+													>
+														<div className="mb-2 flex items-center justify-between">
+															<div className="flex items-center gap-3">
+																<span className="font-medium text-sm">
+																	Cuota #{cuota.numeroCuota}
 																</span>
+																<Badge className={estadoBadge}>
+																	{cuota.estadoMora
+																		?.replace("_", " ")
+																		?.toUpperCase()}
+																</Badge>
+																{pagoConMora && (
+																	<Badge className="bg-orange-100 text-orange-800 text-xs">
+																		Pagado con Mora
+																	</Badge>
+																)}
+																{!esPagada && tieneMora && (
+																	<Badge
+																		variant="destructive"
+																		className="text-xs"
+																	>
+																		{cuota.diasMora} días mora
+																	</Badge>
+																)}
+															</div>
+															<div className="text-right">
+																<p className="font-medium text-sm">
+																	Q{Number(cuota.montoCuota).toLocaleString()}
+																</p>
+																{tieneMora && (
+																	<p className="text-red-600 text-xs">
+																		+Q{Number(cuota.montoMora).toLocaleString()}{" "}
+																		mora
+																	</p>
+																)}
+															</div>
+														</div>
+
+														<div className="grid grid-cols-2 gap-4 text-muted-foreground text-xs">
+															<div>
+																<span className="font-medium">
+																	Vencimiento:
+																</span>
+																<br />
+																{new Date(
+																	cuota.fechaVencimiento,
+																).toLocaleDateString("es-GT")}
+															</div>
+															{esPagada ? (
+																<div>
+																	<span className="font-medium">Pagado:</span>
+																	<br />
+																	{cuota.fechaPago
+																		? new Date(
+																				cuota.fechaPago,
+																			).toLocaleDateString("es-GT")
+																		: "Sin fecha"}
+																	<br />
+																	<span className="font-medium text-green-600">
+																		Q
+																		{Number(
+																			cuota.montoPagado || 0,
+																		).toLocaleString()}
+																	</span>
+																	{pagoConMora && (
+																		<span className="block text-orange-600 text-xs">
+																			(incluye Q
+																			{Number(cuota.montoMora).toLocaleString()}{" "}
+																			de mora)
+																		</span>
+																	)}
+																</div>
+															) : (
+																<div>
+																	<span className="font-medium">Estado:</span>
+																	<br />
+																	<span className="text-red-600">
+																		Pendiente de pago
+																	</span>
+																	{tieneMora && (
+																		<span className="block font-medium text-red-600 text-xs">
+																			Total: Q
+																			{(
+																				Number(cuota.montoCuota) +
+																				Number(cuota.montoMora)
+																			).toLocaleString()}
+																		</span>
+																	)}
+																</div>
 															)}
 														</div>
-													) : (
-														<div>
-															<span className="font-medium">Estado:</span>
-															<br />
-															<span className="text-red-600">
-																Pendiente de pago
-															</span>
-															{tieneMora && (
-																<span className="block font-medium text-red-600 text-xs">
-																	Total: Q
-																	{(
-																		Number(cuota.montoCuota) +
-																		Number(cuota.montoMora)
-																	).toLocaleString()}
-																</span>
-															)}
-														</div>
-													)}
-												</div>
-											</div>
-										);
-									})}
+													</div>
+												);
+											})}
 									</div>
 									<Pagination
 										currentPage={cuotasPage}

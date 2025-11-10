@@ -6,9 +6,11 @@ import { authRouter } from "./auth";
 import { cobrosRouter } from "./cobros";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { legalContractsRouter } from "./legal-contracts";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
+import { reportesCarteraRouter } from "./reportes-cartera";
 import * as reportsRouter from "./reports";
 import { vehiclesRouter } from "./vehicles";
 import { vendorsRouter } from "./vendors";
@@ -24,6 +26,7 @@ export const appRouter = {
 	adminOnlyData: adminRouter.getStats,
 	getAllUsers: adminRouter.getAllUsers,
 	updateUserRole: adminRouter.updateUserRole,
+	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
 
@@ -47,6 +50,13 @@ export const appRouter = {
 	getOpportunityDocuments: crmRouter.getOpportunityDocuments,
 	uploadOpportunityDocument: crmRouter.uploadOpportunityDocument,
 	deleteOpportunityDocument: crmRouter.deleteOpportunityDocument,
+	getDocumentRequirementsByClientType:
+		crmRouter.getDocumentRequirementsByClientType,
+	getAnalysisChecklist: crmRouter.getAnalysisChecklist,
+	updateAnalysisChecklistVerification:
+		crmRouter.updateAnalysisChecklistVerification,
+	updateAnalysisChecklistVehicleVerification:
+		crmRouter.updateAnalysisChecklistVehicleVerification,
 	getClients: crmRouter.getClients,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
@@ -68,6 +78,9 @@ export const appRouter = {
 	createFullVehicleInspection: vehiclesRouter.createFullInspection,
 	processVehicleRegistrationOCR: vehiclesRouter.processVehicleRegistrationOCR,
 	getAIVehicleValuation: vehiclesRouter.getAIVehicleValuation,
+	getVehicleDocuments: vehiclesRouter.getVehicleDocuments,
+	uploadVehicleDocument: vehiclesRouter.uploadVehicleDocument,
+	deleteVehicleDocument: vehiclesRouter.deleteVehicleDocument,
 
 	// Cobros routes
 	getCobrosDashboardStats: cobrosRouter.getDashboardStats,
@@ -83,6 +96,28 @@ export const appRouter = {
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
+	// Cartera-back integration endpoints
+	registrarPago: cobrosRouter.registrarPago,
+	getHistorialPagosCarteraBack: cobrosRouter.getHistorialPagosCarteraBack,
+	getCreditoCarteraBack: cobrosRouter.getCreditoCarteraBack,
+	sincronizarCasosCobros: cobrosRouter.sincronizarCasosCobros,
+	getHistorialSincronizaciones: cobrosRouter.getHistorialSincronizaciones,
+	getInversionistas: cobrosRouter.getInversionistas,
+	getDetalleInversionista: cobrosRouter.getDetalleInversionista,
+	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
+
+	// Legal Contracts routes (Jurídico)
+	createLegalContract: legalContractsRouter.createLegalContract,
+	listLegalContractsByLead: legalContractsRouter.listLegalContractsByLead,
+	listLegalContractsByOpportunity:
+		legalContractsRouter.listLegalContractsByOpportunity,
+	getLegalContract: legalContractsRouter.getLegalContract,
+	assignOpportunityToContract: legalContractsRouter.assignOpportunityToContract,
+	updateContractStatus: legalContractsRouter.updateContractStatus,
+	deleteContract: legalContractsRouter.deleteContract,
+	getOpportunitiesByLead: legalContractsRouter.getOpportunitiesByLead,
+	getUserPermissions: legalContractsRouter.getUserPermissions,
+	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
@@ -122,6 +157,9 @@ export const appRouter = {
 	getReporteCartera: reportsRouter.getReporteCartera,
 	getReporteInventario: reportsRouter.getReporteInventario,
 	getReporteSubastas: reportsRouter.getReporteSubastas,
+	// Reportes unificados (cartera-back + CRM)
+	getReporteCarteraCompleto: reportesCarteraRouter.getReporteCarteraCompleto,
+	getReporteEficienciaCobros: reportesCarteraRouter.getReporteEficienciaCobros,
 
 	// MiniAgent routes
 	getMiniAgentCredentials: miniagentRouter.getMiniAgentCredentials,

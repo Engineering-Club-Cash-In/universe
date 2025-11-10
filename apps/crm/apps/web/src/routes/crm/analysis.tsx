@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle, CheckCircle, FileText, XCircle } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -67,12 +68,24 @@ function OpportunityActions({
 		enabled: !!opportunity.id,
 	});
 
-	const canApprove = validation.data?.canApprove ?? false;
-	const isLoading = validation.isLoading;
+	const checklist = useQuery({
+		queryKey: ["getAnalysisChecklist", opportunity.id],
+		queryFn: async () => {
+			return await client.getAnalysisChecklist({
+				opportunityId: opportunity.id,
+			});
+		},
+		enabled: !!opportunity.id,
+	});
+
+	const canApprove =
+		(validation.data?.canApprove ?? false) &&
+		((checklist.data as any)?.canApprove ?? false);
+	const isLoading = validation.isLoading || checklist.isLoading;
 
 	// Build tooltip message for why approve is disabled
 	const getDisabledReason = () => {
-		if (!validation.data) return "Cargando validación...";
+		if (!validation.data || !checklist.data) return "Cargando validación...";
 
 		const reasons: string[] = [];
 		if (!validation.data.vehicleInfo?.id) {
@@ -83,6 +96,13 @@ function OpportunityActions({
 		if (!validation.data.allDocumentsPresent) {
 			reasons.push(
 				`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`,
+			);
+		}
+
+		const checklistData = checklist.data as any;
+		if (checklistData && !checklistData.canApprove) {
+			reasons.push(
+				"Debe completar todas las verificaciones del checklist de análisis",
 			);
 		}
 
@@ -415,6 +435,10 @@ function AnalysisPage() {
 					<div className="w-full space-y-6 py-4">
 						{selectedOpportunityForDocs && (
 							<>
+								<AnalysisChecklistView
+									opportunityId={selectedOpportunityForDocs.id}
+									onUpdate={loadOpportunities}
+								/>
 								<DocumentValidationChecklist
 									opportunityId={selectedOpportunityForDocs.id}
 								/>
@@ -447,6 +471,25 @@ function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
 		vehicle_title: "Tarjeta de Circulación",
 		credit_report: "Reporte Crediticio",
 		other: "Otro",
+		// Documentos específicos por cliente
+		dpi: "DPI",
+		licencia: "Licencia",
+		recibo_luz: "Recibo de luz",
+		recibo_adicional: "Recibo adicional",
+		formularios: "Formularios",
+		estados_cuenta_1: "Estado de cuenta mes 1",
+		estados_cuenta_2: "Estado de cuenta mes 2",
+		estados_cuenta_3: "Estado de cuenta mes 3",
+		patente_comercio: "Patente de comercio",
+		representacion_legal: "Representación Legal",
+		constitucion_sociedad: "Constitución de sociedad",
+		patente_mercantil: "Patente mercantil",
+		iva_1: "Formulario IVA mes 1",
+		iva_2: "Formulario IVA mes 2",
+		iva_3: "Formulario IVA mes 3",
+		estado_financiero: "Estado financiero",
+		clausula_consentimiento: "Cláusula de consentimiento",
+		minutas: "Minutas",
 	};
 
 	const getDocumentIcon = (mimeType: string) => {

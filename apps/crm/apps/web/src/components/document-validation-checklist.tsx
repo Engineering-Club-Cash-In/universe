@@ -26,6 +26,25 @@ const documentTypeLabels: Record<string, string> = {
 	vehicle_title: "Tarjeta de Circulación",
 	credit_report: "Reporte Crediticio",
 	other: "Otro",
+	// Documentos específicos por cliente
+	dpi: "DPI",
+	licencia: "Licencia",
+	recibo_luz: "Recibo de luz",
+	recibo_adicional: "Recibo adicional",
+	formularios: "Formularios",
+	estados_cuenta_1: "Estado de cuenta mes 1",
+	estados_cuenta_2: "Estado de cuenta mes 2",
+	estados_cuenta_3: "Estado de cuenta mes 3",
+	patente_comercio: "Patente de comercio",
+	representacion_legal: "Representación Legal",
+	constitucion_sociedad: "Constitución de sociedad",
+	patente_mercantil: "Patente mercantil",
+	iva_1: "Formulario IVA mes 1",
+	iva_2: "Formulario IVA mes 2",
+	iva_3: "Formulario IVA mes 3",
+	estado_financiero: "Estado financiero",
+	clausula_consentimiento: "Cláusula de consentimiento",
+	minutas: "Minutas",
 };
 
 const creditTypeLabels = {

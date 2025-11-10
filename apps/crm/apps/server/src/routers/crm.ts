@@ -1,6 +1,11 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { vehicleInspections } from "@/db/schema";
+import {
+	vehicleDocumentRequirements,
+	vehicleDocuments,
+	vehicleInspections,
+	vehicles,
+} from "@/db/schema";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
@@ -14,7 +19,9 @@ import {
 	salesStages,
 } from "../db/schema/crm";
 import {
+	analysisChecklists,
 	documentRequirements,
+	documentRequirementsByClientType,
 	documentValidations,
 	opportunityDocuments,
 } from "../db/schema/documents";
@@ -26,6 +33,10 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
+import {
+	createCreditoInCarteraBack,
+	isCarteraBackEnabled,
+} from "../services/cartera-back-integration";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -229,6 +240,9 @@ export const crmRouter = {
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				clientType: z
+					.enum(["individual", "comerciante", "empresa"])
+					.default("individual"),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
@@ -705,7 +719,7 @@ export const crmRouter = {
 							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
 						);
 
-						// Create financing contract
+						// Create financing contract (local CRM)
 						const newContract = await db
 							.insert(contratosFinanciamiento)
 							.values({
@@ -724,27 +738,105 @@ export const crmRouter = {
 							})
 							.returning();
 
-						// Generate payment installments (cuotas)
-						const cuotasValues = [];
-						for (let i = 1; i <= (finalNumeroCuotas as number); i++) {
-							const fechaVencimientoCuota = new Date(fechaInicioDate);
-							fechaVencimientoCuota.setMonth(
-								fechaVencimientoCuota.getMonth() + i,
-							);
-							// Set to the payment day of the month
-							fechaVencimientoCuota.setDate(finalDiaPagoMensual as number);
+						// Generate SIFCO credit number (unique identifier)
+						const timestamp = Date.now();
+						const randomSuffix = Math.floor(Math.random() * 1000)
+							.toString()
+							.padStart(3, "0");
+						const numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 
-							cuotasValues.push({
-								contratoId: newContract[0].id,
-								numeroCuota: i,
-								fechaVencimiento: fechaVencimientoCuota,
-								montoCuota: finalCuotaMensual as string,
-								estadoMora: "al_dia" as const,
-								diasMora: 0,
-							});
+						// Integrate with cartera-back (dual-write)
+						let carteraBackSuccess = false;
+						let carteraBackError: string | undefined;
+
+						if (isCarteraBackEnabled()) {
+							try {
+								// TODO: Get or create usuario_id in cartera-back
+								// For now, we'll use a placeholder (this needs to be implemented)
+								const usuarioId = 1; // PLACEHOLDER - needs proper implementation
+
+								const creditoResult = await createCreditoInCarteraBack({
+									opportunityId: opp.id,
+									contratoFinanciamientoId: newContract[0].id,
+									userId: context.userId,
+									usuario_id: usuarioId,
+									numero_credito_sifco: numeroSifco,
+									capital: Number.parseFloat(finalValue as string),
+									porcentaje_interes: Number.parseFloat(
+										finalTasaInteres as string,
+									),
+									plazo: finalNumeroCuotas as number,
+									cuota: Number.parseFloat(finalCuotaMensual as string),
+									tipoCredito: opp.creditType || "autocompra",
+									fecha_creacion: fechaInicioDate.toISOString(),
+									observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
+								});
+
+								carteraBackSuccess = creditoResult.success;
+								carteraBackError = creditoResult.error;
+
+								if (creditoResult.success) {
+									console.log(
+										`[CRM] Credit synced to cartera-back: ${numeroSifco}`,
+									);
+								} else {
+									console.error(
+										`[CRM] Failed to sync credit to cartera-back: ${carteraBackError}`,
+									);
+								}
+							} catch (error) {
+								carteraBackError =
+									error instanceof Error ? error.message : String(error);
+								console.error(
+									"[CRM] Error syncing to cartera-back:",
+									carteraBackError,
+								);
+							}
 						}
 
-						await db.insert(cuotasPago).values(cuotasValues);
+						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
+						// When cartera-back is enabled, installments are managed there
+						if (!isCarteraBackEnabled()) {
+							const cuotasValues = [];
+							for (let i = 1; i <= (finalNumeroCuotas as number); i++) {
+								const fechaVencimientoCuota = new Date(fechaInicioDate);
+								fechaVencimientoCuota.setMonth(
+									fechaVencimientoCuota.getMonth() + i,
+								);
+								// Set to the payment day of the month
+								fechaVencimientoCuota.setDate(finalDiaPagoMensual as number);
+
+								cuotasValues.push({
+									contratoId: newContract[0].id,
+									numeroCuota: i,
+									fechaVencimiento: fechaVencimientoCuota,
+									montoCuota: finalCuotaMensual as string,
+									estadoMora: "al_dia" as const,
+									diasMora: 0,
+								});
+							}
+
+							await db.insert(cuotasPago).values(cuotasValues);
+						} else {
+							console.log(
+								"[CRM] Skipping local cuotas generation - managed by cartera-back",
+							);
+						}
+
+						// Update contract notes with sync status
+						if (isCarteraBackEnabled()) {
+							const syncNote = carteraBackSuccess
+								? `\n✓ Sincronizado con cartera-back: ${numeroSifco}`
+								: `\n⚠ Error sincronizando con cartera-back: ${carteraBackError}`;
+
+							await db
+								.update(contratosFinanciamiento)
+								.set({
+									notes: `${newContract[0].notes}${syncNote}`,
+									updatedAt: new Date(),
+								})
+								.where(eq(contratosFinanciamiento.id, newContract[0].id));
+						}
 
 						// Update opportunity to mark as won and set close date
 						updateData.status = "won";
@@ -899,10 +991,19 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Get current opportunity with stage info
+			// Get current opportunity with stage info and lead data
 			const opportunity = await db
-				.select()
+				.select({
+					id: opportunities.id,
+					vehicleId: opportunities.vehicleId,
+					creditType: opportunities.creditType,
+					stageId: opportunities.stageId,
+					notes: opportunities.notes,
+					leadId: opportunities.leadId,
+					clientType: leads.clientType,
+				})
 				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
@@ -936,14 +1037,19 @@ export const crmRouter = {
 					throw new Error("El vehículo debe tener una inspección aprobada");
 				}
 
-				// Validar documentos requeridos
+				// Validar documentos requeridos según tipo de cliente
+				const clientType = opportunity[0].clientType || "individual";
 				const requiredDocs = await db
 					.select()
-					.from(documentRequirements)
+					.from(documentRequirementsByClientType)
 					.where(
 						and(
-							eq(documentRequirements.creditType, opportunity[0].creditType),
-							eq(documentRequirements.required, true),
+							eq(documentRequirementsByClientType.clientType, clientType),
+							eq(
+								documentRequirementsByClientType.creditType,
+								opportunity[0].creditType,
+							),
+							eq(documentRequirementsByClientType.required, true),
 						),
 					);
 
@@ -958,14 +1064,33 @@ export const crmRouter = {
 
 				if (missingDocs.length > 0) {
 					const docLabels: Record<string, string> = {
-						identification: "Identificación",
+						identification: "Identificación (DPI/Pasaporte)",
 						income_proof: "Comprobante de Ingresos",
-						bank_statement: "Estado de Cuenta",
+						bank_statement: "Estado de Cuenta Bancario",
 						business_license: "Patente de Comercio",
-						property_deed: "Escrituras",
+						property_deed: "Escrituras de Propiedad",
 						vehicle_title: "Tarjeta de Circulación",
 						credit_report: "Reporte Crediticio",
-						other: "Otros",
+						other: "Otro",
+						// Documentos específicos por cliente
+						dpi: "DPI",
+						licencia: "Licencia",
+						recibo_luz: "Recibo de luz",
+						recibo_adicional: "Recibo adicional",
+						formularios: "Formularios",
+						estados_cuenta_1: "Estado de cuenta mes 1",
+						estados_cuenta_2: "Estado de cuenta mes 2",
+						estados_cuenta_3: "Estado de cuenta mes 3",
+						patente_comercio: "Patente de comercio",
+						representacion_legal: "Representación Legal",
+						constitucion_sociedad: "Constitución de sociedad",
+						patente_mercantil: "Patente mercantil",
+						iva_1: "Formulario IVA mes 1",
+						iva_2: "Formulario IVA mes 2",
+						iva_3: "Formulario IVA mes 3",
+						estado_financiero: "Estado financiero",
+						clausula_consentimiento: "Cláusula de consentimiento",
+						minutas: "Minutas",
 					};
 					const missingLabels = missingDocs
 						.map((d) => docLabels[d] || d)
@@ -1514,10 +1639,17 @@ export const crmRouter = {
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			try {
-				// 1. Obtener oportunidad con vehículo
+				// 1. Obtener oportunidad con información del lead
 				const [opp] = await db
-					.select()
+					.select({
+						id: opportunities.id,
+						creditType: opportunities.creditType,
+						vehicleId: opportunities.vehicleId,
+						leadId: opportunities.leadId,
+						clientType: leads.clientType,
+					})
 					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
 					.where(eq(opportunities.id, input.opportunityId))
 					.limit(1);
 
@@ -1563,16 +1695,19 @@ export const crmRouter = {
 					}
 				}
 
-				// 3. Obtener documentos requeridos según tipo de crédito
+				// 3. Obtener documentos requeridos según tipo de cliente y crédito
+				const clientType = opp.clientType || "individual";
 				const requiredDocs = await db
 					.select()
-					.from(documentRequirements)
+					.from(documentRequirementsByClientType)
 					.where(
 						and(
-							eq(documentRequirements.creditType, opp.creditType),
-							eq(documentRequirements.required, true),
+							eq(documentRequirementsByClientType.clientType, clientType),
+							eq(documentRequirementsByClientType.creditType, opp.creditType),
+							eq(documentRequirementsByClientType.required, true),
 						),
-					);
+					)
+					.orderBy(documentRequirementsByClientType.order);
 
 				// 4. Obtener documentos subidos
 				const uploadedDocs = await db
@@ -1605,5 +1740,645 @@ export const crmRouter = {
 				console.error("[validateOpportunityDocuments] ERROR:", error);
 				throw error;
 			}
+		}),
+
+	// Get document requirements by client type
+	getDocumentRequirementsByClientType: crmProcedure
+		.input(
+			z.object({
+				clientType: z.enum(["individual", "comerciante", "empresa"]),
+				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const requirements = await db
+				.select()
+				.from(documentRequirementsByClientType)
+				.where(
+					and(
+						eq(documentRequirementsByClientType.clientType, input.clientType),
+						eq(documentRequirementsByClientType.creditType, input.creditType),
+					),
+				)
+				.orderBy(documentRequirementsByClientType.order);
+
+			return requirements;
+		}),
+
+	// Get analysis checklist for an opportunity
+	getAnalysisChecklist: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// Get opportunity with lead info
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					creditType: opportunities.creditType,
+					vehicleId: opportunities.vehicleId,
+					leadId: opportunities.leadId,
+					clientType: leads.clientType,
+				})
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Check if checklist already exists
+			const [existingChecklist] = await db
+				.select()
+				.from(analysisChecklists)
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (existingChecklist) {
+				return existingChecklist.checklistData;
+			}
+
+			// Get required documents for this client type
+			const requiredDocs = await db
+				.select()
+				.from(documentRequirementsByClientType)
+				.where(
+					and(
+						eq(
+							documentRequirementsByClientType.clientType,
+							opportunity.clientType || "individual",
+						),
+						eq(
+							documentRequirementsByClientType.creditType,
+							opportunity.creditType,
+						),
+					),
+				)
+				.orderBy(documentRequirementsByClientType.order);
+
+			// Get uploaded documents
+			const uploadedDocs = await db
+				.select()
+				.from(opportunityDocuments)
+				.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+
+			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+
+			// Check vehicle inspection and get vehicle info
+			let vehicleInspected = false;
+			let inspectionId = null;
+			let vehicleOwnerType = null;
+			let vehicleData = null;
+			if (opportunity.vehicleId) {
+				// Get vehicle info including ownerType
+				const [vehicle] = await db
+					.select()
+					.from(vehicles)
+					.where(eq(vehicles.id, opportunity.vehicleId))
+					.limit(1);
+
+				if (vehicle) {
+					vehicleData = vehicle;
+					vehicleOwnerType = vehicle.ownerType;
+
+					// Check inspection
+					const [inspection] = await db
+						.select()
+						.from(vehicleInspections)
+						.where(
+							and(
+								eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+								eq(vehicleInspections.status, "approved"),
+							),
+						)
+						.limit(1);
+
+					if (inspection) {
+						vehicleInspected = true;
+						inspectionId = inspection.id;
+					}
+				}
+			}
+
+			// Get required vehicle documents based on ownerType
+			let requiredVehicleDocs: any[] = [];
+			let uploadedVehicleDocs: any[] = [];
+			if (opportunity.vehicleId && vehicleOwnerType) {
+				requiredVehicleDocs = await db
+					.select()
+					.from(vehicleDocumentRequirements)
+					.where(eq(vehicleDocumentRequirements.ownerType, vehicleOwnerType))
+					.orderBy(vehicleDocumentRequirements.order);
+
+				uploadedVehicleDocs = await db
+					.select()
+					.from(vehicleDocuments)
+					.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId));
+			}
+
+			const uploadedVehicleTypes = new Set(
+				uploadedVehicleDocs.map((d) => d.documentType),
+			);
+
+			// Check if credit analysis exists
+			let creditAnalysisExists = null;
+			if (opportunity.leadId) {
+				[creditAnalysisExists] = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, opportunity.leadId))
+					.limit(1);
+			}
+
+			// Create initial checklist structure
+			const checklistData = {
+				sections: {
+					documentos: {
+						completed:
+							requiredDocs.length > 0 &&
+							requiredDocs.every((doc) => uploadedTypes.has(doc.documentType)),
+						items: requiredDocs.map((doc) => ({
+							documentType: doc.documentType,
+							required: doc.required,
+							description: doc.description,
+							uploaded: uploadedTypes.has(doc.documentType),
+							documentId: uploadedDocs.find(
+								(ud) => ud.documentType === doc.documentType,
+							)?.id,
+						})),
+					},
+					verificaciones: {
+						completed: false,
+						items: [
+							{
+								name: "RTU - Validar que no sea PEP",
+								type: "rtu_pep",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "RTU - Confirmar empresa registrada",
+								type: "rtu_empresa",
+								required: opportunity.clientType !== "individual",
+								completed: false,
+							},
+							{
+								name: "Revisar cliente/empresa en internet y redes sociales",
+								type: "revision_internet",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Confirmación de referencias",
+								type: "confirmacion_referencias",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Confirmación de lugar de trabajo",
+								type: "confirmacion_trabajo",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Confirmación de negocio propio",
+								type: "confirmacion_negocio",
+								required: opportunity.clientType !== "individual",
+								completed: false,
+							},
+							{
+								name: "Análisis de capacidad de pago",
+								type: "capacidad_pago",
+								required: true,
+								completed: !!creditAnalysisExists,
+								analysisId: creditAnalysisExists?.id,
+							},
+							{
+								name: "Consulta Infornet",
+								type: "infornet",
+								required: true,
+								completed: false,
+							},
+							{
+								name: "Verificación de dirección domicilio",
+								type: "verificacion_direccion",
+								required: true,
+								completed: false,
+							},
+						],
+					},
+					vehiculo: {
+						completed: false, // Will be calculated below
+						vehicleId: opportunity.vehicleId,
+						ownerType: vehicleOwnerType,
+						inspected: vehicleInspected,
+						inspectionId,
+						// Vehicle documents subsection
+						documentos: {
+							completed:
+								requiredVehicleDocs.length > 0 &&
+								requiredVehicleDocs.every((doc) =>
+									uploadedVehicleTypes.has(doc.documentType),
+								),
+							items: requiredVehicleDocs.map((doc) => ({
+								documentType: doc.documentType,
+								required: doc.required,
+								uploaded: uploadedVehicleTypes.has(doc.documentType),
+								documentId: uploadedVehicleDocs.find(
+									(ud) => ud.documentType === doc.documentType,
+								)?.id,
+							})),
+						},
+						// Vehicle verifications subsection (manual checkboxes)
+						verificaciones: {
+							completed: false,
+							items: [
+								{
+									name: "Consulta WhatsApp con AutoEfectivo",
+									type: "whatsapp_autoefectivo",
+									required: true,
+									completed: false,
+								},
+								{
+									name: "Consulta WhatsApp con INREXA",
+									type: "whatsapp_inrexa",
+									required: true,
+									completed: false,
+								},
+								{
+									name: "Consulta SAT (Portal web)",
+									type: "consulta_sat_portal",
+									required: true,
+									completed: false,
+								},
+								{
+									name: "Consulta Garantías Mobiliarias (RGM)",
+									type: "consulta_rgm",
+									required: true,
+									completed: false,
+								},
+							],
+						},
+					},
+				},
+				overallProgress: 0,
+				canApprove: false,
+			};
+
+			// Calculate vehicle section completion
+			checklistData.sections.vehiculo.verificaciones.completed =
+				checklistData.sections.vehiculo.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			checklistData.sections.vehiculo.completed =
+				vehicleInspected &&
+				checklistData.sections.vehiculo.documentos.completed &&
+				checklistData.sections.vehiculo.verificaciones.completed;
+
+			// Calculate overall progress
+			const totalItems =
+				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.verificaciones.items.filter((i) => i.required)
+					.length + // client verifications
+				(opportunity.vehicleId ? 1 : 0) + // vehicle inspection
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.documentos.items.length
+					: 0) + // vehicle docs
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0); // vehicle verifications
+
+			const completedItems =
+				checklistData.sections.documentos.items.filter((i) => i.uploaded)
+					.length + // client docs uploaded
+				checklistData.sections.verificaciones.items.filter(
+					(i) => i.required && i.completed,
+				).length + // client verifications completed
+				(vehicleInspected ? 1 : 0) + // vehicle inspection
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.uploaded,
+						).length
+					: 0) + // vehicle docs uploaded
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required && i.completed,
+						).length
+					: 0); // vehicle verifications completed
+
+			checklistData.overallProgress = Math.round(
+				(completedItems / totalItems) * 100,
+			);
+
+			// Can approve if all sections are completed
+			checklistData.sections.verificaciones.completed =
+				checklistData.sections.verificaciones.items
+					.filter((i) => i.required)
+					.every((i) => i.completed);
+
+			checklistData.canApprove =
+				checklistData.sections.documentos.completed &&
+				checklistData.sections.verificaciones.completed &&
+				(opportunity.vehicleId
+					? checklistData.sections.vehiculo.completed
+					: true); // Only require vehicle section if there's a vehicle
+
+			// Save initial checklist
+			await db.insert(analysisChecklists).values({
+				opportunityId: input.opportunityId,
+				checklistData,
+			});
+
+			return checklistData;
+		}),
+
+	// Update analysis checklist verification
+	updateAnalysisChecklistVerification: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				verificationType: z.string(),
+				completed: z.boolean(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get existing checklist
+			const [existing] = await db
+				.select()
+				.from(analysisChecklists)
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!existing) {
+				throw new Error("Checklist no encontrado");
+			}
+
+			const checklistData = existing.checklistData as any;
+
+			// Update the specific verification
+			const item = checklistData.sections.verificaciones.items.find(
+				(i: any) => i.type === input.verificationType,
+			);
+
+			if (item) {
+				item.completed = input.completed;
+				if (input.completed) {
+					item.verifiedBy = context.userId;
+					item.verifiedAt = new Date().toISOString();
+				} else {
+					delete item.verifiedBy;
+					delete item.verifiedAt;
+				}
+			}
+
+			// Recalculate completion status
+			checklistData.sections.verificaciones.completed =
+				checklistData.sections.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			// Recalculate overall progress
+			const [opportunity] = await db
+				.select({ vehicleId: opportunities.vehicleId })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			let vehicleInspected = false;
+			if (opportunity?.vehicleId) {
+				const [inspection] = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+				vehicleInspected = !!inspection;
+			}
+
+			// Recalculate vehicle section if exists
+			if (opportunity?.vehicleId && checklistData.sections.vehiculo) {
+				// Recalculate vehicle verifications completion
+				if (checklistData.sections.vehiculo.verificaciones) {
+					checklistData.sections.vehiculo.verificaciones.completed =
+						checklistData.sections.vehiculo.verificaciones.items
+							.filter((i: any) => i.required)
+							.every((i: any) => i.completed);
+				}
+
+				// Recalculate vehicle section completion
+				checklistData.sections.vehiculo.completed =
+					vehicleInspected &&
+					(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+					(checklistData.sections.vehiculo.verificaciones?.completed ?? false);
+			}
+
+			const totalItems =
+				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required,
+				).length + // client verifications
+				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.length
+					: 0) + // vehicle docs
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0); // vehicle verifications
+
+			const completedItems =
+				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
+					.length + // client docs uploaded
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required && i.completed,
+				).length + // client verifications completed
+				(vehicleInspected ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.uploaded,
+						).length
+					: 0) + // vehicle docs uploaded
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required && i.completed,
+						).length
+					: 0); // vehicle verifications completed
+
+			checklistData.overallProgress = Math.round(
+				(completedItems / totalItems) * 100,
+			);
+
+			checklistData.canApprove =
+				checklistData.sections.documentos.completed &&
+				checklistData.sections.verificaciones.completed &&
+				(opportunity?.vehicleId
+					? (checklistData.sections.vehiculo?.completed ?? false)
+					: true);
+
+			// Update checklist
+			await db
+				.update(analysisChecklists)
+				.set({
+					checklistData,
+					updatedAt: new Date(),
+				})
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId));
+
+			return checklistData;
+		}),
+
+	// Update vehicle verification in analysis checklist
+	updateAnalysisChecklistVehicleVerification: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				verificationType: z.string(),
+				completed: z.boolean(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get existing checklist
+			const [existing] = await db
+				.select()
+				.from(analysisChecklists)
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!existing) {
+				throw new Error("Checklist no encontrado");
+			}
+
+			const checklistData = existing.checklistData as any;
+
+			// Verify vehicle section exists
+			if (!checklistData.sections.vehiculo?.verificaciones) {
+				throw new Error(
+					"La sección de verificaciones de vehículo no existe en este checklist",
+				);
+			}
+
+			// Update the specific vehicle verification
+			const item = checklistData.sections.vehiculo.verificaciones.items.find(
+				(i: any) => i.type === input.verificationType,
+			);
+
+			if (item) {
+				item.completed = input.completed;
+				if (input.completed) {
+					item.verifiedBy = context.userId;
+					item.verifiedAt = new Date().toISOString();
+				} else {
+					delete item.verifiedBy;
+					delete item.verifiedAt;
+				}
+			}
+
+			// Recalculate vehicle verifications completion
+			checklistData.sections.vehiculo.verificaciones.completed =
+				checklistData.sections.vehiculo.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			// Get opportunity and vehicle inspection status
+			const [opportunity] = await db
+				.select({ vehicleId: opportunities.vehicleId })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			let vehicleInspected = false;
+			if (opportunity?.vehicleId) {
+				const [inspection] = await db
+					.select()
+					.from(vehicleInspections)
+					.where(
+						and(
+							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+							eq(vehicleInspections.status, "approved"),
+						),
+					)
+					.limit(1);
+				vehicleInspected = !!inspection;
+			}
+
+			// Recalculate vehicle section completion
+			checklistData.sections.vehiculo.completed =
+				vehicleInspected &&
+				(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+				checklistData.sections.vehiculo.verificaciones.completed;
+
+			// Recalculate client verificaciones completion
+			checklistData.sections.verificaciones.completed =
+				checklistData.sections.verificaciones.items
+					.filter((i: any) => i.required)
+					.every((i: any) => i.completed);
+
+			// Recalculate overall progress
+			const totalItems =
+				checklistData.sections.documentos.items.length + // client docs
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required,
+				).length + // client verifications
+				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.length
+					: 0) + // vehicle docs
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required,
+						).length
+					: 0); // vehicle verifications
+
+			const completedItems =
+				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
+					.length + // client docs uploaded
+				checklistData.sections.verificaciones.items.filter(
+					(i: any) => i.required && i.completed,
+				).length + // client verifications completed
+				(vehicleInspected ? 1 : 0) + // vehicle inspection
+				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
+					? checklistData.sections.vehiculo.documentos.items.filter(
+							(i: any) => i.uploaded,
+						).length
+					: 0) + // vehicle docs uploaded
+				(opportunity?.vehicleId &&
+				checklistData.sections.vehiculo?.verificaciones
+					? checklistData.sections.vehiculo.verificaciones.items.filter(
+							(i: any) => i.required && i.completed,
+						).length
+					: 0); // vehicle verifications completed
+
+			checklistData.overallProgress = Math.round(
+				(completedItems / totalItems) * 100,
+			);
+
+			checklistData.canApprove =
+				checklistData.sections.documentos.completed &&
+				checklistData.sections.verificaciones.completed &&
+				(opportunity?.vehicleId
+					? (checklistData.sections.vehiculo?.completed ?? false)
+					: true);
+
+			// Update checklist
+			await db
+				.update(analysisChecklists)
+				.set({
+					checklistData,
+					updatedAt: new Date(),
+				})
+				.where(eq(analysisChecklists.opportunityId, input.opportunityId));
+
+			return checklistData;
 		}),
 };

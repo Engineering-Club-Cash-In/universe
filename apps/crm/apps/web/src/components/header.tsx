@@ -13,13 +13,14 @@ import {
 	Key,
 	LayoutDashboard,
 	MessageSquare,
+	Scale,
 	Settings,
 	TrendingUp,
 	UserCircle,
 	Users,
 } from "lucide-react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 import { ModeToggle } from "./mode-toggle";
@@ -196,6 +197,20 @@ export default function Header() {
 								<Link to="/crm/analysis">
 									<BarChart3 className="mr-2 h-4 w-4" />
 									Análisis
+								</Link>
+							</Button>
+						)}
+
+						{/* Jurídico */}
+						{session && userRole && PERMISSIONS.canAccessJuridico(userRole) && (
+							<Button
+								variant={isActive("/juridico") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/juridico">
+									<Scale className="mr-2 h-4 w-4" />
+									Jurídico
 								</Link>
 							</Button>
 						)}

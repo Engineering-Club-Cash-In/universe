@@ -143,9 +143,7 @@ function DraggableContractCard({
 				</div>
 
 				<Badge className={`${getEstadoBadgeColor(estadoVisual)}`}>
-					{esAlDia
-						? "AL DÍA"
-						: estadoVisual?.replace("_", " ")?.toUpperCase()}
+					{esAlDia ? "AL DÍA" : estadoVisual?.replace("_", " ")?.toUpperCase()}
 				</Badge>
 
 				<div className="flex items-center gap-1 text-muted-foreground text-xs">
@@ -178,9 +176,13 @@ function DraggableContractCard({
 							</div>
 							<div className="text-muted-foreground text-xs">
 								{infoPago.diasRestantes === 0 ? (
-									<span className="font-medium text-red-600">¡Hoy es el día de pago!</span>
+									<span className="font-medium text-red-600">
+										¡Hoy es el día de pago!
+									</span>
 								) : infoPago.diasRestantes === 1 ? (
-									<span className="font-medium text-orange-600">Queda 1 día</span>
+									<span className="font-medium text-orange-600">
+										Queda 1 día
+									</span>
 								) : (
 									<span>Quedan {infoPago.diasRestantes} días</span>
 								)}
@@ -208,7 +210,11 @@ function DroppableStatusColumn({
 	totalMonto: number;
 	count: number;
 	getEstadoBadgeColor: (estado: string) => string;
-	onDropContrato: (contratoId: string, casoCobroId: string | null, newEstado: string) => void;
+	onDropContrato: (
+		contratoId: string,
+		casoCobroId: string | null,
+		newEstado: string,
+	) => void;
 	onContratoClick: (contrato: any) => void;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
@@ -574,7 +580,9 @@ function RouteComponent() {
 										{/* Ícono y Badge */}
 										<div className="flex w-32 shrink-0 items-center gap-2">
 											<Icon className="h-5 w-5 shrink-0 text-muted-foreground" />
-											<Badge className={`${estado.color} whitespace-nowrap text-xs`}>
+											<Badge
+												className={`${estado.color} whitespace-nowrap text-xs`}
+											>
 												{estado.label}
 											</Badge>
 										</div>
@@ -613,57 +621,59 @@ function RouteComponent() {
 				</CardContent>
 			</Card>
 
-		{/* Kanban Board de Cobranza */}
-		<div className="space-y-4">
-			<div className="flex items-center justify-between">
-				<div>
-					<h2 className="font-bold text-2xl">Tablero de Cobranza</h2>
-					<p className="text-muted-foreground">
-						Arrastra los casos entre columnas para actualizar su estado
-					</p>
+			{/* Kanban Board de Cobranza */}
+			<div className="space-y-4">
+				<div className="flex items-center justify-between">
+					<div>
+						<h2 className="font-bold text-2xl">Tablero de Cobranza</h2>
+						<p className="text-muted-foreground">
+							Arrastra los casos entre columnas para actualizar su estado
+						</p>
+					</div>
+					<div className="flex items-center gap-2">
+						<Checkbox
+							id="showHiddenColumns"
+							checked={showHiddenColumns}
+							onCheckedChange={(checked) =>
+								setShowHiddenColumns(checked === true)
+							}
+						/>
+						<Label
+							htmlFor="showHiddenColumns"
+							className="cursor-pointer font-medium text-sm"
+						>
+							{showHiddenColumns ? (
+								<span className="flex items-center gap-2">
+									<Eye className="h-4 w-4" />
+									Ocultar columnas finales
+								</span>
+							) : (
+								<span className="flex items-center gap-2">
+									<EyeOff className="h-4 w-4" />
+									Mostrar columnas finales
+								</span>
+							)}
+						</Label>
+					</div>
 				</div>
-				<div className="flex items-center gap-2">
-					<Checkbox
-						id="showHiddenColumns"
-						checked={showHiddenColumns}
-						onCheckedChange={(checked) =>
-							setShowHiddenColumns(checked === true)
-						}
-					/>
-					<Label
-						htmlFor="showHiddenColumns"
-						className="cursor-pointer text-sm font-medium"
-					>
-						{showHiddenColumns ? (
-							<span className="flex items-center gap-2">
-								<Eye className="h-4 w-4" />
-								Ocultar columnas finales
-							</span>
-						) : (
-							<span className="flex items-center gap-2">
-								<EyeOff className="h-4 w-4" />
-								Mostrar columnas finales
-							</span>
-						)}
-					</Label>
-				</div>
-			</div>
 
-			<div className="flex gap-6 overflow-x-auto pb-4">
-				{contratosPorEstado.map(({ estado, contratos, totalMonto, count }) => (
-					<DroppableStatusColumn
-						key={estado.key}
-						estado={estado}
-						contratos={contratos}
-						totalMonto={totalMonto}
-						count={count}
-						getEstadoBadgeColor={getEstadoBadgeColor}
-						onDropContrato={handleDropContrato}
-						onContratoClick={handleContratoClick}
-					/>
-				))}
+				<div className="flex gap-6 overflow-x-auto pb-4">
+					{contratosPorEstado.map(
+						({ estado, contratos, totalMonto, count }) => (
+							<DroppableStatusColumn
+								key={estado.key}
+								estado={estado}
+								contratos={contratos}
+								totalMonto={totalMonto}
+								count={count}
+								getEstadoBadgeColor={getEstadoBadgeColor}
+								onDropContrato={handleDropContrato}
+								onContratoClick={handleContratoClick}
+							/>
+						),
+					)}
+				</div>
 			</div>
-		</div>
 		</div>
 	);
 }

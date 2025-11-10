@@ -14,6 +14,7 @@ import {
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
 import { documensoService } from './DocumensoService';
 import { getRequiredEmailCount } from '../config/docusealConfig';
+import { crmApiService } from './CrmApiService';
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -462,6 +463,8 @@ export class ContractGeneratorService {
 
       // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
       let signingLinks: string[] | undefined;
+      let shouldCleanupFiles = false;
+
       if (options.emails && options.emails.length > 0 && pdfBuffer) {
         try {
           console.log(`🔗 Creando documento en Documenso para firma...`);
@@ -481,9 +484,23 @@ export class ContractGeneratorService {
           );
 
           console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
+
+          // Marcar para limpieza: archivo subido exitosamente a Documenso/R2
+          shouldCleanupFiles = true;
         } catch (documensoError) {
           console.error('⚠ Error al crear documento en Documenso:', documensoError);
           // No fallar si Documenso falla, los archivos ya están generados
+        }
+      }
+
+      // 13. Limpiar archivos locales si se subieron exitosamente a R2
+      if (shouldCleanupFiles) {
+        try {
+          await this.cleanupLocalFiles(docxPath, pdfPath);
+          console.log(`🗑️  Archivos locales eliminados (ya están en R2)`);
+        } catch (cleanupError) {
+          console.warn('⚠ Error al limpiar archivos locales:', cleanupError);
+          // No fallar si la limpieza falla
         }
       }
 
@@ -521,6 +538,45 @@ export class ContractGeneratorService {
           embed_src: signingLink // Link de firma de Documenso
         };
       });
+
+      // 14. Guardar contrato en CRM (si hay DPI y signing links)
+      if (data.dpi && signingLinks && signingLinks.length > 0) {
+        const templateId = Math.floor(Math.random() * 100000);
+
+        // Preparar response completo para guardar en CRM
+        const fullApiResponse = {
+          templateId,
+          success: true,
+          nameDocument: [{ enum: contractType, label: config.description }],
+          data: submissionData,
+          signing_links: signingLinks,
+          contractType,
+          docx_path: docxPath,
+          pdf_path: pdfPath,
+          message: `Contrato ${contractType} generado exitosamente`,
+          generatedAt: new Date().toISOString()
+        };
+
+        // Llamar al CRM de manera no-bloqueante
+        crmApiService.saveContractSilently({
+          dpi: data.dpi,
+          contractType,
+          contractName: config.description,
+          signingLinks,
+          templateId,
+          apiResponse: fullApiResponse,
+        }).catch(err => {
+          console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
+          // No bloquear la respuesta si falla el guardado en CRM
+        });
+      } else {
+        if (!data.dpi) {
+          console.warn('[ContractGeneratorService] No se guardará en CRM: falta DPI en los datos');
+        }
+        if (!signingLinks || signingLinks.length === 0) {
+          console.warn('[ContractGeneratorService] No se guardará en CRM: no hay signing links');
+        }
+      }
 
       return {
         templateId: Math.floor(Math.random() * 100000), // ID de template simulado
@@ -594,6 +650,25 @@ export class ContractGeneratorService {
   }
 
   /**
+   * Limpia archivos locales después de subir exitosamente a R2
+   */
+  private async cleanupLocalFiles(docxPath: string, pdfPath?: string): Promise<void> {
+    const filesToDelete = [docxPath];
+    if (pdfPath) {
+      filesToDelete.push(pdfPath);
+    }
+
+    for (const filePath of filesToDelete) {
+      try {
+        await fs.unlink(filePath);
+        console.log(`  ✓ Eliminado: ${path.basename(filePath)}`);
+      } catch (error) {
+        console.warn(`  ⚠ No se pudo eliminar ${path.basename(filePath)}:`, error);
+      }
+    }
+  }
+
+  /**
    * Verifica si Gotenberg está disponible
    */
   public async checkGotenbergHealth(): Promise<boolean> {
@@ -610,4 +685,6 @@ export class ContractGeneratorService {
 }
 
 // Exportar instancia singleton por defecto
-export const contractGenerator = new ContractGeneratorService();
+export const contractGenerator = new ContractGeneratorService({
+  gotenbergUrl: process.env.GOTENBERG_URL || 'http://localhost:3000'
+});

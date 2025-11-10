@@ -1419,7 +1419,7 @@ function RouteComponent() {
 										</div>
 										<div className="text-right">
 											<div className="font-bold text-2xl text-green-600">
-												$
+												Q
 												{Number.parseFloat(
 													selectedOpportunity.value || "0",
 												).toLocaleString()}

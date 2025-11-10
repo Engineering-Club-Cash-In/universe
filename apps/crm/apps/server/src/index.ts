@@ -15,6 +15,7 @@ import { livenessController } from "./controllers/liveness";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
+import externalContractsRouter from "./routes/external-contracts";
 
 const app = new Hono();
 
@@ -52,6 +53,9 @@ app.use(
 );
 
 app.on(["POST", "GET"], "/api/auth/**", (c) => auth.handler(c.req.raw));
+
+// External contracts endpoint (requires service account authentication)
+app.route("/api/contracts/external", externalContractsRouter);
 
 const handler = new RPCHandler(appRouter);
 app.use("/rpc/*", async (c, next) => {

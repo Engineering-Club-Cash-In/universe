@@ -15,7 +15,9 @@ COPY . .
 
 # Build arguments for environment variables
 ARG VITE_API_URL=https://api.devteamatcci.site
+ARG VITE_API_URL_DOCUMENTS=https://legal-docs-blueprints.s4.devteamatcci.site
 ENV VITE_API_URL=${VITE_API_URL}
+ENV VITE_API_URL_DOCUMENTS=${VITE_API_URL_DOCUMENTS}
 
 # Build the application
 RUN bun run build

@@ -126,6 +126,9 @@ export const casosCobros = pgTable("casos_cobros", {
 		.notNull()
 		.references(() => contratosFinanciamiento.id),
 
+	// Referencia a cartera-back (nullable para compatibilidad con datos legacy)
+	numeroCreditoSifco: text("numero_credito_sifco"),
+
 	// Estado actual del caso
 	estadoMora: estadoMoraEnum("estado_mora").notNull(),
 	montoEnMora: decimal("monto_en_mora", { precision: 12, scale: 2 }).notNull(),

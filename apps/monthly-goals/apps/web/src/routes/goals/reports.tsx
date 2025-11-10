@@ -16,7 +16,7 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { useState, useMemo } from "react";
 
-export const Route = createFileRoute("/goals/")({
+export const Route = createFileRoute("/goals/reports")({
 	component: GoalsIndexPage,
 });
 

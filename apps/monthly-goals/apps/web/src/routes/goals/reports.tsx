@@ -16,7 +16,7 @@ import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
 import { useState, useMemo } from "react";
 
-export const Route = createFileRoute("/goals/")({
+export const Route = createFileRoute("/goals/reports")({
 	component: GoalsIndexPage,
 });
 
@@ -113,6 +113,16 @@ function GoalsIndexPage() {
 
 	const years = Array.from({ length: 5 }, (_, i) => currentDate.getFullYear() - 2 + i);
 
+	// Generar opciones de área dinámicamente desde los datos
+	const areaOptions = useMemo(() => {
+		if (!monthlyGoals.data) return [];
+		const uniqueAreas = new Set(monthlyGoals.data.map((goal) => goal.areaName).filter(Boolean));
+		return Array.from(uniqueAreas).sort().map((area) => ({
+			label: area as string,
+			value: area as string,
+		}));
+	}, [monthlyGoals.data]);
+
 	// Definir columnas para TanStack Table
 	const columns = useMemo<ColumnDef<MonthlyGoal>[]>(() => [
 		{
@@ -129,8 +139,13 @@ function GoalsIndexPage() {
 		},
 		{
 			accessorKey: "areaName",
-			header: createSortableHeader("Área"),
+			header: createFilterableHeader("Área", areaOptions),
 			cell: ({ row }) => row.getValue("areaName") || "—",
+			filterFn: (row, id, value) => {
+				if (!value || value.length === 0) return true;
+				const areaName = row.getValue("areaName") as string;
+				return value.includes(areaName);
+			},
 		},
 		{
 			accessorKey: "goalTemplateName",
@@ -198,7 +213,7 @@ function GoalsIndexPage() {
 				return value.includes(status);
 			},
 		},
-	], []);
+	], [areaOptions]);
 
 	return (
 		<div className="space-y-6">

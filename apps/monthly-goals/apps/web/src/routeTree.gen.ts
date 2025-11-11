@@ -16,8 +16,8 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PresentationsIndexRouteImport } from './routes/presentations/index'
-import { Route as GoalsIndexRouteImport } from './routes/goals/index'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
+import { Route as GoalsReportsRouteImport } from './routes/goals/reports'
 import { Route as GoalsMyGoalsRouteImport } from './routes/goals/my-goals'
 import { Route as GoalsConfigureRouteImport } from './routes/goals/configure'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
@@ -63,15 +63,15 @@ const PresentationsIndexRoute = PresentationsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PresentationsRoute,
 } as any)
-const GoalsIndexRoute = GoalsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => GoalsRoute,
-} as any)
 const AdminIndexRoute = AdminIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AdminRoute,
+} as any)
+const GoalsReportsRoute = GoalsReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => GoalsRoute,
 } as any)
 const GoalsMyGoalsRoute = GoalsMyGoalsRouteImport.update({
   id: '/my-goals',
@@ -133,8 +133,8 @@ export interface FileRoutesByFullPath {
   '/admin/users': typeof AdminUsersRoute
   '/goals/configure': typeof GoalsConfigureRoute
   '/goals/my-goals': typeof GoalsMyGoalsRoute
+  '/goals/reports': typeof GoalsReportsRoute
   '/admin/': typeof AdminIndexRoute
-  '/goals/': typeof GoalsIndexRoute
   '/presentations/': typeof PresentationsIndexRoute
   '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
   '/presentations/$id/view': typeof PresentationsIdViewRoute
@@ -142,6 +142,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
+  '/goals': typeof GoalsRouteWithChildren
   '/login': typeof LoginRoute
   '/admin/areas': typeof AdminAreasRoute
   '/admin/departments': typeof AdminDepartmentsRoute
@@ -150,8 +151,8 @@ export interface FileRoutesByTo {
   '/admin/users': typeof AdminUsersRoute
   '/goals/configure': typeof GoalsConfigureRoute
   '/goals/my-goals': typeof GoalsMyGoalsRoute
+  '/goals/reports': typeof GoalsReportsRoute
   '/admin': typeof AdminIndexRoute
-  '/goals': typeof GoalsIndexRoute
   '/presentations': typeof PresentationsIndexRoute
   '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
   '/presentations/$id/view': typeof PresentationsIdViewRoute
@@ -171,8 +172,8 @@ export interface FileRoutesById {
   '/admin/users': typeof AdminUsersRoute
   '/goals/configure': typeof GoalsConfigureRoute
   '/goals/my-goals': typeof GoalsMyGoalsRoute
+  '/goals/reports': typeof GoalsReportsRoute
   '/admin/': typeof AdminIndexRoute
-  '/goals/': typeof GoalsIndexRoute
   '/presentations/': typeof PresentationsIndexRoute
   '/presentations/$id/submit': typeof PresentationsIdSubmitRoute
   '/presentations/$id/view': typeof PresentationsIdViewRoute
@@ -193,8 +194,8 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/goals/configure'
     | '/goals/my-goals'
+    | '/goals/reports'
     | '/admin/'
-    | '/goals/'
     | '/presentations/'
     | '/presentations/$id/submit'
     | '/presentations/$id/view'
@@ -202,6 +203,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/dashboard'
+    | '/goals'
     | '/login'
     | '/admin/areas'
     | '/admin/departments'
@@ -210,8 +212,8 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/goals/configure'
     | '/goals/my-goals'
+    | '/goals/reports'
     | '/admin'
-    | '/goals'
     | '/presentations'
     | '/presentations/$id/submit'
     | '/presentations/$id/view'
@@ -230,8 +232,8 @@ export interface FileRouteTypes {
     | '/admin/users'
     | '/goals/configure'
     | '/goals/my-goals'
+    | '/goals/reports'
     | '/admin/'
-    | '/goals/'
     | '/presentations/'
     | '/presentations/$id/submit'
     | '/presentations/$id/view'
@@ -297,19 +299,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PresentationsIndexRouteImport
       parentRoute: typeof PresentationsRoute
     }
-    '/goals/': {
-      id: '/goals/'
-      path: '/'
-      fullPath: '/goals/'
-      preLoaderRoute: typeof GoalsIndexRouteImport
-      parentRoute: typeof GoalsRoute
-    }
     '/admin/': {
       id: '/admin/'
       path: '/'
       fullPath: '/admin/'
       preLoaderRoute: typeof AdminIndexRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/goals/reports': {
+      id: '/goals/reports'
+      path: '/reports'
+      fullPath: '/goals/reports'
+      preLoaderRoute: typeof GoalsReportsRouteImport
+      parentRoute: typeof GoalsRoute
     }
     '/goals/my-goals': {
       id: '/goals/my-goals'
@@ -400,13 +402,13 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 interface GoalsRouteChildren {
   GoalsConfigureRoute: typeof GoalsConfigureRoute
   GoalsMyGoalsRoute: typeof GoalsMyGoalsRoute
-  GoalsIndexRoute: typeof GoalsIndexRoute
+  GoalsReportsRoute: typeof GoalsReportsRoute
 }
 
 const GoalsRouteChildren: GoalsRouteChildren = {
   GoalsConfigureRoute: GoalsConfigureRoute,
   GoalsMyGoalsRoute: GoalsMyGoalsRoute,
-  GoalsIndexRoute: GoalsIndexRoute,
+  GoalsReportsRoute: GoalsReportsRoute,
 }
 
 const GoalsRouteWithChildren = GoalsRoute._addFileChildren(GoalsRouteChildren)

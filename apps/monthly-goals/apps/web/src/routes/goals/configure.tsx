@@ -16,6 +16,13 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
+import {
+	SearchableSelect,
+	SearchableSelectTrigger,
+	SearchableSelectContent,
+	SearchableSelectValue,
+	SearchableSelectItem,
+} from "@/components/ui/searchable-select";
 import { useState, useMemo } from "react";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/error-handler";
@@ -26,6 +33,7 @@ export const Route = createFileRoute("/goals/configure")({
 
 type BulkGoal = {
 	id: string;
+	areaId: string;
 	teamMemberId: string;
 	goalTemplateId: string;
 	targetValue: string;
@@ -40,6 +48,7 @@ function GoalsConfigurePage() {
 	const [bulkGoals, setBulkGoals] = useState<BulkGoal[]>([]);
 
 	// Queries
+	const areas = useQuery(orpc.areas.list.queryOptions());
 	const teamMembers = useQuery(orpc.teams.list.queryOptions());
 	const goalTemplates = useQuery(orpc.goalTemplates.list.queryOptions());
 
@@ -81,6 +90,7 @@ function GoalsConfigurePage() {
 			...bulkGoals,
 			{
 				id: crypto.randomUUID(),
+				areaId: "",
 				teamMemberId: "",
 				goalTemplateId: "",
 				targetValue: "",
@@ -101,7 +111,7 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 
 	const handleBulkSubmit = () => {
 		const validGoals = bulkGoals.filter(goal =>
-			goal.teamMemberId && goal.goalTemplateId && goal.targetValue
+			goal.areaId && goal.teamMemberId && goal.goalTemplateId && goal.targetValue
 		);
 
 		if (validGoals.length === 0) {
@@ -112,65 +122,130 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 		bulkCreateMutation.mutate({
 			month: selectedMonth,
 			year: selectedYear,
-			goals: validGoals.map(({ id, ...goal }) => goal),
+			goals: validGoals.map(({ id, areaId, ...goal }) => goal),
 		});
 	};
 
 	// Definir columnas para TanStack Table
 	const columns = useMemo<ColumnDef<BulkGoal>[]>(() => [
 		{
-			accessorKey: "teamMemberId",
-			header: "Empleado",
+			accessorKey: "areaId",
+			header: "Área",
 			cell: ({ row }) => {
 				const goal = row.original;
 				return (
-					<Select
-						value={goal.teamMemberId}
-						onValueChange={(value) => updateGoalInList(goal.id, "teamMemberId", value)}
+					<SearchableSelect
+						value={goal.areaId}
+						onValueChange={(value) => {
+							updateGoalInList(goal.id, "areaId", value);
+							// Reset team member when area changes
+							updateGoalInList(goal.id, "teamMemberId", "");
+						}}
 					>
-						<SelectTrigger>
-							<SelectValue placeholder="Seleccionar empleado" />
-						</SelectTrigger>
-						<SelectContent>
-							{teamMembers.isLoading ? (
-								<SelectItem value="" disabled>
-									Cargando empleados...
-								</SelectItem>
-							) : teamMembers.data?.map((member: any) => (
-								<SelectItem key={member.id} value={member.id}>
-									{member.userName} - {member.areaName}
-								</SelectItem>
+						<SearchableSelectTrigger className="w-[200px] h-auto min-h-9 whitespace-normal">
+							<SearchableSelectValue placeholder="Seleccionar área" />
+						</SearchableSelectTrigger>
+						<SearchableSelectContent searchPlaceholder="Buscar área...">
+							{areas.isLoading ? (
+								<div className="py-6 text-center text-sm text-muted-foreground">
+									Cargando áreas...
+								</div>
+							) : areas.data?.map((area: any) => (
+								<SearchableSelectItem
+									key={area.id}
+									value={area.id}
+									searchValue={area.name}
+								>
+									{area.name}
+								</SearchableSelectItem>
 							))}
-						</SelectContent>
-					</Select>
+						</SearchableSelectContent>
+					</SearchableSelect>
 				);
 			},
 		},
 		{
-			accessorKey: "goalTemplateId", 
+			accessorKey: "teamMemberId",
+			header: "Empleado",
+			cell: ({ row }) => {
+				const goal = row.original;
+				// Filter team members by selected area
+				const filteredMembers = goal.areaId
+					? (teamMembers.data?.filter((member: any) => member.areaId === goal.areaId) || [])
+					: [];
+
+				return (
+					<SearchableSelect
+						value={goal.teamMemberId}
+						onValueChange={(value) => updateGoalInList(goal.id, "teamMemberId", value)}
+						disabled={!goal.areaId}
+					>
+						<SearchableSelectTrigger className="w-[200px] h-auto min-h-9 whitespace-normal">
+							<SearchableSelectValue placeholder={
+								!goal.areaId
+									? "Primero selecciona área"
+									: "Seleccionar empleado"
+							} />
+						</SearchableSelectTrigger>
+						<SearchableSelectContent searchPlaceholder="Buscar empleado...">
+							{teamMembers.isLoading ? (
+								<div className="py-6 text-center text-sm text-muted-foreground">
+									Cargando empleados...
+								</div>
+							) : filteredMembers.length === 0 ? (
+								<div className="py-6 text-center text-sm text-muted-foreground">
+									No hay empleados en esta área
+								</div>
+							) : filteredMembers.map((member: any) => (
+								<SearchableSelectItem
+									key={member.id}
+									value={member.id}
+									searchValue={member.userName}
+								>
+									{member.userName}
+								</SearchableSelectItem>
+							))}
+						</SearchableSelectContent>
+					</SearchableSelect>
+				);
+			},
+		},
+		{
+			accessorKey: "goalTemplateId",
 			header: "Template de Meta",
 			cell: ({ row }) => {
 				const goal = row.original;
 				return (
-					<Select
+					<SearchableSelect
 						value={goal.goalTemplateId}
-						onValueChange={(value) => updateGoalInList(goal.id, "goalTemplateId", value)}
+						onValueChange={(value) => {
+							updateGoalInList(goal.id, "goalTemplateId", value);
+							// Set default target if objective is empty
+							const selectedTemplate = goalTemplates.data?.find((t: any) => t.id === value);
+							if (selectedTemplate?.defaultTarget) {
+								updateGoalInList(goal.id, "targetValue", selectedTemplate.defaultTarget);
+							}
+						}}
 					>
-						<SelectTrigger>
-							<SelectValue placeholder="Seleccionar template" />
-						</SelectTrigger>
-						<SelectContent>
+						<SearchableSelectTrigger className="w-[250px] h-auto min-h-9 whitespace-normal">
+							<SearchableSelectValue placeholder="Seleccionar template" />
+						</SearchableSelectTrigger>
+						<SearchableSelectContent searchPlaceholder="Buscar template...">
 							{goalTemplates.isLoading ? (
-								<SelectItem value="" disabled>
+								<div className="py-6 text-center text-sm text-muted-foreground">
 									Cargando templates...
-								</SelectItem>
+								</div>
 							) : goalTemplates.data?.map((template: any) => (
-								<SelectItem key={template.id} value={template.id}>
+								<SearchableSelectItem
+									key={template.id}
+									value={template.id}
+									searchValue={`${template.name} ${template.unit || "unidades"}`}
+								>
 									{template.name} ({template.unit || "unidades"})
-								</SelectItem>
+								</SearchableSelectItem>
 							))}
-						</SelectContent>
-					</Select>
+						</SearchableSelectContent>
+					</SearchableSelect>
 				);
 			},
 		},
@@ -185,6 +260,7 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 						step="0.01"
 						value={goal.targetValue}
 						onChange={(e) => updateGoalInList(goal.id, "targetValue", e.target.value)}
+						onFocus={(e) => e.target.select()}
 						placeholder="Objetivo"
 					/>
 				);
@@ -213,7 +289,7 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 				variant: "destructive",
 			},
 		]),
-	], [teamMembers.data, goalTemplates.data]);
+	], [areas.data, teamMembers.data, goalTemplates.data]);
 
 	return (
 		<div className="space-y-6">
@@ -302,7 +378,7 @@ const updateGoalInList = (id: string, field: string, value: string) => {
 
 							<div className="flex items-center justify-between pt-4 border-t dark:border-gray-700">
 								<p className="text-sm text-gray-600 dark:text-gray-400">
-									Se crearán {bulkGoals.filter(g => g.teamMemberId && g.goalTemplateId && g.targetValue).length} meta(s) válida(s)
+									Se crearán {bulkGoals.filter(g => g.areaId && g.teamMemberId && g.goalTemplateId && g.targetValue).length} meta(s) válida(s)
 								</p>
 								<Button
 									onClick={handleBulkSubmit}

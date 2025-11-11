@@ -41,9 +41,10 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 días
     updateAge: 60 * 60 * 24, // 1 día
+    // Deshabilitar cookieCache temporalmente para debug
+    // El problema es que cookieCache devuelve null cuando no puede validar
     cookieCache: {
-      enabled: true,
-      maxAge: 60 * 5, // 5 minutos
+      enabled: false,
     },
   },
   advanced: {
@@ -52,6 +53,9 @@ export const auth = betterAuth({
       enabled: false,
     },
     useSecureCookies: env.NODE_ENV === "production",
+    cookies: {
+      sameSite: env.NODE_ENV === "production" ? "strict" : "lax",
+    },
   },
   secret: env.BETTER_AUTH_SECRET,
   baseURL: env.BETTER_AUTH_URL,

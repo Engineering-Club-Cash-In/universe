@@ -51,10 +51,6 @@ const valuationSchema = z.object({
     message: "Esta información es requerida",
   }),
   missingAirbag: z.string().optional(),
-  testDrive: z.enum(["Sí", "No"], {
-    message: "Esta información es requerida",
-  }),
-  noTestDriveReason: z.string().optional(),
 });
 
 interface VehicleValuationProps {
@@ -93,7 +89,6 @@ export default function VehicleValuation({
       importantConsiderations: "",
       scannerUsed: undefined,
       airbagWarning: undefined,
-      testDrive: undefined,
     },
   });
 
@@ -504,60 +499,6 @@ export default function VehicleValuation({
                         <Input
                           placeholder="Ej. Airbag lateral izquierdo"
                           {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              <FormField
-                control={form.control}
-                name="testDrive"
-                render={({ field }) => (
-                  <FormItem className="space-y-3">
-                    <FormLabel>¿Se realizó prueba de manejo?</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        className="flex flex-col space-y-1"
-                      >
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="Sí" />
-                          </FormControl>
-                          <FormLabel className="font-normal">Sí</FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="No" />
-                          </FormControl>
-                          <FormLabel className="font-normal">No</FormLabel>
-                        </FormItem>
-                      </RadioGroup>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {form.watch("testDrive") === "No" && (
-                <FormField
-                  control={form.control}
-                  name="noTestDriveReason"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        Indique por qué no se realizó la prueba de manejo
-                      </FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Razón por la que no se realizó la prueba"
-                          className="min-h-[80px]"
-                          {...field}
-                          value={field.value || ""}
                         />
                       </FormControl>
                       <FormMessage />

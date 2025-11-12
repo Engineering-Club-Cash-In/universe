@@ -154,6 +154,7 @@ export default function VehicleRegistrationOCR({
         {/* File Selection */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Button
+            type="button"
             variant="outline"
             onClick={() => cameraInputRef.current?.click()}
             disabled={processing || isProcessing}
@@ -162,8 +163,9 @@ export default function VehicleRegistrationOCR({
             <Camera className="h-6 w-6" />
             <span>Tomar Foto</span>
           </Button>
-          
+
           <Button
+            type="button"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={processing || isProcessing}
@@ -205,6 +207,7 @@ export default function VehicleRegistrationOCR({
                 </span>
               </div>
               <Button
+                type="button"
                 variant="ghost"
                 size="sm"
                 onClick={clearSelection}
@@ -234,6 +237,7 @@ export default function VehicleRegistrationOCR({
 
             {/* Process Button */}
             <Button
+              type="button"
               onClick={processOCR}
               disabled={processing || isProcessing}
               className="w-full"

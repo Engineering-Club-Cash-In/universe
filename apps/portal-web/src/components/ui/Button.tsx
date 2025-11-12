@@ -19,9 +19,9 @@ export const Button: React.FC<ButtonProps> = ({
   isLoading = false,
 }) => {
   const sizeClasses = {
-    lg: "w-[225px] h-[59px] px-7 py-[10px] text-body",
-    md: "w-[180px] h-12 px-5 py-2 text-lg",
-    sm: "w-[150px] h-10 px-4 py-1.5 text-base",
+    lg: "min-w-[225px] h-[59px] px-7 py-[10px] text-body",
+    md: "min-w-[180px] h-12 px-5 py-2 text-lg",
+    sm: "min-w-[150px] h-10 px-4 py-1.5 text-base",
   };
 
   return (

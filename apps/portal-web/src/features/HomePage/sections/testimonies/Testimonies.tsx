@@ -23,7 +23,7 @@ export const Testimonies = () => {
   ];
 
   return (
-    <section className="text-center w-full mt-44 px-4">
+    <section className="text-center w-full mt-50 px-4">
       <div className="w-full flex justify-center">
         <h2 className="text-[50px] w-2xl">
           Un sueño cumplido habla más que mil palabras

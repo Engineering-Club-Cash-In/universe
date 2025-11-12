@@ -4,7 +4,7 @@
   font-family: "PlusJakarta";
   src: url("/PlusJakartaSans-VariableFont_wght.ttf") format("truetype");
   font-weight: 100 700;
-   font-style: normal;
+  font-style: normal;
   font-display: swap;
 }
 
@@ -36,9 +36,10 @@
 /* Configuración de tema */
 @theme {
   --font-hero: "Hero", sans-serif;
-    --font-plus-jakarta: "PlusJakarta", sans-serif;
-  --color-primary: rgba(216, 231, 16, 0.87);
-  --color-secondary: rgb(79, 87, 247);
+  --font-plus-jakarta: "PlusJakarta", sans-serif;
+  --color-primary: rgba(113, 117, 180);
+  --color-secondary: rgba(216, 231, 16, 0.87);
+  --color-blue: rgb(79, 87, 247);
   --color-dark: #0f0f0f;
   --color-light: #ffffff;
 

@@ -39,11 +39,11 @@ import {
 } from "@/components/ui/card";
 import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
-  // Section 1
+  // Section 1: Technician Info
   technicianName: z.string().min(1, { message: "El nombre es requerido" }),
   inspectionDate: z.date({ message: "La fecha es requerida" }),
 
-  // Section 2
+  // Section 2: Vehicle Info
   vehicleMake: z.string().min(1, { message: "La marca es requerida" }),
   vehicleModel: z.string().min(1, { message: "La línea es requerida" }),
   vehicleYear: z.string().min(1, { message: "El año es requerido" }),
@@ -74,36 +74,7 @@ const formSchema = z.object({
     .string()
     .min(1, { message: "El resultado de la inspección es requerido" }),
 
-  // Section 3
-  vehicleRating: z.enum(["Comercial", "No comercial"], {
-    message: "La calificación es requerida",
-  }),
-  marketValue: z
-    .string({ message: "El valor de mercado es requerido" })
-    .min(1, { message: "El valor de mercado es requerido" }),
-  suggestedCommercialValue: z
-    .string({ message: "El valor comercial sugerido es requerido" })
-    .min(1, { message: "El valor comercial sugerido es requerido" }),
-  bankValue: z
-    .string({ message: "El valor bancario es requerido" })
-    .min(1, { message: "El valor bancario es requerido" }),
-  currentConditionValue: z
-    .string({ message: "El valor en condiciones actuales es requerido" })
-    .min(1, { message: "El valor en condiciones actuales es requerido" }),
-  vehicleEquipment: z
-    .string({ message: "El equipamiento es requerido" })
-    .min(1, { message: "El equipamiento es requerido" }),
-  importantConsiderations: z.string().optional(),
-  scannerUsed: z.enum(["Sí", "No"], {
-    message: "Esta información es requerida",
-  }),
-  scannerResult: z.instanceof(File).optional(),
-  airbagWarning: z.enum(["Sí", "No"], {
-    message: "Esta información es requerida",
-  }),
-  missingAirbag: z.string().optional(),
-
-  // Section 4
+  // Section 3: Test Drive
   testDrive: z.enum(["Sí", "No"], {
     message: "Esta información es requerida",
   }),
@@ -115,12 +86,11 @@ interface VehicleInspectionFormProps {
   isWizardMode?: boolean;
 }
 
-export default function VehicleInspectionForm({ 
-  onComplete, 
-  isWizardMode = false 
+export default function VehicleInspectionForm({
+  onComplete,
+  isWizardMode = false
 }: VehicleInspectionFormProps) {
   const { formData, setFormData } = useInspection();
-  const [scannerFile, setScannerFile] = useState<File | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
   
@@ -173,37 +143,45 @@ export default function VehicleInspectionForm({
       fuelType: undefined,
       transmission: undefined,
       inspectionResult: "",
-      vehicleRating: undefined,
-      marketValue: "",
-      suggestedCommercialValue: "",
-      bankValue: "",
-      currentConditionValue: "",
-      vehicleEquipment: "",
-      importantConsiderations: "",
-      scannerUsed: undefined,
-      scannerResult: undefined,
-      airbagWarning: undefined,
-      missingAirbag: "",
       testDrive: undefined,
       noTestDriveReason: "",
     });
 
-    setScannerFile(null);
     setFormSubmitted(true);
   }
 
-  const handleScannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (file.type === "application/pdf") {
-        setScannerFile(file);
-        form.setValue("scannerResult", file);
-      } else {
-        alert("Por favor suba un archivo PDF");
+  // Function to handle OCR data
+  const handleOCRData = (mappedData: any) => {
+    // Update form with OCR data and trigger validation only for filled fields
+    Object.keys(mappedData).forEach(key => {
+      if (mappedData[key]) {
+        form.setValue(key as any, mappedData[key], {
+          shouldValidate: true,
+          shouldDirty: true,
+          shouldTouch: true
+        });
       }
-    }
+    });
+
+    // Clear validation errors for fields that OCR cannot fill
+    const nonOCRFields = [
+      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
+      'fuelType', 'transmission', 'inspectionResult',
+      'testDrive', 'noTestDriveReason'
+    ];
+
+    nonOCRFields.forEach(field => {
+      form.clearErrors(field as any);
+    });
+
+    // Save to context
+    const currentData = form.getValues();
+    const updatedData = { ...currentData, ...mappedData };
+    setFormData(updatedData);
+
+    toast.success('Información de la tarjeta aplicada al formulario');
   };
-  
+
   // Function to fill form with dummy data
   const fillWithDummyData = async () => {
     const dummyData = {
@@ -224,120 +202,15 @@ export default function VehicleInspectionForm({
       fuelType: "Gasolina" as const,
       transmission: "Automático" as const,
       inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
-      vehicleRating: "Comercial" as const,
-      marketValue: "185000",
-      suggestedCommercialValue: "175000",
-      bankValue: "165000",
-      currentConditionValue: "170000",
-      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
-      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
-      scannerUsed: "Sí" as const,
-      airbagWarning: "No" as const,
       testDrive: "Sí" as const,
     };
-    
+
     // Use form.reset() to properly update all fields including selects
     form.reset(dummyData);
-    
-    // Load and set the PDF file
-    try {
-      const response = await fetch('/sample.pdf');
-      const blob = await response.blob();
-      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
-      
-      setScannerFile(file);
-      form.setValue("scannerResult", file);
-    } catch (error) {
-      console.error('Error loading sample PDF:', error);
-    }
-    
+
     // Save to context
     setFormData(dummyData);
-    
-    toast.success("Formulario llenado con datos de prueba");
-  };
 
-    // Update form with OCR data and trigger validation only for filled fields
-    Object.keys(mappedData).forEach(key => {
-      if (mappedData[key]) {
-        form.setValue(key as any, mappedData[key], { 
-          shouldValidate: true,
-          shouldDirty: true,
-          shouldTouch: true 
-        });
-      }
-    });
-
-    // Clear validation errors for fields that OCR cannot fill
-    const nonOCRFields = [
-      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage', 
-      'fuelType', 'transmission', 'inspectionResult', 'vehicleRating',
-      'marketValue', 'suggestedCommercialValue', 'bankValue', 'currentConditionValue',
-      'vehicleEquipment', 'importantConsiderations', 'scannerUsed', 'scannerResult',
-      'airbagWarning', 'missingAirbag', 'testDrive', 'noTestDriveReason'
-    ];
-    
-    nonOCRFields.forEach(field => {
-      form.clearErrors(field as any);
-    });
-
-    // Save to context
-    const currentData = form.getValues();
-    const updatedData = { ...currentData, ...mappedData };
-    setFormData(updatedData);
-    
-    toast.success('Información de la tarjeta aplicada al formulario');
-  };
-
-  const fillWithDummyData = async () => {
-    const dummyData = {
-      technicianName: "Juan Pérez García",
-      inspectionDate: new Date(),
-      vehicleMake: "Toyota",
-      vehicleModel: "Corolla Cross",
-      vehicleYear: "2023",
-      licensePlate: "P-123ABC",
-      vinNumber: "JTMB34FV2ND123456",
-      milesMileage: "15000",
-      kmMileage: "24140",
-      origin: "Importado" as const,
-      vehicleType: "SUV",
-      color: "Blanco Perlado",
-      cylinders: "4",
-      engineCC: "2000",
-      fuelType: "Gasolina" as const,
-      transmission: "Automático" as const,
-      inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
-      vehicleRating: "Comercial" as const,
-      marketValue: "185000",
-      suggestedCommercialValue: "175000",
-      bankValue: "165000",
-      currentConditionValue: "170000",
-      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
-      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
-      scannerUsed: "Sí" as const,
-      airbagWarning: "No" as const,
-      testDrive: "Sí" as const,
-    };
-    
-    // Use form.reset() to properly update all fields including selects
-    form.reset(dummyData);
-    
-    // Load and set the PDF file
-    try {
-      const response = await fetch('/sample.pdf');
-      const blob = await response.blob();
-      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
-      
-      setScannerFile(file);
-      form.setValue("scannerResult", file);
-    } catch (error) {
-      console.error('Error loading sample PDF:', error);
-    }
-    
-    // Save to context
-    setFormData(dummyData);
-    
     toast.success("Formulario llenado con datos de prueba");
   };
 
@@ -705,295 +578,6 @@ export default function VehicleInspectionForm({
                   </FormItem>
                 )}
               />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="px-3 py-0.5 sm:px-6 sm:py-1">
-              <CardTitle className="text-xl sm:text-2xl">Valoración del Vehículo</CardTitle>
-              <CardDescription className="text-sm sm:text-base">
-                Información sobre el valor y condiciones
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-3 py-2 sm:px-6 sm:py-3 space-y-4 sm:space-y-5">
-              <FormField
-                control={form.control}
-                name="vehicleRating"
-                render={({ field }) => (
-                  <FormItem className="space-y-3">
-                    <FormLabel>Calificación del vehículo</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        className="flex flex-col space-y-1"
-                      >
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="Comercial" />
-                          </FormControl>
-                          <FormLabel className="font-normal">
-                            Comercial
-                          </FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="No comercial" />
-                          </FormControl>
-                          <FormLabel className="font-normal">
-                            No comercial
-                          </FormLabel>
-                        </FormItem>
-                      </RadioGroup>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-                <FormField
-                  control={form.control}
-                  name="marketValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor de mercado</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="suggestedCommercialValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor comercial sugerido</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
-                <FormField
-                  control={form.control}
-                  name="bankValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor bancario</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="currentConditionValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor vehículo condiciones actuales</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <FormField
-                control={form.control}
-                name="vehicleEquipment"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Equipamiento del vehículo</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Ej: Aire AC, cámaras de reversa, tapicería de cuero, sistema de navegación, sensores de estacionamiento, techo panorámico, etc."
-                        className="min-h-[100px]"
-                        {...field}
-                        value={field.value || ""}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="importantConsiderations"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Aspectos importantes a considerar</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="Observaciones sobre estado físico, legal o técnico del vehículo"
-                        className="min-h-[100px]"
-                        {...field}
-                        value={field.value || ""}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="scannerUsed"
-                render={({ field }) => (
-                  <FormItem className="space-y-3">
-                    <FormLabel>¿Se le pasó escáner al vehículo?</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        className="flex flex-col space-y-1"
-                      >
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="Sí" />
-                          </FormControl>
-                          <FormLabel className="font-normal">Sí</FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="No" />
-                          </FormControl>
-                          <FormLabel className="font-normal">No</FormLabel>
-                        </FormItem>
-                      </RadioGroup>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {form.watch("scannerUsed") === "Sí" && (
-                <FormField
-                  control={form.control}
-                  name="scannerResult"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Resultado del scanner (subir PDF)</FormLabel>
-                      <FormControl>
-                        <Input
-                          type="file"
-                          accept=".pdf"
-                          onChange={(e) => {
-                            handleScannerUpload(e);
-                            field.onChange(e.target.files?.[0] || null);
-                          }}
-                          className="flex-1"
-                        />
-                      </FormControl>
-                      {scannerFile && (
-                        <FormDescription className="text-green-600">
-                          Archivo cargado: {scannerFile.name}
-                        </FormDescription>
-                      )}
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              <FormField
-                control={form.control}
-                name="airbagWarning"
-                render={({ field }) => (
-                  <FormItem className="space-y-3">
-                    <FormLabel>¿Presenta testigos de airbag u otros en tablero?</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        className="flex flex-col space-y-1"
-                      >
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="Sí" />
-                          </FormControl>
-                          <FormLabel className="font-normal">Sí</FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="No" />
-                          </FormControl>
-                          <FormLabel className="font-normal">No</FormLabel>
-                        </FormItem>
-                      </RadioGroup>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {form.watch("airbagWarning") === "Sí" && (
-                <FormField
-                  control={form.control}
-                  name="missingAirbag"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Indique qué airbag no posee</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="Ej. Airbag lateral izquierdo"
-                          {...field}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
             </CardContent>
           </Card>
 

@@ -20,6 +20,7 @@ const validationSchema = Yup.object({
 
 export const useLogin = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>("");
 
   // Mutation para el login con better-auth
   const loginMutation = useMutation({
@@ -30,7 +31,35 @@ export const useLogin = () => {
         rememberMe: credentials.rememberMe,
         callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
       });
+      console.log("Login result:", result.error);
+      if (result.error) {
+        const err = result.error as { code?: string; message?: string };
+        console.error("Login error:", err.code);
+        if (err?.code === "INVALID_EMAIL_OR_PASSWORD") {
+          console.log("Invalid email or password error encountered");
+          setErrorMessage("Correo electrónico o contraseña incorrectos");
+        } else {
+          setErrorMessage(
+            err?.message ||
+              "Error al iniciar sesión. Por favor, intenta de nuevo."
+          );
+        }
+        return null;
+      }
       return result;
+    },
+    onError: (error: unknown) => {
+      // Manejar el error del endpoint
+      const err = error as { code?: string; message?: string };
+      console.error("Login error:", err);
+      if (err?.code === "INVALID_EMAIL_OR_PASSWORD") {
+        setErrorMessage("Correo electrónico o contraseña incorrectos");
+      } else {
+        setErrorMessage(
+          err?.message ||
+            "Error al iniciar sesión. Por favor, intenta de nuevo."
+        );
+      }
     },
   });
 
@@ -61,19 +90,32 @@ export const useLogin = () => {
     // Iniciar el flujo de OAuth con better-auth
     try {
       setIsGoogleLoading(true);
-      
+
+      console.log("Iniciando login con Google...");
+
       // Iniciar el flujo de OAuth con Google
-      await authClient.signIn.social({
-        provider: "google",
-        callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
-      }, {
-        onError: (error) => {
-          console.error("Error during Google login:", error);
-          setIsGoogleLoading(false);
+      // El backend requiere el callbackURL
+      await authClient.signIn.social(
+        {
+          provider: "google",
+          callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+        },
+        {
+          onRequest: () => {
+            console.log("Redirigiendo a Google...");
+          },
+          onError: (error) => {
+            console.error("Error during Google login:", error);
+            setErrorMessage("Error al iniciar sesión con Google");
+            setIsGoogleLoading(false);
+          },
         }
-      });
+      );
+      // Nota: No agregamos onSuccess aquí porque el flujo OAuth redirige
+      // y la página se recarga en el callbackURL
     } catch (error) {
       console.error("Error during Google login:", error);
+      setErrorMessage("Error al iniciar sesión con Google");
       setIsGoogleLoading(false);
     }
   };
@@ -83,5 +125,6 @@ export const useLogin = () => {
     handleGoogleLogin,
     isLoading: loginMutation.isPending,
     isGoogleLoading,
+    errorMessage,
   };
 };

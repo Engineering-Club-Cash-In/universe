@@ -1,4 +1,5 @@
 import { Context, Next } from "hono";
+import { env } from "../config/env";
 
 interface RateLimitConfig {
   windowMs: number;
@@ -13,6 +14,12 @@ const store = new Map<string, { count: number; resetTime: number }>();
 
 function createRateLimiter(config: RateLimitConfig) {
   return async (c: Context, next: Next) => {
+    // En desarrollo, no aplicar rate limiting
+    if (env.NODE_ENV === "development") {
+      await next();
+      return;
+    }
+
     const ip = c.req.header("x-forwarded-for") || c.req.header("x-real-ip") || "unknown";
     const key = `${ip}:${c.req.path}`;
     const now = Date.now();

@@ -4,9 +4,11 @@ import {
   HowItWorks,
   FindYourIdealModel,
   Testimonies,
-  GraphLine
+  GraphLine,
 } from "./sections";
 import { Footer } from "@features/footer";
+import { WhoWeAre } from "./sections/whoWeAre/WhoWeAre";
+import { HowSellOrBuy } from "./sections/howSellOrBuy/HowSellOrBuy";
 
 export const HomePage = () => {
   return (
@@ -22,11 +24,12 @@ export const HomePage = () => {
           className="absolute top-0 left-0 right-0 h-[200px] pointer-events-none z-40"
         />
       </div>
-      <div className="w-full mt-10 p-8 ">
+      <div className="w-full mt-6 p-8 ">
         <NavBar />
+        <WhoWeAre />
         <HowItWorks />
-        <FindYourIdealModel />
         <GraphLine />
+        <HowSellOrBuy />
         <Testimonies />
       </div>
       <Footer />

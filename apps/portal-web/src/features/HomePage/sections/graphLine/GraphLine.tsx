@@ -32,9 +32,9 @@ export const GraphLine = () => {
   }
 
   return (
-    <section className="text-center w-full mt-36 px-12">
+    <section className="text-center w-full mt-52 px-12">
       <div>
-        <h2 className="text-header-2  mb-2">¿Listo para invertir?</h2>
+        <h2 className="text-header-2">¿Listo para invertir?</h2>
       </div>
       <div className="w-full h-[500px] bg-dark rounded-lg p-6">
         <ResponsiveLine
@@ -260,14 +260,15 @@ export const GraphLine = () => {
         />
       </div>
       <div className="w-full mx-auto flex items-center justify-center mt-6">
-        <h2 className="text-[35px] w-1/2">
-          Queremos darte soluciones pensadas para cada etapa de tu camino
-          financiero.
+        <h2 className="text-[35px] px-20">
+          Compara y descubre porque nuestras oportunidades superan otras
+          opciones del mercado. Usa la calculadora de rendimiento y comprueba
+          cuanto podrias generar con nosotros.
         </h2>
       </div>
       <div className="mt-6 flex justify-center">
         <Button size="lg">
-            Contáctanos
+          Calcula tu inversión
         </Button>
       </div>
     </section>

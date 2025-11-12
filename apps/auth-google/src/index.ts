@@ -20,10 +20,16 @@ app.use("*", logger());
 app.use(
   "*",
   cors({
-    origin: env.CORS_ORIGIN,
+    origin: (origin) => {
+      // Permitir localhost en desarrollo
+      if (env.NODE_ENV === "development") {
+        return origin || "*";
+      }
+      return env.CORS_ORIGIN;
+    },
     credentials: true,
-    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "Cookie"],
+    allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allowHeaders: ["Content-Type", "Authorization", "Cookie", "Set-Cookie"],
     exposeHeaders: ["Set-Cookie"],
   })
 );

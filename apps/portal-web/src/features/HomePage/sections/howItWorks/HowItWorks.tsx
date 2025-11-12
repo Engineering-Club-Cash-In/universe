@@ -6,26 +6,29 @@ import investWithUs from "./assets/investWithUs.jpg";
 export const HowItWorks: React.FC = () => {
   const items = [
     {
-      image: investWithUs,
-      label: "Invierte con Nosotros",
-    },
-    {
       image: financing,
       label: "Financiamiento",
     },
     {
       image: buyYourCar,
-      label: "Compra tu Auto",
+      label: "Marketplace",
+    },
+     {
+      image: investWithUs,
+      label: "Invierte con Nosotros",
     },
   ];
 
   return (
-    <section className="text-center w-full mt-44 px-20">
+    <section className="text-center w-full mt-60 px-20">
       <div>
-        <h2 className="text-header-2 mb-24">¿Cómo funciona?</h2>
+        <h2 className="text-header-2 mb-6">¿Cómo funciona?</h2>
+        <h3 className="text-header-body">
+          Explora estos videos y entiende paso a paso cómo te ayudamos en cada proceso.
+        </h3>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-20">
+      <div className="flex flex-col mt-8 md:flex-row gap-20">
         {items.map((item, index) => (
           <div
             key={index}

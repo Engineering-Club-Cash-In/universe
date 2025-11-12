@@ -3,13 +3,20 @@ import { IconGoogle } from "@components/icons";
 import { useLogin } from "../hook/useLogin";
 
 export const FormLogin = () => {
-  const { formik, handleGoogleLogin, isLoading, isGoogleLoading } = useLogin();
+  const { formik, handleGoogleLogin, isLoading, isGoogleLoading, errorMessage } = useLogin();
+
+  console.log("Rendering FormLogin with errorMessage:", errorMessage);
 
   return (
     <div className="w-full flex justify-center mb-20 mt-16 items-center">
       <div className="w-[500px] flex flex-col text-center">
         <h2 className="text-header-2">Inicia sesión</h2>
         <form className="w-full mt-10 flex flex-col gap-6" onSubmit={formik.handleSubmit}>
+          {errorMessage && (
+            <div className="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+              <span className="block sm:inline">{errorMessage}</span>
+            </div>
+          )}
           <Input
             name="email"
             value={formik.values.email}

@@ -6,6 +6,9 @@ const authRoutes = new Hono();
 // Proxy de todas las rutas de Better Auth
 authRoutes.all("/*", async (c) => {
   try {
+    console.log("🔵 Auth Route:", c.req.method, c.req.url);
+    console.log("📨 Incoming cookies:", c.req.header("cookie"));
+
     // Convertir los headers de Hono a objeto plano
     const headers: Record<string, string> = {};
     c.req.raw.headers.forEach((value, key) => {
@@ -44,12 +47,22 @@ authRoutes.all("/*", async (c) => {
 
     // Convertir Response de Better Auth a Response de Hono
     const responseBody = await authResponse.text();
+    console.log("📦 Auth response body:", responseBody);
+    console.log("📦 Auth response status:", authResponse.status);
 
-    // Copiar headers
+    // Copiar headers incluyendo Set-Cookie
     const responseHeaders: Record<string, string> = {};
     authResponse.headers.forEach((value, key) => {
       responseHeaders[key] = value;
     });
+
+    console.log("🍪 Response cookies:", responseHeaders["set-cookie"]);
+    console.log("📋 Content-Type:", responseHeaders["content-type"]);
+
+    // Asegurar que el content-type sea application/json para respuestas JSON
+    if (!responseHeaders["content-type"] && responseBody !== "") {
+      responseHeaders["content-type"] = "application/json";
+    }
 
     return c.text(responseBody, authResponse.status as any, responseHeaders);
   } catch (error) {

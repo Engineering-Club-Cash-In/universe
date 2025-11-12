@@ -5,9 +5,20 @@ import { authClient } from "@/lib/auth";
 
 // Función para verificar autenticación con better-auth
 const checkAuth = async () => {
-  const sessionData = await authClient.getSession();
-  
-  if (!sessionData?.data?.user) {
+  try {
+    const sessionData = await authClient.getSession();
+    console.log("checkAuth - Respuesta de getSession:", sessionData);
+    
+    if (sessionData?.data?.user) {
+      return; // Sesión válida
+    }
+    
+    // Si no hay sesión, redirigir al login
+    throw redirect({
+      to: "/login",
+    });
+  } catch (error) {
+    console.error("checkAuth - Error:", error);
     throw redirect({
       to: "/login",
     });

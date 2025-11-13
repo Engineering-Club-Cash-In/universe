@@ -754,12 +754,12 @@ export const cobrosRouter = {
 					montoEnMora: sql<string>`'0'`,
 					diasMoraMaximo: sql<number>`0`,
 					cuotasVencidas: sql<number>`0`,
-					telefonoPrincipal: sql<string>`''`,
-					telefonoAlternativo: sql<string>`''`,
-					emailContacto: sql<string>`'cliente@email.com'`,
-					direccionContacto: sql<string>`''`,
-					proximoContacto: sql<Date | null>`null`,
-					metodoContactoProximo: sql<string | null>`null`,
+					telefonoPrincipal: sql<string>`COALESCE(${casosCobros.telefonoPrincipal}, '')`,
+					telefonoAlternativo: sql<string>`COALESCE(${casosCobros.telefonoAlternativo}, '')`,
+					emailContacto: sql<string>`COALESCE(${casosCobros.emailContacto}, 'cliente@email.com')`,
+					direccionContacto: sql<string>`COALESCE(${casosCobros.direccionContacto}, '')`,
+					proximoContacto: casosCobros.proximoContacto,
+					metodoContactoProximo: casosCobros.metodoContactoProximo,
 					// Datos del contrato
 					montoFinanciado: contratosFinanciamiento.montoFinanciado,
 					cuotaMensual: contratosFinanciamiento.cuotaMensual,
@@ -778,6 +778,10 @@ export const cobrosRouter = {
 				.from(contratosFinanciamiento)
 				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
 				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
+				.leftJoin(
+					casosCobros,
+					eq(contratosFinanciamiento.id, casosCobros.contratoId),
+				)
 				.where(eq(contratosFinanciamiento.id, input.id))
 				.limit(1);
 

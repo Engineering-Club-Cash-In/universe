@@ -9,7 +9,7 @@ import {
   boletas,
   cuotas_credito,
 } from "../database/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, gte } from "drizzle-orm";
 import Big from "big.js";
 import { z } from "zod";
 import { and, eq, lt, sql, asc, lte, inArray } from "drizzle-orm";
@@ -18,8 +18,6 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
-import { validate } from "uuid";
-
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
@@ -37,534 +35,7 @@ export const pagoSchema = z.object({
   cuotaApagar: z.number().min(1),
   url_boletas: z.array(z.string().max(500)),
 });
- 
 
-export const insertPaymentPast = async ({ body, set }: any) => {
-  try {
-    const parseResult = pagoSchema.safeParse(body);
-    if (!parseResult.success) {
-      set.status = 400;
-      return {
-        message: "Validation failed",
-        errors: parseResult.error.flatten().fieldErrors,
-      };
-    }
-
-    const {
-      credito_id,
-      usuario_id,
-      monto_boleta,
-      fecha_pago,
-      llamada,
-      renuevo_o_nuevo,
-      otros,
-      mora,
-      observaciones,
-      abono_directo_capital,
-      cuotaApagar,
-      url_boletas,
-    } = parseResult.data;
-    console.log("monto_boleta", monto_boleta);
-    const r2BaseUrl = import.meta.env.URL_PUBLIC_R2;
-    const urlCompletas = url_boletas.map(
-      (url_boleta) => `${r2BaseUrl}${url_boleta}`
-    );
-    const now = new Date();
-    const mes_pagado = `${now.getFullYear()}-${String(
-      now.getMonth() + 1
-    ).padStart(2, "0")}`;
-
-    const [credito] = await db
-      .select()
-      .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          eq(creditos.statusCredit, "ACTIVO")
-        )
-      )
-      .limit(1);
-    if (!credito) {
-      set.status = 404;
-      return { message: "Credit not found" };
-    }
-    const fechaInicio = new Date(credito.fecha_creacion);
-    const hoy = new Date();
-
-    const mesesTranscurridos =
-      (hoy.getFullYear() - fechaInicio.getFullYear()) * 12 +
-      (hoy.getMonth() - fechaInicio.getMonth()) +
-      1;
-    let cuotasPendientes = await db
-      .select()
-      .from(cuotas_credito)
-      .where(
-        and(
-          eq(cuotas_credito.credito_id, credito_id),
-          lte(cuotas_credito.numero_cuota, cuotaApagar), // 👈 Cuotas hasta la actual
-          eq(cuotas_credito.pagado, false)
-        )
-      )
-      .orderBy(asc(cuotas_credito.numero_cuota));
-    console.log("cuotasPendientes", cuotasPendientes);
-    const inversionistasCredito = await db
-      .select()
-      .from(creditos_inversionistas)
-      .where(eq(creditos_inversionistas.credito_id, credito_id));
-
-    const [usuario] = await db
-      .select({ saldo_a_favor: usuarios.saldo_a_favor })
-      .from(usuarios)
-      .where(eq(usuarios.usuario_id, usuario_id));
-
-    if (!usuario) {
-      set.status = 404;
-      return { message: "User not found" };
-    }
-
-    const saldoAFavor = new Big(usuario.saldo_a_favor ?? 0);
-    const montoBoleta = new Big(monto_boleta);
-    const moraBig = new Big(mora ?? 0);
-    const otrosBig = new Big(otros ?? 0);
-    const montoEfectivo = montoBoleta
-      .minus(moraBig)
-      .minus(otrosBig)
-      .minus(abono_directo_capital ?? 0);
-    let disponible = saldoAFavor.plus(montoEfectivo);
-    console.log("disponible", disponible.toString());
-    const pagosRealizados = [];
-
-    if (cuotasPendientes.length === 0) {
-      // Si no hay cuotas pendientes, revisamos si hay mora y/o otros a pagar
-      if (moraBig.gt(0) || otrosBig.gt(0)) {
-        const cuotaEspecial =
-          cuotaApagar > 0 ? cuotaApagar : mesesTranscurridos;
-        // Llamamos a tu método centralizado
-        const pagoEspecial = await insertarPago({
-          numero_credito_sifco: credito.numero_credito_sifco,
-          numero_cuota: cuotaEspecial, // No es una cuota normal
-          mora: moraBig.toNumber(),
-
-          otros: otrosBig.toNumber(),
-          boleta: montoBoleta.toNumber(),
-          urlBoletas: urlCompletas ?? [], // URL de la boleta
-          pagado: true,
-
-          // Puedes agregar más params si tu método los necesita
-        });
-
-        // Actualizar la mora del crédito SOLO si se pagó mora
-        if (moraBig.gt(0)) {
-          await updateMora({
-            credito_id,
-            monto_cambio: moraBig.toNumber(),
-            tipo: "DECREMENTO", // 👈 porque devolvés la mora al crédito
-            activa: true, // 👈 asegurás que quede activa
-          });
-        }
-        pagosRealizados.push(pagoEspecial);
-      }
-      // o dejar que siga el flujo para saldo a favor si así lo prefieres.
-    } else {
-      for (const cuota of cuotasPendientes) {
-        console.log("CUOTA", cuota);
-        const montoCuota = new Big(credito.cuota);
-        console.log("disponible", disponible.toString());
-        if (disponible.gte(montoCuota)) {
-          let abono_capital = new Big(0);
-          let abono_interes = new Big(0);
-          let abono_iva_12 = new Big(0);
-          let abono_interes_ci = new Big(0);
-          let abono_iva_ci = new Big(0);
-          let abono_seguro = new Big(0);
-          let abono_gps = new Big(0);
-
-          let total_monto_cash_in = new Big(0);
-          let total_iva_cash_in = new Big(0);
-          let total_monto_inversionista = new Big(0);
-          let total_iva_inversionista = new Big(0);
-          console.log("🚀 Procesando pago para la cuota:", cuota.numero_cuota);
-          inversionistasCredito.forEach(
-            ({
-              monto_cash_in,
-              iva_cash_in,
-              monto_inversionista,
-              iva_inversionista,
-            }) => {
-              total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
-              total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
-              total_monto_inversionista =
-                total_monto_inversionista.plus(monto_inversionista);
-              total_iva_inversionista =
-                total_iva_inversionista.plus(iva_inversionista);
-            }
-          );
-          abono_interes = total_monto_inversionista.plus(total_monto_cash_in);
-          abono_iva_12 = abono_iva_12.plus(credito.iva_12);
-          abono_seguro = new Big(credito.seguro_10_cuotas);
-          abono_gps = new Big(credito.gps);
-          abono_interes_ci = new Big(total_monto_cash_in);
-          abono_iva_ci = new Big(total_iva_cash_in);
-          abono_capital = montoCuota
-            .minus(abono_interes)
-            .minus(abono_iva_12)
-            .minus(abono_seguro)
-            .minus(abono_gps)
-            .minus(credito.membresias ?? 0);
-
-          const pago_del_mes = await getPagosDelMesActual(credito.credito_id);
-          const pago_del_mesBig = new Big(pago_del_mes ?? 0).add(
-            montoBoleta ?? 0
-          );
-          const [existingPago] = await db
-            .select({ pago: pagos_credito }) // o los campos que necesites
-            .from(pagos_credito)
-            .innerJoin(
-              cuotas_credito,
-              eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
-            )
-            .where(
-              and(
-                eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
-                eq(pagos_credito.pagado, false),
-                eq(pagos_credito.credito_id, credito.credito_id)
-              )
-            )
-            .limit(1);
-
-          const capital_restante = new Big(credito.capital ?? 0)
-            .minus(abono_capital)
-            .toString();
-          const pagoData = {
-            credito_id,
-            cuota: montoCuota.toString(),
-
-            cuota_interes: credito.cuota_interes.toString(),
-            abono_capital: abono_capital.toString(),
-            abono_interes: abono_interes.toString(),
-            abono_iva_12: abono_iva_12.toString(),
-            abono_interes_ci: abono_interes_ci.toString(),
-            abono_iva_ci: abono_iva_ci.toString(),
-            abono_seguro: abono_seguro.toString(),
-            abono_gps: abono_gps.toString(),
-            pago_del_mes: pago_del_mesBig.toString(),
-            monto_boleta: montoBoleta.toString(),
-            capital_restante: capital_restante.toString(),
-            interes_restante: "0",
-            iva_12_restante: "0",
-            seguro_restante: "0",
-            gps_restante: "0",
-            total_restante: "0",
-            numero_cuota: cuota.numero_cuota,
-            llamada: llamada ?? "",
-            fecha_pago,
-            fecha_vencimiento: fecha_pago,
-            renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
-            tipoCredito: "Renuevo",
-            membresias: credito.membresias ?? 0,
-            membresias_pago: credito.membresias_pago?.toString() ?? "",
-            membresias_mes: credito.membresias?.toString() ?? "",
-            otros: otros?.toString() ?? "",
-            mora: moraBig.toString(),
-            monto_boleta_cuota: montoBoleta.toString(),
-            seguro_total: credito.seguro_10_cuotas?.toString() ?? "0",
-            pagado: true,
-            facturacion: "si",
-            mes_pagado,
-            seguro_facturado: credito.seguro_10_cuotas?.toString() ?? "0",
-            gps_facturado: credito.gps?.toString() ?? "0",
-            reserva: "0",
-            observaciones: observaciones ?? "",
-          };
-          type PagoCredito = typeof pagos_credito.$inferSelect;
-          let pagoInsertado: PagoCredito | undefined;
-          if (existingPago) {
-            [pagoInsertado] = await db
-              .update(pagos_credito)
-              .set(pagoData)
-              .from(cuotas_credito) // aquí solo pones la tabla que usas para join
-              .where(
-                and(
-                  eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
-                  eq(pagos_credito.pago_id, existingPago.pago.pago_id),
-                  eq(pagos_credito.cuota_id, cuotas_credito.cuota_id) // join
-                )
-              )
-              .returning();
-            console.log("cuota_id:", cuota);
-            console.log("pagoInsertado:", pagoInsertado);
-            if (
-              pagoInsertado &&
-              pagoInsertado.pago_id &&
-              urlCompletas.length > 0
-            ) {
-              await db
-                .update(cuotas_credito)
-                .set({ pagado: true })
-                .where(eq(cuotas_credito.numero_cuota, cuota.numero_cuota));
-              await db.insert(boletas).values(
-                urlCompletas.map((url) => ({
-                  pago_id: pagoInsertado?.pago_id!, // el ! indica que nunca es undefined aquí
-                  url_boleta: url,
-                }))
-              );
-            }
-
-            await updateMora({
-              credito_id,
-              monto_cambio: moraBig.toNumber(),
-              tipo: "DECREMENTO", // 👈 porque devolvés la mora al crédito
-              activa: true, // 👈 asegurás que quede activa
-            });
-            const cuota_interes = new Big(capital_restante)
-              .times(new Big(credito.porcentaje_interes).div(100))
-              .round(2);
-            const iva_12 = cuota_interes.times(0.12).round(2);
-            console.log("💰 Actualizando pago existente:", capital_restante);
-            const deudatotal = new Big(capital_restante)
-              .plus(cuota_interes)
-              .plus(iva_12)
-              .plus(credito.seguro_10_cuotas ?? 0)
-              .plus(credito.gps ?? 0)
-              .plus(credito.membresias_pago ?? 0)
-
-              .round(2)
-              .toString();
-
-            await db
-              .update(creditos)
-              .set({
-                capital: capital_restante.toString(),
-                deudatotal: deudatotal,
-                iva_12: iva_12.toString(),
-                cuota_interes: cuota_interes.toString(),
-              })
-              .where(eq(creditos.credito_id, credito_id));
-            if (!pagoInsertado.paymentFalse) {
-              await insertPagosCreditoInversionistas(
-                pagoInsertado.pago_id,
-                credito_id
-              );
-            }
-          } else {
-            console.log("no se encontró un pago existente");
-            return { message: "no se encontró un pago existente" };
-          }
-
-          pagosRealizados.push(pagoInsertado);
-
-          disponible = disponible.minus(montoCuota);
-          await db
-            .update(usuarios)
-            .set({ saldo_a_favor: disponible.toString() })
-            .where(eq(usuarios.usuario_id, usuario_id));
-        } else {
-          console.log(
-            `⛔ No hay suficiente saldo disponible para pagar la cuota ${cuota.numero_cuota}.`
-          );
-          const midlePayment = insertarPago({
-            numero_credito_sifco: credito.numero_credito_sifco,
-            numero_cuota: cuota.numero_cuota,
-            otros: otrosBig.toNumber(),
-            mora: moraBig.toNumber(),
-            boleta: montoBoleta.toNumber(),
-            urlBoletas: urlCompletas ?? "",
-            pagado: false,
-          });
-          pagosRealizados.push(midlePayment);
-          await db
-            .update(usuarios)
-            .set({ saldo_a_favor: disponible.toString() })
-            .where(eq(usuarios.usuario_id, usuario_id));
-          return {
-            message:
-              `No se pudo pagar la cuota ${cuota.numero_cuota} por saldo insuficiente. ` +
-              `El monto ingresado fue abonado a su saldo disponible.`,
-            pagos: pagosRealizados,
-            saldo_a_favor: disponible.toString(),
-          };
-        }
-      }
-    }
-
-    const abonoCapital = new Big(abono_directo_capital ?? 0);
-    console.log(`💰 Abono directo a capital: Q${abonoCapital.toString()}`);
-    if (cuotasPendientes.length === 0 && abonoCapital.gt(0)) {
-      const nuevoCapital = new Big(credito.capital).minus(abonoCapital);
-      const deudatotal = new Big(nuevoCapital)
-        .plus(credito.cuota_interes)
-        .plus(credito.iva_12)
-        .plus(credito.seguro_10_cuotas ?? 0)
-        .plus(credito.gps ?? 0)
-        .plus(credito.membresias_pago ?? 0);
-      // 🔥 Actualizar capital del crédito
-
-      const cuota_interes = new Big(nuevoCapital)
-        .times(new Big(credito.porcentaje_interes).div(100))
-        .round(2);
-      const iva_12 = cuota_interes.times(0.12).round(2);
-      await db
-        .update(creditos)
-        .set({
-          capital: nuevoCapital.toString(),
-          deudatotal: deudatotal.toString(),
-          cuota_interes: cuota_interes.toString(),
-          iva_12: iva_12.toString(),
-        })
-        .where(eq(creditos.credito_id, credito_id));
-
-      // 🔥 Limpiar saldo a favor del usuario
-      await db
-        .update(usuarios)
-        .set({ saldo_a_favor: "0" })
-        .where(eq(usuarios.usuario_id, usuario_id));
-
-      // 🔥 Buscar la cuota que corresponde al mes actual
-      const cuotaDelMes = await db
-        .select()
-        .from(cuotas_credito)
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, credito_id),
-            eq(cuotas_credito.numero_cuota, cuotaApagar)
-          )
-        )
-        .limit(1);
-
-      const [pagoExistente] = await db
-        .select()
-        .from(pagos_credito)
-        .where(
-          and(
-            eq(pagos_credito.credito_id, credito_id),
-            eq(pagos_credito.cuota_id, cuotaDelMes[0].cuota_id)
-          )
-        )
-        .limit(1);
-
-      const monthPayments = await getPagosDelMesActual(credito.credito_id);
-      const monthPaymentsBig = new Big(monthPayments ?? 0).add(
-        monto_boleta ?? 0
-      );
-      if (cuotaDelMes.length > 0) {
-        const cuota = pagoExistente;
-
-        const pagoData = {
-          credito_id,
-          cuota: cuota.cuota.toString(),
-          cuota_interes: credito.cuota_interes.toString(),
-          abono_capital: abonoCapital.toString(), // 👉 Todo se va a capital
-          abono_interes: "0",
-          abono_iva_12: "0",
-          abono_interes_ci: "0",
-          abono_iva_ci: "0",
-          abono_seguro: "0",
-          abono_gps: "0",
-
-          pago_del_mes: monthPaymentsBig.toString(),
-          monto_boleta: abonoCapital.toString(),
-          capital_restante: new Big(cuota.capital_restante ?? 0)
-            .minus(abonoCapital)
-            .toString(),
-          interes_restante: "0",
-          iva_12_restante: "0",
-          seguro_restante: "0",
-          gps_restante: "0",
-          total_restante: "0",
-          cuota_id: cuota.cuota_id,
-          llamada: llamada ?? "",
-          fecha_pago,
-          fecha_vencimiento: fecha_pago,
-          renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
-          tipoCredito: "Renuevo",
-          membresias: credito.membresias ?? 0,
-          membresias_pago: credito.membresias_pago?.toString() ?? "",
-          membresias_mes: credito.membresias?.toString() ?? "",
-          otros: otros?.toString() ?? "",
-          mora: moraBig.toString(),
-          monto_boleta_cuota: abonoCapital.toString(),
-          seguro_total: "0",
-          pagado: true,
-          facturacion: "si",
-          mes_pagado,
-          seguro_facturado: "0",
-          gps_facturado: "0",
-          reserva: "0",
-          observaciones: observaciones ?? "",
-        };
-        console.log("es un abono a capital directo");
-        // 🔥 Registrar el pago
-        const [pagoInsertado] = await db
-          .insert(pagos_credito)
-          .values(pagoData)
-          .returning();
-        if (urlCompletas && urlCompletas.length > 0) {
-          await db.insert(boletas).values(
-            urlCompletas.map((url) => ({
-              pago_id: pagoInsertado?.pago_id,
-              url_boleta: url,
-            }))
-          );
-        }
-        console.log("PAGO", pagoInsertado);
-        await insertPagosCreditoInversionistasSpecial(
-          pagoInsertado.pago_id,
-          credito_id
-        );
-
-        pagosRealizados.push(pagoInsertado);
-
-        console.log(
-          `✅ Se abonaron ${montoBoleta.toString()} directamente a capital del crédito ${credito_id} y quedó registrado como pago en la cuota ${
-            cuotaDelMes[0].numero_cuota
-          }`
-        );
-        return {
-          message: `✅ Se abonaron ${montoBoleta.toString()} directamente a capital del crédito ${credito_id} y quedó registrado como pago en la cuota ${
-            cuotaDelMes[0].numero_cuota
-          }`,
-          pagos: pagosRealizados,
-          saldo_a_favor: disponible.toString(),
-        };
-      } else {
-        console.log(
-          `⚠️ No se encontró la cuota del mes actual para registrar el pago.`
-        );
-      }
-    } else {
-      console.log(
-        `⛔ No se puede abonar a capital porque aún hay cuotas pendientes.`
-      );
-    }
-
-    set.status = 201;
-    let message = "";
-    if (pagosRealizados.length > 0) {
-      cuotasPendientes = [];
-    }
-    if (cuotasPendientes && cuotasPendientes.length > 0) {
-      console.log("tienes cuotas pendientes");
-      message = `Aún tienes ${cuotasPendientes.length} cuotas pendientes de pago.  debe cancelar las cuotas de su crédito para abonar a capital o cancelar la mora y otros cargos.`;
-    } else if (pagosRealizados.length > 0) {
-      message = "Pago registrado exitosamente";
-    } else {
-      message = "Amount added to balance";
-    }
-
-    return {
-      message,
-      pagos: pagosRealizados,
-      saldo_a_favor: disponible.toString(),
-    };
-  } catch (error) {
-    console.error("[insertPayment] Error:", error);
-    set.status = 500;
-    return {
-      message: "Internal server error",
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-};
 
 export async function getAllPagosWithCreditAndInversionistas(
   credito_sifco: string
@@ -837,7 +308,9 @@ export async function insertPagosCreditoInversionistas(
   credito_id: number,
   excludeCube: boolean = false
 ) {
-   console.log("\n🔍 ========== INICIO insertPagosCreditoInversionistas ==========");
+  console.log(
+    "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
+  );
   console.log("📥 Parámetros:");
   console.log(`   pago_id: ${pago_id}`);
   console.log(`   credito_id: ${credito_id}`);
@@ -904,7 +377,9 @@ export async function insertPagosCreditoInversionistas(
       )
     : inversionistasWithName;
 
-  console.log(`\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}): ${filteredInversionistas.length}`);
+  console.log(
+    `\n🔍 Inversionistas después de filtrar (excludeCube=${excludeCube}): ${filteredInversionistas.length}`
+  );
   filteredInversionistas.forEach((inv, idx) => {
     console.log(`   ${idx + 1}. ${inv.nombre}`);
   });
@@ -921,12 +396,18 @@ export async function insertPagosCreditoInversionistas(
 
   console.log(`\n🏆 Mayor cuota encontrada:`);
   console.log(`   Índice: ${indexMayorCuota}`);
-  console.log(`   Inversionista: ${filteredInversionistas[indexMayorCuota].nombre}`);
-  console.log(`   Valor cuota: ${filteredInversionistas[indexMayorCuota].cuota_inversionista}`);
+  console.log(
+    `   Inversionista: ${filteredInversionistas[indexMayorCuota].nombre}`
+  );
+  console.log(
+    `   Valor cuota: ${filteredInversionistas[indexMayorCuota].cuota_inversionista}`
+  );
 
   // 3. Calcular e insertar el abono proporcional de cada inversionista
   const inserts = filteredInversionistas.map(async (inv, idx) => {
-    console.log(`\n--- 💼 Procesando inversionista ${idx + 1}/${filteredInversionistas.length} ---`);
+    console.log(
+      `\n--- 💼 Procesando inversionista ${idx + 1}/${filteredInversionistas.length} ---`
+    );
     console.log(`   Nombre: ${inv.nombre}`);
     console.log(`   inversionista_id: ${inv.inversionista_id}`);
 
@@ -943,10 +424,16 @@ export async function insertPagosCreditoInversionistas(
       ? new Big(inv.iva_cash_in ?? 0)
       : new Big(inv.iva_inversionista);
 
-    console.log(`   💵 Interés a usar: ${bigInteres.toString()} (${isCube ? "monto_cash_in" : "monto_inversionista"})`);
-    console.log(`   🧾 IVA a usar: ${bigIVA.toString()} (${isCube ? "iva_cash_in" : "iva_inversionista"})`);
+    console.log(
+      `   💵 Interés a usar: ${bigInteres.toString()} (${isCube ? "monto_cash_in" : "monto_inversionista"})`
+    );
+    console.log(
+      `   🧾 IVA a usar: ${bigIVA.toString()} (${isCube ? "iva_cash_in" : "iva_inversionista"})`
+    );
 
-    console.log(`   💰 cuota_inversionista original: ${inv.cuota_inversionista}`);
+    console.log(
+      `   💰 cuota_inversionista original: ${inv.cuota_inversionista}`
+    );
 
     let abono_capital = isCube
       ? new Big(inv?.cuota_inversionista ?? 0)
@@ -961,17 +448,27 @@ export async function insertPagosCreditoInversionistas(
       new Big(inv.iva_inversionista ?? 0)
     );
 
-    console.log(`   📊 totalMontos (cash_in + inversionista): ${totalMontos.toString()}`);
-    console.log(`   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`);
+    console.log(
+      `   📊 totalMontos (cash_in + inversionista): ${totalMontos.toString()}`
+    );
+    console.log(
+      `   📊 totalIVA (cash_in + inversionista): ${totalIVA.toString()}`
+    );
 
     if (idx === indexMayorCuota && !excludeCube) {
-      console.log(`   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`);
+      console.log(
+        `   🏆 ES EL MAYOR INVERSIONISTA - Aplicando descuentos completos`
+      );
       console.log(`   📉 Restando:`);
       console.log(`      - totalIVA: ${totalIVA.toString()}`);
       console.log(`      - totalMontos: ${totalMontos.toString()}`);
-      console.log(`      - membresias_pago: ${currentCredit?.membresias_pago ?? 0}`);
+      console.log(
+        `      - membresias_pago: ${currentCredit?.membresias_pago ?? 0}`
+      );
       console.log(`      - gps: ${currentCredit?.gps ?? 0}`);
-      console.log(`      - seguro_10_cuotas: ${currentCredit?.seguro_10_cuotas ?? 0}`);
+      console.log(
+        `      - seguro_10_cuotas: ${currentCredit?.seguro_10_cuotas ?? 0}`
+      );
 
       abono_capital = abono_capital
         .minus(totalIVA)
@@ -980,7 +477,9 @@ export async function insertPagosCreditoInversionistas(
         .minus(new Big(currentCredit?.gps ?? 0))
         .minus(new Big(currentCredit?.seguro_10_cuotas ?? 0));
 
-      console.log(`   ✅ abono_capital después de restas: ${abono_capital.toString()}`);
+      console.log(
+        `   ✅ abono_capital después de restas: ${abono_capital.toString()}`
+      );
     } else {
       console.log(`   📌 Inversionista regular - Solo resta interés e IVA`);
       console.log(`   📉 Restando:`);
@@ -989,7 +488,9 @@ export async function insertPagosCreditoInversionistas(
 
       abono_capital = abono_capital.minus(totalIVA).minus(totalMontos);
 
-      console.log(`   ✅ abono_capital después de restas: ${abono_capital.toString()}`);
+      console.log(
+        `   ✅ abono_capital después de restas: ${abono_capital.toString()}`
+      );
     }
 
     console.log(`\n   🔄 Llamando a processAndReplaceCreditInvestors:`);
@@ -1007,7 +508,9 @@ export async function insertPagosCreditoInversionistas(
 
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
-    console.log(`      porcentaje_participacion_inversionista: ${inv.porcentaje_participacion_inversionista}`);
+    console.log(
+      `      porcentaje_participacion_inversionista: ${inv.porcentaje_participacion_inversionista}`
+    );
 
     const resultado = {
       pago_id,
@@ -1033,8 +536,9 @@ export async function insertPagosCreditoInversionistas(
     return resultado;
   });
 
-  console.log("\n✅ ========== FIN insertPagosCreditoInversionistas ==========\n");
-
+  console.log(
+    "\n✅ ========== FIN insertPagosCreditoInversionistas ==========\n"
+  );
 
   // 4. Insertar todos los registros
   const resolvedInserts = await Promise.all(inserts);
@@ -1292,6 +796,7 @@ export async function insertarPago({
       gps_facturado: creditData.gps?.toString() ?? "0",
       reserva: "0",
       observaciones: "",
+      registerBy: "ADMIN",
     })
     .returning();
   if (mora && Number(mora) > 0) {
@@ -1483,8 +988,7 @@ export async function getPagosDelMesActual(credito_id: number) {
 
   return total.toFixed(2); // Devuelve como string, siempre dos decimales
 }
- 
- 
+
 interface GetPagosOptions {
   page?: number;
   pageSize?: number;
@@ -1516,7 +1020,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     anio,
     inversionistaId,
     usuarioNombre,
-    validationStatus
+    validationStatus,
   } = options;
 
   try {
@@ -1525,14 +1029,20 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     // 🔹 Construcción dinámica de filtros
     const whereClauses: string[] = [];
 
-    if (numeroCredito) whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
+    if (numeroCredito)
+      whereClauses.push(`c.numero_credito_sifco = '${numeroCredito}'`);
     if (usuarioNombre) whereClauses.push(`u.nombre ILIKE '%${usuarioNombre}%'`);
-  // ✅ Convertir a zona horaria de Guatemala (America/Guatemala = UTC-6)
-    if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${anio}`);
-    if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${mes}`);
-    if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago AT TIME ZONE 'America/Guatemala') = ${dia}`);
-    
-      whereClauses.push(`p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`);
+    console.log("dia", dia);
+    console.log("mes", mes);
+    console.log("anio", anio);
+
+    // ✅ Convertir a zona horaria de Guatemala (America/Guatemala = UTC-6)
+    if (anio) whereClauses.push(`EXTRACT(YEAR FROM p.fecha_pago) = ${anio}`);
+    if (mes) whereClauses.push(`EXTRACT(MONTH FROM p.fecha_pago) = ${mes}`);
+    if (dia) whereClauses.push(`EXTRACT(DAY FROM p.fecha_pago) = ${dia}`);
+    whereClauses.push(
+      `p.validation_status IN ('validated', 'pending' ,'reset', 'capital')`
+    );
 
     if (inversionistaId) {
       whereClauses.push(`
@@ -1546,8 +1056,25 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
     }
 
     // ✅ Solo créditos activos
-whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION')`);
-    const whereSQL = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
+    whereClauses.push(
+      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION')`
+    );
+    const whereSQL = whereClauses.length
+      ? `WHERE ${whereClauses.join(" AND ")}`
+      : "";
+
+    // 🔢 Query para contar el total de registros (SIN LIMIT)
+    const countQuery = sql`
+      SELECT COUNT(*) as total
+      FROM cartera.pagos_credito p
+      LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
+      LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      ${sql.raw(whereSQL)}
+    `;
+
+    const countResult = await db.execute(countQuery);
+    const totalRecords = Number(countResult.rows[0]?.total || 0);
+    const totalPages = Math.ceil(totalRecords / pageSize);
 
     // 🧩 Query principal
     const query = sql`
@@ -1555,15 +1082,23 @@ whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACIO
         p.pago_id AS "pagoId",
         p.monto_boleta AS "montoBoleta",
         p.numeroAutorizacion AS "numeroAutorizacion",
-        p.fecha_pago AS "fechaPago",
+        TO_CHAR(p.fecha_pago, 'YYYY-MM-DD HH24:MI:SS') AS "fechaPago",
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",
         p.otros AS "otros",
         p.reserva AS "reserva",
-        p.membresias AS "membresias",
+        p.membresias_pago AS "membresias",
         p.observaciones AS "observaciones",
-
+        p.registerBy AS "registerBy",
+        p.numeroautorizacion AS "numeroautorizacion",
+        b.nombre AS "bancoNombre",
+        
+        -- 🏦 Info de la cuenta de empresa (NUEVO) 👇
+        ce.nombre_cuenta AS "cuentaEmpresaNombre",
+        ce.banco AS "cuentaEmpresaBanco",
+        ce.numero_cuenta AS "cuentaEmpresaNumero",
+        
         -- 💰 Abonos del pago
         p.abono_capital AS "abono_capital",
         p.abono_interes AS "abono_interes",
@@ -1599,7 +1134,8 @@ whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACIO
         json_build_object(
           'usuarioId', u.usuario_id,
           'nombre', u.nombre,
-          'nit', u.nit
+          'nit', u.nit,
+          'categoria', u.categoria
         ) AS "usuario",
 
         -- 💰 Subconsulta de inversionistas
@@ -1640,6 +1176,8 @@ whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACIO
       FROM cartera.pagos_credito p
       LEFT JOIN cartera.creditos c ON c.credito_id = p.credito_id
       LEFT JOIN cartera.usuarios u ON u.usuario_id = c.usuario_id
+      LEFT JOIN cartera.bancos b ON b.banco_id = p.banco_id
+      LEFT JOIN cartera.cuentas_empresa ce ON ce.cuenta_id = p.cuenta_empresa_id -- 👈 NUEVO JOIN
       ${sql.raw(whereSQL)}
       ORDER BY p.fecha_pago DESC
       LIMIT ${pageSize} OFFSET ${offset};
@@ -1657,6 +1195,12 @@ whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACIO
       otros: r.otros,
       reserva: r.reserva,
       membresias: r.membresias,
+      registerBy: r.registerBy,
+      numeroautorizacion: r.numeroautorizacion,
+      bancoNombre: r.bancoNombre,
+      cuentaEmpresaNombre: r.cuentaEmpresaNombre, // 👈 NUEVO
+      cuentaEmpresaBanco: r.cuentaEmpresaBanco, // 👈 NUEVO
+      cuentaEmpresaNumero: r.cuentaEmpresaNumero, // 👈 NUEVO
       observaciones: r.observaciones,
       abono_capital: r.abono_capital,
       abono_interes: r.abono_interes,
@@ -1669,17 +1213,96 @@ whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACIO
       usuario: r.usuario,
       inversionistas: Array.isArray(r.inversionistas)
         ? r.inversionistas
-        : JSON.parse(typeof r.inversionistas === "string" ? r.inversionistas : "[]"),
+        : JSON.parse(
+            typeof r.inversionistas === "string" ? r.inversionistas : "[]"
+          ),
       boleta: r.boleta,
     }));
+
+    interface TotalesGenerales {
+      totalAbonoCapital: number;
+      totalAbonoInteres: number;
+      totalAbonoIva: number;
+      totalAbonoSeguro: number;
+      totalAbonoGps: number;
+      totalMora: number;
+      totalOtros: number;
+      totalReserva: number;
+      totalMembresias: number;
+    }
+
+    const totalesGenerales = result.rows.reduce<TotalesGenerales>(
+      (acc, r) => {
+        acc.totalAbonoCapital += Number(r.abono_capital || 0);
+        acc.totalAbonoInteres += Number(r.abono_interes || 0);
+        acc.totalAbonoIva += Number(r.abono_iva_12 || 0);
+        acc.totalAbonoSeguro += Number(r.abono_seguro || 0);
+        acc.totalAbonoGps += Number(r.abono_gps || 0);
+        acc.totalMora += Number(r.mora || 0);
+        acc.totalOtros += Number(r.otros || 0);
+        acc.totalReserva += Number(r.reserva || 0);
+        acc.totalMembresias += Number(r.membresias || 0);
+        return acc;
+      },
+      {
+        totalAbonoCapital: 0,
+        totalAbonoInteres: 0,
+        totalAbonoIva: 0,
+        totalAbonoSeguro: 0,
+        totalAbonoGps: 0,
+        totalMora: 0,
+        totalOtros: 0,
+        totalReserva: 0,
+        totalMembresias: 0,
+      }
+    );
+
+    // 💰 Redondear con Big.js SOLO al final (una vez)
+    const totalesFinales = {
+      totalAbonoCapital: new Big(totalesGenerales.totalAbonoCapital)
+        .round(2)
+        .toNumber(),
+      totalAbonoInteres: new Big(totalesGenerales.totalAbonoInteres)
+        .round(2)
+        .toNumber(),
+      totalAbonoIva: new Big(totalesGenerales.totalAbonoIva)
+        .round(2)
+        .toNumber(),
+      totalAbonoSeguro: new Big(totalesGenerales.totalAbonoSeguro)
+        .round(2)
+        .toNumber(),
+      totalAbonoGps: new Big(totalesGenerales.totalAbonoGps)
+        .round(2)
+        .toNumber(),
+      totalMora: new Big(totalesGenerales.totalMora).round(2).toNumber(),
+      totalOtros: new Big(totalesGenerales.totalOtros).round(2).toNumber(),
+      totalReserva: new Big(totalesGenerales.totalReserva).round(2).toNumber(),
+      totalMembresias: new Big(totalesGenerales.totalMembresias)
+        .round(2)
+        .toNumber(),
+      totalGeneral: new Big(totalesGenerales.totalAbonoCapital)
+        .plus(totalesGenerales.totalAbonoInteres)
+        .plus(totalesGenerales.totalAbonoIva)
+        .plus(totalesGenerales.totalAbonoSeguro)
+        .plus(totalesGenerales.totalAbonoGps)
+        .plus(totalesGenerales.totalMora)
+        .plus(totalesGenerales.totalOtros)
+        .plus(totalesGenerales.totalReserva)
+        .plus(totalesGenerales.totalMembresias)
+        .round(2)
+        .toNumber(),
+    };
+    console.log("Totales finales calculados:", totalesFinales);
 
     return {
       success: true,
       message: "📄 Datos de pagos obtenidos correctamente",
       page,
       pageSize,
-      total: result.rowCount,
+      total: totalRecords,
+      totalPages,
       data,
+      totales: totalesFinales,
     };
   } catch (error: any) {
     console.error("❌ Error en getPagosConInversionistas:", error);
@@ -1689,8 +1312,222 @@ whereClauses.push(`c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACIO
       page,
       pageSize,
       total: 0,
+      totalPages: 0,
       data: [],
       error: error.message,
+    };
+  }
+}
+/**
+ * 🔍 Obtiene todos los créditos con pagos pendientes de un inversionista específico
+ *
+ * @param inversionistaId - ID del inversionista a consultar
+ * @param generateFalsePayment - Si es true, genera los pagos en pagos_credito_inversionistas
+ * @returns Objeto con créditos, cuotas actuales y pagos pendientes
+ *
+ * Flujo:
+ * 1. Busca todos los créditos del inversionista (ACTIVO/MOROSO)
+ * 2. Por cada crédito, obtiene la cuota actual (próxima sin pagar)
+ * 3. Por cada cuota, busca los pagos pendientes
+ * 4. Si generateFalsePayment=true, llama a insertPagosCreditoInversionistas
+ */
+export async function obtenerCreditosConPagosPendientes(
+  inversionistaId: number,
+  generateFalsePayment: boolean = false // 🆕 Parámetro para generar pagos
+) {
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+
+    // 1️⃣ PASO 1: Obtener todos los créditos del inversionista
+    // Solo créditos ACTIVOS o MOROSOS (no cancelados ni liquidados)
+    const creditosInversionista = await db
+      .select({
+        creditoId: creditos_inversionistas.credito_id,
+        inversionistaId: creditos_inversionistas.inversionista_id,
+        montoAportado: creditos_inversionistas.monto_aportado,
+        porcentajeParticipacion:
+          creditos_inversionistas.porcentaje_participacion_inversionista,
+        // Datos del crédito
+        numeroCreditoSifco: creditos.numero_credito_sifco,
+        capital: creditos.capital,
+        deudaTotal: creditos.deudatotal,
+        statusCredit: creditos.statusCredit,
+        usuarioId: creditos.usuario_id,
+        cuota: creditos.cuota,
+        interes: creditos.cuota_interes,
+        iva: creditos.iva_12,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(
+        creditos,
+        eq(creditos_inversionistas.credito_id, creditos.credito_id)
+      )
+      .where(
+        and(
+          eq(creditos_inversionistas.inversionista_id, inversionistaId),
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO"]) // Solo créditos vigentes
+        )
+      );
+
+    console.log(
+      `📊 Créditos encontrados para inversionista ${inversionistaId}:`,
+      creditosInversionista.length
+    );
+
+    // 2️⃣ PASO 2: Por cada crédito, obtener cuota actual y pagos pendientes
+    const creditosConPagos = await Promise.all(
+      creditosInversionista.map(async (credito) => {
+        // 📅 Buscar la CUOTA ACTUAL (próxima cuota sin pagar completamente)
+        // - Debe pertenecer al crédito
+        // - No debe estar pagada (pagado = false)
+        // - Fecha de vencimiento >= hoy
+        const [cuotaActual] = await db
+          .select()
+          .from(cuotas_credito)
+          .where(
+            and(
+              eq(cuotas_credito.credito_id, credito.creditoId),
+              eq(cuotas_credito.pagado, false), // 🔥 Solo cuotas NO pagadas
+              gte(cuotas_credito.fecha_vencimiento, hoy) // Desde hoy en adelante
+            )
+          )
+          .orderBy(cuotas_credito.fecha_vencimiento) // Ordenar por fecha más próxima
+          .limit(1); // Solo la primera (más cercana)
+        console.log(
+          `🔍 Crédito ${credito.creditoId}: Cuota actual encontrada:`,
+          cuotaActual
+        );
+        // ⚠️ Si no hay cuota pendiente, este crédito no tiene pagos por procesar
+        if (!cuotaActual) {
+          console.log(
+            `⚠️ Crédito ${credito.creditoId}: No hay cuota pendiente`
+          );
+          return null;
+        }
+
+        // 3️⃣ PASO 3: Buscar PAGOS de esta cuota que NO estén pagados
+        // Estos son los pagos registrados en pagos_credito que aún no se han
+        // distribuido entre los inversionistas
+        const pagosPendientes = await db
+          .select()
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.credito_id, credito.creditoId), // Del crédito actual
+              eq(pagos_credito.cuota_id, cuotaActual.cuota_id), // De la cuota actual
+              eq(pagos_credito.pagado, false), // 🔥 Solo pagos NO pagados
+              // Solo pagos validados o pendientes de validación
+              eq(pagos_credito.validationStatus, "no_required")
+            )
+          )
+          .orderBy(pagos_credito.fecha_pago);
+        console.log(
+          `🔍 Crédito ${credito.creditoId}, Cuota ${cuotaActual.numero_cuota}: Pagos pendientes encontrados:`,
+          pagosPendientes
+        );
+        // ⚠️ Si no hay pagos pendientes, este crédito no tiene nada por distribuir
+        if (pagosPendientes.length === 0) {
+          console.log(
+            `⚠️ Crédito ${credito.creditoId}, Cuota ${cuotaActual.numero_cuota}: No hay pagos pendientes`
+          );
+          return null;
+        }
+
+        console.log(
+          `✅ Crédito ${credito.creditoId}, Cuota ${cuotaActual.numero_cuota}: ${pagosPendientes.length} pagos pendientes`
+        );
+
+        // 4️⃣ PASO 4: Si generateFalsePayment=true, generar pagos en pagos_credito_inversionistas
+        if (generateFalsePayment) {
+          console.log(
+            `🚀 Generando pagos para inversionista ${inversionistaId}...`
+          );
+
+          // Procesar cada pago pendiente
+          for (const pago of pagosPendientes) {
+            try {
+              console.log(
+                `  📝 Procesando pago ${pago.pago_id} del crédito ${credito.creditoId}...`
+              );
+
+              // 🎯 Llamar a insertPagosCreditoInversionistas
+              // - pago_id: ID del pago a distribuir
+              // - credito_id: ID del crédito
+              // - true: Excluir Cube Investments
+              await insertPagosCreditoInversionistas(
+                pago.pago_id,
+                credito.creditoId,
+                true
+              );
+
+              console.log(`  ✅ Pago ${pago.pago_id} procesado correctamente`);
+            } catch (error) {
+              console.error(
+                `  ❌ Error procesando pago ${pago.pago_id}:`,
+                error
+              );
+            }
+          }
+        }
+
+        // 5️⃣ PASO 5: Retornar información estructurada
+        return {
+          credito: {
+            creditoId: credito.creditoId,
+            numeroCreditoSifco: credito.numeroCreditoSifco,
+            capital: credito.capital,
+            deudaTotal: credito.deudaTotal,
+            statusCredit: credito.statusCredit,
+            montoAportado: credito.montoAportado,
+            porcentajeParticipacion: credito.porcentajeParticipacion,
+          },
+          cuotaActual: {
+            cuotaId: cuotaActual.cuota_id,
+            numeroCuota: cuotaActual.numero_cuota,
+            fechaVencimiento: cuotaActual.fecha_vencimiento,
+            montoCuota: credito.cuota,
+            capital: credito.capital,
+          },
+          pagosPendientes: pagosPendientes.map((p) => ({
+            pagoId: p.pago_id,
+            creditoId: p.credito_id,
+            cuotaId: p.cuota_id,
+            fechaPago: p.fecha_pago,
+            montoBoleta: p.monto_boleta,
+            abonoCapital: p.abono_capital,
+            abonoInteres: p.abono_interes,
+            abonoIva: p.abono_iva_12,
+            abonoSeguro: p.abono_seguro,
+            abonoGps: p.abono_gps,
+            validationStatus: p.validationStatus,
+            pagado: p.pagado,
+          })),
+        };
+      })
+    );
+
+    // 6️⃣ PASO 6: Filtrar nulls (créditos sin pagos pendientes)
+    const creditosConPagosPendientes = creditosConPagos.filter(
+      (c) => c !== null
+    );
+
+    console.log(
+      `✅ Total créditos con pagos pendientes: ${creditosConPagosPendientes.length}`
+    );
+
+    return {
+      success: true,
+      inversionistaId,
+      totalCreditosConPagos: creditosConPagosPendientes.length,
+      data: creditosConPagosPendientes,
+      pagosGenerados: generateFalsePayment, // Indica si se generaron los pagos
+    };
+  } catch (error: any) {
+    console.error("❌ Error en obtenerCreditosConPagosPendientes:", error);
+    return {
+      success: false,
+      error: error.message,
+      data: [],
     };
   }
 }

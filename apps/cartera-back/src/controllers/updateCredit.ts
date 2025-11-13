@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { db } from "../database";
 import { creditos, creditos_inversionistas, cuotas_credito, pagos_credito } from "../database/db";
 import z from "zod";
@@ -138,6 +138,7 @@ const creditUpdateSchema = z.object({
   plazo: z.number().min(0),
   mora: z.number().optional(),
   numero_credito_sifco: z.string().max(1000).optional(),
+   asesor_id: z.number().int().positive().optional(),
   inversionistas: z
     .array(
       z.object({
@@ -493,20 +494,21 @@ export const updateCredit = async ({ body, set }: any) => {
       mora,
       cuota,
       numero_credito_sifco,
+      asesor_id,
       ...fieldsToUpdate
     } = parseResult.data;
 
     // 2. Buscar el crédito actual
     const [current] = await db
-      .select()
-      .from(creditos)
-      .where(
-        and(
-          eq(creditos.credito_id, credito_id),
-          eq(creditos.statusCredit, "ACTIVO")
-        )
-      )
-      .limit(1);
+  .select()
+  .from(creditos)
+  .where(
+    and(
+      eq(creditos.credito_id, credito_id),
+      inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION"])
+    )
+  )
+  .limit(1);
 
     if (!current) {
       set.status = 400;
@@ -546,7 +548,9 @@ export const updateCredit = async ({ body, set }: any) => {
     if (numero_credito_sifco !== undefined) {
       updateFields.numero_credito_sifco = numero_credito_sifco;
     }
-
+ if (asesor_id !== undefined) { // ✅ Agregar al update
+      updateFields.asesor_id = asesor_id;
+    }
     // 5. Detectar cambios que afectan la deuda
     const changes = detectDebtAffectingChanges(fieldsToUpdate, current);
     const otrosModificado =

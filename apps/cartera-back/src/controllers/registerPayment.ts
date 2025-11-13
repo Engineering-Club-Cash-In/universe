@@ -11,11 +11,13 @@ import {
   moras_credito,
   inversionistas,
   pagos_credito_inversionistas,
+  cuentasEmpresa,
 } from "../database/db";
-import { eq, and, lte, asc, sql, gt, gte, or } from "drizzle-orm";
+import { eq, and, lte, asc, sql, gt, gte, or, ne } from "drizzle-orm";
 import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
+import { formatInTimeZone } from "date-fns-tz/dist/cjs/formatInTimeZone";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -33,6 +35,9 @@ const pagoSchema = z.object({
   abono_directo_capital: z.number().min(0).optional(),
   cuotaApagar: z.number().int(),
   url_boletas: z.array(z.string()),
+  banco_id: z.number().int().positive().optional(),
+  numeroAutorizacion: z.string().optional(),
+  registerBy: z.string().min(1),
 });
 
 type PagoData = z.infer<typeof pagoSchema>;
@@ -234,7 +239,8 @@ const procesarPagoMora = async ({
  */
 const obtenerInfoCompletaCredito = async (
   credito_id: number,
-  set: SetContext
+  set: SetContext,
+  cuotaApagar: number
 ) => {
   try {
     // 📋 Query 1: Crédito + Usuario + Mora (1 fila)
@@ -258,10 +264,10 @@ const obtenerInfoCompletaCredito = async (
       .where(
         and(
           eq(creditos.credito_id, credito_id),
-           or(
-        eq(creditos.statusCredit, "ACTIVO"),
-        eq(creditos.statusCredit, "MOROSO") // 🚨 También traer créditos morosos
-      )
+          or(
+            eq(creditos.statusCredit, "ACTIVO"),
+            eq(creditos.statusCredit, "MOROSO") // 🚨 También traer créditos morosos
+          )
         )
       )
       .limit(1);
@@ -290,10 +296,16 @@ const obtenerInfoCompletaCredito = async (
       db
         .select()
         .from(cuotas_credito)
+        .innerJoin(
+          pagos_credito,
+          eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+        )
         .where(
           and(
             eq(cuotas_credito.credito_id, credito_id),
-            eq(cuotas_credito.pagado, false)
+            eq(cuotas_credito.pagado, false),
+            ne(pagos_credito.validationStatus, "pending"),
+            gte(cuotas_credito.numero_cuota, cuotaApagar)
           )
         )
         .orderBy(cuotas_credito.numero_cuota),
@@ -548,6 +560,9 @@ export const insertPayment = async ({ body, set }: any) => {
       abono_directo_capital,
       cuotaApagar,
       url_boletas,
+      banco_id,
+      numeroAutorizacion,
+      registerBy,
     } = parseResult.data;
 
     // 2. Preparar datos
@@ -559,7 +574,7 @@ export const insertPayment = async ({ body, set }: any) => {
       saldoAFavor,
       mora, // ← NUEVO: Info de mora
       stats,
-    } = await obtenerInfoCompletaCredito(credito_id, set);
+    } = await obtenerInfoCompletaCredito(credito_id, set, cuotaApagar);
     // 4. Calcular disponible
     const montoBoleta = new Big(monto_boleta);
     let moraBig = new Big(mora?.monto_mora ?? 0);
@@ -569,12 +584,18 @@ export const insertPayment = async ({ body, set }: any) => {
       await insertarPago({
         numero_credito_sifco: credito.numero_credito_sifco,
         numero_cuota: cuotaApagar,
-        cuotaId: cuotasPendientes.length > 0 ? cuotasPendientes[0].cuota_id : 0,
+        cuotaId:
+          cuotasPendientes.length > 0
+            ? cuotasPendientes[0].cuotas_credito.cuota_id
+            : 0,
         otros: otrosBig.toNumber(),
         mora: 0,
         boleta: montoBoleta.toNumber(),
         urlBoletas: urlCompletas ?? [],
         pagado: true,
+        banco_id: banco_id ?? 0,
+        numeroAutorizacion: numeroAutorizacion ?? "",
+        registerBy: registerBy ?? "",
       });
     }
     const montoEfectivo = calcularMontoEfectivo(
@@ -592,7 +613,7 @@ export const insertPayment = async ({ body, set }: any) => {
       stats,
       disponible,
     });
-     // Actualizar disponible
+    // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
     const montoCuota = new Big(credito.cuota);
     let disponible_restante = disponible.minus(abono_directo_capital ?? 0);
@@ -604,36 +625,46 @@ export const insertPayment = async ({ body, set }: any) => {
       console.log("Resultado del pago de mora:", resultadoMora);
       if (resultadoMora.pagoCompleto && resultadoMora.moraPagada) {
         moraBig = new Big(resultadoMora.montoAplicadoMora);
-        if (disponible_restante.lte(0))  {
-
+        if (disponible_restante.lte(0)) {
           await insertarPago({
-        numero_credito_sifco: credito.numero_credito_sifco,
-        numero_cuota: cuotaApagar,
-        cuotaId: cuotasPendientes.length > 0 ? cuotasPendientes[0].cuota_id : 0,
-        otros: otrosBig.toNumber(),
-        mora: resultadoMora.montoAplicadoMora,
-        boleta: montoBoleta.toNumber(),
-        urlBoletas: urlCompletas ?? [],
-        pagado: true,
-      });
+            numero_credito_sifco: credito.numero_credito_sifco,
+            numero_cuota: cuotaApagar,
+            cuotaId:
+              cuotasPendientes.length > 0
+                ? cuotasPendientes[0].cuotas_credito.cuota_id
+                : 0,
+            otros: otrosBig.toNumber(),
+            mora: resultadoMora.montoAplicadoMora,
+            boleta: montoBoleta.toNumber(),
+            urlBoletas: urlCompletas ?? [],
+            pagado: true,
+            banco_id: banco_id ?? 0,
+            numeroAutorizacion: numeroAutorizacion ?? "",
+            registerBy: registerBy ?? "",
+          });
         }
         console.log(
           "Mora pagada completamente, se procede a registrar el pago normal."
         );
       }
       if (!resultadoMora.moraPagada && resultadoMora.pagoParcial) {
-        if (disponible_restante.lte(0))  {
-
+        if (disponible_restante.lte(0)) {
           await insertarPago({
-        numero_credito_sifco: credito.numero_credito_sifco,
-        numero_cuota: cuotaApagar,
-        cuotaId: cuotasPendientes.length > 0 ? cuotasPendientes[0].cuota_id : 0,
-        otros: otrosBig.toNumber(),
-        mora: resultadoMora.montoAplicadoMora,
-        boleta: montoBoleta.toNumber(),
-        urlBoletas: urlCompletas ?? [],
-        pagado: true,
-      });
+            numero_credito_sifco: credito.numero_credito_sifco,
+            numero_cuota: cuotaApagar,
+            cuotaId:
+              cuotasPendientes.length > 0
+                ? cuotasPendientes[0].cuotas_credito.cuota_id
+                : 0,
+            otros: otrosBig.toNumber(),
+            mora: resultadoMora.montoAplicadoMora,
+            boleta: montoBoleta.toNumber(),
+            urlBoletas: urlCompletas ?? [],
+            pagado: true,
+            banco_id: banco_id ?? 0,
+            numeroAutorizacion: numeroAutorizacion ?? "",
+            registerBy: registerBy ?? "",
+          });
         }
         return {
           message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
@@ -644,19 +675,24 @@ export const insertPayment = async ({ body, set }: any) => {
     }
 
     if (!resultadoMora.moraPagada && resultadoMora.montoAplicadoMora > 0) {
-      if (disponible_restante.lte(0))  {
-
-          await insertarPago({
-        numero_credito_sifco: credito.numero_credito_sifco,
-        numero_cuota: cuotaApagar,
-        cuotaId: cuotasPendientes.length > 0 ? cuotasPendientes[0].cuota_id : 0,
-        otros: otrosBig.toNumber(),
-        mora: resultadoMora.montoAplicadoMora,
-        boleta: montoBoleta.toNumber(),
-        urlBoletas: urlCompletas ?? [],
-        pagado: true,
-      });
-        }
+      if (disponible_restante.lte(0)) {
+        await insertarPago({
+          numero_credito_sifco: credito.numero_credito_sifco,
+          numero_cuota: cuotaApagar,
+          cuotaId:
+            cuotasPendientes.length > 0
+              ? cuotasPendientes[0].cuotas_credito.cuota_id
+              : 0,
+          otros: otrosBig.toNumber(),
+          mora: resultadoMora.montoAplicadoMora,
+          boleta: montoBoleta.toNumber(),
+          urlBoletas: urlCompletas ?? [],
+          pagado: true,
+          banco_id: banco_id ?? 0,
+          numeroAutorizacion: numeroAutorizacion ?? "",
+          registerBy: registerBy ?? "",
+        });
+      }
       return {
         message: `Pago parcial de mora aplicado. Saldo pendiente de mora: $${resultadoMora.saldoMoraRestante}. Por favor, cancele la mora pendiente para continuar con el pago de cuotas.`,
         pagos: [],
@@ -664,13 +700,13 @@ export const insertPayment = async ({ body, set }: any) => {
       };
     }
 
-   
     let cuotas_completas = 0;
     let cuotas_parciales = 0;
+    let disponible_para_cuotasPosteriores = new Big(0);
     for (const cuota of cuotasPendientes) {
       console.log("\n===============================");
       console.log(
-        `🚀 Procesando cuota #${cuota.numero_cuota} (Monto: $${montoCuota.toString()})`
+        `🚀 Procesando cuota #${cuota.cuotas_credito.numero_cuota} (Monto: $${montoCuota.toString()})`
       );
       console.log(
         `💰 Disponible antes de cuota: $${disponible_restante.toString()}`
@@ -686,7 +722,10 @@ export const insertPayment = async ({ body, set }: any) => {
           )
           .where(
             and(
-              eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
+              eq(
+                cuotas_credito.numero_cuota,
+                cuota.cuotas_credito.numero_cuota
+              ),
               eq(pagos_credito.pagado, false),
               eq(pagos_credito.credito_id, credito.credito_id)
             )
@@ -719,7 +758,10 @@ export const insertPayment = async ({ body, set }: any) => {
         let total_monto_cash_in = new Big(0);
         let total_iva_cash_in = new Big(0);
 
-        console.log("🚀 Procesando pago para la cuota:", cuota.numero_cuota);
+        console.log(
+          "🚀 Procesando pago para la cuota:",
+          cuota.cuotas_credito.numero_cuota
+        );
 
         // Sumar totales de inversionistas
         inversionistas.forEach(({ monto_cash_in, iva_cash_in }) => {
@@ -921,7 +963,25 @@ export const insertPayment = async ({ body, set }: any) => {
           "Diciembre",
         ];
         const mes_pagado = months[currentDate.getMonth()];
-        const paymentFalse = existingPago ? existingPago.pago.paymentFalse : false;
+        const paymentFalse = existingPago
+          ? existingPago.pago.paymentFalse
+          : false;
+        const guatemalaTimeString = new Date().toLocaleString("en-US", {
+          timeZone: "America/Guatemala",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        });
+
+        // Convertir "11/22/2025, 17:07:09" a Date object
+        const [datePart, timePart] = guatemalaTimeString.split(", ");
+        const [month, day, year] = datePart.split("/");
+        const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+
         const pagoData = {
           credito_id: credito.credito_id,
           cuota: credito.cuota,
@@ -940,9 +1000,9 @@ export const insertPayment = async ({ body, set }: any) => {
           iva_12_restante: nuevo_iva_restante.toString(),
           seguro_restante: nuevo_seguro_restante.toString(),
           gps_restante: nuevo_gps_restante.toString(),
-          numero_cuota: cuota.numero_cuota,
+          numero_cuota: cuota.cuotas_credito.numero_cuota,
           llamada: llamada,
-          fecha_pago,
+          fecha_pago: fechaGuatemala,
           renuevo_o_nuevo: renuevo_o_nuevo,
           tipoCredito: "Renuevo",
           membresias: nuevo_membresias_restante.toString(),
@@ -962,6 +1022,9 @@ export const insertPayment = async ({ body, set }: any) => {
           validate: false,
           validationStatus: "pending" as const,
           paymentFalse: paymentFalse,
+          numeroAutorizacion: numeroAutorizacion,
+          banco_id: banco_id,
+          registerBy: registerBy,
         };
 
         // Insertar o actualizar pago
@@ -981,7 +1044,7 @@ export const insertPayment = async ({ body, set }: any) => {
             if (pagoData.pagado) {
               cuotas_completas++;
               console.log(
-                `✅ Cuota ${cuota.numero_cuota} PAGADA COMPLETAMENTE`
+                `✅ Cuota ${cuota.cuotas_credito.numero_cuota} PAGADA COMPLETAMENTE`
               );
               [pagoInsertado] = await db
                 .update(pagos_credito)
@@ -989,12 +1052,21 @@ export const insertPayment = async ({ body, set }: any) => {
                 .from(cuotas_credito)
                 .where(
                   and(
-                    eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
+                    eq(
+                      cuotas_credito.numero_cuota,
+                      cuota.cuotas_credito.numero_cuota
+                    ),
                     eq(pagos_credito.pago_id, existingPago.pago.pago_id),
                     eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
                   )
                 )
                 .returning();
+              await db
+                .update(pagos_credito)
+                .set({ pagado: true })
+                .where(
+                  eq(pagos_credito.cuota_id, cuota.cuotas_credito.cuota_id)
+                );
 
               if (
                 pagoInsertado?.pago_id &&
@@ -1009,6 +1081,8 @@ export const insertPayment = async ({ body, set }: any) => {
                 );
               }
             } else {
+              disponible_para_cuotasPosteriores =
+                disponible_para_cuotasPosteriores.plus(montoBoleta);
               await db
                 .update(pagos_credito)
                 .set({
@@ -1022,27 +1096,52 @@ export const insertPayment = async ({ body, set }: any) => {
                 .from(cuotas_credito)
                 .where(
                   and(
-                    eq(cuotas_credito.numero_cuota, cuota.numero_cuota),
+                    eq(
+                      cuotas_credito.numero_cuota,
+                      cuota.cuotas_credito.numero_cuota
+                    ),
                     eq(pagos_credito.pago_id, existingPago.pago.pago_id),
                     eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
                   )
                 )
                 .returning();
+
               cuotas_parciales++;
-              console.log(`⚠️ Cuota ${cuota.numero_cuota} con PAGO PARCIAL`);
+              const guatemalaTimeString = new Date().toLocaleString("en-US", {
+                timeZone: "America/Guatemala",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              });
+
+              // Convertir "11/22/2025, 17:07:09" a Date object
+              const [datePart, timePart] = guatemalaTimeString.split(", ");
+              const [month, day, year] = datePart.split("/");
+              const fechaGuatemala = new Date(
+                `${year}-${month}-${day}T${timePart}`
+              );
+
+              console.log(
+                `⚠️ Cuota ${cuota.cuotas_credito.numero_cuota} con PAGO PARCIAL`
+              );
+
               [pagoInsertado] = await db
                 .insert(pagos_credito)
                 .values({
                   // Campos requeridos del input
-                  cuota_id: cuota.cuota_id,
+                  cuota_id: cuota.cuotas_credito.cuota_id,
                   monto_boleta: pagoData.monto_boleta,
                   renuevo_o_nuevo: pagoData.renuevo_o_nuevo,
                   credito_id: pagoData.credito_id,
                   // Campos que vienen del crédito/cuota
                   cuota: credito.cuota,
                   cuota_interes: credito.cuota_interes,
-                  fecha_pago: new Date().toISOString(),
-                  fecha_vencimiento: cuota.fecha_vencimiento,
+                  fecha_pago: fechaGuatemala,
+                  fecha_vencimiento: cuota.cuotas_credito.fecha_vencimiento,
 
                   // Abonos (calculados según lógica de si monto_boleta == cuota)
                   abono_capital: pagoData.abono_capital,
@@ -1080,11 +1179,14 @@ export const insertPayment = async ({ body, set }: any) => {
                   reserva: pagoData.reserva,
 
                   // Campos de estado
-                  pagado: true,
+                  pagado: false,
                   facturacion: pagoData.facturacion || "si",
                   mes_pagado: pagoData.mes_pagado,
                   paymentFalse: pagoData.paymentFalse || false,
                   validationStatus: pagoData.validationStatus || "pending",
+                  banco_id: pagoData.banco_id || null,
+                  numeroAutorizacion: pagoData.numeroAutorizacion || null,
+                  registerBy: pagoData.registerBy,
                 })
                 .returning();
               console.log("pagoInsertado cuota parcial:", pagoInsertado);
@@ -1145,16 +1247,46 @@ export const insertPayment = async ({ body, set }: any) => {
         "Diciembre",
       ];
       const mes_pagado = months[currentDate.getMonth()];
+      const guatemalaTime = new Date(
+        new Date().toLocaleString("en-US", {
+          timeZone: "America/Guatemala",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        })
+      );
 
       const monthPaymentsBig = new Big(
         (await getPagosDelMesActual(credito_id)) ?? 0
       ).plus(abonoCapital);
-      const newCuota = await db.insert(cuotas_credito).values({
-        credito_id: credito_id,
-        numero_cuota: cuotaActualData.numero_cuota,
-        fecha_vencimiento: cuotaActualData.fecha_vencimiento,
-        pagado: true,
-      }).returning();
+      const newCuota = await db
+        .insert(cuotas_credito)
+        .values({
+          credito_id: credito_id,
+          numero_cuota: cuotaActualData.numero_cuota,
+          fecha_vencimiento: cuotaActualData.fecha_vencimiento,
+          pagado: true,
+        })
+        .returning();
+                    const guatemalaTimeString = new Date().toLocaleString("en-US", {
+                timeZone: "America/Guatemala",
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                hour12: false,
+              });
+
+              // Convertir "11/22/2025, 17:07:09" a Date object
+              const [datePart, timePart] = guatemalaTimeString.split(", ");
+              const [month, day, year] = datePart.split("/");
+              const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
       const pagoData = {
         credito_id,
         cuota: credito.cuota,
@@ -1183,7 +1315,7 @@ export const insertPayment = async ({ body, set }: any) => {
         cuota_id: newCuota[0].cuota_id,
         numero_cuota: 0,
         llamada: llamada ?? "",
-        fecha_pago,
+        fecha_pago: fechaGuatemala,
         renuevo_o_nuevo: renuevo_o_nuevo ?? "Renuevo",
         tipoCredito: "Renuevo",
 
@@ -1210,6 +1342,7 @@ export const insertPayment = async ({ body, set }: any) => {
         validate: false,
         validationStatus: "capital" as const,
         paymentFalse: false,
+        registerBy: registerBy,
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");
@@ -1254,28 +1387,30 @@ export const insertPayment = async ({ body, set }: any) => {
           validationStatus: "pending",
         },
       };
-    }else {
+    } else {
       await db
-              .update(usuarios)
-              .set({ saldo_a_favor: "0.00" })
-              .where(eq(usuarios.usuario_id, credito.usuario_id));
+        .update(usuarios)
+        .set({ saldo_a_favor: disponible_para_cuotasPosteriores.toString() })
+        .where(eq(usuarios.usuario_id, credito.usuario_id));
 
-            console.log("✅ Saldo a favor del usuario quedó en $0");
-            console.log("✅ Pago realizado con éxito");
+      console.log(
+        `✅ Saldo a favor del usuario quedó en $${disponible_para_cuotasPosteriores.toString()}`
+      );
+      console.log("✅ Pago realizado con éxito");
 
-            const montoTotal = montoBoleta.toString();
+      const montoTotal = montoBoleta.toString();
 
-            return {
-              success: true,
-              message: "Pago realizado exitosamente",
-              detalle: {
-                cuotas_pagadas_completas: cuotas_completas,
-                cuotas_pagadas_parciales: cuotas_parciales,
-                monto_aplicado: montoTotal,
-                saldo_sobrante: "0.00",
-              },
-              resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. Ya no queda saldo disponible.`,
-            };
+      return {
+        success: true,
+        message: "Pago realizado exitosamente",
+        detalle: {
+          cuotas_pagadas_completas: cuotas_completas,
+          cuotas_pagadas_parciales: cuotas_parciales,
+          monto_aplicado: montoTotal,
+          saldo_sobrante: "0.00",
+        },
+        resumen: `Se procesaron   cuota(s): ${cuotas_completas} pagada(s) completamente y ${cuotas_parciales} con pago parcial. Monto total aplicado: Q${montoTotal}. Ya no queda saldo disponible.`,
+      };
     }
   } catch (error) {
     console.error("[insertPayment] Error:", error);
@@ -1325,6 +1460,9 @@ interface InsertarPagoParams {
   boleta: number;
   urlBoletas: string[]; // opcional si no se especifica
   pagado: boolean;
+  banco_id: number;
+  numeroAutorizacion: string;
+  registerBy: string;
 
   // Puedes agregar otros si los necesitas
 }
@@ -1337,6 +1475,9 @@ export async function insertarPago({
   boleta,
   urlBoletas = [],
   pagado = true,
+  banco_id,
+  numeroAutorizacion,
+  registerBy,
 }: InsertarPagoParams) {
   console.log(
     `Insertando pago para crédito SIFCO: ${numero_credito_sifco}, cuota: ${numero_cuota}, mora: ${mora}, otros: ${otros}`
@@ -1446,7 +1587,7 @@ export async function insertarPago({
       pago_del_mes: monthPaymentsBig.toString() ?? "0",
       monto_boleta: boleta.toString(),
 
-      capital_restante:   "0",
+      capital_restante: "0",
       interes_restante: "0",
       iva_12_restante: "0",
       seguro_restante: "0",
@@ -1457,8 +1598,8 @@ export async function insertarPago({
 
       renuevo_o_nuevo: "renuevo",
 
-      membresias:   "0",
-      membresias_pago:   "0",
+      membresias: "0",
+      membresias_pago: "0",
       membresias_mes: "0",
       otros: otros.toString() ?? "0",
       mora: mora.toString(),
@@ -1472,6 +1613,9 @@ export async function insertarPago({
       reserva: "0",
       observaciones: "",
       validationStatus: "pending",
+      banco_id: banco_id || null,
+      numeroAutorizacion: numeroAutorizacion || null,
+      registerBy: registerBy,
     })
     .returning();
 
@@ -1517,13 +1661,12 @@ export async function aplicarPagoAlCredito(pago_id: number) {
         pago.abono_capital ?? "0",
         pago_id
       );
-      console.log(
-        "⚠️ El pago es un abono directo a capital"
-      );
+      console.log("⚠️ El pago es un abono directo a capital");
       return {
         success: true,
         applied: false,
-        message: "Pago validado como abono a capital , se abonó a inversionistas correctamente",
+        message:
+          "Pago validado como abono a capital , se abonó a inversionistas correctamente",
       };
     }
     if (pago.validationStatus === "reset") {
@@ -1614,7 +1757,12 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     const todosPagosCuota = await db
       .select({ abono_capital: pagos_credito.abono_capital })
       .from(pagos_credito)
-      .where(and(eq(pagos_credito.cuota_id, pago.cuota_id), eq(pagos_credito.validationStatus, "validated")));
+      .where(
+        and(
+          eq(pagos_credito.cuota_id, pago.cuota_id),
+          eq(pagos_credito.validationStatus, "validated")
+        )
+      );
 
     let abono_capital_total = new Big(0);
     for (const p of todosPagosCuota) {
@@ -1998,12 +2146,6 @@ export async function aplicarAbonoCapitalInversionistas(
 
   console.log(`✅ Crédito actualizado`);
 
-  // 1️⃣.3 Limpiar saldo a favor del usuario
-  await db
-    .update(usuarios)
-    .set({ saldo_a_favor: "0" })
-    .where(eq(usuarios.usuario_id, credito.usuario_id));
-
   console.log(`✅ Saldo a favor limpiado`);
 
   // 2️⃣ Calcular la distribución (ya sabes cuánto le toca a cada quien)
@@ -2054,6 +2196,18 @@ export async function aplicarAbonoCapitalInversionistas(
     );
 
     console.log(`   💵 Cuota Actualizada: Q${cuotaInversionista.toString()}`);
+    const guatemalaTime = new Date(
+      new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      })
+    );
 
     // 6️⃣ Registrar el pago del inversionista (SOLO abono_capital, lo demás en 0)
     const [pagoRegistrado] = await db
@@ -2067,7 +2221,7 @@ export async function aplicarAbonoCapitalInversionistas(
         abono_iva_12: "0.00", // ❌ Cero
         porcentaje_participacion: porcentajeParticipacion.toFixed(2),
         cuota: cuotaInversionista.toFixed(2),
-        fecha_pago: new Date(),
+        fecha_pago: guatemalaTime,
         estado_liquidacion: "NO_LIQUIDADO",
       })
       .returning();
@@ -2086,7 +2240,8 @@ export async function aplicarAbonoCapitalInversionistas(
       porcentaje_participacion: porcentajeParticipacion.toFixed(2),
     });
   }
-  await db.update(pagos_credito)
+  await db
+    .update(pagos_credito)
     .set({ validationStatus: "validated" })
     .where(eq(pagos_credito.pago_id, pago_id));
 
@@ -2108,4 +2263,72 @@ export async function aplicarAbonoCapitalInversionistas(
     pagos_registrados: pagosRegistrados,
     distribucion,
   };
+}
+
+export   async function actualizarCuentaPago(
+  pagoId: number,
+  cuentaEmpresaId: number
+) {
+  try {
+    // 1️⃣ Validar que el pago existe
+    const pagoExiste = await db
+      .select()
+      .from(pagos_credito)
+      .where(eq(pagos_credito.pago_id, pagoId))
+      .limit(1);
+
+    if (!pagoExiste || pagoExiste.length === 0) {
+      return {
+        success: false,
+        message: "❌ Pago no encontrado",
+        data: null,
+      };
+    }
+
+    // 2️⃣ Validar que la cuenta existe y está activa
+    const cuentaExiste = await db
+      .select()
+      .from(cuentasEmpresa)
+      .where(eq(cuentasEmpresa.cuentaId, cuentaEmpresaId))
+      .limit(1);
+
+    if (!cuentaExiste || cuentaExiste.length === 0) {
+      return {
+        success: false,
+        message: "❌ Cuenta de empresa no encontrada",
+        data: null,
+      };
+    }
+
+    if (!cuentaExiste[0].activo) {
+      return {
+        success: false,
+        message: "❌ La cuenta de empresa está inactiva",
+        data: null,
+      };
+    }
+
+    // 3️⃣ Actualizar el pago con la nueva cuenta
+    const [pagoActualizado] = await db
+      .update(pagos_credito)
+      .set({
+        cuenta_empresa_id: cuentaEmpresaId,
+      })
+      .where(eq(pagos_credito.pago_id, pagoId))
+      .returning();
+
+    return {
+      success: true,
+      message: "✅ Cuenta de empresa actualizada correctamente en el pago",
+      data: pagoActualizado,
+    };
+  } catch (error: any) {
+    console.error("❌ Error al actualizar cuenta de empresa en pago:", error);
+    return {
+      success: false,
+      message: "❌ Error al actualizar la cuenta del pago",
+      error: error.message,
+      data: null,
+    };
+  }
 }

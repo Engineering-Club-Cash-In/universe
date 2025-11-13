@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {   useRef, useState } from "react";
-import { FileSpreadsheet, Loader2, Search, SearchIcon, User, UserIcon, X, XIcon } from "lucide-react";
+import { Download, FileSpreadsheet, Loader2, Search, SearchIcon, User, UserIcon, X, XIcon } from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
 import { Eye, Pencil, XCircle } from "lucide-react";
@@ -76,46 +76,90 @@ const userAsesorId = user?.asesor_id;
     | "ACTIVO"
     | "PENDIENTE_CANCELACION"
     | "CANCELADO"
-    | "INCOBRABLE";
+    | "INCOBRABLE"
+    |"MOROSO"
 
   // Helpers de permisos
-  const canEdit = (s: CreditStatus) => s === "ACTIVO";
-  const canCancel = (s: CreditStatus) => s === "ACTIVO";
+  const canEdit = (s: CreditStatus) => ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION"].includes(s);
+
+  const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
-  const canViewPayments = (_s: CreditStatus) => true;
-  const [openInfoCancelation, setOpenInfoCancelation] = React.useState(false);
-  const handleOpenEdit = (credit: any, inversionistas: any) => {
-    console.log(inversionistas);
-    setCreditToEdit({
-      capital: credit.capital,
-      porcentaje_interes: credit.porcentaje_interes,
-      plazo: credit.plazo,
-      no_poliza: credit.no_poliza,
-      observaciones: credit.observaciones,
-      mora: Number(credit.mora ?? 0),
-      credito_id: credit.credito_id,
-      cuota: credit.cuota,
-      numero_credito_sifco: credit.numero_credito_sifco,
-      otros: credit.otros ?? 0,
-      seguro_10_cuotas: credit.seguro_10_cuotas ?? 0,
-      membresias_pago: credit.membresias_pago ?? 0,
-      gps: credit.gps ?? 0,
-      // agrega aquí cualquier otro campo nuevo que quieras editar
-    });
+  const canViewPayments = (_s: CreditStatus) => true; 
+// Dentro del componente, después de los otros hooks:
+const reportCancelation = useReport("cancelation");
+const reportCancelationIntern = useReport("cancelation-intern");
+const reportCostDetail = useReport("cost-detail");
+const canViewReports = (s: CreditStatus) => 
+  s === "PENDIENTE_CANCELACION" || s === "CANCELADO";
+// State para el modal de reportes
+const [reportModalOpen, setReportModalOpen] = useState(false);
+const [selectedCreditForReport, setSelectedCreditForReport] = useState<any | null>(null);
+const handleGenerateReport = (
+  numeroSifco: string,
+  format: "pdf" | "excel",
+  reportType: "cancelation" | "cancelation-intern" | "cost-detail"
+) => {
+  const reportMutation =
+    reportType === "cancelation"
+      ? reportCancelation
+      : reportType === "cancelation-intern"
+      ? reportCancelationIntern
+      : reportCostDetail;
 
-    setInvestorsToEdit(
-      inversionistas.map((inv: any) => ({
-        inversionista_id: inv.inversionista_id,
-        porcentaje_participacion: inv.porcentaje_participacion,
-        monto_aportado: inv.monto_aportado,
-        porcentaje_cash_in: inv.porcentaje_cash_in,
-        porcentaje_inversion: inv.porcentaje_participacion_inversionista,
-        cuota_inversionista: inv.cuota_inversionista ?? 0,
-      }))
-    );
+  reportMutation.mutate(
+    {
+      numero_sifco: numeroSifco,
+      format,
+    },
+    {
+      onSuccess: (response) => {
+        if (response.url) {
+          openReportInNewTab(response.url);
+        } else {
+          alert("No se generó la URL del reporte");
+        }
+      },
+      onError: (err: any) => {
+        alert(err?.message || `Error al generar reporte ${reportType}`);
+      },
+    }
+  );
+};
+const isGeneratingReport =
+  reportCancelation.status === "pending" ||
+  reportCancelationIntern.status === "pending" ||
+  reportCostDetail.status === "pending";
+const handleOpenEdit = (credit: any, inversionistas: any) => {
+  console.log(credit);
+  setCreditToEdit({
+    capital: credit.capital,
+    porcentaje_interes: credit.porcentaje_interes,
+    plazo: credit.plazo,
+    no_poliza: credit.no_poliza,
+    observaciones: credit.observaciones,
+    credito_id: credit.credito_id,
+    cuota: credit.cuota,
+    numero_credito_sifco: credit.numero_credito_sifco,
+    otros: credit.otros ?? 0,
+    seguro_10_cuotas: credit.seguro_10_cuotas ?? 0,
+    membresias_pago: credit.membresias_pago ?? 0,
+    gps: credit.gps ?? 0,
+    asesor_id: credit.asesor_id, // ✅ NUEVO (eliminamos mora)
+  });
 
-    setEditModalOpen(true);
-  };
+  setInvestorsToEdit(
+    inversionistas.map((inv: any) => ({
+      inversionista_id: inv.inversionista_id,
+      porcentaje_participacion: inv.porcentaje_participacion,
+      monto_aportado: inv.monto_aportado,
+      porcentaje_cash_in: inv.porcentaje_cash_in,
+      porcentaje_inversion: inv.porcentaje_participacion_inversionista,
+      cuota_inversionista: inv.cuota_inversionista ?? 0,
+    }))
+  );
+  
+  setEditModalOpen(true);
+};
   const inputRef = useRef<HTMLInputElement>(null);
   const { investors, advisors } = useCatalogs() as {
     investors: Investor[];
@@ -131,6 +175,12 @@ const userAsesorId = user?.asesor_id;
     setSelectedCreditId(creditId);
     setModalOpen(true);
   };
+ 
+const handleKeyPress = (e: React.KeyboardEvent) => {
+  if (e.key === 'Enter') {
+    handleSearchNombreUsuario();
+  }
+};
 console.log("👥 Advisors:", advisors);
 console.log("🎯 Asesor ID actual:", asesorId);
   // Cuando cierras el modal, resetea ambos states (opcional)
@@ -1809,19 +1859,20 @@ console.log("🎯 Asesor ID actual:", asesorId);
       {isFetching && (
         <div className="text-blue-500 mt-2">Cargando página...</div>
       )}
-      <ModalEditCredit
-        open={editModalOpen}
-        onClose={() => setEditModalOpen(false)}
-        initialValues={creditToEdit}
-        investorsInitial={investorsToEdit}
-        onSuccess={() => {
-          setEditModalOpen(false);
-          queryClient.invalidateQueries({
-            queryKey: ["creditos-paginados", mes, anio, page, perPage],
-          });
-        }}
-        investorsOptions={investors}
-      />
+     <ModalEditCredit
+  open={editModalOpen}
+  onClose={() => setEditModalOpen(false)}
+  initialValues={creditToEdit}
+  investorsInitial={investorsToEdit}
+  onSuccess={() => {
+    setEditModalOpen(false);
+    queryClient.invalidateQueries({
+      queryKey: ["creditos-paginados", mes, anio, page, perPage],
+    });
+  }}
+  investorsOptions={investors}
+  advisorsOptions={advisors} // ✅ NUEVO
+/>
       <ModalCancelCredit
         open={modalOpen}
         onClose={handleCloseModal}

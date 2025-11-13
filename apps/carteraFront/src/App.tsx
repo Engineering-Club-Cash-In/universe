@@ -11,6 +11,7 @@ import { useAuth } from "./Provider/authProvider";
 import AdvisorsManager from "./private/cartera/components/advisor";
 import MorasManager from "./private/cartera/components/Latefee";
 import CreditosPorAsesorManager from "./private/cartera/components/resumeAdvisor";
+import { BancosManager } from "./private/cartera/components/bank";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -111,6 +112,14 @@ function App() {
             element={
               <RoleRoute allowedRoles={["ADMIN"]}>
                 <TableInvestors />
+              </RoleRoute>
+            }
+          />
+           <Route
+            path="bancos"
+            element={
+              <RoleRoute allowedRoles={["ADMIN"]}>
+                <BancosManager />
               </RoleRoute>
             }
           />

@@ -67,9 +67,9 @@ export async function buildCostDetailWorkbookPeach(
     views: [{ state: "frozen", ySplit: 11 }],
   });
 
-  // Column widths (similar layout to your screenshot)
-  // No., Mes, Seguro, GPS, Otros, Capital pendiente, Total a cancelar
-  [7, 12, 14, 12, 14, 26, 18].forEach((w, i) => (ws.getColumn(i + 1).width = w));
+  // ✅ Column widths - REMOVIMOS columna de capital
+  // No., Mes, Seguro, GPS, Otros, Total a cancelar
+  [7, 12, 14, 12, 14, 18].forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
   // Optional logo
   if (opts?.logoBase64) {
@@ -78,12 +78,12 @@ export async function buildCostDetailWorkbookPeach(
   }
 
   // Titles
-  ws.mergeCells("C1:G1");
+  ws.mergeCells("C1:F1"); // ✅ Ajustado a 6 columnas
   ws.getCell("C1").value = "DETALLE DE COSTOS";
   ws.getCell("C1").font = { bold: true, size: 18, color: { argb: PEACH.title } };
   ws.getCell("C1").alignment = { vertical: "middle" };
 
-  ws.mergeCells("C2:G2");
+  ws.mergeCells("C2:F2"); // ✅ Ajustado a 6 columnas
   ws.getCell("C2").value = "PRÉSTAMO";
   ws.getCell("C2").font = { bold: true, size: 14, color: { argb: PEACH.title } };
   ws.getCell("C2").alignment = { vertical: "middle" };
@@ -94,7 +94,6 @@ export async function buildCostDetailWorkbookPeach(
     ["Préstamo No.", data.header.numero_credito_sifco],
     ["Moneda", data.header.moneda],
     ["Tipo de crédito", data.header.tipo_credito],
-    // Optional line like "DATOS DEL VEHÍCULO"
     ["DATOS DEL VEHÍCULO", ""],
   ];
 
@@ -108,27 +107,55 @@ export async function buildCostDetailWorkbookPeach(
     r++;
   }
 
-  // Right card: balance
-  ws.mergeCells("F4:G4");
-  ws.getCell("F4").value = "Saldo total";
-  ws.getCell("F4").font = { bold: true, color: { argb: PEACH.slate } };
+  // ✅ Right card: Capital + Total a pagar + Con extras
+  const saldoBase = toNum(data.header.saldo_total);
+  const extrasTotal = toNum(data.header.extras_total);
+  
+  // Calcular total de costos de la tabla
+  let totalCostos = 0;
+  for (const it of data.cuotas_atrasadas.items) {
+    const seguro = toNum((it as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
+    const gps = toNum((it as any).gps ?? (data as any).header?.gps ?? 0);
+    const otros = toNum(it.otros ?? 0);
+    totalCostos += seguro + gps + otros;
+  }
+  
+  const totalAPagar = saldoBase + totalCostos;
+  const totalConExtras = totalAPagar + extrasTotal;
 
-  ws.mergeCells("F5:G5");
-  ws.getCell("F5").value = toNum(data.header.saldo_total);
+  ws.mergeCells("F4:F4");
+  ws.getCell("F4").value = "Capital";
+  ws.getCell("F4").font = { bold: true, color: { argb: PEACH.slate } };
+  ws.getCell("F4").alignment = { horizontal: "center" };
+
+  ws.getCell("F5").value = saldoBase;
   ws.getCell("F5").numFmt = '"Q"#,##0.00';
   ws.getCell("F5").font = { bold: true, size: 14, color: { argb: PEACH.accent } };
+  ws.getCell("F5").alignment = { horizontal: "center" };
 
-  // 🔸 NUEVO: Con extras (siempre visible)
-  ws.mergeCells("F7:G7");
-  ws.getCell("F7").value = "Con extras";
+  ws.mergeCells("F7:F7");
+  ws.getCell("F7").value = "Total a pagar";
   ws.getCell("F7").font = { bold: true, color: { argb: PEACH.slate } };
+  ws.getCell("F7").alignment = { horizontal: "center" };
 
-  ws.mergeCells("F8:G8");
-  ws.getCell("F8").value = toNum(data.header.saldo_total_con_extras);
+  ws.getCell("F8").value = totalAPagar;
   ws.getCell("F8").numFmt = '"Q"#,##0.00';
-  ws.getCell("F8").font = { bold: true, size: 14, color: { argb: PEACH.accent } };
+  ws.getCell("F8").font = { bold: true, size: 14, color: { argb: "FFDC2626" } }; // rojo
+  ws.getCell("F8").alignment = { horizontal: "center" };
 
-  // Header row for the cost table
+  if (extrasTotal !== 0) {
+    ws.mergeCells("F9:F9");
+    ws.getCell("F9").value = "Con extras";
+    ws.getCell("F9").font = { bold: true, color: { argb: PEACH.slate } };
+    ws.getCell("F9").alignment = { horizontal: "center" };
+
+    ws.getCell("F10").value = totalConExtras;
+    ws.getCell("F10").numFmt = '"Q"#,##0.00';
+    ws.getCell("F10").font = { bold: true, size: 14, color: { argb: "FF059669" } }; // verde
+    ws.getCell("F10").alignment = { horizontal: "center" };
+  }
+
+  // ✅ Header row for the cost table - SIN columna de capital
   let row = 11;
   const head = ws.getRow(row);
   head.values = [
@@ -137,7 +164,6 @@ export async function buildCostDetailWorkbookPeach(
     "Seguro",
     "GPS",
     "Otros",
-    "Capital pendiente de pago",
     "Total a cancelar",
   ];
   styleHeaderRow(head);
@@ -145,7 +171,7 @@ export async function buildCostDetailWorkbookPeach(
   // Body rows
   if (data.cuotas_atrasadas.items.length === 0) {
     row++;
-    ws.mergeCells(`A${row}:G${row}`);
+    ws.mergeCells(`A${row}:F${row}`); // ✅ 6 columnas
     ws.getCell(`A${row}`).value = "Sin cuotas atrasadas";
     ws.getCell(`A${row}`).alignment = { horizontal: "center" };
     ws.getCell(`A${row}`).font = { italic: true, color: { argb: PEACH.slate } };
@@ -153,76 +179,75 @@ export async function buildCostDetailWorkbookPeach(
     let totalSeguro = 0;
     let totalGPS = 0;
     let totalOtros = 0;
-    let totalCapital = 0;
     let totalCancelar = 0;
 
     for (const it of data.cuotas_atrasadas.items) {
       row++;
 
-      // Pull per-row values; fallback to header fields if item doesn't include them
-      const seguro   = new Big((it as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
-      const gps      = new Big((it as any).gps ?? (data as any).header?.gps ?? 0);
-      const otros    = new Big(it.otros ?? 0);
-      const capital  = new Big(it.capital_pendiente ?? 0);
-      const total    = new Big(it.total_cancelar ?? 0);
+      const seguro = toNum((it as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
+      const gps = toNum((it as any).gps ?? (data as any).header?.gps ?? 0);
+      const otros = toNum(it.otros ?? 0);
+      
+      // ✅ Total a cancelar = solo seguro + gps + otros
+      const totalFila = seguro + gps + otros;
 
-      totalSeguro  += Number(seguro.toString());
-      totalGPS     += Number(gps.toString());
-      totalOtros   += Number(otros.toString());
-      totalCapital += Number(capital.toString());
-      totalCancelar+= Number(total.toString());
+      totalSeguro += seguro;
+      totalGPS += gps;
+      totalOtros += otros;
+      totalCancelar += totalFila;
 
       const rr = ws.getRow(row);
       rr.values = [
         it.no,
         it.mes,
-        Number(seguro.toString()),
-        Number(gps.toString()),
-        Number(otros.toString()),
-        Number(capital.toString()),
-        Number(total.toString()),
+        seguro,
+        gps,
+        otros,
+        totalFila, // ✅ Solo costos
       ];
 
       // Currency format for numeric columns
-      [3,4,5,6,7].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
-      rr.getCell(7).font = { bold: true, color: { argb: PEACH.accent } };
+      [3, 4, 5, 6].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
+      rr.getCell(6).font = { bold: true, color: { argb: PEACH.accent } };
 
       // Zebra striping
       if (row % 2 === 0) {
-        for (let c = 1; c <= 7; c++) {
+        for (let c = 1; c <= 6; c++) {
           rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: PEACH.zebra } };
         }
       }
       setThinBottomBorder(rr);
     }
 
-    // Totals row
+    // ✅ Totals row
     row++;
     const totalRow = ws.getRow(row);
-    totalRow.getCell(1).value = "Total";
-    totalRow.getCell(1).font = { bold: true, color: { argb: PEACH.slate } };
-    // Merge label across first two cols
+    totalRow.getCell(1).value = "TOTALES:";
+    totalRow.getCell(1).font = { bold: true, color: { argb: PEACH.title } };
+    totalRow.getCell(1).alignment = { horizontal: "right" };
     ws.mergeCells(`A${row}:B${row}`);
+    
     totalRow.getCell(3).value = totalSeguro;
     totalRow.getCell(4).value = totalGPS;
     totalRow.getCell(5).value = totalOtros;
-    totalRow.getCell(6).value = totalCapital;
-    totalRow.getCell(7).value = totalCancelar;
-    [3,4,5,6,7].forEach((i) => {
+    totalRow.getCell(6).value = totalCancelar;
+    
+    [3, 4, 5, 6].forEach((i) => {
       totalRow.getCell(i).numFmt = '"Q"#,##0.00';
       totalRow.getCell(i).font = { bold: true, color: { argb: PEACH.accent } };
+      totalRow.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE4D6" } };
     });
   }
 
   // ===== Montos adicionales (sección peach) =====
   row += 2;
-  ws.mergeCells(`A${row}:G${row}`);
+  ws.mergeCells(`A${row}:F${row}`); // ✅ 6 columnas
   ws.getCell(`A${row}`).value = "Montos adicionales";
   ws.getCell(`A${row}`).font = { bold: true, size: 12, color: { argb: PEACH.title } };
 
   row++;
   const eHead = ws.getRow(row);
-  eHead.values = ["#", "Concepto", "Monto", "Fecha", "", "", ""];
+  eHead.values = ["#", "Concepto", "Monto", "Fecha", "", ""];
   styleHeaderRow(eHead);
 
   if (data.extras.total_items > 0) {
@@ -240,17 +265,17 @@ export async function buildCostDetailWorkbookPeach(
       setThinBottomBorder(rr);
     }
     row++;
-    ws.mergeCells(`A${row}:F${row}`);
+    ws.mergeCells(`A${row}:E${row}`); // ✅ Ajustado
     ws.getCell(`A${row}`).value = "Total extras:";
     ws.getCell(`A${row}`).alignment = { horizontal: "right" };
     ws.getCell(`A${row}`).font = { bold: true, color: { argb: PEACH.slate } };
 
-    ws.getCell(`G${row}`).value = toNum(data.header.extras_total);
-    ws.getCell(`G${row}`).numFmt = '"Q"#,##0.00';
-    ws.getCell(`G${row}`).font = { bold: true, color: { argb: PEACH.accent } };
+    ws.getCell(`F${row}`).value = extrasTotal;
+    ws.getCell(`F${row}`).numFmt = '"Q"#,##0.00';
+    ws.getCell(`F${row}`).font = { bold: true, color: { argb: PEACH.accent } };
   } else {
     row++;
-    ws.mergeCells(`A${row}:G${row}`);
+    ws.mergeCells(`A${row}:F${row}`); // ✅ 6 columnas
     ws.getCell(`A${row}`).value = "Sin extras registrados";
     ws.getCell(`A${row}`).alignment = { horizontal: "center" };
     ws.getCell(`A${row}`).font = { italic: true, color: { argb: PEACH.slate } };
@@ -266,22 +291,46 @@ function gtq(v: string | number | null | undefined): string {
 }
 /** PDF: DETALLE DE COSTOS (durazno) — con “Con extras”, logo y Montos adicionales */
 export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
-  // Totales de la tabla principal
-  let sumSeguro = 0, sumGPS = 0, sumOtros = 0, sumCapital = 0, sumTotal = 0;
+  const saldoBase = Number(data.header.saldo_total || 0);
+  const extrasTotal = Number(data.header.extras_total || 0);
 
-  // Filas de la tabla principal
+  // ✅ Totales de la tabla (solo costos: seguro + gps + otros)
+  const totales = data.cuotas_atrasadas.items.reduce(
+    (acc, r) => {
+      const seguro = Number((r as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
+      const gps = Number((r as any).gps ?? (data as any).header?.gps ?? 0);
+      const otros = Number(r.otros ?? 0);
+      
+      // ✅ Total a cancelar de esta fila = solo seguro + gps + otros
+      const totalFila = seguro + gps + otros;
+
+      return {
+        seguro: acc.seguro + seguro,
+        gps: acc.gps + gps,
+        otros: acc.otros + otros,
+        total_cancelar: acc.total_cancelar + totalFila,
+      };
+    },
+    {
+      seguro: 0,
+      gps: 0,
+      otros: 0,
+      total_cancelar: 0,
+    }
+  );
+
+  // ✅ Total a pagar = Capital + Total de costos
+  const totalAPagar = saldoBase + totales.total_cancelar;
+  const totalConExtras = totalAPagar + extrasTotal;
+
+  // ✅ Filas de la tabla
   const rows = data.cuotas_atrasadas.items.map((r) => {
-    const seguro  = (r as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0;
-    const gps     = (r as any).gps ?? (data as any).header?.gps ?? 0;
-    const otros   = r.otros ?? 0;
-    const capital = r.capital_pendiente ?? 0;
-    const total   = r.total_cancelar ?? 0;
-
-    sumSeguro  += toNum(seguro);
-    sumGPS     += toNum(gps);
-    sumOtros   += toNum(otros);
-    sumCapital += toNum(capital);
-    sumTotal   += toNum(total);
+    const seguro = Number((r as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
+    const gps = Number((r as any).gps ?? (data as any).header?.gps ?? 0);
+    const otros = Number(r.otros ?? 0);
+    
+    // ✅ Total de esta fila = solo seguro + gps + otros
+    const totalFila = seguro + gps + otros;
 
     return `
       <tr>
@@ -290,12 +339,22 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
         <td>${gtq(seguro)}</td>
         <td>${gtq(gps)}</td>
         <td>${gtq(otros)}</td>
-        <td>${gtq(capital)}</td>
-        <td class="total">${gtq(total)}</td>
+        <td class="total">${gtq(totalFila)}</td>
       </tr>`;
   }).join("");
 
-  const empty = `<tr><td colspan="7" class="tbl-note">Sin cuotas atrasadas</td></tr>`;
+  // ✅ Fila de totales
+  const totalesRow = `
+    <tr class="totales-row">
+      <td colspan="2" style="text-align:right;font-weight:700;background:#FFE4D6;color:#D86B3A;">TOTALES:</td>
+      <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.seguro)}</td>
+      <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.gps)}</td>
+      <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.otros)}</td>
+      <td class="total" style="font-weight:800;background:#FFE4D6;font-size:14px;">${gtq(totales.total_cancelar)}</td>
+    </tr>
+  `;
+
+  const empty = `<tr><td colspan="6" class="tbl-note">Sin cuotas atrasadas</td></tr>`;
 
   // Sección de Montos adicionales
   const extrasBlock = data.extras.total_items > 0
@@ -316,7 +375,7 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
               </tr>`).join("")}
           </tbody>
         </table>
-        <div class="extras-total">Total extras: <strong>${gtq(data.header.extras_total)}</strong></div>
+        <div class="extras-total">Total extras: <strong>${gtq(extrasTotal)}</strong></div>
       </div>`
     : "";
 
@@ -328,8 +387,8 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
 <title>Detalle de Costos</title>
 <style>
   :root{
-    --peach-title:#D86B3A;  /* títulos y acentos */
-    --peach-head:#E19B71;   /* encabezado de tabla */
+    --peach-title:#D86B3A;
+    --peach-head:#E19B71;
     --text:#0F172A;
     --slate:#58413A;
     --line:#E9C4B1;
@@ -350,7 +409,7 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
 
   .saldo{ display:flex; align-items:center; justify-content:center; text-align:center; }
   .saldo .num{ font-size:22px; color:var(--peach-title); font-weight:800; }
-  .saldo small{ display:block; color:#64748b; font-weight:600; }
+  .saldo small{ display:block; color:#64748b; font-weight:600; margin-bottom:4px; }
 
   table{ width:100%; border-collapse:collapse; margin:10px 0; }
   thead th{ background:var(--peach-head); color:var(--white); font-weight:700; padding:8px; font-size:12px; text-align:center; }
@@ -391,12 +450,18 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
 
   <div class="box saldo">
     <div>
-      <small>Saldo total</small>
-      <div class="num">${gtq(data.header.saldo_total)}</div>
-
-      <!-- Con extras (siempre visible, como pediste) -->
-      <small style="display:block;margin-top:10px;">Con extras</small>
-      <div class="num">${gtq(data.header.saldo_total_con_extras)}</div>
+      <small>Capital</small>
+      <div class="num">${gtq(saldoBase)}</div>
+      <div style="border-top:2px solid var(--line);margin:8px 0;"></div>
+      <small>Total a pagar</small>
+      <div class="num" style="color:#dc2626;">${gtq(totalAPagar)}</div>
+      ${
+        extrasTotal !== 0
+          ? `<div style="border-top:2px solid var(--line);margin:8px 0;"></div>
+             <small>Con extras</small>
+             <div class="num" style="color:#059669;">${gtq(totalConExtras)}</div>`
+          : ""
+      }
     </div>
   </div>
 </div>
@@ -409,21 +474,12 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
       <th>Seguro</th>
       <th>GPS</th>
       <th>Otros</th>
-      <th>Capital pendiente de pago</th>
       <th>Total a cancelar</th>
     </tr>
   </thead>
   <tbody>
     ${rows || empty}
-    ${data.cuotas_atrasadas.items.length ? `
-      <tr>
-        <td colspan="2" style="text-align:right; font-weight:700; color:var(--peach-title);">Total</td>
-        <td style="font-weight:700; color:var(--peach-title);">${gtq(sumSeguro)}</td>
-        <td style="font-weight:700; color:var(--peach-title);">${gtq(sumGPS)}</td>
-        <td style="font-weight:700; color:var(--peach-title);">${gtq(sumOtros)}</td>
-        <td style="font-weight:700; color:var(--peach-title);">${gtq(sumCapital)}</td>
-        <td class="total">${gtq(sumTotal)}</td>
-      </tr>` : ""}
+    ${data.cuotas_atrasadas.items.length ? totalesRow : ""}
   </tbody>
 </table>
 

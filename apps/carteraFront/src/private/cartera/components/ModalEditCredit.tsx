@@ -32,6 +32,7 @@ interface ModalEditCreditProps {
   investorsInitial?: InvestorItem[];
   onSuccess: () => void;
   investorsOptions: InvestorOption[];
+  advisorsOptions: { asesor_id: number; nombre: string }[]; // ✅ NUEVO
 }
 
 const creditFields = [
@@ -40,7 +41,7 @@ const creditFields = [
   "plazo",
   "no_poliza",
   "observaciones",
-  "mora",
+  "asesor_id",
   "cuota",
   "numero_credito_sifco",
   "otros", // nuevo campo
@@ -55,12 +56,12 @@ const fieldLabels: Record<CreditField, string> = {
   plazo: "Plazo",
   no_poliza: "No. Póliza",
   observaciones: "Observaciones",
-  mora: "Mora",
   cuota: "Cuota",
   numero_credito_sifco: "No. Crédito SIFCO",
   otros: "Otros (Q)",
   seguro_10_cuotas: "Seguro 10 cuotas",
   membresias_pago: "Membresías pago",
+  asesor_id: "Asesor",
 };
 export function ModalEditCredit({
   open,
@@ -69,6 +70,8 @@ export function ModalEditCredit({
   investorsInitial,
   onSuccess,
   investorsOptions,
+  advisorsOptions
+
 }: ModalEditCreditProps) {
   const { mutate: updateCredit, isPending } = useUpdateCredit();
 
@@ -195,38 +198,65 @@ export function ModalEditCredit({
                 Información del Crédito
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {creditFields.map((name) => (
-                  <div key={name} className="flex flex-col gap-1">
-                    <Label className="text-gray-700 font-medium">
-                      {fieldLabels[name]}
-                    </Label>
-                    <Input
-                      type={
-                        [
-                          "observaciones",
-                          "no_poliza",
-                          "numero_credito_sifco",
-                        ].includes(name)
-                          ? "text"
-                          : "number"
-                      }
-                      name={name}
-                      value={formik.values[name] ?? ""}
-                      onChange={formik.handleChange}
-                      className="bg-blue-50 border-blue-200 text-gray-800"
-                      min={
-                        [
-                          "observaciones",
-                          "no_poliza",
-                          "numero_credito_sifco",
-                        ].includes(name)
-                          ? undefined
-                          : 0
-                      }
-                      step="any"
-                    />
-                  </div>
-                ))}
+                {creditFields.map((name) => {
+  // ✅ Renderizado especial para asesor_id como select
+  if (name === "asesor_id") {
+    return (
+      <div key={name} className="flex flex-col gap-1">
+        <Label className="text-gray-700 font-medium">
+          {fieldLabels[name]}
+        </Label>
+        <select
+          name={name}
+          value={formik.values[name] ?? ""}
+          onChange={formik.handleChange}
+          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
+        >
+          <option value="">Seleccione un asesor</option>
+          {advisorsOptions.map((adv) => (
+            <option key={adv.asesor_id} value={adv.asesor_id}>
+              {adv.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  }
+
+  // ✅ Renderizado normal para los demás campos
+  return (
+    <div key={name} className="flex flex-col gap-1">
+      <Label className="text-gray-700 font-medium">
+        {fieldLabels[name]}
+      </Label>
+      <Input
+        type={
+          [
+            "observaciones",
+            "no_poliza",
+            "numero_credito_sifco",
+          ].includes(name)
+            ? "text"
+            : "number"
+        }
+        name={name}
+        value={formik.values[name] ?? ""}
+        onChange={formik.handleChange}
+        className="bg-blue-50 border-blue-200 text-gray-800"
+        min={
+          [
+            "observaciones",
+            "no_poliza",
+            "numero_credito_sifco",
+          ].includes(name)
+            ? undefined
+            : 0
+        }
+        step="any"
+      />
+    </div>
+  );
+})}
               </div>
             </div>
 

@@ -31,6 +31,7 @@ import { findOrCreateInvestor } from "../controllers/investor";
 import { map } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { toBigExcel } from "../utils/functions/generalFunctions";
+import { register } from "module";
 
 const excelPath = path.resolve(
   "C:/Users/Kelvin Palacios/Documents/analis de datos/noviembre2025.csv"
@@ -515,7 +516,7 @@ export async function mapEstadoCuentaToPagosBig(
       cuota: credito?.cuota?.toString() ?? "0.00",
       cuota_interes: cuota_interes?.toString() ?? "0.00",
       cuota_id: cuota0[0]?.cuota_id ?? null,
-      fecha_pago: new Date(primeraTransaccion.CrMoFeTrx).toISOString(),
+      fecha_pago: new Date(primeraTransaccion.CrMoFeTrx),
       abono_capital: "0.00",
       abono_interes: cuota_interes.toString() ?? "0.00",
       abono_iva_12: iva_12.toString() ?? "0.00",
@@ -550,6 +551,7 @@ export async function mapEstadoCuentaToPagosBig(
       observaciones: "pago inicial",
       paymentFalse: false,
       validationStatus: "validated" as const,
+      registerBy: "SIFCO_SYNC",
     };
 
     await db.insert(pagos_credito).values(pago0).onConflictDoNothing();
@@ -569,7 +571,7 @@ export async function mapEstadoCuentaToPagosBig(
   // 🚀 OPTIMIZACIÓN 1: Preparar todas las cuotas para inserción batch
   const cuotasParaInsertar = cuotas.map((c) => ({
     credito_id: creditoId,
-    numero_cuota: Number(c.CapitalNumeroCuota ?? c.InteresNumeroCuota ?? 0),
+    numero_cuota: Number(c.InteresNumeroCuota ?? 0)+1,
     fecha_vencimiento: new Date(c.Fecha).toISOString(),
     pagado: c.CapitalPagado === "S" && c.InteresPagado === "S",
   }));
@@ -636,7 +638,7 @@ export async function mapEstadoCuentaToPagosBig(
       credito_id: creditoId,
       cuota_interes: abonoInteres.toString(),
       cuota: credito?.cuota?.toString() || "0.00",
-      fecha_pago: isPagado ? new Date(c.Fecha).toISOString() : null,
+      fecha_pago: isPagado ? new Date(c.Fecha) : null,
       abono_capital: abonoCapital.toString(),
       abono_interes: abonoInteres.toString(),
       abono_iva_12: abonoIva12.toString(),
@@ -671,6 +673,7 @@ export async function mapEstadoCuentaToPagosBig(
       observaciones: `pago sincronizado desde SIFCO cuota ${cuotaDB.numero_cuota}`,
       paymentFalse: false,
       validationStatus: isPagado ? ("validated" as const) : ("no_required" as const),
+      registerBy: "SIFCO_SYNC",
     };
   });
 

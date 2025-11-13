@@ -20,7 +20,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     defaultValues: {
       nombre: "",
       emite_factura: false,
-      reinversion: false,
+      tipo_reinversion: "sin_reinversion", // ⭐ Cambiado
       banco: "",
       tipo_cuenta: "",
       numero_cuenta: "",
@@ -36,7 +36,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       reset({
         nombre: "",
         emite_factura: false,
-        reinversion: false,
+        tipo_reinversion: "sin_reinversion", // ⭐ Cambiado
         banco: "",
         tipo_cuenta: "",
         numero_cuenta: "",
@@ -141,7 +141,21 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             />
           </div>
 
-          {/* Checkboxes */}
+          {/* ⭐ NUEVO: Tipo de Reinversión */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">Tipo de Reinversión</label>
+            <select
+              {...register("tipo_reinversion")}
+              className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            >
+              <option value="sin_reinversion">Sin Reinversión</option>
+              <option value="reinversion_capital">Reinversión Capital</option>
+              <option value="reinversion_interes">Reinversión Interés</option>
+              <option value="reinversion_total">Reinversión Total</option>
+            </select>
+          </div>
+
+          {/* Checkbox */}
           <div className="flex items-center gap-4 mt-2">
             <label className="flex items-center gap-2 text-blue-900 text-sm">
               <input
@@ -150,14 +164,6 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               />
               Emite Factura
-            </label>
-            <label className="flex items-center gap-2 text-blue-900 text-sm">
-              <input
-                type="checkbox"
-                {...register("reinversion")}
-                className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              Re-inversión
             </label>
           </div>
 

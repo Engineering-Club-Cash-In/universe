@@ -275,14 +275,14 @@ export async function exportPagosConInversionistasExcel(
     mes?: number;
     anio?: number;
     inversionistaId?: number;
-    usuarioNombre?: string; // 🆕 nuevo filtro
-    validationStatus?: string; // 🆕 nuevo filtro
+    usuarioNombre?: string;
+    validationStatus?: string;
   }
 ) {
   // 1️⃣ Obtener los datos completos de tu servicio
   const result = await getPagosConInversionistas({
     ...options,
-    pageSize: 99999, // sin paginar para traer TODO
+    pageSize: 99999,
   });
 
   if (!result.data || result.data.length === 0) {
@@ -306,24 +306,23 @@ export async function exportPagosConInversionistasExcel(
     { header: "Monto Boleta", key: "montoBoleta", width: 15 },
     { header: "Número Autorización", key: "numeroAutorizacion", width: 20 },
     { header: "Fecha Pago", key: "fechaPago", width: 20 },
-
-    // 👇 Información de la cuota
     { header: "Cuota ID", key: "cuotaId", width: 12 },
     { header: "Número Cuota", key: "numeroCuota", width: 12 },
     { header: "Fecha Vencimiento", key: "fechaVencimiento", width: 20 },
     { header: "Pagado", key: "pagado", width: 10 },
-
-    // 👇 Info de boleta
     { header: "Boleta ID", key: "boletaId", width: 12 },
     { header: "URL Boleta", key: "urlBoleta", width: 50 },
-
-    // 👇 Abonos globales
+    
+    { header: "Abono Capital", key: "abono_capital", width: 15 },
     { header: "Abono Interés", key: "abono_interes", width: 15 },
     { header: "Abono IVA 12%", key: "abono_iva_12", width: 15 },
-    { header: "Abono Interés CI", key: "abono_interes_ci", width: 15 },
-    { header: "Abono IVA CI", key: "abono_iva_ci", width: 15 },
     { header: "Abono Seguro", key: "abono_seguro", width: 15 },
     { header: "Abono GPS", key: "abono_gps", width: 15 },
+    { header: "Mora", key: "mora", width: 15 },
+    { header: "Otros", key: "otros", width: 15 },
+    { header: "Reserva", key: "reserva", width: 15 },
+    { header: "Membresías", key: "membresias", width: 15 },
+    { header: "Categoría", key: "categoria", width: 15 },
   ];
 
   // 4️⃣ Determinar máximo de inversionistas por pago
@@ -350,29 +349,30 @@ export async function exportPagosConInversionistasExcel(
   result.data.forEach((item: any) => {
     const row: any = {
       pagoId: item.pagoId,
-      numeroCredito: item.numeroCredito,
-      creditoId: item.creditoId,
-      capital: item.capital,
-      deudaTotal: item.deudaTotal,
-      usuarioNombre: item.usuarioNombre,
+      numeroCredito: item.credito?.numeroCreditoSifco ?? "",
+      creditoId: item.credito?.creditoId ?? "",
+      capital: item.credito?.capital ?? "",
+      deudaTotal: item.credito?.deudaTotal ?? "",
+      usuarioNombre: item.usuario?.nombre ?? "",
       montoBoleta: item.montoBoleta,
       numeroAutorizacion: item.numeroAutorizacion,
       fechaPago: item.fechaPago,
-
       cuotaId: item.cuota?.cuotaId ?? "",
       numeroCuota: item.cuota?.numeroCuota ?? "",
       fechaVencimiento: item.cuota?.fechaVencimiento ?? "",
       pagado: item.cuota?.pagado ? "Sí" : "No",
-
       boletaId: item.boleta?.boletaId ?? "",
       urlBoleta: item.boleta?.urlBoleta ?? "",
-
+      categoria: item.usuario?.categoria ?? "",
+      abono_capital: item.abono_capital,
       abono_interes: item.abono_interes,
       abono_iva_12: item.abono_iva_12,
-      abono_interes_ci: item.abono_interes_ci,
-      abono_iva_ci: item.abono_iva_ci,
       abono_seguro: item.abono_seguro,
       abono_gps: item.abono_gps,
+      mora: item.mora,
+      otros: item.otros,
+      reserva: item.reserva,
+      membresias: item.membresias,
     };
 
     // Agregar inversionistas dinámicos
@@ -390,6 +390,47 @@ export async function exportPagosConInversionistasExcel(
     });
 
     sheet.addRow(row);
+  });
+
+  // 💰 AGREGAR FILA DE TOTALES (usando los totales que ya vienen en result.totales)
+  sheet.addRow({}); // Fila vacía para separar
+
+  const totalRow = sheet.addRow({
+    pagoId: "TOTALES",
+    numeroCredito: "",
+    creditoId: "",
+    capital: "",
+    deudaTotal: "",
+    usuarioNombre: "",
+    montoBoleta: "",
+    numeroAutorizacion: "",
+    fechaPago: "",
+    cuotaId: "",
+    numeroCuota: "",
+    fechaVencimiento: "",
+    pagado: "",
+    boletaId: "",
+    urlBoleta: "",
+    categoria:"",
+    abono_capital: result.totales?.totalAbonoCapital ?? 0,
+    abono_interes: result.totales?.totalAbonoInteres ?? 0,
+    abono_iva_12: result.totales?.totalAbonoIva ?? 0,
+    abono_seguro: result.totales?.totalAbonoSeguro ?? 0,
+    abono_gps: result.totales?.totalAbonoGps ?? 0,
+    mora: result.totales?.totalMora ?? 0,
+    otros: result.totales?.totalOtros ?? 0,
+    reserva: result.totales?.totalReserva ?? 0,
+    membresias: result.totales?.totalMembresias ?? 0,
+  });
+
+  // 🎨 Formatear fila de totales (negrita + fondo amarillo)
+  totalRow.eachCell((cell) => {
+    cell.font = { bold: true };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFF00' }
+    };
   });
 
   // 7️⃣ Generar buffer del Excel

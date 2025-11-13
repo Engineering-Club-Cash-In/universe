@@ -4,12 +4,10 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import {
   usePendingCancelCredit,
-  useInfoCancelCredit,
-} from "../hooks/cancelCredit";
+  useInfoCancelCredit, 
+} from "../hooks/cancelCredit"; 
 import {
   AlertCircle,
   Banknote,
@@ -20,18 +18,19 @@ import {
   CalendarClock,
   FileText,
   X,
-} from "lucide-react";
+  AlertTriangle, // ✅ NUEVO: para mora
+} from "lucide-react"; 
 
 interface MotivoExtra {
   motivo: string;
-  monto: number; // puede ser negativo para descuentos
+  monto: number;
 }
 
 export function ModalCancelCredit({
   open,
   onClose,
   creditId,
-  onSuccess, // opcional
+  onSuccess,
 }: {
   open: boolean;
   onClose: () => void;
@@ -40,14 +39,13 @@ export function ModalCancelCredit({
 }) {
   const cancelCredit = useInfoCancelCredit();
   const creditActionMutation = usePendingCancelCredit();
-
+   
   const [motivos, setMotivos] = useState<MotivoExtra[]>([]);
   const [motivo, setMotivo] = useState("");
   const [monto, setMonto] = useState("");
   const [motivoCancel, setMotivoCancel] = useState("");
   const [observaciones, setObservaciones] = useState("");
 
-  // Cargar info del crédito al abrir
   useEffect(() => {
     if (open && creditId) {
       cancelCredit.mutate(creditId);
@@ -69,13 +67,14 @@ export function ModalCancelCredit({
 
   const credit = cancelCredit.data?.credito;
 
-  // Totales base que ya vienen del servicio
+  // ✅ NUEVO: Incluir mora en el total base
   const totalBase = [
     Number(credit?.capital_actual ?? 0),
     Number(credit?.total_intereses_pendientes ?? 0),
     Number(credit?.total_membresias_pendientes ?? 0),
     Number(credit?.total_seguro_pendiente ?? 0),
     Number(credit?.total_iva_pendiente ?? 0),
+    Number(credit?.mora ?? 0), // ✅ NUEVO
   ].reduce((acc, v) => acc + v, 0);
 
   const totalMotivos = motivos.reduce((acc, curr) => acc + curr.monto, 0);
@@ -101,7 +100,6 @@ export function ModalCancelCredit({
       motivo: motivoCancel.trim(),
       observaciones: observaciones?.trim() || undefined,
       monto_cancelacion: total,
-      // NUEVO: enviamos montosAdicionales al backend
       montosAdicionales: motivos.map((m) => ({
         concepto: m.motivo,
         monto: m.monto,
@@ -120,115 +118,7 @@ export function ModalCancelCredit({
     });
   };
 
-  const handlePDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.setTextColor(33, 150, 243);
-    doc.text("Resumen de Cancelación de Crédito", 105, 22, { align: "center" });
-
-    const resumenCampos = [
-      {
-        label: "Capital actual",
-        value: `Q${Number(credit?.capital_actual ?? 0).toLocaleString("es-GT", {
-          minimumFractionDigits: 2,
-        })}`,
-      },
-      {
-        label: "Intereses pendientes",
-        value: `Q${Number(
-          credit?.total_intereses_pendientes ?? 0
-        ).toLocaleString("es-GT", { minimumFractionDigits: 2 })}`,
-      },
-      {
-        label: "Membresías pendientes",
-        value: `Q${Number(
-          credit?.total_membresias_pendientes ?? 0
-        ).toLocaleString("es-GT", { minimumFractionDigits: 2 })}`,
-      },
-      {
-        label: "Seguro pendiente",
-        value: `Q${Number(credit?.total_seguro_pendiente ?? 0).toLocaleString(
-          "es-GT",
-          { minimumFractionDigits: 2 }
-        )}`,
-      },
-      {
-        label: "IVA pendiente",
-        value: `Q${Number(credit?.total_iva_pendiente ?? 0).toLocaleString(
-          "es-GT",
-          { minimumFractionDigits: 2 }
-        )}`,
-      },
-      {
-        label: "Cuotas Atrasadas",
-        value: credit?.cuotas_pendientes ?? 0,
-      },
-    ];
-
-    let x = 14;
-    let y = 34;
-    resumenCampos.forEach(({ label, value }, i) => {
-      doc.setFillColor(240, 248, 255);
-      doc.roundedRect(x, y, 47, 18, 4, 4, "F");
-      doc.setTextColor(33, 37, 41);
-      doc.setFontSize(9);
-      doc.text(label, x + 4, y + 7);
-      doc.setFontSize(12);
-      doc.setTextColor(37, 99, 235);
-      (doc as any).setFont("helvetica", "bold");
-      doc.text(String(value), x + 4, y + 14);
-      x += 49;
-      if ((i + 1) % 3 === 0) {
-        x = 14;
-        y += 22;
-      }
-    });
-
-    y += 24;
-    doc.setDrawColor(180, 180, 180);
-    doc.line(14, y, 196, y);
-
-    if (motivos.length) {
-      autoTable(doc, {
-        head: [["#", "Motivo", "Monto"]],
-        body: motivos.map((mot, idx) => [
-          idx + 1,
-          mot.motivo,
-          `Q${mot.monto.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`,
-        ]),
-        startY: y + 6,
-        headStyles: { fillColor: [33, 150, 243], textColor: 255 },
-        bodyStyles: { fillColor: [245, 245, 250] },
-        styles: { fontSize: 10, halign: "center" },
-        columnStyles: { 2: { fontStyle: "bold" } },
-      });
-      y = (doc as any).lastAutoTable.finalY + 8;
-    } else {
-      y += 8;
-    }
-
-    doc.setFontSize(14);
-    doc.setTextColor(22, 163, 74);
-    (doc as any).setFont("helvetica", "bold");
-    doc.text(
-      `TOTAL: Q${total.toLocaleString("es-GT", { minimumFractionDigits: 2 })}`,
-      196,
-      y + 6,
-      { align: "right" }
-    );
-
-    doc.setFontSize(8);
-    doc.setTextColor(140, 140, 140);
-    doc.text(
-      "Generado por Club Cashin.com - " +
-        new Date().toLocaleDateString("es-GT"),
-      14,
-      285
-    );
-
-    doc.save("cancelacion_credito.pdf");
-  };
-
+ 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
@@ -329,6 +219,22 @@ export function ModalCancelCredit({
                 </span>
               </div>
 
+              {/* ✅ NUEVO: Mora pendiente */}
+              {credit.mora && Number(credit.mora) > 0 && (
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="text-orange-600 w-5 h-5" />
+                  <span className="font-medium text-slate-700">
+                    Mora pendiente:
+                  </span>
+                  <span className="font-bold text-orange-700 ml-auto">
+                    Q
+                    {Number(credit.mora).toLocaleString("es-GT", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+              )}
+
               <div className="flex items-center gap-2">
                 <CalendarClock className="text-gray-600 w-5 h-5" />
                 <span className="font-medium text-slate-700">
@@ -363,7 +269,6 @@ export function ModalCancelCredit({
               step="0.01"
               onChange={(e) => setMonto(e.target.value)}
               onKeyDown={(e) => {
-                // bloquear notación científica; permitir "-" y "."
                 if (["e", "E", "+"].includes(e.key)) e.preventDefault();
               }}
               className="bg-white/90 border-blue-300 focus:border-blue-500 focus:ring-blue-500 text-slate-800"
@@ -435,7 +340,7 @@ export function ModalCancelCredit({
             </span>
           </div>
 
-          {/* Botones */}
+          {/* Botones principales */}
           <div className="flex flex-col sm:flex-row gap-2 mt-2 sm:justify-end w-full">
             <Button
               variant="outline"
@@ -443,12 +348,6 @@ export function ModalCancelCredit({
               onClick={handleClose}
             >
               Cerrar
-            </Button>
-            <Button
-              className="bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg w-full sm:w-auto"
-              onClick={handlePDF}
-            >
-              Descargar PDF
             </Button>
             <Button
               className="bg-red-600 hover:bg-red-700 text-white font-bold shadow-lg w-full sm:w-auto"

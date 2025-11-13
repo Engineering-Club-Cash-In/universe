@@ -37,7 +37,8 @@ export async function getDocusealDocumentsController() {
       "pagare_unico_libre_protesto",
       "carta_emision_cheques",
       "garantia_mobiliaria",
-      "declaracion_vendedor"
+      "declaracion_vendedor",
+      "contrato_privado_uso_carro_usado"
     ] as const;
 
     // 🧠 Query optimized: only select distinct document names
@@ -126,7 +127,8 @@ export async function getDocumentsByDpiController(
       "pagare_unico_libre_protesto",
       "carta_emision_cheques",
       "garantia_mobiliaria",
-      "declaracion_vendedor"
+      "declaracion_vendedor",
+      "contrato_privado_uso_carro_usado"
     ] as const;
 
     // Validar todos los nombres
@@ -189,6 +191,8 @@ export async function getDocumentsByDpiController(
         genero: doc.genero,
         serialid: doc.serialid,
         url_insercion: doc.url_insercion,
+        large_spacing: doc.large_spacing,
+        count_doble_line: doc.count_double_line
       });
 
       // 7️⃣ 🔥 Traer los campos del documento
@@ -202,6 +206,8 @@ export async function getDocumentsByDpiController(
           relation: field.relation,
           description: field.description,
           default: field.default,
+          is_double_line: field.is_double_line,
+          
         })
         .from(detail_document_field)
         .innerJoin(field, eq(detail_document_field.idField, field.id))
@@ -228,6 +234,8 @@ export async function getDocumentsByDpiController(
             relation: f.relation,
             description: f.description,
             default: f.default,
+            is_double_line: f.is_double_line,
+            
           });
         }
       }

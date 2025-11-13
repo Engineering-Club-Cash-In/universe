@@ -17,6 +17,7 @@ export const documentNameEnum = docusealSchema.enum("document_name_enum", [
   "carta_emision_cheques",
   "garantia_mobiliaria",
   "declaracion_vendedor",
+  "contrato_privado_uso_carro_usado"
 ]);
 
 // 📗 Tabla principal
@@ -30,6 +31,8 @@ export const docusealDocuments = docusealSchema.table(
     descripcion: text("descripcion"),
     serialid: varchar("serialid", { length: 255 }).notNull(),
     url_insercion: text("url_insercion").notNull(),
+    large_spacing: boolean("large_spacing").default(false),
+    count_double_line:integer("count_double_line").default(0)
   },
   (table) => ({
     // 🚫 Evita duplicados
@@ -54,6 +57,7 @@ export const field = docusealSchema.table('field', {
   key: varchar('key', { length: 100 }).notNull().unique(),
   regex: varchar('regex', { length: 500 }),
   description: text('description'),
+  is_double_line: boolean('is_double_line').default(false),
   default: text('default'),
   required: boolean('required').default(false),
   relation: varchar('relation', { length: 100 }),

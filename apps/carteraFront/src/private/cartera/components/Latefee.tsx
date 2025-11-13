@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 "use client";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardHeader, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,13 +13,18 @@ import {
   TableCell,
   TableBody,
 } from "@/components/ui/table";
-import { useMoras } from "../hooks/useLateFee";
+import { useMoras, useMorasMasivo } from "../hooks/useLateFee";
 import { useAuth } from "@/Provider/authProvider";
 
 export default function MorasManager() {
   const [tab, setTab] = useState<"creditos" | "condonaciones">("creditos");
 
-  // Modal condonación
+  // Modal condonación masiva
+  const [openModalCondonacionMasiva, setOpenModalCondonacionMasiva] =
+    useState(false);
+  const [motivoMasivo, setMotivoMasivo] = useState("");
+
+  // Modal condonación individual
   const [openModalCondonacion, setOpenModalCondonacion] = useState(false);
   const [condonacionCreditoId, setCondonacionCreditoId] = useState<
     number | null
@@ -37,6 +43,10 @@ export default function MorasManager() {
     "INCREMENTO"
   );
 
+  const [expandedCondonacionId, setExpandedCondonacionId] = useState<
+    number | null
+  >(null);
+
   const {
     creditosMora,
     condonaciones,
@@ -45,10 +55,58 @@ export default function MorasManager() {
     condonarMora,
     updateMora,
   } = useMoras({ estado: "MOROSO" });
+  const { condonarMorasMasivo } = useMorasMasivo();
 
   const { user } = useAuth();
+  const queryClient = useQueryClient();
 
-  // --- Condonación ---
+  // --- Condonación Masiva ---
+  const handleCondonarMasivo = () => {
+    setOpenModalCondonacionMasiva(true);
+  };
+
+  const confirmCondonacionMasiva = () => {
+    if (!motivoMasivo) {
+      alert("[ERROR] Debes ingresar un motivo para la condonación masiva.");
+      return;
+    }
+
+    if (!user?.email) {
+      alert("[ERROR] No se pudo obtener el email del usuario.");
+      return;
+    }
+
+    if (
+      !confirm(
+        "⚠️ ¿Estás seguro de condonar TODAS las moras de créditos morosos?"
+      )
+    ) {
+      return;
+    }
+
+    condonarMorasMasivo.mutate(
+      {
+        motivo: motivoMasivo,
+        usuario_email: user.email,
+      },
+      {
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ["moras"] });
+          alert("[SUCCESS] Moras condonadas masivamente");
+        },
+        onError: (err: any) => {
+          alert(
+            `[ERROR] No se pudo condonar moras\n\n${JSON.stringify(err, null, 2)}`
+          );
+        },
+      }
+    );
+
+    setOpenModalCondonacionMasiva(false);
+    setMotivoMasivo("");
+  };
+
+  // --- Condonación Individual ---
   const handleCondonar = (credito_id: number, monto_mora: number) => {
     setCondonacionCreditoId(credito_id);
     setMontoMoraSeleccionada(monto_mora);
@@ -58,7 +116,11 @@ export default function MorasManager() {
   const confirmCondonacion = () => {
     if (condonacionCreditoId && motivo && user?.email) {
       condonarMora.mutate(
-        { credito_id: condonacionCreditoId, motivo, usuario_email: user.email },
+        {
+          credito_id: condonacionCreditoId,
+          motivo,
+          usuario_email: user.email,
+        },
         {
           onSuccess: (res: any) =>
             alert(
@@ -126,11 +188,21 @@ export default function MorasManager() {
   };
 
   return (
-    <div className=" fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       {/* Title */}
       <h2 className="text-2xl font-bold text-blue-600 mb-4">
         Gestión de Moras
       </h2>
+
+      {/* Botón Condonar Masivo */}
+      <div className="mb-4 w-full max-w-4xl">
+        <Button
+          onClick={handleCondonarMasivo}
+          className="w-full bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3"
+        >
+          🔥 Condonar Todas las Moras (Masivo)
+        </Button>
+      </div>
 
       {/* Tabs minimalistas con toggle */}
       <div className="flex gap-2 mb-4">
@@ -164,7 +236,7 @@ export default function MorasManager() {
       {tab === "creditos" && (
         <Card>
           <CardHeader className="font-semibold text-lg text-gray-700">
-            Créditos Morosos
+            Créditos Morosos ({creditosMora?.data?.length || 0})
           </CardHeader>
           <CardContent>
             {loadingCreditos ? (
@@ -210,7 +282,7 @@ export default function MorasManager() {
                             {c.estado}
                           </TableCell>
                           <TableCell className="px-3 py-2">
-                            Q {c.monto_mora}
+                            Q {Number(c.monto_mora || 0).toFixed(2)}
                           </TableCell>
                           <TableCell className="px-3 py-2">
                             {c.cuotas_atrasadas}
@@ -258,7 +330,9 @@ export default function MorasManager() {
                       <p className="text-xs">SIFCO: {c.numero_credito_sifco}</p>
                       <p className="text-xs">Usuario: {c.usuario}</p>
                       <p className="text-xs">Estado: {c.estado}</p>
-                      <p className="text-xs">Monto: Q {c.monto_mora}</p>
+                      <p className="text-xs">
+                        Monto: Q {Number(c.monto_mora || 0).toFixed(2)}
+                      </p>
                       <p className="text-xs">Cuotas: {c.cuotas_atrasadas}</p>
                       <div className="flex gap-2 mt-2">
                         <Button
@@ -293,7 +367,7 @@ export default function MorasManager() {
         </Card>
       )}
 
-      {/* Historial de condonaciones → igual que arriba puedes duplicar lógica lista responsiva */}
+      {/* Historial de condonaciones */}
       {tab === "condonaciones" && (
         <Card>
           <CardHeader className="font-semibold text-lg text-gray-700">
@@ -312,6 +386,7 @@ export default function MorasManager() {
                         <TableCell className="px-3 py-2">Crédito</TableCell>
                         <TableCell className="px-3 py-2">Usuario</TableCell>
                         <TableCell className="px-3 py-2">Motivo</TableCell>
+                        <TableCell className="px-3 py-2">Monto</TableCell>
                         <TableCell className="px-3 py-2">Fecha</TableCell>
                         <TableCell className="px-3 py-2">Condonó</TableCell>
                       </TableRow>
@@ -331,8 +406,36 @@ export default function MorasManager() {
                           <TableCell className="px-3 py-2">
                             {c.usuario}
                           </TableCell>
-                          <TableCell className="px-3 py-2">
-                            {c.motivo}
+                          <TableCell className="px-3 py-2 relative">
+                            <div className="relative">
+                              <button
+                                onClick={() =>
+                                  setExpandedCondonacionId(
+                                    expandedCondonacionId === c.condonacion_id
+                                      ? null
+                                      : c.condonacion_id
+                                  )
+                                }
+                                className="text-xs text-blue-600 font-semibold hover:text-blue-800 flex items-center gap-1 hover:underline"
+                              >
+                                {expandedCondonacionId === c.condonacion_id
+                                  ? "▼ Ocultar"
+                                  : "▶ Ver"}
+                              </button>
+                              {expandedCondonacionId === c.condonacion_id && (
+                                <div className="absolute left-0 top-full mt-1 p-3 bg-white rounded-lg shadow-xl border-2 border-blue-200 text-xs max-w-md z-50 animate-fadeIn">
+                                  <p className="font-semibold text-gray-700 mb-1">
+                                    Motivo:
+                                  </p>
+                                  <p className="text-gray-600 leading-relaxed">
+                                    {c.motivo}
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-3 py-2 font-semibold text-green-600">
+                            Q {Number(c.montoCondonacion || 0).toFixed(2)}
                           </TableCell>
                           <TableCell className="px-3 py-2">
                             {new Date(c.fecha).toLocaleDateString("es-GT")}
@@ -360,7 +463,34 @@ export default function MorasManager() {
                         Crédito: {c.numero_credito_sifco}
                       </p>
                       <p className="text-xs">Usuario: {c.usuario}</p>
-                      <p className="text-xs">Motivo: {c.motivo}</p>
+                      <div className="mt-2">
+                        <button
+                          onClick={() =>
+                            setExpandedCondonacionId(
+                              expandedCondonacionId === c.condonacion_id
+                                ? null
+                                : c.condonacion_id
+                            )
+                          }
+                          className="text-xs text-blue-600 font-semibold hover:text-blue-800 flex items-center gap-1 transition-colors"
+                        >
+                          {expandedCondonacionId === c.condonacion_id
+                            ? "▼"
+                            : "▶"}{" "}
+                          Ver motivo
+                        </button>
+                        {expandedCondonacionId === c.condonacion_id && (
+                          <div className="mt-2 p-2 bg-white rounded border border-blue-200 text-xs text-gray-700 animate-fadeIn">
+                            <span className="font-semibold text-gray-600">
+                              Motivo:
+                            </span>{" "}
+                            {c.motivo}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs font-semibold text-green-600">
+                        Monto: Q {Number(c.montoCondonacion || 0).toFixed(2)}
+                      </p>
                       <p className="text-xs">
                         Fecha: {new Date(c.fecha).toLocaleDateString("es-GT")}
                       </p>
@@ -372,6 +502,60 @@ export default function MorasManager() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Modal Condonación Masiva */}
+      {openModalCondonacionMasiva && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl text-black border-4 border-orange-500">
+            <h3 className="text-lg font-bold text-orange-600 mb-2">
+              ⚠️ Condonación Masiva de Moras
+            </h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Esta acción condonará la mora de{" "}
+              <span className="font-bold text-red-600">TODOS</span> los
+              créditos con estado MOROSO ({creditosMora?.data?.length || 0}{" "}
+              créditos)
+            </p>
+            <div className="flex flex-col gap-3">
+              <div>
+                <Label htmlFor="motivoMasivo">
+                  Motivo de condonación masiva
+                </Label>
+                <Input
+                  id="motivoMasivo"
+                  value={motivoMasivo}
+                  onChange={(e) => setMotivoMasivo(e.target.value)}
+                  placeholder="Ej: Condonación fin de año..."
+                />
+              </div>
+              <div className="text-sm text-gray-600">
+                Se registrará con el usuario:{" "}
+                <span className="font-semibold">{user?.email}</span>
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setOpenModalCondonacionMasiva(false);
+                    setMotivoMasivo("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={confirmCondonacionMasiva}
+                  className="bg-orange-600 hover:bg-orange-700"
+                  disabled={condonarMorasMasivo.isPending}
+                >
+                  {condonarMorasMasivo.isPending
+                    ? "Condonando..."
+                    : "Confirmar Condonación"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Modal Editar Mora */}
@@ -414,16 +598,16 @@ export default function MorasManager() {
               </div>
 
               <div>
-                <Label htmlFor="monto">Monto Actual</Label>
+                <Label htmlFor="montoActual">Monto Actual</Label>
                 <Input
-                  id="monto"
+                  id="montoActual"
                   type="number"
                   value={montoMoraSeleccionada ?? ""}
                   disabled
                 />
               </div>
               <div>
-                <Label htmlFor="monto" className="flex items-center gap-2">
+                <Label htmlFor="montoCambio" className="flex items-center gap-2">
                   {tipoCambio === "INCREMENTO" ? (
                     <span className="text-green-600 font-semibold">
                       💹 Monto a incrementar
@@ -435,7 +619,7 @@ export default function MorasManager() {
                   )}
                 </Label>
                 <Input
-                  id="monto"
+                  id="montoCambio"
                   type="number"
                   value={nuevoMonto ?? ""}
                   onChange={(e) => setNuevoMonto(Number(e.target.value))}
@@ -464,28 +648,32 @@ export default function MorasManager() {
         </div>
       )}
 
-      {/* Modal condonación */}
+      {/* Modal condonación individual */}
       {openModalCondonacion && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-40 z-50">
-          <div className="bg-white rounded-lg p-6 w-96 shadow-lg text-black">
-            <h3 className="text-lg font-bold text-blue-600 mb-4">
-              Condonar Mora
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
+          <div className="bg-white rounded-lg p-6 w-96 shadow-xl text-black border-4 border-green-500">
+            <h3 className="text-lg font-bold text-green-600 mb-2">
+              ✅ Condonar Mora Individual
             </h3>
-            {montoMoraSeleccionada !== null && (
-              <div className="mb-3 text-sm text-gray-700">
-                Monto actual:{" "}
-                <span className="font-semibold text-red-600">
-                  Q {montoMoraSeleccionada}
-                </span>
-              </div>
-            )}
+            <p className="text-sm text-gray-600 mb-4">
+              Crédito ID:{" "}
+              <span className="font-bold text-blue-600">
+                #{condonacionCreditoId}
+              </span>
+              <br />
+              Monto de mora:{" "}
+              <span className="font-bold text-red-600">
+                Q {Number(montoMoraSeleccionada || 0).toFixed(2)}
+              </span>
+            </p>
             <div className="flex flex-col gap-3">
               <div>
-                <Label htmlFor="motivo">Motivo</Label>
+                <Label htmlFor="motivo">Motivo de condonación</Label>
                 <Input
                   id="motivo"
                   value={motivo}
                   onChange={(e) => setMotivo(e.target.value)}
+                  placeholder="Ej: Cliente con dificultades económicas..."
                 />
               </div>
               <div className="text-sm text-gray-600">
@@ -495,11 +683,23 @@ export default function MorasManager() {
               <div className="flex justify-end gap-2 mt-4">
                 <Button
                   variant="secondary"
-                  onClick={() => setOpenModalCondonacion(false)}
+                  onClick={() => {
+                    setOpenModalCondonacion(false);
+                    setMotivo("");
+                    setMontoMoraSeleccionada(null);
+                  }}
                 >
                   Cancelar
                 </Button>
-                <Button onClick={confirmCondonacion}>Confirmar</Button>
+                <Button
+                  onClick={confirmCondonacion}
+                  className="bg-green-600 hover:bg-green-700"
+                  disabled={condonarMora.isPending}
+                >
+                  {condonarMora.isPending
+                    ? "Condonando..."
+                    : "Confirmar Condonación"}
+                </Button>
               </div>
             </div>
           </div>

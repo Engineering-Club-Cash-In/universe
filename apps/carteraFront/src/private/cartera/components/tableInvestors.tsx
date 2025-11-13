@@ -8,17 +8,72 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Download, Edit } from "lucide-react";
+import { CheckCircle, ChevronDown, ChevronUp, Download, Edit, FileDown, FileSpreadsheet, Loader2, MoreVertical } from "lucide-react";
 import { useGetInvestors } from "../hooks/getInvestor";
 import { useCatalogs } from "../hooks/catalogs";
 import { inversionistasService, type Investor, type InvestorPayload } from "../services/services";
 import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
-import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport";
-import { Spinner } from "./spinner";
+import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport"; 
 import { InvestorModal } from "./modalInvestor"; 
+import { useFalsePayments } from "../hooks/falsePayments";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+ 
 const PER_PAGE_OPTIONS = [5, 10, 20, 50];
 
 export function TableInvestors() {
+  // 🆕 Estados para el modal de confirmación
+// 🆕 Estados para el modal de generar pagos falsos
+const [showGenerarPagosModal, setShowGenerarPagosModal] = useState(false);
+const [selectedInversionista, setSelectedInversionista] = useState<number | null>(null);
+
+// 🆕 Hook para generar pagos falsos
+const { mutate: generateFalsePayments, isPending: isGenerating } = useFalsePayments();
+// 🆕 Confirmar liquidación
+// 🆕 Abrir modal de confirmación para generar pagos
+const handleOpenGenerarPagosModal = (inversionistaId: number) => {
+  setSelectedInversionista(inversionistaId);
+  setShowGenerarPagosModal(true);
+};
+
+// 🆕 Confirmar generación de pagos falsos
+const handleConfirmarGenerarPagos = async () => {
+  if (!selectedInversionista) return;
+
+  // Generar pagos falsos
+  generateFalsePayments(
+    {
+      inversionistaId: selectedInversionista,
+      generateFalsePayment: true,
+    },
+    {
+      onSuccess: (data) => {
+        if (data.success) {
+          // Cerrar modal
+          setShowGenerarPagosModal(false);
+          setSelectedInversionista(null);
+             refetch();
+          // Refrescar datos si tenés un refetch
+          // refetch?.();
+        }
+      },
+    }
+  );
+};
+
+// 🆕 Cancelar generación
+const handleCancelarGenerarPagos = () => {
+  setShowGenerarPagosModal(false);
+  setSelectedInversionista(null);
+};
+
+// 🆕 Cancelar liquidación
+ 
   const downloadPDF = useDownloadInvestorPDF();
   const [selectedInvestor, setSelectedInvestor] = useState<number | "">(1);
   const [page, setPage] = useState(1);
@@ -94,6 +149,7 @@ export function TableInvestors() {
       banco: inv.banco ?? "",
       tipo_cuenta: inv.tipo_cuenta ?? "",
       numero_cuenta: inv.numero_cuenta ?? "",
+      re_inversion: inv.re_inversion ?? "",
     });
     setModalOpen(true);
   };
@@ -277,58 +333,97 @@ export function TableInvestors() {
                       </TableCell>
 
                       <TableCell>
-                        <div className="flex flex-col gap-2">
-                          <button
-                            className="px-3 py-1 rounded-lg bg-blue-500 text-white font-bold hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-                            aria-busy={downloadPDF.isPending}
-                            onClick={() =>
-                              downloadPDF.mutate({ id: inv.inversionista_id })
-                            }
-                          >
-                            {downloadPDF.isPending ? (
-                              <>
-                                <Spinner />
-                                <span>Descargando…</span>
-                              </>
-                            ) : (
-                              "Descargar PDF"
-                            )}
-                          </button>
+     <DropdownMenu>
+  <DropdownMenuTrigger asChild>
+    <button className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 transition-colors inline-flex items-center justify-center shadow-sm">
+      <MoreVertical className="w-5 h-5 text-white" />
+    </button>
+  </DropdownMenuTrigger>
+  
+  <DropdownMenuContent align="end" className="w-56">
+    {/* Descargar PDF */}
+    <DropdownMenuItem
+      onClick={() => downloadPDF.mutate({ id: inv.inversionista_id })}
+      disabled={downloadPDF.isPending}
+      className="cursor-pointer"
+    >
+      {downloadPDF.isPending ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin text-blue-600" />
+          <span className="text-blue-700 font-medium">Descargando…</span>
+        </>
+      ) : (
+        <>
+          <FileDown className="mr-2 h-4 w-4 text-blue-600" />
+          <span className="text-blue-700 font-medium">Descargar PDF</span>
+        </>
+      )}
+    </DropdownMenuItem>
 
-                          <button
-                            className="px-3 py-1 rounded-lg bg-green-500 text-white font-bold hover:bg-green-600 transition disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2"
-                            aria-busy={liquidateMutation.isPending}
-                            onClick={() => {
-                              liquidateMutation.mutate(
-                                { inversionista_id: inv.inversionista_id },
-                                {
-                                  onSuccess: () => {
-                                    refetch();
-                                  },
-                                }
-                              );
-                            }}
-                          >
-                            {liquidateMutation.isPending ? (
-                              <>
-                                <Spinner />
-                                <span>Liquidando…</span>
-                              </>
-                            ) : (
-                              "Liquidar"
-                            )}
-                          </button>
-                          <button
-                            className="px-3 py-1 rounded-lg bg-yellow-500 text-white font-bold hover:bg-yellow-600 transition inline-flex items-center justify-center gap-2"
-                            onClick={(e) => {
-                              e.stopPropagation(); // Evita que se expanda/colapse la fila
-                              handleEditInvestor(inv);
-                            }}
-                          >
-                            <Edit className="w-4 h-4" />
-                            Editar
-                          </button>
-                        </div>
+    {/* Generar Pagos Falsos */}
+    <DropdownMenuItem
+      onClick={() => handleOpenGenerarPagosModal(inv.inversionista_id)}
+      disabled={isGenerating && selectedInversionista === inv.inversionista_id}
+      className="cursor-pointer"
+    >
+      {isGenerating && selectedInversionista === inv.inversionista_id ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin text-purple-600" />
+          <span className="text-purple-700 font-medium">Generando…</span>
+        </>
+      ) : (
+        <>
+          <FileSpreadsheet className="mr-2 h-4 w-4 text-purple-600" />
+          <span className="text-purple-700 font-medium">Generar Pagos</span>
+        </>
+      )}
+    </DropdownMenuItem>
+
+    <DropdownMenuSeparator />
+
+    {/* Liquidar */}
+    <DropdownMenuItem
+      onClick={() => {
+        liquidateMutation.mutate(
+          { inversionista_id: inv.inversionista_id },
+          {
+            onSuccess: () => {
+              refetch();
+            },
+          }
+        );
+      }}
+      disabled={liquidateMutation.isPending}
+      className="cursor-pointer"
+    >
+      {liquidateMutation.isPending ? (
+        <>
+          <Loader2 className="mr-2 h-4 w-4 animate-spin text-green-600" />
+          <span className="text-green-700 font-medium">Liquidando…</span>
+        </>
+      ) : (
+        <>
+          <CheckCircle className="mr-2 h-4 w-4 text-green-600" />
+          <span className="text-green-700 font-medium">Liquidar</span>
+        </>
+      )}
+    </DropdownMenuItem>
+
+    <DropdownMenuSeparator />
+
+    {/* Editar */}
+    <DropdownMenuItem
+      onClick={(e) => {
+        e.stopPropagation();
+        handleEditInvestor(inv);
+      }}
+      className="cursor-pointer"
+    >
+      <Edit className="mr-2 h-4 w-4 text-amber-600" />
+      <span className="text-amber-700 font-medium">Editar</span>
+    </DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
                       </TableCell>
                     </TableRow>
                     {/* Colapsable con créditos y subtotales */}
@@ -430,6 +525,9 @@ export function TableInvestors() {
                                   <TableHead className="text-blue-900 font-bold">
                                     NIT
                                   </TableHead>
+                                        <TableHead className="text-blue-900 font-bold">
+                                    Plazo
+                                  </TableHead>
                                   <TableHead className="text-blue-900 font-bold">
                                     Capital
                                   </TableHead>
@@ -499,6 +597,9 @@ export function TableInvestors() {
                                         </TableCell>
                                         <TableCell className="text-blue-900 font-bold">
                                           {cred.nit_usuario}
+                                        </TableCell>
+                                         <TableCell className="text-blue-900 font-bold">
+                                          {cred.plazo}
                                         </TableCell>
                                         <TableCell className="text-blue-900 font-bold">
                                           Q
@@ -604,6 +705,7 @@ export function TableInvestors() {
                                                   <TableHead className="text-blue-800 font-bold">
                                                     Fecha Pago
                                                   </TableHead>
+                                                  
                                                   <TableHead className="text-blue-800 font-bold"></TableHead>
                                                 </TableRow>
                                               </TableHeader>
@@ -684,7 +786,7 @@ export function TableInvestors() {
                                                           )}
                                                         </TableCell>
                                                         <TableCell className="font-semibold text-blue-900">
-                                                          {pago.mes ?? "--"}
+                                                          {pago.mes ?? "--"}  (Cuota #{pago.cuota})
                                                         </TableCell>
                                                         <TableCell className="text-blue-900">
                                                           {pago.fecha_pago
@@ -811,78 +913,104 @@ export function TableInvestors() {
               </div>
             </div>
             {/* BOTONES */}
-            <div className="flex gap-2 mb-2">
-              <button
-                className="
-    w-full sm:w-auto                /* Ocupa todo el ancho en móvil, solo auto en pantallas medianas */
-    px-3 py-2                       /* Un poco más de padding vertical para mobile */
-    rounded-lg
-    bg-blue-500
-    text-white font-bold
-    hover:bg-blue-600
-    transition
-    disabled:opacity-50 disabled:cursor-not-allowed
-    flex items-center justify-center gap-2 /* Para centrar ícono y texto */
-  "
-                disabled={
-                  Number(inv.subtotal?.total_cuota ?? 0) <= 0 ||
-                  downloadPDF.isPending
-                }
-                onClick={() => downloadPDF.mutate({ id: inv.inversionista_id })}
-              >
-                {downloadPDF.isPending ? (
-                  <>
-                    <svg
-                      className="w-4 h-4 animate-spin"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                      />
-                    </svg>
-                    <span className="text-sm sm:text-base">Descargando...</span>
-                  </>
-                ) : (
-                  <span className="text-sm sm:text-base">Descargar PDF</span>
-                )}
-              </button>
+       <div className="flex gap-2 mb-2">
+  {/* Descargar PDF */}
+  <button
+    className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"
+    disabled={
+      Number(inv.subtotal?.total_cuota ?? 0) <= 0 ||
+      downloadPDF.isPending
+    }
+    onClick={() => downloadPDF.mutate({ id: inv.inversionista_id })}
+  >
+    {downloadPDF.isPending ? (
+      <>
+        <svg
+          className="w-4 h-4 animate-spin"
+          viewBox="0 0 24 24"
+          fill="none"
+        >
+          <circle
+            className="opacity-25"
+            cx="12"
+            cy="12"
+            r="10"
+            stroke="currentColor"
+            strokeWidth="4"
+          />
+          <path
+            className="opacity-75"
+            fill="currentColor"
+            d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+          />
+        </svg>
+        <span>Descargando...</span>
+      </>
+    ) : (
+      <>
+        <FileDown className="w-4 h-4" />
+        <span>Descargar PDF</span>
+      </>
+    )}
+  </button>
 
-              <button
-                className="px-3 py-1 rounded-lg bg-green-500 text-white font-bold hover:bg-green-600 transition disabled:opacity-50"
-                disabled={Number(inv.subtotal?.total_cuota ?? 0) <= 0}
-                onClick={() => {
-                  liquidateMutation.mutate(
-                    { inversionista_id: inv.inversionista_id },
-                    {
-                      onSuccess: () => refetch(),
-                    }
-                  );
-                }}
-              >
-                Liquidar
-              </button>
-              <button
-                className="px-3 py-1 rounded-lg bg-yellow-500 text-white font-bold hover:bg-yellow-600 transition inline-flex items-center justify-center gap-2"
-                onClick={(e) => {
-                  e.stopPropagation(); // Evita que se expanda/colapse la fila
-                  handleEditInvestor(inv);
-                }}
-              >
-                <Edit className="w-4 h-4" />
-                Editar
-              </button>
-            </div>
+  {/* Generar Pagos Falsos */}
+  <button
+    className="px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"
+    onClick={() => handleOpenGenerarPagosModal(inv.inversionista_id)}
+    disabled={isGenerating && selectedInversionista === inv.inversionista_id}
+  >
+    {isGenerating && selectedInversionista === inv.inversionista_id ? (
+      <>
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span>Generando...</span>
+      </>
+    ) : (
+      <>
+        <FileSpreadsheet className="w-4 h-4" />
+        <span>Generar Pagos</span>
+      </>
+    )}
+  </button>
+
+  {/* Liquidar */}
+  <button
+    className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-semibold hover:bg-green-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 shadow-sm"
+    disabled={Number(inv.subtotal?.total_cuota ?? 0) <= 0 || liquidateMutation.isPending}
+    onClick={() => {
+      liquidateMutation.mutate(
+        { inversionista_id: inv.inversionista_id },
+        {
+          onSuccess: () => refetch(),
+        }
+      );
+    }}
+  >
+    {liquidateMutation.isPending ? (
+      <>
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span>Liquidando...</span>
+      </>
+    ) : (
+      <>
+        <CheckCircle className="w-4 h-4" />
+        <span>Liquidar</span>
+      </>
+    )}
+  </button>
+
+  {/* Editar */}
+  <button
+    className="px-4 py-2 rounded-lg bg-amber-500 text-white text-sm font-semibold hover:bg-amber-600 active:scale-95 transition-all inline-flex items-center justify-center gap-2 shadow-sm"
+    onClick={(e) => {
+      e.stopPropagation();
+      handleEditInvestor(inv);
+    }}
+  >
+    <Edit className="w-4 h-4" />
+    <span>Editar</span>
+  </button>
+</div>
 
             {/* COLLAPSE: Créditos Asociados */}
          {expandedRow === idx && (
@@ -938,7 +1066,12 @@ export function TableInvestors() {
                 {cred.nit_usuario}
               </div>
             </div>
-
+ <div className="bg-white rounded-lg p-3 shadow-sm border border-blue-100">
+              <div className="text-xs text-gray-500 mb-1">Plazo</div>
+              <div className="font-semibold text-blue-900 text-sm">
+                {cred.plazo}
+              </div>
+            </div>
             {/* Capital Aportado */}
             <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-lg p-3 shadow-sm border border-green-200">
               <div className="text-xs text-green-700 mb-1">💰 Capital Aportado</div>
@@ -1038,7 +1171,7 @@ export function TableInvestors() {
                           <span className="text-lg">📅</span>
                           <div>
                             <div className="font-bold text-indigo-900 text-sm">
-                              {pago.mes ?? "--"}
+                              {pago.mes ?? "--"} (Cuota #{pago.cuota})
                             </div>
                             <div className="text-xs text-gray-500">
                               {pago.fecha_pago
@@ -1127,29 +1260,30 @@ export function TableInvestors() {
 )}
           </div>
         ))}
+           {data && (
+      <div className="flex items-center justify-between mt-auto pt-6">
+        <button
+          className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-bold disabled:opacity-50"
+          onClick={() => setPage((p) => Math.max(1, p - 1))}
+          disabled={page <= 1 || isLoading || isFetching}
+        >
+          Anterior
+        </button>
+        <span className="text-gray-800 font-bold">
+          Página {data.page} de {data.totalPages}
+        </span>
+        <button
+          className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-bold disabled:opacity-50"
+          onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
+          disabled={page >= data.totalPages || isLoading || isFetching}
+        >
+          Siguiente
+        </button>
+      </div>
+    )}
       </div>
       {/* Paginación abajo */}
-      {data && (
-        <div className="flex items-center justify-between mt-6">
-          <button
-            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-bold disabled:opacity-50"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || isLoading || isFetching}
-          >
-            Anterior
-          </button>
-          <span className="text-gray-800 font-bold">
-            Página {data.page} de {data.totalPages}
-          </span>
-          <button
-            className="px-4 py-2 rounded-lg bg-gray-100 text-gray-700 font-bold disabled:opacity-50"
-            onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
-            disabled={page >= data.totalPages || isLoading || isFetching}
-          >
-            Siguiente
-          </button>
-        </div>
-      )}
+     
       {/* Modal */}
       <InvestorModal
         open={modalOpen}
@@ -1158,6 +1292,56 @@ export function TableInvestors() {
         initialData={selectedInvestorData}
       />
       </div>
+      <Dialog open={showGenerarPagosModal} onOpenChange={setShowGenerarPagosModal}>
+  <DialogContent className="bg-white dark:bg-gray-900">
+    <DialogHeader>
+      <DialogTitle className="text-blue-700 dark:text-blue-400 text-xl font-bold">
+        ¿Generar pagos falsos?
+      </DialogTitle>
+      <DialogDescription className="space-y-3 pt-4">
+        <p className="text-gray-900 dark:text-gray-100 text-base">
+          Esta acción generará los <strong className="text-blue-700 dark:text-blue-400">pagos falsos pendientes</strong> para
+          este inversionista.
+        </p>
+        <p className="text-gray-700 dark:text-gray-300 text-sm">
+          • Se distribuirán todos los pagos pendientes entre inversionistas
+        </p>
+        <p className="text-gray-700 dark:text-gray-300 text-sm">
+          • Los registros se crearán en pagos_credito_inversionistas
+        </p>
+        <p className="text-gray-700 dark:text-gray-300 text-sm">
+          • Esta acción puede tardar unos segundos
+        </p>
+      </DialogDescription>
+    </DialogHeader>
+    <DialogFooter className="gap-2 sm:gap-0 pt-4">
+      <button
+        className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 font-medium transition-colors disabled:opacity-50"
+        onClick={handleCancelarGenerarPagos}
+        disabled={isGenerating}
+      >
+        Cancelar
+      </button>
+      <button
+        className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors disabled:opacity-50 inline-flex items-center gap-2"
+        onClick={handleConfirmarGenerarPagos}
+        disabled={isGenerating}
+      >
+        {isGenerating ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span>Generando pagos...</span>
+          </>
+        ) : (
+          <>
+            <FileSpreadsheet className="h-4 w-4" />
+            <span>Confirmar generación</span>
+          </>
+        )}
+      </button>
+    </DialogFooter>
+  </DialogContent>
+</Dialog>
     </div>
   );
 }

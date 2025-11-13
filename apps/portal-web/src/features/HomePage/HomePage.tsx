@@ -2,7 +2,6 @@ import { NavBar } from "@components/ui";
 import {
   CarrouselStart,
   HowItWorks,
-  FindYourIdealModel,
   Testimonies,
   GraphLine,
 } from "./sections";

@@ -37,7 +37,7 @@
 @theme {
   --font-hero: "Hero", sans-serif;
   --font-plus-jakarta: "PlusJakarta", sans-serif;
-  --color-primary: rgba(113, 117, 180);
+  --color-primary: rgba(148, 153, 236, 1);
   --color-secondary: rgba(216, 231, 16, 0.87);
   --color-blue: rgb(79, 87, 247);
   --color-dark: #0f0f0f;

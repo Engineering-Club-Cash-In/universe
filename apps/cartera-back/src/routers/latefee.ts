@@ -3,7 +3,7 @@ import { Elysia, t } from "elysia";
  
  
 import { authMiddleware } from "./midleware";
-import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora } from "../controllers/latefee";
+import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
 
 export const morasRouter = new Elysia()
   .use(authMiddleware)
@@ -136,5 +136,41 @@ export const morasRouter = new Elysia()
       fecha_hasta: t.Optional(t.String()), // ISO date string
       excel: t.Optional(t.String()),
     })
-  });
+  })
  
+  .post("/moras/condonar-masivo", async ({ body, set }) => {
+  try {
+    const { motivo, usuario_email } = body;
+    
+    if (!motivo || !usuario_email) {
+      set.status = 400;
+      return { 
+        success: false, 
+        message: "[ERROR] Faltan parámetros requeridos: motivo, usuario_email" 
+      };
+    }
+
+    const result = await condonarTodasLasMoras({
+      motivo,
+      usuario_email,
+    });
+
+    if (!result.success) {
+      set.status = 400;
+    }
+
+    return result;
+  } catch (err) {
+    set.status = 500;
+    return { 
+      success: false, 
+      message: "[ERROR] No se pudo realizar la condonación masiva", 
+      error: String(err) 
+    };
+  }
+}, {
+  body: t.Object({
+    motivo: t.String(),
+    usuario_email: t.String(),
+  })
+})

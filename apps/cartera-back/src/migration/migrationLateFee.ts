@@ -135,8 +135,8 @@ export const leerCreditosMora = async (filePath: string): Promise<CreditoMora[]>
     }
     
     if (tieneMora) {
-      // 💰 Calcular monto de mora: capital * 1.15% * cuotasAtrasadas
-      const tasaMora = new Big('0.0115'); // 1.15%
+      // 💰 Calcular monto de mora: capital * 1.12% * cuotasAtrasadas
+      const tasaMora = new Big('0.0112'); // 1.12%
       const montoMora = capital
         .times(tasaMora)
         .times(cuotasAtrasadas)

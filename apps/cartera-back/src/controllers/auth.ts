@@ -140,9 +140,24 @@ export async function loginService(email: string, password: string) {
 export function verifyTokenService(token: string) {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    return { valid: true, decoded };
+    
+    // Generar un nuevo token con tiempo extendido
+    const newToken = jwt.sign(
+      typeof decoded === 'string' ? { data: decoded } : { ...decoded }, // Copiar el payload del token actual
+      JWT_SECRET,
+      { expiresIn: '1h' } // O el tiempo que necesites: '2h', '30m', '7d', etc.
+    );
+    
+    return { 
+      valid: true, 
+      decoded,
+      newToken // Devolver el nuevo token con tiempo extendido
+    };
   } catch (err) {
-    return { valid: false, error: "Token inválido o expirado" };
+    return { 
+      valid: false, 
+      error: "Token inválido o expirado" 
+    };
   }
 }
 

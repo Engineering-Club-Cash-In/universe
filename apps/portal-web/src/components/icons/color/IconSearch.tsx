@@ -1,10 +1,11 @@
-export const IconSearch = () => (
+export const IconSearch = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="50"
     height="51"
     viewBox="0 0 50 51"
     fill="none"
+    {...props}
   >
     <path
       fill-rule="evenodd"

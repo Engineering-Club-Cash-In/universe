@@ -31,9 +31,36 @@ function gtq(n: string | number) {
 }
 
 export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
-  const saldoBase = data.header.saldo_total;
-  const extrasTotal = data.header.extras_total;
-  const saldoConExtras = data.header.saldo_total_con_extras;
+  // ✅ Asegurar que sean números
+  const saldoBase = Number(data.header.saldo_total || 0);
+  const extrasTotal = Number(data.header.extras_total || 0);
+  const saldoConExtras = Number(data.header.saldo_total_con_extras || 0);
+
+  // ✅ Calcular totales de cada columna
+  const totales = data.cuotas_atrasadas.items.reduce(
+    (acc, r) => ({
+      interes: acc.interes + Number(r.interes || 0),
+      servicios: acc.servicios + Number(r.servicios || 0),
+      mora: acc.mora + Number(r.mora || 0),
+      otros: acc.otros + Number(r.otros || 0),
+      capital_pendiente: acc.capital_pendiente + Number(r.capital_pendiente || 0),
+      total_cancelar: acc.total_cancelar + Number(r.total_cancelar || 0),
+    }),
+    {
+      interes: 0,
+      servicios: 0,
+      mora: 0,
+      otros: 0,
+      capital_pendiente: 0,
+      total_cancelar: 0,
+    }
+  );
+
+  // ✅ Total a pagar = Capital + Total de la tabla (asegurando números)
+  const totalAPagar = Number(saldoBase) + Number(totales.total_cancelar);
+  
+  // ✅ Con extras
+  const totalConExtras = Number(totalAPagar) + Number(extrasTotal);
 
   const rows = data.cuotas_atrasadas.items
     .map(
@@ -51,6 +78,19 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
     `
     )
     .join("");
+
+  // ✅ Fila de totales
+  const totalesRow = `
+    <tr class="totales-row">
+      <td colspan="2" style="text-align:right;font-weight:700;background:#e0f2fe;color:#0F1B4C;">TOTALES:</td>
+      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.interes)}</td>
+      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.servicios)}</td>
+      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.mora)}</td>
+      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.otros)}</td>
+      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.capital_pendiente)}</td>
+      <td class="total" style="font-weight:800;background:#e0f2fe;font-size:14px;">${gtq(totales.total_cancelar)}</td>
+    </tr>
+  `;
 
   const extrasBlock =
     data.extras.total_items > 0
@@ -107,7 +147,7 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
 
   .saldo { display:flex; align-items:center; justify-content:center; height:100%; }
   .saldo .num { font-size:22px; color:#0F56D9; font-weight:800; }
-  .saldo small { display:block; color:#64748b; font-weight:600; }
+  .saldo small { display:block; color:#64748b; font-weight:600; margin-bottom:4px; }
 
   table { width:100%; border-collapse:collapse; margin:10px 0; }
   thead th { background:#0F1B4C; color:#fff; font-weight:700; padding:8px; font-size:12px; }
@@ -146,13 +186,17 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
   </div>
 
   <div class="box saldo">
-    <div>
-      <small>Saldo total</small>
+    <div style="text-align:center;">
+      <small>Capital</small>
       <div class="num">${gtq(saldoBase)}</div>
+      <div style="border-top:2px solid #cbd5e1;margin:8px 0;"></div>
+      <small>Total a pagar</small>
+      <div class="num" style="color:#dc2626;">${gtq(totalAPagar)}</div>
       ${
-        Number(extrasTotal) !== 0
-          ? `<small style="display:block;margin-top:6px;">Con extras</small>
-             <div class="num">${gtq(saldoConExtras)}</div>`
+        extrasTotal !== 0
+          ? `<div style="border-top:2px solid #cbd5e1;margin:8px 0;"></div>
+             <small>Con extras</small>
+             <div class="num" style="color:#059669;">${gtq(totalConExtras)}</div>`
           : ""
       }
     </div>
@@ -174,6 +218,7 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
   </thead>
   <tbody>
     ${rows || `<tr><td colspan="8" style="text-align:center;color:#7c8591;">Sin cuotas atrasadas</td></tr>`}
+    ${totalesRow}
   </tbody>
 </table>
 
@@ -188,7 +233,6 @@ ${extrasBlock}
 </html>
 `;
 }
-
 /** ───────── helpers num/estilo ───────── */
 function toNum(v: string | number | null | undefined): number {
   if (v == null) return 0;
@@ -294,7 +338,6 @@ export async function buildCancelationWorkbook(
   const logo = await fetchImageBase64(opts?.logoUrl);
   if (logo) {
     const imgId = wb.addImage({ base64: logo.data, extension: logo.ext });
-    // ocupa A1:B2 (no es merge real; addImage posiciona sobre ese rango)
     ws.addImage(imgId, 'A1:B2');
   }
 
@@ -333,25 +376,50 @@ export async function buildCancelationWorkbook(
     r++;
   }
 
-  // tarjeta derecha: saldos
-  ws.getCell("E5").value = "Saldo total";
-  ws.getCell("E5").font = { bold: true, color: { argb: COLOR.slate } };
-  ws.mergeCells("F5:H5");
-  ws.getCell("F5").value = toNum(data.header.saldo_total);
-  ws.getCell("F5").numFmt = '"Q"#,##0.00';
-  ws.getCell("F5").font = { bold: true, size: 14, color: { argb: COLOR.blue } };
+  // ✅ tarjeta derecha: Capital + Total a pagar + Con extras
+  const saldoBase = toNum(data.header.saldo_total);
+  const extrasTotal = toNum(data.header.extras_total);
+  
+  // Calcular total de la tabla
+  let totalTabla = 0;
+  for (const it of data.cuotas_atrasadas.items) {
+    totalTabla += toNum(it.total_cancelar ?? 0);
+  }
+  
+  const totalAPagar = saldoBase + totalTabla;
+  const totalConExtras = totalAPagar + extrasTotal;
 
-  if (toNum(data.header.extras_total) !== 0) {
+  ws.getCell("E4").value = "Capital";
+  ws.getCell("E4").font = { bold: true, color: { argb: COLOR.slate } };
+  ws.getCell("E4").alignment = { horizontal: "center" };
+  ws.mergeCells("F4:H4");
+  ws.getCell("F4").value = saldoBase;
+  ws.getCell("F4").numFmt = '"Q"#,##0.00';
+  ws.getCell("F4").font = { bold: true, size: 14, color: { argb: COLOR.blue } };
+  ws.getCell("F4").alignment = { horizontal: "center" };
+
+  ws.getCell("E5").value = "Total a pagar";
+  ws.getCell("E5").font = { bold: true, color: { argb: COLOR.slate } };
+  ws.getCell("E5").alignment = { horizontal: "center" };
+  ws.mergeCells("F5:H5");
+  ws.getCell("F5").value = totalAPagar;
+  ws.getCell("F5").numFmt = '"Q"#,##0.00';
+  ws.getCell("F5").font = { bold: true, size: 14, color: { argb: "FFDC2626" } }; // rojo
+  ws.getCell("F5").alignment = { horizontal: "center" };
+
+  if (extrasTotal !== 0) {
     ws.getCell("E7").value = "Con extras";
     ws.getCell("E7").font = { bold: true, color: { argb: COLOR.slate } };
+    ws.getCell("E7").alignment = { horizontal: "center" };
     ws.mergeCells("F7:H7");
-    ws.getCell("F7").value = toNum(data.header.saldo_total_con_extras);
+    ws.getCell("F7").value = totalConExtras;
     ws.getCell("F7").numFmt = '"Q"#,##0.00';
     ws.getCell("F7").font = {
       bold: true,
       size: 14,
-      color: { argb: COLOR.blue },
+      color: { argb: "FF059669" }, // verde
     };
+    ws.getCell("F7").alignment = { horizontal: "center" };
   }
 
   // ── tabla cuotas atrasadas
@@ -376,18 +444,43 @@ export async function buildCancelationWorkbook(
     ws.getCell(`A${row}`).alignment = { horizontal: "center" };
     ws.getCell(`A${row}`).font = { italic: true, color: { argb: "FF7C8591" } };
   } else {
+    // ✅ Calcular totales
+    let totales = {
+      interes: 0,
+      servicios: 0,
+      mora: 0,
+      otros: 0,
+      capital_pendiente: 0,
+      total_cancelar: 0,
+    };
+
     for (const it of data.cuotas_atrasadas.items) {
       row++;
+      
+      const interes = toNum(it.interes);
+      const servicios = toNum(it.servicios);
+      const mora = toNum(it.mora);
+      const otros = toNum(it.otros);
+      const capital = toNum(it.capital_pendiente);
+      const total = toNum(it.total_cancelar);
+
+      totales.interes += interes;
+      totales.servicios += servicios;
+      totales.mora += mora;
+      totales.otros += otros;
+      totales.capital_pendiente += capital;
+      totales.total_cancelar += total;
+
       const rr = ws.getRow(row);
       rr.values = [
         it.no,
         it.mes,
-        toNum(it.interes),
-        toNum(it.servicios),
-        toNum(it.mora),
-        toNum(it.otros),
-        toNum(it.capital_pendiente),
-        toNum(it.total_cancelar),
+        interes,
+        servicios,
+        mora,
+        otros,
+        capital,
+        total,
       ];
       [3, 4, 5, 6, 7, 8].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
       rr.getCell(8).font = { bold: true, color: { argb: COLOR.blue } };
@@ -402,6 +495,31 @@ export async function buildCancelationWorkbook(
       }
       setThinBottomBorder(rr);
     }
+
+    // ✅ Fila de totales
+    row++;
+    const totalRow = ws.getRow(row);
+    totalRow.getCell(1).value = "TOTALES:";
+    totalRow.getCell(1).font = { bold: true, color: { argb: COLOR.navy } };
+    totalRow.getCell(1).alignment = { horizontal: "right" };
+    ws.mergeCells(`A${row}:B${row}`);
+
+    totalRow.getCell(3).value = totales.interes;
+    totalRow.getCell(4).value = totales.servicios;
+    totalRow.getCell(5).value = totales.mora;
+    totalRow.getCell(6).value = totales.otros;
+    totalRow.getCell(7).value = totales.capital_pendiente;
+    totalRow.getCell(8).value = totales.total_cancelar;
+
+    [3, 4, 5, 6, 7, 8].forEach((i) => {
+      totalRow.getCell(i).numFmt = '"Q"#,##0.00';
+      totalRow.getCell(i).font = { bold: true, color: { argb: COLOR.blue } };
+      totalRow.getCell(i).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0F2FE" }, // azul claro
+      };
+    });
   }
 
   // congelar encabezado hasta la fila de header de tabla
@@ -442,7 +560,7 @@ export async function buildCancelationWorkbook(
     ws.getCell(`A${row}`).alignment = { horizontal: "right" };
     ws.getCell(`A${row}`).font = { bold: true, color: { argb: COLOR.navy } };
 
-    ws.getCell(`H${row}`).value = toNum(data.header.extras_total);
+    ws.getCell(`H${row}`).value = extrasTotal;
     ws.getCell(`H${row}`).numFmt = '"Q"#,##0.00';
     ws.getCell(`H${row}`).font = { bold: true, color: { argb: COLOR.blue } };
   } else {
@@ -455,7 +573,7 @@ export async function buildCancelationWorkbook(
 
   // buffer XLSX
   const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
-  return Buffer.from(arr); // Node Buffer
+  return Buffer.from(arr);
 }
 /**
  * Convierte un string o número en Big, limpiando %, Q, comas y guiones

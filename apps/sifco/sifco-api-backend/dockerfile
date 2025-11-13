@@ -1,0 +1,12 @@
+FROM oven/bun:latest
+RUN apt update && apt install -y ca-certificates
+WORKDIR /app
+
+# Copiar todo el proyecto directamente
+COPY . .
+
+# Instalar dependencias
+RUN bun install
+
+EXPOSE 9000
+CMD ["bun", "run", "devStart"]

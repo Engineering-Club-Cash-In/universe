@@ -116,7 +116,7 @@ export const creditos = customSchema.table("creditos", {
   iva_12: numeric("iva_12", { precision: 18, scale: 2 }).notNull(),
   seguro_10_cuotas: numeric("seguro_10_cuotas", {
     precision: 18,
-    scale: 2,
+    scale: 2, 
   }).notNull(),
   gps: numeric("gps", { precision: 18, scale: 2 }).notNull(),
   observaciones: text("observaciones").notNull(),
@@ -180,7 +180,7 @@ export const moras_credito = customSchema.table("moras_credito", {
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
 });
-export const moras_condonaciones = pgTable("moras_condonaciones", {
+export const moras_condonaciones = customSchema.table("moras_condonaciones", {
   condonacion_id: serial("condonacion_id").primaryKey(),
   credito_id: integer("credito_id")
     .notNull()
@@ -189,6 +189,9 @@ export const moras_condonaciones = pgTable("moras_condonaciones", {
     .notNull()
     .references(() => moras_credito.mora_id, { onDelete: "cascade" }),
   motivo: text("motivo").notNull(), // reason for condonation
+  montoCondonacion: numeric("monto_condonacion", { precision: 18, scale: 2 })
+    .notNull()
+    .default("0"),
   usuario_id: integer("usuario_id")
     .notNull()
     .references(() => platform_users.id, { onDelete: "cascade" }),
@@ -221,7 +224,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   cuota_id: integer("cuota_id")
     .references(() => cuotas_credito.cuota_id)
     .notNull(),
-  fecha_pago: date("fecha_pago").defaultNow(), //esto viene del credito 
+  fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito 
   abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
   abono_interes: numeric("abono_interes", { precision: 18, scale: 2 }), // aca jala el interes del credito si ? pero solo si  el monto de la boleta  es igual al de la cuota
@@ -234,8 +237,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
 
   llamada: varchar("llamada", { length: 100 }), // ""
 
-  monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input
-  numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), // input
+  monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input 
   fecha_vencimiento: date("fecha_vencimiento").defaultNow(), // viene del credito
 
   renuevo_o_nuevo: varchar("renuevo_o_nuevo", { length: 50 }), //input
@@ -274,6 +276,11 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   .notNull()
   .default('no_required'),
   createdAt: timestamp("createdat").defaultNow(),
+    banco_id: integer("banco_id").references(() => bancos.banco_id), // 👈 OPCIONAL
+  numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), 
+  registerBy:varchar("registerby",{length:150}).notNull(),
+    cuenta_empresa_id: integer("cuenta_empresa_id")
+    .references(() => cuentasEmpresa.cuentaId), // 
 });
 export const boletas = customSchema.table("boletas", {
   id: serial("id").primaryKey(),
@@ -388,7 +395,12 @@ export const pagos_credito_inversionistas = customSchema.table(
     cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(), // Cuota del crédito
   }
 );
-
+export const bancos = customSchema.table('bancos', {
+  banco_id: serial('banco_id').primaryKey(),
+  nombre: varchar('nombre', { length: 100 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
 export const bancoEnum = pgEnum("banco_enum", [
   "GyT",
   "BAM",
@@ -416,12 +428,20 @@ export const tipoCuentaEnum = pgEnum("tipo_cuenta_enum", [
   "Capital"
 ]);
 
+export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
+  "sin_reinversion",
+  "reinversion_capital",
+  "reinversion_interes",
+  "reinversion_total"
+]);
 
 export const inversionistas = customSchema.table("inversionistas", {
   inversionista_id: serial("inversionista_id").primaryKey(),
   nombre: varchar("nombre", { length: 200 }).notNull(),
   emite_factura: boolean("emite_factura").notNull(), 
-  reinversion: boolean("reinversion").notNull().default(false),  
+  tipo_reinversion: tipoReinversionEnum("tipo_reinversion")
+    .notNull()
+    .default("sin_reinversion"),
   banco: bancoEnum("banco"),
   tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
   numero_cuenta: varchar("numero_cuenta", { length: 100 }), 
@@ -430,4 +450,15 @@ export const asesores = customSchema.table("asesores", {
   asesor_id: serial("asesor_id").primaryKey(),
   nombre: varchar("nombre", { length: 100 }).notNull(),
   activo: boolean("activo"), // puedes usar boolean si prefieres
+});
+
+export const cuentasEmpresa = customSchema.table("cuentas_empresa", {
+  cuentaId: serial("cuenta_id").primaryKey(),
+  nombreCuenta: varchar("nombre_cuenta", { length: 100 }).notNull(),
+  banco: varchar("banco", { length: 100 }).notNull(),
+  numeroCuenta: varchar("numero_cuenta", { length: 50 }).notNull().unique(),
+  descripcion: varchar("descripcion", { length: 255 }),
+  activo: boolean("activo").default(true).notNull(),
+  fechaCreacion: timestamp("fecha_creacion").defaultNow().notNull(),
+  fechaActualizacion: timestamp("fecha_actualizacion").defaultNow().notNull(),
 });

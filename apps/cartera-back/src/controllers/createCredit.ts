@@ -616,6 +616,8 @@ const insertPayments = async (
   const pagosValidosSinUndefined = pagosValidos.map((p) => ({
     ...p,
     cuota_id: p.cuota_id as number,
+    fecha_pago: p.fecha_pago ? new Date(p.fecha_pago) : null,
+    registerBy: "system",
   }));
 
   await db.insert(pagos_credito).values(pagosValidosSinUndefined);

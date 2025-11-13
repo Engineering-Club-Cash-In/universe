@@ -14,6 +14,7 @@ import {
 import { useEffect, useState } from "react"; 
 import { useMutation } from "@tanstack/react-query";
 import { useResetCredit } from "./resetCredit";
+import { useAuth } from "@/Provider/authProvider";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
@@ -28,6 +29,9 @@ export const pagoSchema = z.object({
   abono_directo_capital: z.number().optional(),
   cuotaApagar: z.number().int(),
   url_boletas: z.array(z.string().max(500)),
+  banco_id: z.number().int().positive(), // 👈 NUEVO
+  numeroAutorizacion: z.string().max(100).optional(), // 👈 NUEVO
+    registerBy: z.string().max(100)
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -57,6 +61,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
   const [cuotaActualInfo, setCuotaActualInfo] = useState<{
     numero: number;
     pagada: boolean;
+    validationStatus?: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
     data?: any;
   } | null>(null);
   const [mora, setMora] = useState<number>(0);
@@ -81,7 +86,8 @@ const [resetBuscador, setResetBuscador] = useState(false);
     number | undefined
   >();
   const [archivosParaSubir, setArchivosParaSubir] = useState<File[]>([]);
-
+  const { user } = useAuth(); // 
+  console.log(user)
   // Formik
   const formik = useFormik<PagoFormValues>({
     initialValues: {
@@ -98,6 +104,9 @@ const [resetBuscador, setResetBuscador] = useState(false);
       abono_directo_capital: 0,
       cuotaApagar: cuotaSeleccionada ?? 0,
       url_boletas: [],
+      banco_id: 0, // 👈 NUEVO
+      numeroAutorizacion: undefined, // 👈 NUEVO
+       registerBy: user?.email || ""
     },
     validate: zodToFormikValidate(pagoSchema),
     onSubmit: async (values, { setSubmitting, setStatus, resetForm }) => {
@@ -214,6 +223,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
       setCuotaActualInfo({
         numero: result.cuotaActual,
         pagada: !!result.cuotaActualPagada,
+        validationStatus: result.cuotaActualStatus,
         data:
           result.cuotasPagadas.find(
             (c: any) => c.numero_cuota === result.cuotaActual

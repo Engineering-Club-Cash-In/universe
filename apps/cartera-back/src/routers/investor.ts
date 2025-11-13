@@ -15,6 +15,7 @@ import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { authMiddleware } from "./midleware";
+import { obtenerCreditosConPagosPendientes } from "../controllers/payments";
  
 
 export const inversionistasRouter = new Elysia()
@@ -113,9 +114,14 @@ export const inversionistasRouter = new Elysia()
       },
     }
   )
-.get("/investor/pdf", async ({ query, set }) => {
-  const { id, page = "1", perPage = "1" } = query as Record<string, string | undefined>;
-
+.post("/investor/pdf", async ({ body, set }) => {
+   const { id, page = 1, perPage = 1 } = body as { 
+    id?: number; 
+    page?: number; 
+    perPage?: number 
+  };
+  
+  console.log("Generando PDF para inversionista ID:", id);
   // Validaciones...
   const pageNum = Number(page);
   const perPageNum = Number(perPage);
@@ -130,19 +136,28 @@ export const inversionistasRouter = new Elysia()
     return { message: "El parámetro 'id' es obligatorio y debe ser numérico." };
   }
 
-  const result: RespuestaReporte = await resumeInvestor(Number(id), pageNum, perPageNum);
+  const result = await resumeInvestor(Number(id), pageNum, perPageNum);
+  console.log("Datos obtenidos para el reporte:", result);
 
   if (!result.inversionistas.length) {
     set.status = 404;
     return { message: "Inversionista no encontrado." };
   }
 
-  const inversionista: InversionistaReporte = result.inversionistas[0];
+  const inversionista = result.inversionistas[0];
 
   const logoUrl = import.meta.env.LOGO_URL || "";
-  const html = generarHTMLReporte(inversionista, logoUrl);
+  const html = generarHTMLReporte(inversionista as any, logoUrl);
 
-  const browser = await puppeteer.launch({ headless: true });
+  const browser = await puppeteer.launch({ 
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage', // Previene problemas de memoria compartida
+      '--disable-gpu' // Opcional, útil en algunos entornos
+    ]
+  });
   const pagePDF = await browser.newPage();
   await pagePDF.setContent(html, { waitUntil: "networkidle0" });
 
@@ -204,5 +219,80 @@ export const inversionistasRouter = new Elysia()
         anio: t.Optional(t.String()),
         excel: t.Optional(t.String()), // "true" | "false"
       }),
+    }
+  )
+    .post(
+    "/generateFalsePayments",
+    async ({ body, set }) => {
+      try {
+        const { inversionistaId, generateFalsePayment } = body;
+
+        console.log(`🔍 Procesando pagos pendientes para inversionista ${inversionistaId}`);
+        console.log(`🎯 Generar pagos: ${generateFalsePayment}`);
+
+        // Llamar al servicio
+        const resultado = await obtenerCreditosConPagosPendientes(
+          inversionistaId,
+          generateFalsePayment
+        );
+
+        if (!resultado.success) {
+          set.status = 500;
+          return {
+            success: false,
+            error: resultado.error,
+          };
+        }
+
+        set.status = 200;
+        return {
+          message: generateFalsePayment 
+            ? "✅ Pagos generados correctamente" 
+            : "📄 Datos obtenidos correctamente",
+          ...resultado,
+        };
+
+      } catch (error: any) {
+        console.error("❌ Error en POST /pagos-pendientes/generar:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error al procesar pagos pendientes",
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Generar pagos pendientes para un inversionista",
+        description: `
+          Obtiene todos los créditos con pagos pendientes de un inversionista.
+          Si generateFalsePayment=true, genera los registros en pagos_credito_inversionistas.
+        `,
+        tags: ["Pagos Pendientes"],
+      },
+      body: t.Object({
+        inversionistaId: t.Number({
+          description: "ID del inversionista",
+          minimum: 1,
+        }),
+        generateFalsePayment: t.Boolean({
+          description: "Si es true, genera los pagos en pagos_credito_inversionistas",
+          default: false,
+        }),
+      }),
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          inversionistaId: t.Number(),
+          totalCreditosConPagos: t.Number(),
+          pagosGenerados: t.Boolean(),
+          data: t.Array(t.Any()),
+        }),
+        500: t.Object({
+          success: t.Literal(false),
+          error: t.String(),
+        }),
+      },
     }
   );

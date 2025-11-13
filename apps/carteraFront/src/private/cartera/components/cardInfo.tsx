@@ -15,6 +15,7 @@ export function MiniCardCredito({
   usuario,
   cuotaActual,
   cuotaActualPagada,
+  cuotaActualStatus,
   cuotasAtrasadasInfo,
   cuotaSeleccionada,
   onCuotaSeleccionadaChange,
@@ -25,10 +26,37 @@ export function MiniCardCredito({
   usuario: any;
   cuotaActual: number;
   cuotaActualPagada?: boolean;
-  cuotasAtrasadasInfo?: { cuotas: { numero_cuota: number }[] };
+  cuotaActualStatus?:
+    | "no_required"
+    | "pending"
+    | "validated"
+    | "capital"
+    | "reset";
+
+  cuotasAtrasadasInfo?: {
+    cuotas: {
+      numero_cuota: number;
+      validationStatus:
+        | "no_required"
+        | "pending"
+        | "validated"
+        | "capital"
+        | "reset";
+    }[];
+  };
   cuotaSeleccionada?: number;
   onCuotaSeleccionadaChange?: (cuota: number) => void;
-  cuotasPendientesInfo?: { cuotas: { numero_cuota: number }[] };
+  cuotasPendientesInfo?: {
+    cuotas: {
+      numero_cuota: number;
+      validationStatus:
+        | "no_required"
+        | "pending"
+        | "validated"
+        | "capital"
+        | "reset";
+    }[];
+  };
   mora: number;
 }) {
   if (!credito || !usuario) return null;
@@ -50,7 +78,7 @@ export function MiniCardCredito({
   };
 
   const cuotasFiltradas =
-    cuotasPendientesInfo?.cuotas?.filter((cuota, idx) => { 
+    cuotasPendientesInfo?.cuotas?.filter((cuota, idx) => {
       return idx < 1;
     }) ?? [];
 
@@ -58,7 +86,6 @@ export function MiniCardCredito({
     <div className="w-full flex justify-center">
       <Card className="bg-gradient-to-br from-blue-50 to-indigo-50 border-2 border-blue-300 rounded-2xl shadow-2xl px-6 py-6 w-full max-w-[900px] relative mb-8">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
-          
           {/* Número de crédito */}
           <div className="flex flex-col bg-white rounded-lg p-4 shadow-sm border border-blue-100">
             <span className="font-bold text-blue-700 text-sm mb-1">
@@ -113,9 +140,16 @@ export function MiniCardCredito({
                   <BadgeCheck className="w-4 h-4 mr-1" /> Pagada
                 </span>
               ) : (
-                <span className="flex items-center text-orange-600 font-bold text-sm">
-                  <AlertTriangle className="w-4 h-4 mr-1" /> Pendiente
-                </span>
+                <>
+                  <span className="flex items-center text-orange-600 font-bold text-sm">
+                    <AlertTriangle className="w-4 h-4 mr-1" /> Pendiente
+                  </span>
+                  {cuotaActualStatus === "pending" && (
+                    <span className="ml-2 text-orange-500 font-semibold text-xs">
+                      (Pendiente de revisión)
+                    </span>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -148,7 +182,8 @@ export function MiniCardCredito({
               </span>
               {mora > 0 && (
                 <span className="text-xs font-semibold text-red-500">
-                  mora(Q{mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })})
+                  mora(Q
+                  {mora.toLocaleString("es-GT", { minimumFractionDigits: 2 })})
                 </span>
               )}
             </div>
@@ -166,6 +201,11 @@ export function MiniCardCredito({
                       className="text-xs text-red-500 pl-2"
                     >
                       • Cuota #{cuota.numero_cuota}
+                      {cuota.validationStatus === "pending" && (
+                        <span className="ml-1 text-orange-500">
+                          (Pendiente de revisión)
+                        </span>
+                      )}
                     </span>
                   ))}
                   {cuotasAtrasadasInfo!.cuotas.length > 3 && (
@@ -184,10 +224,35 @@ export function MiniCardCredito({
               Saldo a Favor
             </span>
             <span className="text-green-700 font-bold text-xl">
-              Q{Number(usuario.saldo_a_favor ?? 0).toLocaleString("es-GT", { 
-                minimumFractionDigits: 2 
+              Q
+              {Number(usuario.saldo_a_favor ?? 0).toLocaleString("es-GT", {
+                minimumFractionDigits: 2,
               })}
             </span>
+
+            {/* Monto restante a pagar */}
+            {(() => {
+              const cuotaMensual = Number(credito.cuota);
+              const saldoFavor = Number(usuario.saldo_a_favor ?? 0);
+              const montoRestante = Math.max(0, cuotaMensual - saldoFavor);
+
+              if (saldoFavor > 0) {
+                return (
+                  <div className="mt-2 pt-2 border-t border-yellow-300">
+                    <span className="text-xs text-gray-600 block mb-0.5">
+                      A pagar con saldo:
+                    </span>
+                    <span className="text-indigo-700 font-bold text-lg">
+                      Q
+                      {montoRestante.toLocaleString("es-GT", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                );
+              }
+              return null;
+            })()}
           </div>
 
           {/* Selector de cuotas - Ocupa 2 columnas en pantallas grandes */}
@@ -210,8 +275,8 @@ export function MiniCardCredito({
                           : "text-gray-500 text-base"
                       }
                     >
-                      {localCuotaSeleccionada 
-                        ? `Cuota #${localCuotaSeleccionada}` 
+                      {localCuotaSeleccionada
+                        ? `Cuota #${localCuotaSeleccionada}`
                         : "Selecciona una cuota"}
                     </span>
                   </SelectTrigger>

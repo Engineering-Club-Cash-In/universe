@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/rules-of-hooks */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import * as React from "react";
 import {
@@ -171,6 +170,120 @@ export function PaymentsTable() {
             </button>
           </div>
         </div>
+        {data?.totales && (
+          <>
+            {/* Header del Collapse */}
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="w-full flex items-center justify-between bg-white hover:bg-blue-50 p-4 rounded-lg border border-blue-100 transition-colors"
+            >
+              <div className="flex items-center gap-3">
+                <FileSpreadsheet className="h-5 w-5 text-blue-700" />
+                <div className="text-left">
+                  {/* 💙 Texto forzado a ser legible */}
+                  <h3 className="font-semibold text-lg text-blue-800">
+                    Resumen de Totales
+                  </h3>
+                  <p className="text-sm text-blue-600">
+                    {data.total} pagos encontrados
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className="text-lg font-bold px-4 py-2 border-blue-400 text-blue-800 bg-blue-100/70"
+                >
+                  {formatCurrency(data.totales.totalGeneral)}
+                </Badge>
+                {isCollapsed ? (
+                  <ChevronDown className="h-5 w-5 text-blue-700" />
+                ) : (
+                  <ChevronUp className="h-5 w-5 text-blue-700" />
+                )}
+              </div>
+            </button>
+
+            {/* Contenido Colapsable */}
+            <AnimatePresence>
+              {!isCollapsed && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-6 space-y-6">
+                    {/* Grid de Totales */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                      {[
+                        {
+                          label: "Abono Capital",
+                          value: data.totales.totalAbonoCapital,
+                        },
+                        {
+                          label: "Abono Interés",
+                          value: data.totales.totalAbonoInteres,
+                        },
+                        {
+                          label: "Abono IVA",
+                          value: data.totales.totalAbonoIva,
+                        },
+                        {
+                          label: "Abono Seguro",
+                          value: data.totales.totalAbonoSeguro,
+                        },
+                        {
+                          label: "Abono GPS",
+                          value: data.totales.totalAbonoGps,
+                        },
+                        { label: "Mora", value: data.totales.totalMora },
+                        { label: "Otros", value: data.totales.totalOtros },
+                        { label: "Reserva", value: data.totales.totalReserva },
+                        {
+                          label: "Membresías",
+                          value: data.totales.totalMembresias,
+                        },
+                      ].map((f, i) => (
+                        <div
+                          key={i}
+                          className="bg-white rounded-lg border border-blue-100 p-3 shadow-sm hover:border-blue-300 transition-all"
+                        >
+                          <p className="text-blue-800 text-sm font-bold">
+                            {f.label}
+                          </p>
+                          <p className="text-blue-900 font-semibold text-sm">
+                            {f.value ?? "--"}
+                          </p>
+                        </div>
+                      ))}
+
+                      {/* Total General */}
+                    </div>
+
+                    {/* Botón Excel */}
+                    <div className="flex justify-end pt-4 border-t border-blue-100">
+                      <Button
+                        onClick={handleDownloadExcel}
+                        disabled={isDownloadingExcel}
+                        size="lg"
+                        className="gap-2 shadow-sm bg-blue-600 hover:bg-blue-700 text-white transition-all"
+                      >
+                        <Download className="h-5 w-5" />
+                        {isDownloadingExcel
+                          ? "Generando..."
+                          : "Descargar Reporte Excel"}
+                      </Button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </>
+        )}
+
+        <br></br>
 
         {loading ? (
           <div className="text-blue-700 font-bold p-6 text-center">

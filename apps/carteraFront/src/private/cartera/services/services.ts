@@ -28,6 +28,7 @@ export interface InvestorPayload {
   reinversion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
+  re_inversion: string | null;
   numero_cuenta: string | null;
 }
 export interface InvestorResponse {
@@ -183,6 +184,8 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotaActual: number;
   moraActual: number;
   cuotaActualPagada: boolean;
+  cuotaActualStatus: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
+
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
@@ -551,6 +554,7 @@ export interface UpdateCreditBody {
   membresias_pago?: number;
   reserva?: number;
   seguro_10_cuotas?: number;
+  
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -586,6 +590,7 @@ export interface PagoCredito {
   isr: string;
   porcentaje_inversor: string;
   cuota_inversor: string;
+  cuota:number;
   fecha_pago: string;
    abonoGeneralInteres?:number
      tasaInteresInvesor?:number
@@ -597,6 +602,7 @@ export interface CreditoInversionistaData {
   numero_credito_sifco: string;
   nombre_usuario: string;
   nit_usuario: string;
+  plazo: number;
   capital: string;
   porcentaje_interes: string;
   meses_en_credito: number;
@@ -633,6 +639,7 @@ export interface InversionistaConCreditos {
   banco: string | null;           // 🔹 nuevo
   tipo_cuenta: string | null;     // 🔹 nuevo
   numero_cuenta: string | null;   // 🔹 nuevo
+  re_inversion:string
 
 }
 
@@ -738,13 +745,16 @@ export async function downloadInvestorPDFService(
 ): Promise<PdfUploadResponse> {
   const BACK_URL = import.meta.env.VITE_BACK_URL || "";
 
-  const { data } = await api.get<PdfUploadResponse>(`${BACK_URL}/investor/pdf`, {
-    params: { id, page, perPage },
-    // Asegura que el backend responda JSON (no blob)
-    headers: { Accept: "application/json" },
-    responseType: "json",
-    withCredentials: true,
-  });
+  const { data } = await api.post<PdfUploadResponse>(
+    `${BACK_URL}/investor/pdf`,
+    // ✅ Enviar datos en el body, no en params
+    { id, page, perPage },
+    {
+      // Asegura que el backend responda JSON (no blob)
+      headers: { Accept: "application/json" },
+      responseType: "json", 
+    }
+  );
 
   if (!data?.url) {
     throw new Error("[ERROR] La respuesta no contiene url del PDF subido.");
@@ -795,6 +805,7 @@ export interface CancelCreditResponse {
     total_seguro_pendiente: string;
     total_iva_pendiente: string;
     cuotas_pendientes: number;
+    mora:number
   };
   error?: string;
 }
@@ -1120,6 +1131,7 @@ export interface Condonacion {
   motivo: string;
   fecha: string;
   usuario_email: string;
+  montoCondonacion: string;
 }
 
 // ---------- Requests ----------
@@ -1201,8 +1213,7 @@ export async function getCondonacionesMoraService(params?: {
   );
   return data;}
 
-// 🧾 Información de la cuota asociada
-// 🧾 Información de la cuota asociada
+ 
 export interface CuotaPago {
   cuotaId: number;
   numeroCuota: number;
@@ -1245,6 +1256,7 @@ export interface UsuarioPago {
   usuarioId: number;
   nombre: string;
   nit: string;
+  Categoria: string;
 }
 
 // 💵 Objeto principal del pago
@@ -1260,6 +1272,9 @@ export interface PagoDataInvestor {
   reserva: number | null;
   membresias: number | null;
   observaciones: string | null;
+  registerBy: string | null;
+  bancoNombre: string | null;
+  numeroautorizacion: string | null;
   validationStatus: string;
 
   // 💰 Abonos asociados directamente al pago
@@ -1275,6 +1290,24 @@ export interface PagoDataInvestor {
   usuario: UsuarioPago;
   inversionistas: InversionistaPago[];
   boleta: BoletaPago | null;
+
+  cuentaEmpresaBanco: string | null;
+  cuentaEmpresaNombre: string | null;
+  cuentaEmpresaNumero: string | null;
+}
+
+// 💰 Totales generales de todos los pagos
+export interface TotalesPagos {
+  totalAbonoCapital: number;
+  totalAbonoInteres: number;
+  totalAbonoIva: number;
+  totalAbonoSeguro: number;
+  totalAbonoGps: number;
+  totalMora: number;
+  totalOtros: number;
+  totalReserva: number;
+  totalMembresias: number;
+  totalGeneral: number;
 }
 
 // 📊 Respuesta del servicio
@@ -1285,7 +1318,9 @@ export interface GetPagosResponse {
   pageSize: number;
   total: number;
   data: PagoDataInvestor[];
-  excelUrl?: string;
+  totales?: TotalesPagos; // 🆕 Totales opcionales (vienen cuando NO es Excel)
+  excelUrl?: string; // 🆕 URL del Excel (viene cuando excel=true)
+  totalPages: number
 }
 
 // ⚙️ Parámetros del query
@@ -1299,6 +1334,7 @@ export interface GetPagosParams {
   inversionistaId?: number;
   excel?: boolean;
   usuarioNombre?: string;
+  validationStatus?: string; // 🆕 Filtro por estado de validación
 }
 
 /**
@@ -1323,12 +1359,30 @@ export async function getPagosConInversionistasService(
       reserva: pago.reserva ?? 0,
       membresias: pago.membresias ?? 0,
       observaciones: pago.observaciones ?? null,
+      abono_capital: Number(pago.abono_capital ?? 0), // 🆕 Agregado
       abono_interes: Number(pago.abono_interes ?? 0),
       abono_iva_12: Number(pago.abono_iva_12 ?? 0),
       abono_seguro: Number(pago.abono_seguro ?? 0),
       abono_gps: Number(pago.abono_gps ?? 0),
       inversionistas: pago.inversionistas ?? [],
     })),
+    // 💰 Incluir totales si vienen del backend (solo cuando NO es Excel)
+    totales: data.totales
+      ? {
+          totalAbonoCapital: Number(data.totales.totalAbonoCapital ?? 0),
+          totalAbonoInteres: Number(data.totales.totalAbonoInteres ?? 0),
+          totalAbonoIva: Number(data.totales.totalAbonoIva ?? 0),
+          totalAbonoSeguro: Number(data.totales.totalAbonoSeguro ?? 0),
+          totalAbonoGps: Number(data.totales.totalAbonoGps ?? 0),
+          totalMora: Number(data.totales.totalMora ?? 0),
+          totalOtros: Number(data.totales.totalOtros ?? 0),
+          totalReserva: Number(data.totales.totalReserva ?? 0),
+          totalMembresias: Number(data.totales.totalMembresias ?? 0),
+          totalGeneral: Number(data.totales.totalGeneral ?? 0),
+        }
+      : undefined,
+    // 📊 Incluir URL del Excel si viene
+    excelUrl: data.excelUrl,
   };
 
   return parsedData;
@@ -1480,3 +1534,297 @@ export const inversionistasService = {
   },
 
 };
+
+// 📁 types/pagos-pendientes.types.ts
+
+/**
+ * 💳 Información del crédito
+ */
+export interface CreditoInfoFalsePayment{
+  creditoId: number;
+  numeroCreditoSifco: string;
+  capital: number;
+  deudaTotal: number;
+  statusCredit: string;
+  montoAportado: number;
+  porcentajeParticipacion: number;
+}
+
+/**
+ * 📅 Información de la cuota actual
+ */
+export interface CuotaActual {
+  cuotaId: number;
+  numeroCuota: number;
+  fechaVencimiento: string;
+  montoCuota: number;
+  capital: number;
+  interes: number;
+  iva: number;
+}
+
+/**
+ * 💰 Información de un pago pendiente
+ */
+export interface PagoPendiente {
+  pagoId: number;
+  creditoId: number;
+  cuotaId: number;
+  fechaPago: string;
+  montoBoleta: number;
+  abonoCapital: number;
+  abonoInteres: number;
+  abonoIva: number;
+  abonoSeguro: number;
+  abonoGps: number;
+  validationStatus: string;
+  pagado: boolean;
+}
+
+/**
+ * 📊 Crédito con su cuota actual y pagos pendientes
+ */
+export interface CreditoConPagosPendientes {
+  credito: CreditoInfoFalsePayment;
+  cuotaActual: CuotaActual;
+  pagosPendientes: PagoPendiente[];
+}
+
+/**
+ * 📋 Parámetros para generar pagos falsos
+ */
+export interface GenerateFalsePaymentsParams {
+  inversionistaId: number;
+  generateFalsePayment: boolean;
+}
+
+/**
+ * ✅ Respuesta del servicio
+ */
+export interface GenerateFalsePaymentsResponse {
+  success: boolean;
+  message: string;
+  inversionistaId: number;
+  totalCreditosConPagos: number;
+  pagosGenerados: boolean;
+  data: CreditoConPagosPendientes[];
+}
+
+/**
+ * ❌ Respuesta de error
+ */
+export interface GenerateFalsePaymentsError {
+  success: false;
+  error: string;
+}
+/**
+ * 🚀 Genera pagos falsos para un inversionista
+ * 
+ * @param params - Parámetros del request
+ * @returns Promesa con la respuesta del servidor
+ * 
+ * @example
+ * // Solo consultar sin generar
+ * const resultado = await generateFalsePaymentsService({
+ *   inversionistaId: 123,
+ *   generateFalsePayment: false
+ * });
+ * 
+ * @example
+ * // Consultar y generar pagos
+ * const resultado = await generateFalsePaymentsService({
+ *   inversionistaId: 123,
+ *   generateFalsePayment: true
+ * });
+ */
+export async function generateFalsePaymentsService(
+  params: GenerateFalsePaymentsParams
+): Promise<GenerateFalsePaymentsResponse | GenerateFalsePaymentsError> {
+  try {
+    const { data } = await api.post<GenerateFalsePaymentsResponse>(
+      "/generateFalsePayments",
+      params
+    );
+
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en generateFalsePaymentsService:", error);
+    
+    // Retornar error estructurado
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || "Error al generar pagos",
+    };
+  }
+}
+
+export interface Banco {
+  banco_id: number;
+  nombre: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateBancoDto {
+  nombre: string;
+}
+
+export interface UpdateBancoDto {
+  nombre: string;
+}
+
+export interface BancoResponse {
+  success: boolean;
+  data?: Banco;
+  message?: string;
+  error?: string;
+}
+
+export interface BancosResponse {
+  success: boolean;
+  data?: Banco[];
+  message?: string;
+  error?: string;
+}
+
+export const bancoService = {
+  // 📋 Obtener todos los bancos
+  getAll: async (): Promise<Banco[]> => {
+    const { data } = await api.get<BancosResponse>('/bancos');
+    return data.data || [];
+  },
+
+  // 🔍 Obtener un banco por ID
+  getById: async (id: number): Promise<Banco> => {
+    const { data } = await api.get<BancoResponse>(`/bancos/${id}`);
+    if (!data.data) throw new Error('Banco no encontrado');
+    return data.data;
+  },
+
+  // ✨ Crear nuevo banco
+  create: async (bancoData: CreateBancoDto): Promise<Banco> => {
+    const { data } = await api.post<BancoResponse>('/bancos', bancoData);
+    if (!data.data) throw new Error('Error al crear banco');
+    return data.data;
+  },
+
+  // ✏️ Actualizar banco
+  update: async (id: number, bancoData: UpdateBancoDto): Promise<Banco> => {
+    const { data } = await api.put<BancoResponse>(`/bancos/${id}`, bancoData);
+    if (!data.data) throw new Error('Error al actualizar banco');
+    return data.data;
+  },
+
+  // 🗑️ Eliminar banco
+  delete: async (id: number): Promise<void> => {
+    await api.delete<BancoResponse>(`/bancos/${id}`);
+  },
+};
+
+
+export interface CondonarMasivaRequest {
+  motivo: string;
+  usuario_email: string;
+}
+
+export interface CondonacionMasivaResponse {
+  success: boolean;
+  message: string;
+  condonados?: number;
+  creditos_afectados?: number[];
+  condonaciones?: any[];
+  error?: string;
+}
+
+export const morasService = {
+  /**
+   * Condonar mora de TODOS los créditos morosos
+   */
+  condonarMorasMasivo: async (data: CondonarMasivaRequest): Promise<CondonacionMasivaResponse> => {
+    const response = await api.post('/moras/condonar-masivo', data);
+    return response.data;
+  },
+};
+
+// types/cuentasEmpresa.types.ts
+
+export interface CuentaEmpresa {
+  cuentaId: number;
+  nombreCuenta: string;
+  banco: string;
+  numeroCuenta: string;
+  descripcion?: string | null;
+  activo: boolean;
+  fecha_creacion: string;
+  fecha_actualizacion: string;
+}
+
+export interface CuentasEmpresaResponse {
+  success: boolean;
+  message: string;
+  data: CuentaEmpresa[];
+}
+
+export interface ActualizarCuentaPagoRequest {
+  pagoId: number;
+  cuentaEmpresaId: number;
+}
+
+export interface ActualizarCuentaPagoResponse {
+  success: boolean;
+  message: string;
+  data?: any;
+  error?: string;
+}
+
+
+
+// 🏦 Obtener todas las cuentas de empresa activas
+export async function getCuentasEmpresaService(): Promise<CuentasEmpresaResponse> {
+  try {
+    const { data } = await api.get<CuentasEmpresaResponse>(
+      `${API_URL}/api/cuentas`
+    );
+
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en getCuentasEmpresaService:", error);
+    
+    // Retornar respuesta de error estructurada
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al obtener las cuentas de empresa",
+      data: [],
+    };
+  }
+}
+
+// 🔄 Actualizar cuenta de empresa en un pago
+export async function actualizarCuentaPagoService(
+  params: ActualizarCuentaPagoRequest
+): Promise<ActualizarCuentaPagoResponse> {
+  try {
+    const { pagoId, cuentaEmpresaId } = params;
+
+    const { data } = await api.post<ActualizarCuentaPagoResponse>(
+      `${API_URL}/actualizar-cuenta`,
+      null, // No body porque usamos query params
+      {
+        params: {
+          pagoId: pagoId.toString(), // 👈 Convertir a string
+          cuentaEmpresaId: cuentaEmpresaId.toString(), // 👈 Convertir a string
+        },
+      }
+    );
+
+    return data;
+  } catch (error: any) {
+    console.error("❌ Error en actualizarCuentaPagoService:", error);
+    
+    return {
+      success: false,
+      message: error.response?.data?.message || "Error al actualizar la cuenta del pago",
+      error: error.message,
+    };
+  }
+}

@@ -7,7 +7,8 @@ import {
   bad_debts,
   cuotas_credito,
   montos_adicionales,
-  moras_credito, // 👈 importar
+  moras_credito,
+  pagos_credito, // 👈 importar
 } from "../database/db/schema";
 import { eq, and, lt, asc } from "drizzle-orm";
 
@@ -84,7 +85,8 @@ export async function getCreditWithCancellationDetails(
           capital: creditos.capital,
           cuota_interes: creditos.cuota_interes,
           seguro_10_cuotas: creditos.seguro_10_cuotas,
-          membresias_pago: creditos.membresias_pago,
+          membresias_mes: creditos.membresias,
+          iva: creditos.iva_12,
       
           otros: creditos.otros,
           tipo_credito: creditos.tipoCredito,
@@ -142,19 +144,24 @@ export async function getCreditWithCancellationDetails(
     }
 
     // 3) Cuotas atrasadas
-    const hoy = todayStr();
+        const hoy = new Date();
     const cuotasAtrasadas = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
+        credito_id: cuotas_credito.credito_id,
         numero_cuota: cuotas_credito.numero_cuota,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        createdAt: cuotas_credito.createdAt,
+        validationStatus: pagos_credito.validationStatus,
       })
       .from(cuotas_credito)
+      .innerJoin(pagos_credito, eq(pagos_credito.cuota_id, cuotas_credito.cuota_id))
       .where(
         and(
           eq(cuotas_credito.credito_id, r.credit.id),
           eq(cuotas_credito.pagado, false),
-          lt(cuotas_credito.fecha_vencimiento, hoy)
+          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
         )
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
@@ -181,13 +188,13 @@ export async function getCreditWithCancellationDetails(
         typeof c.fecha_vencimiento === "string"
           ? c.fecha_vencimiento
           : (c.fecha_vencimiento as Date).toISOString().slice(0, 10);
-
-      const interes = new Big(r.credit.cuota_interes);
-      const membresias = new Big(r.credit.membresias_pago);
-
+       
+      const interes = new Big(r.credit.cuota_interes).plus(r.credit.iva);
+      const membresias = new Big(r.credit.membresias_mes);
+      const seguro = new Big(r.credit.seguro_10_cuotas);
       const otros = new Big(r.credit.otros ?? "0");
       const gps = new Big(r.credit.gps ?? "0");
-      const servicios = new Big(r.credit.seguro_10_cuotas).add(new Big(r.credit.membresias_pago)).add(new Big(r.credit.gps ?? "0"));
+      const servicios = new Big(r.credit.seguro_10_cuotas).add(new Big(r.credit.membresias_mes)).add(new Big(r.credit.gps ?? "0"));
       const moraResult = await db.select({monto: moras_credito.monto_mora}).from(moras_credito).where(eq(moras_credito.credito_id, r.credit.id));
       const mora = moraResult.length > 0 ? new Big(moraResult[0].monto as unknown as string) : new Big(0);
       const total_cancelar = interes.plus(servicios).plus(membresias).plus(mora).plus(otros);
@@ -202,13 +209,15 @@ export async function getCreditWithCancellationDetails(
         capital_pendiente: new Big(r.credit.capital).toFixed(2),
         total_cancelar: total_cancelar.toFixed(2),
         fecha_vencimiento: fv,
+        seguro: seguro.toFixed(2),
+        membresias: membresias.toFixed(2),
       };
     });
     
     const items: CuotaExcelRow[] = await Promise.all(itemsPromises);
 
     // 6) DTO final con extras
-    const saldo_total = new Big(r.credit.deudatotal);
+    const saldo_total = new Big(r.credit.capital);
     const data: GetCreditDTO = {
       header: {
         usuario: r.user?.name ?? "—",
@@ -239,7 +248,7 @@ export async function getCreditWithCancellationDetails(
         })),
       },
     };
-
+    console.log("data.", data.cuotas_atrasadas)
     return { success: true, data };
   } catch (error) {
     console.error("[ERROR] getCreditWithCancellationDetails:", error);

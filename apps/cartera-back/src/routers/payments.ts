@@ -10,7 +10,7 @@ import { z } from "zod";
 import { mapPagosPorCreditos } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../controllers/reports";
-import { aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
+import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { pagos_credito } from "../database/db";
@@ -29,8 +29,7 @@ const falsePaymentSchema = z.object({
 
 
 
-export const paymentRouter = new Elysia()
- 
+export const paymentRouter = new Elysia() 
   // Endpoint para registrar pago (ya lo tienes)
   .post("/newPayment", insertPayment)
   .post("/reversePayment", reversePayment)
@@ -219,10 +218,8 @@ export const paymentRouter = new Elysia()
         });
 
         set.status = 200;
-        return {
-          status: "📄 Datos de pagos obtenidos correctamente",
-          ...data,
-        };
+        console.log(data)
+        return  data
       } catch (error: any) {
         console.error("❌ Error en /reportes/pagos-inversionistas:", error);
         set.status = 500;
@@ -242,14 +239,14 @@ export const paymentRouter = new Elysia()
       query: t.Object({
         page: t.Optional(t.Integer({ minimum: 1, default: 1 })),
         pageSize: t.Optional(t.Integer({ minimum: 1, maximum: 1000, default: 20 })),
-        numeroCredito: t.Optional(t.String({ minLength: 1 })),
+        numeroCredito: t.Optional(t.String()),
         dia: t.Optional(t.Integer({ minimum: 1, maximum: 31 })),
         mes: t.Optional(t.Integer({ minimum: 1, maximum: 12 })),
         anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
         inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
         excel: t.Optional(t.Boolean({ default: false })),
-        usuarioNombre: t.Optional(t.String({ minLength: 1 })),
-        validationStatus: t.Optional(t.String({ minLength: 1 })),
+        usuarioNombre: t.Optional(t.String()),
+        validationStatus: t.Optional(t.String()),
       }),
       response: {
         200: t.Object({
@@ -258,6 +255,8 @@ export const paymentRouter = new Elysia()
           total: t.Optional(t.Number()),
           excelUrl: t.Optional(t.String()),
           data: t.Optional(t.Array(t.Any())),
+          totalPages: t.Optional(t.Number()),
+          totales: t.Optional(t.Any()),
         }),
         500: t.Object({
           success: t.Literal(false),
@@ -335,3 +334,67 @@ export const paymentRouter = new Elysia()
     }),
   }
 )
+.post(
+  "/actualizar-cuenta",
+  async ({ query }) => {
+    try {
+      const { pagoId, cuentaEmpresaId } = query;
+
+      // Validaciones
+      if (!pagoId || !cuentaEmpresaId) {
+        return {
+          status: 400,
+          body: {
+            success: false,
+            message: "❌ pagoId y cuentaEmpresaId son requeridos",
+          },
+        };
+      }
+
+      const pagoIdNum = parseInt(pagoId);
+      const cuentaIdNum = parseInt(cuentaEmpresaId);
+
+      if (isNaN(pagoIdNum) || isNaN(cuentaIdNum)) {
+        return {
+          status: 400,
+          body: {
+            success: false,
+            message: "❌ pagoId y cuentaEmpresaId deben ser números válidos",
+          },
+        };
+      }
+
+      const result = await actualizarCuentaPago(pagoIdNum, cuentaIdNum);
+
+      if (!result.success) {
+        return {
+          status: result.message.includes("no encontrado") ? 404 : 400,
+          body: result,
+        };
+      }
+
+      return {
+        status: 200,
+        body: result,
+      };
+    } catch (error: any) {
+      console.error("❌ Error en POST /pagos/actualizar-cuenta:", error);
+      return {
+        status: 500,
+        body: {
+          success: false,
+          message: "❌ Error interno del servidor",
+          error: error.message,
+        },
+      };
+    }
+  },
+  {
+    query: t.Object({
+      pagoId: t.String(),
+      cuentaEmpresaId: t.String(),
+    }),
+  }
+)
+
+ 

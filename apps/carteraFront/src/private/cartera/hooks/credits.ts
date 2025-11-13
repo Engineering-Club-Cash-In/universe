@@ -35,6 +35,10 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
 
   // 🆕 Nuevos states para filtros con valor inicial
   const [asesorId, setAsesorId] = useState<number | undefined>(options?.initialAsesorId);
+  
+  // 🔥 Estado local del input (lo que escribe el usuario)
+  const [nombreUsuarioInput, setNombreUsuarioInput] = useState("");
+  // 🔥 Estado que realmente dispara la búsqueda
   const [nombreUsuario, setNombreUsuario] = useState("");
 
   // React Query consulta con todos los filtros
@@ -49,7 +53,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
       estado,
       excel,
       asesorId,
-      nombreUsuario,
+      nombreUsuario, // 👈 Este es el que realmente busca
     ],
     queryFn: () =>
       getCreditosPaginados({
@@ -66,6 +70,7 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     staleTime: 1000 * 60,
     refetchOnWindowFocus: false,
   });
+  
   const handleSifco = (valor: string) => {
     setCreditoSifco(valor);
     setPage(1);
@@ -91,13 +96,15 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     setPage(1);
   };
 
-  // 🆕 Handler para nombre de usuario
-  const handleNombreUsuario = (valor: string) => {
-    setNombreUsuario(valor);
+  // 🔥 Handler para ejecutar la búsqueda (se llama al presionar botón o Enter)
+  const handleSearchNombreUsuario = () => {
+    setNombreUsuario(nombreUsuarioInput);
     setPage(1);
   };
 
+  // 🔥 Handler para limpiar
   const clearNombreUsuario = () => {
+    setNombreUsuarioInput("");
     setNombreUsuario("");
     setPage(1);
   };
@@ -105,8 +112,9 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
   // 🆕 Limpiar todos los filtros
   const clearAllFilters = () => {
     setCreditoSifco("");
+    setNombreUsuarioInput("");
     setNombreUsuario("");
-    setAsesorId(options?.initialAsesorId); // 👈 Volver al inicial
+    setAsesorId(options?.initialAsesorId);
     setPage(1);
   };
 
@@ -151,16 +159,16 @@ export function useCreditosPaginadosWithFilters(options?: UseCreditosOptions) {
     estados,
     excel,
     handleExcel,
-    // 🆕 Nuevos exports para asesor
+    // 🆕 Exports para asesor
     asesorId,
     setAsesorId,
     handleAsesorId,
     clearAsesorId,
-    // 🆕 Nuevos exports para nombre usuario
-    nombreUsuario,
-    setNombreUsuario,
-    handleNombreUsuario,
-    clearNombreUsuario,
+    // 🔥 Exports para nombre usuario (actualizados)
+    nombreUsuarioInput,        // 👈 Para el input
+    setNombreUsuarioInput,     // 👈 Para actualizar el input
+    handleSearchNombreUsuario, // 👈 Para ejecutar la búsqueda
+    clearNombreUsuario,        // 👈 Para limpiar
     // 🆕 Limpiar todos
     clearAllFilters,
   };

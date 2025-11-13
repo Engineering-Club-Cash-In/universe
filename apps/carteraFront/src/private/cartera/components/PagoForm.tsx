@@ -3,11 +3,19 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { DollarSign, Percent, Info } from "lucide-react"; 
+import { DollarSign, Percent, Info, FileText, Building2 } from "lucide-react";
 import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
 import { ModalBadDebtCredit } from "./ModalBadDebtCredit";
 import { BuscadorUsuarioSifco } from "./searchByNameSifco";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select"; // 👈 Importar desde shadcn/ui, no de radix directo
+import { useBancos } from "../hooks/bancos";
 
 const fields = [
   {
@@ -16,14 +24,12 @@ const fields = [
     type: "number",
     icon: <DollarSign className="text-blue-500 mr-2 w-5 h-5" />,
   },
-
   {
     name: "otros",
     label: "Otros",
     type: "number",
     icon: <Info className="text-blue-500 mr-2 w-5 h-5" />,
   },
-  
   {
     name: "observaciones",
     label: "Observaciones",
@@ -36,7 +42,7 @@ export function PagoForm() {
   const {
     formik,
     fetchCredito,
-    dataCredito, 
+    dataCredito,
     errorCredito,
     cuotaActualInfo,
     cuotasAtrasadasInfo,
@@ -45,7 +51,7 @@ export function PagoForm() {
     setModalExcesoOpen,
     excedente,
     handleAbonoCapital,
-    handleAbonoSiguienteCuota, 
+    handleAbonoSiguienteCuota,
     handleAbonoOtros,
     modalMode,
     setCuotaSeleccionada,
@@ -59,20 +65,19 @@ export function PagoForm() {
     handleResetCredito,
     resetBuscador,
     setResetBuscador,
-    mora
+    mora,
   } = usePagoForm();
- 
+
+  const { bancos, loading: loadingBancos } = useBancos();
+
   return (
-<div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-
-
+    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <OpcionesExcesoModal
         open={modalExcesoOpen}
-        mode={modalMode} // "excedente" o "pagada"
+        mode={modalMode}
         onClose={() => setModalExcesoOpen(false)}
         onAbonoCapital={handleAbonoCapital}
         onAbonoSiguienteCuota={handleAbonoSiguienteCuota}
-     
         excedente={excedente}
         onAbonoOtros={handleAbonoOtros}
         cuotaNumero={cuotaActualInfo?.numero}
@@ -85,40 +90,25 @@ export function PagoForm() {
         onSuccess={async () => {
           setOpenBadDebt(false);
           await handleResetCredito();
-          // Puedes hacer un refetch o lo que necesites aquí
         }}
       />
-  <h1 className="text-4xl font-extrabold text-blue-700 text-center mb-6 drop-shadow-md w-full">
-    Registro de Pago
-  </h1>
-      <Card
-        className="
-          w-full max-w-[900px]
-          mx-2
-          flex flex-col
-          shadow-2xl
-          border-2 border-blue-100
-          rounded-3xl
-          bg-white/90
-          backdrop-blur-sm
-        "
-      >
-        {/* Ícono flotando centrado */}
+      <h1 className="text-4xl font-extrabold text-blue-700 text-center mb-6 drop-shadow-md w-full">
+        Registro de Pago
+      </h1>
+      <Card className="w-full max-w-[900px] mx-2 flex flex-col shadow-2xl border-2 border-blue-100 rounded-3xl bg-white/90 backdrop-blur-sm">
         <CardHeader className="pb-0 flex flex-col items-center gap-2">
           <span className="flex items-center justify-center bg-blue-100 rounded-full w-14 h-14 mb-1 shadow">
             <DollarSign className="text-blue-600 w-9 h-9" />
           </span>
         </CardHeader>
         <CardContent className="flex-1 flex flex-col items-center justify-center">
-             <div className="mb-4 flex gap-2 items-center">
-     <BuscadorUsuarioSifco
-  onSelect={(sifco) => fetchCredito(sifco)}
-  reset={resetBuscador}
-  onReset={() => setResetBuscador(false)}
-/>
-
-    </div>
-          {/* --- MINICARD --- */}
+          <div className="mb-4 flex gap-2 items-center">
+            <BuscadorUsuarioSifco
+              onSelect={(sifco) => fetchCredito(sifco)}
+              reset={resetBuscador}
+              onReset={() => setResetBuscador(false)}
+            />
+          </div>
 
           {creditoCanceladoInfo ? (
             <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-xl mb-4 flex gap-3 items-start shadow">
@@ -178,6 +168,7 @@ export function PagoForm() {
                 usuario={dataCredito.usuario}
                 cuotaActual={cuotaActualInfo?.numero || 0}
                 cuotaActualPagada={cuotaActualInfo?.pagada}
+                cuotaActualStatus={cuotaActualInfo?.validationStatus}
                 cuotasAtrasadasInfo={cuotasAtrasadasInfo ?? { cuotas: [] }}
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
@@ -188,6 +179,7 @@ export function PagoForm() {
           {errorCredito && (
             <div className="text-red-500 mb-2">{errorCredito}</div>
           )}
+
           <form
             onSubmit={handleFormSubmit}
             className="flex-1 flex flex-col gap-5 w-full"
@@ -209,54 +201,24 @@ export function PagoForm() {
                     {field.icon}
                     <span>{field.label}</span>
                   </Label>
-                  {field.name === "renuevo_o_nuevo" ? (
-                    <select
-                      id={field.name}
-                      name={field.name}
-                      value={
-                        formik.values[
-                          field.name as keyof typeof formik.values
-                        ] ?? ""
-                      }
-                      onChange={formik.handleChange}
-                      onBlur={formik.handleBlur}
-                      className={[
-                        "w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70",
-                        formik.errors[
-                          field.name as keyof typeof formik.values
-                        ] &&
-                        formik.touched[field.name as keyof typeof formik.values]
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-gray-300",
-                      ].join(" ")}
-                    >
-                      <option value="">Seleccione una opción</option>
-                      <option value="Renuevo">Renuevo</option>
-                      <option value="Nuevo">Nuevo</option>
-                    </select>
-                  ) : (
-                    <Input
-                      id={field.name}
-                      name={field.name}
-                      type={field.type}
-                      value={
-                        formik.values[
-                          field.name as keyof typeof formik.values
-                        ] ?? ""
-                      }
-                      onChange={formik.handleChange}
-                      onBlur={formik.handleBlur}
-                      className={[
-                        "w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70",
-                        formik.errors[
-                          field.name as keyof typeof formik.values
-                        ] &&
-                        formik.touched[field.name as keyof typeof formik.values]
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-gray-300",
-                      ].join(" ")}
-                    />
-                  )}
+                  <Input
+                    id={field.name}
+                    name={field.name}
+                    type={field.type}
+                    value={
+                      formik.values[field.name as keyof typeof formik.values] ??
+                      ""
+                    }
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                    className={[
+                      "w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70",
+                      formik.errors[field.name as keyof typeof formik.values] &&
+                      formik.touched[field.name as keyof typeof formik.values]
+                        ? "border-red-500 focus:ring-red-500"
+                        : "border-gray-300",
+                    ].join(" ")}
+                  />
                   {formik.errors[field.name as keyof typeof formik.values] &&
                     formik.touched[
                       field.name as keyof typeof formik.values
@@ -271,7 +233,75 @@ export function PagoForm() {
                     )}
                 </div>
               ))}
+
+              {/* 👇 Campo Banco */}
+              <div className="min-h-[92px] flex flex-col justify-end w-full">
+                <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
+                  <Building2 className="text-blue-500 mr-2 w-5 h-5" />
+                  <span>Banco (Opcional)</span>
+                </Label>
+                <Select
+                  value={formik.values.banco_id?.toString() || "none"}
+                  onValueChange={(value) => {
+                    formik.setFieldValue(
+                      "banco_id",
+                      value === "none" ? undefined : Number(value)
+                    );
+                  }}
+                  disabled={loadingBancos}
+                >
+                  <SelectTrigger className="w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white border-gray-300 [&>span]:text-gray-900">
+                    <SelectValue
+                      placeholder="Selecciona un banco"
+                      className="text-gray-900"
+                    />
+                  </SelectTrigger>
+                  <SelectContent className="bg-white border border-gray-200 shadow-lg">
+                    <SelectItem
+                      value="none"
+                      className="text-gray-900 hover:bg-blue-50 cursor-pointer"
+                    >
+                      Sin banco
+                    </SelectItem>
+                    {bancos.map((banco) => (
+                      <SelectItem
+                        key={banco.banco_id}
+                        value={banco.banco_id.toString()}
+                        className="text-gray-900 hover:bg-blue-50 cursor-pointer"
+                      >
+                        {banco.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* 👇 Campo Número de Autorización */}
+              <div className="min-h-[92px] flex flex-col justify-end w-full">
+                <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
+                  <FileText className="text-blue-500 mr-2 w-5 h-5" />
+                  <span>Número de Autorización </span>
+                </Label>
+                <Input
+                  id="numeroAutorizacion"
+                  name="numeroAutorizacion"
+                  type="text"
+                  value={formik.values.numeroAutorizacion ?? ""}
+                  onChange={formik.handleChange}
+                  onBlur={formik.handleBlur}
+                  placeholder="Ej: 123456789"
+                  className="w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70 border-gray-300"
+                />
+                {formik.errors.numeroAutorizacion &&
+                  formik.touched.numeroAutorizacion && (
+                    <div className="text-red-500 text-sm mt-1">
+                      {formik.errors.numeroAutorizacion}
+                    </div>
+                  )}
+              </div>
             </div>
+
+            {/* Boletas */}
             <div className="flex flex-col gap-1 mb-2">
               <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
                 <Info className="text-blue-500 mr-2 w-5 h-5" />
@@ -287,7 +317,6 @@ export function PagoForm() {
                   style={{ minHeight: 44 }}
                   onChange={(e) => {
                     const files = Array.from(e.target.files ?? []);
-                    // Limita el total a 3 archivos
                     if (files.length + archivosParaSubir.length > 3) {
                       alert(
                         "Solo puedes seleccionar hasta 3 archivos en total."
@@ -295,11 +324,11 @@ export function PagoForm() {
                       return;
                     }
                     setArchivosParaSubir([...archivosParaSubir, ...files]);
-                    e.target.value = ""; // Permite volver a elegir el mismo archivo si se borra
+                    e.target.value = "";
                   }}
                 />
               </div>
-              {/* Mostrar archivos pendientes para subir */}
+
               {archivosParaSubir.length > 0 && (
                 <ul className="mt-2 text-xs text-green-700 space-y-1">
                   {archivosParaSubir.map((file, i) => (
@@ -330,10 +359,8 @@ export function PagoForm() {
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 px-4 rounded-xl text-2xl shadow transition"
               disabled={formik.isSubmitting}
               onClick={(e) => {
-                // Detener el submit si hay errores
                 if (!formik.isValid && Object.keys(formik.errors).length > 0) {
                   e.preventDefault();
-                  // Crea un mensaje bonito con todos los errores
                   const errores = Object.entries(formik.errors)
                     .map(([campo, mensaje]) => `• ${campo}: ${mensaje}`)
                     .join("\n");
@@ -345,7 +372,6 @@ export function PagoForm() {
             >
               {formik.isSubmitting ? "Registrando..." : "Registrar Pago"}
             </Button>
-            {/* Resumen */}
           </form>
         </CardContent>
       </Card>

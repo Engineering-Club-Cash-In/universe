@@ -6,10 +6,16 @@ export const NavBar = () => {
   const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
 
   const defaultNavItems = [
-    { label: "Sobre nosotros", href: "#about" },
-    { label: "Solicita tu crédito", href: "#credit" },
-    { label: "Compra - vende", href: "#trade" },
-    { label: "Invierte con nosotros", href: "#invest" },
+    { label: "Solicita tu crédito", href: "/credit" },
+    { label: "Autos en venta", href: "/cars" },
+    { label: "Vendemos tu auto", href: "/sell" },
+    {
+      label: "Invierte con nosotros",
+      href: "/invest",
+      className: "text-secondary",
+    },
+    { label: "Sobre nosotros", href: "/about" },
+
   ];
 
   const userMenuItems = [
@@ -19,13 +25,13 @@ export const NavBar = () => {
 
   return (
     <nav
-      className="sticky top-6 sm:top-8 left-4 sm:left-8 right-16 sm:right-8 flex items-center justify-center lg:justify-between z-50 gap-4 mx-28"
+      className="sticky top-6 sm:top-8 left-4 sm:left-8 right-16 sm:right-8 flex items-center justify-center lg:justify-between z-50 gap-4 mx-20"
       aria-label="Main navigation"
     >
       <div className="hidden lg:block shrink-0"></div>
 
       <div
-        className="flex items-center justify-between w-full max-w-[1134px] h-[61px] rounded-[56px] px-4 sm:px-6 py-3 border-[0.8px] border-transparent"
+        className="flex items-center justify-between w-full max-w-[1250px] h-[61px] rounded-[56px] px-4 sm:px-6 py-3 border-[0.8px] border-transparent"
         style={{
           background:
             "linear-gradient(181.54deg, #0F0F0F 1.31%, #262626 98.69%)",
@@ -59,7 +65,9 @@ export const NavBar = () => {
                   |
                 </span>
               )}
-              <Link href={item.href}>{item.label}</Link>
+              <Link href={item.href} className={item.className}>
+                {item.label}
+              </Link>
             </div>
           ))}
         </div>

@@ -2,20 +2,24 @@ import React from "react";
 import buyYourCar from "./assets/buyYourCar.jpg";
 import financing from "./assets/financing.jpg";
 import investWithUs from "./assets/investWithUs.jpg";
+import { IconPlay } from "@/components/icons/IconPlay";
 
 export const HowItWorks: React.FC = () => {
   const items = [
     {
       image: financing,
       label: "Financiamiento",
+      icon: <IconPlay />
     },
     {
       image: buyYourCar,
       label: "Marketplace",
+      icon: <IconPlay />
     },
      {
       image: investWithUs,
       label: "Invierte con Nosotros",
+      icon: <IconPlay />
     },
   ];
 
@@ -39,7 +43,8 @@ export const HowItWorks: React.FC = () => {
               alt={item.label}
               className="w-full h-full object-cover rounded-4xl"
             />
-            <div className="absolute inset-0 flex items-center justify-center bg-black/55 rounded-4xl transition-all duration-600 ease-in group-hover:bg-black/0">
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 rounded-4xl transition-all duration-600 ease-in group-hover:bg-black/0">
+              {item.icon}
               <span className="text-light text-header-body">{item.label}</span>
             </div>
           </div>

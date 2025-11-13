@@ -1,3 +1,5 @@
+const urlImage = import.meta.env.VITE_IMAGE_URL
+
 export const WhoWeAre = () => {
   return (
     <section className="text-center w-full mt-20 px-20">
@@ -10,7 +12,7 @@ export const WhoWeAre = () => {
         </h3>
         <div className="flex justify-center mt-8">
           <img
-            src="https://via.assets.so/img.jpg?w=800&h=525&bg=1f2937&text=video&fontColor=ffffff&f=png"
+            src={`${urlImage}/tempVideo.png`}
             alt="Who We Are Video"
             className="rounded-2xl"
           />

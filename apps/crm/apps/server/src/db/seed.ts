@@ -2668,8 +2668,27 @@ async function seedCasosCobros(
 							["llamada", "whatsapp", "email", "visita_domicilio"] as const
 						)[index],
 					});
+				} else {
+					// Contratos al día: crear casos de cobros con estado al_dia
+					// para almacenar datos de contacto
+					casosData.push({
+						contratoId: contrato.id,
+						estadoMora: "al_dia" as const,
+						montoEnMora: "0.00",
+						diasMoraMaximo: 0,
+						cuotasVencidas: 0,
+						responsableCobros: responsableCobros?.id,
+						telefonoPrincipal: "+502 5555 0" + (index + 1) + "01",
+						telefonoAlternativo: "+502 4444 0" + (index + 1) + "01",
+						emailContacto:
+							cliente.contactPerson.toLowerCase().replace(" ", ".") +
+							"@email.com",
+						direccionContacto: `Zona ${index + 10}, Ciudad de Guatemala`,
+						proximoContacto: null,
+						metodoContactoProximo: null,
+						activo: false, // No mostrar en dashboard de cobros por defecto
+					});
 				}
-				// Los contratos 5-6 están al día, no necesitan casos de cobros
 			} else if (
 				contrato.estado === "incobrable" ||
 				contrato.estado === "recuperado"

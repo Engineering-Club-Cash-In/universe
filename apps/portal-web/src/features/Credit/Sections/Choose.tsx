@@ -35,7 +35,7 @@ export const Choose = () => {
     "Dos soluciones diseñadas para diferentes necesidades. Encuentra la que mejor funcione para tu situación.";
 
   return (
-    <section className="relative w-full mt-56 pb-20 px-20">
+    <section className="relative w-full mt-50 pb-20 px-20">
       {/* Título y Subtítulo */}
       <div className="text-center mb-16">
         <h2 className="text-header-2 font-bold mb-4">{title}</h2>

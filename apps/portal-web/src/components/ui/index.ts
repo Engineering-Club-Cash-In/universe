@@ -4,3 +4,4 @@ export * from "./Link";
 export * from "./Input";
 export * from "./ButtonIcon";
 export * from "./CheckBox"
+export * from "./BottomSheets";

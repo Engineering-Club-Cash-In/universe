@@ -20,7 +20,7 @@ import {
 } from './ui/form';
 import { formatCurrency, handleCurrencyInput } from '../utils/currency';
 import { toast } from 'sonner';
-import { vehiclesApi } from '../utils/orpc';
+import { client } from '../utils/orpc';
 import { useInspection } from '../contexts/InspectionContext';
 
 const valuationSchema = z.object({
@@ -57,6 +57,7 @@ interface VehicleValuationProps {
   vehicleData: any; // Data from previous steps
   onComplete: (valuationData: z.infer<typeof valuationSchema>) => void;
   isWizardMode?: boolean;
+  isSubmitting?: boolean;
 }
 
 interface AIValuationResult {
@@ -67,10 +68,11 @@ interface AIValuationResult {
   confidence: string;
 }
 
-export default function VehicleValuation({ 
-  vehicleData, 
-  onComplete, 
-  isWizardMode = false 
+export default function VehicleValuation({
+  vehicleData,
+  onComplete,
+  isWizardMode = false,
+  isSubmitting = false
 }: VehicleValuationProps) {
   const { checklistItems, photos } = useInspection();
   const [aiValuation, setAiValuation] = useState<AIValuationResult | null>(null);
@@ -106,10 +108,10 @@ export default function VehicleValuation({
 
   const getAIValuation = async () => {
     setLoadingAI(true);
-    
+
     try {
       // Call AI valuation endpoint with complete context
-      const result = await vehiclesApi.getAIValuation({
+      const result = await client.getAIVehicleValuation({
         vehicleData,
         checklistItems,
         photos
@@ -510,8 +512,15 @@ export default function VehicleValuation({
           </Card>
 
           {isWizardMode && (
-            <Button type="submit" className="w-full">
-              Finalizar Inspección
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Enviando inspección...
+                </>
+              ) : (
+                "Finalizar Inspección"
+              )}
             </Button>
           )}
         </form>

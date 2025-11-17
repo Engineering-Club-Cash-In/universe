@@ -4,7 +4,6 @@ import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
 import {
-	contractStatusEnum,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
 import { adminProcedure, juridicoProcedure } from "../lib/orpc";

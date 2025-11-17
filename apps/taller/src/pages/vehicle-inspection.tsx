@@ -1,5 +1,3 @@
-import type React from "react";
-
 import { useState, useRef, useEffect } from "react";
 import { useInspection } from "../contexts/InspectionContext";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -14,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,

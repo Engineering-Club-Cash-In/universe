@@ -54,6 +54,8 @@ export default function VehicleInspectionWizard() {
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [savedPhotos, setSavedPhotos] = useState<any[]>([]);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -67,7 +69,8 @@ export default function VehicleInspectionWizard() {
       toast.error("Por favor complete la evaluación de criterios antes de continuar");
       return;
     }
-    // Photo step validation is handled automatically by VehiclePictures component
+    // Nota: El paso 2 (fotos) y paso 3 (valoración) no muestran el botón "Siguiente"
+    // Estos pasos manejan su propia navegación con botones internos
 
     if (currentStep < STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -82,10 +85,12 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[]) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[], completeFormData?: any) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
-    
+    // Usar los datos completos pasados o los del contexto
+    const dataToUse = completeFormData || formData;
+
     // Verificar que las fotos estén disponibles
     if (!photosToUse || photosToUse.length === 0) {
       console.error("No hay fotos disponibles");
@@ -95,7 +100,7 @@ export default function VehicleInspectionWizard() {
 
     console.log("Enviando inspección con", photosToUse.length, "fotos");
     setIsSubmitting(true);
-    
+
     try {
       // Prepare data for submission
       const { vehicleData, inspectionData } = prepareInspectionData(dataToUse);
@@ -125,6 +130,7 @@ export default function VehicleInspectionWizard() {
       console.error('Error submitting inspection:', error);
       toast.error("Error al procesar la inspección");
     } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -268,11 +274,19 @@ export default function VehicleInspectionWizard() {
 
             {currentStep === 2 && (
               <div>
-                <VehiclePictures 
+                <VehiclePictures
                   onComplete={(photosFromComponent) => {
+                    console.log("=== CALLBACK onComplete del wizard ===");
+                    console.log("Fotos recibidas:", photosFromComponent);
+                    console.log("Cantidad:", photosFromComponent?.length || 0);
+
                     setPhotosCompleted(true);
-                    // Pasar las fotos directamente, sin delays
-                    handleCompleteInspection(photosFromComponent);
+                    setSavedPhotos(photosFromComponent);
+
+                    // No mostrar toast aquí, VehiclePictures ya lo hace
+                    // toast.success("Fotos guardadas. Continúa con la valoración.");
+
+                    handleNextStep();
                   }}
                   isWizardMode={true}
                 />
@@ -281,15 +295,18 @@ export default function VehicleInspectionWizard() {
 
             {currentStep === 3 && (
               <div>
-                <VehicleValuation 
+                <VehicleValuation
                   vehicleData={formData}
                   onComplete={(valuationData) => {
                     setValuationCompleted(true);
                     // Merge valuation data with existing form data
                     const completeData = { ...formData, ...valuationData };
-                    handleCompleteInspection(photos, completeData);
+                    console.log("Fotos guardadas del paso 2:", savedPhotos);
+                    console.log("Cantidad de fotos:", savedPhotos?.length || 0);
+                    handleCompleteInspection(savedPhotos, completeData);
                   }}
                   isWizardMode={true}
+                  isSubmitting={isSubmitting}
                 />
               </div>
             )}
@@ -301,7 +318,7 @@ export default function VehicleInspectionWizard() {
               <Button
                 variant="outline"
                 onClick={handlePreviousStep}
-                disabled={currentStep === 0}
+                disabled={currentStep === 0 || isSubmitting}
                 size="sm"
                 className="text-xs sm:text-sm"
               >
@@ -314,12 +331,14 @@ export default function VehicleInspectionWizard() {
                 Paso {currentStep + 1} de {STEPS.length}
               </div>
 
-              {currentStep === STEPS.length - 1 ? (
-                // No mostrar botón aquí, el botón "Finalizar" en VehiclePictures lo maneja todo
+              {currentStep === 2 || currentStep === STEPS.length - 1 ? (
+                // No mostrar botón "Siguiente" en el paso de fotos (2) ni en valoración (3)
+                // Estos pasos manejan su propia navegación con sus botones internos
                 null
               ) : (
-                <Button 
+                <Button
                   onClick={handleNextStep}
+                  disabled={isSubmitting}
                   size="sm"
                   className="text-xs sm:text-sm"
                 >

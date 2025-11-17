@@ -1,12 +1,13 @@
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
-import { auctionExpenses, auctionVehicles } from "@/db/schema/auctionVehicles";
 import { db } from "../db";
 import {
+	auctionExpenses,
+	auctionVehicles,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
-} from "../db/schema/vehicles";
+} from "../db/schema";
 import { protectedProcedure } from "../lib/orpc";
 
 export const auctionRouter = {
@@ -310,7 +311,83 @@ export const auctionRouter = {
 				.offset(offset);
 
 			// Group rows into nested structure
-			const grouped = auctions.reduce((acc, row) => {
+			type AuctionRow = (typeof auctions)[number];
+			type GroupedAuction = {
+				auctionId: AuctionRow['auctionId'];
+				description: AuctionRow['description'];
+				auctionStatus: AuctionRow['auctionStatus'];
+				auctionPrice: AuctionRow['auctionPrice'];
+				lossValue: AuctionRow['lossValue'];
+				vehicle: {
+					id: AuctionRow['vehicleId'];
+					make: AuctionRow['make'];
+					model: AuctionRow['model'];
+					year: AuctionRow['year'];
+					licensePlate: AuctionRow['licensePlate'];
+					vinNumber: AuctionRow['vinNumber'];
+					color: AuctionRow['color'];
+					vehicleType: AuctionRow['vehicleType'];
+					kmMileage: AuctionRow['kmMileage'];
+					milesMileage: AuctionRow['milesMileage'];
+					origin: AuctionRow['origin'];
+					cylinders: AuctionRow['cylinders'];
+					engineCC: AuctionRow['engineCC'];
+					fuelType: AuctionRow['fuelType'];
+					transmission: AuctionRow['transmission'];
+					seguroVigente: AuctionRow['seguroVigente'];
+					numeroPoliza: AuctionRow['numeroPoliza'];
+					companiaSeguro: AuctionRow['companiaSeguro'];
+					fechaInicioSeguro: AuctionRow['fechaInicioSeguro'];
+					fechaVencimientoSeguro: AuctionRow['fechaVencimientoSeguro'];
+					montoAsegurado: AuctionRow['montoAsegurado'];
+					deducible: AuctionRow['deducible'];
+					tipoCobertura: AuctionRow['tipoCobertura'];
+					gpsActivo: AuctionRow['gpsActivo'];
+					dispositivoGPS: AuctionRow['dispositivoGPS'];
+					imeiGPS: AuctionRow['imeiGPS'];
+					ubicacionActualGPS: AuctionRow['ubicacionActualGPS'];
+					ultimaSeñalGPS: AuctionRow['ultimaSeñalGPS'];
+					status: AuctionRow['vehicleStatus'];
+				};
+				inspections: Array<{
+					id: string;
+					date: AuctionRow['inspectionDate'];
+					result: AuctionRow['inspectionResult'];
+					technicianName: AuctionRow['technicianName'];
+					rating: AuctionRow['vehicleRating'];
+					marketValue: AuctionRow['marketValue'];
+					bankValue: AuctionRow['bankValue'];
+					suggestedCommercialValue: AuctionRow['suggestedCommercialValue'];
+					currentConditionValue: AuctionRow['currentConditionValue'];
+					vehicleEquipment: AuctionRow['vehicleEquipment'];
+					importantConsiderations: AuctionRow['importantConsiderations'];
+					scannerUsed: AuctionRow['scannerUsed'];
+					scannerResultUrl: AuctionRow['scannerResultUrl'];
+					airbagWarning: AuctionRow['airbagWarning'];
+					missingAirbag: AuctionRow['missingAirbag'];
+					testDrive: AuctionRow['testDrive'];
+					noTestDriveReason: AuctionRow['noTestDriveReason'];
+					status: AuctionRow['inspectionStatus'];
+					alerts: AuctionRow['alerts'];
+				}>;
+				photos: Array<{
+					id: AuctionRow['photoId'];
+					url: AuctionRow['photoUrl'];
+					title: AuctionRow['photoTitle'];
+					category: AuctionRow['photoCategory'];
+					description: AuctionRow['photoDescription'];
+					type: AuctionRow['photoType'];
+					valuatorComment: AuctionRow['valuatorComment'];
+					noCommentsChecked: AuctionRow['noCommentsChecked'];
+				}>;
+				expenses: Array<{
+					id: string;
+					description: AuctionRow['expenseDescription'];
+					amount: AuctionRow['expenseAmount'];
+				}>;
+			};
+
+			const grouped = auctions.reduce((acc: GroupedAuction[], row) => {
 				let auction = acc.find((a) => a.auctionId === row.auctionId);
 				if (!auction) {
 					auction = {
@@ -357,11 +434,14 @@ export const auctionRouter = {
 					acc.push(auction);
 				}
 
+				// TypeScript narrowing: auction is now guaranteed to be defined
+				if (!auction) return acc;
+
 				// Agrupar inspecciones
 				if (
 					row.inspectionId &&
 					!auction.inspections.find(
-						(i: { id: string }) => i.id === row.inspectionId,
+						(i) => i.id === row.inspectionId,
 					)
 				) {
 					auction.inspections.push({
@@ -391,7 +471,7 @@ export const auctionRouter = {
 				if (
 					row.photoId &&
 					!auction.photos.find(
-						(p: { id: string | null }) => p.id === row.photoId,
+						(p) => p.id === row.photoId,
 					)
 				) {
 					auction.photos.push({
@@ -409,7 +489,7 @@ export const auctionRouter = {
 				// Agrupar gastos
 				if (
 					row.expenseId &&
-					!auction.expenses.find((e: { id: string }) => e.id === row.expenseId)
+					!auction.expenses.find((e) => e.id === row.expenseId)
 				) {
 					auction.expenses.push({
 						id: row.expenseId,

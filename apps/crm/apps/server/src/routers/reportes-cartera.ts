@@ -3,12 +3,11 @@
  * Combina datos de CRM y cartera-back para reportes completos
  */
 
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
-import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
-import { clients } from "../db/schema/crm";
+import { casosCobros } from "../db/schema/cobros";
 import { adminProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";

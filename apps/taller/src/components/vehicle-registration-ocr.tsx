@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Alert, AlertDescription } from './ui/alert';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { vehiclesApi } from '../utils/orpc';
+import { client } from '../utils/orpc';
 
 interface OCRResult {
   success: boolean;
@@ -87,7 +87,7 @@ export default function VehicleRegistrationOCR({
           const base64Data = base64.split(',')[1]; // Remove data:image/...;base64, prefix
 
           // Send to backend OCR endpoint using ORPC client
-          const ocrResult: OCRResult = await vehiclesApi.processRegistrationOCR({
+          const ocrResult: OCRResult = await client.processVehicleRegistrationOCR({
             imageBase64: base64Data,
             mimeType: selectedFile.type,
           });

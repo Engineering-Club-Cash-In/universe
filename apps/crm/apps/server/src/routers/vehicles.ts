@@ -6,11 +6,11 @@ import { z } from "zod";
 import {
 	mapOCRToVehicleForm,
 	vehicleRegistrationOCRSchema,
-} from "@/lib/ocr-schema";
+} from "../lib/ocr-schema";
 import {
 	prepareValuationContext,
 	vehicleValuationSchema,
-} from "@/lib/valuation-schema";
+} from "../lib/valuation-schema";
 import { db } from "../db";
 import {
 	casosCobros,
@@ -982,7 +982,7 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 	// Vehicle Documents Management
 	getVehicleDocuments: crmProcedure
 		.input(z.object({ vehicleId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			// Verify user has access to the vehicle
 			const [vehicle] = await db
 				.select()

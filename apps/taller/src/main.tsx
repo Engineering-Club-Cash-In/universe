@@ -36,8 +36,8 @@ const indexRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  VehiclesDashboardRoute(rootRoute),
-  VehicleInspectionRoute(rootRoute),
+  VehiclesDashboardRoute(rootRoute as any),
+  VehicleInspectionRoute(rootRoute as any),
 ])
 
 const TanStackQueryProviderContext = TanStackQueryProvider.getContext()

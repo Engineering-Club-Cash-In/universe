@@ -23,7 +23,7 @@ export const ReadyStart = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-8 mt-30">
+    <div className="flex flex-col gap-8 mt-30 lg:px-0 px-12">
       <h2 className="text-header-2 text-center">{title}</h2>
       <p className="text-gray text-4xl text-center">{subtitle}</p>
       <div className="flex justify-center items-center gap-12 flex-col lg:flex-row">

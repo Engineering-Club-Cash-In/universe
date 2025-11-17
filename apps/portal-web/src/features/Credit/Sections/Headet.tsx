@@ -21,16 +21,17 @@ export const Header = () => {
       {/* Fondo con gradiente */}
       <div
         className="absolute inset-0 z-0"
-        style={{ 
+        style={{
           opacity: 0.2,
-          background: 'linear-gradient(0deg, #0F0F0F 0%, #9A9FF5 20%, #0F0F0F 100%)'
+          background:
+            "linear-gradient(0deg, #0F0F0F 0%, #9A9FF5 20%, #0F0F0F 100%)",
         }}
       />
 
       <div className="flex gap-16 items-center z-10 pointer-events-none">
         {items.map((item, index) => (
           <div key={index} className="flex flex-col items-center gap-4 p-6">
-            <div className="flex w-[126.5px] h-[126.5px] p-8 justify-center items-center shrink-0 rounded-full bg-primary/10">
+            <div className="flex w-[126.5px] h-[126.5px] p-8 justify-center items-center shrink-0 rounded-full bg-primary/10 text-primary">
               {item.icon}
             </div>
             <p className="text-body text-gray">{item.title}</p>

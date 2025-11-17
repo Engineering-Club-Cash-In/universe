@@ -1,5 +1,11 @@
 import { Button } from "@/components";
-import { IconCalendar, IconCar, IconDollar, IconSearch, IconSettings } from "@/components";
+import {
+  IconCalendar,
+  IconCar,
+  IconDollar,
+  IconSearch,
+  IconSettings,
+} from "@/components";
 
 interface items {
   icon: React.ReactNode;
@@ -55,7 +61,7 @@ export const HowSellOrBuy = () => {
   ];
 
   return (
-    <section className="relative grid grid-cols-2 gap-40 mt-80 px-20 py-20">
+    <section className="relative grid grid-cols-1 lg:grid-cols-2 gap-40 mt-80 px-20 py-20">
       {/* Imagen de fondo con overlay opaco */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat z-0"
@@ -64,7 +70,7 @@ export const HowSellOrBuy = () => {
       <div className="absolute inset-0 bg-[#0F0F0F]/96 z-0" />
 
       {/* Línea vertical central difuminada */}
-      <div className="absolute left-1/2 top-0 bottom-0 w-1 -translate-x-1/2 bg-linear-to-b from-transparent via-primary to-transparent z-10"></div>
+      <div className="absolute left-1/2 top-0 bottom-0 w-1 -translate-x-1/2 bg-linear-to-b from-transparent via-primary to-transparent z-10 hidden lg:block"></div>
 
       {/* Sección de Compras */}
       <div className="relative z-10">

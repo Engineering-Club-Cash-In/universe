@@ -11,7 +11,7 @@ export const Sell = () => {
         style={{
           paddingBottom: "40px",
           background:
-            "linear-gradient(to bottom, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0) 100%)",
+            "linear-gradient(to bottom, rgba(0, 0, 0, 0.75) 0%, rgba(0, 0, 0, 0) 100%)",
         }}
       >
         <HowItWorks />

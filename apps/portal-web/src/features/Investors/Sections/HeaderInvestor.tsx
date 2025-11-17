@@ -8,7 +8,7 @@ export const HeaderInvestor = () => {
   return (
     <section className="px-20 mt-32">
       <div className="flex gap-20">
-        <div className="flex flex-col gap-12 w-3/5">
+        <div className="flex flex-col gap-12 w-full lg:w-3/5">
           <div>
             <InvestorsLogo width={"320px"} height={"128px"} />
           </div>
@@ -53,7 +53,7 @@ export const HeaderInvestor = () => {
             </motion.button>
           </div>
         </div>
-        <div className="w-2/5">
+        <div className="hidden lg:block w-2/5">
           <img
             src={imgUrl}
             alt="Inversiones"

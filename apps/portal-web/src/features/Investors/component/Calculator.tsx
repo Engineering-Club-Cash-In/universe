@@ -67,7 +67,7 @@ export const Calculator: React.FC = () => {
         background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
       }}
     >
-      <div className="grid grid-cols-2 gap-12">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
         {/* Primer Grid - Inputs */}
         <div className="flex flex-col gap-6">
           <div>

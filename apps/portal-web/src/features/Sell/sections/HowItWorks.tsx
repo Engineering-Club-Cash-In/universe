@@ -30,7 +30,7 @@ export const HowItWorks = () => {
 
   return (
     <div
-      className="w-full px-4 py-16"
+      className="w-full px-12 lg:px-4 py-16"
       style={{
         
       }}

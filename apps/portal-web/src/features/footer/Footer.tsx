@@ -1,6 +1,6 @@
 import Map from "./assets/Map.png";
 import {
-  Investors,
+  InvestorsLogo as Investors,
   Tranki,
   Listo,
   Facebook,
@@ -66,7 +66,7 @@ const LOCATION_INFO = {
 
 export const Footer: React.FC = () => {
   return (
-    <footer className="relative bg-[#0F0F0F] h-[550px]">
+    <footer className="relative bg-[#0F0F0F] lg:h-[550px] h-full">
       {/* Gradient shadow at the top - always visible */}
       <div
         style={{
@@ -89,7 +89,7 @@ export const Footer: React.FC = () => {
       />
 
       {/* Content */}
-      <div className="flex justify-end flex-col gap-6 h-full px-40 py-20 z-10 relative">
+      <div className="flex justify-end flex-col gap-6 h-full px-40 py-6 lg:py-20 z-10 relative">
         {/* Logo section */}
         <div className="flex gap-10 items-center">
           <h1 className="text-header-3">Cashin</h1>
@@ -101,9 +101,9 @@ export const Footer: React.FC = () => {
         <div className="border-t border-white border-2"></div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-5 w-full">
+        <div className="grid grid-cols-5 gap-6 lg:gap-0 w-full">
           {/* Navigation links */}
-          <div className="w-full col-span-2 flex gap-14">
+          <div className="w-full col-span-3 lg:col-span-2 flex gap-14">
             {FOOTER_SECTIONS.map((section) => (
               <div key={section.title} className="flex flex-col gap-6">
                 <div className="text-[20px] font-bold">{section.title}</div>
@@ -121,7 +121,7 @@ export const Footer: React.FC = () => {
           </div>
 
           {/* Social media and contact */}
-          <div className="w-full col-span-3 flex justify-end gap-8 pr-14">
+          <div className="w-full col-span-2 lg:col-span-3 flex flex-col lg:flex-row justify-end gap-8 lg:pr-14">
             {SOCIAL_CONTACTS.map((contact) => {
               const IconComponent = contact.icon;
               return (

@@ -260,7 +260,7 @@ export const GraphLine = () => {
         />
       </div>
       <div className="w-full mx-auto flex items-center justify-center mt-6">
-        <h2 className="text-[35px] px-20">
+        <h2 className="text-[35px] lg:px-20">
           Compara y descubre porque nuestras oportunidades superan otras
           opciones del mercado. Usa la calculadora de rendimiento y comprueba
           cuanto podrias generar con nosotros.

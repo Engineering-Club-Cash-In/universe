@@ -55,14 +55,15 @@ export const Choose = () => {
         />
 
         {/* Contenedor de las dos tarjetas */}
-        <div className="relative flex justify-center items-center gap-8 max-w-7xl mx-auto" style={{ zIndex: 10 }}>
+        <div
+          className="relative flex justify-center items-center gap-8  h-[430.4px]"
+          style={{ zIndex: 10 }}
+        >
           {features.map((feature, index) => (
             <motion.div
               key={index}
-              className="flex flex-col justify-between"
+              className="flex flex-col justify-between w-1/2 lg:w-1/4 gap-6"
               style={{
-                width: "470.4px",
-                height: "430.4px",
                 padding: "33.6px 33.2px 40.6px 33.6px",
                 borderRadius: "16px",
                 border: "1px solid rgba(154, 159, 245, 0.50)",

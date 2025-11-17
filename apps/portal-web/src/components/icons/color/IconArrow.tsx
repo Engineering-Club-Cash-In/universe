@@ -10,17 +10,17 @@ export const IconArrow = ({ ...props }: React.SVGProps<SVGSVGElement>) => {
     >
       <path
         d="M42.1697 18.4477H57.9822V34.2602"
-        stroke="#9A9FF5"
-        stroke-width="3.95313"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        stroke="currentColor"
+        strokeWidth="3.95313"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
       <path
         d="M57.9789 18.4477L35.5778 40.8487L22.4007 27.6716L5.27051 44.8018"
-        stroke="#9A9FF5"
-        stroke-width="3.95313"
-        stroke-linecap="round"
-        stroke-linejoin="round"
+        stroke="currentColor"
+        strokeWidth="3.95313"
+        strokeLinecap="round"
+        strokeLinejoin="round"
       />
     </svg>
   );

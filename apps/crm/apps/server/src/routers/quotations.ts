@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { quotations, vehicles } from "../db/schema";
@@ -44,8 +44,6 @@ function generateAmortizationTable(
 	totalFinanced: number,
 	monthlyRate: number,
 	termMonths: number,
-	insuranceCost: number,
-	gpsCost: number,
 ): AmortizationRow[] {
 	const table: AmortizationRow[] = [];
 	let balance = totalFinanced;
@@ -257,8 +255,6 @@ export const quotationsRouter = {
 				Number(quotation.totalFinanced),
 				Number(quotation.interestRate),
 				quotation.termMonths,
-				Number(quotation.insuranceCost),
-				Number(quotation.gpsCost),
 			);
 
 			return {

@@ -1,12 +1,12 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
+import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
 	vehicles,
-} from "@/db/schema";
-import { db } from "../db";
+} from "../db/schema";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
 import {
@@ -20,7 +20,6 @@ import {
 } from "../db/schema/crm";
 import {
 	analysisChecklists,
-	documentRequirements,
 	documentRequirementsByClientType,
 	documentValidations,
 	opportunityDocuments,
@@ -49,7 +48,7 @@ export const crmRouter = {
 	}),
 
 	// Get sales users for assignment dropdown
-	getCrmUsers: crmProcedure.handler(async ({ context }) => {
+	getCrmUsers: crmProcedure.handler(async () => {
 		const users = await db
 			.select({
 				id: user.id,
@@ -1637,7 +1636,7 @@ export const crmRouter = {
 	// Validate opportunity documents - Para analistas
 	validateOpportunityDocuments: analystProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			try {
 				// 1. Obtener oportunidad con información del lead
 				const [opp] = await db
@@ -1828,7 +1827,6 @@ export const crmRouter = {
 			let vehicleInspected = false;
 			let inspectionId = null;
 			let vehicleOwnerType = null;
-			let vehicleData = null;
 			if (opportunity.vehicleId) {
 				// Get vehicle info including ownerType
 				const [vehicle] = await db
@@ -1838,7 +1836,6 @@ export const crmRouter = {
 					.limit(1);
 
 				if (vehicle) {
-					vehicleData = vehicle;
 					vehicleOwnerType = vehicle.ownerType;
 
 					// Check inspection

@@ -238,6 +238,8 @@ type PhotoData = {
   uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'failed';
   serverUrl?: string;
   uploadError?: string;
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 };
 
 type PhotosState = {
@@ -439,7 +441,7 @@ export default function VehiclePictures({
             ...prev[stepId],
             [photoId]: {
               ...prev[stepId][photoId]!,
-              uploadStatus: 'uploaded',
+              uploadStatus: 'uploaded' as const,
               serverUrl,
               // Keep the blob URL for preview, serverUrl is for database
             },
@@ -550,6 +552,7 @@ export default function VehiclePictures({
             file,
             preview,
             uploadStatus: 'pending',
+            noCommentsChecked: true, // Auto-marcar "Sin comentarios" para fotos de prueba
           };
         } catch (error) {
           console.error(`Error loading sample image for ${photo.id}:`, error);
@@ -578,6 +581,7 @@ export default function VehiclePictures({
                 file,
                 preview,
                 uploadStatus: 'pending',
+                noCommentsChecked: true, // Auto-marcar "Sin comentarios" para fotos de prueba
               };
             }
           }, 'image/jpeg', 0.9);
@@ -676,15 +680,21 @@ export default function VehiclePictures({
       }
 
       // Prepare photo data with server URLs for context
+      console.log("=== INICIO handleFinish - Estado completo de photos ===");
+      console.log("photos state:", photos);
+      console.log("Número de steps:", Object.keys(photos).length);
+
       const photoDataForContext = [];
       for (const [stepId, stepPhotos] of Object.entries(photos)) {
+        console.log(`Processing step: ${stepId}`, stepPhotos);
         const step = inspectionSteps.find(s => s.id === stepId);
         for (const [photoId, photoData] of Object.entries(stepPhotos)) {
+          console.log(`  Processing photo: ${photoId}`, photoData);
           if (photoData) {
             const photo = step?.photos.find(p => p.id === photoId);
-            
+
             // Debug: log what we're sending
-            console.log(`Photo ${photoId}:`, {
+            console.log(`  Photo ${photoId} details:`, {
               uploadStatus: photoData.uploadStatus,
               hasServerUrl: !!photoData.serverUrl,
               serverUrl: photoData.serverUrl,
@@ -710,11 +720,12 @@ export default function VehiclePictures({
         }
       }
       console.log('Final photos being sent to context:', photoDataForContext);
+      console.log('Total photos to save in context:', photoDataForContext.length);
       setContextPhotos(photoDataForContext);
 
       // Automatically trigger completion when in wizard mode
       if (onComplete) {
-        toast.success(`¡Fotos subidas exitosamente! Enviando inspección...`);
+        toast.success(`¡${photoDataForContext.length} fotos guardadas exitosamente!`);
         // Pasar las fotos directamente sin delay
         onComplete(photoDataForContext);
       } else {
@@ -783,8 +794,17 @@ export default function VehiclePictures({
                 )}
               >
                 <CheckCircle2 className="mr-1 h-3 w-3" />
-                <span className="hidden sm:inline">Completar y Enviar Inspección</span>
-                <span className="sm:hidden">Completar</span>
+                {isWizardMode ? (
+                  <>
+                    <span className="hidden sm:inline">Guardar fotos y continuar</span>
+                    <span className="sm:hidden">Guardar</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="hidden sm:inline">Completar y Enviar Inspección</span>
+                    <span className="sm:hidden">Completar</span>
+                  </>
+                )}
               </Button>
             </div>
           </div>

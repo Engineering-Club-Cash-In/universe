@@ -12,3 +12,4 @@ export * from "./IconClock";
 export * from "./IconCircleCheck";
 export * from "./IconSignDollar";
 export * from "./IconCheckList";
+export * from "./IconMessage";

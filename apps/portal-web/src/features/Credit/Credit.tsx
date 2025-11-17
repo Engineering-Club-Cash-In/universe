@@ -1,5 +1,5 @@
 import { NavBar } from "@/components";
-import { Header, BuyCar, GetMoney, Choose } from "./Sections";
+import { Header, BuyCar, GetMoney, Choose, StartToday } from "./Sections";
 import { Footer } from "../footer";
 
 export const Credit = () => {
@@ -10,6 +10,7 @@ export const Credit = () => {
       <BuyCar />
       <GetMoney />
       <Choose />
+      <StartToday />
       <Footer />
     </div>
   );

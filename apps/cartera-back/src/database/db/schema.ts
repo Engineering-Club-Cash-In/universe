@@ -89,6 +89,8 @@ export enum StatusCredit {
   CANCELADO = "CANCELADO",
   INCOBRABLE = "INCOBRABLE",
   PENDIENTE_CANCELACION = "PENDIENTE_CANCELACION",
+  MOROSO = "MOROSO",
+  EN_CONVENIO = "EN_CONVENIO",
 }
 // 2. Créditos
 
@@ -147,7 +149,7 @@ export const creditos = customSchema.table("creditos", {
   }).notNull(),
  
   statusCredit: text("statusCredit", {
-    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO"],
+    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO"],
   })
     .notNull()
     .default(StatusCredit.ACTIVO),
@@ -461,4 +463,74 @@ export const cuentasEmpresa = customSchema.table("cuentas_empresa", {
   activo: boolean("activo").default(true).notNull(),
   fechaCreacion: timestamp("fecha_creacion").defaultNow().notNull(),
   fechaActualizacion: timestamp("fecha_actualizacion").defaultNow().notNull(),
+});
+
+
+export const convenios_pago = customSchema.table("convenios_pago", {
+  convenio_id: serial("convenio_id").primaryKey(),
+  
+  // Relación con el crédito
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  
+  // Detalles del convenio
+  monto_total_convenio: numeric("monto_total_convenio", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull(),
+  
+  numero_meses: integer("numero_meses").notNull(),
+  
+  cuota_mensual: numeric("cuota_mensual", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull(),
+  
+  fecha_convenio: timestamp("fecha_convenio").notNull(),
+  
+  // 🎯 CONTROL DEL CONVENIO
+  monto_pagado: numeric("monto_pagado", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull().default("0"), // Cuánto se ha pagado
+  
+  monto_pendiente: numeric("monto_pendiente", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull(), // Cuánto falta (se actualiza con cada pago)
+  
+  pagos_realizados: integer("pagos_realizados").notNull().default(0), // Cuántos pagos se han hecho
+  
+  pagos_pendientes: integer("pagos_pendientes").notNull(), // Cuántos pagos faltan
+  
+  // Estado del convenio
+  activo: boolean("activo").notNull().default(true),
+  
+  completado: boolean("completado").notNull().default(false),
+  
+  // Metadata
+  motivo: text("motivo"),
+  observaciones: text("observaciones"),
+  
+  created_by: integer("created_by")
+    .references(() => platform_users.id),
+  
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+
+
+export const convenios_pagos_resume = customSchema.table("convenios_pagos_resume", {
+  id: serial("id").primaryKey(),
+  
+  convenio_id: integer("convenio_id")
+    .notNull()
+    .references(() => convenios_pago.convenio_id, { onDelete: "cascade" }),
+  
+  pago_id: integer("pago_id")
+    .notNull()
+    .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+  
+  created_at: timestamp("created_at").defaultNow(),
 });

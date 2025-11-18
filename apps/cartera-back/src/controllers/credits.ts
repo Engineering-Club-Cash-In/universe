@@ -246,7 +246,7 @@ export async function getCreditosWithUserByMesAnio(
   page: number = 1,
   perPage: number = 10,
   numero_credito_sifco?: string,
-  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO",
+  estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO",
   asesor_id?: number,        // 👈 NUEVO
   nombre_usuario?: string    // 👈 NUEVO
 ): Promise<{
@@ -736,6 +736,8 @@ const AccionCreditoParamsSchema = z.object({
     "ACTIVAR",
     "INCOBRABLE",
     "PENDIENTE_CANCELACION",
+    "EN_CONVENIO",
+    "MOROSO",
   ]),
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
 });
@@ -743,6 +745,10 @@ const AccionCreditoParamsSchema = z.object({
 const STATUS_MAP = {
   CANCELAR: "CANCELADO",
   PENDIENTE_CANCELACION: "PENDIENTE_CANCELACION",
+  ACTIVAR: "ACTIVO",
+  INCOBRABLE: "INCOBRABLE",
+  EN_CONVENIO: "EN_CONVENIO",
+  MOROSO: "MOROSO",
   // Puedes agregar más acciones aquí si las necesitas
 };
 

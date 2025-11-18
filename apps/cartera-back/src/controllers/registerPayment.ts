@@ -266,7 +266,8 @@ const obtenerInfoCompletaCredito = async (
           eq(creditos.credito_id, credito_id),
           or(
             eq(creditos.statusCredit, "ACTIVO"),
-            eq(creditos.statusCredit, "MOROSO") // 🚨 También traer créditos morosos
+            eq(creditos.statusCredit, "MOROSO"),
+            eq(creditos.statusCredit, "EN_CONVENIO") // 🚨 También traer créditos en convenio
           )
         )
       )

@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useUsersWithSifco } from "../hooks/getUsers";
-import { User, BadgeDollarSign, XCircle } from "lucide-react"; // Importa XCircle
+import { User, BadgeDollarSign, XCircle } from "lucide-react";
 
 type OpcionSifco = {
   usuario_id: number;
@@ -21,24 +21,24 @@ interface BuscadorUsuarioSifcoProps {
   reset?: boolean;
   onReset?: () => void;
 }
-export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuarioSifcoProps) {
 
+export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuarioSifcoProps) {
   const { data = [], isLoading } = useUsersWithSifco();
   const [search, setSearch] = useState<string>("");
-  const [selectedSifco, setSelectedSifco] = useState<string | undefined>(undefined);
+  const [selectedSifco, setSelectedSifco] = useState<string>(""); // ✅ "" en vez de undefined
 
   // Aplana los SIFCOs
-const opciones: OpcionSifco[] = useMemo(() => {
-  const usuarios = data || []; // 👈 Sin .data porque el servicio ya retorna el array
-  
-  return usuarios.flatMap(u =>
-    u.numeros_credito_sifco.map(sifco => ({
-      usuario_id: u.usuario_id,
-      nombre: u.nombre,
-      sifco,
-    }))
-  );
-}, [data]);
+  const opciones: OpcionSifco[] = useMemo(() => {
+    const usuarios = data || [];
+    
+    return usuarios.flatMap(u =>
+      u.numeros_credito_sifco.map(sifco => ({
+        usuario_id: u.usuario_id,
+        nombre: u.nombre,
+        sifco,
+      }))
+    );
+  }, [data]);
 
   // Filtra en tiempo real por nombre o sifco
   const opcionesFiltradas = useMemo(
@@ -59,16 +59,17 @@ const opciones: OpcionSifco[] = useMemo(() => {
   };
 
   const handleClear = () => {
-    setSelectedSifco(undefined);
+    setSelectedSifco(""); // ✅ "" en vez de undefined
     setSearch("");
-    onSelect(""); // O puedes pasar null si tu lógica lo soporta
+    onSelect("");
   };
+
   useEffect(() => {
     if (reset) {
       handleClear();
       onReset?.();
     }
-  }, [reset]);
+  }, [reset, onReset]); // ✅ Agregué onReset a las dependencias
 
   return (
     <div className="mb-4 w-full max-w-md flex flex-col gap-2">
@@ -102,7 +103,7 @@ const opciones: OpcionSifco[] = useMemo(() => {
         <div className="text-gray-400 px-2 py-2">No hay resultados</div>
       ) : (
         <Select
-          value={selectedSifco}
+          value={selectedSifco || ""} // ✅ Siempre string, nunca undefined
           onValueChange={handleChange}
           disabled={opcionesFiltradas.length === 0}
         >

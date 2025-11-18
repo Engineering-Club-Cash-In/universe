@@ -1,0 +1,45 @@
+version: "3.8"
+
+services:
+  ana-voice-assistant:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      # Flask configuration
+      - FLASK_ENV=production
+      - FLASK_APP=app.py
+
+      # Google Cloud Configuration
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/google_credentials.json
+
+      # OpenAI Configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+
+      # Supabase Configuration
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+
+      # Application Configuration
+      - USE_OPENAI=${USE_OPENAI:-true}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+
+    volumes:
+      # Persist uploads and logs
+      - ana_uploads:/app/uploads
+      - ana_static:/app/static
+      - ana_logs:/app/logs
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  ana_uploads:
+  ana_static:
+  ana_logs:

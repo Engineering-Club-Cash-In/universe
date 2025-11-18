@@ -1,0 +1,8 @@
+node_modules
+.turbo
+
+# Playwright MCP screenshots
+apps/web/.playwright-mcp/
+
+# Browser extensions (development only)
+miniagent-extension/

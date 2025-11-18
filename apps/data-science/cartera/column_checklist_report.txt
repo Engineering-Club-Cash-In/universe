@@ -1,0 +1,914 @@
+CHECKLIST DE COLUMNAS PARA MIGRACIÓN
+==================================================
+
+Total hojas: 97
+Total columnas únicas: 185
+
+COLUMNAS ENCONTRADAS:
+------------------------------
+  1. #
+     Tipo SQL sugerido: INTEGER
+     Aparece en 92 hojas
+     Ejemplos: 9 de 12 / 9 de 18, tbc, 8 de 12 / 8 de 12, 12 de 60, 5 de 10 (874/86)
+
+  2. # crédito SIFCO
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 01010202106450, 01010214110800, 01010214110410, 01030407330030, 01010214111550_2
+
+  3. %
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 0.0, 0.015, 0.0225, 0.023, 0.0125
+
+  4. % Cash-In
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 0.2334, 0.2, 0.083, 0.1, 0.111111111
+
+  5. % DE INTERES MENSUAL
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3,00%, 1,50%
+
+  6. % DE MORA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 5,00%, 2,50%
+
+  7. % Inversionista
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 0.834, 0.7, 0.666666667, 0.9, 0.75
+
+  8. % Royalty
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 0.015, 0.04, 0.045, 0.035, 0.07
+
+  9. ABONOS PARCIALES
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q200,00, Q997,19, Q538,58
+
+ 10. ACUERDOS
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: ENTREGA LA UNIDAD
+
+ 11. ASESOR
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Diego Gómez, Roberto Sicán
+
+ 12. Abono GPS
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 145.92, 345.0, 142.31, 138.0, 145.54
+
+ 13. Abono IVA 12%
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 58.904387999999976, 108.85028960159998, 31.39325999999998, 551.52, 20.85358252050245
+
+ 14. Abono IVA CI
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 36.54, 15.919648199999996, 22.991768999999994, 10.44, 61.199999999999996
+
+ 15. Abono Interés
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 1488.5422000000003, 199.40159999999983, 2639.5671700000003, 364.19, 21000.000000000004
+
+ 16. Abono Seguro
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 328.7655, 423.49, 391.76, 508.63, 579.28
+
+ 17. Abono capital
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 1311.33, 100000.0, 146.5, 1370.74, 2852.11
+
+ 18. Abono interés CI
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 89.19346499999999, 132.66373499999997, 81.44689545157017, 47.44804499999998, 52.13395630125613
+
+ 19. Acumulado Comisión de Venta
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 419080.79, 363400.83999999997, 729973.21, 1055292.97, 3732950.558
+
+ 20. Acumulado comisiones Cash-In
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 3677.13963, 6748400.361953618, 10089281.210222322, 10558814.079499613, 13172433.21872059
+
+ 21. Acumulado comisiones cobradas Cash-In
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 3677.13963, 214541.33488275763, 6074761.779279712, 1361546.9346184523, 4128579.6610457627
+
+ 22. Ampliaciones
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Ampliación
+
+ 23. Asesor
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: Gerencia, Erik Rivas, Diego Gómez, Roberto Sicán, Jorge Sente
+
+ 24. Banco
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: GyT, BAM
+
+ 25. CAPITAL A LA FECHA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q28.399,23, Q12.115,50, Q24.933,08
+
+ 26. COMENTARIOS
+     Tipo SQL sugerido: VARCHAR(579)
+     Aparece en 1 hojas
+     Ejemplos: premora, pedienta impuesto 2023, al díia
+
+ 27. COMPROMISO DE PAGO
+     Tipo SQL sugerido: DATETIME
+     Aparece en 1 hojas
+     Ejemplos: 2024-07-30 00:00:00, 2024-07-26 00:00:00, 2024-07-31 00:00:00
+
+ 28. CUMPLE COMPROMISO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: SI, SE LLEGO A ACUERDO
+
+ 29. CUOTA MENSUAL
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q984,46, Q1.205,89, Q4.480,32
+
+ 30. CUOTAS PAGADAS
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 18.0, 14.0, 8.0
+
+ 31. CUOTAS PENDIENTES
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 0.0, 2.0
+
+ 32. Cantidad no pagada
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+
+ 33. Capital
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 5324.953987707548, 100000.0, 122500.0, 53825.87626672, 57880.06
+
+ 34. Capital Nuevos créditos
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 180565.37, 100000.0, 32500.0, 40994.0, 55981.49
+
+ 35. Capital cuota
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q413,41, Q3.280,59, Q1.103,40
+
+ 36. Capital restante
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 9906.72, 14991.129999999996, 16989.98215662052, 122500.0, 53825.87626672
+
+ 37. Categoría
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: Contraseña, Amigo, Joya/Reloj, CV Vehículo nuevo, Hipotecario
+
+ 38. Comisiones cobradas de el mes Cash-In
+     Tipo SQL sugerido: REAL
+     Aparece en 34 hojas
+     Ejemplos: 34281.37205082754, 47411.76303784935, 44174.922021116676, 52697.678481197036, 34502.414904582954
+
+ 39. Comisiones cobradas del mes Cash-In
+     Tipo SQL sugerido: REAL
+     Aparece en 59 hojas
+     Ejemplos: 139949.68455451098, 98321.84517201094, 400557.02495747025, 254954.51399397393, 206756.63440309878
+
+ 40. Comisiones de el mes Cash-In
+     Tipo SQL sugerido: REAL
+     Aparece en 34 hojas
+     Ejemplos: 51202.068282754204, 9243.312, 17424.499200000002, 57006.59331778683, 45078.42328253683
+
+ 41. Comisiones del mes Cash-In
+     Tipo SQL sugerido: REAL
+     Aparece en 59 hojas
+     Ejemplos: 194128.09616154418, 166988.40761113825, 73343.59370151092, 131318.80261751096, 223272.91359079993
+
+ 42. Comisionistas
+     Tipo SQL sugerido: REAL
+     Aparece en 47 hojas
+     Ejemplos: Cube Prospect, Se Presta S.A., Gunther Alvarado, Agente Promérica, Rodolfo Godoy
+
+ 43. Comisión de venta
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 459.26, 4000.0, 39551.56, 12149.14, 3840.0
+
+ 44. Como se enteró de nosotros
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+
+ 45. Contacto
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 46 hojas
+     Ejemplos: 4769-8304, tbc, 5349-6437, 3759-8974, 4128-2525
+
+ 46. Correo
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: abrahamcastro1@hotmail.com, urrutiamanuel1@gmail.com, aineguena89@hotmail.com
+
+ 47. Cuota
+     Tipo SQL sugerido: REAL
+     Aparece en 16 hojas
+     Ejemplos: 5730.82, 2568.91, 1019.48, 7533.1900000000005, 2441.36
+
+ 48. Cuota Cash-IN
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 89.19346499999999, 132.66373499999997, 81.44689545157017, 96.30287999999999, 47.44804499999998
+
+ 49. Cuota Inverionista
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 462.06305999999984, 819.5802842945541, 222.36892499999985, 1305.4805750000003, 202.93549084865282
+
+ 50. Cuota nivelada / seguro
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 851/83, #1
+
+ 51. Cuotas
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 1488.5422000000003, 199.40159999999983, 2639.5671700000003, 21000.000000000004, 21375.0
+
+ 52. DETALLE DEL ACUERDO EN MESES
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 6.0
+
+ 53. DIFERENCIA EN PAGO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q1.426,87, Q2.511,69, Q4.480,32
+
+ 54. DPI
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 1733306060806, 2371489270101, 2313395850101
+
+ 55. Deuda Q
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 82861.799903, 32437.35264, 155379.1072, 15208.702080000003, 890113.8402
+
+ 56. Dif
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 0.0
+
+ 57. Diferencia para membresia
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: -Q19,60, Q78,30
+
+ 58. ETAPA GENERAL
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: CONVENIO, COBRO
+
+ 59. ETAPA PRINCIPAL
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Pago no recibido, Conversacion efectiva, Cierre de pago recibido
+
+ 60. Emite factura
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: No
+
+ 61. Extrafinanciamiento (capital concedido segun SIFCO menos Capital a la fecha segun DRIVE)
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q8.120,54, Q969,15, Q4.463,14
+
+ 62. FECHA DE PAGO
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 24.0, 15.0, 30.0
+
+ 63. FECHA DE SEGUIMIENTO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 2024-07-30 00:00:00, 2024-08-19 00:00:00, 2024-07-26 00:00:00
+
+ 64. FECHA ULTIMO CONTACTO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 2024-07-25 00:00:00, 2024-07-24 00:00:00, 2024-07-26 00:00:00
+
+ 65. Facturacion
+     Tipo SQL sugerido: REAL
+     Aparece en 26 hojas
+     Ejemplos: No, Si
+
+ 66. Fecha
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 2019-05-05 00:00:00, 2024-03-05 00:00:00, 2023-11-12 00:00:00, 2025-02-27 00:00:00, 2021-05-14 00:00:00
+
+ 67. Fecha filtro
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 3, 27.0, 29.0, 11, 7
+
+ 68. Formato crédito
+     Tipo SQL sugerido: REAL
+     Aparece en 27 hojas
+     Ejemplos: Individual, Pool
+
+ 69. GPS
+     Tipo SQL sugerido: INTEGER
+     Aparece en 94 hojas
+     Ejemplos: 145.92, 345.0, 142.31, 138, 138.0
+
+ 70. GPS Facturado
+     Tipo SQL sugerido: REAL
+     Aparece en 13 hojas
+     Ejemplos: 0.0, 138.0
+
+ 71. GPS Restante
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 0.0, 138, 0
+
+ 72. Gastos del mes
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 227841.52, 434718.93, 156111.43, 29785.16, 62753.41
+
+ 73. INVERSIONISTA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: HARI DE JESUS PEÑA RAMIREZ, RICHARD KACHLER, CENTRAL DE CARGA, BLOCKFUN, S.A., AUTOCASH
+
+ 74. IVA 12%
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 58.904387999999976, 108.85028960159998, 31.39325999999998, 551.52, 20.85358252050245
+
+ 75. IVA 12% restante
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 92.7859746489999, 0.0030000000000001137, 21.759120000000003, 135.53647663911553, 0.002467059199993571
+
+ 76. IVA Cash-In
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 36.54, 15.919648199999996, 22.991768999999994, 61.199999999999996, 108.85028960159998
+
+ 77. IVA Inversionista
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 1728.0, 28.590661316431863, 140.519652, 847.2080400000001, 75.05853599999999
+
+ 78. Interes
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q477,11, Q418,88, Q407,08
+
+ 79. Interés restante
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 0.004199999999968895, 0.004309815613211754, -0.004984328192051635, 0.0028092799999512863, 0.0018334201495235902
+
+ 80. Inversionista
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: Jose Fernando Rios Gordillo, Juan Jose Massis, Alexander Kachler Simons (AMJK), Elizabeth Marie Von Ahn Ortiz (Javier Estuardo Est, Carlos Fernando Carrillo Cifuentes
+
+ 81. Liquidacion 10 abril 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 82. Liquidacion 10 diciembre 2024
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 83. Liquidacion 10 enero 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 84. Liquidacion 10 febrero 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 85. Liquidacion 10 julio 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 86. Liquidacion 10 junio 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 87. Liquidacion 10 marzo 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 88. Liquidacion 12 mayo 2025
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3. Cargada
+
+ 89. Lista Negra
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+
+ 90. Llamada
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: reestructura, extra f. , COVID-19 (2 cuotas)
+
+ 91. MEMBRESIA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q95,04, Q10,20, Q197,62
+
+ 92. MEMBRESIA ACTUAL
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 10.2, 197.62, 95.04
+
+ 93. MEMBRESIA NUEVA
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: -9.4, 75.44, 275.92
+
+ 94. MORA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q542,77, Q0,00
+
+ 95. Membresia
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 413.25, 175.44, 523.65
+
+ 96. Membresías
+     Tipo SQL sugerido: REAL
+     Aparece en 41 hojas
+     Ejemplos: 413.25, 397.325, 507.746, 88.03999999999999, 195.73
+
+ 97. Membresías acumulado
+     Tipo SQL sugerido: REAL
+     Aparece en 41 hojas
+     Ejemplos: 478740.91476185434, 3347220.755633057, 80485.53000000006, 382901.1100000002, 280588.0400000001
+
+ 98. Membresías del mes
+     Tipo SQL sugerido: REAL
+     Aparece en 41 hojas
+     Ejemplos: 43615.52000000001, 54182.24000000009, 82440.61000000012, 149674.3149, 180386.50350000022
+
+ 99. Membresías del mes cobradas
+     Tipo SQL sugerido: REAL
+     Aparece en 41 hojas
+     Ejemplos: 192799.33570000023, 63387.36000000016, 176940.59350000022, 34878.13999999999, 34890.62
+
+100. Membresías pago
+     Tipo SQL sugerido: REAL
+     Aparece en 41 hojas
+     Ejemplos: 392.7, 413.25, 397.325, 507.746, 88.03999999999999
+
+101. Mes pagado
+     Tipo SQL sugerido: REAL
+     Aparece en 17 hojas
+     Ejemplos: 2024-11-11 00:00:00, 2025-02-10 00:00:00, 2025-01-10 00:00:00, 2025-08-11 00:00:00, 2024-12-10 00:00:00
+
+102. Monto
+     Tipo SQL sugerido: REAL
+     Aparece en 47 hojas
+     Ejemplos: 3795.0, 286.0, 4504.0, 935.0, 100.0
+
+103. Monto boleta
+     Tipo SQL sugerido: REAL
+     Aparece en 16 hojas
+     Ejemplos: 5730.82, 2568.91, 1019.48, 7533.1900000000005, 2317.18
+
+104. Monto boleta - cuota
+     Tipo SQL sugerido: REAL
+     Aparece en 27 hojas
+     Ejemplos: 0.19000000000005457, 6.2800000000002, 0.09999999999990905, 6.3900000000001, 0.0
+
+105. Mora
+     Tipo SQL sugerido: REAL
+     Aparece en 31 hojas
+     Ejemplos: 265.87, 1208.9400000000005, 838.4899999999998, 856.52, 400.55999999999995
+
+106. Motivo
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Reparación
+
+107. NIT
+     Tipo SQL sugerido: REAL
+     Aparece en 47 hojas
+     Ejemplos: 57325596 / 8967291, 56250886, 87137240, 3089-9158, 99505983
+
+108. NOMBRE DEL CLIENTE
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Abraham Esteban Castro Lux, ANA EUGENIA CABRERA VARGAS, MANUEL FRANCISCO URRUTIA GAITAN
+
+109. NUMERO DE POLIZA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 223090638, 223095603, 222088992
+
+110. NUMERO DE PRESTAMO
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 1010214104530.0, 1010214107740.0, 1010202104820.0
+
+111. No. Póliza
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: POOL Izabal #7, leasing, RDBE, COVID-19, POOL zona 14 #3
+
+112. Nombre
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: Zoom Digital Strategy S.A., Bienes de Capital S.A. (Jeniffer Maria Simons Garc, Erick Fernando Sempe Rodriguez, Marco Alejandro Correa Mancia, Mynor Gilberto Castillo Tanchez
+
+113. Nombre inversionista
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Ana Lucia Salvatierra Mayen, Alexander Kachler Simons (AMJK), Alexa Nahomy Caballero Pinto
+
+114. Numero de cuenta
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 4056927902, ´01210061766, ´3510202606`
+
+115. OTROS
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q398,97, Q286,59, Q220,98
+
+116. Observaciones
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: Mitsubishi Outlander Sport SE AWD 2015 P247LBH, VW Jetta 2016 P273GKY, 12 cuotas de Q2,568.91 (dej, Hino WU600L-HKMMJ3 2016 C0544BPN, Local 243 CC Los Próceres, Crédito Amigo (jefe a su empleado) 18 meses cuotas
+
+117. Otros
+     Tipo SQL sugerido: REAL
+     Aparece en 31 hojas
+     Ejemplos: 0.19000000000005457, 6.2800000000002, 0.09999999999990905, 200.0, 6.3900000000001
+
+118. PLACA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: P-120KPY, P-510JYP, P-355HML
+
+119. Pagado
+     Tipo SQL sugerido: REAL
+     Aparece en 27 hojas
+     Ejemplos: Atrasado, No, Si
+
+120. Pago
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 2019-02-04 00:00:00, 2024-07-30 00:00:00, 2024-03-05 00:00:00, 2018-08-03 00:00:00, 2023-11-12 00:00:00
+
+121. Pago del mes
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 11296.109999999999, 2366.6260319999997, 1099.98, 700.01, 977.4744800000001
+
+122. Plazo
+     Tipo SQL sugerido: REAL
+     Aparece en 27 hojas
+     Ejemplos: 24.0, 84.0, 300.0, 0.0, 19.0
+
+123. Poliza INREXSA
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 02-01-774-54-0, 02-01-774-129-0, 02 01 774 14
+
+124. Reinversion
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: No
+
+125. Renuevo ó Nuevo
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: Renuevo, Nuevo
+
+126. Reserva
+     Tipo SQL sugerido: REAL
+     Aparece en 13 hojas
+     Ejemplos: 4487.490000000007, 961.64205, 7799.299999999997, 2660.74, 1820.59
+
+127. Royalty
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+     Ejemplos: 5867.0, 625.0, 5808.54, 459.26, 640.0
+
+128. SEGURO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q387,00, Q225,40
+
+129. SEGURO LA CEIBA
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 387.0, 225.4
+
+130. SI/NO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: SI
+
+131. Seguro
+     Tipo SQL sugerido: REAL
+     Aparece en 27 hojas
+     Ejemplos: 15.0, 3.0, 12.0, 9.0, 5.0
+
+132. Seguro (10 cuotas)
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 328.7655, 423.49, 391.76, 508.63, 579.28
+
+133. Seguro Facturado
+     Tipo SQL sugerido: REAL
+     Aparece en 13 hojas
+     Ejemplos: 328.7655, 335.34081000000003, 246.96000000000004, 465.7, 523.91
+
+134. Seguro INREXSA
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 245.0, 308.7
+
+135. Seguro Restante
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 652.9, 269.58771, 260.925, 266.30005500000004, 0.0
+
+136. Seguro.1
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 246.96000000000004, 245.0
+
+137. TIPO DE PRESTAMO
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Sobre vehículo, Compra de vehículo
+
+138. TOTAL A PAGAR
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q1.426,87, Q2.511,69, Q4.480,32
+
+139. Telefono
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 3824 6770, 47605402, 35696388
+
+140. Telefono 2
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 52123428, 35584525, 41653179
+
+141. Telefono 3
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 22959680, 51621632, 57885365
+
+142. Telefono 4
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 55776980.0, 36289873.0, 33126995.0
+
+143. Tipo cuenta
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: MONETARIA Q, AHORRO Q, AHORRO
+
+144. Total restante
+     Tipo SQL sugerido: INTEGER
+     Aparece en 93 hojas
+     Ejemplos: 82861.799903, 63217.71, 14991.129999999996, 11847.4257543936, 43375.47552231845
+
+145. U$ Royalty
+     Tipo SQL sugerido: REAL
+     Aparece en 89 hojas
+     Ejemplos: 193.05, 159.74025974025975, 81.01265822784809, 27.662337662337663, 550.56
+
+146. Unnamed: 0
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+
+147. Unnamed: 10
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Cancelacion, Cancelacion escondrillas
+
+148. Unnamed: 11
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Denis alexander morales valle, reportaron pago 11 , raul antonio roca juarez, verificar el pago de seg
+
+149. Unnamed: 12
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+150. Unnamed: 13
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+151. Unnamed: 14
+     Tipo SQL sugerido: REAL
+     Aparece en 2 hojas
+     Ejemplos: 66.19, 572.09, 1. Preparada, 1154.34
+
+152. Unnamed: 15
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 2 hojas
+     Ejemplos: Cancelacion Aura Lorena Arango, Aun no ha firmado, Javier Arzu, Cancelacion rosalinda
+
+153. Unnamed: 16
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 428.026848381145, recibe Q431 abono a capital, Dif
+
+154. Unnamed: 17
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Sin pago aun, pagar en liquidacion mayo 2025, Scimmia
+
+155. Unnamed: 18
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Sin pago aun
+
+156. Unnamed: 37
+     Tipo SQL sugerido: REAL
+     Aparece en 77 hojas
+     Ejemplos: 23.0, 27.0, 2106.27, 31.0, 14.0
+
+157. Unnamed: 38
+     Tipo SQL sugerido: REAL
+     Aparece en 77 hojas
+     Ejemplos: leasing, RDBE, POOL zona 14 #3, POOL zona 18, RDBE 2
+
+158. Unnamed: 46
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Q245,00, Q308,70
+
+159. Unnamed: 5
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: 2 cuotas septiembre y octubre 2024, Cuota de septiembre 2024
+
+160. Unnamed: 51
+     Tipo SQL sugerido: REAL
+     Aparece en 4 hojas
+     Ejemplos: 230.0, 709.46, 209.45, 337.84, 421.35
+
+161. Unnamed: 55
+     Tipo SQL sugerido: REAL
+     Aparece en 4 hojas
+
+162. Unnamed: 57
+     Tipo SQL sugerido: REAL
+     Aparece en 93 hojas
+
+163. Unnamed: 58
+     Tipo SQL sugerido: REAL
+     Aparece en 4 hojas
+
+164. Unnamed: 59
+     Tipo SQL sugerido: REAL
+     Aparece en 52 hojas
+
+165. Unnamed: 6
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+166. Unnamed: 60
+     Tipo SQL sugerido: REAL
+     Aparece en 52 hojas
+
+167. Unnamed: 61
+     Tipo SQL sugerido: REAL
+     Aparece en 52 hojas
+
+168. Unnamed: 7
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+169. Unnamed: 71
+     Tipo SQL sugerido: DATETIME
+     Aparece en 4 hojas
+     Ejemplos: 2025-03-10 00:00:00, 2025-02-10 00:00:00
+
+170. Unnamed: 75
+     Tipo SQL sugerido: REAL
+     Aparece en 3 hojas
+     Ejemplos: Tiene un costo de traspaso de Q650
+
+171. Unnamed: 76
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+172. Unnamed: 77
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+173. Unnamed: 78
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+174. Unnamed: 79
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+175. Unnamed: 8
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+
+176. Unnamed: 80
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: -18.05894999999998, -15.925000000000011
+
+177. Unnamed: 81
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: -18.05894999999998, -15.925000000000011
+
+178. Unnamed: 9
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 1.0, 3.0, 2.0
+
+179. Utilidad acumulada
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 93 hojas
+     Ejemplos: 38508.64696237305, 193951.1218390349, 39017.46069745147, 199413.05303445447, 156743.6467010523
+
+180. Utilidad del mes
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 93 hojas
+     Ejemplos: -56897.73733634932, 14297.391185712477, 31527.81175636104, 50487.83407644125, 103289.57334076578
+
+181. cuenta
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: cube, autocash
+
+182. cuenta destino
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: cube, autocash
+
+183. fecha
+     Tipo SQL sugerido: DATETIME
+     Aparece en 1 hojas
+     Ejemplos: 2024-12-04 00:00:00
+
+184. monto
+     Tipo SQL sugerido: REAL
+     Aparece en 1 hojas
+     Ejemplos: 1180.04, 1199.86, 1171.56
+
+185. nombre
+     Tipo SQL sugerido: VARCHAR(255)
+     Aparece en 1 hojas
+     Ejemplos: Mario Ismael Estrada Ramirez, Ligia Evelina Castañeda Romero, Woo Seong Park
+

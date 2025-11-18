@@ -1,0 +1,27 @@
+meta {
+  name: WSClientesEmailConsulta
+  type: http
+  seq: 2
+}
+
+post {
+  url: https://test.sifco.org/ClubCashIn/rest/WSClientesEmailConsulta
+  body: none
+  auth: inherit
+}
+
+headers {
+  Authorization: OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!949f25b0d7a04f2815f625edbef32b61a23c2db1a0a8ebf4ead7a4e7214f3b7a4d3047c4aa2442
+  GENEXUS-AGENT: SmartDevice Application
+  Content-Type: application/json
+}
+
+body:text {
+  {
+     "NumeroPrestamo": "01010101000630"
+  }
+}
+
+settings {
+  encodeUrl: true
+}

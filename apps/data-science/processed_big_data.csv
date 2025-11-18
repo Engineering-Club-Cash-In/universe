@@ -1,0 +1,874 @@
+PRECIO PRODUCTO,SUELDO,EDAD (RANGO DE EDAD EN AÑOS),DEPENDIENTES ECONOMICOS,OCUPACION,ANTIGUEDAD,ESTADO CIVIL,UTILIZACION DINERO,VIVIENDA PROPIA,VEHICULO PROPIO,TARJETA DE CREDITO,TIPO DE COMPRAS,Cuotas pendientes actual
+"Q 66,908.00","Q 60,000.00",50,1,Due+APE-o,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 74,664.00","Q 7,303.75" -,18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,6
+"Q 32,618.00","Q 7,350.00",30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 10,000.00","Q 12,000.00",50,0, Empleado,1-5, Casado, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,0
+"Q 43,118.00","Q 7,820.00",30-39,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 38,118.00","Q 5,000.00",30-39,1, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 66,858.00","Q 23,800.00",40-49,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 41,153.00","Q 54,000.00",40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 84,578.00","Q 9,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 23,985.00","Q 9,600.00",30-39,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 103,563.00","Q 15,500.00",18-29,0, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 76,300.00","Q 15,000.00",30-39,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 41,658.00","Q 5,000.00",18-29,0, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,3
+"Q 860,000.00","Q 100,000.00",40-49,5,Due+APE-o,1-5, Casado, Capital de trabajo, Si, Si, Si,Hipotecarios,0
+"Q 122,680.00","Q 80,000.00",40-49,2,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 52,616.00","Q 15,000.00",40-49,0,Due+APE-o,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+"Q 109,530.00","Q 34,500.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+"Q 107,308.00","Q 13,000.00",30-39,1,Due+APE-o,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 152,770.00","Q 80,000.00",40-49,2,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 35,603.00","Q 12,000.00",30-39,2, Empleado,0-1, Casado, Consumo, Si, Si, No,Autocompras,0
+"Q 89,229.00","Q 40,000.00",30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,2
+"Q 65,898.00","Q 12,000.00",18-29,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 47,617.00","Q 13,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 33,982.00","Q 19,000.00",18-29,0,Due+APE-o,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 32,500.00","Q 27,000.00",40-49,2, Empleado,5-10, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+"Q 52,116.00","Q 25,000.00",30-39,1,Due+APE-o,1-5, Casado, Consumo, No, No, Si,Autocompras,3
+"Q 40,648.00","Q 17,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 199,506.00","Q 28,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 48,728.00","Q 11,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 61,964.00","Q 20,000.00",40-49,0, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 47,718.00","Q 12,000.00",30-39,4,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 61,858.00","Q 15,000.00",30-39,3, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 51,758.00","Q 10,000.00",30-39,2,Due+APE-o,5-10, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 54,010.00","Q 6,000.00",30-39,1, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 130,033.00","Q 10,800.00",18-29,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 71,958.00","Q 25,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,2
+"Q 30,000.00","Q 4,000.00",18-29,0, Empleado,1-5, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+"Q 150,718.00","Q 9,000.00",40-49,3, Empleado,5-10, Casado, Consumo, Si, Si, No,Autocompras,0
+"Q 16,500.00","Q 54,000.00",40-49,3, Empleado,1-5, Casado, Salud o Medico, Si, Si, Si,Sobre Vehiculos,0
+"Q 39,436.00","Q 6,500.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 119,428.00","Q 25,000.00",30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 143,092.00","Q 5,000.00",30-39,4, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 268,862.00","Q 250,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 68,901.00","Q 17,500.00",30-39,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 44,421.00","Q 30,000.00",30-39,0,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 42,500.00","Q 5,500.00",30-39,4, Empleado,5-10, Casado, Mejora Inmueble, Si, Si, No,Sobre Vehiculos,0
+"Q 143,871.00","Q 35,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,9
+"Q 42,070.00","Q 17,000.00",50,0,Due+APE-o,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 30,000.00","Q 12,000.00",30-39,1, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 36,250.00","Q 3,100.00",18-29,1, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 195,580.00","Q 50,000.00",40-49,2, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 69,284.00","Q 18,190.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 40,846.00","Q 6,500.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 31,309.00","Q 9,000.00",40-49,2, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 79,713.00","Q 23,450.00",18-29,0,Due+APE-o,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 52,270.00","Q 25,000.00",30-39,2, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 76,750.00","Q 38,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 91,540.00","Q 60,000.00",30-39,0,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+"Q 40,000.00","Q 5,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, No, Si, Si,Autocompras,0
+"Q 48,593.00","Q 10,000.00",40-49,3,Due+APE-o,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 77,974.00","Q 60,000.00",50,1,Due+APE-o,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 10,000.00","Q 3,100.00",18-29,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 146,008.00","Q 30,000.00",40-49,2,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 34,216.00","Q 10,000.00",18-29,1,Due+APE-o,5-10, Soltero, Capital de trabajo, No, No, Si,Autocompras,0
+"Q 69,355.00","Q 35,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 21,500.00","Q 10,000.00",30-39,2, Empleado,1-5, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 121,936.00","Q 60,000.00",50,1,Due+APE-o,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 57,753.00","Q 12,600.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 20,000.00","Q 25,000.00",40-49,3,Due+APE-o,5-10, Casado, Capital de trabajo, Si, Si, Si,Prendario,0
+"Q 80,000.00","Q 3,700.00",18-29,0, Empleado,0-1, Soltero, Mejora Inmueble, Si, No, No,Hipotecarios,0
+"Q 83,074.00","Q 8,250.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 159,676.00","Q 71,428.57" -,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 62,000.00","Q 80,000.00",18-29,0,Due+APE-o,1-5, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+"Q 114,388.00","Q 25,000.00",50,0,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 74,608.00","Q 35,000.00",30-39,3,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 40,000.00","Q 15,000.00",18-29,0,Due+APE-o,1-5, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,2
+"Q 54,034.94" -,"Q 11,000.00",30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 88,888.00","Q 100,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 18,508.00","Q 3,416.00",40-49,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,2
+"Q 91,948.00","Q 15,500.00",30-39,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 30,891.00","Q 8,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,2
+"Q 46,869.00","Q 5,000.00",30-39,2, Empleado,0-1, Casado, Capital de trabajo, No, No, No,Autocompras,0
+"Q 170,550.00","Q 25,500.00",50,2, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 60,000.00","Q 9,000.00",40-49,2,Due+APE-o,5-10, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,0
+"Q 65,000.00","Q 32,000.00",30-39,1,Due+APE-o,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 21,045.00","Q 7,000.00",18-29,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 50,000.00","Q 6,250.00",40-49,1, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,7
+"Q 102,607.00","Q 100,000.00",18-29,0,Due+APE-o,5-10, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 71,956.00","Q 30,000.00",40-49,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 31,972.00","Q 4,800.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 47,374.00","Q 25,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,2
+"Q 62,043.96" -,"Q 4,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 60,000.00","Q 4,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 53,851.00","Q 6,000.00",40-49,1,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 19,885.00","Q 12,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 38,811.00","Q 7,000.00",40-49,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 245,356.00","Q 60,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 99,751.00","Q 50,000.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 41,973.00","Q 15,000.00",30-39,0,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 650,000.00","Q 30,000.00",50,2, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, No,Hipotecarios,0
+"Q 48,972.00","Q 12,500.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 59,890.00","Q 10,000.00",40-49,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 212,784.21" -,"Q 40,000.00",18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 80,974.00","Q 8,500.00",30-39,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 37,852.46" -,"Q 5,500.00",30-39,2, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,2
+"Q 144,659.00","Q 15,000.00",40-49,2,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,9
+"Q 79,975.00","Q 20,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,7
+"Q 46,500.00","Q 15,000.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+"Q 100,060.00","Q 7,500.00",50,0,Due+APE-o,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 61,726.03" -,"Q 7,500.00",18-29,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 41,968.00","Q 19,000.00",18-29,0,Due+APE-o,0-1, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 52,731.00","Q 5,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 14,875.84" -,"Q 20,000.00",40-49,1, Empleado,1-5, Casado, Salud o Medico, Si, Si, Si,Sobre Vehiculos,0
+"Q 437,500.00","Q 100,000.00",50,3,Due+APE-o,5-10, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 48,980.00","Q 6,250.00",30-39,2, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,7
+"Q 253,977.00","Q 40,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,8
+"Q 86,000.00","Q 20,000.00",40-49,2,Due+APE-o,1-5, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehiculos,2
+"Q 28,000.00","Q 11,000.00",18-29,0,,1-5, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,8
+"Q 264,469.00","Q 40,000.00",40-49,2,Due+APE-o,1-5, Casado, Consumo, Si, No, No,Autocompras,2
+"Q 73,276.00","Q 8,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,10
+"Q 23,500.00","Q 20,000.00",30-39,2,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+"Q 205,576.00","Q 100,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,5
+"Q 206,086.00","Q 100,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,5
+"Q 35,000.00","Q 20,000.00",40-49,2,Due+APE-o,1-5, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehiculos,2
+"Q 40,000.00","Q 5,400.00",18-29,0, Empleado,5-10, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,16
+"Q 35,000.00","Q 5,000.00",30-39,3, Empleado,1-5, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+"Q 54,156.21" -,"Q 50,000.00",30-39,1, Empleado,5-10, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,5
+"Q 39,900.00","Q 10,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, No,Sobre Vehiculos,7
+"Q 45,350.00","Q 7,400.00",40-49,2, Empleado,5-10, Casado, Consumo, No, No, No,Sobre Vehiculos,24
+"Q 31,200.00","Q 5,000.00",30-39,4, Empleado,1-5, Soltero, Consumo, No, No, Si,Sobre Vehiculos,30
+"Q 45,600.00","Q 7,500.00",30-39,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Sobre Vehiculos,5
+"Q 49,750.00","Q 15,400.00",50,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Sobre Vehiculos,8
+"Q 39,945.00","Q 5,000.00",40-49,1, Empleado,1-5, Soltero, Consumo, Si, No, No,Sobre Vehiculos,16
+"Q 39,116.00","Q 10,000.00",30-39,2,Due+APE-o,5-10, Soltero, Consumo, No, No, No,Sobre Vehiculos,14
+"Q 31,795.00","Q 13,000.00",18-29,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Sobre Vehiculos,5
+"Q 19,500.00","Q 5,000.00",30-39,1, Empleado,1-5, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,26
+"Q 38,068.00","Q 5,710.00",30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,5
+"Q 155,225.00","Q 20,000.00",30-39,2,Due+APE-o,1-5, Soltero, Consumo, Si, Si, No,Sobre Vehiculos,18
+"Q 44,688.00","Q 18,000.00",30-39,0,Due+APE-o,5-10, Soltero, Consumo, Si, No, Si,Autocompras,9
+"Q 58,625.41" -,"Q 7,000.00",30-39,3, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,5
+"Q 72,872.00","Q 12,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,5
+"Q 38,027.00","Q 18,650.00",30-39,0, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,17
+"Q 56,687.00","Q 12,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,5
+"Q 17,810.00","Q 15,000.00",30-39,0,Due+APE-o,1-5, Soltero, Capital de trabajo, No, No, No,Autocompras,15
+"Q 69,513.00","Q 10,000.00",18-29,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,5
+"Q 66,963.00","Q 10,000.00",18-29,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,5
+"Q 56,763.00","Q 10,000.00",18-29,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,5
+"Q 111,328.00","Q 125,000.00",18-29,2,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,11
+"Q 13,000.00","Q 15,000.00",50,0,Due+APE-o,5-10, Casado, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,11
+"Q 59,971.00","Q 12,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 139,378.00","Q 125,000.00",18-29,2,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,11
+"Q 66,448.00","Q 12,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 71,038.00","Q 14,175.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,12
+"Q 63,294.00","Q 18,000.00",40-49,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 29,593.00","Q 9,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,4
+"Q 12,000.00","Q 7,000.00",18-29,1,Due+APE-o,1-5, Soltero, Capital de trabajo, No, Si, No,Sobre Vehiculos,1
+"Q 69,938.00","Q 75,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 195,183.00","Q 45,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 198,263.00","Q 75,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 97,263.00","Q 23,600.00",50,0, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 38,628.00","Q 10,000.00",40-49,2,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,12
+"Q 58,929.00","Q 10,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 241,956.00","Q 28,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, No,Autocompras,19
+"Q 71,958.00","Q 80,000.00",18-29,1,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Autocompras,2
+"Q 20,500.00","Q 5,116.43" -,18-29,0, Empleado,1-5, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+"Q 15,000.00","Q 4,200.00",30-39,2, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,2
+"Q 23,548.00","Q 5,000.00",30-39,2, Empleado,5-10, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,0
+"Q 147,077.00","Q 10,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,2
+"Q 67,366.00","Q 9,500.00",30-39,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 30,000.00","Q 12,000.00",50,2, Empleado,5-10, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,0
+"Q 17,800.00","Q 15,384.00",50,0, Empleado,5-10, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,1
+"Q 221,565.00","Q 30,000.00",40-49,5,Due+APE-o,5-10, Casado, Consumo, Si, No, No,Autocompras,1
+"Q 70,630.00","Q 10,000.00",30-39,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 52,250.00","Q 18,000.00",30-39,2, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,8
+"Q 68,009.00","Q 10,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 53,000.00","Q 20,000.00",40-49,0, Empleado,1-5, Soltero, Consolidacion de deudas, Si, Si, No,Sobre Vehiculos,10
+"Q 62,997.00","Q 10,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 41,050.00","Q 16,000.00",50,0,Due+APE-o,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 107,118.40" -,"Q 100,000.00",40-49,0,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,1
+"Q 47,476.00","Q 6,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,6
+"Q 195,376.00","Q 50,000.00",40-49,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,10
+"Q 76,827.00","Q 17,000.00",30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,10
+"Q 13,500.00","Q 7,050.00",30-39,1, Empleado,1-5, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,1
+"Q 37,888.00","Q 4,000.00",30-39,2, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,10
+"Q 58,918.00","Q 9,500.00",18-29,1, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,13
+"Q 64,244.00","Q 27,500.00",50,0,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,2
+"Q 41,917.00","Q 15,000.00",50,0,Due+APE-o,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 177,628.00","Q 75,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 85,000.00","Q 6,000.00",40-49,0, Empleado,5-10, Casado, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+"Q 39,979.00","Q 15,000.00",50,0,Due+APE-o,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 23,812.00","Q 50,000.00",40-49,0, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,10
+"Q 42,769.00","Q 12,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,15
+"Q 80,000.00","Q 15,000.00",30-39,2,Due+APE-o,5-10, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,1
+"Q 26,500.00","Q 10,200.00",30-39,2, Empleado,5-10, Casado, Mejora Inmueble, Si, Si, Si,Sobre Vehiculos,8
+"Q 13,000.00","Q 9,250.00",18-29,0, Empleado,5-10, Soltero, Estudios, Si, Si, Si,Sobre Vehiculos,0
+"Q 43,976.00","Q 18,000.00",30-39,1,Due+APE-o,5-10, Soltero, Consumo, Si, Si, No,Autocompras,5
+"Q 29,400.00","Q 15,000.00",50,2,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+"Q 54,024.00","Q 25,000.00",40-49,3,Due+APE-o,1-5, Casado, Consumo, Si, No, No,Autocompras,3
+"Q 69,576.00","Q 68,000.00",40-49,3,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,
+"Q 24,908.00","Q 90,000.00",30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,8
+"Q 82,264.00","Q 7,000.00",40-49,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 35,516.00","Q 90,000.00",30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 39,962.00","Q 8,000.00",40-49,3,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 61,984.00","Q 7,500.00",30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 39,343.38" -,"Q 10,000.00",30-39,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 38,688.00","Q 7,800.00",30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 49,626.68" -,"Q 9,000.00",30-39,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 60,995.00","Q 15,000.00",30-39,0, Empleado,1-5, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,0
+"Q 358,476.21" -,"Q 50,000.00",50,3,Due+APE-o,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 49,984.88" -,"Q 6,000.00",18-29,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 10,450.00","Q 7,000.00",40-49,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 30,363.00","Q 7,000.00",30-39,3, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 96,720.00","Q 11,415.20" -,30-39,3, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 58,968.00","Q 14,000.00",30-39,2,,, Casado, Consumo, No, Si, Si,Autocompras,2
+"Q 61,932.00","Q 25,000.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 69,000.00",,40-49,,,, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,3
+"Q 4,504.49" -,"Q 4,000.00",40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 61,776.00","Q 18,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,4
+"Q 59,769.00","Q 6,500.00",30-39,3, Empleado,5-10, Divorciado, Consumo, Si, No, Si,Autocompras,0
+"Q 100,672.00","Q 20,000.00",50,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 46,306.00","Q 10,000.00",40-49,3, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 81,529.48" -,"Q 30,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 144,248.00","Q 47,050.00",40-49,4, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 40,997.00","Q 11,000.00",18-29,3,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+"Q 45,968.00","Q 118,000.00",40-49,2, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 73,000.00","Q 15,000.00",30-39,5, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 43,940.00","Q 7,000.00",30-39,3, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 136,308.00","Q 34,000.00",30-39,, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 15,840.96" -,"Q 25,000.00",40-49,4, Empleado,5-10, Casado, Capital de trabajo,,,,Sobre Vehiculos,10
+"Q 64,480.00","Q 12,000.00",50,2,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 46,904.00","Q 120,000.00",40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 39,936.00","Q 14,000.00",50,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 80,808.00","Q 6,500.00",18-29,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 39,676.00","Q 240,000.00",30-39,2,Due+APE-o,0-1,, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 58,500.00","Q 15,000.00",30-39,2,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 110,000.00","Q 25,000.00",50,4,Due+APE-o,5-10, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 84,968.00","Q 28,000.00",40-49,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 90,116.00","Q 9,000.00",30-39,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 59,270.00","Q 12,500.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 34,944.00","Q 10,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 40,550.00","Q 10,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 31,689.00","Q 4,600.00",18-29,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 8,691.58" -,"Q 17,687.00",50,1, Empleado,1-5,, Consumo,,,,Sobre Vehiculos,1
+"Q 73,476.00","Q 15,000.00",30-39,2,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 39,745.88" -,"Q 8,000.00",30-39,2, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,3
+"Q 27,000.00","Q 6,000.00",40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 48,000.00","Q 7,000.00",18-29,, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,2
+"Q 52,832.00","Q 10,000.00",50,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 155,999.25" -,"Q 27,500.00",30-39,2,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 57,304.00","Q 12,000.00",18-29,2, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 65,988.00","Q 18,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,4
+"Q 35,828.00","Q 20,475.00",40-49,3, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 45,003.31" -,"Q 7,216.00",30-39,3, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 121,046.00","Q 22,000.00",30-39,0, Empleado,, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 211,848.00","Q 48,000.00",40-49,4,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 44,928.00","Q 22,000.00",30-39,2,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 153,920.00","Q 50,000.00",30-39,4,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 90,959.36" -,"Q 18,000.00",18-29,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,8
+"Q 40,768.00","Q 7,600.00",18-29,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 81,120.00",,30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 103,896.00","Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+"Q 81,246.62" -,"Q 13,000.00",18-29,,Due+APE-o,1-5,, Capital de trabajo, Si, No, Si,Autocompras,1
+"Q 63,908.00","Q 12,000.00",18-29,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 45,916.00","Q 9,500.00",30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 22,800.00","Q 10,000.00",30-39,,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 142,678.00","Q 25,000.00",30-39,4, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 111,696.00","Q 300,000.00",18-29,1,Due+APE-o,, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 65,780.00","Q 18,000.00",30-39,3, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 54,990.00","Q 18,000.00",40-49,3,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 112,008.00","Q 20,000.00",40-49,3, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 154,994.93" -,"Q 15,000.00",18-29,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,4
+"Q 86,840.00","Q 8,750.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 131,463.40" -,"Q 60,000.00",30-39,3,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 36,556.00","Q 22,000.00",30-39,, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 53,710.00","Q 5,000.00",30-39,2,,, Soltero, Consumo, Si, Si, Si,Autocompras,2
+"Q 54,946.00","Q 11,012.50" -,40-49,4, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 47,839.00","Q 8,500.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 94,910.00", "Q 15.00" ,18-29,1,Due+APE-o,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 57,830.00","Q 18,000.00",18-29,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 48,843.00","Q 18,063.19" -,30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 65,761.00","Q 4,000.00",30-39,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+"Q 70,808.00","Q 22,500.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 34,363.16" -,"Q 11,000.00",18-29,0,Due+APE-o,, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+"Q 20,540.00","Q 3,416.38" -,18-29,0, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 43,930.00","Q 6,000.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 29,500.00","Q 8,000.00",30-39,2, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 111,500.00","Q 10,000.00",50,0, Empleado,5-10,, Capital de trabajo, Si, Si, No,Hipotecarios,0
+"Q 56,290.00","Q 5,000.00",40-49,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 53,911.00","Q 20,000.00",30-39,1,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 49,229.00","Q 5,000.00",30-39,1, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 27,960.00","Q 8,000.00",30-39,3, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+"Q 61,950.00","Q 12,000.00",30-39,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 67,914.00","Q 15,000.00",40-49,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 80,840.00","Q 11,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 64,000.00","Q 15,000.00",40-49,1, Empleado,5-10, Soltero, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+"Q 65,864.00","Q 180,000.00",30-39,3,Due+APE-o,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 47,942.00","Q 5,785.00",30-39,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 34,977.00","Q 5,000.00",30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 44,400.00","Q 4,250.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,1
+"Q 37,951.00","Q 10,000.00",40-49,1, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 117,570.00","Q 21,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 60,843.00","Q 6,800.00",30-39,4, Empleado,, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 40,994.00","Q 1,700.00",50,1, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 33,934.00","Q 4,200.00",18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,4
+"Q 32,955.00","Q 7,000.00",40-49,1, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 42,998.00","Q 3,212.62" -,18-29,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 39,810.00","Q 2,000.00",50,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 51,985.00","Q 1,800.00",18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 33,934.00","Q 5,000.00",40-49,4, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 53,916.00","Q 10,000.00",50,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 37,745.00","Q 12,100.00",30-39,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 42,848.00","Q 7,000.00",30-39,1, Empleado,0-1, Soltero, Consumo, No, Si, Si,Autocompras,5
+"Q 14,000.00","Q 15,000.00",18-29,1, Empleado,1-5, Soltero, Salud o Medico, No, Si, Si,Sobre Vehiculos,0
+"Q 134,997.00","Q 15,000.00",30-39,2, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 71,967.00","Q 3,500.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 57,933.00","Q 8,000.00",50,1, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 55,924.00",,40-49,0, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 30,998.00","Q 2,000.00",40-49,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 90,300.00","Q 8,000.00",30-39,2, Empleado,0-1, Casado, Consolidacion de deudas, Si, No, Si,Hipotecarios,
+"Q 47,633.00","Q 2,600.00",18-29,3, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,2
+"Q 124,491.00","Q 20,000.00",40-49,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 121,999.00","Q 8,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 39,702.00",,18-29,,,, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 76,370.00","Q 9,000.00",40-49,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 31,977.00","Q 8,800.00",40-49,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 98,500.00","Q 40,000.00",40-49,0, Empleado,, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,9
+"Q 38,260.00","Q 3,500.00",30-39,1, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 75,000.00","Q 65,000.00",50,1, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,1
+"Q 5,485.00","Q 3,416.00",50,2, Empleado,5-10, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 21,545.00","Q 3,000.00",30-39,0,Due+APE-o,1-5, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,0
+"Q 335,467.00","Q 120,000.00",40-49,3,Due+APE-o,1-5,, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 110,000.00","Q 20,000.00",50,0, Empleado,5-10, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 29,021.05" -,,18-29,,,, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 64,937.00","Q 3,000.00",18-29,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,1
+"Q 39,100.00","Q 25,000.00",40-49,0, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 56,491.00","Q 9,500.00",30-39,4, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 160,835.00","Q 25,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 43,899.00","Q 2,000.00",40-49,1, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 23,000.00","Q 11,000.00",30-39,0, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 36,869.00","Q 2,800.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 45,000.00","Q 2,000.00",18-29,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 32,909.00","Q 4,500.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 397,992.00","Q 45,000.00",50,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 19,000.00","Q 2,500.00",30-39,1, Empleado,0-1, Casado, Salud o Medico, No, Si, Si,Sobre Vehiculos,1
+"Q 49,899.00","Q 5,500.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 42,998.00","Q 6,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 19,800.00","Q 2,225.00",50,1, Empleado,1-5,, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+"Q 232,940.00","Q 50,000.00",50,0, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,8
+"Q 155,165.00","Q 3,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 49,500.00","Q 25,000.00",50,1,,, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 32,698.00","Q 2,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 17,500.00","Q 4,500.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 65,416.00","Q 10,000.00",40-49,2,Due+APE-o,5-10, Casado, Capital de trabajo,, Si, Si,Autocompras,10
+"Q 39,000.00","Q 4,500.00",30-39,0, Empleado,5-10, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,1
+"Q 84,713.00","Q 4,200.00",18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 42,637.00","Q 45,000.00",30-39,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 45,000.00","Q 8,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+"Q 52,989.00","Q 3,000.00",50,0,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,3
+"Q 35,994.00","Q 7,000.00",40-49,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,2
+"Q 48,560.00","Q 8,000.00",50,0, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 48,920.00","Q 10,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 93,000.00","Q 14,000.00",18-29,0,Due+APE-o,1-5,, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+"Q 107,064.00","Q 120,000.00",40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 41,906.00","Q 10,000.00",30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,3
+"Q 65,890.00","Q 120,000.00",30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 38,826.00","Q 8,000.00",30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,3
+"Q 62,000.00","Q 7,500.00",30-39,3, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+"Q 17,000.00","Q 4,500.00",30-39,2, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,2
+"Q 37,899.00","Q 2,800.00",30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,8
+"Q 165,500.00","Q 25,000.00",40-49,,Due+APE-o,5-10,, Capital de trabajo, No, Si, No,Sobre Vehiculos,0
+"Q 32,909.00","Q 12,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,10
+"Q 60,920.00","Q 5,000.00",30-39,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 52,000.00","Q 3,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 12,000.00","Q 4,400.00",30-39,1, Empleado,5-10, Soltero, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,0
+"Q 79,460.00","Q 2,500.00",30-39,2,Due+APE-o,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+"Q 46,706.00","Q 1,000.00",18-29,0,,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 76,885.00","Q 4,500.00",18-29,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,9
+"Q 47,942.00","Q 4,500.00",18-29,0,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 41,350.00","Q 4,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,7
+"Q 35,994.00","Q 2,500.00",30-39,2, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,4
+"Q 38,672.00","Q 3,000.00",30-39,1,Due+APE-o,0-1, Casado, Capital de trabajo, Si, Si, No,Autocompras,1
+"Q 24,875.00", "Q 299.00" ,18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,3
+"Q 48,560.00","Q 8,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 58,139.00","Q 4,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,3
+"Q 56,805.00","Q 22,000.00",30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 37,384.00","Q 8,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 10,000.00","Q 4,000.00",40-49,3, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,1
+"Q 142,800.00","Q 1,500.00",30-39,0, Empleado,1-5,, Consumo, No, No, Si,Autocompras,0
+"Q 128,900.00","Q 13,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,12
+"Q 102,600.00","Q 2,000.00",18-29,0, Empleado,0-1, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 142,032.00","Q 4,000.00",30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 40,000.00","Q 2,000.00",30-39,2, Empleado,5-10, Soltero, Capital de trabajo, No, No, Si,Sobre Vehiculos,0
+"Q 59,225.00","Q 18,500.00",40-49,2,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 34,608.00","Q 3,000.00",18-29,2, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,1
+"Q 43,873.00","Q 2,500.00",18-29,3,Due+APE-o,0-1, Casado, Consumo,,,,Autocompras,0
+"Q 43,976.00","Q 3,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 15,000.00","Q 3,000.00",18-29,0, Empleado,0-1, Soltero, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 44,000.00","Q 20,000.00",40-49,1, Empleado,5-10, Casado, Capital de trabajo, No, Si, Si,Sobre Vehiculos,0
+"Q 81,422.00","Q 22,000.00",40-49,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 27,991.00","Q 4,500.00",18-29,1, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,9
+"Q 113,450.00","Q 25,000.00",50,3,Due+APE-o,5-10, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 54,740.00","Q 25,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 46,963.00","Q 4,000.00",30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,2
+"Q 34,608.00","Q 4,500.00",30-39,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 29,845.00","Q 8,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 55,255.00","Q 1,250.00",18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,9
+"Q 37,750.00","Q 9,000.00",18-29,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 57,984.00","Q 3,500.00",40-49,2, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 105,215.00","Q 8,000.00",30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,4
+"Q 53,143.00","Q 6,500.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 73,718.00","Q 3,000.00",30-39,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 31,000.00","Q 4,000.00",18-29,2, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,6
+"Q 68,954.00","Q 15,000.00",50,5, Empleado,, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 36,617.00","Q 6,500.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, No, No, Si,Autocompras,0
+"Q 139,359.00","Q 6,000.00",40-49,3,,, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 46,000.00","Q 8,000.00",40-49,2, Empleado,1-5, Casado, Consolidacion de deudas, No, Si, Si,Sobre Vehiculos,1
+"Q 34,258.00","Q 6,000.00",40-49,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,3
+"Q 96,460.00","Q 10,000.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 79,465.00","Q 3,500.00",50,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 40,994.00","Q 7,000.00",40-49,3, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 31,874.00","Q 6,000.00",50,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 31,570.00","Q 3,000.00",50,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 40,891.00","Q 8,800.00",40-49,3,Due+APE-o,1-5, Casado, Capital de trabajo, No, No, Si,Autocompras,
+"Q 43,878.00","Q 12,000.00",40-49,1, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 24,900.00","Q 12,080.00",50,3, Empleado,5-10, Soltero, Consolidacion de deudas, Si, No, Si,Sobre Vehiculos,1
+"Q 126,510.00","Q 48,000.00",30-39,2,,, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 89,657.00","Q 3,500.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 14,000.00","Q 2,000.00",40-49,0, Empleado,1-5, Casado, Consumo, No, Si, Si,Sobre Vehiculos,1
+"Q 35,000.00","Q 11,500.00",30-39,3, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 167,015.00","Q 1,500.00",30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 79,465.00","Q 25,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 70,499.00","Q 40,000.00",40-49,2, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 57,938.00","Q 11,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 55,723.00","Q 8,500.00",40-49,2, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 47,993.00","Q 56,000.00",50,0, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 39,676.00","Q 240,000.00",30-39,2,Due+APE-o,0-1,, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 39,211.44" -,"Q 37,000.00",30-39,3, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 27,150.94" -,"Q 4,500.00",40-49,1,Due+APE-o,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 96,150.95" -,"Q 10,000.00",30-39,,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 46,923.25" -,"Q 19,750.00",30-39,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 46,306.00","Q 10,000.00",40-49,3, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 49,626.68" -,"Q 9,000.00",30-39,2, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 31,500.00","Q 13,000.00",40-49,1, Empleado,5-10, Casado, Estudios, Si, Si, No,Sobre Vehiculos,0
+"Q 60,995.00","Q 15,000.00",30-39,0, Empleado,1-5, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,0
+"Q 144,248.00","Q 47,050.00",40-49,4, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 21,500.00","Q 5,500.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,1
+"Q 59,270.00","Q 12,500.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 61,226.75" -,"Q 5,600.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 48,000.00","Q 7,000.00",18-29,, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,2
+"Q 61,776.00","Q 18,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,4
+"Q 90,116.00","Q 9,000.00",30-39,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 65,780.00","Q 18,000.00",30-39,3, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 54,102.61" -,"Q 15,000.00",30-39,1,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 31,689.00","Q 4,600.00",18-29,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 51,863.70" -,"Q 9,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 146,974.90" -,"Q 15,000.00",18-29,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 39,962.00","Q 8,000.00",40-49,3,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 65,988.00","Q 18,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,4
+"Q 53,927.75" -,"Q 9,000.00",30-39,2, Empleado,5-10, Casado, Consumo, No, No, No,Autocompras,0
+"Q 49,984.88" -,"Q 6,000.00",18-29,1,,, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 61,984.00","Q 7,500.00",30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 45,224.59" -,"Q 10,000.00",40-49,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 36,556.00","Q 22,000.00",30-39,, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 131,463.40" -,"Q 60,000.00",30-39,3,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 154,994.93" -,"Q 15,000.00",18-29,2, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,4
+"Q 61,932.00","Q 25,000.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 211,848.00","Q 48,000.00",40-49,4,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 81,246.62" -,"Q 13,000.00",18-29,,Due+APE-o,1-5,, Capital de trabajo, Si, No, Si,Autocompras,1
+"Q 56,627.68" -,"Q 5,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,4
+"Q 40,997.00","Q 11,000.00",18-29,3,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Autocompras,1
+"Q 87,583.62" -,"Q 10,720.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 119,925.27" -,"Q 75,000.00",18-29,,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 66,423.64" -,"Q 15,000.00",30-39,0, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,4
+"Q 38,688.00","Q 7,800.00",30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 58,968.00","Q 14,000.00",30-39,2,,, Casado, Consumo, No, Si, Si,Autocompras,2
+"Q 52,832.00","Q 10,000.00",50,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 92,772.12" -,"Q 17,500.00",30-39,2, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 110,294.23" -,"Q 22,000.00",30-39,1, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 73,000.00","Q 15,000.00",30-39,5, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 71,060.12" -,"Q 13,500.00",30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 40,550.00","Q 10,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 21,725.52" -,"Q 8,500.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 24,910.37" -,"Q 8,500.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 8,691.58" -,"Q 17,687.00",50,1, Empleado,1-5,, Consumo,,,,Sobre Vehiculos,1
+"Q 63,670.09" -,"Q 15,000.00",30-39,4, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 142,374.25" -,"Q 25,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,3
+"Q 110,000.00","Q 25,000.00",50,4,Due+APE-o,5-10, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 34,293.90" -,"Q 37,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 47,638.59" -,"Q 15,000.00",30-39,3, Empleado,5-10, Soltero, Consumo, No, Si, No,Autocompras,0
+"Q 216,304.50" -,"Q 15,000.00",30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 10,450.00","Q 7,000.00",40-49,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 40,768.00","Q 7,600.00",18-29,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 50,885.66" -,"Q 7,000.00",30-39,2, Empleado,5-10, Casado, Consumo, No, No, No,Autocompras,1
+"Q 132,786.39" -,"Q 70,000.00",40-49,2,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 44,928.00","Q 22,000.00",30-39,2,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 30,363.00","Q 7,000.00",30-39,3, Empleado,0-1, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 50,000.00","Q 4,800.00",30-39,3, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 46,904.00","Q 120,000.00",40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 81,529.48" -,"Q 30,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 24,908.00","Q 90,000.00",30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,8
+"Q 64,916.64" -,"Q 11,000.00",30-39,3, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 4,504.49" -,"Q 4,000.00",40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 90,959.36" -,"Q 18,000.00",18-29,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,8
+"Q 43,955.59" -,"Q 24,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,2
+"Q 124,275.44" -,,18-29,,,, Soltero, Consumo, No, No, Si,Autocompras,2
+"Q 22,800.00","Q 10,000.00",30-39,,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 86,840.00","Q 8,750.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 58,500.00","Q 15,000.00",30-39,2,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 64,015.38" -,,18-29,,,, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 60,870.64" -,"Q 13,500.00",18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 15,000.00","Q 13,900.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+"Q 78,881.61" -,"Q 45,000.00",30-39,1,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 97,224.93" -,"Q 25,000.00",40-49,2, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 59,769.00","Q 6,500.00",30-39,3, Empleado,5-10, Divorciado, Consumo, Si, No, Si,Autocompras,0
+"Q 73,476.00","Q 15,000.00",30-39,2,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 142,678.00","Q 25,000.00",30-39,4, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 95,160.00","Q 500,000.00",18-29,0,Due+APE-o,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 50,000.00","Q 30,000.00",30-39,3, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 40,264.89" -,"Q 7,000.00",18-29,,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 358,476.21" -,"Q 50,000.00",50,3,Due+APE-o,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 111,696.00","Q 300,000.00",18-29,1,Due+APE-o,, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 153,920.00","Q 50,000.00",30-39,4,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 74,544.61" -,"Q 15,695.00",40-49,2, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,2
+"Q 50,837.25" -,"Q 10,000.00",30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 167,984.91" -,"Q 32,000.00",40-49,, Empleado,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 45,916.00","Q 9,500.00",30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 85,489.86" -,"Q 35,000.00",40-49,, Empleado,, Soltero, Consumo, No, Si, No,Autocompras,0
+"Q 68,500.00","Q 45,000.00",18-29,,Due+APE-o,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+"Q 75,297.81" -,"Q 45,000.00",50,1,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 111,965.27" -,"Q 20,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 41,998.59" -,"Q 3,210.00",40-49,1, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 121,046.00","Q 22,000.00",30-39,0, Empleado,, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 54,990.00","Q 18,000.00",40-49,3,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 87,837.95" -,"Q 35,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 15,840.96" -,"Q 25,000.00",40-49,4, Empleado,5-10, Casado, Capital de trabajo,,,,Sobre Vehiculos,10
+"Q 155,622.58" -,"Q 50,000.00",30-39,4, Empleado,1-5, Casado, Consumo, Si, Si, No,Autocompras,3
+"Q 96,720.00","Q 11,415.20" -,30-39,3, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 131,717.93" -,"Q 17,000.00",30-39,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 64,480.00","Q 12,000.00",50,2,Due+APE-o,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 47,981.25" -,"Q 13,000.00",40-49,1, Empleado,1-5, Casado, Consumo, No, No, No,Autocompras,0
+"Q 100,672.00","Q 20,000.00",50,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 80,808.00","Q 6,500.00",18-29,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 31,268.44" -,"Q 10,000.00",40-49,1,,, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 55,619.75" -,"Q 15,000.00",40-49,1, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 69,576.00","Q 68,000.00",40-49,3,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,
+"Q 81,120.00",,30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 49,817.73" -,"Q 7,200.00",18-29,, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,2
+"Q 31,000.00","Q 27,000.00",40-49,2, Empleado,5-10, Casado, Consumo, No, Si, Si,Sobre Vehiculos,0
+"Q 45,902.64" -,"Q 6,200.00",30-39,1, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 42,950.59" -,"Q 12,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 35,461.34" -,"Q 25,000.00",30-39,4, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,4
+"Q 42,983.25" -,"Q 15,000.00",40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 57,304.00","Q 12,000.00",18-29,2, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 10,000.00","Q 4,200.00",18-29,2, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 22,200.00","Q 8,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,0
+"Q 82,264.00","Q 7,000.00",40-49,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 27,000.00","Q 15,000.00",50,4,Due+APE-o,1-5, Soltero, Consolidacion de deudas,,, No,Sobre Vehiculos,0
+"Q 45,968.00","Q 118,000.00",40-49,2, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 60,314.64" -,"Q 35,000.00",50,1,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 27,000.00","Q 6,000.00",40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 66,066.35" -,"Q 20,000.00",30-39,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 69,000.00",,40-49,, Empleado,, Soltero, Consumo, No, Si, Si,Sobre Vehiculos,3
+"Q 194,688.00","Q 35,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,9
+"Q 55,207.07" -,"Q 12,000.00",30-39,0, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 112,008.00","Q 20,000.00",40-49,3, Empleado,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,1
+"Q 39,936.00","Q 14,000.00",50,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 84,968.00","Q 28,000.00",40-49,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 39,745.88" -,"Q 8,000.00",30-39,2, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,3
+"Q 63,908.00","Q 12,000.00",18-29,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 39,343.38" -,"Q 10,000.00",30-39,, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 6,198.95" -,"Q 14,000.00",40-49,1, Empleado,5-10, Soltero, Consumo,,,,Autocompras,3
+"Q 136,308.00","Q 34,000.00",30-39,, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 34,944.00","Q 10,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 103,896.00","Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,1
+"Q 35,516.00","Q 90,000.00",30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 100,000.00","Q 14,000.00",18-29,0,Due+APE-o,1-5,, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,2
+"Q 44,907.59" -,"Q 8,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,5
+"Q 155,999.25" -,"Q 27,500.00",30-39,2,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 45,003.31" -,"Q 7,216.00",30-39,3, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 43,940.00","Q 7,000.00",30-39,3, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 35,828.00","Q 20,475.00",40-49,3, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 39,541.75" -,"Q 6,500.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 49,975.73" -,"Q 10,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 41,945.59" -,"Q 8,000.00",30-39,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 41,945.59" -,"Q 6,000.00",30-39,0, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 67,904.64" -,"Q 18,000.00",40-49,3,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 46,070.46" -,"Q 7,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 47,275.87" -,"Q 60,000.00",18-29,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,2
+"Q 175,986.71" -,"Q 20,000.00",18-29,,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 82,811.86" -,"Q 34,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 30,356.59" -,"Q 12,000.00",30-39,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, Si,Autocompras,1
+"Q 36,000.00","Q 9,000.00",30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 42,129.02" -,"Q 8,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 110,112.60" -,"Q 20,000.00",18-29,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 29,972.44" -,"Q 11,200.00",30-39,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 45,816.59" -,"Q 3,500.00",18-29,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 40,993.59" -,"Q 15,000.00",40-49,1, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 51,456.73" -,"Q 12,500.00",30-39,1,Due+APE-o,0-1, Soltero, Consumo, No, Si, Si,Autocompras,3
+"Q 79,939.61" -,"Q 18,150.00",30-39,2, Empleado,1-5, Casado, Consumo, Si, Si, No,Autocompras,1
+"Q 68,198.95" -,"Q 20,000.00",40-49,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 95,807.27" -,"Q 12,000.00",30-39,3,Due+APE-o,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 34,488.59" -,"Q 15,000.00",50,0, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 84,415.12" -,"Q 34,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 35,975.44" -,"Q 11,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 29,998.44" -,"Q 7,000.00",18-29,, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 70,985.35" -,"Q 7,300.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 117,886.25" -,"Q 23,000.00",50,0, Empleado,5-10, Casado, Capital de trabajo, Si,, No,Autocompras,2
+"Q 40,993.59" -,"Q 7,500.00",18-29,,Due+APE-o,0-1, Soltero, Consumo, No, Si, No,Autocompras,1
+"Q 49,235.73" -,"Q 8,000.00",30-39,2, Empleado,0-1, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 38,983.59" -,"Q 9,000.00",30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 80,283.35" -,"Q 17,000.00",40-49,1, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,1
+"Q 113,948.27" -,"Q 25,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,2
+"Q 33,991.44" -,"Q 7,000.00",30-39,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 42,051.59" -,"Q 7,500.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 68,800.09" -,"Q 16,500.00",30-39,3, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 69,995.61" -,"Q 12,000.00",18-29,,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, Si, Si,Autocompras,1
+"Q 102,995.30" -,"Q 7,000.00",18-29,3, Empleado,5-10, Casado, Consumo, No,, Si,Autocompras,0
+"Q 124,592.44" -,"Q 15,000.00",40-49,,Due+APE-o,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 7,239.60" -,"Q 78,000.00",40-49,2,Due+APE-o,5-10,,,,,,Autocompras,1
+"Q 47,276.59" -,"Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 58,876.25" -,"Q 12,500.00",30-39,4, Empleado, Q -   , Soltero, Consumo, No, No, No,Autocompras,1
+"Q 127,474.76" -,"Q 30,000.00",30-39,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 46,585.00","Q 40,000.00",50,2, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 105,288.78" -,"Q 27,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Sobre Vehiculos,0
+"Q 56,895.86" -,"Q 18,000.00",50,1, Empleado,0-1,, Consumo, Si, No, No,Autocompras,0
+"Q 57,818.25" -,"Q 20,000.00",40-49,3, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 103,908.78" -,"Q 20,000.00",18-29,1, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 25,328.64" -,"Q 18,000.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 122,912.60" -,"Q 10,000.00",50,4, Empleado,5-10, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 51,895.25" -,"Q 60,000.00",30-39,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 50,000.00","Q 65,000.00",40-49,0,Due+APE-o,5-10, Soltero, mejora de algo en inmueble o v, No, Si, Si,Sobre Vehiculos,0
+"Q 449,893.73" -,"Q 50,000.00",30-39,4, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 47,710.59" -,"Q 8,125.00",18-29,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 68,486.64" -,"Q 14,000.00",40-49,4, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 77,628.86" -,"Q 35,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,2
+"Q 40,676.59" -,"Q 10,000.00",30-39,1,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,2
+"Q 76,399.78" -,"Q 35,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 67,814.76" -,"Q 9,500.00",18-29,0, Empleado,1-5,, Consumo, No, No, Si,Autocompras,0
+"Q 67,814.76" -,"Q 9,500.00",18-29,0, Empleado,1-5,, Consumo, No, No, Si,Autocompras,0
+"Q 64,664.75" -,"Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 73,820.86" -,"Q 9,000.00",40-49,1, Empleado,0-1, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 99,324.95" -,"Q 14,000.00",30-39,4, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 141,383.41" -,"Q 8,000.00",30-39,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,1
+"Q 111,979.11" -,,30-39,,, Q -   , Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 80,008.51" -,"Q 15,000.00",30-39,3, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 58,000.00","Q 5,750.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 56,299.62" -,"Q 20,000.00",30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 50,625.25" -,,30-39,,, Q -   , Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 55,157.28" -,"Q 32,000.00",50,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 32,960.44" -,"Q 2,500.00",18-29,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 54,777.25" -,"Q 6,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 44,167.59" -,,40-49,1, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 72,979.09" -,"Q 70,000.00",40-49,3,Due+APE-o,5-10, Casado, Consumo, No, Si, Si,Autocompras,2
+"Q 60,459.75" -,"Q 8,500.00",40-49,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 36,424.44" -,"Q 6,500.00",18-29,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 5,082.75" -,"Q 10,000.00",30-39,2, Empleado,1-5, Soltero,,,,,Sobre Vehiculos,0
+"Q 5,442.80" -,"Q 10,000.00",30-39,0, Empleado,1-5, Soltero,,,,,Autocompras,0
+"Q 40,789.11" -,"Q 20,000.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 37,006.44" -,"Q 9,000.00",40-49,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 42,639.25" -,"Q 10,000.00",30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 63,934.09" -,,50,3, Empleado, Q -   , Casado,, Si, No, No,Autocompras,0
+"Q 38,719.59" -,"Q 5,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 73,947.35" -,"Q 17,250.00",30-39,1, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 35,922.44" -,"Q 10,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 45,383.59" -,"Q 7,000.00",30-39,0, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 83,816.86" -,"Q 13,500.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 34,277.44" -,"Q 6,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 64,903.35" -,"Q 9,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 44,067.25" -,"Q 29,000.00",40-49,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,1
+"Q 235,889.30" -,"Q 110,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 40,035.59" -,"Q 5,000.00",30-39,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 108,474.95" -,"Q 20,000.00",18-29,1, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 77,945.86" -,"Q 13,000.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 61,250.96" -,"Q 15,000.00",30-39,1,, Q -   , Soltero, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 53,662.75" -,"Q 15,000.00",40-49,1, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 161,000.00","Q 60,000.00",30-39,3,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 29,893.44" -,"Q 1,600.00",30-39,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 62,601.75" -,"Q 10,000.00",18-29,0,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 33,383.44" -,"Q 8,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 58,242.25" -,"Q 16,000.00",18-29,1, Empleado,0-1, Casado,,, No, No,Autocompras,1
+"Q 51,911.75" -,"Q 25,000.00",30-39,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 50,520.25" -,"Q 9,000.00",40-49,4, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 62,072.75" -,"Q 6,000.00",30-39,3,Due+APE-o,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 105,420.11" -,"Q 50,000.00",40-49,3, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 54,715.00","Q 3,400.00",18-29,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 80,996.61" -,"Q 15,000.00",30-39,2, Empleado,0-1, Casado, Consumo, Si, Si, No,Autocompras,0
+"Q 62,971.75" -,"Q 10,000.00",30-39,3, Empleado,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 34,441.44" -,"Q 11,500.00",30-39,0, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 194,924.52" -,"Q 13,386.11" -,18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 180,493.39" -,"Q 4,200.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 228,364.91" -,"Q 50,000.00",40-49,1,Due+APE-o,1-5, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 94,123.78" -,"Q 15,000.00",40-49,1, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 43,009.25" -,"Q 8,000.00",40-49,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 96,211.43" -,"Q 25,000.00",30-39,1, Empleado,1-5, Soltero, Consumo, Si, Si, No,Autocompras,1
+"Q 79,994.62" -,"Q 100,000.00",30-39,2, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 64,374.35" -,"Q 8,500.00",18-29,1, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 53,957.25" -,"Q 5,000.00",18-29,0, Empleado,5-10, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 75,777.86" -,"Q 18,500.00",40-49,3, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 67,615.61" -,"Q 9,000.00",40-49,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 72,608.09" -,"Q 21,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 116,059.23" -,"Q 90,000.00",30-39,2,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 36,886.61" -,"Q 20,000.00",40-49,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 46,388.59" -,"Q 12,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 90,973.12" -,"Q 9,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 51,472.25" -,"Q 17,000.00",30-39,3, Empleado,0-1, Casado, Consumo, No, Si, Si,Autocompras,1
+"Q 41,460.73" -,"Q 8,000.00",30-39,2, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 50,927.73" -,"Q 9,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 126,931.60" -,"Q 20,000.00",18-29,2,Due+APE-o,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 80,046.62" -,"Q 50,000.00",18-29,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 38,613.59" -,"Q 14,000.00",18-29,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 65,680.09" -,"Q 11,500.00",30-39,3,, Q -   , Casado, Consumo, No, No, Si,Autocompras,1
+"Q 59,904.75" -,"Q 35,000.00",30-39,3, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 61,777.35" -,"Q 15,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 44,748.59" -,"Q 13,000.00",30-39,2, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,1
+"Q 174,437.91" -,"Q 35,000.00",30-39,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 101,150.62" -,"Q 9,500.00",30-39,1, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 133,780.93" -,"Q 83,000.00",50,0,Due+APE-o,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 66,952.64" -,"Q 15,000.00",18-29,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 70,615.35" -,"Q 10,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 52,403.73" -,"Q 8,000.00",40-49,2, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 168,922.55" -,"Q 5,000.00",30-39,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 68,906.09" -,"Q 7,500.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 78,140.61" -,"Q 25,000.00",18-29,2,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 63,077.75" -,"Q 20,000.00",50,1, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 43,279.57" -,"Q 7,500.00",40-49,3, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 75,058.35" -,"Q 16,000.00",30-39,0, Empleado,0-1, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 42,897.59" -,"Q 6,250.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 62,932.64" -,"Q 30,000.00",40-49,0, Empleado,5-10, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 5,775.00","Q 4,500.00",18-29,0, Empleado,0-1, Soltero, mejora de algo en inmueble o v, No, Si, Si,Sobre Vehiculos,0
+"Q 59,812.64" -,"Q 7,600.00",30-39,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 12,000.00","Q 5,000.00",30-39,3, Empleado,1-5, Soltero,,,,,Autocompras,1
+"Q 162,034.30" -,"Q 30,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 73,009.93" -,"Q 12,000.00",40-49,1, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 60,999.61" -,"Q 35,000.00",40-49,2,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 49,960.75" -,"Q 35,000.00",40-49,0, Empleado,0-1, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 72,503.09" -,"Q 10,000.00",18-29,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 60,146.25" -,"Q 6,800.00",18-29,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 74,877.86" -,"Q 6,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 40,987.59" -,"Q 9,000.00",30-39,0,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 44,702.25" -,"Q 6,000.00",18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,1
+"Q 47,387.67" -,"Q 8,000.00",30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 61,067.75" -,"Q 12,000.00",30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, Si,Autocompras,1
+"Q 130,697.08" -,"Q 20,000.00",30-39,2,Due+APE-o,0-1, Soltero, Consumo, Si, Si, Si,Autocompras,2
+"Q 290,405.67" -,"Q 25,000.00",30-39,3, Empleado,5-10, Casado, Consumo, Si, Si, No,Autocompras,0
+"Q 46,902.64" -,"Q 6,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 74,906.37" -,"Q 6,530.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 61,702.75" -,"Q 25,000.00",30-39,3, Empleado,5-10, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 80,532.86" -,"Q 7,000.00",30-39,1, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 108,144.78" -,"Q 12,000.00",18-29,0, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 79,638.86" -,"Q 12,000.00",18-29,2, Empleado,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 153,336.41" -,"Q 20,000.00",30-39,1,Due+APE-o,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 71,741.61" -,"Q 8,000.00",30-39,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 110,318.18" -,"Q 35,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,1
+"Q 243,369.96" -,"Q 125,000.00",50,1,,5-10, Soltero, Consumo,, Si, Si,Autocompras,0
+"Q 360,128.47" -,,40-49,,,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 26,000.00","Q 15,000.00",50,2, Empleado,0-1, Casado, Salud o Medico, Si, Si, Si,Sobre Vehiculos,0
+"Q 47,340.59" -,,30-39,,, Q -   , Casado, Consumo, No, No, Si,Autocompras,0
+"Q 31,902.44" -,"Q 7,100.00",30-39,1, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 75,968.38" -,"Q 14,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 241,198.30" -,"Q 6,000.00",40-49,3,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 78,897.86" -,"Q 8,000.00",40-49,2, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,3
+"Q 38,672.44" -,"Q 10,000.00",30-39,3, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 193,536.26" -,"Q 20,000.00",30-39,2, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 56,942.75" -,"Q 12,000.00",30-39,2,Due+APE-o,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 102,617.11" -,"Q 25,000.00",18-29,1, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 194,941.71" -,"Q 15,486.00",30-39,3, Empleado,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 66,790.09" -,"Q 20,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 96,939.38" -,"Q 8,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 333,447.06" -,"Q 65,000.00",50,3,Due+APE-o,1-5, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 71,514.35" -,"Q 35,000.00",18-29,1, Empleado,0-1, Casado, Consumo, Si, No, Si,Autocompras,1
+"Q 40,405.59" -,"Q 8,500.00",18-29,1,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 81,960.86" -,"Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 72,851.61" -,"Q 18,500.00",18-29,0,Due+APE-o,1-5, Soltero, Consumo, Si, No, Si,Autocompras,1
+"Q 72,957.61" -,"Q 43,000.00",30-39,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 166,012.42" -,,18-29,,, Q -   , Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 60,976.64" -,"Q 10,000.00",50,1, Empleado,0-1, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 46,335.59" -,"Q 5,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 121,821.74" -,"Q 16,000.00",30-39,1,Due+APE-o,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 66,000.64" -,"Q 35,000.00",30-39,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 61,596.75" -,"Q 10,500.00",40-49,2, Empleado,1-5, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 43,532.59" -,"Q 70,000.00",40-49,3, Empleado,5-10, Soltero, Consumo, No, Si, Si,Autocompras,1
+"Q 107,137.42" -,"Q 25,000.00",18-29,3, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 66,484.35" -,"Q 45,000.00",18-29,0, Empleado,1-5,, Consumo, No, Si, No,Autocompras,0
+"Q 52,937.73" -,"Q 12,000.00",30-39,1, Empleado,5-10, Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 41,675.59" -,"Q 5,000.00",40-49,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 231,239.10" -,"Q 12,000.00",30-39,3, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 171,101.07" -,"Q 30,000.00",18-29,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Autocompras,1
+"Q 290,468.49" -,"Q 35,000.00",30-39,2, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,1
+"Q 46,752.59" -,"Q 4,200.00",30-39,3, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 75,957.35" -,"Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 80,849.86" -,"Q 30,000.00",40-49,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 203,732.30" -,"Q 25,000.00",18-29,0, Empleado,5-10, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 138,963.93" -,"Q 15,000.00",18-29,0,, Q -   , Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 134,520.93" -,"Q 80,000.00",50,2,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 136,597.09" -,"Q 15,000.00",18-29,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 59,918.64" -,"Q 15,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 250,000.00","Q 60,000.00",30-39,3,Due+APE-o,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 67,878.64" -,"Q 5,000.00",18-29,2, Empleado,0-1, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 79,956.12" -,"Q 6,000.00",30-39,4, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,0
+"Q 49,191.59" -,,30-39,,, Q -   , Casado, Capital de trabajo, Si, No, No,Autocompras,2
+"Q 73,084.09" -,"Q 8,000.00",30-39,0, Empleado,5-10, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 17,800.00","Q 20,000.00",50,2, Empleado,5-10, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,1
+"Q 131,129.58" -,"Q 10,500.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 39,407.59" -,"Q 3,400.00",18-29,1, Empleado,1-5, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 170,219.90" -,"Q 18,400.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 74,000.00","Q 125,000.00",30-39,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Sobre Vehiculos,0
+"Q 453,077.06" -,"Q 75,000.00",40-49,4,,5-10, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 98,302.78" -,"Q 50,000.00",30-39,1, Empleado,5-10, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 68,327.64" -,"Q 7,800.00",40-49,3, Empleado,1-5, Casado, Consumo, Si, Si, No,Autocompras,1
+"Q 212,480.71" -,"Q 25,000.00",40-49,1, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 50,566.59" -,,30-39,0, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 56,919.25" -,"Q 10,500.00",30-39,1, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 97,825.44" -,"Q 20,000.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 63,898.35" -,"Q 10,000.00",18-29,2,Due+APE-o,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 35,400.00","Q 14,500.00",50,1, Empleado,5-10, Casado, Consolidacion de deudas, Si, Si, Si,Sobre Vehiculos,0
+"Q 147,716.25" -,"Q 25,000.00",50,1, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 46,000.00","Q 37,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, Si, Si, No,Sobre Vehiculos,0
+"Q 24,999.44" -,"Q 17,000.00",40-49,1,Due+APE-o,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 66,476.64" -,"Q 10,000.00",18-29,0, Empleado,0-1, Soltero, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 62,760.75" -,"Q 17,231.00",40-49,3, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 134,661.76" -,"Q 15,000.00",40-49,2, Empleado,0-1, Casado, Consumo, Si, No, No,Autocompras,0
+"Q 165,961.90" -,"Q 25,000.00",30-39,1,Due+APE-o,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 50,806.75" -,"Q 12,000.00",40-49,1, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 43,579.59" -,"Q 10,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 179,964.39" -,"Q 12,000.00",30-39,4, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 41,939.59" -,"Q 8,600.00",30-39,2, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 39,148.44" -,,18-29,,, Q -   , Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 66,448.38" -,"Q 18,000.00",40-49,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 50,399.73" -,"Q 14,000.00",30-39,0, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 85,200.00","Q 30,000.00",30-39,1, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+"Q 53,921.75" -,"Q 9,550.00",18-29,0, Empleado,0-1, Soltero, Consumo, Si, Si, No,Autocompras,0
+"Q 59,400.00","Q 30,000.00",30-39,1, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,1
+"Q 40,517.59" -,"Q 15,000.00",40-49,0,Due+APE-o,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 69,625.61" -,"Q 12,000.00",50,0, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 62,932.64" -,"Q 4,500.00",18-29,0, Empleado,1-5, Casado, Consumo, No, Si, Si,Autocompras,0
+"Q 79,844.86" -,"Q 22,000.00",50,1, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 90,333.12" -,"Q 18,000.00",40-49,1, Empleado,0-1, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 42,468.59" -,"Q 5,000.00",18-29,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 66,397.64" -,"Q 10,000.00",30-39,3,, Q -   , Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 70,000.00","Q 22,000.00",30-39,2, Empleado,0-1, Soltero, Salud o Medico, Si, Si, No,Sobre Vehiculos,1
+"Q 59,427.75" -,"Q 20,000.00",50,1,Due+APE-o,5-10, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 56,655.25" -,"Q 10,000.00",40-49,3, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 189,301.32" -,"Q 19,650.00",30-39,3, Empleado,1-5, Casado, Capital de trabajo, Si, No, Si,Autocompras,0
+"Q 85,000.00","Q 10,000.00",50,0,Due+APE-o,5-10, Soltero, Capital de trabajo, Si, Si, Si,Sobre Vehiculos,0
+"Q 102,644.78" -,,40-49,,, Q -   , Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 63,606.75" -,"Q 14,000.00",18-29,0, Empleado,1-5, Soltero, Consumo, No, No, No,Autocompras,1
+"Q 140,929.09" -,"Q 15,000.00",30-39,0, Empleado,1-5, Soltero, Capital de trabajo, No, No, Si,Autocompras,0
+"Q 47,754.73" -,"Q 6,930.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 177,095.23" -,"Q 40,000.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 168,077.90" -,"Q 15,300.00",30-39,4, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 85,931.86" -,"Q 15,000.00",30-39,2, Empleado,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 137,027.25" -,"Q 9,000.00",50,0, Empleado,5-10, Casado, Consumo, Si, Si, Si,Autocompras,0
+"Q 54,413.73" -,"Q 3,600.00",30-39,4, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,1
+"Q 51,630.25" -,"Q 7,500.00",18-29,0, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 71,233.09" -,"Q 15,000.00",30-39,2,Due+APE-o,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 65,889.64" -,"Q 7,000.00",18-29,0, Empleado,1-5, Casado, Capital de trabajo, Si, Si, No,Autocompras,0
+"Q 69,187.35" -,"Q 9,000.00",18-29,3, Empleado,1-5, Soltero, Consumo, Si, Si, Si,Autocompras,0
+"Q 84,885.12" -,"Q 45,000.00",40-49,5, Empleado,5-10, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 116,474.11" -,"Q 15,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, Si, Si,Autocompras,0
+"Q 105,869.44" -,"Q 17,000.00",30-39,2, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,1
+"Q 51,388.75" -,"Q 35,000.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 119,607.27" -,"Q 20,000.00",30-39,2, Empleado,1-5, Soltero, Consumo, No, No, Si,Autocompras,0
+"Q 65,326.35" -,"Q 18,250.00",30-39,1, Empleado,0-1, Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 51,659.09" -,"Q 4,200.00",30-39,3, Empleado,1-5, Soltero, Consumo, Si, No, No,Autocompras,0
+"Q 51,774.73" -,"Q 9,000.00",30-39,1, Empleado,0-1, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 54,683.73" -,"Q 16,000.00",30-39,2, Empleado,1-5, Casado, Capital de trabajo, Si, Si, Si,Autocompras,0
+"Q 50,859.75" -,"Q 6,000.00",50,0, Empleado,1-5, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 46,541.59" -,"Q 37,000.00",30-39,2, Empleado, Q -   , Casado, Consumo, Si, No, Si,Autocompras,0
+"Q 62,888.35" -,,40-49,3,, Q -   , Soltero, Consumo, Si, No, Si,Autocompras,0
+"Q 76,866.61" -,"Q 15,000.00",40-49,2,Due+APE-o,5-10, Casado, Consumo, No, No, Si,Autocompras,0
+"Q 28,500.00","Q 20,000.00",40-49,0, Empleado,5-10, Soltero, Consumo, Si, Si, Si,Sobre Vehiculos,0
+"Q 194,844.19" -,"Q 6,000.00",30-39,4, Empleado,1-5, Soltero, Capital de trabajo, Si, No, No,Autocompras,0
+"Q 115,000.00", Q -   ,30-39,0, Empleado,1-5, Soltero, Consumo, Si, No, Si,Autocompras,

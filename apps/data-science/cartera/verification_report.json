@@ -1,0 +1,34 @@
+{
+  "verification_timestamp": "2025-08-18T09:40:40.117859",
+  "source_checklist": "column_checklist.json",
+  "target_database": "cartera_migrated.db",
+  "summary": {
+    "total_rows_migrated": 36471,
+    "total_sheets_migrated": 96,
+    "total_columns_in_schema": 189,
+    "checklist_columns": 185
+  },
+  "column_utilization": {
+    "num": 23522,
+    "num_credito_sifco": 20918,
+    "pct": 35488,
+    "pct_cash_in": 35488,
+    "pct_de_interes_mensual": 790,
+    "pct_de_mora": 785,
+    "pct_inversionista": 35488,
+    "pct_royalty": 1503,
+    "abonos_parciales": 50,
+    "acuerdos": 47,
+    "asesor": 792,
+    "abono_gps": 18643,
+    "abono_iva_12pct": 23002,
+    "abono_iva_ci": 22895,
+    "abono_interes": 23001,
+    "abono_seguro": 18384,
+    "abono_capital": 19280,
+    "abono_interes_ci": 22896,
+    "acumulado_comision_de_venta": 93,
+    "acumulado_comisiones_cash_in": 93
+  },
+  "verification_status": "COMPLETED"
+}

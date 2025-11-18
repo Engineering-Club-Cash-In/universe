@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard de Perfiles de Clientes</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .header {
+        text-align: center;
+        color: white;
+        margin-bottom: 30px;
+      }
+
+      .header h1 {
+        font-size: 2.5rem;
+        margin-bottom: 10px;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+      }
+
+      .header p {
+        font-size: 1.2rem;
+        opacity: 0.9;
+      }
+
+      .profiles-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+
+      .profile-card {
+        background: white;
+        border-radius: 15px;
+        padding: 25px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        transition:
+          transform 0.3s ease,
+          box-shadow 0.3s ease;
+        cursor: pointer;
+      }
+
+      .profile-card:hover {
+        transform: translateY(-10px);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+      }
+
+      .profile-header {
+        display: flex;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+
+      .profile-icon {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.8rem;
+        margin-right: 15px;
+        color: white;
+      }
+
+      .profile-a .profile-icon {
+        background: linear-gradient(135deg, #2e8b57, #3cb371);
+      }
+      .profile-b .profile-icon {
+        background: linear-gradient(135deg, #4169e1, #6495ed);
+      }
+      .profile-c .profile-icon {
+        background: linear-gradient(135deg, #dc143c, #ff6347);
+      }
+      .profile-d .profile-icon {
+        background: linear-gradient(135deg, #ff8c00, #ffa500);
+      }
+
+      .profile-title {
+        flex: 1;
+      }
+
+      .profile-title h3 {
+        font-size: 1.3rem;
+        color: #333;
+        margin-bottom: 5px;
+      }
+
+      .profile-subtitle {
+        color: #666;
+        font-size: 0.9rem;
+      }
+
+      .profile-stats {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 15px;
+        margin-bottom: 20px;
+      }
+
+      .stat-item {
+        text-align: center;
+        padding: 15px;
+        background: #f8f9fa;
+        border-radius: 10px;
+      }
+
+      .stat-value {
+        font-size: 1.5rem;
+        font-weight: bold;
+        color: #333;
+        display: block;
+      }
+
+      .stat-label {
+        font-size: 0.85rem;
+        color: #666;
+        margin-top: 5px;
+      }
+
+      .profile-characteristics {
+        margin-top: 20px;
+      }
+
+      .characteristics-title {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #333;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+      }
+
+      .characteristics-title::before {
+        content: "🎯";
+        margin-right: 8px;
+      }
+
+      .characteristic-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 10px;
+        font-size: 0.9rem;
+      }
+
+      .characteristic-icon {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        margin-right: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.7rem;
+      }
+
+      .positive {
+        background: #28a745;
+        color: white;
+      }
+      .negative {
+        background: #dc3545;
+        color: white;
+      }
+      .neutral {
+        background: #6c757d;
+        color: white;
+      }
+
+      .risk-indicator {
+        position: absolute;
+        top: 15px;
+        right: 15px;
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: bold;
+        color: white;
+      }
+
+      .risk-low {
+        background: #28a745;
+      }
+      .risk-medium {
+        background: #ffc107;
+        color: #333;
+      }
+      .risk-high {
+        background: #dc3545;
+      }
+
+      .summary-section {
+        background: white;
+        border-radius: 15px;
+        padding: 30px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        margin-top: 20px;
+      }
+
+      .summary-title {
+        text-align: center;
+        font-size: 1.8rem;
+        color: #333;
+        margin-bottom: 25px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+      }
+
+      .summary-item {
+        text-align: center;
+        padding: 20px;
+        border-radius: 10px;
+        background: #f8f9fa;
+      }
+
+      .summary-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: #667eea;
+      }
+
+      .summary-label {
+        color: #666;
+        margin-top: 5px;
+      }
+
+      @media (max-width: 768px) {
+        .profiles-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .header h1 {
+          font-size: 2rem;
+        }
+
+        .summary-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .active-card {
+        border: 3px solid #667eea;
+        transform: scale(1.02);
+      }
+
+      .profile-demographics {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f1f3f4;
+        border-radius: 10px;
+        border-left: 4px solid #667eea;
+      }
+
+      .demographics-title {
+        font-size: 1.1rem;
+        font-weight: bold;
+        color: #333;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+      }
+
+      .demographic-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        font-size: 0.9rem;
+      }
+
+      .demo-label {
+        font-weight: 600;
+        color: #555;
+        min-width: 85px;
+      }
+
+      .demo-value {
+        color: #333;
+        text-align: right;
+        font-weight: 500;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🎯 Dashboard de Perfiles de Clientes</h1>
+        <p>Análisis Estratégico de Segmentación Crediticia</p>
+      </div>
+
+      <div class="profiles-grid">
+        <!-- Perfil A: Propietario Conservador -->
+        <div class="profile-card profile-a" onclick="selectProfile('A')">
+          <div class="risk-indicator risk-low">Riesgo Bajo</div>
+          <div class="profile-header">
+            <div class="profile-icon">🏠</div>
+            <div class="profile-title">
+              <h3>Propietario Conservador</h3>
+              <div class="profile-subtitle">
+                Casa propia + Sin tarjeta crédito
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-stats">
+            <div class="stat-item">
+              <span class="stat-value">30.8%</span>
+              <div class="stat-label">Del total de clientes</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">11.7%</span>
+              <div class="stat-label">Riesgo alto</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">Q15,200</span>
+              <div class="stat-label">Sueldo promedio</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">0.3x</span>
+              <div class="stat-label">Capacidad de pago</div>
+            </div>
+          </div>
+
+          <div class="profile-demographics">
+            <div class="demographics-title">👤 Perfil Demográfico</div>
+            <div class="demographic-item">
+              <span class="demo-label">Edad típica:</span>
+              <span class="demo-value">40-49 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Ocupación:</span>
+              <span class="demo-value">Empleados (65%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Estado civil:</span>
+              <span class="demo-value">Casados (72%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Dependientes:</span>
+              <span class="demo-value">2.3 promedio</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Antigüedad:</span>
+              <span class="demo-value">4.5 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Compra típica:</span>
+              <span class="demo-value">Autocompras</span>
+            </div>
+          </div>
+
+          <div class="profile-characteristics">
+            <div class="characteristics-title">Características Clave</div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Familia establecida con patrimonio</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Evita endeudamiento crediticio</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon neutral">•</div>
+              <span>Prefiere consumo y mejoras del hogar</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Cliente leal, mayor antigüedad</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Perfil B: Urbano con Crédito -->
+        <div class="profile-card profile-b" onclick="selectProfile('B')">
+          <div class="risk-indicator risk-low">Riesgo Bajo</div>
+          <div class="profile-header">
+            <div class="profile-icon">💳</div>
+            <div class="profile-title">
+              <h3>Urbano con Crédito</h3>
+              <div class="profile-subtitle">Sin casa + Con tarjeta crédito</div>
+            </div>
+          </div>
+
+          <div class="profile-stats">
+            <div class="stat-item">
+              <span class="stat-value">34.2%</span>
+              <div class="stat-label">Del total de clientes</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">10.9%</span>
+              <div class="stat-label">Riesgo alto</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">Q16,800</span>
+              <div class="stat-label">Sueldo promedio</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">0.3x</span>
+              <div class="stat-label">Capacidad de pago</div>
+            </div>
+          </div>
+
+          <div class="profile-demographics">
+            <div class="demographics-title">👤 Perfil Demográfico</div>
+            <div class="demographic-item">
+              <span class="demo-label">Edad típica:</span>
+              <span class="demo-value">30-39 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Ocupación:</span>
+              <span class="demo-value">Empleados (55%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Estado civil:</span>
+              <span class="demo-value">Solteros (45%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Dependientes:</span>
+              <span class="demo-value">1.8 promedio</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Antigüedad:</span>
+              <span class="demo-value">3.2 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Compra típica:</span>
+              <span class="demo-value">Sobre Vehículos</span>
+            </div>
+          </div>
+
+          <div class="profile-characteristics">
+            <div class="characteristics-title">Características Clave</div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Segmento más grande (34.2%)</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Cómodo con productos crediticios</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon neutral">•</div>
+              <span>Perfil urbano, busca movilidad</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Excelente cumplimiento de pagos</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Perfil C: Establecido Premium -->
+        <div class="profile-card profile-c" onclick="selectProfile('C')">
+          <div class="risk-indicator risk-low">Riesgo Bajo</div>
+          <div class="profile-header">
+            <div class="profile-icon">👑</div>
+            <div class="profile-title">
+              <h3>Establecido Premium</h3>
+              <div class="profile-subtitle">
+                Casa propia + Con tarjeta crédito
+              </div>
+            </div>
+          </div>
+
+          <div class="profile-stats">
+            <div class="stat-item">
+              <span class="stat-value">31.6%</span>
+              <div class="stat-label">Del total de clientes</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">11.4%</span>
+              <div class="stat-label">Riesgo alto</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">Q17,500</span>
+              <div class="stat-label">Sueldo promedio</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">0.3x</span>
+              <div class="stat-label">Capacidad de pago</div>
+            </div>
+          </div>
+
+          <div class="profile-demographics">
+            <div class="demographics-title">👤 Perfil Demográfico</div>
+            <div class="demographic-item">
+              <span class="demo-label">Edad típica:</span>
+              <span class="demo-value">40-49 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Ocupación:</span>
+              <span class="demo-value">Dueños (38%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Estado civil:</span>
+              <span class="demo-value">Casados (78%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Dependientes:</span>
+              <span class="demo-value">2.5 promedio</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Antigüedad:</span>
+              <span class="demo-value">5.1 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Compra típica:</span>
+              <span class="demo-value">Hipotecarios</span>
+            </div>
+          </div>
+
+          <div class="profile-characteristics">
+            <div class="characteristics-title">Características Clave</div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Segmento premium consolidado</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Dueños de negocio (38%)</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Familia grande, mayor estabilidad</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon neutral">•</div>
+              <span>Invierte en bienes raíces</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Perfil D: Joven Emergente -->
+        <div class="profile-card profile-d" onclick="selectProfile('D')">
+          <div class="risk-indicator risk-high">Riesgo Alto</div>
+          <div class="profile-header">
+            <div class="profile-icon">🚀</div>
+            <div class="profile-title">
+              <h3>Joven Emergente</h3>
+              <div class="profile-subtitle">Sin casa + Sin tarjeta crédito</div>
+            </div>
+          </div>
+
+          <div class="profile-stats">
+            <div class="stat-item">
+              <span class="stat-value">3.4%</span>
+              <div class="stat-label">Del total de clientes</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">25.0%</span>
+              <div class="stat-label">Riesgo alto</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">Q12,900</span>
+              <div class="stat-label">Sueldo promedio</div>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">0.3x</span>
+              <div class="stat-label">Capacidad de pago</div>
+            </div>
+          </div>
+
+          <div class="profile-demographics">
+            <div class="demographics-title">👤 Perfil Demográfico</div>
+            <div class="demographic-item">
+              <span class="demo-label">Edad típica:</span>
+              <span class="demo-value">18-29 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Ocupación:</span>
+              <span class="demo-value">Empleados (60%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Estado civil:</span>
+              <span class="demo-value">Solteros (80%)</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Dependientes:</span>
+              <span class="demo-value">1.2 promedio</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Antigüedad:</span>
+              <span class="demo-value">1.8 años</span>
+            </div>
+            <div class="demographic-item">
+              <span class="demo-label">Compra típica:</span>
+              <span class="demo-value">Prendario</span>
+            </div>
+          </div>
+
+          <div class="profile-characteristics">
+            <div class="characteristics-title">Características Clave</div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon negative">⚠</div>
+              <span>Segmento pequeño pero riesgoso</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon negative">⚠</div>
+              <span>Sin patrimonio ni historial crediticio</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon neutral">•</div>
+              <span>Jóvenes solteros, pocos dependientes</span>
+            </div>
+            <div class="characteristic-item">
+              <div class="characteristic-icon positive">✓</div>
+              <span>Compras menores, crecimiento futuro</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-section">
+        <h2 class="summary-title">📊 Resumen Ejecutivo</h2>
+        <div class="summary-grid">
+          <div class="summary-item">
+            <div class="summary-number">4</div>
+            <div class="summary-label">Perfiles Identificados</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-number">12.4%</div>
+            <div class="summary-label">Tasa Morosidad Promedio</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-number">65.8%</div>
+            <div class="summary-label">Clientes de Bajo Riesgo</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-number">Q16,100</div>
+            <div class="summary-label">Sueldo Promedio General</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      function selectProfile(profileLetter) {
+        // Remover clase activa de todas las tarjetas
+        document.querySelectorAll(".profile-card").forEach((card) => {
+          card.classList.remove("active-card");
+        });
+
+        // Agregar clase activa a la tarjeta seleccionada
+        event.currentTarget.classList.add("active-card");
+
+        // Feedback visual adicional
+        const profileNames = {
+          A: "Propietario Conservador",
+          B: "Urbano con Crédito",
+          C: "Establecido Premium",
+          D: "Joven Emergente",
+        };
+
+        // Mostrar información adicional (opcional)
+        console.log(`Seleccionaste el perfil: ${profileNames[profileLetter]}`);
+
+        // Aquí podrías agregar más funcionalidad como mostrar detalles adicionales
+        // o actualizar otros elementos del dashboard
+      }
+
+      // Animación de entrada para las tarjetas
+      document.addEventListener("DOMContentLoaded", function () {
+        const cards = document.querySelectorAll(".profile-card");
+        cards.forEach((card, index) => {
+          setTimeout(() => {
+            card.style.opacity = "0";
+            card.style.transform = "translateY(30px)";
+            card.style.animation = `fadeInUp 0.6s ease forwards`;
+          }, index * 150);
+        });
+      });
+
+      // Agregar estilos de animación
+      const style = document.createElement("style");
+      style.textContent = `
+            @keyframes fadeInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(30px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        `;
+      document.head.appendChild(style);
+    </script>
+  </body>
+</html>

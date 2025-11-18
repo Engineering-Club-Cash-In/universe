@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS "magic_urls" (
+	"dpi" varchar NOT NULL,
+	"name" varchar,
+	"nameOwner" varchar,
+	"nameBox" varchar,
+	"rolCdd" varchar,
+	"typeUrl" varchar,
+	"phoneNumber" varchar,
+	"cajaId" integer,
+	"clerkId" integer,
+	"promoterId" integer,
+	"submissionId" varchar,
+	"stepper" json,
+	"isCompleted" boolean DEFAULT false NOT NULL,
+	"id" varchar NOT NULL,
+	"url" varchar NOT NULL,
+	"createdAt" timestamp with time zone DEFAULT (NOW() AT TIME ZONE 'America/Guatemala') NOT NULL,
+	"expiresAt" timestamp with time zone DEFAULT (NOW() AT TIME ZONE 'America/Guatemala') NOT NULL,
+	"state" varchar NOT NULL,
+	CONSTRAINT "magic_urls_id_unique" UNIQUE("id"),
+	CONSTRAINT "magic_urls_url_unique" UNIQUE("url")
+);

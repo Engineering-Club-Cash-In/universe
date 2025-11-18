@@ -1,0 +1,89 @@
+---
+interface Props {
+  title: string;
+  faqs: {
+    question: string;
+    answer: string;
+  }[];
+}
+
+const { title, faqs } = Astro.props;
+---
+
+<div class="pt-36" id="faq">
+  <p
+    class="text-[2.13rem] leading-9 font-semibold mb-3 text-center mx-auto"
+    set:html={title}
+  />
+  <div class="mt-16 max-w-4xl mx-auto">
+    <div class="space-y-4">
+      {
+        faqs.map(({ question, answer }, index) => (
+          <div class="border border-neutral-200 rounded-lg">
+            <button
+              class="faq-button w-full px-6 py-4 text-left flex justify-between items-center hover:bg-neutral-50 focus:outline-none focus:bg-neutral-50"
+              data-index={index}
+            >
+              <span class="font-semibold text-lg">{question}</span>
+              <svg
+                class="faq-icon w-5 h-5 transform transition-transform duration-200"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 9l-7 7-7-7"
+                />
+              </svg>
+            </button>
+            <div
+              class="faq-content px-6 py-0 overflow-hidden transition-all duration-200"
+              style="max-height: 0;"
+            >
+              <div class="pb-4 text-neutral-700">{answer}</div>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const faqButtons = document.querySelectorAll(".faq-button");
+
+    faqButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = button.getAttribute("data-index");
+        const content = button.nextElementSibling as HTMLElement;
+        const icon = button.querySelector(".faq-icon") as HTMLElement;
+
+        // Close all other FAQs
+        faqButtons.forEach((otherButton, otherIndex) => {
+          if (otherIndex.toString() !== index) {
+            const otherContent = otherButton.nextElementSibling as HTMLElement;
+            const otherIcon = otherButton.querySelector(
+              ".faq-icon"
+            ) as HTMLElement;
+
+            otherContent.style.maxHeight = "0";
+            otherIcon.style.transform = "rotate(0deg)";
+          }
+        });
+
+        // Toggle current FAQ
+        if (content.style.maxHeight === "0px" || !content.style.maxHeight) {
+          content.style.maxHeight = content.scrollHeight + "px";
+          icon.style.transform = "rotate(180deg)";
+        } else {
+          content.style.maxHeight = "0";
+          icon.style.transform = "rotate(0deg)";
+        }
+      });
+    });
+  });
+</script>

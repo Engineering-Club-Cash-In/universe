@@ -1,0 +1,32 @@
+{
+	"name": "monthly-goals",
+	"private": true,
+	"workspaces": [
+		"apps/*",
+		"packages/*"
+	],
+	"scripts": {
+		"check": "oxlint",
+		"dev": "bun run --filter '*' dev",
+		"build": "bun run --filter '*' build",
+		"check-types": "bun run --filter '*' check-types",
+		"dev:native": "bun run --filter native dev",
+		"dev:web": "bun run --filter web dev",
+		"dev:server": "bun run --filter server dev",
+		"db:push": "bun run --filter server db:push",
+		"db:studio": "bun run --filter server db:studio",
+		"db:generate": "bun run --filter server db:generate",
+		"db:migrate": "bun run --filter server db:migrate",
+		"db:seed": "bun run --filter server db:seed",
+		"db:clear": "bun run --filter server db:clear",
+		"test": "bun run --filter server test",
+		"test:watch": "bun run --filter server test:watch",
+		"check-all": "./scripts/build-types.sh"
+	},
+	"dependencies": {},
+	"devDependencies": {
+		"oxlint": "^1.12.0",
+		"tsdown": "^0.14.2"
+	},
+	"packageManager": "bun@1.2.19"
+}

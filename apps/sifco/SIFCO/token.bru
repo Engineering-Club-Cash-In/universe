@@ -1,0 +1,33 @@
+meta {
+  name: token
+  type: http
+  seq: 4
+}
+
+post {
+  url: https://test.sifco.org/ClubCashIn/oauth/access_token
+  body: formUrlEncoded
+  auth: inherit
+}
+
+params:query {
+  ~client_id: 67a0ac9d43d84129b339370aa2c3889a
+  ~client_secret: 5f74579f71b2449eb5a36930b8156af2
+  ~grant_type: password
+  ~scope: FullControl
+  ~username: Iralda
+  ~password: Iralda123$
+}
+
+body:form-urlencoded {
+  client_id: 67a0ac9d43d84129b339370aa2c3889a
+  client_secret: 5f74579f71b2449eb5a36930b8156af2
+  grant_type: passwordFullControl
+  scope: FullControl
+  username: webservices
+  password: web.services
+}
+
+settings {
+  encodeUrl: true
+}

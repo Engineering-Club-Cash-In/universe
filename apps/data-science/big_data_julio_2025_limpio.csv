@@ -1,0 +1,1108 @@
+CLIENTE,PRECIO PRODUCTO,SUELDO,EDAD (RANGO DE EDAD EN AÑOS),DEPENDIENTES ECONOMICOS,OCUPACION,ANTIGUEDAD,ESTADO CIVIL,UTILIZACION DINERO,VIVIENDA PROPIA,VEHICULO PROPIO,TARJETA DE CREDITO,TIPO DE COMPRAS,Cuotas pendientes actual
+Carlos Eduardo Diaz Cuevas,66908.0,60000.0, 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+María Alejandra Sánchez Mazariegos,74664.0,7303.75, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,6.0
+Mario Alexander Rosales Avila,32618.0,7350.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Deyanira Elizardi Díaz,10000.0,12000.0, 50 años o mas,0, Empleado, 1-5 años, Casado, Consolidacion de deudas,Si,Si,No,Sobre Vehículos,0.0
+Jaime Efraín Monzón Alburez,43118.0,7820.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Héctor Alexander Castro Tobar,38118.0,5000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Mauricio García Dávila,66858.0,23800.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,8.0
+Mario David García Sesam,41153.0,54000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Carlos Enrique Ixcotoy Aguirre,84578.0,9000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Karen Janeth Lone Saénz,23985.0,9600.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Xaxy Mileidy Niño Delgado,103563.0,15500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Sami Walid Nasser Mencos,76300.0,15000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Raul Antonio Roca Juárez,41658.0,5000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Carlos Otoniel Ovalle González,860000.0,100000.0, 40 - 49 años,5+, Dueño, 1-5 años, Casado, Capital de trabajo,Si,Si,Si,Hipotecarios,0.0
+Marco Aurelio Collier Barillas,122680.0,80000.0, 40 - 49 años,2, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Francisco Alberto Santos Carreto,52616.0,15000.0, 40 - 49 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Jorge Mario Asturias López,109530.0,34500.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Nancy Del Rosario Roldán Montenegro de Chicas,107308.0,13000.0, 30 - 39 años,1, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Marco Aurelio Collier Barillas,152770.0,80000.0, 40 - 49 años,2, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Guemaly Gabriel López Serrano,35603.0,12000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,Si,Si,No,Autocompras,0.0
+Joanna Del Rosario Bonilla Batres,89229.0,40000.0, 30 - 39 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,2.0
+Gilbran Emil Farach Adrover,65898.0,12000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Estuardo Francisco Alvarez Navichoque,47617.0,13000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Bryan David Vargas Rivas,33982.0,19000.0, 18 - 29 años,0, Dueño, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Meyling Xaviera Quant Leiva de Lucas,32500.0,27000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,0.0
+Wilson Anibal Yumán Paredes,52116.0,25000.0, 30 - 39 años,1, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,5.0
+Aurora Flor de María Morales Cruz,40648.0,17000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Eduardo Enrique Montenegro Alfaro,199506.0,28000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Angelo Paolo Ibarguren Sanchinelly,48728.0,11500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Monica Maria Fuentes Rubio,61964.0,20000.0, 40 - 49 años,0, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Alejandro José Alvarez Aguilar,47718.0,12000.0, 30 - 39 años,4, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Jonathan Eliezer Aguilar Leiva,61858.0,15000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,2.0
+Selvin Estuardo Galindo Leal,51758.0,10000.0, 30 - 39 años,2, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Yunior Gomar Santos Garcia,54010.0,6000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Mauricio Enrique De Guisse Morataya,130033.0,10800.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,1.0
+Maria Paula Girón Pereda,71958.0,25000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Berkin Eduardo Santos Albal,30000.0,4000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,0.0
+Herlyn Samuel Carrillo Ramírez,150718.0,9000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,Si,No,Autocompras,0.0
+Mario David García Sesam,16500.0,54000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Salud o Medico,Si,Si,Si,Sobre Vehículos,0.0
+Kebin Rolando Vargas Rivas,39436.0,6500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Walter Humberto Arana Hernández,119428.0,25000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Nelson Haroldo Donis Flores,143092.0,5000.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Eddie Erly Danniery Portillo Lima,268862.0,250000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Paola Arana Estrada,68901.0,17500.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Andrés Contenti Secaira,44421.0,30000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Luis Fernando Carrera Hernández,42500.0,5500.0, 30 - 39 años,4, Empleado, 5-10 años, Casado, Mejora Inmueble,Si,Si,No,Sobre Vehículos,0.0
+Raul Alberto Zeledon Burgalin,143871.0,35000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,10.0
+Ester Chinchilla Melgar de Sosa,42070.0,17000.0, 50 años o mas,0, Dueño, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Yany María Berreondo Roulet de Pérez,30000.0,12000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Sergio Domingo Chavac Castro,36250.0,3100.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Juan Manuel Valle Toralla,195580.0,50000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Paula Maria De Dios Paz,69284.0,18190.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Andrea Isabel Marin Rodriguez,40846.0,6500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Manuel Francisco Urrutia Gaitan,31309.0,9000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Romario Raí Aldana Estrada,79713.0,23450.0, 18 - 29 años,0, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Francisco José Ochaita Pira,52270.0,25000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Ricardo Augusto Morán Castellanos,76750.0,38000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Elliott Raúl Castellanos García,91540.0,60000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Andres Alejandro Salvatierra Mayen,40000.0,5000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,No,Si,Si,Autocompras,0.0
+Josue Abel Galvez Grageda,48593.0,10000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Carlos Eduardo Diaz Cuevas,77974.0,60000.0, 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Sergio Domingo Chavac Castro,10000.0,3100.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Augusto Fernando Aguirre Mix,146008.0,30000.0, 40 - 49 años,2, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Jorge Steeven Ramos,34216.0,10000.0, 18 - 29 años,1, Dueño, 5-10 años, Soltero, Capital de trabajo,No,No,Si,Autocompras,0.0
+Raul Alberto Zeledon Burgalin,69355.0,35000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,10.0
+Vinicio Khaled Flores Aguilar,21500.0,10000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,1.0
+Carlos Eduardo Diaz Cuevas,121936.0,60000.0, 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Mariana Wer Cabrera,57753.0,12600.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Jorge Armando Sandoval Lémus,20000.0,25000.0, 40 - 49 años,3, Dueño, 5-10 años, Casado, Capital de trabajo,Si,Si,Si,Prendario,0.0
+Miguel Alejandro Martínez Del Cid,80000.0,3700.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Mejora Inmueble,Si,No,No,Hipotecarios,1.0
+María De Pilar Arévalo Cuevas,83074.0,8250.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Pablo Josué Alvarez Sanchez,159676.0,71428.57, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,1.0
+Guillermo Alejandro Lemus Montenegro,62000.0,80000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo,No,Si,Si,Sobre Vehículos,0.0
+Carlos Roberto Sandoval Rivas,114388.0,25000.0, 50 años o mas,0, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Félix Alfredo Castro Solares,74608.0,35000.0, 30 - 39 años,3, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Sara Abigail Rosales Soto,40000.0,15000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Salud o Medico,No,Si,Si,Sobre Vehículos,2.0
+José Jorge Retana Melgar,54034.94,11000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Luis Eduardo Morán Castellanos,88888.0,100000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Deiry Johana Armas De Leon de Aranda,18508.0,3416.0, 40 - 49 años,0, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Ana Lucia Cajas Menendéz,91948.0,15500.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Karla Paola España Girón,30891.0,8000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,2.0
+Gerson Abisai Chicoj Samayoa,46869.0,5000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,No,No,No,Autocompras,0.0
+Gianina Plihal Tattersfield,170550.0,25500.0, 50 años o mas,2, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Nanci Julissa Cano Del Valle,60000.0,9000.0, 40 - 49 años,2, Dueño, 5-10 años, Soltero, Salud o Medico,No,Si,Si,Sobre Vehículos,0.0
+Gustavo Francisco Castro Orellana,65000.0,32000.0, 30 - 39 años,1, Dueño, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Sharon Frinee Gámez Sical,21045.0,7000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Coralia Del Carmen Ortíz Morales,50000.0,6250.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,9.0
+Josué Israel Puac Chay,102607.0,100000.0, 18 - 29 años,0, Dueño, 5-10 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Jonathan Josué Alvarez Velásquez,71956.0,30000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Nancy Abigail Chávez Ruíz,31972.0,4800.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Carlos Enrique Yoc Barillas,47374.0,25000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Bryan Fernando Mota Arroyo,62043.96,4000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Sergio Raúl Del Cid Aguilar,60000.0,4000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Mario Noé Laines Vielman,53851.0,6000.0, 40 - 49 años,1, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+César Gersón Sicán Ojer,19885.0,12000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Rodolfo Contreras Lemus,38811.0,7000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Edmon Hernan Robinson Cubillo,245356.0,60000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+José Benjamín Ordoñez Gamarro,99751.0,50000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Sami Walid Nasser Mencos,41973.0,15000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+René Lionel Velasquez Castillo,650000.0,30000.0, 50 años o mas,2, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,No,Hipotecarios,0.0
+Kebín Enmanuel Perez Garcia,48972.0,12500.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Maikel Johan Revete Perez,59890.0,10000.0, 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Rosa Adelia Reyes Herrera,212784.21,40000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Mercy Stefany Reyes Aldana,80974.0,8500.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+César Daniel Contreras García,37852.46,5500.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,9.0
+Claudia María Cifuentes Medina De Pineda,144659.0,15000.0, 40 - 49 años,2, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,9.0
+Katherine Lisseth Lancerio Constanzo,79975.0,20000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,11.0
+Francisco Javier Corado Rodriguez,46500.0,15000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Frida Juliette González Morales de Azzari,100060.0,7500.0, 50 años o mas,0, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Ana Nicole Silva Rogel,61726.03,7500.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Bryan David Vargas Rivas,41968.0,19000.0, 18 - 29 años,0, Dueño, 0-1 año, Soltero, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Natalia María Sandoval Fuentes,52731.0,5000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+María Cecilia De Matta Vega de Méndez,14875.84,20000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Salud o Medico,Si,Si,Si,Sobre Vehículos,0.0
+Carlos Enrique Urruela Novella,437500.0,100000.0, 50 años o mas,3, Dueño, 5-10 años, Casado, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Timoteo Estuardo Román Monzón,48980.0,6250.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,7.0
+Pedro Rosales López,253977.0,40000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Guillermo Alejandro Chavarría Sánchez,86000.0,20000.0, 40 - 49 años,2, Dueño, 1-5 años, Casado, Mejora Inmueble,Si,Si,Si,Sobre Vehículos,2.0
+Stephany Marioly García Gómez,28000.0,11000.0, 18 - 29 años,0,, 1-5 años, Soltero, Consolidacion de deudas,Si,Si,No,Sobre Vehículos,8.0
+Rita Maria Regalado Oliva,264469.0,40000.0, 40 - 49 años,2, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,3.0
+Dairin Noemí González Pellecer,73276.0,8000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,10.0
+Erick Fernando Sempé Rodríguez,23500.0,20000.0, 30 - 39 años,2, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,1.0
+César Armando Portillo Lo,205576.0,100000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,5.0
+César Armando Portillo Lo,206086.0,100000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,5.0
+Guillermo Alejandro Chavarría Sánchez,35000.0,20000.0, 40 - 49 años,2, Dueño, 1-5 años, Casado, Mejora Inmueble,Si,Si,Si,Sobre Vehículos,2.0
+Jorge Luis Rodriguez Garcia,40000.0,5400.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,16.0
+Mario Giovanni Fuentes Maldonado,35000.0,5000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Capital de trabajo,No,Si,Si,Sobre Vehículos,8.0
+Maria Miguel Salaverria Corzantes,54156.21,50000.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,No,Si,Si,Sobre Vehículos,5.0
+Mario Gerardo Palencia Paiz,39900.0,10000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,No,Sobre Vehículos,9.0
+Francisco Jose Diaz-Perusina Fuentes,45350.0,7400.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,No,Sobre Vehículos,24.0
+Mario Aroldo Florian Lopez,31200.0,5000.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Sobre Vehículos,31.0
+Eliot Jacob Fajardo Yaguaz,45600.0,7500.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Sobre Vehículos,5.0
+Byron Enrique Guerrero Pineda,49750.0,15400.0, 50 años o mas,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Sobre Vehículos,8.0
+Byron Eduardo Gomez Pineda / Byron Estuardo Gomez Vasquez,39945.0,5000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Sobre Vehículos,16.0
+Reynaldo Esquivel Raymundo,39116.0,10000.0, 30 - 39 años,2, Dueño, 5-10 años, Soltero, Consumo,No,No,No,Sobre Vehículos,16.0
+Cintia Adelaida Meza CastañedaMeza,31795.0,13000.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Sobre Vehículos,5.0
+Rodrigo Alejandro Martinez Aragon,19500.0,5000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,0.0
+Rene Amilcar Orozco Martinez,38068.0,5710.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,5.0
+Fredy Aiyeser Velásquez Fuentes,155225.0,20000.0, 30 - 39 años,2, Dueño, 1-5 años, Soltero, Consumo,Si,Si,No,Sobre Vehículos,18.0
+Juan José Amado García,44688.0,18000.0, 30 - 39 años,0, Dueño, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,9.0
+Saul Enrique Revolorio Chinchilla,58625.41,7000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,5.0
+David Isaac Jimenez Villatoro,72872.0,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,5.0
+Luis Armando Mó Tiul,38027.0,18650.0, 30 - 39 años,0, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,19.0
+José Dimas Monterroso López,56687.0,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,5.0
+Jimmy Paolo Herrera Gutiérrez,17810.0,15000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo,No,No,No,Autocompras,15.0
+Eduardo José González Auyon,69513.0,10000.0, 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,5.0
+Eduardo José González Auyon,66963.0,10000.0, 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,5.0
+Eduardo José González Auyon,56763.0,10000.0, 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,5.0
+Alison Dayana Hernández Fonsea de Marin,111328.0,125000.0, 18 - 29 años,2, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,11.0
+Emilio Enrique Ardavin Villatoro,13000.0,15000.0, 50 años o mas,0, Dueño, 5-10 años, Casado, Consolidacion de deudas,Si,Si,No,Sobre Vehículos,7.0
+Joseph Abraham Santa Cruz Pérez,59971.0,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Alison Dayana Hernández Fonsea de Marin,139378.0,125000.0, 18 - 29 años,2, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,11.0
+Joseph Abraham Santa Cruz Pérez,66448.0,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+José Fernando Rodas Paniagua,71038.0,14175.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,12.0
+Miguel Angel Juárez Paredes,63294.0,18000.0, 40 - 49 años,3, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Byron Cecilio Bonilla Girón,29593.0,9000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,5.0
+Darlin Yesmin Chay Lázaro,12000.0,7000.0, 18 - 29 años,1, Dueño, 1-5 años, Soltero, Capital de trabajo,No,Si,No,Sobre Vehículos,1.0
+María Beatriz Quezada Mac Donald de Díaz,69938.0,75000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Juan Diego Díaz Sierra,195183.0,45000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+María Beatriz Quezada Mac Donald de Díaz,198263.0,75000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Claudia Guisela Mendoza Cruz de Estrada,97263.0,23600.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+José Salvador Robles,38628.0,10000.0, 40 - 49 años,2, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,12.0
+Carlos René Contreras Chiyoque,58929.0,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Nelson Adolfo Vásquez Hernández,241956.0,28000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,1.0
+Héctor Daniel Rodriguez Pineda,71958.0,80000.0, 18 - 29 años,1, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Joshua Gabriel Iboy Taque,20500.0,5116.43, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,0.0
+Beberly Roxana Matías Mendoza,15000.0,4200.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,0.0
+Diego Emanuel Sierra Barrientos,23548.0,5000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Salud o Medico,Si,Si,No,Sobre Vehículos,0.0
+Sofia Valentina Soria Martínez,147077.0,10000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,2.0
+Gladys Elizabeth Ramírez Agustín,67366.0,9500.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Edna Luz Velásquez Eguizabal,30000.0,12000.0, 50 años o mas,2, Empleado, 5-10 años, Soltero, Consolidacion de deudas,Si,Si,No,Sobre Vehículos,0.0
+Ada Lis Grajeda De Paz,17800.0,15384.0, 50 años o mas,0, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,1.0
+Martín Humberto Martínez Fernández,221565.0,30000.0, 40 - 49 años,5+, Dueño, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,3.0
+Mario Carlos Girón Rodas,70630.0,10000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Luis Fernando Hernández Barrios,52250.0,18000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,15.0
+Jessica Valeska Colocho Menjivar,68009.0,10000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,1.0
+Edson Fernando Gómez Barrera,53000.0,20000.0, 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consolidacion de deudas,Si,Si,No,Sobre Vehículos,10.0
+Oliver Rodolfo Barrientos Ricco,62997.0,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Manuel Arturo Castillo Calderón,41050.0,16000.0, 50 años o mas,0, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Carlos Eduardo Lémus Zepeda,107118.4,100000.0, 40 - 49 años,0, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,1.0
+William Javier Navarro Díaz,47476.0,6000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Jairlen Manfredo Juarez Garza,195376.0,50000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,12.0
+Gustavo Adolfo Leche,76827.0,17000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,10.0
+Ana Eugenia Cabrera Vargas,13500.0,7050.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Salud o Medico,No,Si,Si,Sobre Vehículos,1.0
+Ana Gabriela Quintanilla Izquierdo,37888.0,4000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,10.0
+Keyla Mirella de los Angeles Morales Alfaro de Samayoa,58918.0,9500.0, 18 - 29 años,1, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,13.0
+Miguel Angel Méndez Cario,64244.0,27500.0, 50 años o mas,0, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,4.0
+Nancy Arabella Duque Ruiz,41917.0,15000.0, 50 años o mas,0, Dueño, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+María Beatriz Quezada Mac Donald de Díaz,177628.0,75000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Carla Maribel López Gracias De Pérez,85000.0,6000.0, 40 - 49 años,0, Empleado, 5-10 años, Casado, Capital de trabajo,No,Si,Si,Sobre Vehículos,0.0
+Nancy Arabella Duque Ruiz,39979.0,15000.0, 50 años o mas,0, Dueño, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Jairlen Manfredo Juarez Garza,23812.0,50000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,12.0
+María Celeste Orantes Martínez,42769.0,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,17.0
+Gelsing David Carreto López,80000.0,15000.0, 30 - 39 años,2, Dueño, 5-10 años, Soltero, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,1.0
+Edgar Josué Quiñonez Cardenas,26500.0,10200.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Mejora Inmueble,Si,Si,Si,Sobre Vehículos,1.0
+Ruth Esmirna Palma Soto,13000.0,9250.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Estudios,Si,Si,Si,Sobre Vehículos,0.0
+Joshua Juan Luis Enmanuel Villatoro Duque,43976.0,18000.0, 30 - 39 años,1, Dueño, 5-10 años, Soltero, Consumo,Si,Si,No,Autocompras,5.0
+Jose Eduardo Alas Benitez,29400.0,15000.0, 50 años o mas,2, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Axel Hernan Sarceño Orozco,54024.0,25000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,5.0
+Marlon Rodolfo Conde Diaz,69576.0,68000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Helyn Arelí Pérez Roman,24908.0,90000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,14.0
+Oscar Fernando Cruz Torres,82264.0,7000.0, 40 - 49 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Sthephani Maria Lima Mejia,35516.0,90000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Carlos Alfredo Morales Loy,39962.0,8000.0, 40 - 49 años,3, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Carlos Ramiro Díaz De León,61984.0,7500.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Ronald René Argueta Segura,39343.38,10000.0, 30 - 39 años,, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Diego Gerardo Rosales Oliva,38688.0,7800.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Alejandra Claudette Calderón Arévalo,49626.68,9000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Ana Isabel Palomo Avalos,60995.0,15000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Salud o Medico,Si,Si,No,Sobre Vehículos,0.0
+José Carlos Rafael Motta Ovando,358476.21,50000.0, 50 años o mas,3, Dueño, 1-5 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Carlos Geovanny Rosales Oliva,49984.88,6000.0, 18 - 29 años,1,,, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Gerardo Enrique Hernández Ramirez,10450.0,7000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,3.0
+Hector Francisco de León López,30363.0,7000.0, 30 - 39 años,3, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Marcela Lucia Torres Morales,96720.0,11415.2, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Dina Areli Chún Coronado de Recinos,58968.0,14000.0, 30 - 39 años,2,,, Casado, Consumo,No,Si,Si,Autocompras,5.0
+Cristel Maria Marroquin Solorzano,61932.0,25000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Ivan Alexander Aquino Enriquez,4504.49,4000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Angel Lizandro Galicia,61776.0,18000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Joselyn Arely Rubí Morales,59769.0,6500.0, 30 - 39 años,3, Empleado, 5-10 años, Divorciado, Consumo,Si,No,Si,Autocompras,0.0
+Mario Roberto Fitzgerald Jiménez,100672.0,20000.0, 50 años o mas,1, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Adolfo Bernabé Castro Gaspar,46306.0,10000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Helen Yuranitza Santizo Avila,81529.48,30000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Ana Izabel Arevalo Lehnhoff,144248.0,47050.0, 40 - 49 años,4, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Denis Alexander Morales Valle,40997.0,11000.0, 18 - 29 años,3, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+Oscar Rodolfo Cuyún Echeverría,45968.0,118000.0, 40 - 49 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Dustin Obed Cheng Cancinos,73000.0,15000.0, 30 - 39 años,5+, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Wendy Eugenia Gonzalez Quej de Linares,43940.0,7000.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,1.0
+Ruth Eunice Guerra López,136308.0,34000.0, 30 - 39 años,, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Luis Pedro Corado Rosales,15840.96,25000.0, 40 - 49 años,4, Empleado, 5-10 años, Casado, Capital de trabajo,,,,Sobre Vehículos,10.0
+Marco Antonio Hernández Méndez,64480.0,12000.0, 50 años o mas,2, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,3.0
+Heidy Jeaneth López López,46904.0,120000.0, 40 - 49 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Roberto Illescas Enriquez,39936.0,14000.0, 50 años o mas,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Mario Roberto Pérez Ocampo,80808.0,6500.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+AGENCIA INDEPENDIENTE DE SEGUROS MILENIA,39676.0,240000.0, 30 - 39 años,2, Dueño, 0-1 año,, Capital de trabajo,Si,No,No,Autocompras,0.0
+Johnny Alfredo Carrillo Corado,58500.0,15000.0, 30 - 39 años,2, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+FREDDY ISAÍAS PULUC PIRIR,110000.0,25000.0, 50 años o mas,4, Dueño, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Roberto Estuardo Folgar Alvarez,84968.0,28000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Angela María José Cifuentes Bran,90116.0,9000.0, 30 - 39 años,1,,, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Andrea Madai Chacon Solorzano,59270.0,12500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Santiago Samuel Isaí Mazariegos Jiménez,34944.0,10000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Eliezer Abraham Hernández Flores,40550.0,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Brayan Roel Ramírez Mejía,31689.0,4600.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Emilio Enrique Noguera Cardona,8691.58,17687.0, 50 años o mas,1, Empleado, 1-5 años,, Consumo,,,,Sobre Vehículos,0.0
+Josué Azarael Pérez García,73476.0,15000.0, 30 - 39 años,2, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Rodolfo Antonio Viatoro Garcia,39745.88,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,6.0
+Oto Eduardo Fabián Albeño,27000.0,6000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+ANDRÉS ALEJANDRO ESCALANTE ESTRADA,48000.0,7000.0, 18 - 29 años,, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Dina Liseth Estrada Moreira,52832.0,10000.0, 50 años o mas,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Vivian Maricela Rodríguez Alvarado,155999.25,27500.0, 30 - 39 años,2, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Mónica José Salguero Guzmán,57304.0,12000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Carlos Enrique Ortiz Hernández,65988.0,18000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,8.0
+Yadira Jamileth Moradel Lagos,35828.0,20475.0, 40 - 49 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Walter Jesús González Alvarado,45003.31,7216.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Lindsey Pamela Sánchez Moreno,121046.0,22000.0, 30 - 39 años,0, Empleado,, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+César Estuardo Mencos Lechuga,211848.0,48000.0, 40 - 49 años,4, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+HERLIN VERÓNICA LEMUS ESTRADA,44928.0,22000.0, 30 - 39 años,2, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Juan Carlos Quiroa Torres,153920.0,50000.0, 30 - 39 años,4, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+JACOBB MORALES VEGA,90959.36,18000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,8.0
+Gerber Audiel Bardales Sánches,40768.0,7600.0, 18 - 29 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Santos Nicolás Mejía Iztep,103896.0,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,4.0
+DORTY NAILS FOR YOU & DORTY NATURE SPA SOCIEDAD ANONIMA,81246.62,13000.0, 18 - 29 años,, Dueño, 1-5 años,, Capital de trabajo,Si,No,Si,Autocompras,2.0
+Ronald Estuardo Méndez Siles,63908.0,12000.0, 18 - 29 años,, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Juan Roberto Alfaro Hernández,45916.0,9500.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Jeffrey Andreé Rey Ponce,22800.0,10000.0, 30 - 39 años,, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Josué David Pérez Ortíz,142678.0,25000.0, 30 - 39 años,4, Empleado, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,1.0
+José Fernando González Hidalgo,111696.0,300000.0, 18 - 29 años,1, Dueño,, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Auner Abel Guzmán López,65780.0,18000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Luis Axel Jafet Gramajo Corzantes,54990.0,18000.0, 40 - 49 años,3, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,2.0
+Ricardo Pernillo Santos,112008.0,20000.0, 40 - 49 años,3, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Christian Josué Muñoz Herrarte,154994.93,15000.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Jessica Maribel Ramos López,86840.0,8750.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Christian André Barraza Bochantín,131463.4,60000.0, 30 - 39 años,3, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Cesar Samuel Mota Velásquez,36556.0,22000.0, 30 - 39 años,, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Ibeth Magaly Gaitán Hernández,53710.0,5000.0, 30 - 39 años,2,,, Soltero, Consumo,Si,Si,Si,Autocompras,6.0
+Luis Fernando Ardón Alvarez,54946.0,11012.5, 40 - 49 años,4, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,1.0
+José Ernesto Castellanos Guevara,47839.0,8500.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Gerbert Antonio Oviedo Rabanales,94910.0,15.0, 18 - 29 años,1, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Vilma Gricelda Patá Riquiac,57830.0,18000.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Nelson Joel Mayen Valenzuela,48843.0,18063.19, 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Jorge Rene Estrada Sanchez,65761.0,4000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,12.0
+Bryan Javier Arriaza Güitrón,70808.0,22500.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+José David Jui Valenzuela,34363.16,11000.0, 18 - 29 años,0, Dueño,, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Diego Andrés Avila Galvez,20540.0,3416.38, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Esther Nohemi Marroquín Cerezo,43930.0,6000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+José Esteban Ochoa Urizar,29500.0,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+"Engir, Sociedad Anónima",111500.0,10000.0, 50 años o mas,0, Empleado, 5-10 años,, Capital de trabajo,Si,Si,No,Hipotecarios,0.0
+Iris Lisseth Girón Galicia,56290.0,5000.0, 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Luis Fernando Pineda Gonzalez,53911.0,20000.0, 30 - 39 años,1, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+José Ramón Vanegas Castellanos,49229.0,5000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+José Alberto Beltrán Colindres,27960.0,8000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,7.0
+Cyntia Paola Rodas Marcos,61950.0,12000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,2.0
+Lenin Obed Lara Vela,67914.0,15000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+María Andrea Guerra Arenales,80840.0,11000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Delmy Gertudriz Berganza Duarte,64000.0,15000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,No,Si,Si,Sobre Vehículos,0.0
+Jhosep Alexander Mendoza,65864.0,180000.0, 30 - 39 años,3, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Jeysi Dayan Garcia Galvez,47942.0,5785.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,4.0
+Manuel Alejandro Pérez Duarte,34977.0,5000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Paola Andrea Pérez López,44400.0,4250.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Yozana Paola Rendon Rodriguez,37951.0,10000.0, 40 - 49 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,1.0
+Jennifer Alejandra López Ambrocio,117570.0,21000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Jose Ovidio Rivas Ramirez,60843.0,6800.0, 30 - 39 años,4, Empleado,, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Mirian Marleny Solares del Cid de Solares,40994.0,1700.0, 50 años o mas,1, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Edyson Estuardo Barrera Sandoval,33934.0,4200.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Jose Javier Martinez Rodriguez,32955.0,7000.0, 40 - 49 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Sarah Noemy Sandoval Poggio,42998.0,3212.62, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Ernesto Guzman Echeverria,39810.0,2000.0, 50 años o mas,1, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Luis Fernando Guerra Peña,51985.0,1800.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Luis Alberto Guay Molina,33934.0,5000.0, 40 - 49 años,4, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,1.0
+Monica del Rosario Rabanales Arriola,53916.0,10000.0, 50 años o mas,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Juan Carlos Aguilar Montúfar,37745.0,12100.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Dalaias Raquel Hernández Cajbon,42848.0,7000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Autocompras,11.0
+María de los Angeles Najarro Elias,14000.0,15000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Salud o Medico,No,Si,Si,Sobre Vehículos,0.0
+Keyla Esmeralda Giron Torres,134997.0,15000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Diego José Loarca de León,71967.0,3500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Maynor Lester Gil Arauz,57933.0,8000.0, 50 años o mas,1, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,6.0
+Jose Adolfo Lopez Garcia,30998.0,2000.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Luis Enrique Sanabria de la Cruz,90300.0,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consolidacion de deudas,Si,No,Si,Hipotecarios,0.0
+Felipe Antonio Hernandez,47633.0,2600.0, 18 - 29 años,3, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,1.0
+Cela Patricia Loza Paez,124491.0,20000.0, 40 - 49 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Cristian Silvestre Hernandez Max,121999.0,8500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Oscar Enrique Ramirez Valenzuela,76370.0,9000.0, 40 - 49 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Brenda Marizel Hernandez Castellanos,31977.0,8800.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Barbara Elizabeth Caballeros Solé,98500.0,40000.0, 40 - 49 años,0, Empleado,, Soltero, Consumo,Si,Si,Si,Sobre Vehículos,0.0
+Marco Tulio Villatoro Lopez,38260.0,3500.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Gustavo Adolfo Cordon Franco,75000.0,65000.0, 50 años o mas,1, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Erick Roberto Veliz de la Cruz,5485.0,3416.0, 50 años o mas,2, Empleado, 5-10 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Pamela Rios Martell,21545.0,3000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,Si,Si,Sobre Vehículos,0.0
+"Inversiones Globales GS, S.A.",335467.0,120000.0, 40 - 49 años,3, Dueño, 1-5 años,, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Jeanneth Rosalina Castillo Molina de Polanco,110000.0,20000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Capital de trabajo,Si,Si,Si,Sobre Vehículos,1.0
+Mario Enrique Chinchilla Batres,64937.0,3000.0, 18 - 29 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Ricardo Rafael Gonzalez Cariñez,39100.0,25000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Steven René Muñoz Tapia,56491.0,9500.0, 30 - 39 años,4, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Gisella Anahy Soza Chacon,160835.0,25000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Jaquelin Michel Arias Mejia,43899.0,2000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Pablo Alfonso Ralón Molina,23000.0,11000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Pablo Samuel Morales Tejeda,36869.0,2800.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Claudia Maria Caballeros Castillo,45000.0,2000.0, 18 - 29 años,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Alexandra Argentina Mendez Gómez,32909.0,4500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Dora Maria Raguay Godinez,397992.0,45000.0, 50 años o mas,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,8.0
+Claudia María Osorio de Robles,19000.0,2500.0, 30 - 39 años,1, Empleado, 0-1 año, Casado, Salud o Medico,No,Si,Si,Sobre Vehículos,1.0
+Victor Manuel Pérez Arana,49899.0,5500.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Yersika Carina Paredes Chete,42998.0,6000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Ana María Rodríguez De Alas,19800.0,2225.0, 50 años o mas,1, Empleado, 1-5 años,, Capital de trabajo,Si,Si,Si,Sobre Vehículos,1.0
+Rosalinda Ortiz Pacheco de Sánchez,232940.0,50000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,8.0
+Daniel Alexander Cardoza Diaz,155165.0,3500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Herbert Alberto Lopez Alejandro,49500.0,25000.0, 50 años o mas,1,,, Soltero, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Alvaro Samuel Castro de Leon,32698.0,2000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Jeniffer Guadalupe Rodriguez Parada,17500.0,4500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Juan Mauricio Londoño Rua,65416.0,10000.0, 40 - 49 años,2, Dueño, 5-10 años, Casado, Capital de trabajo,,Si,Si,Autocompras,10.0
+Mario José Gonzalez Pabla,39000.0,4500.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,3.0
+José Francisco Morales Girón,84713.0,4200.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Ana Cecilia Pineda Rodriguez De Figueroa,42637.0,45000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Nicolás José Serrano Diaz-Durán,45000.0,8500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Alan Rene Arrighi Ponce,52989.0,3000.0, 50 años o mas,0, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Tito Orlan Flores Rosales,35994.0,7000.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,6.0
+Dina Varinia Alvarado Sánchez De Urbina,48560.0,8000.0, 50 años o mas,0, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Fender Enrique Hernandez Tejeda,48920.0,10000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Textiles Pralin S.A.,93000.0,14000.0, 18 - 29 años,0, Dueño, 1-5 años,, Capital de trabajo,Si,Si,Si,Sobre Vehículos,2.0
+Ismelda Girón Chavarria,107064.0,120000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Jose Manuel Roldán Cornejo,41906.0,10000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,3.0
+Sonia Elizabeth Salguero Contreras,65890.0,120000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Edson Joel Rodriguez Valenzuela,38826.0,8000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,11.0
+Juan Andrés Samayoa Toledo,62000.0,7500.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,9.0
+Fabiola Alejandra Velasquez Romero de Rivera,17000.0,4500.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,0.0
+Edgar Danilo Sajche Coj,37899.0,2800.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,8.0
+Motivacion Con Arte S.A,165500.0,25000.0, 40 - 49 años,, Dueño, 5-10 años,, Capital de trabajo,No,Si,No,Sobre Vehículos,0.0
+Jharim Elizabeth López Palma,32909.0,12000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,15.0
+Diego Alejandro Palma Sochon,60920.0,5000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Alisson Carolina Alvarez Polanco,52000.0,3000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,1.0
+Enilsa Margarita Jimenez,12000.0,4400.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,1.0
+Celia Nathaly del Rosario Lopez Barrios,79460.0,2500.0, 30 - 39 años,2, Dueño, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+José Fernando Angel Jocholá Tello,46706.0,1000.0, 18 - 29 años,0,, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Andy de Jesus Tamayac Morales,76885.0,4500.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,11.0
+Maria Jose Palma Sochon,47942.0,4500.0, 18 - 29 años,0,,, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Mario Alexander Vega Ricaurte,41350.0,4000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,7.0
+Andrea Patricia Guerra López,35994.0,2500.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,8.0
+Jonathan Keneth Meneses Fernandez,38672.0,3000.0, 30 - 39 años,1, Dueño, 0-1 año, Casado, Capital de trabajo,Si,Si,No,Autocompras,3.0
+Cristopher Dugarry Diaz Hernandez,24875.0,299.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,8.0
+Rodrigo Antonio Rangel Guillermo,48560.0,8000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Wilder Yuny Lezana Alvarez,58139.0,4000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,3.0
+Jose Gustavo Azmitia Zambrano,56805.0,22000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Anderly Fernanda Reyes Cardona,37384.0,8000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Edgar Arnoldo Tohom Yax,10000.0,4000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Edgar Estuardo Diaz Orellana,142800.0,1500.0, 30 - 39 años,0, Empleado, 1-5 años,, Consumo,No,No,Si,Autocompras,0.0
+Miguel Angel Santos Hernandez,128900.0,13000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,13.0
+Karin Denise Herrera Monzón,102600.0,2000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Fabian Arnoldo Guit Batz,142032.0,4000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Oscar Fernando Pinto Quiroa,40000.0,2000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,No,No,Si,Sobre Vehículos,0.0
+Lester Leopoldo Rodriguez Calderón,59225.0,18500.0, 40 - 49 años,2, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Kevin Joshoa Veliz Lopez,34608.0,3000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,1.0
+Maria Jose manuel De pedro,43873.0,2500.0, 18 - 29 años,3, Dueño, 0-1 año, Casado, Consumo,,,,Autocompras,0.0
+Cristina Isabel Maravilla Morales,43976.0,3000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Karina Mireya Díaz López,15000.0,3000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Jorge Humberto Polanco Tay,44000.0,20000.0, 40 - 49 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,No,Si,Si,Sobre Vehículos,1.0
+Moisés Alberto Avila Melgar,81422.0,22000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Rodrigo Alejandro Lopez Arias,27991.0,4500.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,9.0
+Juan Antonio Carranza Ramírez,113450.0,25000.0, 50 años o mas,3, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Jimena Gabriela Campos Martinez,54740.0,25000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,6.0
+Jose Alejandro Pascacio Hernandez,46963.0,4000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,2.0
+Rolando Estuardo Serrano Hernández,34608.0,4500.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,1.0
+Cristian Estuardo Andrade Alvarez,29845.0,8000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Juan Diego Coc xiquín,55255.0,1250.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,12.0
+Axel Daniel Orellana Sequen,37750.0,9000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Emalyn Milardy Alarcón López de Hernández,57984.0,3500.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,3.0
+Fernando Javier Monzon Oliva,105215.0,8000.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,4.0
+Jaime Alejandro Urizar Flores,53143.0,6500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Abraham Esteban Castro Lux,73718.0,3000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Brahan David Mendizabal Pérez,31000.0,4000.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,6.0
+Juan Martin Ochoa Rivera,68954.0,15000.0, 50 años o mas,5+, Empleado,, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Isidro Medardo Gómez Solórzano,36617.0,6500.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,No,No,Si,Autocompras,0.0
+Eddy Fernando Gutierrez Roldán,139359.0,6000.0, 40 - 49 años,3,,, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Ligia Evelina Castañeda Romero,46000.0,8000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consolidacion de deudas,No,Si,Si,Sobre Vehículos,1.0
+Josué Puluc Perez,34258.0,6000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Ana Silvia Oliva Bracamonte de Hernandez,96460.0,10000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Edwin René Perdomo Guzmán,79465.0,3500.0, 50 años o mas,1, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Manuel Antonio Cáceres Moscoso,40994.0,7000.0, 40 - 49 años,3, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Ingrid Lorena Mclaughlin Corona,31874.0,6000.0, 50 años o mas,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Sonia Leticia Mejia de Leon,31570.0,3000.0, 50 años o mas,2, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Manuel Alejandro Fuentes Cancino,40891.0,8800.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Capital de trabajo,No,No,Si,Autocompras,0.0
+Maria Marta Flores Mazariegos de Bird,43878.0,12000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Laiton Estuardo Marroquin Chapas,24900.0,12080.0, 50 años o mas,3, Empleado, 5-10 años, Soltero, Consolidacion de deudas,Si,No,Si,Sobre Vehículos,0.0
+Mariana Azucena Godoy Alay,126510.0,48000.0, 30 - 39 años,2,,, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Lady Carolina Guevara Cortave,89657.0,3500.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Jennifer Georgette Borrayo Rodriguez,14000.0,2000.0, 40 - 49 años,0, Empleado, 1-5 años, Casado, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Josué Roberto López Castro,35000.0,11500.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Marco Alejandro Correa Mancia,167015.0,1500.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Blanca Dolores Solis Jackman De Diaz,79465.0,25000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Mario Anibal Cabrera Paredes,70499.0,40000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Renato Waldemar Prera Chacon,57938.0,11000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,1.0
+Gilberto Luciano Castañon Cinto,55723.0,8500.0, 40 - 49 años,2, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Nelva Azucena Flores Morales,47993.0,56000.0, 50 años o mas,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+AGENCIA INDEPENDIENTE DE SEGUROS MILENIA,39676.0,240000.0, 30 - 39 años,2, Dueño, 0-1 año,, Capital de trabajo,Si,No,No,Autocompras,0.0
+ANDY NOHEL SANTIAGO RAMÍREZ,39211.44,37000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+ANGEL RODOLFO LÓPEZ MORALES,27150.94,4500.0, 40 - 49 años,1, Dueño, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Ada Carmina Cambara Estrada,96150.95,10000.0, 30 - 39 años,, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,1.0
+Adolfo Antonio Lemus Osorio,46923.25,19750.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Adolfo Bernabé Castro Gaspar,46306.0,10000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Alejandra Claudette Calderón Arévalo,49626.68,9000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Amanda MariaJose Enríquez Barillas,31500.0,13000.0, 40 - 49 años,1, Empleado, 5-10 años, Casado, Estudios,Si,Si,No,Sobre Vehículos,0.0
+Ana Isabel Palomo Avalos,60995.0,15000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Salud o Medico,Si,Si,No,Sobre Vehículos,0.0
+Ana Izabel Arevalo Lehnhoff,144248.0,47050.0, 40 - 49 años,4, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Andrea Gabriela Ortiz Pivaral,21500.0,5500.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Sobre Vehículos,0.0
+Andrea Madai Chacon Solorzano,59270.0,12500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Andree David Dardón Jordán,61226.75,5600.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Andrés Alejandro Escalante Estrada,48000.0,7000.0, 18 - 29 años,, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Angel Lizandro Galicia,61776.0,18000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Angela María José Cifuentes Bran,90116.0,9000.0, 30 - 39 años,1,,, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Auner Abel Guzmán López,65780.0,18000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Aurie Alejandra Cano Flores,54102.61,15000.0, 30 - 39 años,1, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Brayan Roel Ramírez Mejía,31689.0,4600.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Brenda Liseth Vásquez Tista De Calvillo,51863.7,9000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Carlos Alberto Salazar Revolorio,146974.9,15000.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Carlos Alfredo Morales Loy,39962.0,8000.0, 40 - 49 años,3, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Carlos Enrique Ortiz Hernández,65988.0,18000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,8.0
+Carlos Estuardo Guzmán Chacón,53927.75,9000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,No,Autocompras,0.0
+Carlos Geovanny Rosales Oliva,49984.88,6000.0, 18 - 29 años,1,,, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Carlos Ramiro Díaz De León,61984.0,7500.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Cesar Augusto Meza Morales,45224.59,10000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Cesar Samuel Mota Velásquez,36556.0,22000.0, 30 - 39 años,, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Christian André Barraza Bochantín,131463.4,60000.0, 30 - 39 años,3, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Christian Josué Muñoz Herrarte,154994.93,15000.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Cristel Maria Marroquin Solorzano,61932.0,25000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+César Estuardo Mencos Lechuga,211848.0,48000.0, 40 - 49 años,4, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+DORTY NAILS FOR YOU & DORTY NATURE SPA SOCIEDAD ANONIMA,81246.62,13000.0, 18 - 29 años,, Dueño, 1-5 años,, Capital de trabajo,Si,No,Si,Autocompras,2.0
+Daniel Diego Alejandro González Godínez,56627.68,5000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Denis Alexander Morales Valle,40997.0,11000.0, 18 - 29 años,3, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+Denis Enrique Zapeta Hernández,87583.62,10720.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Diego Andres Girón Pereda,119925.27,75000.0, 18 - 29 años,, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Diego Armando Padilla López,66423.64,15000.0, 30 - 39 años,0, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,6.0
+Diego Gerardo Rosales Oliva,38688.0,7800.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Dina Areli Chún Coronado de Recinos,58968.0,14000.0, 30 - 39 años,2,,, Casado, Consumo,No,Si,Si,Autocompras,5.0
+Dina Liseth Estrada Moreira,52832.0,10000.0, 50 años o mas,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Douglas David Marroquín Estrada,92772.12,17500.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,3.0
+Dulce María Zapeta García,110294.23,22000.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Dustin Obed Cheng Cancinos,73000.0,15000.0, 30 - 39 años,5+, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Edvin Emilio Méndez Choy,71060.12,13500.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Eliezer Abraham Hernández Flores,40550.0,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Elmer Osbany Revolorio Corado,21725.52,8500.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Elmer Osbany Revolorio Corado,24910.37,8500.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Emilio Enrique Noguera Cardona,8691.58,17687.0, 50 años o mas,1, Empleado, 1-5 años,, Consumo,,,,Sobre Vehículos,0.0
+Erick Javier Espinoza Donis,63670.09,15000.0, 30 - 39 años,4, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,3.0
+Etienne Asdrubal Méndez Gómez,142374.25,25000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+FREDDY ISAÍAS PULUC PIRIR,110000.0,25000.0, 50 años o mas,4, Dueño, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Francisco José Ochaita Pira,34293.9,37000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Fredy Yonatán González,47638.59,15000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,No,Si,No,Autocompras,0.0
+Gabriel Eduardo Recinos Melgar,216304.5,15000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Gerardo Enrique Hernández Ramirez,10450.0,7000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,3.0
+Gerber Audiel Bardales Sánches,40768.0,7600.0, 18 - 29 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Gislena María Rivas Villatoro,50885.66,7000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,No,Autocompras,1.0
+Guillermo Gutierrez Alfonso,132786.39,70000.0, 40 - 49 años,2, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+HERLIN VERÓNICA LEMUS ESTRADA,44928.0,22000.0, 30 - 39 años,2, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Hector Francisco de León López,30363.0,7000.0, 30 - 39 años,3, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Heidy Azucena Maldonado España,50000.0,4800.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Heidy Jeaneth López López,46904.0,120000.0, 40 - 49 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Helen Yuranitza Santizo Avila,81529.48,30000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Helyn Arelí Pérez Roman,24908.0,90000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,14.0
+Isaías Emmanuel Guzmán García,64916.64,11000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Ivan Alexander Aquino Enriquez,4504.49,4000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+JACOBB MORALES VEGA,90959.36,18000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,8.0
+Javier Alexander Hernández Cordero,43955.59,24000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Jeffrey Andreé Rey Ponce,22800.0,10000.0, 30 - 39 años,, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Jessica Maribel Ramos López,86840.0,8750.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Johnny Alfredo Carrillo Corado,58500.0,15000.0, 30 - 39 años,2, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Jonathán Josué García Hernández,60870.64,13500.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Jorge Alfredo Vega López,15000.0,13900.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Sobre Vehículos,3.0
+Jorge Byron Guerra Duarte,78881.61,45000.0, 30 - 39 años,1, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Jorge Humberto Estrada Morales,97224.93,25000.0, 40 - 49 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Joselyn Arely Rubí Morales,59769.0,6500.0, 30 - 39 años,3, Empleado, 5-10 años, Divorciado, Consumo,Si,No,Si,Autocompras,0.0
+Josué Azarael Pérez García,73476.0,15000.0, 30 - 39 años,2, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Josué David Pérez Ortíz,142678.0,25000.0, 30 - 39 años,4, Empleado, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Josué Israel Puac Chay,95160.0,500000.0, 18 - 29 años,0, Dueño, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+José Angel Peralta Soma,50000.0,30000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+José Armando Grijalva Corado,40264.89,7000.0, 18 - 29 años,, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+José Carlos Motta Ovando,358476.21,50000.0, 50 años o mas,3, Dueño, 1-5 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+José Fernando González Hidalgo,111696.0,300000.0, 18 - 29 años,1, Dueño,, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Juan Carlos Quiroa Torres,153920.0,50000.0, 30 - 39 años,4, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Juan Jose Samayoa Pineda,74544.61,15695.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Juan Pablo Molina Cosenza,50837.25,10000.0, 30 - 39 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Juan Pablo Santizo Montenegro,167984.91,32000.0, 40 - 49 años,, Empleado, 1-5 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Juan Roberto Alfaro Hernández,45916.0,9500.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Julissa Denisse Monterroso Rivera,85489.86,35000.0, 40 - 49 años,, Empleado,, Soltero, Consumo,No,Si,No,Autocompras,0.0
+Kevin Alexander Corado Ramos,68500.0,45000.0, 18 - 29 años,, Dueño, 1-5 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+LUIS ADRIÁN RUIZ AGUILAR,75297.81,45000.0, 50 años o mas,1, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Lesli Marleni Xunic Asturias de Tejaxún,111965.27,20000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Lilian Judith Colay Patzan,41998.59,3210.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Lindsey Pamela Sánchez Moreno,121046.0,22000.0, 30 - 39 años,0, Empleado,, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Luis Axel Jafet Gramajo Corzantes,54990.0,18000.0, 40 - 49 años,3, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,2.0
+Luis Pedro Burgos Pineda,87837.95,35000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Luis Pedro Corado Rosales,15840.96,25000.0, 40 - 49 años,4, Empleado, 5-10 años, Casado, Capital de trabajo,,,,Sobre Vehículos,10.0
+Luis Ricardo Rivera Chután,155622.58,50000.0, 30 - 39 años,4, Empleado, 1-5 años, Casado, Consumo,Si,Si,No,Autocompras,8.0
+Marcela Lucia Torres Morales,96720.0,11415.2, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Marco Antonio Galindo Esquivel,131717.93,17000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Marco Antonio Hernández Méndez,64480.0,12000.0, 50 años o mas,2, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,3.0
+Mariano Ramiro Salazar Castellanos,47981.25,13000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Consumo,No,No,No,Autocompras,0.0
+Mario Roberto Fitzgerald Jiménez,100672.0,20000.0, 50 años o mas,1, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Mario Roberto Pérez Ocampo,80808.0,6500.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Mario Roberto Soyos Noj,31268.44,10000.0, 40 - 49 años,1,,, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Mario Rodrigo Natareno Herrera,55619.75,15000.0, 40 - 49 años,1, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Marlon Rodolfo Conde Diaz,69576.0,68000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+María José Pineda Galicia,49817.73,7200.0, 18 - 29 años,, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Meyling Xaviera Quant Leiva de Lucas,31000.0,27000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Miriam Lucrecia González Alvarado,45902.64,6200.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Mirna Lissette Arévalo Ramírez,42950.59,12000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Missael Antonio Rayo Sandoval,35461.34,25000.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Mynor Gabriel Morales Arriola,42983.25,15000.0, 40 - 49 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,4.0
+Mónica José Salguero Guzmán,57304.0,12000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Mónica Magdalena Turnil Citán,10000.0,4200.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Nicolás José Serrano Diaz-Durán,22200.0,8500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Oscar Fernando Cruz Torres,82264.0,7000.0, 40 - 49 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Oscar Rafael Ralón Alvarado,27000.0,15000.0, 50 años o mas,4, Dueño, 1-5 años, Soltero, Consolidacion de deudas,,,No,Sobre Vehículos,1.0
+Oscar Rodolfo Cuyún Echeverría,45968.0,118000.0, 40 - 49 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Oswaldo Francisco Chún Chilín,60314.64,35000.0, 50 años o mas,1, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Oto Eduardo Fabián Albeño,27000.0,6000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Pablo César Paniagua Illescas,66066.35,20000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Raul Alberto Zeledon Burgalin,194688.0,35000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,10.0
+Regina Jeteyá Pérez de López,55207.07,12000.0, 30 - 39 años,0, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,1.0
+Ricardo Pernillo Santos,112008.0,20000.0, 40 - 49 años,3, Empleado, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Roberto Illescas Enriquez,39936.0,14000.0, 50 años o mas,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Roberto Estuardo Folgar Alvarez,84968.0,28000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Rodolfo Antonio Viatoro Garcia,39745.88,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,6.0
+Ronald Estuardo Méndez Siles,63908.0,12000.0, 18 - 29 años,, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Ronald René Argueta Segura,39343.38,10000.0, 30 - 39 años,, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Rubén Dario Pereira Dubón,6198.95,14000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,,,,Autocompras,3.0
+Ruth Eunice Guerra López,136308.0,34000.0, 30 - 39 años,, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Santiago Samuel Isaí Mazariegos Jiménez,34944.0,10000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Santos Nicolás Mejía Iztep,103896.0,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,4.0
+Sthephani Maria Lima Mejia,35516.0,90000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Textiles Pralin S.A.,100000.0,14000.0, 18 - 29 años,0, Dueño, 1-5 años,, Capital de trabajo,Si,Si,Si,Sobre Vehículos,2.0
+Victor Hugo Anleu Porras,44907.59,8000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,6.0
+Vivian Maricela Rodríguez Alvarado,155999.25,27500.0, 30 - 39 años,2, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Walter Jesús González Alvarado,45003.31,7216.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Wendy Eugenia Gonzalez Quej de Linares,43940.0,7000.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,1.0
+Yadira Jamileth Moradel Lagos,35828.0,20475.0, 40 - 49 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Yenifer Lourdes Rodriguez Lux,39541.75,6500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Yordi Josué Amézquita Díaz,49975.73,10000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Erwin Guillermo de León Ventura,41945.59,8000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Edwin Fernando Patzán Cotzojay,41945.59,6000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Meyra Damaris Boche Chávez,67904.64,18000.0, 40 - 49 años,3, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Karla Andrea Turcios Canizalez,46070.46,7000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Yarol Antonio Cur Pérez,47275.87,60000.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,5.0
+Miguel Angel Ramírez Coroy,175986.71,20000.0, 18 - 29 años,, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Benjamin Emanuel Osorio Villalta,82811.86,34500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Edy Eduardo Chacón,30356.59,12000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,Si,Autocompras,1.0
+Oscar Giovanni Avila Ortega,36000.0,9000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,1.0
+Rodolfo Andrés Pelaez Escobar,42129.02,8000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,1.0
+Claudia Rocío Martínez Mendoza,110112.6,20000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Mónica Yesenia Díaz Say,29972.44,11200.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Marvin Tot Choc,45816.59,3500.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Arturo René Rodas Morán,40993.59,15000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,6.0
+José Manuel Martínez López,51456.73,12500.0, 30 - 39 años,1, Dueño, 0-1 año, Soltero, Consumo,No,Si,Si,Autocompras,6.0
+Pablo Enrique Dighero Roldan,79939.61,18150.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,Si,No,Autocompras,0.0
+Roberto Molina Spillari,68198.95,20000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Carmen Izayana Pacheco Dávila,95807.27,12000.0, 30 - 39 años,3, Dueño, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Edwin Emir Elías Alonzo,34488.59,15000.0, 50 años o mas,0, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Oliver Andere Valenzuela Díaz,84415.12,34000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Alejandro Javier Estumer Gómez,35975.44,11000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Daniel Eduardo Lopez Ortíz,29998.44,7000.0, 18 - 29 años,, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Dilan Ivan Morales González,70985.35,7300.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Eddie Walter Sempé Custodio,117886.25,23000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Capital de trabajo,Si,,No,Autocompras,1.0
+Héctor Imanol Chacón Velásquez,40993.59,7500.0, 18 - 29 años,, Dueño, 0-1 año, Soltero, Consumo,No,Si,No,Autocompras,1.0
+Evelin Betzabé Monroy Gallardo De Reynoso,49235.73,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Carlos Enrique Reynoso Hernández,38983.59,9000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,5.0
+Gustavo Adolfo Antón Ojeda,80283.35,17000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Ronaldo Yosimar Hernández Mejia,113948.27,25000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,4.0
+Berta Alicia Vásquez Hernández,33991.44,7000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Mariana Chiu Molina,42051.59,7500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+KENNY JONATHAN MONZÓN PORTILLO,68800.09,16500.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Olga Tatiana Hernández Sarmiento,69995.61,12000.0, 18 - 29 años,, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,Si,Si,Autocompras,1.0
+Bacner Alejandro Rojas Franco,102995.3,7000.0, 18 - 29 años,3, Empleado, 5-10 años, Casado, Consumo,No,,Si,Autocompras,0.0
+LIGIA GABRIELA AVILA ORTÍZ,124592.44,15000.0, 40 - 49 años,, Dueño, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Operadora Legal Centroamericana S.A,7239.6,78000.0, 40 - 49 años,2, Dueño, 5-10 años,, Consumo,,,,Autocompras,1.0
+Saira Areli Tun Coyoy,47276.59,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Luis Estuardo Morales Reyes,58876.25,12500.0, 30 - 39 años,4, Empleado, Q -   , Soltero, Consumo,No,No,No,Autocompras,0.0
+Edwin Rolando Fausto Barrientos,127474.76,30000.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Juan Ignacio Florido,46585.0,40000.0, 50 años o mas,2, Empleado, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Juan Manuel Rivera Morales,105288.78,27000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Sobre Vehículos,0.0
+"Corporación de Transportes Futura de Guatemala, S.A.",56895.86,18000.0, 50 años o mas,1, Empleado, 0-1 año,, Consumo,Si,No,No,Autocompras,0.0
+Edwin Alfredo Sasvín Santos,57818.25,20000.0, 40 - 49 años,3, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Axel Andre Aldana Orantes,103908.78,20000.0, 18 - 29 años,1, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,1.0
+JOSUÉ DAVID MARTÍNEZ EGUIZABAL,25328.64,18000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Gregorio Iván Cardona Méndez,122912.6,10000.0, 50 años o mas,4, Empleado, 5-10 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Dave Kevin Wilder Laynes Hernández,51895.25,60000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Juan Diego Díaz Doig,50000.0,65000.0, 40 - 49 años,0, Dueño, 5-10 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Roberto Estuardo Alvarado Hernández,449893.73,50000.0, 30 - 39 años,4, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Osmar Josue Daniel Delcompare Acevedo,47710.59,8125.0, 18 - 29 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Edgar Rolando Cardona Mendez,68486.64,14000.0, 40 - 49 años,4, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+María Roselly Barberena Sagastume,77628.86,35000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,3.0
+Edgar Humberto Estrada Salazar,40676.59,10000.0, 30 - 39 años,1, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Kimberly Jireh López Marroquín,76399.78,35000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Rodolfo Alberto de León Escobar,67814.76,9500.0, 18 - 29 años,0, Empleado, 1-5 años,, Consumo,No,No,Si,Autocompras,0.0
+,67814.76,9500.0, 18 - 29 años,0, Empleado, 1-5 años,, Consumo,No,No,Si,Autocompras,0.0
+Cristian Esteban Apén Juárez,64664.75,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Boris Orlando Contreras González,73820.86,9000.0, 40 - 49 años,1, Empleado, 0-1 año, Casado, Capital de trabajo,Si,Si,No,Autocompras,0.0
+José Adrian Rivera Morataya,99324.95,14000.0, 30 - 39 años,4, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Luis Eduardo Rodas Gómez,141383.41,8000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,Si,Autocompras,1.0
+Elvis Moises Morataya Solis,80008.51,15000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Astrid Michelle Vásquez Figueroa,58000.0,5750.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,5.0
+José Danilo De La Cerda Guarcas,56299.62,20000.0, 30 - 39 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Salvador Augusto Saravia Mendoza,55157.28,32000.0, 50 años o mas,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Hector Adolfo Aguilar Juarez,32960.44,2500.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Antony Emanuel Caal,54777.25,6000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Williams Josué Alvarez Fuentes,72979.09,70000.0, 40 - 49 años,3, Dueño, 5-10 años, Casado, Consumo,No,Si,Si,Autocompras,2.0
+Emmy Stephanie González Guerrero de Pacheco,60459.75,8500.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Luis Rodrigo Rubi Morales,36424.44,6500.0, 18 - 29 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,4.0
+Vinicio Khaled Flores Aguilar,5082.75,10000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,,,,Sobre Vehículos,1.0
+Oliver Rodolfo Barrientos Ricco,5442.8,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,,,,Autocompras,0.0
+Marco Antonio Alejandro Monterroso Méndez,40789.11,20000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+José Antonio Oliveros Escalante,37006.44,9000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Tojíl Ludwin Isaac Ajú Salazar,42639.25,10000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Javier Alejandro Alburez Recinos,38719.59,5000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Gustavo Rodolfo Alvarado Alarcón,73947.35,17250.0, 30 - 39 años,1, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Ana Marzela Castellanos Solis,35922.44,10000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+José Ricardo Ortiz Juárez,45383.59,7000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Marvin Rodolfo Pérez Matul,83816.86,13500.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Katherine Nicolle Santizo Garcia,34277.44,6000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Adán Gabriel del Cid Valenzuela,64903.35,9000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Leonardo José Carrasco Aguilera,44067.25,29000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Edmon Hernan Robinson Cubillo,235889.3,110000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Héctor Alexander Castro Tobar,40035.59,5000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Marlon Estuardo Estrada Sánchez,108474.95,20000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Pamella Patricia Brán Campos,77945.86,13000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+María de los Angeles Najarro Elias,61250.96,15000.0, 30 - 39 años,1,, Q -   , Soltero, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Guillermo Francisco Mérida Bosque,53662.75,15000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Christian André Barraza Bochantín,161000.0,60000.0, 30 - 39 años,3, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Kelvín Fabián Yocuté Segura,29893.44,1600.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Maria Ximena Franco García,62601.75,10000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Mynor Emilio Micheo Valle,33383.44,8000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Yeison Esleiter González Reyes,58242.25,16000.0, 18 - 29 años,1, Empleado, 0-1 año, Casado, Consumo,,No,No,Autocompras,1.0
+Sindy Paola Molina Arias,51911.75,25000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Mario Ismael Estrada Ramírez,50520.25,9000.0, 40 - 49 años,4, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Cintia Yanely Alvarez Castillo,62072.75,6000.0, 30 - 39 años,3, Dueño, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Otto Efrain Ordoñez López,105420.11,50000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Sergio Domingo Chavac Castro,54715.0,3400.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Christian Miguel Castillo Castillo,80996.61,15000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,Si,Si,No,Autocompras,1.0
+José Alfredo Méndez Rodas,62971.75,10000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Mario José Duarte Pérez,34441.44,11500.0, 30 - 39 años,0, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Eswin José Calderón De León,194924.52,13386.11, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,2.0
+José Francisco Morales Girón,180493.39,4200.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Aura Lorena Arango López,228364.91,50000.0, 40 - 49 años,1, Dueño, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Mynor Roberto Calderón Méndez,94123.78,15000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+Delmí Patricia Méndez Martínez,43009.25,8000.0, 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Denis Humberto Ramírez Umaña,96211.43,25000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,2.0
+Leslie Suzzette Hernández Alvarez,79994.62,100000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,1.0
+Kevin Josué Castro Cardona,64374.35,8500.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Dennis Yojar Peñate Mota,53957.25,5000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,2.0
+José Vinicio Panjoj Senté,75777.86,18500.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+José Manuel de León Fuentes,67615.61,9000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Hazel Arlette Alonzo Navas,72608.09,21000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Jhosep Alexander Mendoza,116059.23,90000.0, 30 - 39 años,2, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Josue Carlos Ludwing Gómez Castillo,36886.61,20000.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Sören Edgar Nissi de León Argueta,46388.59,12000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Juan Armando Barrios Rios,90973.12,9000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Héctor Leonel Hernández Ramírez,51472.25,17000.0, 30 - 39 años,3, Empleado, 0-1 año, Casado, Consumo,No,Si,Si,Autocompras,1.0
+Mynor Rolando Gonzales Jacobo,41460.73,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Estefani Paola Hernandez Alarcón,50927.73,9000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Ana Lucia Reyes Osorio,126931.6,20000.0, 18 - 29 años,2, Dueño, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Diana Samantha Hernández Flores,80046.62,50000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Jhonatan Alexander Ergón Orozco,38613.59,14000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Uziel Johnatan Emanuel López Velásquez,65680.09,11500.0, 30 - 39 años,3,, Q -   , Casado, Consumo,No,No,Si,Autocompras,1.0
+Carlos Eduardo Sarat Coyoy,59904.75,35000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Gamaliel Alexander Ramos Boc,61777.35,15000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Alex Jairo Alvarado Ochoa,44748.59,13000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,1.0
+Jonathan Josue Gómez Peraza,174437.91,35000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Dámaris Nohemí Ordóñez Rodríguez,101150.62,9500.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+Sindi Patricia Moreno Flores,133780.93,83000.0, 50 años o mas,0, Dueño, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Nathali Rocio Salguero Lemus,66952.64,15000.0, 18 - 29 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Kevin Alberto Larios Alvarez,70615.35,10000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+Mariano Alfredo García Mejía,52403.73,8000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Nestor Humberto Martínez Cruz,168922.55,5000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Adrián Soberanis Toledo,68906.09,7500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Josselin Mirella Cotón Figueroa,78140.61,25000.0, 18 - 29 años,2, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Rina Nedelia Quintana Mendoza,63077.75,20000.0, 50 años o mas,1, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Erick Humberto Marroquin Alvarez,43279.57,7500.0, 40 - 49 años,3, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+José Guillermo Yupe Zelaya,75058.35,16000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Zuleyka Vanessa Blandón,42897.59,6250.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Karen Lisseth Illescas Linares,62932.64,30000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Jeniffer Guadalupe Rodriguez Parada,5775.0,4500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Sobre Vehículos,0.0
+Shady Amy Archila Raxón,59812.64,7600.0, 30 - 39 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Maylin Johanna Barrios,12000.0,5000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,,,,Autocompras,0.0
+Keyla Esmeralda Girón Torres,162034.3,30000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Sergio Estuardo Castañeda Muñoz,73009.93,12000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Oscar Renato Pineda Pérez,60999.61,35000.0, 40 - 49 años,2, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Eddy Antonio Pineda Cosajay,49960.75,35000.0, 40 - 49 años,0, Empleado, 0-1 año, Casado, Consumo,No,Si,Si,Autocompras,0.0
+David Enrique Arbizú Pérez,72503.09,10000.0, 18 - 29 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,3.0
+Brian Esteban Morales Gil,60146.25,6800.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Ana Cristina Paz Morales,74877.86,6000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Carlos Santiago Enrique Ixcotoy Aguirre,40987.59,9000.0, 30 - 39 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Diego Esau Lara Morales,44702.25,6000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,3.0
+Edwin Anibal Cojoc Narciso,47387.67,8000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Jason Francisco Ochaita De León,61067.75,12000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,Si,Autocompras,1.0
+José Esteban Ochoa Urizar,130697.08,20000.0, 30 - 39 años,2, Dueño, 0-1 año, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Mynor Renato Sandoval Martínez,290405.67,25000.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,Si,Si,No,Autocompras,2.0
+Javier Arón Hernández García,46902.64,6000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Roberto Antonio Mo Mérida,74906.37,6530.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Rafael Antonio Irias Gómez,61702.75,25000.0, 30 - 39 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Jackelinne Valeria Pérez Avila,80532.86,7000.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Brayan Lizandro Hernández Sequén,108144.78,12000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Soyli Roxana Estrada Aguilar,79638.86,12000.0, 18 - 29 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Ivan Paolo Alejandro Rivera Rosales,153336.41,20000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,2.0
+Juan Edwin Gaitán Castillo,71741.61,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Christopher Jhonnatan Garrido Vega,110318.18,35000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,Si,Autocompras,1.0
+Willian Enrique Saavedra González,243369.96,125000.0, 50 años o mas,1,, 5-10 años, Soltero, Consumo,,Si,Si,Autocompras,1.0
+Pedro Fernando Ruiz Ramirez,26000.0,15000.0, 50 años o mas,2, Empleado, 0-1 año, Casado, Salud o Medico,Si,Si,Si,Sobre Vehículos,0.0
+Raúl Alberto Velasquez Lajpop,31902.44,7100.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Wagner Daniel Chacón Cardona,75968.38,14000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,3.0
+Eddy Fernando Gutierrez Roldán,241198.3,6000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Ligia Gabriela Vargas Arias,78897.86,8000.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,5.0
+Douglas Marmax Hernández Flores,38672.44,10000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Ana Kelle Veraly Delgado Vaides,193536.26,20000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Mynor Alberto Gabriel Palacios,56942.75,12000.0, 30 - 39 años,2, Dueño, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Kenny Robin Jose Castellanos Pineda,102617.11,25000.0, 18 - 29 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Emerson Estuardo Cuyán Rabanales,194941.71,15486.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Steve Lezzer Pineda,66790.09,20000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Julia Adriana Valle Fajardo,96939.38,8000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+José Carlos Rafael Motta Ovando,333447.06,65000.0, 50 años o mas,3, Dueño, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Celin Yhovana Godínez Siles de Alvarez,71514.35,35000.0, 18 - 29 años,1, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Rony Armando Hernández Barreno,40405.59,8500.0, 18 - 29 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Emerzón Joel Batz Pirir,81960.86,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Melquin Rafael Vásquez Jimenez,72851.61,18500.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Ingrid Jeanette García Alvarado,72957.61,43000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Maynor René López Ramos,60976.64,10000.0, 50 años o mas,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,1.0
+Josue Emanuel Solorzano Folgar,46335.59,5000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Pablo Ottoniel Caal Chub,121821.74,16000.0, 30 - 39 años,1, Dueño, 1-5 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Jonathan Enrique Velasquez Orantes,66000.64,35000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Yohana Carolina Escobar Figueroa de Espinoza,61596.75,10500.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Jonny Santiago Martínez,43532.59,70000.0, 40 - 49 años,3, Empleado, 5-10 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Alexis Pamela de León Recinos,107137.42,25000.0, 18 - 29 años,3, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,3.0
+"ENGLISH FOR ALL, S.A.",66484.35,45000.0, 18 - 29 años,0, Empleado, 1-5 años,, Consumo,No,Si,No,Autocompras,0.0
+José Raúl Pineda del Cid,52937.73,12000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Sara Eugénia Higueros Guin,41675.59,5000.0, 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Kevin Steevin Ramos Ramírez,231239.1,12000.0, 30 - 39 años,3, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,1.0
+Hans Adelso Ajuchan Quiquivix,171101.07,30000.0, 18 - 29 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,Si,Autocompras,1.0
+Melany Edith Hernández Salazar,290468.49,35000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,3.0
+Velvet Jaqueline Milena Chinchilla Orantes,46752.59,4200.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,3.0
+Rodrigo Estuardo Cruz Barrera,75957.35,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Suyín Lucía Mayorga Dávila,80849.86,30000.0, 40 - 49 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,Si,Autocompras,0.0
+José Rodrigo Soto Mora,203732.3,25000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Diego Ricardo Santiago Gonzales,138963.93,15000.0, 18 - 29 años,0,, Q -   , Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Hugo Demetrio Garrido Estrada,134520.93,80000.0, 50 años o mas,2, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+José Luis Félix Saavedra,136597.09,15000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Cristian Rubén Pineda Arriaza,59918.64,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Christian André Barraza Bochantín,250000.0,60000.0, 30 - 39 años,3, Dueño, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Harlie Vinicio Velásquez Ramírez,67878.64,5000.0, 18 - 29 años,2, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+René Estuardo Bravo Cruz,79956.12,6000.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Amparo Nohemí López Roldán de de la Cruz,73084.09,8000.0, 30 - 39 años,0, Empleado, 5-10 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Manuel Ciprian Soriano,17800.0,20000.0, 50 años o mas,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,2.0
+Cristian Gerardo Hernandez Contreras,131129.58,10500.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Alejandra Noelia Hernández Sequen,39407.59,3400.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Felix Romeo Torres Culajay,170219.9,18400.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Douglas Francisco Enriquez Obando,74000.0,125000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Juan Carlos Alonzo Rodas,453077.06,75000.0, 40 - 49 años,4,, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Patricia Noemí Gómez Muñoz de Diaz,98302.78,50000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Pedro José Cabrera Navarro,68327.64,7800.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,Si,Si,No,Autocompras,1.0
+Erika Marleny Girón Muñoz de Florian,212480.71,25000.0, 40 - 49 años,1, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,1.0
+Carlos Raúl Borrayo García,56919.25,10500.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,3.0
+Amal Sara Aldesht Aranki,97825.44,20000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Edwin Oswaldo Gonzalez Trinidad,63898.35,10000.0, 18 - 29 años,2, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Mayra Johana Avendaño Hernández,35400.0,14500.0, 50 años o mas,1, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Eddy Fernando Pérez Sinay,147716.25,25000.0, 50 años o mas,1, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Diego Andrés Aguilar Linares,46000.0,37000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,No,Sobre Vehículos,0.0
+Alma Lidia Bolaños Blanco,24999.44,17000.0, 40 - 49 años,1, Dueño, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Oscar René Cruz Martínez,66476.64,10000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Autocompras,1.0
+Jose Francisco Javier Falla,62760.75,17231.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Verner Ricardo Ortiz Izaguirre,134661.76,15000.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consumo,Si,No,No,Autocompras,0.0
+Jengli Cané Díaz Alvarado,165961.9,25000.0, 30 - 39 años,1, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Marco Tulio Reyes Villeda,50806.75,12000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Erick Pernilla,43579.59,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Marvin Noé Muralles Lima,179964.39,12000.0, 30 - 39 años,4, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+William Daniel Bolaños Marmol,41939.59,8600.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+María Beatríz Medrano Godoy,66448.38,18000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Eladio Jose Manuel Orellana Rodríguez,50399.73,14000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Luis David Quezada Quevedo,85200.0,30000.0, 30 - 39 años,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Edwin Gadiel Estrada Cruz,53921.75,9550.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Luis David Quezada Quevedo,59400.0,30000.0, 30 - 39 años,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Hilmar Guillermo Monzón Juárez,40517.59,15000.0, 40 - 49 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Ingrid Liseth Chacón Avalos de Bedoya,69625.61,12000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Ronald Ardanie Velásquez Ramírez,62932.64,4500.0, 18 - 29 años,0, Empleado, 1-5 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Tanya Priscilla Solórzano Méndez de Paz,79844.86,22000.0, 50 años o mas,1, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,Si,Autocompras,0.0
+José Manuel Velásquez López,90333.12,18000.0, 40 - 49 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Henry Ovidio Hernández Barreno,42468.59,5000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Darlyn Julissa Ramírez Saenz,66397.64,10000.0, 30 - 39 años,3,, Q -   , Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Nelson Noel Reyes Franco,70000.0,22000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Salud o Medico,Si,Si,No,Sobre Vehículos,1.0
+Ingrid Jeannette Alvarez Avalos,59427.75,20000.0, 50 años o mas,1, Dueño, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Crystian Josué Gutierrez Vaidez,56655.25,10000.0, 40 - 49 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Luis Humberto Fajardo Ordoñez,189301.32,19650.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,Si,Autocompras,0.0
+Javier Marroquin Orozco,85000.0,10000.0, 50 años o mas,0, Dueño, 5-10 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Gerald Kenneth Manuel García Anderson,63606.75,14000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,1.0
+Kevyn Janssen López Contreras,140929.09,15000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,No,No,Si,Autocompras,0.0
+Ivis Ovidio Rivera Juárez,47754.73,6930.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Abner Alexander Santizo Cifuentes,177095.23,40000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,1.0
+Pablo Andree Dardón Arbizú,168077.9,15300.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Lester Wangner Makepeace Muñoz,85931.86,15000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Hector David Valenzuela Vasquez,137027.25,9000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Sandra Patricia De León Hernández,54413.73,3600.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Pedro Samuel Salazar Arevalo,51630.25,7500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Roberto Ervin de Jesús Ramírez Aquino,71233.09,15000.0, 30 - 39 años,2, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+José Daniel Santizo Recinos,65889.64,7000.0, 18 - 29 años,0, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,No,Autocompras,0.0
+Andy Josue Rodríguez Barrillas,69187.35,9000.0, 18 - 29 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Marco René Escobar Gramajo,84885.12,45000.0, 40 - 49 años,5+, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Stephanee Alejandra Villatoro Alvarado,116474.11,15000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Jorge Luis Cute Oliva,105869.44,17000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Carlos Daniel Dionicio Quintero,51388.75,35000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Ana Elisa Alvarez Zuñiga,119607.27,20000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Brayan Antonio Subuyuj Contreras,65326.35,18250.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Velvet Jaqueline Milena Chinchilla Orantes,51659.09,4200.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,3.0
+Kenneth Omar Roberto Murillo Zetina,51774.73,9000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Oscar Antonio Jiménez Juárez,54683.73,16000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,Si,Si,Autocompras,0.0
+Rumaldo René Hernández Sánchez,50859.75,6000.0, 50 años o mas,0, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Gerson Fernando Gordillo Rodas,46541.59,37000.0, 30 - 39 años,2, Empleado, Q -   , Casado, Consumo,Si,No,Si,Autocompras,0.0
+Mario Roberto López Gudiel,76866.61,15000.0, 40 - 49 años,2, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+José Miguel Suntecún de León,28500.0,20000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Sobre Vehículos,1.0
+Kevin Alberto Villatoro Orellana,194844.19,6000.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Aaron Josué Urrutia Ambrosy,33960.44,6000.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consumo,No,No,No,Autocompras,0.0
+Adilis Beatriz López Aquino de Urbina,51156.66,4250.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Adolfo Daniel Mejía Melgar,51789.25,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Adonias Tepáz Buc,163469.59,3000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Alan Alexander Gutiérrez González,52847.25,12500.0, 30 - 39 años,0, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Alberto Hernández Muñoz,136669.95,30000.0, 50 años o mas,3, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Alexander Josué Velasquez Silva,56470.25,55000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Alexis Antonio De León Castillo,97360.31,35000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Alfonso Guerra De La Rosa,187149.5,50000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Alvaro Daniel Sulugui Estéban,173571.59,45000.0, 40 - 49 años,3, Dueño, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Alvaro Ricardo Estevez Mena,62139.64,8475.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Ana Marina Vargas Rodríguez,103750.84,15000.0, 40 - 49 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,2.0
+Anabella Figueroa Tacatic,84979.86,10000.0, 50 años o mas,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,1.0
+Angel Daniel Fuentes López,60817.64,10000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Angela Maria Mejía Corado de Vargas,96150.95,6000.0, 40 - 49 años,0, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Augusto Alexander Pérez Torres,179236.84,10000.0, 30 - 39 años,4, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Aury Zucely Fígueroa Román,51890.25,6750.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Axel Daniel Orellana Sequén,86279.16,9000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Axel Faraón Cárdenas Alberto,62612.09,20000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Aída Gabriela Aroche Reyes de Véliz,35910.59,4500.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Backer Bladimir Tepáz López,62141.68,5500.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Berni Yesenia Ramírez De Hernández,79440.64,13000.0, 30 - 39 años,0, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Billy Brandon Javier Alay López,34912.44,14900.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Blanca Estela Gómez Gonzalez de Pérez,103909.84,15000.0, 30 - 39 años,2, Dueño, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Boni Armando Morataya Chavez,86780.89,6000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Brenda Amarilis Aguilar Juárez,25800.0,18000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,Si,No,Sobre Vehículos,0.0
+Brenda Ileana Caballeros Castillo,60999.9,25000.0, 50 años o mas,2, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,1.0
+Bryan Alexander Curruchich González,59944.82,7000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Bryan Ernesto Requena Velásquez,90973.12,8000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Byron Eduardo Palma Natareno,104200.84,30000.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Carlos Alejandro Orozco Mejía,59442.64,12000.0, 40 - 49 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Carlos Alfredo Morales Loy,80538.59,8000.0, 40 - 49 años,3, Dueño, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Carlos Antonio Reyes Urrea,110993.57,23000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Carlos Arnoldo Barrera Barillas,81256.61,35000.0, 30 - 39 años,0, Empleado, 5-10 años, Casado, Consumo,Si,Si,No,Autocompras,0.0
+Carlos Emanuel Sil Zelaya,86408.86,85000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Carlos Fernando De León Orellana,113936.11,11000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Carlos Ivan Vega Santos,46864.59,5000.0, 40 - 49 años,1,,, Soltero, Consumo,No,No,No,Autocompras,0.0
+Carlos Johán Arroyo Rodríguez,165602.57,40000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Carlos Ramiro López Torres,59686.75,13500.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,No,Autocompras,1.0
+Cesar Alfonzo Alvarez Marroquin,111968.42,40000.0, 18 - 29 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,1.0
+Cleidy Consuelo Medrano Amezquita,73656.86,28000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Comercios Innovadores INC,96449.48,4000.0, 18 - 29 años,0, Empleado, 1-5 años,, Consumo,Si,Si,Si,Autocompras,1.0
+Corporación Magda Sociedad Anonima,209856.67,15000.0, 50 años o mas,0, Dueño, 5-10 años,, Capital de trabajo,Si,No,Si,Autocompras,1.0
+Crhistian Alexander Herrera Hernández,128730.6,20000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,1.0
+Cristiams Josué Blanco Fajardo,530134.34,40000.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Cristian Gustavo Izeppi Mendoza,86795.12,10500.0, 40 - 49 años,4, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Cristián Ademar Villatoro Lozoj,78838.78,25000.0, 30 - 39 años,3, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Cruz Milton Torres Godínez,108575.95,40000.0, 50 años o mas,3, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+César Augusto Ambrocio Silva,86143.86,6000.0, 30 - 39 años,0, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+César Augusto Pérez Pérez,39872.74,3500.0, 18 - 29 años,1, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+César David López Sagastume,176867.28,50000.0, 40 - 49 años,4, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Daniel Roberto Otzoy García,53000.0,50000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,No,Si,No,Sobre Vehículos,0.0
+Darlin Sucely Martínez López,48500.0,25000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Darwin Antonio Tábora Navarro,37836.52,1500.0, 40 - 49 años,1, Dueño, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+David Ismael Jonathan Galindo Garabito,56031.25,10000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Devóra Rebeca Castillo Martínez de Castro,174095.59,25000.0, 18 - 29 años,4, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Diego Alejandro Villagran Bámaca,304231.81,37000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Diego Andree Gómez Arreaga,56704.01,4200.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Diego Andrés Avila Galvez,37265.85,3416.38, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Eddy Rosmery Marroquín Colindres,37979.59,3500.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Edgar Alexander Sochon Urbina,363960.74,40000.0, 18 - 29 años,2, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Edgar Octavio Herrera Rodríguez,75134.54,30000.0, 40 - 49 años,3, Empleado, 0-1 año, Casado, Consumo,Si,No,No,Autocompras,1.0
+Edgar Ramiro Lastro Velásquez,147291.63,8000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Eduardo Enrique Ramírez Ovalle,52574.35,7000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Eduardo Luis Godoy Rojas,252199.0,30000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Elder Jotam Pérez Amaya,69239.57,17000.0, 30 - 39 años,5+, Dueño, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Elisa María García Melgar,22426.0,17000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Elvis Josué Galicia,59110.75,28000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,1.0
+Emerson Abdiel García Rodríguez,130326.37,1000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Emerson Fernando Mendez Ramirez,73519.35,10000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,2.0
+Emilce Yessenia Arana,77496.58,20000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Erick Orlando Alonso Mayorga,69592.64,11000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Ericka Lorena Curiales Palencia de Oviedo,118378.22,15000.0, 40 - 49 años,4, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Erik Alexander Rivas Morente,27563.0,3860.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Erika Anabella Vásquez Sánchez,86049.92,15000.0, 40 - 49 años,0, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Erika Marleny Girón Muñoz de Florian,135533.44,25000.0, 40 - 49 años,1, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,1.0
+Estuardo Josué de León García,43734.73,12500.0, 40 - 49 años,0, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,1.0
+Evangelina Girón Saavedra,50096.25,6000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Fernando Alfonso Ac Vicente,204250.29,15000.0, 40 - 49 años,5+,, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Ferner Eliú Castellanos Equité,60939.25,8500.0, 18 - 29 años,3, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Francisco Antonio Luna Bolaños,109571.44,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,1.0
+Francisco Ottoniel López y López,165552.63,30000.0, 18 - 29 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Fredy José Chapetón Franco,36000.0,14000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Sobre Vehículos,0.0
+Gerardo Anibal García Yocuté,49318.29,14000.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Gerardo Antonio Mazariegos Pineda,44712.52,8500.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Gerber Alexander Díaz Osoy,115864.19,45000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Gerson Emanuel Pérez,57359.18,7000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Gilberto Manuel Dominguez Tiriquiz,148572.04,40000.0, 30 - 39 años,4, Empleado, 0-1 año, Casado, Consumo,Si,No,No,Autocompras,0.0
+Glenda Azucena Duarte Alvarez,48229.64,30000.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Consumo,No,Si,No,Autocompras,0.0
+Glenda Maribel Alvarado,88820.38,30000.0, 40 - 49 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Glenda Paola Arroyo Díaz,88820.38,10000.0, 40 - 49 años,2, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,2.0
+Guadalupe Del Rosario Arrecis González,132022.76,6000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Guillermo Rodrigo González Palma,162147.59,20000.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Henry Gustavo Rojas,78165.29,12500.0, 40 - 49 años,4, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Henry Leonel Morales Juárez,49905.59,10000.0, 40 - 49 años,4, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Herber Estuardo Morales Guerra,69274.64,18000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,No,Si,No,Autocompras,0.0
+Heydi Elizabeth España Miguel De Estrada,133432.4,10500.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Hugo Antonio Piedrasanta Paz,66542.57,25000.0, 30 - 39 años,3, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Hugo Roberto Villegas Velásquez,171607.39,20000.0, 18 - 29 años,1, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Héctor Francisco Morales Rodas,345817.44,50000.0, 30 - 39 años,1, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Ilsa Mercedes Elías de Lemus,173677.59,100000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+"Importadora El Compa, S.A",56000.0,15000.0, 40 - 49 años,2, Empleado, 5-10 años,, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Ingrid Manuela Ventura Cuterez de Xón,161473.42,8000.0, 30 - 39 años,0, Dueño, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+"Inversiones Billetera Express, Sociedada Anonima",149700.25,23000.0, 30 - 39 años,3, Empleado, 1-5 años,, Consumo,Si,No,No,Autocompras,0.0
+Inversiones Carsol Sociedad Anónima,240113.95,12000.0, 18 - 29 años,0, Empleado, 1-5 años,, Consumo,Si,Si,Si,Autocompras,1.0
+Irwin Armando Diaz Chajón,133432.4,75000.0, 18 - 29 años,0, Dueño, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Ivan Alexander Aquino Enriquez,69981.64,20000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Iván Alirio Cadenas Pérez,91411.61,15000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Javier Alexander Lorenzo Chinchilla,140440.06,30000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Jefferson Edgar Eliú Pérez Castillo,110047.44,40000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,1.0
+Jenniffer Ofelia Pineda Villagrán,86143.86,10000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Johanna Celeste Herrarte Romero,78385.12,25000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,Si,Si,No,Autocompras,0.0
+Jonathan Mishell Quiroa Hernández,69990.35,35000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,3.0
+Jonathan Stuart Suruy Coronado,85427.99,7500.0, 18 - 29 años,1, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Jorge Alexander de la Cruz Samayoa,41152.59,22000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Jorge Daniel Salazar Martinez,101915.95,20000.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Jorge Miszael Blanco Sanic,134200.99,12000.0, 40 - 49 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Jose Leonel Zet Cotzojay,127748.3,15000.0, 40 - 49 años,5+, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Jose Ovidio Rivas Ramirez,69570.64,6800.0, 30 - 39 años,4, Empleado,, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Joseline Carolina Rivera Morales,99616.62,55000.0, 30 - 39 años,1, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Joshua Fernando Luna,50108.18,9800.0, 30 - 39 años,0, Empleado, 5-10 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Joshua Vladimir Estrada Arana,48997.18,8000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Josué Armando Morales Naj,257917.55,40000.0, 40 - 49 años,1, Empleado, 5-10 años, Casado, Capital de trabajo,No,Si,Si,Autocompras,0.0
+Josué Claudio Misael Contreras Enriquez,63990.64,8000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Josué David Hernández Rodriguez,174203.57,16000.0, 30 - 39 años,2, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,2.0
+Josué Gerardo Rojas Paz,56690.54,3600.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,1.0
+Josué Humberto Menendez Choc,41475.25,3750.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Josué Misaelh Parada Cute,84535.61,12000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+José Alberto Pacheco Lópéz,28873.71,4500.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+José Alfredo Jiménez Orozco,85320.46,20000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,Si,No,Autocompras,0.0
+José Angel Lee Martínez,43993.52,7000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+José Eduardo Quiñonez Esteban,76496.61,3200.0, 18 - 29 años,2, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+José Eduardo Rodas Morales,174332.01,15000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,1.0
+José Manuel Prado Sarg,94797.38,25000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+José Miguel Morales Valdéz,51875.09,12000.0, 30 - 39 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+José Raul Barrios Arroyo,68874.61,5000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Juan Carlos Chiquitó Jiménez,97046.8,7000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Juan Carlos Guzman Mira,46282.59,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Juan Jose Ortíz Donado,126110.74,18400.0, 18 - 29 años,0, Empleado, 5-10 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Juan José Melendez Chupina,86561.86,39000.0, 40 - 49 años,3, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Julieta Aracely Huitz Enríquez,71969.86,11200.0, 50 años o mas,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Julio Guillermo Espinoza García,61945.57,25000.0, 40 - 49 años,0, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Julián Estuardo Aguilar Juarez,88622.32,10000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Karen Azucena Lopez Lopez,79410.61,10000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Karla Susana Cruz Serrano de Unda,42196.73,3000.0, 40 - 49 años,1, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Katheryn Andrea Ramirez Miranda,168964.74,35000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Kelvin Ilde Alexander Lara Vásquez,77169.12,5000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,No,Autocompras,1.0
+Kenneth Adolfo Escoto Rojas,21600.0,7500.0, 40 - 49 años,2, Empleado, 0-1 año, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Kenny Jonathan Monzón Portillo,177485.61,16500.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Kevin Josué Corado Ramírez,42792.59,12000.0, 30 - 39 años,3, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,2.0
+Laura Roxana Palacios Castillo,17200.0,8000.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Capital de trabajo,Si,Si,No,Sobre Vehículos,0.0
+Leonardo Rafael Velasquez Godínez,57501.25,6200.0, 18 - 29 años,1, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Lervin Cristopher Torres Jolón,63475.35,15000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Leslie Odett Mansilla Cabrera,53821.16,4000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Lilian Victoria López Marroquín de Diaz,93195.12,30000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Loida Tomasa Ochoa Vargas de Castellanos,92281.96,35000.0, 50 años o mas,1, Dueño, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Luis Alejandro Guzmán Montenegro,65760.38,13000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Luis Alfredo Boche Tunchez,162643.07,30000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,1.0
+Luis Eduardo Morán Castellanos,75249.21,100000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,Si,Si,Sobre Vehículos,0.0
+Luis Estuardo Borrayo Morales,93639.62,15000.0, 40 - 49 años,1, Empleado, 5-10 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Luis Felipe Hernández Reyes,81507.92,50000.0, 50 años o mas,1, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Manuel de Jesús Acevedo Santos,180565.37,7000.0, 18 - 29 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Marco Antonio Chen Monteros,60660.68,8000.0, 40 - 49 años,3, Empleado, 0-1 año, Casado, Consumo,No,No,No,Autocompras,0.0
+Marco Tulio Rojas López,62774.64,12000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Marcos René Reyes Hernández,35869.44,9500.0, 30 - 39 años,4, Empleado, 0-1 año, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Marelyn Siomara Ramírez Raymundo,97733.89,8000.0, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Maria Ventura Ramón de Gutierrez,98928.62,10000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Mario David Alvarez Romero,80961.89,20000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,1.0
+Mario Josué Revolorio Paz,51210.37,6000.0, 40 - 49 años,2, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Mario Julian De Paz López,120441.22,15000.0, 30 - 39 años,3, Dueño, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Mario Leonel Ibarra Lemus,57554.25,6000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Mario Leopoldo Sian Ordóñez,47885.52,8253.13, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Marlon Estuardo Estrada Sánchez,378513.92,20000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Martha Sofia Barrios Sandoval,113406.52,8000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Marvin Edgardo Asencio Soto,61607.68,13200.0, 50 años o mas,3, Empleado, 1-5 años, Casado, Consumo,No,No,No,Autocompras,0.0
+Marvin Leonel Hernández Díaz,53640.25,10000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Marvin Leopoldo Estuardo Cahuec Sucup,125821.6,20000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Marvin Mauricio Díaz Monroy,84256.12,6750.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Marvin René Gómez Bautista,50037.59,20000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+María Cecilia De Matta Vega de Méndez,43000.0,20000.0, 40 - 49 años,1, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Sobre Vehículos,0.0
+María Cristina Portales,336790.93,130000.0, 30 - 39 años,4, Empleado, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+María Renée Morales Bardales,192200.93,2500.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+María Xiomara Aguilar Meza de Meléndez,64889.64,25000.0, 30 - 39 años,0, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Maylin Johanna Barrios,25984.0,5000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Melany María Alvarado Hernández,18000.0,8000.0, 30 - 39 años,0, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Sobre Vehículos,2.0
+Merlin Jéssica Carrillo Soberanis,173989.59,5000.0, 40 - 49 años,3, Dueño, 5-10 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Miguel Eduardo Torres Cardoza,89545.12,8500.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Miguel Orlando Salazar Pereira,122736.44,19500.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Mildred Abigail Mancilla Marin,242201.66,25000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Monica Maria Fuentes Rubio,78702.31,20000.0, 40 - 49 años,0, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Mynor Alexander Sazo Maldonado,76796.99,10000.0, 30 - 39 años,3, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Myra Carolina Escobar Hernández de Peláez,54909.25,60000.0, 50 años o mas,1, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Nery Estuardo Monterroso Calderón,175102.0,15000.0, 40 - 49 años,3, Empleado, 0-1 año, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Noelia Ivon Estrada Enriquez,96649.62,18000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Noé Isaías Jocol Ruiz,85107.09,20000.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Obdin Francisco Barrientos Vargas,140157.02,30000.0, 30 - 39 años,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Olga Ileana López Girón,74105.35,20000.0, 40 - 49 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Orpa Horalia Tiul Garcías de Campos,126767.14,8180.0, 40 - 49 años,0, Empleado, 0-1 año, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Oscar Alfonso Morales Escobar,57234.35,12000.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Oscar Aroldo Ayala Díaz,98413.78,10000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,No,Si,Si,Autocompras,0.0
+Otto Leonardo Caal López,75036.86,11500.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,2.0
+Otto René López Méndez,49808.66,12000.0, 40 - 49 años,3, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Pablo Alberto Uriel Castañeda Hernández,46908.73,6000.0, 18 - 29 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Pablo César Sandoval Aquino,181380.41,11000.0, 40 - 49 años,0, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Pablo José de León Cajas,68796.49,8800.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Pabloandres Ramirez Mejía,67231.02,6000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Paola Rubí Mejía González,58693.09,15000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Paula Albertina Estrada Urrutia,76813.61,20000.0, 50 años o mas,1, Empleado, 5-10 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Paulo César Flores Flores,86839.22,18000.0, 30 - 39 años,0, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,1.0
+Pedro Bersaí Pérez Cardona,46388.59,3973.0, 30 - 39 años,2, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Pedro Ivan Gudiel Tobar,120950.6,12600.0, 30 - 39 años,3, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,1.0
+Pedro Joaquin Chajon Morales,108944.46,6000.0, 18 - 29 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Pía Constanza Reyes del Cid,40861.59,6000.0, 50 años o mas,0, Empleado, 0-1 año, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Queni Alberto Marroquín Ordóñez,104168.84,25000.0, 30 - 39 años,1, Empleado, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+René Orlando Diaz Pacheco,63500.0,25000.0, 50 años o mas,3, Empleado, 5-10 años, Casado, Consolidacion de deudas,Si,Si,Si,Sobre Vehículos,0.0
+Ricardo Rafael Menes Castillo,73238.86,14000.0, 30 - 39 años,2, Empleado, 0-1 año, Casado, Consumo,No,No,Si,Autocompras,0.0
+Rita Fabiola Mérida de Paz,79431.51,6000.0, 18 - 29 años,1, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Roberto Enrique Sicán Leiva,23205.54,3973.05, 18 - 29 años,1, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Roberto Ervin Ramírez de León,47997.18,9000.0, 50 años o mas,0, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Rogelim Abidsai Valenzuela Muñoz,103235.49,11000.0, 30 - 39 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Rogger Javier Mazariegos Quisque,62277.75,10500.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Rony Javier Fuentes Fuentes,94977.72,7000.0, 18 - 29 años,3, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Roothman Scott León Monroy,63136.44,7900.0, 18 - 29 años,2, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,0.0
+Ruth María López García,66635.64,6000.0, 30 - 39 años,2, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Santiago Soch Reynoso,55422.64,35000.0, 50 años o mas,0, Dueño, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Sergio Alejandro Ogaldes Cruz,80960.86,15000.0, 50 años o mas,2, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Sergio Antonio Samayoa Gutiérrez,53989.64,19000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Sergio Domingo Chavac Castro,81956.83,3400.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,Si,Si,Autocompras,0.0
+Sergio Emilio Rodas Leiva,92009.44,15000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+Sergio Iván Ramírez Letona,71810.09,23000.0, 50 años o mas,1, Empleado, 5-10 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Sergio Pedro David Torres Rodas,60373.39,10000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Shirley Walesca Marroquín Urízar De Montenegro,94691.38,15000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,No,No,Si,Autocompras,1.0
+Sonia Maribel Ramos Martínez De Raymundo,87000.0,25000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Capital de trabajo,No,Si,No,Sobre Vehículos,0.0
+Steven José Jayes Lemus,30178.98,5200.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,No,Autocompras,0.0
+"Tiendas Virtuales, Sociedad Anónima",246153.21,45000.0, 40 - 49 años,2, Empleado, 5-10 años,, Consumo,Si,Si,Si,Autocompras,0.0
+Victor Antonio Siquiná Romero,80907.86,7500.0, 18 - 29 años,0, Dueño, 1-5 años, Soltero, Capital de trabajo,Si,No,No,Autocompras,0.0
+Victor David Alfaro Quiej,75745.35,10000.0, 40 - 49 años,2, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,0.0
+Victor Hugo Pérez Gregorio,130334.48,10000.0, 50 años o mas,2, Empleado, 5-10 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+Victoria Azucena Zuñiga Chitic de Cifuentes,78702.35,11000.0, 30 - 39 años,2, Empleado, 5-10 años, Casado, Consumo,Si,Si,Si,Autocompras,0.0
+Vilma Maria Carranza Sanchez,155146.58,60000.0, 40 - 49 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Vilma Michell Hernández López,91000.0,22000.0, 30 - 39 años,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Sobre Vehículos,0.0
+Walder Darío Mérida Muñoz,101909.4,8000.0, 30 - 39 años,2, Empleado, 0-1 año, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Walter Eduardo Castro,60447.64,20000.0, 40 - 49 años,2, Dueño, 1-5 años, Soltero, Consumo,Si,Si,No,Autocompras,0.0
+Wendoly Paola Castro Paz,77438.35,10000.0, 18 - 29 años,0, Empleado, 1-5 años, Soltero, Consumo,No,No,Si,Autocompras,0.0
+Wilfredo Matias Oliva Jumique,174366.57,15000.0, 40 - 49 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+William Eliseo Cristal Pérez,189576.92,20000.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+William Estuardo Equité Mirón,202333.29,21000.0, 40 - 49 años,1, Dueño, 5-10 años, Casado, Consumo,Si,No,Si,Autocompras,0.0
+Yahel Alfredo Lancerio Marrero,74089.09,18000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,No,Autocompras,0.0
+Yener Josué García Cano,98632.89,3800.0, 30 - 39 años,3, Empleado, 1-5 años, Casado, Capital de trabajo,Si,No,No,Autocompras,2.0
+Yesica Estefani Peña Marroquín,104479.02,20000.0, 30 - 39 años,0, Empleado, 0-1 año, Soltero, Consumo,No,No,No,Autocompras,0.0
+Yonatan David Rodríguez Pineda,129616.09,40000.0, 30 - 39 años,1, Empleado,, Soltero, Consumo,No,No,No,Autocompras,1.0
+Yosselin Roosmery Arroyo Romero,46759.25,5000.0, 18 - 29 años,1, Empleado, 1-5 años, Soltero, Consumo,Si,No,Si,Autocompras,0.0
+Zoila Nohemi Constanza Morales,117902.11,15000.0, 50 años o mas,0, Empleado, 5-10 años, Soltero, Consumo,Si,Si,Si,Autocompras,0.0
+Axel Hernan Sarceño Orozco,54024.0,25000.0, 40 - 49 años,3, Dueño, 1-5 años, Casado, Consumo,Si,No,No,Autocompras,0.0
+MINIMO,4504.49,15.0,,,,,,,,,,,0.0
+MAXIMO,860000.0,500000.0,,,,,,,,,,,0.0

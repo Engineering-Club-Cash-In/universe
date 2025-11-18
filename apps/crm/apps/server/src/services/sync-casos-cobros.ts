@@ -16,11 +16,46 @@ import {
 	type estadoMoraEnum,
 } from "../db/schema/cobros";
 import { leads } from "../db/schema/crm";
-import type { StatusCreditEnum } from "../types/cartera-back";
+import type {
+	CarteraCuotaCredito,
+	StatusCreditEnum,
+} from "../types/cartera-back";
 import { carteraBackClient } from "./cartera-back-client";
 import { isCarteraBackEnabled } from "./cartera-back-integration";
 
 type EstadoMoraEnum = (typeof estadoMoraEnum.enumValues)[number];
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+/**
+ * Calcula los días de mora exactos basándose en la fecha de vencimiento
+ * de la cuota más antigua que está atrasada
+ */
+function calcularDiasMoraExactos(
+	cuotasAtrasadas: CarteraCuotaCredito[],
+): number {
+	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
+		return 0;
+	}
+
+	// Encontrar la cuota con fecha de vencimiento más antigua
+	const cuotaMasAntigua = cuotasAtrasadas.reduce((antigua, actual) => {
+		const fechaAntigua = new Date(antigua.fecha_vencimiento);
+		const fechaActual = new Date(actual.fecha_vencimiento);
+		return fechaActual < fechaAntigua ? actual : antigua;
+	});
+
+	// Calcular días transcurridos desde la fecha de vencimiento
+	const fechaVencimiento = new Date(cuotaMasAntigua.fecha_vencimiento);
+	const hoy = new Date();
+	const diffMs = hoy.getTime() - fechaVencimiento.getTime();
+	const diasMora = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+	// Retornar 0 si el resultado es negativo (cuota aún no vence)
+	return Math.max(0, diasMora);
+}
 
 // ============================================================================
 // MAPEO DE ESTADOS
@@ -191,11 +226,13 @@ export async function sincronizarCasosCobros(
 					credito.creditos.numero_credito_sifco,
 				);
 
-				// Calcular días de mora y estado
-				const diasMora = creditoCompleto.dias_mora || 0;
+				// Calcular días de mora exactos usando la fecha de vencimiento
+				const diasMora = calcularDiasMoraExactos(
+					creditoCompleto.cuotasAtrasadas || [],
+				);
 				const estadoMora = mapearEstadoMora(
 					diasMora,
-					creditoCompleto.statusCredit,
+					creditoCompleto.credito.statusCredit,
 				);
 
 				// Verificar si existe referencia en CRM

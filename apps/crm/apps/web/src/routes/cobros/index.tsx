@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { differenceInDays, format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -6,12 +6,15 @@ import {
 	Banknote,
 	CalendarDays,
 	CalendarRange,
+	Loader2,
 	Phone,
+	RefreshCw,
 	TrendingDown,
 	TrendingUp,
 	Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { PERMISSIONS } from "server/src/types/roles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,6 +91,33 @@ function RouteComponent() {
 	const userProfile = useQuery({
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session,
+	});
+
+	const queryClient = useQueryClient();
+
+	// Mutation para sincronizar casos de cobros (solo admin)
+	const sincronizarCasos = useMutation({
+		mutationFn: async () => {
+			const now = new Date();
+			return await orpc.sincronizarCasosCobros({
+				mes: now.getMonth() + 1,
+				anio: now.getFullYear(),
+				forceSyncAll: true,
+			});
+		},
+		onSuccess: (data) => {
+			toast.success(
+				`Sincronización completada: ${data.casosCreados} creados, ${data.casosActualizados} actualizados, ${data.casosCerrados} cerrados`,
+			);
+			// Refrescar los datos
+			queryClient.invalidateQueries({ queryKey: ["getTodosLosContratos"] });
+			queryClient.invalidateQueries({ queryKey: ["getCobrosDashboardStats"] });
+		},
+		onError: (error) => {
+			toast.error(
+				`Error en sincronización: ${error instanceof Error ? error.message : "Error desconocido"}`,
+			);
+		},
 	});
 
 	const userRole = userProfile.data?.role;
@@ -208,7 +238,44 @@ function RouteComponent() {
 						Gestión y seguimiento de cobranza - Enfoque preventivo
 					</p>
 				</div>
+				{userRole === "admin" && (
+					<Button
+						onClick={() => sincronizarCasos.mutate()}
+						disabled={sincronizarCasos.isPending}
+						variant="outline"
+						className="gap-2"
+					>
+						{sincronizarCasos.isPending ? (
+							<>
+								<Loader2 className="h-4 w-4 animate-spin" />
+								Sincronizando...
+							</>
+						) : (
+							<>
+								<RefreshCw className="h-4 w-4" />
+								Sincronizar Casos
+							</>
+						)}
+					</Button>
+				)}
 			</div>
+
+			{/* Loading indicator */}
+			{(dashboardStats.isLoading || todosLosContratos.isLoading) && (
+				<Card className="border-blue-200 bg-blue-50">
+					<CardContent className="flex items-center gap-3 py-4">
+						<Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+						<div>
+							<p className="font-medium text-blue-900">
+								Cargando información de cobros...
+							</p>
+							<p className="text-blue-700 text-sm">
+								Obteniendo datos de Cartera-Back
+							</p>
+						</div>
+					</CardContent>
+				</Card>
+			)}
 
 			{/* Estadísticas Generales */}
 			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -220,12 +287,21 @@ function RouteComponent() {
 						<Users className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">
-							{dashboardStats.data?.totalCasosAsignados || 0}
-						</div>
-						<p className="text-muted-foreground text-xs">
-							Casos bajo tu responsabilidad
-						</p>
+						{dashboardStats.isLoading ? (
+							<div className="flex items-center gap-2">
+								<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+								<span className="text-muted-foreground text-sm">Cargando...</span>
+							</div>
+						) : (
+							<>
+								<div className="font-bold text-2xl">
+									{dashboardStats.data?.totalCasosAsignados || 0}
+								</div>
+								<p className="text-muted-foreground text-xs">
+									Casos bajo tu responsabilidad
+								</p>
+							</>
+						)}
 					</CardContent>
 				</Card>
 

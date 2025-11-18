@@ -11,6 +11,27 @@ import { casosCobros } from "../db/schema/cobros";
 import { adminProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import type { CarteraCuotaCredito } from "../types/cartera-back";
+
+// Helper para calcular días de mora exactos
+function calcularDiasMoraExactos(cuotasAtrasadas: CarteraCuotaCredito[]): number {
+	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
+		return 0;
+	}
+
+	const cuotaMasAntigua = cuotasAtrasadas.reduce((antigua, actual) => {
+		const fechaAntigua = new Date(antigua.fecha_vencimiento);
+		const fechaActual = new Date(actual.fecha_vencimiento);
+		return fechaActual < fechaAntigua ? actual : antigua;
+	});
+
+	const fechaVencimiento = new Date(cuotaMasAntigua.fecha_vencimiento);
+	const hoy = new Date();
+	const diffMs = hoy.getTime() - fechaVencimiento.getTime();
+	const diasMora = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+	return Math.max(0, diasMora);
+}
 
 export const reportesCarteraRouter = {
 	// ========================================================================
@@ -166,18 +187,18 @@ export const reportesCarteraRouter = {
 								plazo: credito.creditos.plazo,
 								statusCredit: credito.creditos.statusCredit,
 								deudaTotal: credito.creditos.deudatotal,
-								diasMora: creditoCompleto.dias_mora || 0,
-								montoMora: creditoCompleto.monto_mora ?? "0",
-								cuotasAtrasadas: creditoCompleto.cuotas_atrasadas ?? 0,
-								cuotasPagadas: creditoCompleto.cuotas_pagadas ?? 0,
-								cuotasPendientes: creditoCompleto.cuotas_pendientes ?? 0,
-								capitalRestante: creditoCompleto.capital_restante ?? "0",
-								totalRestante: creditoCompleto.total_restante ?? "0",
+								diasMora: calcularDiasMoraExactos(creditoCompleto.cuotasAtrasadas || []),
+								montoMora: creditoCompleto.moraActual ?? "0",
+								cuotasAtrasadas: creditoCompleto.cuotasAtrasadas?.length || 0,
+								cuotasPagadas: creditoCompleto.cuotasPagadas?.length || 0,
+								cuotasPendientes: creditoCompleto.cuotasPendientes?.length || 0,
+											capitalRestante: "0", // No disponible
+											totalRestante: "0", // No disponible
 								// Cliente
 								clienteNombre: creditoCompleto.usuario.nombre,
 								clienteNit: creditoCompleto.usuario.nit,
 								// Asesor
-								asesorNombre: creditoCompleto.asesor?.nombre || null,
+											asesorNombre: null, // No disponible
 								// Datos CRM
 								agenteCobranza: casoCobros[0]?.responsableCobros || null,
 								numeroContactos,
@@ -185,10 +206,7 @@ export const reportesCarteraRouter = {
 								tieneConvenio,
 								tieneRecuperacion,
 								// Inversionistas
-								tieneInversionistas:
-									(creditoCompleto.creditos_inversionistas?.length || 0) > 0,
-								numeroInversionistas:
-									creditoCompleto.creditos_inversionistas?.length || 0,
+											tieneInversionistas: false,
 							};
 						} catch (error) {
 							console.error(

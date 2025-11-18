@@ -28,6 +28,39 @@ import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
+import type { CarteraCuotaCredito } from "../types/cartera-back";
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+/**
+ * Calcula los días de mora exactos basándose en la fecha de vencimiento
+ * de la cuota más antigua que está atrasada
+ */
+function calcularDiasMoraExactos(
+	cuotasAtrasadas: CarteraCuotaCredito[],
+): number {
+	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
+		return 0;
+	}
+
+	// Encontrar la cuota con fecha de vencimiento más antigua
+	const cuotaMasAntigua = cuotasAtrasadas.reduce((antigua, actual) => {
+		const fechaAntigua = new Date(antigua.fecha_vencimiento);
+		const fechaActual = new Date(actual.fecha_vencimiento);
+		return fechaActual < fechaAntigua ? actual : antigua;
+	});
+
+	// Calcular días transcurridos desde la fecha de vencimiento
+	const fechaVencimiento = new Date(cuotaMasAntigua.fecha_vencimiento);
+	const hoy = new Date();
+	const diffMs = hoy.getTime() - fechaVencimiento.getTime();
+	const diasMora = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+	// Retornar 0 si el resultado es negativo (cuota aún no vence)
+	return Math.max(0, diasMora);
+}
 
 // Helper: Obtener todos los créditos de todos los estados
 async function obtenerTodosLosCreditosCarteraBack(params: {
@@ -130,8 +163,9 @@ export const cobrosRouter = {
 					const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
 					const montoMora = Number(credito.mora?.monto_mora ?? 0);
 
-					// Calcular días de mora aproximados (30 días por cuota atrasada)
-					// No usar mora.activa porque puede estar en false aunque tenga cuotas atrasadas
+					// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
+					// NO retorna las fechas de vencimiento de las cuotas individuales.
+					// Solo /credito retorna el array completo con fechas para cálculo exacto.
 					const diasMora = cuotasAtrasadas * 30;
 
 					// Determinar estado de mora
@@ -324,8 +358,9 @@ export const cobrosRouter = {
 							const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
 							const cuotaMensual = Number(credito.creditos.cuota ?? 0);
 
-							// Calcular días de mora aproximados (30 días por cuota atrasada)
-							// No usar mora.activa porque puede estar en false aunque tenga cuotas atrasadas
+							// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
+							// NO retorna las fechas de vencimiento de las cuotas individuales.
+							// Solo /credito retorna el array completo con fechas para cálculo exacto.
 							const diasMora = cuotasAtrasadas * 30;
 
 							// Calcular monto en mora como: cuota mensual * cuotas atrasadas
@@ -1211,7 +1246,10 @@ export const cobrosRouter = {
 						const cuotasAtrasadas =
 							creditoCompleto.cuotasAtrasadas?.length || 0;
 						const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
-						const diasMora = cuotasAtrasadas * 30;
+					// Calcular días de mora exactos usando la fecha de vencimiento
+					const diasMora = calcularDiasMoraExactos(
+						creditoCompleto.cuotasAtrasadas || [],
+					);
 						const montoEnMora = cuotaMensual * cuotasAtrasadas;
 
 						let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
@@ -1245,7 +1283,10 @@ export const cobrosRouter = {
 				// 5. Mapear datos correctamente
 				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
 				const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
-				const diasMora = cuotasAtrasadas * 30;
+				// Calcular días de mora exactos usando la fecha de vencimiento
+				const diasMora = calcularDiasMoraExactos(
+					creditoCompleto.cuotasAtrasadas || [],
+				);
 				const montoEnMora =
 					Number(creditoCompleto.moraActual) || cuotaMensual * cuotasAtrasadas;
 

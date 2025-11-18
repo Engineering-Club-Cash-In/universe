@@ -49,6 +49,8 @@ const RouterBodySchema = z.object({
     "ACTIVAR",
     "INCOBRABLE",
     "PENDIENTE_CANCELACION",
+    "EN_CONVENIO",
+    "MOROSO"
   ]),
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
 });
@@ -57,7 +59,11 @@ export const creditRouter = new Elysia()
 //.use(authMiddleware)
   // Crear nuevo crédito
   .post("/newCredit", async ({ body, set }) => {
-    return await insertCredit({ body, set });
+    const result = await insertCredit(body, set);
+    if (result && typeof result === 'object' && 'status' in result) {
+      set.status = result.status as number;
+    }
+    return result;
   })
   .post("/updateCredit", updateCredit)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
@@ -117,7 +123,9 @@ export const creditRouter = new Elysia()
     | "CANCELADO"
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
-    | "MOROSO";
+    | "EN_CONVENIO"
+    | "MOROSO"
+    |"EN_CONVENIO"
   
   // 🆕 Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
@@ -228,7 +236,10 @@ export const creditRouter = new Elysia()
     const requiereMotivoYMonto =
       accion === "CANCELAR" ||
       accion === "PENDIENTE_CANCELACION" ||
-      accion === "INCOBRABLE";
+      accion === "INCOBRABLE"
+      || accion === "EN_CONVENIO"
+      || accion === "MOROSO"
+        
 
     if (requiereMotivoYMonto && (!motivo || monto_cancelacion == null)) {
       set.status = 400;

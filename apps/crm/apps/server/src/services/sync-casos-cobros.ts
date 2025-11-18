@@ -188,7 +188,7 @@ export async function sincronizarCasosCobros(
 			try {
 				// Obtener detalles completos del crédito
 				const creditoCompleto = await carteraBackClient.getCredito(
-					credito.numero_credito_sifco,
+					credito.creditos.numero_credito_sifco,
 				);
 
 				// Calcular días de mora y estado
@@ -205,14 +205,14 @@ export async function sincronizarCasosCobros(
 					.where(
 						eq(
 							carteraBackReferences.numeroCreditoSifco,
-							credito.numero_credito_sifco,
+							credito.creditos.numero_credito_sifco,
 						),
 					)
 					.limit(1);
 
 				if (reference.length === 0) {
 					console.warn(
-						`[SyncCobros] Crédito ${credito.numero_credito_sifco} no tiene referencia en CRM, saltando`,
+						`[SyncCobros] Crédito ${credito.creditos.numero_credito_sifco} no tiene referencia en CRM, saltando`,
 					);
 					continue;
 				}
@@ -221,7 +221,7 @@ export async function sincronizarCasosCobros(
 
 				if (!contratoId) {
 					console.warn(
-						`[SyncCobros] Crédito ${credito.numero_credito_sifco} no tiene contrato asociado, saltando`,
+						`[SyncCobros] Crédito ${credito.creditos.numero_credito_sifco} no tiene contrato asociado, saltando`,
 					);
 					continue;
 				}
@@ -252,12 +252,12 @@ export async function sincronizarCasosCobros(
 					.select()
 					.from(casosCobros)
 					.where(
-						eq(casosCobros.numeroCreditoSifco, credito.numero_credito_sifco),
+						eq(casosCobros.numeroCreditoSifco, credito.creditos.numero_credito_sifco),
 					)
 					.limit(1);
 
 				const debeCrearCaso = debeCrearCasoCobros(
-					creditoCompleto.statusCredit,
+					creditoCompleto.credito.statusCredit,
 					diasMora,
 				);
 
@@ -271,9 +271,9 @@ export async function sincronizarCasosCobros(
 							.update(casosCobros)
 							.set({
 								estadoMora,
-								montoEnMora: creditoCompleto.monto_mora || "0",
+								montoEnMora: creditoCompleto.moraActual, // ya es string
 								diasMoraMaximo: diasMora,
-								cuotasVencidas: creditoCompleto.cuotas_atrasadas || 0,
+								cuotasVencidas: creditoCompleto.cuotasAtrasadas?.length || 0,
 								activo: true,
 								updatedAt: new Date(),
 							})
@@ -281,7 +281,7 @@ export async function sincronizarCasosCobros(
 
 						result.casosActualizados++;
 						console.log(
-							`[SyncCobros] ✓ Actualizado caso ${caso.id} - ${credito.numero_credito_sifco}`,
+							`[SyncCobros] ✓ Actualizado caso ${caso.id} - ${credito.creditos.numero_credito_sifco}`,
 						);
 					} else {
 						// El crédito ya no está en mora → cerrar caso
@@ -297,7 +297,7 @@ export async function sincronizarCasosCobros(
 
 							result.casosCerrados++;
 							console.log(
-								`[SyncCobros] ✓ Cerrado caso ${caso.id} - ${credito.numero_credito_sifco} (al día)`,
+								`[SyncCobros] ✓ Cerrado caso ${caso.id} - ${credito.creditos.numero_credito_sifco} (al día)`,
 							);
 						}
 					}
@@ -307,7 +307,7 @@ export async function sincronizarCasosCobros(
 
 					if (!responsable) {
 						result.errors.push(
-							`No se pudo asignar agente para crédito ${credito.numero_credito_sifco}`,
+							`No se pudo asignar agente para crédito ${credito.creditos.numero_credito_sifco}`,
 						);
 						continue;
 					}
@@ -319,11 +319,11 @@ export async function sincronizarCasosCobros(
 
 					await db.insert(casosCobros).values({
 						contratoId,
-						numeroCreditoSifco: credito.numero_credito_sifco,
+						numeroCreditoSifco: credito.creditos.numero_credito_sifco,
 						estadoMora,
-						montoEnMora: creditoCompleto.monto_mora || "0",
+						montoEnMora: creditoCompleto.moraActual, // ya es string
 						diasMoraMaximo: diasMora,
-						cuotasVencidas: creditoCompleto.cuotas_atrasadas || 0,
+						cuotasVencidas: creditoCompleto.cuotasAtrasadas?.length || 0,
 						responsableCobros: responsable,
 						telefonoPrincipal,
 						telefonoAlternativo: null,
@@ -335,11 +335,11 @@ export async function sincronizarCasosCobros(
 
 					result.casosCreados++;
 					console.log(
-						`[SyncCobros] ✓ Creado caso para ${credito.numero_credito_sifco} - ${diasMora} días mora`,
+						`[SyncCobros] ✓ Creado caso para ${credito.creditos.numero_credito_sifco} - ${diasMora} días mora`,
 					);
 				}
 			} catch (error) {
-				const errorMsg = `Error procesando crédito ${credito.numero_credito_sifco}: ${error instanceof Error ? error.message : String(error)}`;
+				const errorMsg = `Error procesando crédito ${credito.creditos.numero_credito_sifco}: ${error instanceof Error ? error.message : String(error)}`;
 				result.errors.push(errorMsg);
 				console.error(`[SyncCobros] ${errorMsg}`);
 			}

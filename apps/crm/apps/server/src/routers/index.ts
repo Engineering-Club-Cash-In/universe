@@ -96,6 +96,7 @@ export const appRouter = {
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
 	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
+	getDetallesCreditoCarteraBack: cobrosRouter.getDetallesCreditoCarteraBack,
 	// Cartera-back integration endpoints
 	registrarPago: cobrosRouter.registrarPago,
 	getHistorialPagosCarteraBack: cobrosRouter.getHistorialPagosCarteraBack,

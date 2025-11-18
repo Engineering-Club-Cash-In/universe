@@ -1,5 +1,6 @@
 import { publicProcedure } from "../lib/orpc";
 import { adminRouter } from "./admin";
+import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 import { authRouter } from "./auth";
@@ -29,6 +30,12 @@ export const appRouter = {
 	toggleUserSuspension: adminRouter.toggleUserSuspension,
 	deleteUser: adminRouter.deleteUser,
 	createUser: adminRouter.createUser,
+
+	// Admin Import routes
+	setupImportacion: adminImportRouter.setupImportacion,
+	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
+	importarCreditosCarteraBack: adminImportRouter.importarCreditosCarteraBack,
+	debugCreditData: adminImportRouter.debugCreditData,
 
 	// CRM routes
 	getSalesStages: crmRouter.getSalesStages,

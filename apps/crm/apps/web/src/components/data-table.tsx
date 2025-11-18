@@ -29,6 +29,7 @@ interface DataTableProps<TData, TValue> {
 	data: TData[];
 	searchPlaceholder?: string;
 	searchColumn?: string;
+	filterContent?: React.ReactNode;
 }
 
 export function DataTable<TData, TValue>({
@@ -36,6 +37,7 @@ export function DataTable<TData, TValue>({
 	data,
 	searchPlaceholder = "Buscar...",
 	searchColumn,
+	filterContent,
 }: DataTableProps<TData, TValue>) {
 	const [sorting, setSorting] = useState<SortingState>([]);
 	const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -67,13 +69,14 @@ export function DataTable<TData, TValue>({
 
 	return (
 		<div className="space-y-4">
-			<div className="flex items-center justify-between gap-4">
+			<div className="flex flex-col gap-4">
 				<Input
 					placeholder={searchPlaceholder}
 					value={globalFilter ?? ""}
 					onChange={(event) => setGlobalFilter(event.target.value)}
 					className="max-w-sm"
 				/>
+				{filterContent && <div className="flex flex-wrap gap-2">{filterContent}</div>}
 			</div>
 
 			<div className="overflow-hidden rounded-md border">

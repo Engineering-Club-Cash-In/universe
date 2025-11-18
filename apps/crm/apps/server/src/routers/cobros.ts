@@ -28,7 +28,10 @@ import {
 	getUltimasSincronizaciones,
 	sincronizarCasosCobros,
 } from "../services/sync-casos-cobros";
-import type { CarteraCuotaCredito } from "../types/cartera-back";
+import type {
+	CarteraCuotaCredito,
+	CreditoDirectoResponse,
+} from "../types/cartera-back";
 
 // ============================================================================
 // HELPERS
@@ -901,30 +904,41 @@ export const cobrosRouter = {
 							"🔗 Contrato vinculado a cartera-back, obteniendo cuotas de allá",
 						);
 
-						// Obtener crédito completo de cartera-back
-						const creditoCompleto = await carteraBackClient.getCredito(
-							reference[0].numeroCreditoSifco,
-						);
+						try {
+							// Obtener crédito completo de cartera-back
+							const creditoCompleto = await carteraBackClient.getCredito(
+								reference[0].numeroCreditoSifco,
+							);
 
-						// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
-						const todasLasCuotas = [
-							...(creditoCompleto.cuotasPagadas || []),
-							...(creditoCompleto.cuotasPendientes || []),
-							...(creditoCompleto.cuotasAtrasadas || []),
-						].sort((a, b) => a.numero_cuota - b.numero_cuota);
+							// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
+							const todasLasCuotas = [
+								...(creditoCompleto.cuotasPagadas || []),
+								...(creditoCompleto.cuotasPendientes || []),
+								...(creditoCompleto.cuotasAtrasadas || []),
+							].sort((a, b) => a.numero_cuota - b.numero_cuota);
 
-						// Mapear a estructura esperada por frontend
-						return todasLasCuotas.map((cuota) => ({
-							id: cuota.cuota_id.toString(),
-							numeroCuota: cuota.numero_cuota,
-							fechaVencimiento: cuota.fecha_vencimiento,
-							montoCuota: creditoCompleto.credito.cuota,
-							fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
-							montoPagado: cuota.pagado ? creditoCompleto.credito.cuota : null,
-							montoMora: "0", // TODO: calcular mora real
-							estadoMora: cuota.pagado ? "pagado" : "mora_30",
-							diasMora: 0,
-						}));
+							// Mapear a estructura esperada por frontend
+							return todasLasCuotas.map((cuota) => ({
+								id: cuota.cuota_id.toString(),
+								numeroCuota: cuota.numero_cuota,
+								fechaVencimiento: cuota.fecha_vencimiento,
+								montoCuota: creditoCompleto.credito.cuota,
+								fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
+								montoPagado: cuota.pagado ? creditoCompleto.credito.cuota : null,
+								montoMora: "0", // TODO: calcular mora real
+								estadoMora: cuota.pagado ? "pagado" : "mora_30",
+								diasMora: 0,
+							}));
+						} catch (error) {
+							console.warn(
+								`⚠️ No se pudieron obtener cuotas de cartera-back para ${reference[0].numeroCreditoSifco}:`,
+								error instanceof Error ? error.message : error,
+							);
+							console.log(
+								"📊 Fallback: intentando obtener cuotas desde DB local...",
+							);
+							// Continuar con DB local más abajo
+						}
 					}
 				}
 
@@ -1183,7 +1197,94 @@ export const cobrosRouter = {
 				}
 
 				// 2. Obtener detalles completos del crédito de cartera-back
-				const creditoCompleto = await carteraBackClient.getCredito(numeroSifco);
+				let creditoCompleto: CreditoDirectoResponse | null = null;
+				let usingFallback = false;
+
+				try {
+					creditoCompleto = await carteraBackClient.getCredito(numeroSifco);
+				} catch (error) {
+					console.error(
+						`[Cobros] Error obteniendo detalles de crédito ${numeroSifco}:`,
+						error,
+					);
+
+					// Si el crédito tiene datos corruptos o circuit breaker está abierto,
+					// intentar usar datos del listado como fallback
+					if (
+						error instanceof Error &&
+						(error.message.includes("destructure") ||
+							error.message.includes("HTTP 500") ||
+							error.message.includes("Circuit breaker is OPEN") ||
+							error.message.includes("HTTP 404"))
+					) {
+						console.warn(
+							`[Cobros] Intentando fallback con datos del listado para ${numeroSifco}...`,
+						);
+
+						try {
+							// Obtener datos del listado como fallback
+							// Intentar con todos los estados posibles ya que no sabemos cuál es
+							const now = new Date();
+							const estadosPosibles: ("ACTIVO" | "MOROSO" | "CANCELADO" | "INCOBRABLE")[] = [
+								"ACTIVO",
+								"MOROSO",
+								"CANCELADO",
+								"INCOBRABLE",
+							];
+
+							let creditoListado = null;
+							for (const estado of estadosPosibles) {
+								const listado = await carteraBackClient.getAllCreditos({
+									mes: 0,
+									anio: now.getFullYear(),
+									estado,
+									numero_credito_sifco: numeroSifco,
+									page: 1,
+									perPage: 1,
+								});
+
+								if (listado.data.length > 0) {
+									creditoListado = listado.data[0];
+									break;
+								}
+							}
+
+							if (creditoListado) {
+								// Convertir estructura del listado a estructura de detalle
+								creditoCompleto = {
+									credito: creditoListado.creditos,
+									usuario: creditoListado.usuarios,
+									cuotasPagadas: [],
+									cuotasPendientes: [],
+									cuotasAtrasadas: [],
+									moraActual: creditoListado.mora?.monto_mora || "0.00",
+								};
+								usingFallback = true;
+								console.log(
+									`[Cobros] ✓ Usando datos del listado (fallback) para ${numeroSifco}`,
+								);
+							} else {
+								console.warn(
+									`[Cobros] No se encontró el crédito ${numeroSifco} en ningún estado`,
+								);
+								return null;
+							}
+						} catch (fallbackError) {
+							console.error(
+								`[Cobros] Error en fallback para ${numeroSifco}:`,
+								fallbackError,
+							);
+							return null;
+						}
+					} else {
+						// Re-throw otros errores que no sean de datos corruptos
+						throw error;
+					}
+				}
+
+				if (!creditoCompleto) {
+					return null;
+				}
 
 				// 3. Obtener datos del vehículo del CRM (si existe referencia a contrato)
 				let vehiculo = null;
@@ -1544,7 +1645,7 @@ export const cobrosRouter = {
 	sincronizarCasosCobros: adminProcedure
 		.input(
 			z.object({
-				mes: z.number().min(1).max(12).optional(),
+				mes: z.number().min(0).max(12).optional(), // 0 = todos los meses
 				anio: z.number().min(2000).max(2100).optional(),
 				forceSyncAll: z.boolean().optional(),
 			}),

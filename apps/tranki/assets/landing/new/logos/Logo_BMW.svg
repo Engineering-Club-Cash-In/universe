@@ -1,0 +1,61 @@
+<svg width="90.239990" height="90.239990" viewBox="0 0 90.24 90.24" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<desc>
+			Created with Pixso.
+	</desc>
+	<defs>
+		<clipPath id="clip3_3595">
+			<rect id="BMW" width="90.239998" height="90.239998" fill="white" fill-opacity="0"/>
+		</clipPath>
+	</defs>
+	<g opacity="0.990000" style="mix-blend-mode:normal">
+		<rect id="BMW" width="90.239998" height="90.239998" fill="#FFFFFF" fill-opacity="0"/>
+		<g clip-path="url(#clip3_3595)">
+			<mask id="mask3_3574" mask-type="alpha" maskUnits="userSpaceOnUse" x="0.000000" y="0.000000" width="90.239998" height="90.239998">
+				<path id="Clip" d="M0 0L0 90.24L90.24 90.24L90.24 0L0 0Z" fill="#000000" fill-opacity="1.000000" fill-rule="nonzero"/>
+			</mask>
+			<g mask="url(#mask3_3574)">
+				<g opacity="0.990000" style="mix-blend-mode:normal">
+					<path id="Vector" d="M0 45.1201C0 20.2405 20.2405 0 45.1201 0C69.9995 0 90.24 20.2405 90.24 45.1201C90.24 69.9995 69.9995 90.24 45.1201 90.24C20.2405 90.24 0 69.9995 0 45.1201ZM45.1201 87.9343C68.7288 87.9343 87.9343 68.7288 87.9343 45.1201C87.9343 21.5112 68.7288 2.30566 45.1201 2.30566C21.5112 2.30566 2.30566 21.5112 2.30566 45.1201C2.30566 68.7288 21.5112 87.9343 45.1201 87.9343Z" clip-rule="evenodd" fill="#713ddd" fill-opacity="1.000000" fill-rule="evenodd"/>
+				</g>
+			</g>
+			<g mask="url(#mask3_3574)">
+				<g opacity="0.990000" style="mix-blend-mode:normal">
+					<g opacity="0.990000" style="mix-blend-mode:normal">
+						<g opacity="0.990000" style="mix-blend-mode:normal">
+							<path id="Vector" d="M45.12 23.71L45.12 45.11L23.71 45.11C23.71 33.31 33.31 23.71 45.12 23.71Z" fill="#713ddd" fill-opacity="1.000000" fill-rule="nonzero"/>
+						</g>
+						<g opacity="0.990000" style="mix-blend-mode:normal">
+							<path id="Vector" d="M66.52 45.12C66.52 56.92 56.92 66.52 45.12 66.52L45.12 45.12L66.52 45.12Z" fill="#713ddd" fill-opacity="1.000000" fill-rule="nonzero"/>
+						</g>
+					</g>
+					<g opacity="0.990000" style="mix-blend-mode:normal">
+						<g opacity="0.990000" style="mix-blend-mode:normal">
+							<path id="Vector" d="M45.12 45.12L45.12 66.52C33.31 66.52 23.71 56.92 23.71 45.12L45.12 45.12Z" fill="#FFFFFF" fill-opacity="1.000000" fill-rule="nonzero"/>
+						</g>
+						<g opacity="0.990000" style="mix-blend-mode:normal">
+							<path id="Vector" d="M66.52 45.11L45.12 45.11L45.12 23.71C56.92 23.71 66.52 33.31 66.52 45.11Z" fill="#FFFFFF" fill-opacity="1.000000" fill-rule="nonzero"/>
+						</g>
+					</g>
+				</g>
+			</g>
+			<g mask="url(#mask3_3574)">
+				<g opacity="0.990000" style="mix-blend-mode:normal">
+					<path id="Vector" d="M21.4937 45.1201C21.4937 58.1467 32.0925 68.7456 45.1191 68.7456C58.1458 68.7456 68.7446 58.1467 68.7446 45.1201C68.7446 32.0935 58.1458 21.4946 45.1191 21.4946C32.0925 21.4946 21.4937 32.0935 21.4937 45.1201ZM23.7134 45.1201C23.7134 33.3171 33.3162 23.7144 45.1191 23.7144C56.9221 23.7144 66.5249 33.3171 66.5249 45.1201C66.5249 56.9231 56.9221 66.5259 45.1191 66.5259C33.3162 66.5259 23.7134 56.9231 23.7134 45.1201Z" clip-rule="evenodd" fill="#713ddd" fill-opacity="1.000000" fill-rule="evenodd"/>
+				</g>
+			</g>
+			<g mask="url(#mask3_3574)">
+				<g opacity="0.990000" style="mix-blend-mode:normal">
+					<g opacity="0.990000" style="mix-blend-mode:normal">
+						<path id="Vector" d="M21.2781 19.6606C22.3989 19.4304 23.6113 19.73 24.5105 20.5708L24.5076 20.5679C25.9836 21.9468 26.0642 24.261 24.6853 25.7371L19.3303 31.4749L19.3608 31.5024L17.4214 33.7083L13.9365 30.4287L12.061 28.6641L10.5154 27.2102L8.73145 25.5317L10.0632 23.9031L10.5959 23.3286L15.1519 18.4065C16.5281 16.9221 18.8503 16.8362 20.3318 18.2207C20.7729 18.634 21.0894 19.1279 21.2781 19.6606ZM16.9082 20.4126C17.302 19.9963 17.9597 19.9771 18.373 20.3708C18.5867 20.5735 18.6948 20.8481 18.6948 21.1228C18.6948 21.2644 18.6643 21.4031 18.6089 21.5364L14.0032 26.511L12.4937 25.1042L16.9053 20.4153L16.9082 20.4126ZM17.4436 29.7156L22.5986 24.1748L22.5959 24.1748C22.9844 23.7588 22.9622 23.1094 22.5515 22.7183C22.1353 22.3242 21.4805 22.3438 21.0867 22.7598L20.6565 23.2148C20.6094 23.2732 20.5593 23.3313 20.5066 23.387L15.9231 28.2979L17.4436 29.7156Z" clip-rule="evenodd" fill="#713ddd" fill-opacity="1.000000" fill-rule="evenodd"/>
+					</g>
+					<g opacity="0.990000" style="mix-blend-mode:normal">
+						<path id="Vector" d="M51.72 7.57L47.61 7.19L44.79 14.35L41.97 7.19L37.87 7.57L37.43 19.72L40.39 19.33L40.64 10.6L43.6 17.29L44.79 17.29L45.98 17.29L48.94 10.6L49.2 19.33L52.16 19.72L51.72 7.57Z" fill="#713ddd" fill-opacity="1.000000" fill-rule="nonzero"/>
+					</g>
+					<g opacity="0.990000" style="mix-blend-mode:normal">
+						<path id="Vector" d="M63.56 24.83L66.16 26.98L72.57 23.5L69.17 29.99L71.32 32.6L81.5 26.21L79.59 23.91L72.65 28.65L75.83 22.3L73.84 20.39L67.55 23.59L72.31 16.68L69.99 14.86L63.56 24.83Z" fill="#713ddd" fill-opacity="1.000000" fill-rule="nonzero"/>
+					</g>
+				</g>
+			</g>
+		</g>
+	</g>
+</svg>

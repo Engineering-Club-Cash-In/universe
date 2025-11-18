@@ -1,0 +1,10 @@
+{
+	"cline.mcp.servers": [
+		{
+			"name": "cci-mcp-server",
+			"command": "bun",
+			"args": ["--bun", "server.ts"],
+			"cwd": "apps/mcp"
+		}
+	]
+}

@@ -1,0 +1,118 @@
+---
+import { getLangFromUrl, useTranslations, useTranslatedPath } from "@i18n/utils";
+
+const { class: className } = Astro.props;
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+const translatePath = useTranslatedPath(lang);
+---
+
+<section id="final-cta" class:list={["section final-cta-section relative bg-white text-black", className]}>
+	<div class="wrapper col-span-12 flex w-full flex-col items-center justify-center py-20 md:py-32">
+		<div class="mx-auto max-w-4xl text-center">
+			<div class="mb-8 inline-flex items-center gap-4">
+				<div class="hidden h-1 w-20 bg-black md:block"></div>
+				<span class="font-mono text-xs font-semibold uppercase tracking-wide text-zinc-400">
+					{t("finalcta.tagline")}
+				</span>
+			</div>
+
+			<h2 class="mb-12 font-display text-4xl font-extrabold md:text-6xl lg:text-8xl">
+				{t("finalcta.title")}
+			</h2>
+
+			<div class="mx-auto mb-16 grid max-w-3xl gap-6 md:gap-8 lg:gap-12">
+				<div class="flex flex-col items-center justify-center gap-6 sm:flex-row md:gap-8">
+					<div class="flex-1 rounded-xl bg-zinc-800 p-6 text-center transition-all hover:bg-zinc-700 md:p-8">
+						<div class="mb-2 text-2xl font-bold text-yellow-400 md:text-3xl">📞</div>
+						<h3 class="mb-2 text-lg font-semibold text-white md:text-xl">{t("finalcta.call.title")}</h3>
+						<p class="text-sm text-zinc-300 md:text-base">{t("finalcta.call.subtitle")}</p>
+					</div>
+					<div class="flex-1 rounded-xl bg-zinc-800 p-6 text-center transition-all hover:bg-zinc-700 md:p-8">
+						<div class="mb-2 text-2xl font-bold text-green-400 md:text-3xl">💰</div>
+						<h3 class="mb-2 text-lg font-semibold text-white md:text-xl">{t("finalcta.invest.title")}</h3>
+						<p class="text-sm text-zinc-300 md:text-base">{t("finalcta.invest.subtitle")}</p>
+					</div>
+				</div>
+				<div class="mx-auto max-w-md rounded-xl bg-zinc-800 p-6 text-center transition-all hover:bg-zinc-700 md:p-8">
+					<div class="mb-2 text-2xl font-bold text-pink-400 md:text-3xl">📋</div>
+					<h3 class="mb-2 text-lg font-semibold text-white md:text-xl">{t("finalcta.guide.title")}</h3>
+					<p class="text-sm text-zinc-300 md:text-base">{t("finalcta.guide.subtitle")}</p>
+				</div>
+			</div>
+
+			<div class="flex flex-col items-center justify-center gap-4 sm:flex-row">
+				<div class="squircle-bg rounded-lg bg-yellow-400 transition-all hover:bg-yellow-300">
+					<a
+						class="flex h-12 w-full min-w-60 flex-1 items-center justify-center px-6 py-3 text-lg font-bold text-white transition-all hover:text-gray-900 sm:w-auto"
+						href={translatePath("/contact/")}>
+						{t("finalcta.button.primary")} →
+					</a>
+				</div>
+				<div class="squircle-bg rounded-lg bg-zinc-700 transition-all hover:bg-zinc-600">
+					<a
+						class="flex h-12 w-full min-w-60 flex-1 items-center justify-center px-6 py-3 text-lg font-semibold text-white transition-all hover:text-gray-200 sm:w-auto"
+						href="/guide.pdf"
+						target="_blank">
+						{t("finalcta.button.secondary")} ↗
+					</a>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<style is:global>
+	.final-cta-section {
+		--final-cta-clip: 0;
+		--final-cta-radius: 0;
+		clip-path: inset(var(--final-cta-clip) round var(--final-cta-radius));
+		margin-top: -1px; /* Fix weird clip path behavior */
+	}
+</style>
+
+<script>
+	import { gsap } from "gsap";
+	import { ScrollTrigger } from "gsap/ScrollTrigger";
+
+	gsap.registerPlugin(ScrollTrigger);
+
+	function init() {
+		gsap.to("#final-cta", {
+			scrollTrigger: {
+				trigger: "#final-cta",
+				start: "bottom center",
+				end: "bottom top",
+				scrub: 1,
+				markers: false,
+			},
+			"--final-cta-clip": "2vw",
+			"--final-cta-radius": "5rem",
+		});
+
+		// Animate cards on scroll
+		gsap.fromTo(
+			"#final-cta .bg-zinc-800",
+			{
+				opacity: 0,
+				y: 30,
+			},
+			{
+				opacity: 1,
+				y: 0,
+				duration: 0.8,
+				stagger: 0.2,
+				scrollTrigger: {
+					trigger: "#final-cta",
+					start: "top 80%",
+					end: "center center",
+					toggleActions: "play none none reverse",
+				},
+			}
+		);
+	}
+
+	document.removeEventListener("DOMContentLoaded", init);
+	document.addEventListener("DOMContentLoaded", init);
+</script>

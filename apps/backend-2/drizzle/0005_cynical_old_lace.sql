@@ -1,0 +1,1 @@
+ALTER TABLE "credit_record_results" ADD COLUMN "missing_payments" jsonb;

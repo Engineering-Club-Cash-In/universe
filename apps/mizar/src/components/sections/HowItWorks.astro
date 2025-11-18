@@ -1,0 +1,40 @@
+---
+interface Props {
+  title: string;
+  steps: {
+    number: string;
+    title: string;
+    description: string;
+  }[];
+}
+
+const { title, steps } = Astro.props;
+---
+
+<div class="pt-16" id="how-it-works">
+  <p
+    class="text-[2.13rem] leading-9 font-semibold mb-3 text-center mx-auto"
+    set:html={title}
+  />
+  <div class="mt-16">
+    <div
+      class="auto-cols-fr grid-cols-1 md:grid-cols-2 lg:grid-cols-4 grid-rows-[auto] grid gap-10"
+    >
+      {
+        steps.map(({ number, title, description }) => (
+          <div class="items-center flex-col text-center flex h-full max-w-[90%] m-auto col-span-1 row-span-1">
+            <div class="bg-black text-white rounded-full w-12 h-12 flex items-center justify-center text-xl font-bold mb-6">
+              {number}
+            </div>
+            <div class="text-[1.38rem] leading-7 font-semibold mb-4">
+              <h3>{title}</h3>
+            </div>
+            <div class="text-lg text-neutral-600">
+              <p>{description}</p>
+            </div>
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</div>

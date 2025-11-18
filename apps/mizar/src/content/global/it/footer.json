@@ -1,0 +1,10 @@
+{
+	"title": "Hai Qualche Domanda?<br/> Non esitare a contattarci!",
+	"copyright": "© 2025 Club Cash In",
+	"buttons": [
+		{
+			"text": "Contattaci",
+			"url": "/contact"
+		}
+	]
+}

@@ -1,0 +1,44 @@
+services:
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    ports:
+      - "3030:3000"
+    environment:
+      - GOTENBERG_LOG_LEVEL=INFO
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - legal-docs-network
+
+  app:
+    build: .
+    ports:
+      - "${PORT:-4000}:4000"
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=4000
+      - GOTENBERG_URL=http://gotenberg:3000
+      - DOCUMENSO_API_TOKEN=${DOCUMENSO_API_TOKEN}
+      - DOCUMENSO_BASE_URL=${DOCUMENSO_BASE_URL}
+      - CRM_API_URL=${CRM_API_URL:-http://host.docker.internal:3000}
+      - CRM_SERVICE_ACCOUNT_EMAIL=${CRM_SERVICE_ACCOUNT_EMAIL}
+      - CRM_SERVICE_ACCOUNT_PASSWORD=${CRM_SERVICE_ACCOUNT_PASSWORD}
+    depends_on:
+      gotenberg:
+        condition: service_healthy
+    networks:
+      - legal-docs-network
+    volumes:
+      - ./output:/app/output
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+networks:
+  legal-docs-network:
+    driver: bridge

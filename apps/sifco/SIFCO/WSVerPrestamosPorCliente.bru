@@ -1,0 +1,27 @@
+meta {
+  name: WSVerPrestamosPorCliente
+  type: http
+  seq: 3
+}
+
+post {
+  url: https://test.sifco.org/ClubCashIn/rest/WSVerPrestamosPorCliente
+  body: json
+  auth: inherit
+}
+
+headers {
+  authorization: OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!5fe869c74da5aa9fc00f2802644781481e5884742e90a74e47da822ee21c91c67155d6bd2316d1
+  GENEXUS-AGENT: SmartDevice Application
+  Content-Type: application/json
+}
+
+body:json {
+  {
+      "ClCliCod":11
+  }
+}
+
+settings {
+  encodeUrl: true
+}

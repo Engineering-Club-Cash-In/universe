@@ -1828,3 +1828,109 @@ export async function actualizarCuentaPagoService(
     };
   }
 }
+ 
+export interface CreatePaymentAgreementInput {
+  credit_id: number;
+  payment_ids: number[];
+  total_agreement_amount: number;
+  number_of_months: number;
+  reason?: string;
+  observations?: string;
+  created_by: number;
+}
+
+export interface GetPaymentAgreementsFilters {
+  credit_id?: number;
+  start_date?: string; // ISO format
+  end_date?: string;
+  year?: number;
+  month?: number;
+  day?: number;
+  status?: 'active' | 'completed' | 'inactive' | 'all';
+}
+
+export interface PaymentAgreementResponse {
+  success: boolean;
+  data: any;
+  message: string;
+  error?: any;
+}
+
+// CREATE payment agreement
+export const createPaymentAgreement = async (
+  input: CreatePaymentAgreementInput
+): Promise<PaymentAgreementResponse> => {
+  try {
+    const response = await fetch(`${API_URL}/payment-agreements`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(input),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to create payment agreement");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Error creating payment agreement:", error);
+    throw error;
+  }
+};
+
+// GET payment agreements with filters
+export const getPaymentAgreements = async (
+  filters?: GetPaymentAgreementsFilters
+): Promise<PaymentAgreementResponse> => {
+  try {
+    const params = new URLSearchParams();
+
+    if (filters?.credit_id) {
+      params.append("credit_id", filters.credit_id.toString());
+    }
+    if (filters?.start_date) {
+      params.append("start_date", filters.start_date);
+    }
+    if (filters?.end_date) {
+      params.append("end_date", filters.end_date);
+    }
+    if (filters?.year) {
+      params.append("year", filters.year.toString());
+    }
+    if (filters?.month) {
+      params.append("month", filters.month.toString());
+    }
+    if (filters?.day) {
+      params.append("day", filters.day.toString());
+    }
+    if (filters?.status) {
+      params.append("status", filters.status);
+    }
+
+    const url = `${API_URL}/payment-agreements${
+      params.toString() ? `?${params.toString()}` : ""
+    }`;
+
+    const response = await fetch(url, {
+      method: "GET",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || "Failed to fetch payment agreements");
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Error fetching payment agreements:", error);
+    throw error;
+  }
+};

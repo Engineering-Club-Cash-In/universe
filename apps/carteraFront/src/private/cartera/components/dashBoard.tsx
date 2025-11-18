@@ -77,6 +77,13 @@ const menuOptions = [
     path: "/resumenAsesores",
     roles: ["ADMIN", "ASESOR"],
   },
+  {
+    key: "payment-agreements",
+    label: "Convenios",
+    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    path: "/convenios",
+    roles: ["ADMIN"],
+  },
 ];
 
 export function DashBoardCartera() {

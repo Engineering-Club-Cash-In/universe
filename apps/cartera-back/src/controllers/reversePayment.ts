@@ -88,6 +88,7 @@ export const reversePayment = async ({ body, set }: any) => {
       or(
         eq(creditos.statusCredit, "ACTIVO"),
         eq(creditos.statusCredit, "MOROSO"), 
+        eq(creditos.statusCredit, "EN_CONVENIO")
       )
     )
   )

@@ -12,6 +12,7 @@ import AdvisorsManager from "./private/cartera/components/advisor";
 import MorasManager from "./private/cartera/components/Latefee";
 import CreditosPorAsesorManager from "./private/cartera/components/resumeAdvisor";
 import { BancosManager } from "./private/cartera/components/bank";
+import { CreatePaymentAgreementForm } from "./private/cartera/components/paymentAgreement";
 
 // 🔒 Rutas privadas
 function PrivateRoute({ children }: { children: JSX.Element }) {
@@ -115,7 +116,7 @@ function App() {
               </RoleRoute>
             }
           />
-           <Route
+          <Route
             path="bancos"
             element={
               <RoleRoute allowedRoles={["ADMIN"]}>
@@ -158,7 +159,14 @@ function App() {
               </RoleRoute>
             }
           />
-
+          <Route
+            path="convenios"
+            element={
+              <RoleRoute allowedRoles={["ADMIN"]}>
+                <CreatePaymentAgreementForm />
+              </RoleRoute>
+            }
+          />
           <Route index element={<ListaCreditosPagos />} />
         </Route>
 

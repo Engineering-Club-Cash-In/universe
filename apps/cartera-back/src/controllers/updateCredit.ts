@@ -505,7 +505,7 @@ export const updateCredit = async ({ body, set }: any) => {
   .where(
     and(
       eq(creditos.credito_id, credito_id),
-      inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION"])
+      inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION","EN_CONVENIO"])
     )
   )
   .limit(1);

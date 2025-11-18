@@ -28,6 +28,7 @@ function getEstadoBadge(estado: string) {
 		mora_60: "bg-orange-100 text-orange-800",
 		mora_90: "bg-red-100 text-red-800",
 		mora_120: "bg-red-200 text-red-900",
+		mora_120_plus: "bg-red-300 text-red-950",
 		incobrable: "bg-gray-100 text-gray-800",
 		completado: "bg-blue-100 text-blue-800",
 	};
@@ -39,6 +40,7 @@ function getEstadoBadge(estado: string) {
 		mora_60: "Mora 60",
 		mora_90: "Mora 90",
 		mora_120: "Mora 120+",
+		mora_120_plus: "Mora 120+",
 		incobrable: "Incobrable",
 		completado: "Completado",
 	};

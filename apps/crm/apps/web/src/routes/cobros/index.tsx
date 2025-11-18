@@ -68,6 +68,7 @@ function RouteComponent() {
 	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("semana");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
+	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
 
 	const dashboardStats = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions(),
@@ -90,22 +91,6 @@ function RouteComponent() {
 	});
 
 	const userRole = userProfile.data?.role;
-
-	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
-		return (
-			<div className="container mx-auto p-6">
-				<div className="text-center">
-					<h1 className="mb-4 font-bold text-2xl text-gray-900">
-						Acceso Denegado
-					</h1>
-					<p className="text-gray-600">
-						No tienes permisos para acceder a la sección de cobros.
-					</p>
-				</div>
-			</div>
-		);
-	}
-
 	const stats = dashboardStats.data?.estatusStats || [];
 	const contratos = todosLosContratos.data || [];
 
@@ -114,7 +99,10 @@ function RouteComponent() {
 		return contratos
 			.map((contrato) => {
 				const infoPago = calcularProximaFechaPago(contrato.diaPagoMensual);
-				const diasHastaPago = infoPago?.diasRestantes ?? 999;
+				// Si no hay día de pago, usar días de mora negativos para priorizar
+				// Casos con más mora aparecen primero (más negativos)
+				const diasHastaPago =
+					infoPago?.diasRestantes ?? -(contrato.diasMoraMaximo || 0);
 
 				return {
 					...contrato,
@@ -135,6 +123,17 @@ function RouteComponent() {
 			);
 		}
 
+		// Filtrar por etapa de mora si hay filtro activo
+		if (filtroEtapa) {
+			filtrados = filtrados.filter((c) => {
+				const estadoVisual =
+					c.estadoContrato === "activo"
+						? c.estadoMora || "al_dia"
+						: c.estadoContrato;
+				return estadoVisual === filtroEtapa;
+			});
+		}
+
 		// Filtrar por rango temporal
 		if (filtroTemporal === "todos") return filtrados;
 
@@ -152,7 +151,23 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c.diasHastaPago <= limite;
 		});
-	}, [contratosConDias, filtroTemporal, mostrarCompletadosIncobrables]);
+	}, [contratosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtapa]);
+
+	// Check permissions after all hooks
+	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
+		return (
+			<div className="container mx-auto p-6">
+				<div className="text-center">
+					<h1 className="mb-4 font-bold text-2xl text-gray-900">
+						Acceso Denegado
+					</h1>
+					<p className="text-gray-600">
+						No tienes permisos para acceder a la sección de cobros.
+					</p>
+				</div>
+			</div>
+		);
+	}
 
 	const filtros = [
 		{ key: "hoy" as const, label: "Hoy", icon: CalendarDays },
@@ -160,6 +175,28 @@ function RouteComponent() {
 		{ key: "quincena" as const, label: "Esta Quincena", icon: CalendarRange },
 		{ key: "mes" as const, label: "Este Mes", icon: CalendarRange },
 		{ key: "todos" as const, label: "Todos", icon: Users },
+	];
+
+	const filtrosEtapa = [
+		{ key: "al_dia", label: "Al Día", color: "bg-green-100 text-green-800" },
+		{ key: "mora_30", label: "Mora 30", color: "bg-yellow-100 text-yellow-800" },
+		{ key: "mora_60", label: "Mora 60", color: "bg-orange-100 text-orange-800" },
+		{ key: "mora_90", label: "Mora 90", color: "bg-red-100 text-red-800" },
+		{
+			key: "mora_120",
+			label: "Mora 120+",
+			color: "bg-red-200 text-red-900",
+		},
+		{
+			key: "incobrable",
+			label: "Incobrable",
+			color: "bg-gray-100 text-gray-800",
+		},
+		{
+			key: "completado",
+			label: "Completado",
+			color: "bg-blue-100 text-blue-800",
+		},
 	];
 
 	return (
@@ -233,7 +270,20 @@ function RouteComponent() {
 						<TrendingUp className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">85%</div>
+						<div className="font-bold text-2xl">
+							{(() => {
+								const totalCasos = stats.reduce((sum, s) => sum + s.totalCases, 0);
+								const casosRecuperados =
+									(stats.find((s) => s.estadoMora === "pagado")?.totalCases || 0) +
+									(stats.find((s) => s.estadoMora === "completado")?.totalCases ||
+										0);
+								const efectividad =
+									totalCasos > 0
+										? Math.round((casosRecuperados / totalCasos) * 100)
+										: 0;
+								return `${efectividad}%`;
+							})()}
+						</div>
 						<p className="text-muted-foreground text-xs">
 							Tasa de recuperación mensual
 						</p>
@@ -397,6 +447,33 @@ function RouteComponent() {
 						columns={columns}
 						data={contratosFiltrados}
 						searchPlaceholder="Buscar por cliente, vehículo o placa..."
+						filterContent={
+							<>
+								<span className="text-muted-foreground text-sm font-medium">
+									Filtrar por etapa:
+								</span>
+								<Button
+									variant={filtroEtapa === null ? "default" : "outline"}
+									size="sm"
+									onClick={() => setFiltroEtapa(null)}
+								>
+									Todas
+								</Button>
+								{filtrosEtapa.map((filtro) => (
+									<Badge
+										key={filtro.key}
+										className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
+										onClick={() =>
+											setFiltroEtapa(
+												filtroEtapa === filtro.key ? null : filtro.key,
+											)
+										}
+									>
+										{filtro.label}
+									</Badge>
+								))}
+							</>
+						}
 					/>
 				</CardContent>
 			</Card>

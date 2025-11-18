@@ -59,7 +59,7 @@ export const reportesCarteraRouter = {
 								.where(
 									eq(
 										carteraBackReferences.numeroCreditoSifco,
-										credito.numero_credito_sifco,
+										credito.creditos.numero_credito_sifco,
 									),
 								)
 								.limit(1);
@@ -153,19 +153,19 @@ export const reportesCarteraRouter = {
 
 							// Obtener detalles completos desde cartera-back
 							const creditoCompleto = await carteraBackClient.getCredito(
-								credito.numero_credito_sifco,
+								credito.creditos.numero_credito_sifco,
 							);
 
 							return {
 								// Datos financieros de cartera-back
-								creditoId: credito.credito_id,
-								numeroSifco: credito.numero_credito_sifco,
-								capital: credito.capital,
-								porcentajeInteres: credito.porcentaje_interes,
-								cuota: credito.cuota,
-								plazo: credito.plazo,
-								statusCredit: credito.statusCredit,
-								deudaTotal: credito.deudatotal,
+								creditoId: credito.creditos.credito_id,
+								numeroSifco: credito.creditos.numero_credito_sifco,
+								capital: credito.creditos.capital,
+								porcentajeInteres: credito.creditos.porcentaje_interes,
+								cuota: credito.creditos.cuota,
+								plazo: credito.creditos.plazo,
+								statusCredit: credito.creditos.statusCredit,
+								deudaTotal: credito.creditos.deudatotal,
 								diasMora: creditoCompleto.dias_mora || 0,
 								montoMora: creditoCompleto.monto_mora ?? "0",
 								cuotasAtrasadas: creditoCompleto.cuotas_atrasadas ?? 0,
@@ -192,7 +192,7 @@ export const reportesCarteraRouter = {
 							};
 						} catch (error) {
 							console.error(
-								`Error procesando crédito ${credito.numero_credito_sifco}:`,
+								`Error procesando crédito ${credito.creditos.numero_credito_sifco}:`,
 								error,
 							);
 							return {
@@ -210,10 +210,12 @@ export const reportesCarteraRouter = {
 					(acc, credito) => {
 						if ("error" in credito && credito.error) return acc;
 
-						const capital = Number.parseFloat(credito.capital) || 0;
+						const capital =
+							Number.parseFloat((credito as any).capital ?? "0") || 0;
 						const capitalRestante =
-							Number.parseFloat(credito.capitalRestante ?? "0") || 0;
-						const montoMora = Number.parseFloat(credito.montoMora ?? "0") || 0;
+							Number.parseFloat((credito as any).capitalRestante ?? "0") || 0;
+						const montoMora =
+							Number.parseFloat((credito as any).montoMora ?? "0") || 0;
 
 						acc.montoDesembolsado += capital;
 						acc.montoRecuperado += capital - capitalRestante;

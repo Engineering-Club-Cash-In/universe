@@ -1057,7 +1057,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
     // ✅ Solo créditos activos
     whereClauses.push(
-      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION')`
+      `c."statusCredit" IN ('ACTIVO', 'MOROSO','PENDIENTE_CANCELACION','EN_CONVENIO')`
     );
     const whereSQL = whereClauses.length
       ? `WHERE ${whereClauses.join(" AND ")}`
@@ -1365,7 +1365,7 @@ export async function obtenerCreditosConPagosPendientes(
       .where(
         and(
           eq(creditos_inversionistas.inversionista_id, inversionistaId),
-          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO"]) // Solo créditos vigentes
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO","PENDIENTE_CANCELACION","EN_CONVENIO"]) // Solo créditos vigentes
         )
       );
 

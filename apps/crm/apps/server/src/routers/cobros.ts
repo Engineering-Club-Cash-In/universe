@@ -871,20 +871,21 @@ export const cobrosRouter = {
 					throw new Error("Contrato no encontrado");
 				}
 
-				// Verificar permisos (admin o responsable del contrato)
+				// TODO: Cambiar a verificación por caso de cobros cuando ya no haya datos importados sin responsable
+				// Actualmente permitimos a usuarios de cobros ver todos los historiales porque los contratos
+				// importados de cartera-back no tienen responsable asignado.
+				// Futura implementación (cuando todos los casos tengan responsables):
+				// - Buscar caso de cobros asociado al contrato
+				// - Verificar que el usuario sea el responsable del caso
+				// - Solo permitir acceso si es admin o responsable del caso
 				console.log("🔐 Verificando permisos:", {
 					esAdmin: context.userRole === "admin",
-					responsableContrato: contrato[0].responsableCobros,
+					esCobros: context.userRole === "cobros",
 					usuarioActual: context.userId,
-					tienePermiso:
-						context.userRole === "admin" ||
-						contrato[0].responsableCobros === context.userId,
+					tienePermiso: context.userRole === "admin" || context.userRole === "cobros",
 				});
 
-				if (
-					context.userRole !== "admin" &&
-					contrato[0].responsableCobros !== context.userId
-				) {
+				if (context.userRole !== "admin" && context.userRole !== "cobros") {
 					console.error("❌ Sin permisos para ver historial");
 					throw new Error("No tienes permiso para ver este historial");
 				}

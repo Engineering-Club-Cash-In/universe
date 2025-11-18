@@ -14,3 +14,5 @@ export * from "./IconSignDollar";
 export * from "./IconCheckList";
 export * from "./IconMessage";
 export * from "./IconInfo";
+export * from "./IconUserCheck";
+export * from "./IconStart";

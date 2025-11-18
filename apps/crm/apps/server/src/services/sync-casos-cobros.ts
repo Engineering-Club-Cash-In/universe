@@ -190,7 +190,7 @@ export async function sincronizarCasosCobros(
 
 	const startTime = Date.now();
 	const now = new Date();
-	const mes = options.mes || now.getMonth() + 1;
+	const mes = options.mes !== undefined ? options.mes : now.getMonth() + 1;
 	const anio = options.anio || now.getFullYear();
 
 	const result: SyncCobrosResult = {
@@ -205,14 +205,44 @@ export async function sincronizarCasosCobros(
 	console.log(`[SyncCobros] Iniciando sincronización para ${mes}/${anio}`);
 
 	try {
-		// 1. Obtener créditos de cartera-back (todos los activos y morosos)
-		const creditosResponse = await carteraBackClient.getAllCreditos({
-			mes,
-			anio,
-			estado: options.forceSyncAll ? undefined : "MOROSO",
-			page: 1,
-			perPage: 1000, // TODO: Implementar paginación
-		});
+		// 1. Obtener créditos de cartera-back
+		let creditosResponse;
+
+		if (options.forceSyncAll) {
+			// Obtener TODOS los créditos (todos los estados)
+			// Cartera-back requiere el parámetro 'estado', así que debemos llamar por cada estado
+			const estados: Array<
+				"ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
+			> = ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION", "MOROSO"];
+
+			const allCreditos = [];
+			for (const estado of estados) {
+				const response = await carteraBackClient.getAllCreditos({
+					mes,
+					anio,
+					estado,
+					page: 1,
+					perPage: 10000,
+				});
+				allCreditos.push(...response.data);
+			}
+
+			creditosResponse = {
+				data: allCreditos,
+				total: allCreditos.length,
+				page: 1,
+				perPage: allCreditos.length,
+			};
+		} else {
+			// Solo créditos morosos
+			creditosResponse = await carteraBackClient.getAllCreditos({
+				mes,
+				anio,
+				estado: "MOROSO",
+				page: 1,
+				perPage: 1000,
+			});
+		}
 
 		console.log(
 			`[SyncCobros] Encontrados ${creditosResponse.data.length} créditos en cartera-back`,

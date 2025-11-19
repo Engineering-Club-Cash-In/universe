@@ -1,3 +1,4 @@
+import { Footer } from "@/features";
 import React, { type FC } from "react";
 
 interface PageProps {
@@ -16,6 +17,7 @@ export const Page: FC<PageProps> = ({ children, url = "/Layer_1.svg" }) => {
       }}
     >
       {children}
+      <Footer />
     </div>
   );
 };

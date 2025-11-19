@@ -9,7 +9,7 @@ const validationSchema = Yup.object({
   fullName: Yup.string()
     .min(3, "El nombre debe tener al menos 3 caracteres")
     .required("El nombre completo es requerido"),
-  phone: Yup.string().required("El número telefónico es requerido"),
+  phone: Yup.string().optional(),
   email: Yup.string()
     .email("Correo electrónico inválido")
     .required("El correo electrónico es requerido"),

@@ -5,7 +5,6 @@ import {
   Testimonies,
   GraphLine,
 } from "./sections";
-import { Footer } from "@features/footer";
 import { WhoWeAre } from "./sections/whoWeAre/WhoWeAre";
 import { HowSellOrBuy } from "./sections/howSellOrBuy/HowSellOrBuy";
 
@@ -31,7 +30,6 @@ export const HomePage = () => {
         <HowSellOrBuy />
         <Testimonies />
       </div>
-      <Footer />
     </div>
   );
 };

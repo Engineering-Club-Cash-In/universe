@@ -19,7 +19,7 @@ export const FormRegister = () => {
             type="text"
             error={formik.touched.fullName && formik.errors.fullName ? formik.errors.fullName : undefined}
           />
-          <Input
+          {/*<Input
             name="phone"
             value={formik.values.phone}
             onChange={(value) => formik.setFieldValue("phone", value)}
@@ -27,7 +27,7 @@ export const FormRegister = () => {
             placeholder="Número telefónico"
             type="text"
             error={formik.touched.phone && formik.errors.phone ? formik.errors.phone : undefined}
-          />
+          /> */}
           <Input
             name="email"
             value={formik.values.email}

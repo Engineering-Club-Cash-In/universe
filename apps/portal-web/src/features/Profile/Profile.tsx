@@ -1,14 +1,15 @@
 import { NavBar } from "@components/ui";
-import { Footer } from "@features/footer";
 import { useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
+import { InfoPerson } from "./InfoPerson";
 
 interface UserData {
   id: string;
   email: string;
   name?: string;
   phone?: string;
+  image?: string;
 }
 
 export const Profile = () => {
@@ -21,14 +22,15 @@ export const Profile = () => {
       try {
         // Obtener la sesión directamente de better-auth
         const sessionData = await authClient.getSession();
-        
+
         if (sessionData?.data?.user) {
           const userData = sessionData.data.user as UserData;
           setUser({
             id: userData.id,
             email: userData.email,
             name: userData.name,
-            phone: userData.phone, // Si el backend lo tiene
+            phone: userData.phone, // Si el backend lo tiene\
+            image: userData.image,
           });
         } else {
           // Si no hay sesión, redirigir al login
@@ -49,10 +51,10 @@ export const Profile = () => {
     try {
       // Cerrar sesión con better-auth
       await authClient.signOut();
-      
+
       // Limpiar localStorage (solo el token de recordar email)
       localStorage.removeItem("remembered-email");
-      
+
       // Redirigir al login
       navigate({ to: "/login" });
     } catch (error) {
@@ -74,7 +76,6 @@ export const Profile = () => {
             </div>
           </div>
         </div>
-        <Footer />
       </div>
     );
   }
@@ -83,47 +84,54 @@ export const Profile = () => {
     <div>
       <div className="w-full mt-4 p-8">
         <NavBar />
-        <div className="max-w-4xl mx-auto mt-16 mb-20">
-          <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8">
-            <h1 className="text-header-1 mb-8">Perfil de Usuario</h1>
-            
-            {user && (
-              <div className="space-y-6">
-                <div className="border-b border-white/10 pb-4">
-                  <p className="text-sm text-white/65 mb-2">Nombre</p>
-                  <p className="text-body">{user.name || "No disponible"}</p>
-                </div>
-                
-                <div className="border-b border-white/10 pb-4">
-                  <p className="text-sm text-white/65 mb-2">Email</p>
-                  <p className="text-body">{user.email}</p>
-                </div>
-                
-                <div className="border-b border-white/10 pb-4">
-                  <p className="text-sm text-white/65 mb-2">ID de Usuario</p>
-                  <p className="text-body font-mono">{user.id}</p>
-                </div>
-                
-                <div className="pt-4">
-                  <button
-                    onClick={handleLogout}
-                    className="px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 rounded-full text-red-400 font-semibold transition-all"
-                  >
-                    Cerrar sesión
-                  </button>
-                </div>
+        <div className="max-w-7xl mx-auto mt-16 mb-20">
+          {/* Header - Mi Perfil */}
+          <div className="mb-12">
+            <h1 className="text-header-2 mb-6">Mi Perfil</h1>
+
+            <div className="flex items-center gap-6">
+              {/* Imagen de perfil */}
+              <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center text-primary text-3xl font-bold">
+                {user?.image ? (
+                  <img
+                    src={user.image}
+                    alt="Imagen de perfil"
+                    className="w-full h-full object-cover rounded-full"
+                  />
+                ) : (
+                  user?.name?.charAt(0).toUpperCase() ||
+                  user?.email.charAt(0).toUpperCase()
+                )}
               </div>
-            )}
-            
-            <div className="mt-8 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-              <p className="text-sm text-blue-300">
-                ℹ️ Esta es una página protegida. Solo los usuarios autenticados pueden acceder.
-              </p>
+
+              {/* Información básica */}
+              <div>
+                <p className="text-header-4 mb-2">{user?.name || "Usuario"}</p>
+                <p className="text-gray text-lg">{user?.email}</p>
+              </div>
             </div>
           </div>
+          {user && (
+            <div className="space-y-6">
+              <InfoPerson
+                userId={user.id}
+                userName={user.name}
+                userEmail={user.email}
+                userImage={user.image}
+              />
+
+              <div className="pt-4">
+                <button
+                  onClick={handleLogout}
+                  className="px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 rounded-full text-red-400 font-semibold transition-all"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
-      <Footer />
     </div>
   );
 };

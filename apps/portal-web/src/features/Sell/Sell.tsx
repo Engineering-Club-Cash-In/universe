@@ -1,6 +1,5 @@
 import { HeaderSell, HowItWorks, Questions, ReadyStart } from "./sections";
 import { NavBar } from "@/components";
-import { Footer } from "../footer";
 
 export const Sell = () => {
   return (
@@ -18,7 +17,6 @@ export const Sell = () => {
         <ReadyStart />
         <Questions />
       </div>
-      <Footer />
     </div>
   );
 };

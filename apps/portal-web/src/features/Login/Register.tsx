@@ -1,5 +1,4 @@
 import { NavBar } from "@components/ui";
-import { Footer } from "@features/footer";
 import { FormRegister } from "./components/FormRegister";
 
 export const Register = () => {
@@ -9,7 +8,6 @@ export const Register = () => {
         <NavBar />
         <FormRegister />
       </div>
-      <Footer />
     </div>
   );
 };

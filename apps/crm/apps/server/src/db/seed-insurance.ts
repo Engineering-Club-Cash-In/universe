@@ -3,6 +3,14 @@ import * as path from "path";
 import { db } from "./index";
 import { insuranceCosts } from "./schema";
 
+interface InsuranceDataItem {
+	precio: number;
+	inrexsa: number;
+	pickUp: number;
+	panelCamionMicrobus: number;
+	membresia: number;
+}
+
 async function seedInsurance() {
 	try {
 		console.log("Cargando datos de seguros desde JSON...");
@@ -17,7 +25,7 @@ async function seedInsurance() {
 		for (let i = 0; i < data.length; i += batchSize) {
 			const batch = data.slice(i, i + batchSize);
 			await db.insert(insuranceCosts).values(
-				batch.map((item: any) => ({
+				batch.map((item: InsuranceDataItem) => ({
 					price: item.precio,
 					inrexsa: item.inrexsa.toFixed(2),
 					pickUp: item.pickUp.toFixed(2),

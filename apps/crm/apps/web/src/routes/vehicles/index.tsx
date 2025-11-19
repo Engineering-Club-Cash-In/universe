@@ -867,17 +867,17 @@ function VehiclesDashboard() {
 																			{/* Group checklist items by category */}
 																			{Object.entries(
 																				inspection.checklistItems.reduce(
-																					(acc: any, item: any) => {
+																					(acc: Record<string, typeof inspection.checklistItems[number][]>, item: typeof inspection.checklistItems[number]) => {
 																						if (!acc[item.category]) {
 																							acc[item.category] = [];
 																						}
 																						acc[item.category].push(item);
 																						return acc;
 																					},
-																					{},
+																					{} as Record<string, typeof inspection.checklistItems[number][]>,
 																				),
 																			).map(
-																				([category, items]: [string, any]) => (
+																				([category, items]: [string, typeof inspection.checklistItems[number][]]) => (
 																					<div
 																						key={category}
 																						className="space-y-2"
@@ -887,7 +887,7 @@ function VehiclesDashboard() {
 																						</h5>
 																						<div className="grid grid-cols-1 gap-2 md:grid-cols-2">
 																							{items.map(
-																								(item: any, idx: number) => (
+																								(item: typeof inspection.checklistItems[number], idx: number) => (
 																									<div
 																										key={idx}
 																										className="flex items-center justify-between rounded-md border bg-muted/20 p-2"
@@ -921,7 +921,7 @@ function VehiclesDashboard() {
 
 																			{/* Summary of critical issues */}
 																			{inspection.checklistItems.some(
-																				(item: any) =>
+																				(item: typeof inspection.checklistItems[number]) =>
 																					!item.checked &&
 																					item.severity === "critical",
 																			) && (
@@ -932,11 +932,11 @@ function VehiclesDashboard() {
 																					<ul className="space-y-1 text-red-700 text-sm">
 																						{inspection.checklistItems
 																							.filter(
-																								(item: any) =>
+																								(item) =>
 																									!item.checked &&
 																									item.severity === "critical",
 																							)
-																							.map((item: any, idx: number) => (
+																							.map((item: typeof inspection.checklistItems[number], idx: number) => (
 																								<li
 																									key={idx}
 																									className="flex items-start"

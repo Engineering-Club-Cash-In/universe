@@ -157,7 +157,7 @@ function AuctionsDashboard() {
 										</TableCell>
 									</TableRow>
 								) : (
-									auctions?.data?.map((auction: any) => {
+									auctions?.data?.map((auction) => {
 										const latestInspection = auction.inspections?.[0]; // la primera inspección o usa .at(-1) si quieres la última
 										return (
 											<TableRow key={auction.auctionId}>
@@ -337,7 +337,7 @@ function AuctionsDashboard() {
 						<TabsContent value="photos" className="mt-4 space-y-4">
 							{photosVehicle?.photos?.length > 0 ? (
 								<div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-4">
-									{photosVehicle.photos.map((photo: any, index: number) => (
+									{photosVehicle.photos.map((photo: typeof photosVehicle.photos[number], index: number) => (
 										<Card key={photo.id || index}>
 											<CardContent className="p-2">
 												<div className="flex h-[220px] w-full items-center justify-center overflow-hidden rounded-md bg-gray-100">
@@ -374,7 +374,7 @@ function AuctionsDashboard() {
 							{photosVehicle?.inspections?.length > 0 ? (
 								<div className="space-y-4">
 									{photosVehicle.inspections.map(
-										(inspection: any, index: number) => (
+										(inspection: typeof photosVehicle.inspections[number], index: number) => (
 											<Card key={inspection.id || index}>
 												<CardHeader>
 													<div className="flex items-center justify-between">

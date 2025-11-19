@@ -404,7 +404,7 @@ function RouteComponent() {
 												(contactosPage - 1) * ITEMS_PER_PAGE,
 												contactosPage * ITEMS_PER_PAGE,
 											)
-											.map((contacto: any) => {
+											.map((contacto) => {
 												const estadoInfo = getEstadoContacto(
 													contacto.estadoContacto,
 												);
@@ -508,7 +508,7 @@ function RouteComponent() {
 												(cuotasPage - 1) * ITEMS_PER_PAGE,
 												cuotasPage * ITEMS_PER_PAGE,
 											)
-											.map((cuota: any) => {
+											.map((cuota) => {
 												const estadoBadge = getEstadoBadge(cuota.estadoMora);
 												const esPagada = cuota.estadoMora === "pagado";
 												const tieneMora = Number(cuota.montoMora) > 0;
@@ -734,7 +734,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="space-y-3">
-									{convenios.map((convenio: any) => (
+									{convenios.map((convenio) => (
 										<div key={convenio.id} className="rounded border p-3">
 											<div className="mb-2 flex items-center justify-between">
 												<Badge

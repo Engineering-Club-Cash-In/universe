@@ -116,13 +116,13 @@ function VehicleInspectionForm() {
 	const [formSubmitted, setFormSubmitted] = useState(false);
 
 	const createVehicleMutation = useMutation({
-		mutationFn: async (data: any) => {
+		mutationFn: async (data: Parameters<typeof client.createVehicle>[0]) => {
 			return await client.createVehicle(data);
 		},
 	});
 
 	const createInspectionMutation = useMutation({
-		mutationFn: async (data: any) => {
+		mutationFn: async (data: Parameters<typeof client.createVehicleInspection>[0]) => {
 			return await client.createVehicleInspection(data);
 		},
 	});

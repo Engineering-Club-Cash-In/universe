@@ -1,5 +1,47 @@
 import { z } from "zod";
 
+// Types for valuation context parameters
+interface VehicleData {
+	vehicleMake?: string;
+	vehicleModel?: string;
+	vehicleYear?: string;
+	licensePlate?: string;
+	vinNumber?: string;
+	color?: string;
+	vehicleType?: string;
+	cylinders?: string;
+	engineCC?: string;
+	fuelType?: string;
+	transmission?: string;
+	origin?: string;
+	kmMileage?: string;
+	milesMileage?: string;
+	technicianName?: string;
+	inspectionDate?: string | Date;
+	inspectionResult?: string;
+	vehicleEquipment?: string;
+	importantConsiderations?: string;
+	scannerUsed?: string;
+	airbagWarning?: string;
+	missingAirbag?: string;
+	testDrive?: string;
+	noTestDriveReason?: string;
+}
+
+interface ChecklistItem {
+	checked?: boolean;
+	severity?: string;
+	item: string;
+}
+
+interface Photo {
+	category: string;
+	photoType: string;
+	title: string;
+	valuatorComment?: string;
+	noCommentsChecked?: boolean;
+}
+
 // Schema for AI vehicle valuation
 export const vehicleValuationSchema = z.object({
 	suggestedValue: z
@@ -29,9 +71,9 @@ export type VehicleValuation = z.infer<typeof vehicleValuationSchema>;
 
 // Helper to prepare context for AI valuation
 export function prepareValuationContext(
-	vehicleData: any,
-	checklistItems: any[],
-	photos: any[],
+	vehicleData: VehicleData,
+	checklistItems: ChecklistItem[],
+	photos: Photo[],
 ): {
 	location: string;
 	evaluationDate: string;
@@ -110,15 +152,15 @@ export function prepareValuationContext(
 				category: photo.category,
 				photoType: photo.photoType,
 				title: photo.title,
-				comment: photo.valuatorComment,
+				comment: photo.valuatorComment!, // Safe because filter already checked it exists
 			})) || [];
 
 	// Count photos by category
-	const photoCategories =
+	const photoCategories: Record<string, number> =
 		photos?.reduce((acc, photo) => {
 			acc[photo.category] = (acc[photo.category] || 0) + 1;
 			return acc;
-		}, {}) || {};
+		}, {} as Record<string, number>) || {};
 
 	return {
 		// Location context

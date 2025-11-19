@@ -199,8 +199,9 @@ function QuoterPage() {
 				monthlyPayment: 0,
 			});
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear cotización");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al crear cotización";
+		toast.error(message);
 		},
 	});
 
@@ -212,8 +213,9 @@ function QuoterPage() {
 			toast.success("Cotización eliminada");
 			queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al eliminar cotización");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al eliminar cotización";
+		toast.error(message);
 		},
 	});
 

@@ -241,8 +241,9 @@ function RouteComponent() {
 			setEditingLead(null);
 			createLeadForm.reset();
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear el lead");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al crear el lead";
+		toast.error(message);
 		},
 	});
 
@@ -257,8 +258,9 @@ function RouteComponent() {
 			setEditingLead(null);
 			createLeadForm.reset();
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al actualizar el lead");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al actualizar el lead";
+		toast.error(message);
 		},
 	});
 

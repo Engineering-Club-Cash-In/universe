@@ -13,7 +13,7 @@ export const NavBar = () => {
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
-    { label: "Autos en venta", href: "/cars" },
+    { label: "Autos en venta", href: "/marketplace" },
     { label: "Vendemos tu auto", href: "/sell" },
     {
       label: "Invierte con nosotros",

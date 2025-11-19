@@ -1,5 +1,6 @@
 import { Button } from "@components/ui";
 import { ResponsiveLine } from "@nivo/line";
+import { Link } from "@tanstack/react-router";
 import { useGraphLine } from "./hooks/useGraphLine";
 
 export const GraphLine = () => {
@@ -267,9 +268,9 @@ export const GraphLine = () => {
         </h2>
       </div>
       <div className="mt-6 flex justify-center">
-        <Button size="lg">
-          Calcula tu inversión
-        </Button>
+        <Link to="/invest" hash="how-it-works">
+          <Button size="lg">Calcula tu inversión</Button>
+        </Link>
       </div>
     </section>
   );

@@ -1,10 +1,17 @@
 import { InvestorsLogo } from "@/features/footer/icons";
-import { IconArrow, IconInfo } from "@/components";
+import { IconArrow, IconInfo, ModalChatBot } from "@/components";
 import { motion } from "framer-motion";
+import { useModalOptionsCall } from "@/hooks";
 
 const imgUrl = import.meta.env.VITE_IMAGE_URL + "/investors.jpg";
 
 export const HeaderInvestor = () => {
+  const {
+    isModalOpen,
+    modalOptionsInvestors: modalOptions,
+    setIsModalOpen,
+  } = useModalOptionsCall();
+
   return (
     <section className="px-20 mt-32">
       <div className="flex gap-20">
@@ -29,6 +36,7 @@ export const HeaderInvestor = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
+              onClick={() => setIsModalOpen(true)}
             >
               <div>
                 <IconArrow width="24" height="24" />
@@ -43,6 +51,13 @@ export const HeaderInvestor = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={{ type: "spring", stiffness: 400, damping: 17 }}
+              onClick={() => {
+                //navegar a la seccion con id:"how-it-works"
+                const element = document.getElementById("how-it-works");
+                if (element) {
+                  element.scrollIntoView({ behavior: "smooth" });
+                }
+              }}
             >
               <div>
                 <IconInfo width="24" height="24" />
@@ -61,6 +76,11 @@ export const HeaderInvestor = () => {
           />
         </div>
       </div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={modalOptions}
+      />
     </section>
   );
 };

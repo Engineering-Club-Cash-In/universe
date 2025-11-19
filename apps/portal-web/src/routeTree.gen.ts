@@ -13,6 +13,7 @@ import { Route as StylesRouteImport } from './routes/styles'
 import { Route as SellRouteImport } from './routes/sell'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as MarketplaceRouteImport } from './routes/marketplace'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as InvestRouteImport } from './routes/invest'
 import { Route as CreditRouteImport } from './routes/credit'
@@ -37,6 +38,11 @@ const RegisterRoute = RegisterRouteImport.update({
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MarketplaceRoute = MarketplaceRouteImport.update({
+  id: '/marketplace',
+  path: '/marketplace',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/credit': typeof CreditRoute
   '/invest': typeof InvestRoute
   '/login': typeof LoginRoute
+  '/marketplace': typeof MarketplaceRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
   '/sell': typeof SellRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByTo {
   '/credit': typeof CreditRoute
   '/invest': typeof InvestRoute
   '/login': typeof LoginRoute
+  '/marketplace': typeof MarketplaceRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
   '/sell': typeof SellRoute
@@ -94,6 +102,7 @@ export interface FileRoutesById {
   '/credit': typeof CreditRoute
   '/invest': typeof InvestRoute
   '/login': typeof LoginRoute
+  '/marketplace': typeof MarketplaceRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
   '/sell': typeof SellRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/credit'
     | '/invest'
     | '/login'
+    | '/marketplace'
     | '/profile'
     | '/register'
     | '/sell'
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/credit'
     | '/invest'
     | '/login'
+    | '/marketplace'
     | '/profile'
     | '/register'
     | '/sell'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/credit'
     | '/invest'
     | '/login'
+    | '/marketplace'
     | '/profile'
     | '/register'
     | '/sell'
@@ -141,6 +153,7 @@ export interface RootRouteChildren {
   CreditRoute: typeof CreditRoute
   InvestRoute: typeof InvestRoute
   LoginRoute: typeof LoginRoute
+  MarketplaceRoute: typeof MarketplaceRoute
   ProfileRoute: typeof ProfileRoute
   RegisterRoute: typeof RegisterRoute
   SellRoute: typeof SellRoute
@@ -175,6 +188,13 @@ declare module '@tanstack/react-router' {
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/marketplace': {
+      id: '/marketplace'
+      path: '/marketplace'
+      fullPath: '/marketplace'
+      preLoaderRoute: typeof MarketplaceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -221,6 +241,7 @@ const rootRouteChildren: RootRouteChildren = {
   CreditRoute: CreditRoute,
   InvestRoute: InvestRoute,
   LoginRoute: LoginRoute,
+  MarketplaceRoute: MarketplaceRoute,
   ProfileRoute: ProfileRoute,
   RegisterRoute: RegisterRoute,
   SellRoute: SellRoute,

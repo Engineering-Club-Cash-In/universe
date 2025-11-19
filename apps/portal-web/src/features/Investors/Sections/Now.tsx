@@ -1,9 +1,17 @@
 import { IconStart } from "@/components";
+import { ModalChatBot } from "@/components/ModalChatBot";
+import { useModalOptionsCall } from "@/hooks";
 import { motion } from "framer-motion";
 
 export const Now = () => {
+  const {
+    isModalOpen,
+    modalOptionsInvestors: modalOptions,
+    setIsModalOpen,
+  } = useModalOptionsCall();
+
   return (
-    <section className="w-full px-4 py-16 md:py-20">
+    <section className="w-full px-4 py-16 md:py-36">
       <div className="w-full md:w-1/2 mx-auto">
         {/* Contenedor principal con estilos especificados */}
         <div
@@ -57,6 +65,7 @@ export const Now = () => {
 
             {/* Botón Invierte Ahora con motion */}
             <motion.button
+              onClick={() => setIsModalOpen(true)}
               className="px-16 py-6 rounded-xl font-semibold text-secondary border border-secondary text-2xl mb-12"
               initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}
@@ -89,6 +98,12 @@ export const Now = () => {
           </div>
         </div>
       </div>
+
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={modalOptions}
+      />
     </section>
   );
 };

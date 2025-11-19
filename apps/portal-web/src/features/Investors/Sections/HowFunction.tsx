@@ -34,7 +34,10 @@ export const HowFunction = () => {
   ];
 
   return (
-    <section className="mt-56 mb-24 px-20 flex flex-col lg:flex-row gap-40 items-center w-full">
+    <section
+      id="how-it-works"
+      className="pt-56 mb-24 px-20 flex flex-col lg:flex-row gap-40 items-center w-full"
+    >
       <div className="w-full lg:w-2/5 flex flex-col gap-8">
         <h2 className="text-header-body font-bold text-center text-secondary">
           ¿Cómo funciona?

@@ -1,7 +1,13 @@
+import { useState } from "react";
 import { IconCheckList } from "@/components";
+import { useModalOptionsCall } from "@/hooks";
+import { ModalChatBot } from "@/components";
 import { motion } from "framer-motion";
 
 export const Choose = () => {
+  const [type, setType] = useState<"buy" | "sell">("buy");
+  const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
+
   const features = [
     {
       title: "Crédito para compra",
@@ -13,6 +19,10 @@ export const Choose = () => {
         "Auto nuevo o seminuevo",
         "Pagos mensuales fijos",
       ],
+      onClickButton: () => {
+        setType("buy");
+        setIsModalOpen(true);
+      },
       textButton: "Comprar Vehículo",
     },
     {
@@ -25,6 +35,10 @@ export const Choose = () => {
         "Hasta 80% del valor",
         "Pagos flexibles",
       ],
+      onClickButton: () => {
+        setType("sell");
+        setIsModalOpen(true);
+      },
       textButton: "Obtener Préstamo",
     },
   ];
@@ -114,6 +128,7 @@ export const Choose = () => {
                   stiffness: 400,
                   damping: 17,
                 }}
+                onClick={feature.onClickButton}
               >
                 {feature.textButton}
               </motion.button>
@@ -121,6 +136,11 @@ export const Choose = () => {
           ))}
         </div>
       </div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={[optionsCredit[type]]}
+      />
     </section>
   );
 };

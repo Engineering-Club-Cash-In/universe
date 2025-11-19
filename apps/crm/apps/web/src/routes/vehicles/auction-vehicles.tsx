@@ -45,11 +45,11 @@ export const Route = createFileRoute("/vehicles/auction-vehicles")({
 });
 
 function AuctionsDashboard() {
-	const [selectedAuction, setSelectedAuction] = useState<any>(null);
+	const [selectedAuction, setSelectedAuction] = useState<Awaited<ReturnType<typeof orpc.getAuctions.query>>['auctions'][number] | null>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 	const [finalPrice, setFinalPrice] = useState<number | null>(null);
 	const [isPhotosOpen, setIsPhotosOpen] = useState(false);
-	const [photosVehicle, setPhotosVehicle] = useState<any>(null);
+	const [photosVehicle, setPhotosVehicle] = useState<Awaited<ReturnType<typeof orpc.getAuctions.query>>['auctions'][number]['vehicle'] | null>(null);
 	const queryClient = useQueryClient();
 
 	// Fetch auctions

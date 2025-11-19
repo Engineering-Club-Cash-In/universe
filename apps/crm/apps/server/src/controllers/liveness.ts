@@ -32,11 +32,11 @@ export const livenessController = {
 			console.log("[DEBUG] Created liveness session:", response.SessionId);
 
 			return { success: true, sessionId: response.SessionId };
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error("[ERROR] createLivenessSession:", err);
 			return {
 				success: false,
-				message: err.message || "Internal server error",
+				message: err instanceof Error ? err.message : "Internal server error",
 			};
 		}
 	},
@@ -124,11 +124,11 @@ export const livenessController = {
 				similarity: match?.Similarity || 0,
 				isMatch,
 			};
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error("[ERROR] validateLivenessSession:", err);
 			return {
 				success: false,
-				message: err.message || "Internal server error",
+				message: err instanceof Error ? err.message : "Internal server error",
 			};
 		}
 	},

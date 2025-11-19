@@ -86,7 +86,7 @@ function VendorsPage() {
 	const [vendorTypeFilter, setVendorTypeFilter] = useState("all");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isEditOpen, setIsEditOpen] = useState(false);
-	const [selectedVendor, setSelectedVendor] = useState<any>(null);
+	const [selectedVendor, setSelectedVendor] = useState<Awaited<ReturnType<typeof orpc.getVendors.query>>[number] | null>(null);
 	const [vendorToDelete, setVendorToDelete] = useState<string | null>(null);
 
 	const queryClient = useQueryClient();

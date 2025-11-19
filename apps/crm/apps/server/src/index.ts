@@ -260,9 +260,10 @@ app.post("/info/renap", async (c) => {
 		const result = await getRenapInfoController(body.dpi, body.phone);
 
 		return c.json(result);
-	} catch (err: any) {
+	} catch (err: unknown) {
 		console.error("[ERROR] /test/renap:", err);
-		return c.json({ error: err.message || "Internal server error" }, 500);
+		const message = err instanceof Error ? err.message : "Internal server error";
+		return c.json({ error: message }, 500);
 	}
 });
 app.post("/info/lead-opportunity", async (c) => {
@@ -297,9 +298,10 @@ app.post("/info/lead-opportunity", async (c) => {
 		const result = await updateLeadAndCreateOpportunity(body.dpi, body);
 
 		return c.json(result);
-	} catch (err: any) {
+	} catch (err: unknown) {
 		console.error("[ERROR] /info/lead-opportunity:", err);
-		return c.json({ error: err.message || "Internal server error" }, 500);
+		const message = err instanceof Error ? err.message : "Internal server error";
+		return c.json({ error: message }, 500);
 	}
 });
 app.post("/info/lead-progress", async (c) => {
@@ -317,10 +319,11 @@ app.post("/info/lead-progress", async (c) => {
 		const result = await getLeadProgress(body.phone);
 
 		return c.json(result);
-	} catch (err: any) {
+	} catch (err: unknown) {
 		console.error("[ERROR] /info/lead-progress:", err);
+		const message = err instanceof Error ? err.message : "Internal server error";
 		return c.json(
-			{ success: false, message: err.message || "Internal server error" },
+			{ success: false, message },
 			500,
 		);
 	}
@@ -379,11 +382,12 @@ app.post("/info/liveness-validation", async (c) => {
 			},
 			200,
 		);
-	} catch (err: any) {
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : "Internal server error";
 		return c.json(
 			{
 				success: false,
-				message: err.message || "Internal server error",
+				message,
 			},
 			500,
 		);
@@ -403,9 +407,10 @@ app.post("/webhook/facebook-lead", async (c) => {
 		console.log("Lead recibido:", JSON.stringify(body, null, 2));
 
 		return c.json({ success: true, message: "Lead recibido" }, 200);
-	} catch (err: any) {
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : "Internal server error";
 		return c.json(
-			{ success: false, message: err.message || "Internal server error" },
+			{ success: false, message },
 			500,
 		);
 	}
@@ -414,8 +419,9 @@ app.get("/upload-csv", async (c) => {
 	try {
 		const result = await processCsvLeads();
 		return c.json(result);
-	} catch (err: any) {
-		return c.json({ error: err.message }, 500);
+	} catch (err: unknown) {
+		const message = err instanceof Error ? err.message : "Error processing CSV";
+		return c.json({ error: message }, 500);
 	}
 });
 

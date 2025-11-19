@@ -191,7 +191,7 @@ export function AnalysisChecklistView({
 									)}
 									<Badge variant="outline">
 										{checklist.sections.documentos.items?.filter(
-											(i: any) => i.uploaded,
+											(i: ChecklistItem) => i.uploaded,
 										).length ?? 0}{" "}
 										/ {checklist.sections.documentos.items?.length ?? 0}
 									</Badge>
@@ -203,7 +203,7 @@ export function AnalysisChecklistView({
 						<CardContent>
 							<div className="space-y-3">
 								{checklist.sections.documentos.items?.map(
-									(item: any, index: number) => (
+									(item: ChecklistItem, index: number) => (
 										<div
 											key={index}
 											className="flex items-center justify-between border-b py-2 last:border-0"
@@ -260,11 +260,11 @@ export function AnalysisChecklistView({
 									)}
 									<Badge variant="outline">
 										{checklist.sections.verificaciones.items?.filter(
-											(i: any) => i.required && i.completed,
+											(i: ChecklistItem) => i.required && i.completed,
 										).length ?? 0}{" "}
 										/{" "}
 										{checklist.sections.verificaciones.items?.filter(
-											(i: any) => i.required,
+											(i: ChecklistItem) => i.required,
 										).length ?? 0}
 									</Badge>
 								</div>
@@ -275,7 +275,7 @@ export function AnalysisChecklistView({
 						<CardContent>
 							<div className="space-y-3">
 								{checklist.sections.verificaciones.items?.map(
-									(item: any, index: number) => (
+									(item: ChecklistItem, index: number) => (
 										<div
 											key={index}
 											className="flex items-start gap-3 border-b py-2 last:border-0"
@@ -400,7 +400,7 @@ export function AnalysisChecklistView({
 													</h4>
 													<Badge variant="outline">
 														{checklist.sections.vehiculo.documentos.items.filter(
-															(i: any) => i.uploaded,
+															(i: ChecklistItem) => i.uploaded,
 														).length ?? 0}{" "}
 														/{" "}
 														{checklist.sections.vehiculo.documentos.items
@@ -409,7 +409,7 @@ export function AnalysisChecklistView({
 												</div>
 												<div className="space-y-2">
 													{checklist.sections.vehiculo.documentos.items.map(
-														(item: any, index: number) => (
+														(item: ChecklistItem, index: number) => (
 															<div
 																key={index}
 																className="flex items-center justify-between border-b py-2 last:border-0"
@@ -460,17 +460,17 @@ export function AnalysisChecklistView({
 													</h4>
 													<Badge variant="outline">
 														{checklist.sections.vehiculo.verificaciones.items.filter(
-															(i: any) => i.required && i.completed,
+															(i: ChecklistItem) => i.required && i.completed,
 														).length ?? 0}{" "}
 														/{" "}
 														{checklist.sections.vehiculo.verificaciones.items.filter(
-															(i: any) => i.required,
+															(i: ChecklistItem) => i.required,
 														).length ?? 0}
 													</Badge>
 												</div>
 												<div className="space-y-2">
 													{checklist.sections.vehiculo.verificaciones.items.map(
-														(item: any, index: number) => (
+														(item: ChecklistItem, index: number) => (
 															<div
 																key={index}
 																className="flex items-start gap-3 border-b py-2 last:border-0"

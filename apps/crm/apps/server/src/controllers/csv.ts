@@ -139,10 +139,10 @@ export async function processCsvLeads() {
 			const data = await res.json();
 			console.log(`[SUCCESS] Lead sent (id=${row["id"]})`);
 			console.log("[RESPONSE]", data);
-		} catch (err: any) {
+		} catch (err: unknown) {
 			console.error(
 				`[ERROR] Failed to send lead (id=${row["id"]})`,
-				err.message,
+				err instanceof Error ? err.message : "Unknown error",
 			);
 		}
 	}

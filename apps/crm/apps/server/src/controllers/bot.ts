@@ -552,11 +552,12 @@ export const getLeadProgress = async (phone: string) => {
 			steps,
 			currentStep,
 		};
-	} catch (err: any) {
+	} catch (err: unknown) {
 		console.error("[ERROR] getLeadProgress failed:", err);
+		const message = err instanceof Error ? err.message : "Internal server error";
 		return {
 			success: false,
-			message: err.message || "Internal server error",
+			message,
 		};
 	}
 };
@@ -732,7 +733,7 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 				"RENAP data fetched and synchronized successfully (no lead created).",
 			data: renapData,
 		};
-	} catch (error: any) {
+	} catch (error: unknown) {
 		// ========================================================
 		// ❌ Error handling and recovery
 		// ========================================================
@@ -741,10 +742,11 @@ export const getOnlyRenapInfoController = async (dpi: string) => {
 			error,
 		);
 
+		const errorMessage = error instanceof Error ? error.message : String(error);
 		return {
 			success: false,
 			message: "An unexpected error occurred while processing RENAP data.",
-			error: error?.message || error,
+			error: errorMessage,
 		};
 	}
 };

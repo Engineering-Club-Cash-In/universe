@@ -64,15 +64,19 @@ import {
 } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
 
+// Type aliases for better readability
+type Opportunity = Awaited<ReturnType<typeof orpc.getOpportunities.query>>[number];
+type SalesStage = Awaited<ReturnType<typeof orpc.getSalesStages.query>>[number];
+
 // Simple draggable opportunity card component
 function DraggableOpportunityCard({
 	opportunity,
 	getStatusBadgeColor,
 	onOpportunityClick,
 }: {
-	opportunity: any;
+	opportunity: Opportunity;
 	getStatusBadgeColor: (status: string) => string;
-	onOpportunityClick: (opportunity: any) => void;
+	onOpportunityClick: (opportunity: Opportunity) => void;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
 	const [isDragging, setIsDragging] = useState(false);
@@ -179,13 +183,13 @@ function DroppableStageColumn({
 	onDropOpportunity,
 	onOpportunityClick,
 }: {
-	stage: any;
-	opportunities: any[];
+	stage: SalesStage;
+	opportunities: Opportunity[];
 	totalValue: number;
 	count: number;
 	getStatusBadgeColor: (status: string) => string;
 	onDropOpportunity: (opportunityId: string, newStageId: string) => void;
-	onOpportunityClick: (opportunity: any) => void;
+	onOpportunityClick: (opportunity: Opportunity) => void;
 }) {
 	const ref = useRef<HTMLDivElement | null>(null);
 	const [isDraggedOver, setIsDraggedOver] = useState(false);
@@ -288,10 +292,10 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
-	const [selectedOpportunity, setSelectedOpportunity] = useState<any>(null);
+	const [selectedOpportunity, setSelectedOpportunity] = useState<Awaited<ReturnType<typeof orpc.getOpportunities.query>>[number] | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
-	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
+	const [opportunityHistory, setOpportunityHistory] = useState<Awaited<ReturnType<typeof orpc.getOpportunityHistory.query>>>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
 	const processedCompanyIdRef = useRef<string | null>(null);
@@ -356,7 +360,7 @@ function RouteComponent() {
 		});
 	};
 
-	const handleOpportunityClick = async (opportunity: any) => {
+	const handleOpportunityClick = async (opportunity: Opportunity) => {
 		setSelectedOpportunity(opportunity);
 		setIsDetailsDialogOpen(true);
 
@@ -614,7 +618,7 @@ function RouteComponent() {
 			setIsCreateDialogOpen(false);
 			createOpportunityForm.reset();
 		},
-		onError: (error: any) => {
+		onError: (error: unknown) => {
 			toast.error(error.message || "Error al crear la oportunidad");
 		},
 	});
@@ -664,10 +668,10 @@ function RouteComponent() {
 			// Optimistically update to the new value
 			queryClient.setQueryData(
 				opportunitiesQueryKey,
-				(old: any[] | undefined) => {
+				(old: Awaited<ReturnType<typeof orpc.getOpportunities.query>> | undefined) => {
 					if (!old) return old;
 
-					return old.map((opportunity: any) => {
+					return old.map((opportunity) => {
 						if (opportunity.id === variables.id) {
 							// Find the new stage to update the opportunity
 							const newStage = variables.stageId
@@ -726,7 +730,7 @@ function RouteComponent() {
 				}
 			}
 		},
-		onError: (error: any, _variables, context) => {
+		onError: (error: unknown, _variables, context) => {
 			// If the mutation fails, use the context returned from onMutate to roll back
 			if (context?.previousOpportunities) {
 				queryClient.setQueryData(
@@ -1181,7 +1185,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: any) => ({
+														...(vehiclesQuery.data?.map((vehicle: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]) => ({
 															value: vehicle.id,
 															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
 														})) || []),
@@ -1319,7 +1323,7 @@ function RouteComponent() {
 											<Combobox
 												options={[
 													{ value: "none", label: "Sin vendedor asignado" },
-													...(vendorsQuery.data?.map((vendor: any) => ({
+													...(vendorsQuery.data?.map((vendor: Awaited<ReturnType<typeof orpc.getVendors.query>>[number]) => ({
 														value: vendor.id,
 														label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
 													})) || []),
@@ -1788,7 +1792,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: any) => ({
+														...(vehiclesQuery.data?.map((vehicle: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]) => ({
 															value: vehicle.id,
 															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
 														})) || []),
@@ -2412,7 +2416,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 				}),
 			});
 		},
-		onError: (error: any) => {
+		onError: (error: unknown) => {
 			toast.error(error.message || "Error al subir el documento");
 		},
 	});
@@ -2436,7 +2440,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 				}),
 			});
 		},
-		onError: (error: any) => {
+		onError: (error: unknown) => {
 			toast.error(error.message || "Error al eliminar el documento");
 		},
 	});

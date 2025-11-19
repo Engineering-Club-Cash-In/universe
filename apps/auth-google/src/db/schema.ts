@@ -76,6 +76,21 @@ export const verificationTokens = customSchema.table("verification_tokens", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Tabla de perfiles de usuario (información adicional)
+export const userProfiles = customSchema.table("user_profiles", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .unique()
+    .references(() => users.id, { onDelete: "cascade" }),
+  dpi: text("dpi"),
+  phone: text("phone"),
+  address: text("address"),
+  profileCompleted: boolean("profile_completed").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Tipos TypeScript inferidos del schema
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
@@ -88,3 +103,6 @@ export type NewSession = typeof sessions.$inferInsert;
 
 export type VerificationToken = typeof verificationTokens.$inferSelect;
 export type NewVerificationToken = typeof verificationTokens.$inferInsert;
+
+export type UserProfile = typeof userProfiles.$inferSelect;
+export type NewUserProfile = typeof userProfiles.$inferInsert;

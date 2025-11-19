@@ -1,6 +1,5 @@
 import { NavBar } from "@/components";
 import { HeaderInvestor, HowFunction, WhyInvest, FAQ, Now } from "./Sections";
-import { Footer } from "../footer";
 
 export const Investors = () => {
   return (
@@ -11,7 +10,6 @@ export const Investors = () => {
       <WhyInvest />
       <FAQ />
       <Now />
-      <Footer />  
     </div>
   );
 };

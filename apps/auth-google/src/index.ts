@@ -5,6 +5,7 @@ import { serve } from "@hono/node-server";
 import { testConnection } from "./db/connection";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
+import profileRoutes from "./routes/profile.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import {
   apiLimiter,
@@ -44,6 +45,9 @@ app.route("/health", healthRoutes);
 app.use("/api/auth/sign-in/*", authLimiter);
 app.use("/api/auth/sign-up/*", signUpLimiter);
 app.route("/api/auth", authRoutes);
+
+// Profile routes
+app.route("/api/profile", profileRoutes);
 
 // 404 handler
 app.notFound(notFoundHandler);

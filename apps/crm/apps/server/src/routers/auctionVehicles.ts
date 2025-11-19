@@ -499,7 +499,7 @@ export const auctionRouter = {
 				}
 
 				return acc;
-			}, [] as any[]);
+			}, [] as GroupedAuction[]);
 
 			return {
 				page,

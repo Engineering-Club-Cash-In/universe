@@ -663,7 +663,7 @@ function RouteComponent() {
 
 			// Get the current sales stages data
 			const salesStages =
-				(queryClient.getQueryData(salesStagesQueryKey) as any[]) || [];
+				(queryClient.getQueryData(salesStagesQueryKey) as SalesStage[]) || [];
 
 			// Optimistically update to the new value
 			queryClient.setQueryData(

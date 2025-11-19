@@ -75,7 +75,7 @@ function RouteComponent() {
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-	const [selectedCompany, setSelectedCompany] = useState<Awaited<ReturnType<typeof orpc.getCompanies.query>>[number] | null>(null);
+	const [selectedCompany, setSelectedCompany] = useState<Awaited<ReturnType<typeof client.getCompanies>>[number] | null>(null);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [industryFilter, setIndustryFilter] = useState<string>("all");
 	const [sizeFilter, setSizeFilter] = useState<string>("all");

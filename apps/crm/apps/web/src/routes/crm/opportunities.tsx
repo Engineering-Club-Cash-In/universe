@@ -65,8 +65,8 @@ import {
 import { client, orpc } from "@/utils/orpc";
 
 // Type aliases for better readability
-type Opportunity = Awaited<ReturnType<typeof orpc.getOpportunities.query>>[number];
-type SalesStage = Awaited<ReturnType<typeof orpc.getSalesStages.query>>[number];
+type Opportunity = Awaited<ReturnType<typeof client.getOpportunities>>[number];
+type SalesStage = Awaited<ReturnType<typeof client.getSalesStages>>[number];
 
 // Simple draggable opportunity card component
 function DraggableOpportunityCard({
@@ -292,10 +292,10 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
-	const [selectedOpportunity, setSelectedOpportunity] = useState<Awaited<ReturnType<typeof orpc.getOpportunities.query>>[number] | null>(null);
+	const [selectedOpportunity, setSelectedOpportunity] = useState<Awaited<ReturnType<typeof client.getOpportunities>>[number] | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
-	const [opportunityHistory, setOpportunityHistory] = useState<Awaited<ReturnType<typeof orpc.getOpportunityHistory.query>>>([]);
+	const [opportunityHistory, setOpportunityHistory] = useState<Awaited<ReturnType<typeof client.getOpportunityHistory>>>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
 	const processedCompanyIdRef = useRef<string | null>(null);
@@ -619,7 +619,8 @@ function RouteComponent() {
 			createOpportunityForm.reset();
 		},
 		onError: (error: unknown) => {
-			toast.error(error.message || "Error al crear la oportunidad");
+			const message = error instanceof Error ? error.message : "Error al crear la oportunidad";
+			toast.error(message);
 		},
 	});
 
@@ -668,7 +669,7 @@ function RouteComponent() {
 			// Optimistically update to the new value
 			queryClient.setQueryData(
 				opportunitiesQueryKey,
-				(old: Awaited<ReturnType<typeof orpc.getOpportunities.query>> | undefined) => {
+				(old: Awaited<ReturnType<typeof client.getOpportunities>> | undefined) => {
 					if (!old) return old;
 
 					return old.map((opportunity) => {
@@ -738,7 +739,8 @@ function RouteComponent() {
 					context.previousOpportunities,
 				);
 			}
-			toast.error(error.message || "Error al actualizar la oportunidad");
+			const message = error instanceof Error ? error.message : "Error al actualizar la oportunidad";
+			toast.error(message);
 		},
 		onSettled: () => {
 			// Always refetch after error or success to ensure we have correct data
@@ -1185,7 +1187,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]) => ({
+														...(vehiclesQuery.data?.map((vehicle: Awaited<ReturnType<typeof client.getVehicles>>[number]) => ({
 															value: vehicle.id,
 															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
 														})) || []),
@@ -1323,7 +1325,7 @@ function RouteComponent() {
 											<Combobox
 												options={[
 													{ value: "none", label: "Sin vendedor asignado" },
-													...(vendorsQuery.data?.map((vendor: Awaited<ReturnType<typeof orpc.getVendors.query>>[number]) => ({
+													...(vendorsQuery.data?.map((vendor: Awaited<ReturnType<typeof client.getVendors>>[number]) => ({
 														value: vendor.id,
 														label: `${vendor.name}${vendor.vendorType === "empresa" ? ` (${vendor.companyName})` : ""} - ${vendor.dpi}`,
 													})) || []),
@@ -1792,7 +1794,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]) => ({
+														...(vehiclesQuery.data?.map((vehicle: Awaited<ReturnType<typeof client.getVehicles>>[number]) => ({
 															value: vehicle.id,
 															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
 														})) || []),
@@ -2417,7 +2419,8 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			});
 		},
 		onError: (error: unknown) => {
-			toast.error(error.message || "Error al subir el documento");
+			const message = error instanceof Error ? error.message : "Error al subir el documento";
+			toast.error(message);
 		},
 	});
 
@@ -2441,7 +2444,8 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			});
 		},
 		onError: (error: unknown) => {
-			toast.error(error.message || "Error al eliminar el documento");
+			const message = error instanceof Error ? error.message : "Error al eliminar el documento";
+			toast.error(message);
 		},
 	});
 

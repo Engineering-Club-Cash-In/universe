@@ -86,7 +86,7 @@ function VendorsPage() {
 	const [vendorTypeFilter, setVendorTypeFilter] = useState("all");
 	const [isCreateOpen, setIsCreateOpen] = useState(false);
 	const [isEditOpen, setIsEditOpen] = useState(false);
-	const [selectedVendor, setSelectedVendor] = useState<Awaited<ReturnType<typeof orpc.getVendors.query>>[number] | null>(null);
+	const [selectedVendor, setSelectedVendor] = useState<Awaited<ReturnType<typeof client.getVendors>>[number] | null>(null);
 	const [vendorToDelete, setVendorToDelete] = useState<string | null>(null);
 
 	const queryClient = useQueryClient();
@@ -187,7 +187,7 @@ function VendorsPage() {
 			name: vendor.name,
 			phone: vendor.phone,
 			dpi: vendor.dpi,
-			vendorType: vendor.vendorType,
+			vendorType: vendor.vendorType as "individual" | "empresa",
 			companyName: vendor.companyName || "",
 			email: vendor.email || "",
 			address: vendor.address || "",

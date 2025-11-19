@@ -80,7 +80,7 @@ export const auth = betterAuth({
 		enabled: true,
 		requireEmailVerification: false,
 	},
-	onSignUp: async (data: any) => {
+	onSignUp: async (data: { user: { email: string } }) => {
 		const email = data.user.email;
 		if (!email.endsWith("@clubcashin.com")) {
 			throw new Error(
@@ -95,7 +95,7 @@ export const auth = betterAuth({
 			enabled: true,
 		},
 	},
-	onOAuthAccountLinked: async (data: any) => {
+	onOAuthAccountLinked: async (data: { user: { email: string } }) => {
 		const email = data.user.email;
 		if (!email.endsWith("@clubcashin.com")) {
 			throw new Error(

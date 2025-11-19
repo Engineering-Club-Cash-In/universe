@@ -107,8 +107,9 @@ export function NotesTimeline({
 				}),
 			});
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear la nota");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al crear la nota";
+		toast.error(message);
 		},
 	});
 
@@ -129,8 +130,9 @@ export function NotesTimeline({
 				}),
 			});
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al actualizar la nota");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al actualizar la nota";
+		toast.error(message);
 		},
 	});
 
@@ -148,8 +150,9 @@ export function NotesTimeline({
 				}),
 			});
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al fijar la nota");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al fijar la nota";
+		toast.error(message);
 		},
 	});
 
@@ -164,8 +167,9 @@ export function NotesTimeline({
 				}),
 			});
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al eliminar la nota");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al eliminar la nota";
+		toast.error(message);
 		},
 	});
 

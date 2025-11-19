@@ -158,8 +158,9 @@ function RouteComponent() {
 			setIsCreateDialogOpen(false);
 			createClientForm.reset();
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear cliente");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al crear cliente";
+		toast.error(message);
 		},
 	});
 
@@ -181,8 +182,9 @@ function RouteComponent() {
 			});
 			toast.success("Cliente actualizado exitosamente");
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al actualizar cliente");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al actualizar cliente";
+		toast.error(message);
 		},
 	});
 

@@ -75,8 +75,9 @@ export function ContactoModal({
 				.querySelector<HTMLButtonElement>("[data-radix-dialog-close]")
 				?.click();
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al registrar el contacto");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al registrar el contacto";
+		toast.error(message);
 		},
 	});
 

@@ -214,8 +214,9 @@ function RouteComponent() {
 			setIsCreateDialogOpen(false);
 			createCompanyForm.reset();
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear la empresa");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al crear la empresa";
+		toast.error(message);
 		},
 	});
 
@@ -238,8 +239,9 @@ function RouteComponent() {
 			toast.success("Empresa actualizada exitosamente");
 			setIsEditDialogOpen(false);
 		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al actualizar la empresa");
+		onError: (error: unknown) => {
+			const message = error instanceof Error ? error.message : "Error al actualizar la empresa";
+		toast.error(message);
 		},
 	});
 

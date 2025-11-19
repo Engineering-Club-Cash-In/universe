@@ -5,11 +5,14 @@ import {
   IconClock,
   Button,
 } from "@/components";
+import { useModalOptionsCall } from "@/hooks";
+import { ModalChatBot } from "@/components";
 
 const imageUrl = import.meta.env.VITE_IMAGE_URL;
 
 export const GetMoney = () => {
   const imageSrc = `${imageUrl}/car2.png`;
+  const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
 
   const items = [
     {
@@ -38,7 +41,9 @@ export const GetMoney = () => {
     <section className="flex flex-col lg:flex-row gap-40 mt-56 mb-20 px-20 items-center">
       {/* Lado izquierdo - Contenido */}
       <div className="flex flex-col justify-center">
-        <h2 className="text-header-2 font-bold mb-4">Obtén dinero sin dejar tu auto</h2>
+        <h2 className="text-header-2 font-bold mb-4">
+          Obtén dinero sin dejar tu auto
+        </h2>
         <p className="text-gray text-xl mb-12">
           Tu auto tiene valor y nosotros te lo reconocemos. Obtén un préstamo
           equivalente al valor de tu vehículo o un poco menos, mientras sigues
@@ -54,7 +59,7 @@ export const GetMoney = () => {
               className="flex flex-col   p-6 rounded-xl border border-primary/20 bg-primary/5"
             >
               {/* Icono */}
-              <div className="mb-4 w-8">{item.icon}</div>
+              <div className="mb-4 w-8 text-primary">{item.icon}</div>
 
               {/* Título */}
               <h3 className="text mb-2 font-bold">{item.title}</h3>
@@ -67,7 +72,9 @@ export const GetMoney = () => {
 
         {/* Botón */}
         <div>
-          <Button size="lg">Solicitar préstamo</Button>
+          <Button size="lg" onClick={() => setIsModalOpen(true)}>
+            Solicitar préstamo
+          </Button>
         </div>
       </div>
 
@@ -87,6 +94,11 @@ export const GetMoney = () => {
           </div>
         </div>
       </div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={[optionsCredit.sell]}
+      />
     </section>
   );
 };

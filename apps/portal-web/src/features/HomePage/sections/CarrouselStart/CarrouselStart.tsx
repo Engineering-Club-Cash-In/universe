@@ -25,22 +25,29 @@ const slides: CarouselSlide[] = [
     imageUrl: url + "/videoPersonaManejando.mp4",
     title: "Tú eliges el auto, nosotros lo financiamos",
     buttonText: "Solicitar",
-    buttonLink: "#credit",
+    buttonLink: "/credit",
   },
   {
     id: 2,
     imageUrl: url + "/familia-joven-disfrutando-de-su-viaje.jpg",
-    title: "Te ayudamos a hacer momentos inolvodables",
-    buttonText: "Conócenos",
-    buttonLink: "#trade",
+    title: "Tenemos el auto ideal para darte momentos inolvidables",
+    buttonText: "Ver marketplace",
+    buttonLink: "/marketplace",
   },
   {
     id: 3,
     imageUrl: url + "/team-chart-accountant-business-paper-talking.jpg",
     title: "Hagamos una inversión segura",
     buttonText: "Invierte",
-    buttonLink: "#invest",
+    buttonLink: "/invest",
   },
+  {
+    id: 4,
+    imageUrl: url + "/team-chart.png",
+    title: "¿Quieres vender tu auto? Nosotros nos encargamos",
+    buttonText: "Vende tu auto",
+    buttonLink: "/sell",
+  }
 ];
 
 export const CarrouselStart: React.FC = () => {
@@ -110,6 +117,14 @@ export const CarrouselStart: React.FC = () => {
             )}
             {/* Dark overlay */}
             <div className="absolute inset-0 bg-black/40" />
+            {/* Top gradient overlay */}
+            <div
+              className="absolute top-0 left-0 right-0 pointer-events-none"
+              style={{
+                height: '200px',
+                background: 'linear-gradient(180deg, #0F0F0F 4.33%, rgba(15, 15, 15, 0.00) 100%)'
+              }}
+            />
           </div>
 
           {/* Content overlay */}
@@ -123,7 +138,7 @@ export const CarrouselStart: React.FC = () => {
                 delay: index === currentIndex ? 0.2 : 0,
                 duration: 0.6,
               }}
-              className="max-w-2xl"
+              className="max-w-3xl"
             >
               <h1 className="text-[35px] md:text-[45px] lg:text-[55px] text-white mb-4">
                 {slide.title}

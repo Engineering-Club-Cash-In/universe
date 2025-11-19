@@ -1,7 +1,10 @@
-import { BoottomSheets, IconMessage } from "@/components";
+import { BoottomSheets, IconMessage, ModalChatBot } from "@/components";
 import { motion } from "framer-motion";
+import { useModalOptionsCall } from "@/hooks";
 
 export const StartToday = () => {
+  const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
+
   const items = [
     {
       title: "5,000+",
@@ -47,6 +50,7 @@ export const StartToday = () => {
             stiffness: 400,
             damping: 17,
           }}
+          onClick={() => setIsModalOpen(true)}
         >
           <IconMessage className="mr-2" />
           Háblanos en nuestro chat de WhatsApp
@@ -60,6 +64,11 @@ export const StartToday = () => {
           </div>
         ))}
       </div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={[optionsCredit.questions]}
+      />
     </section>
   );
 };

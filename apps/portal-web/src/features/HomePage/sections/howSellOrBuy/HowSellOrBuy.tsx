@@ -6,6 +6,7 @@ import {
   IconSearch,
   IconSettings,
 } from "@/components";
+import { Link } from "@tanstack/react-router";
 
 interface items {
   icon: React.ReactNode;
@@ -93,7 +94,9 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          <Button size="lg">Comprar un auto</Button>
+          <Link to="/marketplace">
+            <Button size="lg">Comprar un auto</Button>
+          </Link>
         </div>
       </div>
 
@@ -118,7 +121,9 @@ export const HowSellOrBuy = () => {
           ))}
         </div>
         <div className="flex justify-center mt-12">
-          <Button size="lg">Vender un auto</Button>
+          <Link to="/sell">
+            <Button size="lg">Vender un auto</Button>
+          </Link>
         </div>
       </div>
     </section>

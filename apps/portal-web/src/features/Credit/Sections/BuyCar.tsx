@@ -1,10 +1,13 @@
 import { IconCheckDoc, IconSearch, IconKey, Button } from "@/components";
-
+import { useModalOptionsCall } from "@/hooks";
+import { ModalChatBot } from "@/components";
 const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 export const BuyCar = () => {
   // URL de la imagen de fondo - puedes cambiarla aquí
   const imageUrl = urlImage + "/car1.jpg";
+
+  const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
 
   const items = [
     {
@@ -72,9 +75,16 @@ export const BuyCar = () => {
 
         {/* Botón */}
         <div className="mt-6">
-          <Button size="lg">Solicita tu crédito</Button>
+          <Button size="lg" onClick={() => setIsModalOpen(true)}>
+            Solicita tu crédito
+          </Button>
         </div>
       </div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={[optionsCredit.buy]}
+      />
     </section>
   );
 };

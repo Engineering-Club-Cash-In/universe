@@ -1,6 +1,10 @@
 import { Button } from "@/components";
+import { useModalOptionsCall } from "@/hooks";
+import { ModalChatBot } from "@/components";
 
 export const Questions = () => {
+  const { isModalOpen, setIsModalOpen, optionsSell } = useModalOptionsCall();
+
   return (
     <section className="relative mt-40 overflow-hidden">
       {/* Contenedor principal */}
@@ -15,7 +19,9 @@ export const Questions = () => {
           </p>
 
           {/* Botón */}
-          <Button size="lg">Contactar ahora</Button>
+          <Button size="lg" onClick={() => setIsModalOpen(true)}>
+            Contactar ahora
+          </Button>
         </div>
       </div>
 
@@ -24,9 +30,15 @@ export const Questions = () => {
         className="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 h-18 w-screen z-0"
         style={{
           opacity: 0.75,
-          background: "linear-gradient(90deg, rgba(15, 15, 15, 0) 0%, #9A9FF5 50%, rgba(15, 15, 15, 0) 100%)",
+          background:
+            "linear-gradient(90deg, rgba(15, 15, 15, 0) 0%, #9A9FF5 50%, rgba(15, 15, 15, 0) 100%)",
         }}
       ></div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={[optionsSell.questions]}
+      />
     </section>
   );
 };

@@ -1,9 +1,13 @@
-import { Button } from "@/components";
+import { Button, ModalChatBot } from "@/components";
 import { Calendar, Camara } from "./icons";
+import { useModalOptionsCall } from "@/hooks";
+import { useState } from "react";
 
 export const ReadyStart = () => {
   const title = "¿Listo para comenzar?";
   const subtitle = "Elige de qué manera quieres hacer la inspección de tu auto";
+  const [type, setType] = useState<"inspection" | "schedule">("inspection");
+  const { isModalOpen, setIsModalOpen, optionsSell } = useModalOptionsCall();
 
   const items = [
     {
@@ -12,6 +16,10 @@ export const ReadyStart = () => {
       buttonText: "Iniciar inspección",
       description:
         "Sigue nuestros pasos para inspeccionar y subir fotos de tu vehículo",
+      onClick: () => {
+        setType("inspection");
+        setIsModalOpen(true);
+      },
     },
     {
       icon: <Calendar />,
@@ -19,6 +27,10 @@ export const ReadyStart = () => {
       buttonText: "Agendar cita",
       description:
         "Programa una inspección a donde más te convenga para una evaluación profesional",
+      onClick: () => {
+        setType("schedule");
+        setIsModalOpen(true);
+      },
     },
   ];
 
@@ -54,11 +66,18 @@ export const ReadyStart = () => {
               <p className="text-gray text-sm mb-4">{item.description}</p>
             </div>
             <div className="flex justify-end">
-              <Button size="lg">{item.buttonText}</Button>
+              <Button size="lg" onClick={item.onClick}>
+                {item.buttonText}
+              </Button>
             </div>
           </div>
         ))}
       </div>
+      <ModalChatBot
+        open={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        options={[optionsSell[type]]}
+      />
     </div>
   );
 };

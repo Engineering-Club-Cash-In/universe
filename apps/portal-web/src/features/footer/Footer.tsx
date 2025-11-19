@@ -16,21 +16,21 @@ const FOOTER_SECTIONS = [
   {
     title: "Acerca de nosotros",
     links: [
-      { label: "Preguntas frecuentes", href: "/faq" },
-      { label: "News Letter", href: "/newsletter" },
+      { label: "Preguntas frecuentes", href: "" },
+      { label: "News Letter", href: "" },
     ],
   },
   {
     title: "Autos",
     links: [
-      { label: "Encuentra tu auto", href: "/faq" },
-      { label: "Obtén tu financiamiento", href: "/newsletter" },
-      { label: "Compramos tu auto", href: "/newsletter" },
+      { label: "Encuentra tu auto", href: "/marketplace" },
+      { label: "Obtén tu financiamiento", href: "/credit" },
+      { label: "Compramos tu auto", href: "/sell" },
     ],
   },
   {
     title: "Investors",
-    links: [{ label: "Quiero invertir", href: "/faq" }],
+    links: [{ label: "Quiero invertir", href: "/invest" }],
   },
 ];
 
@@ -61,7 +61,7 @@ const SOCIAL_CONTACTS = [
 const LOCATION_INFO = {
   icon: Location,
   address: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
-  href: "https://maps.google.com",
+  href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
 };
 
 export const Footer: React.FC = () => {

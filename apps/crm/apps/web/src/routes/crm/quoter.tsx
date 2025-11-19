@@ -226,7 +226,7 @@ function QuoterPage() {
 			vehicleBrand: "",
 			vehicleLine: "",
 			vehicleModel: "",
-			vehicleType: "particular" as const,
+			vehicleType: "particular" as "particular" | "uber" | "pickup" | "nuevo" | "panel" | "camion" | "microbus",
 			vehicleValue: 0,
 			insuredAmount: 0,
 			downPayment: 0,
@@ -529,7 +529,7 @@ function QuoterPage() {
 												<Select
 													value={field.state.value}
 													onValueChange={(value) => {
-														field.handleChange(value);
+														field.handleChange(value as typeof field.state.value);
 
 														// Actualizar seguro cuando cambia el tipo
 														const insuredAmount =

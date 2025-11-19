@@ -284,7 +284,7 @@ export function AnalysisChecklistView({
 												checked={item.completed}
 												onCheckedChange={(checked) =>
 													handleVerificationChange(
-														item.type,
+														item.type || "",
 														checked as boolean,
 													)
 												}
@@ -422,7 +422,7 @@ export function AnalysisChecklistView({
 																	)}
 																	<div>
 																		<p className="font-medium text-sm">
-																			{item.documentType
+																			{item.documentType || ""
 																				.replace(/_/g, " ")
 																				.replace(/\b\w/g, (l: string) =>
 																					l.toUpperCase(),
@@ -479,7 +479,7 @@ export function AnalysisChecklistView({
 																	checked={item.completed}
 																	onCheckedChange={(checked) =>
 																		handleVehicleVerificationChange(
-																			item.type,
+																			item.type || "",
 																			checked as boolean,
 																		)
 																	}

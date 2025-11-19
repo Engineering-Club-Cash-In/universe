@@ -73,7 +73,7 @@ function VehiclesDashboard() {
 	const navigate = useNavigate();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [filterStatus, setFilterStatus] = useState("all");
-	const [selectedVehicle, setSelectedVehicle] = useState<Awaited<ReturnType<typeof orpc.getVehicles.query>>[number] | null>(null);
+	const [selectedVehicle, setSelectedVehicle] = useState<Awaited<ReturnType<typeof client.getVehicles>>[number] | null>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState("general");
 
@@ -86,7 +86,7 @@ function VehiclesDashboard() {
 	);
 
 	// Filter vehicles based on search term and filter status
-	const filteredVehicles = vehicles?.filter((vehicle: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]) => {
+	const filteredVehicles = vehicles?.filter((vehicle: Awaited<ReturnType<typeof client.getVehicles>>[number]) => {
 		const latestInspection = vehicle.inspections?.[0];
 
 		const matchesSearch =
@@ -103,11 +103,11 @@ function VehiclesDashboard() {
 	});
 	// auction vehicles
 	const [isAuctionOpen, setIsAuctionOpen] = useState(false);
-	const [auctionVehicle, setAuctionVehicle] = useState<Awaited<ReturnType<typeof orpc.getVehicles.query>>[number] | null>(null);
+	const [auctionVehicle, setAuctionVehicle] = useState<Awaited<ReturnType<typeof client.getVehicles>>[number] | null>(null);
 	const createAuctionMutation = useMutation(
 		orpc.createAuction.mutationOptions(),
 	);
-	const [auctionInspection, setAuctionInspection] = useState<Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]['inspections'][number] | null>(null);
+	const [auctionInspection, setAuctionInspection] = useState<Awaited<ReturnType<typeof client.getVehicles>>[number]['inspections'][number] | null>(null);
 
 	const [auctionPrice, setAuctionPrice] = useState<number | null>(null);
 
@@ -259,7 +259,7 @@ function VehiclesDashboard() {
 												</TableCell>
 											</TableRow>
 										) : (
-											filteredVehicles?.map((vehicle: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]) => {
+											filteredVehicles?.map((vehicle: Awaited<ReturnType<typeof client.getVehicles>>[number]) => {
 												const latestInspection = vehicle.inspections?.[0];
 												return (
 													<TableRow key={vehicle.id}>
@@ -503,7 +503,8 @@ function VehiclesDashboard() {
 										setAuctionPrice(null);
 									},
 									onError: (err: unknown) => {
-										toast.error(err.message || "Error al rematar el carro");
+										const message = err instanceof Error ? err.message : "Error al rematar el carro";
+								toast.error(message);
 									},
 								},
 							);
@@ -662,7 +663,7 @@ function VehiclesDashboard() {
 								selectedVehicle.inspections.length > 0 ? (
 									<div className="space-y-4">
 										{selectedVehicle.inspections.map(
-											(inspection: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]['inspections'][number], index: number) => {
+											(inspection: Awaited<ReturnType<typeof client.getVehicles>>[number]['inspections'][number], index: number) => {
 												return (
 													<Card key={inspection.id || index}>
 														<CardHeader>
@@ -877,7 +878,7 @@ function VehiclesDashboard() {
 																					{} as Record<string, typeof inspection.checklistItems[number][]>,
 																				),
 																			).map(
-																				([category, items]: [string, typeof inspection.checklistItems[number][]]) => (
+																				([category, items]) => (
 																					<div
 																						key={category}
 																						className="space-y-2"
@@ -973,7 +974,7 @@ function VehiclesDashboard() {
 							<TabsContent value="photos" className="mt-4 space-y-4">
 								{selectedVehicle.photos && selectedVehicle.photos.length > 0 ? (
 									<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-										{selectedVehicle.photos.map((photo: Awaited<ReturnType<typeof orpc.getVehicles.query>>[number]['photos'][number], index: number) => (
+										{selectedVehicle.photos.map((photo: Awaited<ReturnType<typeof client.getVehicles>>[number]['photos'][number], index: number) => (
 											<Card key={photo.id || index}>
 												<CardContent className="p-2">
 													<img

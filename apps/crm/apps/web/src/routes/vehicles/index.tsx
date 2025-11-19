@@ -314,7 +314,7 @@ function VehiclesDashboard() {
 																			latestInspection.status,
 																		)
 																	: renderInspectionStatusBadge("pending")}
-																{(vehicle as any).hasPaymentAgreement && (
+																{(vehicle as typeof vehicle & { hasPaymentAgreement?: boolean }).hasPaymentAgreement && (
 																	<Badge
 																		variant="outline"
 																		className="border-blue-300 bg-blue-100 text-blue-800 text-xs"

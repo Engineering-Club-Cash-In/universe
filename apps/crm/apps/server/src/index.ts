@@ -240,7 +240,7 @@ app.post("/api/upload-opportunity-document", async (c) => {
 				originalName: file.name,
 				mimeType: file.type,
 				size: file.size,
-				documentType: documentType as any,
+				documentType: documentType as typeof opportunityDocuments.$inferInsert.documentType,
 				description: description || undefined,
 				uploadedBy: userId,
 				filePath: key,

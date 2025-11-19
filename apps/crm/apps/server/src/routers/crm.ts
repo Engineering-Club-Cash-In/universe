@@ -1,6 +1,38 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+
+// Type for checklist data structure
+export interface ChecklistItem {
+	type?: string;
+	completed?: boolean;
+	required?: boolean;
+	verifiedBy?: string;
+	verifiedAt?: string;
+	uploaded?: boolean;
+}
+
+export interface ChecklistSection {
+	completed?: boolean;
+	items: ChecklistItem[];
+}
+
+export interface VehiculoSection {
+	completed?: boolean;
+	verificaciones: ChecklistSection;
+	documentos?: ChecklistSection;
+}
+
+export interface ChecklistData {
+	overallProgress?: number;
+	canApprove?: boolean;
+	sections: {
+		verificaciones?: ChecklistSection;
+		documentos?: ChecklistSection;
+		vehiculo?: VehiculoSection;
+		[key: string]: ChecklistSection | VehiculoSection | undefined;
+	};
+}
 import {
 	vehicleDocumentRequirements,
 	vehicleDocuments,
@@ -2025,8 +2057,8 @@ export const crmRouter = {
 			// Calculate vehicle section completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
-					.filter((i: any) => i.required)
-					.every((i: any) => i.completed);
+					.filter((i) => i.required)
+					.every((i) => i.completed);
 
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
@@ -2035,8 +2067,8 @@ export const crmRouter = {
 
 			// Calculate overall progress
 			const totalItems =
-				checklistData.sections.documentos.items.length + // client docs
-				checklistData.sections.verificaciones.items.filter((i) => i.required)
+				checklistData.sections.documentos!.items.length + // client docs
+				checklistData.sections.verificaciones!.items.filter((i) => i.required)
 					.length + // client verifications
 				(opportunity.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
@@ -2044,25 +2076,25 @@ export const crmRouter = {
 					: 0) + // vehicle docs
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required,
+							(i) => i.required,
 						).length
 					: 0); // vehicle verifications
 
 			const completedItems =
-				checklistData.sections.documentos.items.filter((i) => i.uploaded)
+				checklistData.sections.documentos!.items.filter((i) => i.uploaded)
 					.length + // client docs uploaded
-				checklistData.sections.verificaciones.items.filter(
+				checklistData.sections.verificaciones!.items.filter(
 					(i) => i.required && i.completed,
 				).length + // client verifications completed
 				(vehicleInspected ? 1 : 0) + // vehicle inspection
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.uploaded,
+							(i) => i.uploaded,
 						).length
 					: 0) + // vehicle docs uploaded
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required && i.completed,
+							(i) => i.required && i.completed,
 						).length
 					: 0); // vehicle verifications completed
 
@@ -2071,14 +2103,14 @@ export const crmRouter = {
 			);
 
 			// Can approve if all sections are completed
-			checklistData.sections.verificaciones.completed =
-				checklistData.sections.verificaciones.items
+			checklistData.sections.verificaciones!.completed =
+				checklistData.sections.verificaciones!.items
 					.filter((i) => i.required)
 					.every((i) => i.completed);
 
 			checklistData.canApprove =
-				checklistData.sections.documentos.completed &&
-				checklistData.sections.verificaciones.completed &&
+				checklistData.sections.documentos!.completed &&
+				checklistData.sections.verificaciones!.completed &&
 				(opportunity.vehicleId
 					? checklistData.sections.vehiculo.completed
 					: true); // Only require vehicle section if there's a vehicle
@@ -2113,11 +2145,11 @@ export const crmRouter = {
 				throw new Error("Checklist no encontrado");
 			}
 
-			const checklistData = existing.checklistData as any;
+			const checklistData = existing.checklistData as ChecklistData;
 
 			// Update the specific verification
-			const item = checklistData.sections.verificaciones.items.find(
-				(i: any) => i.type === input.verificationType,
+			const item = checklistData.sections.verificaciones!.items.find(
+				(i) => i.type === input.verificationType,
 			);
 
 			if (item) {
@@ -2132,10 +2164,10 @@ export const crmRouter = {
 			}
 
 			// Recalculate completion status
-			checklistData.sections.verificaciones.completed =
-				checklistData.sections.verificaciones.items
-					.filter((i: any) => i.required)
-					.every((i: any) => i.completed);
+			checklistData.sections.verificaciones!.completed =
+				checklistData.sections.verificaciones!.items
+					.filter((i) => i.required)
+					.every((i) => i.completed);
 
 			// Recalculate overall progress
 			const [opportunity] = await db
@@ -2165,8 +2197,8 @@ export const crmRouter = {
 				if (checklistData.sections.vehiculo.verificaciones) {
 					checklistData.sections.vehiculo.verificaciones.completed =
 						checklistData.sections.vehiculo.verificaciones.items
-							.filter((i: any) => i.required)
-							.every((i: any) => i.completed);
+							.filter((i) => i.required)
+							.every((i) => i.completed);
 				}
 
 				// Recalculate vehicle section completion
@@ -2177,9 +2209,9 @@ export const crmRouter = {
 			}
 
 			const totalItems =
-				checklistData.sections.documentos.items.length + // client docs
-				checklistData.sections.verificaciones.items.filter(
-					(i: any) => i.required,
+				checklistData.sections.documentos!.items.length + // client docs
+				checklistData.sections.verificaciones!.items.filter(
+					(i) => i.required,
 				).length + // client verifications
 				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
@@ -2188,26 +2220,26 @@ export const crmRouter = {
 				(opportunity?.vehicleId &&
 				checklistData.sections.vehiculo?.verificaciones
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required,
+							(i) => i.required,
 						).length
 					: 0); // vehicle verifications
 
 			const completedItems =
-				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
+				checklistData.sections.documentos!.items.filter((i) => i.uploaded)
 					.length + // client docs uploaded
-				checklistData.sections.verificaciones.items.filter(
-					(i: any) => i.required && i.completed,
+				checklistData.sections.verificaciones!.items.filter(
+					(i) => i.required && i.completed,
 				).length + // client verifications completed
 				(vehicleInspected ? 1 : 0) + // vehicle inspection
 				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.uploaded,
+							(i) => i.uploaded,
 						).length
 					: 0) + // vehicle docs uploaded
 				(opportunity?.vehicleId &&
 				checklistData.sections.vehiculo?.verificaciones
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required && i.completed,
+							(i) => i.required && i.completed,
 						).length
 					: 0); // vehicle verifications completed
 
@@ -2216,8 +2248,8 @@ export const crmRouter = {
 			);
 
 			checklistData.canApprove =
-				checklistData.sections.documentos.completed &&
-				checklistData.sections.verificaciones.completed &&
+				checklistData.sections.documentos!.completed &&
+				checklistData.sections.verificaciones!.completed &&
 				(opportunity?.vehicleId
 					? (checklistData.sections.vehiculo?.completed ?? false)
 					: true);
@@ -2255,7 +2287,7 @@ export const crmRouter = {
 				throw new Error("Checklist no encontrado");
 			}
 
-			const checklistData = existing.checklistData as any;
+			const checklistData = existing.checklistData as ChecklistData;
 
 			// Verify vehicle section exists
 			if (!checklistData.sections.vehiculo?.verificaciones) {
@@ -2266,7 +2298,7 @@ export const crmRouter = {
 
 			// Update the specific vehicle verification
 			const item = checklistData.sections.vehiculo.verificaciones.items.find(
-				(i: any) => i.type === input.verificationType,
+				(i) => i.type === input.verificationType,
 			);
 
 			if (item) {
@@ -2283,8 +2315,8 @@ export const crmRouter = {
 			// Recalculate vehicle verifications completion
 			checklistData.sections.vehiculo.verificaciones.completed =
 				checklistData.sections.vehiculo.verificaciones.items
-					.filter((i: any) => i.required)
-					.every((i: any) => i.completed);
+					.filter((i) => i.required)
+					.every((i) => i.completed);
 
 			// Get opportunity and vehicle inspection status
 			const [opportunity] = await db
@@ -2315,16 +2347,16 @@ export const crmRouter = {
 				checklistData.sections.vehiculo.verificaciones.completed;
 
 			// Recalculate client verificaciones completion
-			checklistData.sections.verificaciones.completed =
-				checklistData.sections.verificaciones.items
-					.filter((i: any) => i.required)
-					.every((i: any) => i.completed);
+			checklistData.sections.verificaciones!.completed =
+				checklistData.sections.verificaciones!.items
+					.filter((i) => i.required)
+					.every((i) => i.completed);
 
 			// Recalculate overall progress
 			const totalItems =
-				checklistData.sections.documentos.items.length + // client docs
-				checklistData.sections.verificaciones.items.filter(
-					(i: any) => i.required,
+				checklistData.sections.documentos!.items.length + // client docs
+				checklistData.sections.verificaciones!.items.filter(
+					(i) => i.required,
 				).length + // client verifications
 				(opportunity?.vehicleId ? 1 : 0) + // vehicle inspection
 				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
@@ -2333,26 +2365,26 @@ export const crmRouter = {
 				(opportunity?.vehicleId &&
 				checklistData.sections.vehiculo?.verificaciones
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required,
+							(i) => i.required,
 						).length
 					: 0); // vehicle verifications
 
 			const completedItems =
-				checklistData.sections.documentos.items.filter((i: any) => i.uploaded)
+				checklistData.sections.documentos!.items.filter((i) => i.uploaded)
 					.length + // client docs uploaded
-				checklistData.sections.verificaciones.items.filter(
-					(i: any) => i.required && i.completed,
+				checklistData.sections.verificaciones!.items.filter(
+					(i) => i.required && i.completed,
 				).length + // client verifications completed
 				(vehicleInspected ? 1 : 0) + // vehicle inspection
 				(opportunity?.vehicleId && checklistData.sections.vehiculo?.documentos
 					? checklistData.sections.vehiculo.documentos.items.filter(
-							(i: any) => i.uploaded,
+							(i) => i.uploaded,
 						).length
 					: 0) + // vehicle docs uploaded
 				(opportunity?.vehicleId &&
 				checklistData.sections.vehiculo?.verificaciones
 					? checklistData.sections.vehiculo.verificaciones.items.filter(
-							(i: any) => i.required && i.completed,
+							(i) => i.required && i.completed,
 						).length
 					: 0); // vehicle verifications completed
 
@@ -2361,8 +2393,8 @@ export const crmRouter = {
 			);
 
 			checklistData.canApprove =
-				checklistData.sections.documentos.completed &&
-				checklistData.sections.verificaciones.completed &&
+				checklistData.sections.documentos!.completed &&
+				checklistData.sections.verificaciones!.completed &&
 				(opportunity?.vehicleId
 					? (checklistData.sections.vehiculo?.completed ?? false)
 					: true);

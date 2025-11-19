@@ -80,7 +80,7 @@ function OpportunityActions({
 
 	const canApprove =
 		(validation.data?.canApprove ?? false) &&
-		((checklist.data as any)?.canApprove ?? false);
+		((checklist.data as { canApprove?: boolean })?.canApprove ?? false);
 	const isLoading = validation.isLoading || checklist.isLoading;
 
 	// Build tooltip message for why approve is disabled
@@ -99,7 +99,7 @@ function OpportunityActions({
 			);
 		}
 
-		const checklistData = checklist.data as any;
+		const checklistData = checklist.data as { canApprove?: boolean } | undefined;
 		if (checklistData && !checklistData.canApprove) {
 			reasons.push(
 				"Debe completar todas las verificaciones del checklist de análisis",

@@ -269,7 +269,7 @@ function QuoterPage() {
 		try {
 			const result = await client.getInsuranceCost({
 				insuredAmount,
-				vehicleType: vehicleType as any,
+				vehicleType: vehicleType as "particular" | "comercial",
 			});
 
 			quoterForm.setFieldValue(
@@ -529,7 +529,7 @@ function QuoterPage() {
 												<Select
 													value={field.state.value}
 													onValueChange={(value) => {
-														field.handleChange(value as any);
+														field.handleChange(value);
 
 														// Actualizar seguro cuando cambia el tipo
 														const insuredAmount =

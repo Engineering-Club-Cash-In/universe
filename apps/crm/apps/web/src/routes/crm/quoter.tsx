@@ -186,7 +186,7 @@ function QuoterPage() {
 
 	// Mutations
 	const createQuotationMutation = useMutation({
-		mutationFn: async (values: any) => {
+		mutationFn: async (values: Parameters<typeof client.createQuotation>[0]) => {
 			return await client.createQuotation(values);
 		},
 		onSuccess: () => {
@@ -1122,7 +1122,7 @@ function QuotationDetailDialog({
 			monthlyPayment: Number(quotation.monthlyPayment),
 			termMonths: quotation.termMonths,
 			interestRate: Number(quotation.interestRate),
-			amortizationTable: quotation.amortizationTable.map((row: any) => ({
+			amortizationTable: quotation.amortizationTable.map((row) => ({
 				period: row.period,
 				initialBalance: row.initialBalance,
 				interestPlusVAT: row.interestPlusVAT,
@@ -1241,7 +1241,7 @@ function QuotationDetailDialog({
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{quotation.amortizationTable?.map((row: any) => (
+									{quotation.amortizationTable?.map((row) => (
 										<TableRow key={row.period}>
 											<TableCell>{row.period}</TableCell>
 											<TableCell>Q{row.initialBalance.toFixed(2)}</TableCell>

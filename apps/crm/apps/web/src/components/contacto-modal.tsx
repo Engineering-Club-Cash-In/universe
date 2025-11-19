@@ -60,7 +60,7 @@ export function ContactoModal({
 	});
 
 	const createContactoMutation = useMutation({
-		mutationFn: (data: any) =>
+		mutationFn: (data: Omit<Parameters<typeof client.createContactoCobros>[0], 'casoCobroId'>) =>
 			client.createContactoCobros({
 				casoCobroId,
 				...data,

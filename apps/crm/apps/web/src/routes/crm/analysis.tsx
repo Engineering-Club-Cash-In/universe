@@ -225,11 +225,9 @@ function AnalysisPage() {
 
 			setIsApprovalDialogOpen(false);
 			loadOpportunities(); // Recargar lista
-		} catch (error: any) {
-			toast.error(
-				error.message ||
-					`No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`,
-			);
+		} catch (error: unknown) {
+		const message = error instanceof Error ? error.message : `No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`;
+		toast.error(message);
 		} finally {
 			setIsSubmitting(false);
 		}

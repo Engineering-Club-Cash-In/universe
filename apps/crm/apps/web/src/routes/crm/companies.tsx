@@ -245,12 +245,12 @@ function RouteComponent() {
 		},
 	});
 
-	const handleViewDetails = (company: any) => {
+	const handleViewDetails = (company: NonNullable<typeof companiesQuery.data>[number]) => {
 		setSelectedCompany(company);
 		setIsDetailsDialogOpen(true);
 	};
 
-	const handleEditCompany = (company: any) => {
+	const handleEditCompany = (company: NonNullable<typeof companiesQuery.data>[number]) => {
 		setSelectedCompany(company);
 		// Populate form with company data
 		editCompanyForm.setFieldValue("name", company.name || "");

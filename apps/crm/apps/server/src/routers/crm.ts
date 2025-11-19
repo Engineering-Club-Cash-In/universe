@@ -1890,8 +1890,8 @@ export const crmRouter = {
 			}
 
 			// Get required vehicle documents based on ownerType
-			let requiredVehicleDocs: any[] = [];
-			let uploadedVehicleDocs: any[] = [];
+			let requiredVehicleDocs: (typeof vehicleDocumentRequirements.$inferSelect)[] = [];
+			let uploadedVehicleDocs: (typeof vehicleDocuments.$inferSelect)[] = [];
 			if (opportunity.vehicleId && vehicleOwnerType) {
 				requiredVehicleDocs = await db
 					.select()

@@ -148,7 +148,7 @@ export function VehicleDocumentUpload({
 
 	// Get uploaded document types
 	const uploadedTypes = new Set(
-		documents?.map((d: any) => d.documentType) || [],
+		documents?.map((d) => d.documentType) || [],
 	);
 
 	return (
@@ -246,7 +246,7 @@ export function VehicleDocumentUpload({
 					</div>
 				) : documents && documents.length > 0 ? (
 					<div className="space-y-2">
-						{documents.map((doc: any) => (
+						{documents.map((doc) => (
 							<div
 								key={doc.id}
 								className="flex items-center justify-between rounded-lg border p-3"

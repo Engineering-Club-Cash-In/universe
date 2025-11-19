@@ -167,7 +167,7 @@ function VendorsPage() {
 	});
 
 	// Filter vendors
-	const filteredVendors = vendorsQuery.data?.filter((vendor: any) => {
+	const filteredVendors = vendorsQuery.data?.filter((vendor) => {
 		const matchesSearch =
 			vendor.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
 			vendor.dpi.includes(searchTerm) ||
@@ -181,7 +181,7 @@ function VendorsPage() {
 		return matchesSearch && matchesType;
 	});
 
-	const handleEdit = (vendor: any) => {
+	const handleEdit = (vendor: NonNullable<typeof vendorsQuery.data>[number]) => {
 		setSelectedVendor(vendor);
 		editForm.reset({
 			name: vendor.name,
@@ -428,7 +428,7 @@ function VendorsPage() {
 										</TableCell>
 									</TableRow>
 								) : (
-									filteredVendors?.map((vendor: any) => (
+									filteredVendors?.map((vendor) => (
 										<TableRow key={vendor.id}>
 											<TableCell>
 												<div className="flex items-center gap-2">

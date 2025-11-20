@@ -51,15 +51,14 @@ export const Menu = () => {
 
   return (
     <div
-      className="fixed left-0 top-1/2 -translate-y-1/2 z-50"
+      className="fixed left-0 top-1/2 -translate-y-1/2 z-50 "
       style={{
         borderRadius: "0 39.874px 39.874px 0",
-        border: "1px solid #9499EC",
         background:
           "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
       }}
     >
-      <div className="py-12 px-6 space-y-6">
+      <div className="py-12 px-4 space-y-6">
         {/* Items del menú */}
         {menuItems.map((item) => {
           const isActive = location.pathname === item.id;

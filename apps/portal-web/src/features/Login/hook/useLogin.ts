@@ -90,9 +90,6 @@ export const useLogin = () => {
     // Iniciar el flujo de OAuth con better-auth
     try {
       setIsGoogleLoading(true);
-
-      console.log("Iniciando login con Google...");
-
       // Iniciar el flujo de OAuth con Google
       // El backend requiere el callbackURL
       await authClient.signIn.social(

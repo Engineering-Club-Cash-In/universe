@@ -1,1 +1,4 @@
-export { Profile } from "./Profile";
+export * from "./MyProfile";
+export * from "./MyInvestments";
+export * from "./MyLoans";
+export * from "./MyDocuments";

@@ -5,7 +5,6 @@ import { useLogin } from "../hook/useLogin";
 export const FormLogin = () => {
   const { formik, handleGoogleLogin, isLoading, isGoogleLoading, errorMessage } = useLogin();
 
-  console.log("Rendering FormLogin with errorMessage:", errorMessage);
 
   return (
     <div className="w-full flex justify-center mb-20 mt-16 items-center">

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser } from "@/components";
 import { useMutation } from "@tanstack/react-query";
+import { updateDpi, updatePhone, updateAddress } from "../services";
 
 type FieldType = 'dpi' | 'phone' | 'address';
 
@@ -22,61 +23,33 @@ export const ModalConfirmChange = ({
   onSuccess,
 }: ModalConfirmChangeProps) => {
   const [tempValue, setTempValue] = useState(initialValue);
-  const baseURL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
   // Actualizar tempValue cuando cambia initialValue
   useEffect(() => {
     setTempValue(initialValue);
   }, [initialValue]);
 
-  // Mutation para actualizar DPI
+  // Mutation para actualizar DPI usando el servicio centralizado
   const updateDpiMutation = useMutation({
-    mutationFn: async (newDpi: string) => {
-      const response = await fetch(`${baseURL}/api/profile/${userId}/dpi`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ dpi: newDpi }),
-      });
-      if (!response.ok) throw new Error("Error al actualizar DPI");
-      return response.json();
-    },
+    mutationFn: (newDpi: string) => updateDpi(userId, newDpi),
     onSuccess: () => {
       onSuccess();
       onClose();
     },
   });
 
-  // Mutation para actualizar tel�fono
+  // Mutation para actualizar teléfono usando el servicio centralizado
   const updatePhoneMutation = useMutation({
-    mutationFn: async (newPhone: string) => {
-      const response = await fetch(`${baseURL}/api/profile/${userId}/phone`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ phone: newPhone }),
-      });
-      if (!response.ok) throw new Error("Error al actualizar tel�fono");
-      return response.json();
-    },
+    mutationFn: (newPhone: string) => updatePhone(userId, newPhone),
     onSuccess: () => {
       onSuccess();
       onClose();
     },
   });
 
-  // Mutation para actualizar direcci�n
+  // Mutation para actualizar dirección usando el servicio centralizado
   const updateAddressMutation = useMutation({
-    mutationFn: async (newAddress: string) => {
-      const response = await fetch(`${baseURL}/api/profile/${userId}/address`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ address: newAddress }),
-      });
-      if (!response.ok) throw new Error("Error al actualizar direcci�n");
-      return response.json();
-    },
+    mutationFn: (newAddress: string) => updateAddress(userId, newAddress),
     onSuccess: () => {
       onSuccess();
       onClose();

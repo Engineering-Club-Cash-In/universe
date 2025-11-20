@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
 import { InfoPerson } from "./InfoPerson";
+import { Menu } from "../components/Menu";
 
 interface UserData {
   id: string;
@@ -47,21 +48,6 @@ export const Profile = () => {
     loadUserSession();
   }, [navigate]);
 
-  const handleLogout = async () => {
-    try {
-      // Cerrar sesión con better-auth
-      await authClient.signOut();
-
-      // Limpiar localStorage (solo el token de recordar email)
-      localStorage.removeItem("remembered-email");
-
-      // Redirigir al login
-      navigate({ to: "/login" });
-    } catch (error) {
-      console.error("Error during logout:", error);
-      navigate({ to: "/login" });
-    }
-  };
 
   if (isLoading) {
     return (
@@ -84,6 +70,7 @@ export const Profile = () => {
     <div>
       <div className="w-full mt-4 p-8">
         <NavBar />
+        <Menu />
         <div className="max-w-7xl mx-auto mt-16 mb-20">
           {/* Header - Mi Perfil */}
           <div className="mb-12">
@@ -119,15 +106,6 @@ export const Profile = () => {
                 userEmail={user.email}
                 userImage={user.image}
               />
-
-              <div className="pt-4">
-                <button
-                  onClick={handleLogout}
-                  className="px-6 py-3 bg-red-500/20 hover:bg-red-500/30 border border-red-500/50 rounded-full text-red-400 font-semibold transition-all"
-                >
-                  Cerrar sesión
-                </button>
-              </div>
             </div>
           )}
         </div>

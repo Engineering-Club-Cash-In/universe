@@ -108,7 +108,8 @@ function RouteComponent() {
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
-	const casoDetails = useQuery({
+	// @ts-expect-error - TypeScript no puede inferir correctamente el tipo de query options condicionales
+	const casoDetails: any = useQuery({
 		...(esCarteraBack
 			? orpc.getDetallesCreditoCarteraBack.queryOptions({
 					input: { creditoId: id },

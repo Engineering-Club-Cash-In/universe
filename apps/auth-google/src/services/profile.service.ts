@@ -53,7 +53,7 @@ export class ProfileService {
       .update(userProfiles)
       .set({
         dpi,
-        profileCompleted: this.isProfileComplete(dpi, profile.phone, profile.address),
+        profileCompleted: this.isProfileComplete(dpi, profile.phone),
         updatedAt: new Date(),
       })
       .where(eq(userProfiles.userId, userId))
@@ -75,7 +75,7 @@ export class ProfileService {
       .update(userProfiles)
       .set({
         phone,
-        profileCompleted: this.isProfileComplete(profile.dpi, phone, profile.address),
+        profileCompleted: this.isProfileComplete(profile.dpi, phone),
         updatedAt: new Date(),
       })
       .where(eq(userProfiles.userId, userId))
@@ -97,7 +97,7 @@ export class ProfileService {
       .update(userProfiles)
       .set({
         address,
-        profileCompleted: this.isProfileComplete(profile.dpi, profile.phone, address),
+        profileCompleted: this.isProfileComplete(profile.dpi, profile.phone),
         updatedAt: new Date(),
       })
       .where(eq(userProfiles.userId, userId))
@@ -123,9 +123,8 @@ export class ProfileService {
    */
   private static isProfileComplete(
     dpi: string | null,
-    phone: string | null,
-    address: string | null
+    phone: string | null
   ): boolean {
-    return !!dpi && !!phone && !!address;
+    return !!dpi && !!phone
   }
 }

@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Profile } from "@/features/Profile/MyProfile/Profile";
 import { Page } from "@/components";
+import { MyLoans } from "@/features/Profile";
 import { checkAuth } from "@/lib/auth";
 
-export const Route = createFileRoute("/profile")({
+export const Route = createFileRoute("/loans")({
   beforeLoad: async () => {
     await checkAuth();
   },
@@ -13,7 +13,7 @@ export const Route = createFileRoute("/profile")({
 function RouteComponent() {
   return (
     <Page>
-      <Profile />
+      <MyLoans />
     </Page>
   );
 }

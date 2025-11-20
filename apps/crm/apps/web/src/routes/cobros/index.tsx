@@ -1,20 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { differenceInDays, format } from "date-fns";
-import { es } from "date-fns/locale";
+import { differenceInDays } from "date-fns";
 import {
 	Banknote,
 	CalendarDays,
 	CalendarRange,
 	Loader2,
 	Phone,
-	RefreshCw,
 	TrendingDown,
 	TrendingUp,
 	Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { PERMISSIONS } from "server/src/types/roles";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +50,14 @@ function calcularProximaFechaPago(diaPagoMensual: number | null) {
 	}
 
 	const diasRestantes = differenceInDays(fechaPago, hoy);
+
+	console.log("[calcularProximaFechaPago]", {
+		diaPagoMensual,
+		diaActual,
+		hoy: hoy.toISOString(),
+		fechaPago: fechaPago.toISOString(),
+		diasRestantes,
+	});
 
 	return {
 		fechaPago,
@@ -93,33 +98,6 @@ function RouteComponent() {
 		enabled: !!session,
 	});
 
-	const queryClient = useQueryClient();
-
-	// Mutation para sincronizar casos de cobros (solo admin)
-	const sincronizarCasos = useMutation({
-		mutationFn: async () => {
-			const now = new Date();
-			return await orpc.sincronizarCasosCobros({
-				mes: now.getMonth() + 1,
-				anio: now.getFullYear(),
-				forceSyncAll: true,
-			});
-		},
-		onSuccess: (data) => {
-			toast.success(
-				`Sincronización completada: ${data.casosCreados} creados, ${data.casosActualizados} actualizados, ${data.casosCerrados} cerrados`,
-			);
-			// Refrescar los datos
-			queryClient.invalidateQueries({ queryKey: ["getTodosLosContratos"] });
-			queryClient.invalidateQueries({ queryKey: ["getCobrosDashboardStats"] });
-		},
-		onError: (error) => {
-			toast.error(
-				`Error en sincronización: ${error instanceof Error ? error.message : "Error desconocido"}`,
-			);
-		},
-	});
-
 	const userRole = userProfile.data?.role;
 	const stats = dashboardStats.data?.estatusStats || [];
 	const contratos = todosLosContratos.data || [];
@@ -133,6 +111,14 @@ function RouteComponent() {
 				// Casos con más mora aparecen primero (más negativos)
 				const diasHastaPago =
 					infoPago?.diasRestantes ?? -(contrato.diasMoraMaximo || 0);
+
+				console.log("[contratoConDias]", {
+					clienteNombre: contrato.clienteNombre,
+					diaPagoMensual: contrato.diaPagoMensual,
+					diasMoraMaximo: contrato.diasMoraMaximo,
+					infoPago,
+					diasHastaPago,
+				});
 
 				return {
 					...contrato,
@@ -231,33 +217,11 @@ function RouteComponent() {
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
-			<div className="flex items-center justify-between">
-				<div>
-					<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
-					<p className="text-muted-foreground">
-						Gestión y seguimiento de cobranza - Enfoque preventivo
-					</p>
-				</div>
-				{userRole === "admin" && (
-					<Button
-						onClick={() => sincronizarCasos.mutate()}
-						disabled={sincronizarCasos.isPending}
-						variant="outline"
-						className="gap-2"
-					>
-						{sincronizarCasos.isPending ? (
-							<>
-								<Loader2 className="h-4 w-4 animate-spin" />
-								Sincronizando...
-							</>
-						) : (
-							<>
-								<RefreshCw className="h-4 w-4" />
-								Sincronizar Casos
-							</>
-						)}
-					</Button>
-				)}
+			<div>
+				<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
+				<p className="text-muted-foreground">
+					Gestión y seguimiento de cobranza - Enfoque preventivo
+				</p>
 			</div>
 
 			{/* Loading indicator */}
@@ -269,9 +233,7 @@ function RouteComponent() {
 							<p className="font-medium text-blue-900">
 								Cargando información de cobros...
 							</p>
-							<p className="text-blue-700 text-sm">
-								Obteniendo datos de Cartera-Back
-							</p>
+							<p className="text-blue-700 text-sm">Cartera</p>
 						</div>
 					</CardContent>
 				</Card>
@@ -437,22 +399,39 @@ function RouteComponent() {
 									</div>
 									<div className="relative flex-1">
 										<div className="h-10 w-full overflow-hidden rounded-md bg-muted">
-											<div
-												className="flex h-full items-center justify-between px-3 transition-all duration-300 group-hover:opacity-80"
-												style={{
-													width: `${Math.max(porcentaje, 8)}%`,
-													backgroundColor: `hsl(0, 0%, ${100 - porcentaje * 0.7}%)`,
-												}}
-											>
-												<span
-													className="font-semibold text-sm"
+											{porcentaje >= 15 ? (
+												// Barra suficientemente ancha - texto dentro
+												<div
+													className="flex h-full items-center justify-between px-3 transition-all duration-300 group-hover:opacity-80"
 													style={{
-														color: porcentaje > 50 ? "white" : "#1f2937",
+														width: `${porcentaje}%`,
+														backgroundColor: `hsl(220, 15%, ${Math.max(30, 90 - porcentaje * 0.5)}%)`,
 													}}
 												>
-													{estadoStats.totalCases} casos
-												</span>
-											</div>
+													<span
+														className="font-semibold text-sm whitespace-nowrap"
+														style={{
+															color: porcentaje > 60 ? "white" : "#1f2937",
+														}}
+													>
+														{estadoStats.totalCases} casos
+													</span>
+												</div>
+											) : (
+												// Barra estrecha - texto fuera
+												<div className="flex h-full items-center">
+													<div
+														className="h-full transition-all duration-300 group-hover:opacity-80"
+														style={{
+															width: `${Math.max(porcentaje, 3)}%`,
+															backgroundColor: `hsl(220, 15%, ${Math.max(30, 90 - porcentaje * 0.5)}%)`,
+														}}
+													/>
+													<span className="ml-2 font-semibold text-sm text-muted-foreground whitespace-nowrap">
+														{estadoStats.totalCases} casos
+													</span>
+												</div>
+											)}
 										</div>
 									</div>
 									<div className="w-32 shrink-0 text-right font-medium text-sm">

@@ -2,13 +2,7 @@ import { useState, useEffect } from "react";
 import { InputIcon, IconAddress, IconPhone, IconPerson } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { ModalConfirmChange } from "./ModalConfirmChange";
-
-interface ProfileData {
-  dpi?: string;
-  phone?: string;
-  address?: string;
-  profileCompleted: boolean;
-}
+import { getProfile } from "../services";
 
 interface InfoPersonProps {
   userId: string;
@@ -25,19 +19,10 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
   const [address, setAddress] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
 
-  const baseURL = import.meta.env.VITE_API_URL || "http://localhost:3000";
-
-  // Obtener perfil
+  // Obtener perfil usando el servicio centralizado
   const { data: profileData, refetch } = useQuery({
     queryKey: ["profile", userId],
-    queryFn: async () => {
-      const response = await fetch(`${baseURL}/api/profile/${userId}`, {
-        credentials: "include",
-      });
-      if (!response.ok) throw new Error("Error al cargar el perfil");
-      const result = await response.json();
-      return result.data as ProfileData;
-    },
+    queryFn: () => getProfile(userId),
     enabled: !!userId,
   });
 
@@ -116,8 +101,7 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
                 Perfil Incompleto
               </p>
               <p className="text-yellow-200/80 text-sm">
-                Por favor completa todos los campos de tu información personal
-                para que podamos procesar tus solicitudes.
+                Por favor completa los campos de DPI, Teléfono para ser un usuario verificado.
               </p>
             </div>
           </div>

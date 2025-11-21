@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { authService } from "@features/Login/services/authService";
-import type { User } from "@/lib/auth";
+import { authClient, type User } from "@/lib/auth";
 import { AuthContext } from "./useAuth";
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -9,10 +8,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Query para verificar autenticación
   const { data, isLoading } = useQuery({
-    queryKey: ["currentUser"],
-    queryFn: authService.getCurrentUser,
-    retry: false,
-    staleTime: 1000 * 60 * 5, // 5 minutos
+    queryKey: ["auth", "session"],
+    queryFn: () => authClient.getSession().then((res) => res.data),
+    staleTime: 5 * 60 * 1000, // 5 minutos
   });
 
   useEffect(() => {
@@ -35,5 +33,3 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     </AuthContext.Provider>
   );
 };
-
-

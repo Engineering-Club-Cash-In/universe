@@ -9,7 +9,6 @@ import { motion } from "framer-motion";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth";
 
-
 export const Menu = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -18,10 +17,6 @@ export const Menu = () => {
     try {
       // Cerrar sesión con better-auth
       await authClient.signOut();
-
-      // Limpiar localStorage (solo el token de recordar email)
-      localStorage.removeItem("remembered-email");
-
       // Redirigir al login
       navigate({ to: "/login" });
     } catch (error) {

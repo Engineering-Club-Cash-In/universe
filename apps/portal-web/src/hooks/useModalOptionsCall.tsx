@@ -134,6 +134,23 @@ export const useModalOptionsCall = () => {
     },
   };
 
+  const optionPayment: ModalOption = {
+    type: "whatsapp",
+    title:
+      "Puedes obtener más información y realizar el proceso de pago del crédito a través de nuestro WhatsApp.",
+    description: "",
+    buttonText: "WhatsApp",
+    buttonAction: () => {
+      const defaultMessage =
+        "Hola, quiero realizar el pago de mi crédito vehicular.";
+      window.open(
+        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+        "_blank"
+      );
+      setIsModalOpen(false);
+    },
+  }
+
   return {
     isModalOpen,
     setIsModalOpen,
@@ -148,5 +165,6 @@ export const useModalOptionsCall = () => {
       schedule: optionAgendarCita,
       questions: optionSellQuestions,
     },
+    optionPayment,
   };
 };

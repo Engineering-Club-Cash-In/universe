@@ -11,6 +11,7 @@ interface UserData {
   name?: string;
   phone?: string;
   image?: string;
+  cachedImage?: string;
 }
 
 export const Profile = () => {
@@ -26,12 +27,46 @@ export const Profile = () => {
 
         if (sessionData?.data?.user) {
           const userData = sessionData.data.user as UserData;
+          
+          // Verificar si hay imagen cacheada en localStorage
+          const cachedImageKey = `user_image_${userData.id}`;
+          let cachedImage = localStorage.getItem(cachedImageKey);
+
+          // Si hay imagen de Google y no está cacheada, descargarla y cachearla
+          if (userData.image && !cachedImage) {
+            try {
+              const response = await fetch(userData.image);
+              const blob = await response.blob();
+              
+              // Convertir blob a base64 para guardar en localStorage
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64data = reader.result as string;
+                localStorage.setItem(cachedImageKey, base64data);
+                cachedImage = base64data;
+                
+                setUser({
+                  id: userData.id,
+                  email: userData.email,
+                  name: userData.name,
+                  phone: userData.phone,
+                  image: userData.image,
+                  cachedImage: cachedImage || undefined,
+                });
+              };
+              reader.readAsDataURL(blob);
+            } catch (error) {
+              console.error("Error caching image:", error);
+            }
+          }
+
           setUser({
             id: userData.id,
             email: userData.email,
             name: userData.name,
-            phone: userData.phone, // Si el backend lo tiene\
+            phone: userData.phone,
             image: userData.image,
+            cachedImage: cachedImage || undefined,
           });
         } else {
           // Si no hay sesión, redirigir al login
@@ -79,9 +114,9 @@ export const Profile = () => {
             <div className="flex items-center gap-6">
               {/* Imagen de perfil */}
               <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center text-primary text-3xl font-bold">
-                {user?.image ? (
+                {user?.cachedImage || user?.image ? (
                   <img
-                    src={user.image}
+                    src={user.cachedImage || user.image}
                     alt="Imagen de perfil"
                     className="w-full h-full object-cover rounded-full"
                   />

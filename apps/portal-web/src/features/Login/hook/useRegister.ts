@@ -3,6 +3,8 @@ import * as Yup from "yup";
 import { useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
+import { updatePhone } from "@/features/Profile/services";
+import { useNavigate } from "@tanstack/react-router";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -31,6 +33,7 @@ const validationSchema = Yup.object({
 export const useRegister = () => {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const navigate = useNavigate();
 
   // Formik
   const formik = useFormik<RegisterCredentials>({
@@ -46,13 +49,27 @@ export const useRegister = () => {
     onSubmit: async (values) => {
       try {
         setIsLoading(true);
-        await authClient.signUp.email({
+        const response = await authClient.signUp.email({
           email: values.email,
           password: values.password,
           name: values.fullName,
           callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
           // Better-auth no tiene campo phone por defecto, se puede agregar como dato adicional si es necesario
         });
+
+        // Si el registro fue exitoso y hay teléfono, actualizarlo
+        if (response?.data?.user?.id && values.phone && values.phone.trim() !== "") {
+          try {
+            await updatePhone(response.data.user.id, values.phone);
+          } catch (phoneError) {
+            console.error("Error al registrar teléfono:", phoneError);
+            // No detener el flujo si falla el teléfono, el usuario ya fue registrado
+          }
+        }
+
+        // enviar al profile
+        navigate({ to: "/profile" });
+
       } catch (error) {
         console.error("Error during registration:", error);
       } finally {

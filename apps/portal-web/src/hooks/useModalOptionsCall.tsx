@@ -4,7 +4,8 @@ import { useState } from "react";
 export const useModalOptionsCall = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const phoneNumber = import.meta.env.VITE_WHATSAPP_PHONE_NUMBER;
+  const WAphoneNumber = import.meta.env.VITE_WHATSAPP_PHONE_NUMBER;
+  const phoneNumber = import.meta.env.VITE_PHONE_NUMBER;
   const urlInspection = import.meta.env.VITE_URL_INSPECTION;
 
   const modalOptionsInvestors: ModalOption[] = [
@@ -18,7 +19,7 @@ export const useModalOptionsCall = () => {
         const defaultMessage =
           "Hola, estoy interesado en obtener más información sobre las oportunidades de inversión.";
         window.open(
-          `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+          `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
           "_blank"
         );
         setIsModalOpen(false);
@@ -47,7 +48,7 @@ export const useModalOptionsCall = () => {
       const defaultMessage =
         "Hola, estoy interesado en obtener más información sobre el crédito vehicular.";
       window.open(
-        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+        `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
         "_blank"
       );
       setIsModalOpen(false);
@@ -64,7 +65,7 @@ export const useModalOptionsCall = () => {
       const defaultMessage =
         "Hola, estoy interesado en obtener más información sobre la venta de mi auto.";
       window.open(
-        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+        `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
         "_blank"
       );
       setIsModalOpen(false);
@@ -81,7 +82,7 @@ export const useModalOptionsCall = () => {
       const defaultMessage =
         "Hola, tengo algunas preguntas sobre los créditos que ofrecen.";
       window.open(
-        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+        `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
         "_blank"
       );
       setIsModalOpen(false);
@@ -110,29 +111,42 @@ export const useModalOptionsCall = () => {
       const defaultMessage =
         "Hola, me gustaría agendar una cita para inspeccionar mi vehículo y obtener más información sobre sus créditos.";
       window.open(
-        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+        `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
         "_blank"
       );
       setIsModalOpen(false);
     },
   };
 
-  const optionSellQuestions: ModalOption = {
-    type: "whatsapp",
-    title:
-      "Puedes obtener más información y resolver tus dudas sobre la venta de tu auto a través de nuestro WhatsApp.",
-    description: "",
-    buttonText: "WhatsApp",
-    buttonAction: () => {
-      const defaultMessage =
-        "Hola, tengo algunas preguntas sobre la venta de mi auto.";
-      window.open(
-        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
-        "_blank"
-      );
-      setIsModalOpen(false);
+  const optionSellQuestions: ModalOption[] = [
+    {
+      type: "whatsapp",
+      title:
+        "Puedes obtener más información y resolver tus dudas sobre la venta de tu auto a través de nuestro WhatsApp.",
+      description: "",
+      buttonText: "WhatsApp",
+      buttonAction: () => {
+        const defaultMessage =
+          "Hola, tengo algunas preguntas sobre la venta de mi auto.";
+        window.open(
+          `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+          "_blank"
+        );
+        setIsModalOpen(false);
+      },
     },
-  };
+    {
+      type: "call",
+      title:
+        "También puedes llamarnos directamente para resolver tus dudas sobre la venta de tu auto.",
+      description: "",
+      buttonText: "Llamar ahora",
+      buttonAction: () => {
+        window.open(`tel:${phoneNumber}`, "_blank");
+        setIsModalOpen(false);
+      },
+    },
+  ];
 
   const optionPayment: ModalOption = {
     type: "whatsapp",
@@ -144,12 +158,12 @@ export const useModalOptionsCall = () => {
       const defaultMessage =
         "Hola, quiero realizar el pago de mi crédito vehicular.";
       window.open(
-        `https://api.whatsapp.com/send/?phone=${phoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
+        `https://api.whatsapp.com/send/?phone=${WAphoneNumber}&text=${encodeURIComponent(defaultMessage)}&type=phone_number&app_absent=0`,
         "_blank"
       );
       setIsModalOpen(false);
     },
-  }
+  };
 
   return {
     isModalOpen,

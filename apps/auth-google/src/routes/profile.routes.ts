@@ -31,7 +31,6 @@ profileRoutes.get("/:userId", async (c) => {
       throw error;
     }
 
-    console.error("Error obteniendo perfil:", error);
     throw new HTTPException(500, {
       message: "Error al obtener el perfil",
     });
@@ -76,7 +75,6 @@ profileRoutes.post("/:userId/dpi", async (c) => {
       throw error;
     }
 
-    console.error("Error actualizando DPI:", error);
     throw new HTTPException(500, {
       message: error instanceof Error ? error.message : "Error al actualizar el DPI",
     });
@@ -121,7 +119,6 @@ profileRoutes.post("/:userId/phone", async (c) => {
       throw error;
     }
 
-    console.error("Error actualizando teléfono:", error);
     throw new HTTPException(500, {
       message: error instanceof Error ? error.message : "Error al actualizar el teléfono",
     });
@@ -166,7 +163,6 @@ profileRoutes.post("/:userId/address", async (c) => {
       throw error;
     }
 
-    console.error("Error actualizando dirección:", error);
     throw new HTTPException(500, {
       message: error instanceof Error ? error.message : "Error al actualizar la dirección",
     });

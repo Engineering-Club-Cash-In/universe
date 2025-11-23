@@ -1,10 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 
-// 🔥 Constante global para la URL del backend
-const BACK_URL = import.meta.env.VITE_BACK_URL || "https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site";
-
-console.log("🔍 Backend URL configurada:", BACK_URL);
+const BACK_URL = import.meta.env.VITE_BACK_URL;
 
 interface User {
   id: number;
@@ -28,6 +26,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const navigate = useNavigate(); // 👈 agregado
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
@@ -35,7 +34,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 🔹 Verificar token al cargar la app
   useEffect(() => {
-    
     const savedAccess = localStorage.getItem("accessToken");
     const savedRefresh = localStorage.getItem("refreshToken");
     const savedUser = localStorage.getItem("user");
@@ -48,16 +46,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         })
         .then((data) => {
           if (data.success) {
-            setAccessToken(savedAccess);
-            setRefreshToken(savedRefresh);
+            const newToken = data.accessToken || savedAccess;
+            setAccessToken(newToken);
+            localStorage.setItem("accessToken", newToken);
+
             if (savedUser) setUser(JSON.parse(savedUser));
-            else if (data.data) setUser(data.data);
-          } else {
-            console.warn("Token inválido:", data.error);
-            refreshSession();
+            else setUser(data.data);
           }
         })
-        .catch(() => refreshSession())
+        .catch(() => {
+          // 👇 si falla verify, intentamos refresh
+          refreshSession();
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -67,7 +67,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // 🔹 Login
   const login = (user: User, access: string, refresh: string) => {
     setUser(user);
-    
     setAccessToken(access);
     setRefreshToken(refresh);
 
@@ -76,7 +75,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem("user", JSON.stringify(user));
   };
 
-  // 🔹 Logout
+  // 🔹 Logout + redirección inmediata
   const logout = () => {
     setUser(null);
     setAccessToken(null);
@@ -84,6 +83,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("user");
+
+    navigate("/login"); // 👈 redirige
   };
 
   // 🔹 Refrescar sesión
@@ -106,8 +107,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         logout();
       }
-    } catch (err) {
-      console.error("❌ Error refrescando sesión:", err);
+    } catch {
       logout();
     }
   };
@@ -130,7 +130,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-// 🎯 Custom Hook para usar el contexto
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {

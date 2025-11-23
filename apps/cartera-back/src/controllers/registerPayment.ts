@@ -18,6 +18,7 @@ import { updateMora } from "./latefee";
 import { insertPagosCreditoInversionistas } from "./payments";
 import { processAndReplaceCreditInvestors } from "./investor";
 import { formatInTimeZone } from "date-fns-tz/dist/cjs/formatInTimeZone";
+import { processConvenioPayment } from "./paymentAgreement";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -311,7 +312,16 @@ const obtenerInfoCompletaCredito = async (
         )
         .orderBy(cuotas_credito.numero_cuota),
     ]);
+    console.log(cuotaApagar,"cuota a pagar");
+const numerosCuotas = cuotasPendientes.map((item) => item.cuotas_credito.numero_cuota);
+console.log("Números de cuotas pendientes:", numerosCuotas);
 
+// 🎯 O si quieres más info:
+console.log("Cuotas pendientes:", cuotasPendientes.map(item => ({
+  numero_cuota: item.cuotas_credito.numero_cuota,
+  fecha_vencimiento: item.cuotas_credito.fecha_vencimiento,
+  cuota_id: item.cuotas_credito.cuota_id
+})));
     // ✅ Retornar todo estructurado
     return {
       // 📋 Crédito completo
@@ -383,13 +393,6 @@ const calcularMontoEfectivo = (
   return montoBoleta.minus(otros).minus(abonoDirectoCapital ?? 0);
 };
 
-/**
- * Calcula el disponible total (saldo + monto efectivo)
- */
-const calcularDisponible = (saldoAFavor: Big, montoEfectivo: Big): Big => {
-  return saldoAFavor.plus(montoEfectivo);
-};
-
 // ========================================
 // 4. PROCESAMIENTO DE PAGOS ESPECIALES
 // ========================================
@@ -401,74 +404,6 @@ const calcularDisponible = (saldoAFavor: Big, montoEfectivo: Big): Big => {
 // ========================================
 // 5. CÁLCULO DE ABONOS POR CUOTA
 // ========================================
-
-/**
- * Calcula los totales de inversionistas
- */
-const calcularTotalesInversionistas = (inversionistas: any[]) => {
-  let total_monto_cash_in = new Big(0);
-  let total_iva_cash_in = new Big(0);
-  let total_monto_inversionista = new Big(0);
-  let total_iva_inversionista = new Big(0);
-
-  inversionistas.forEach(
-    ({
-      monto_cash_in,
-      iva_cash_in,
-      monto_inversionista,
-      iva_inversionista,
-    }) => {
-      total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
-      total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
-      total_monto_inversionista =
-        total_monto_inversionista.plus(monto_inversionista);
-      total_iva_inversionista = total_iva_inversionista.plus(iva_inversionista);
-    }
-  );
-
-  return {
-    total_monto_cash_in,
-    total_iva_cash_in,
-    total_monto_inversionista,
-    total_iva_inversionista,
-  };
-};
-
-/**
- * Calcula los abonos de una cuota
- */
-const calcularAbonosCuota = (
-  montoCuota: Big,
-  credito: any,
-  totalesInversionistas: ReturnType<typeof calcularTotalesInversionistas>
-) => {
-  const { total_monto_cash_in, total_monto_inversionista } =
-    totalesInversionistas;
-
-  const abono_interes = total_monto_inversionista.plus(total_monto_cash_in);
-  const abono_iva_12 = new Big(credito.iva_12);
-  const abono_seguro = new Big(credito.seguro_10_cuotas);
-  const abono_gps = new Big(credito.gps);
-  const abono_interes_ci = total_monto_cash_in;
-  const abono_iva_ci = totalesInversionistas.total_iva_cash_in;
-
-  const abono_capital = montoCuota
-    .minus(abono_interes)
-    .minus(abono_iva_12)
-    .minus(abono_seguro)
-    .minus(abono_gps)
-    .minus(credito.membresias ?? 0);
-
-  return {
-    abono_capital,
-    abono_interes,
-    abono_iva_12,
-    abono_seguro,
-    abono_gps,
-    abono_interes_ci,
-    abono_iva_ci,
-  };
-};
 
 // ========================================
 // 6. ACTUALIZACIÓN DE CRÉDITO
@@ -550,8 +485,7 @@ export const insertPayment = async ({ body, set }: any) => {
     }
 
     const {
-      credito_id,
-      usuario_id,
+      credito_id, 
       monto_boleta,
       fecha_pago,
       llamada,
@@ -568,16 +502,39 @@ export const insertPayment = async ({ body, set }: any) => {
 
     // 2. Preparar datos
     const urlCompletas = prepararURLsBoletas(url_boletas);
-    const {
-      credito,
-      cuotasPendientes,
-      inversionistas,
-      saldoAFavor,
-      mora, // ← NUEVO: Info de mora
-      stats,
-    } = await obtenerInfoCompletaCredito(credito_id, set, cuotaApagar);
+
     // 4. Calcular disponible
     const montoBoleta = new Big(monto_boleta);
+    // 1. Obtener toda la info del crédito UNA SOLA VEZ
+    const creditoData = await obtenerInfoCompletaCredito(
+      credito_id,
+      set,
+      cuotaApagar
+    );
+
+    const {
+      credito,
+      inversionistas,
+      cuotasPendientes,
+      saldoAFavor,
+      mora,
+      stats,
+      usuario_id,
+    } = creditoData;
+
+    // 3. Preparar creditoInfo con las variables destructuradas
+    const creditoInfo = {
+      credito,
+      inversionistas,
+      cuotasPendientes,
+      mora: mora
+        ? {
+            ...mora,
+            created_at: mora.created_at ?? new Date(),
+            updated_at: mora.updated_at ?? new Date(),
+          }
+        : undefined,
+    };
     let moraBig = new Big(mora?.monto_mora ?? 0);
     const otrosBig = new Big(otros ?? 0);
 
@@ -599,13 +556,56 @@ export const insertPayment = async ({ body, set }: any) => {
         registerBy: registerBy ?? "",
       });
     }
+
     const montoEfectivo = calcularMontoEfectivo(
       montoBoleta,
 
       otrosBig,
       abono_directo_capital ?? 0
     );
-    let disponible = new Big(saldoAFavor).plus(montoEfectivo);
+
+    //  Llamás processConvenioPayment pasándole la info
+    // 3. Preparar pagoMetadata (con los datos del pago que está haciendo el usuario)
+  let montoConvenio = new Big(0);
+let pagoConvenio = null;
+
+if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
+  // 2. Preparar pagoMetadata (con los datos del pago que está haciendo el usuario)
+  const pagoMetadata = {
+    montoBoleta: montoBoleta.toString(),
+    llamada: llamada,
+    renuevo_o_nuevo: "Convenio",
+    observaciones: observaciones,
+    numeroAutorizacion: numeroAutorizacion,
+    banco_id: banco_id,
+    registerBy: usuario_id,
+    urlCompletas: urlCompletas,
+  };
+
+  // 3. 🔥 Llamar processConvenioPayment con TODA la info
+  pagoConvenio = await processConvenioPayment({
+    credito_id: credito_id,
+    monto_pago: montoEfectivo.toNumber(),
+    creditoInfo: creditoInfo,
+    pagoMetadata: pagoMetadata,
+  });
+
+  // 4. El resultado contiene:
+  console.log(pagoConvenio.success);
+  console.log(pagoConvenio.message);
+  console.log(pagoConvenio.convenio);
+  console.log(pagoConvenio.cuotas_procesadas);
+  console.log(pagoConvenio.cuotas_aplicadas);
+  montoConvenio = new Big(pagoConvenio.monto_aplicado);
+  console.log("monto convenio:", montoConvenio.toString());
+} else {
+  console.log(`[INFO] Crédito #${credito_id} no está EN_CONVENIO, saltando procesamiento de convenio`);
+}
+ 
+    console.log("monto convenio:", montoConvenio.toString());
+    let disponible = 
+      new Big(montoEfectivo)
+      .minus(montoConvenio);
     // 🔥 PROCESAR MORA - Ahora solo pasas los IDs
     const resultadoMora = await procesarPagoMora({
       credito_id: credito.credito_id,
@@ -617,7 +617,7 @@ export const insertPayment = async ({ body, set }: any) => {
     // Actualizar disponible
     disponible = new Big(resultadoMora.disponibleRestante);
     const montoCuota = new Big(credito.cuota);
-    let disponible_restante = disponible.minus(abono_directo_capital ?? 0);
+    let disponible_restante = disponible 
     if (!resultadoMora.teniaMora) {
       console.log(
         "No tenía mora activa, se procede a registrar el pago normal."
@@ -1083,7 +1083,7 @@ export const insertPayment = async ({ body, set }: any) => {
               }
             } else {
               disponible_para_cuotasPosteriores =
-                disponible_para_cuotasPosteriores.plus(montoBoleta);
+                disponible_para_cuotasPosteriores.plus(disponible);
               await db
                 .update(pagos_credito)
                 .set({
@@ -1188,6 +1188,7 @@ export const insertPayment = async ({ body, set }: any) => {
                   banco_id: pagoData.banco_id || null,
                   numeroAutorizacion: pagoData.numeroAutorizacion || null,
                   registerBy: pagoData.registerBy,
+                  pagoConvenio: montoConvenio.toString() || "0",
                 })
                 .returning();
               console.log("pagoInsertado cuota parcial:", pagoInsertado);
@@ -1273,21 +1274,21 @@ export const insertPayment = async ({ body, set }: any) => {
           pagado: true,
         })
         .returning();
-                    const guatemalaTimeString = new Date().toLocaleString("en-US", {
-                timeZone: "America/Guatemala",
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-                hour12: false,
-              });
+      const guatemalaTimeString = new Date().toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      });
 
-              // Convertir "11/22/2025, 17:07:09" a Date object
-              const [datePart, timePart] = guatemalaTimeString.split(", ");
-              const [month, day, year] = datePart.split("/");
-              const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+      // Convertir "11/22/2025, 17:07:09" a Date object
+      const [datePart, timePart] = guatemalaTimeString.split(", ");
+      const [month, day, year] = datePart.split("/");
+      const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
       const pagoData = {
         credito_id,
         cuota: credito.cuota,
@@ -1344,6 +1345,7 @@ export const insertPayment = async ({ body, set }: any) => {
         validationStatus: "capital" as const,
         paymentFalse: false,
         registerBy: registerBy,
+        pagoConvenio: montoConvenio.toString() || "0",
       };
 
       console.log("\n📝 ========== REGISTRANDO PAGO ==========");
@@ -1617,6 +1619,7 @@ export async function insertarPago({
       banco_id: banco_id || null,
       numeroAutorizacion: numeroAutorizacion || null,
       registerBy: registerBy,
+      pagoConvenio: "0",
     })
     .returning();
 
@@ -2266,7 +2269,7 @@ export async function aplicarAbonoCapitalInversionistas(
   };
 }
 
-export   async function actualizarCuentaPago(
+export async function actualizarCuentaPago(
   pagoId: number,
   cuentaEmpresaId: number
 ) {

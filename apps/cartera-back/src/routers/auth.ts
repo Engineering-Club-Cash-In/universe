@@ -81,49 +81,53 @@ export const authRouter = new Elysia()
   /**
    * ✅ Verificar token JWT
    */
-  .get(
-    "/auth/verify",
-    async ({ query, set }) => {
-      try {
-        const { token } = query as Record<string, string | undefined>;
+ .get(
+  "/auth/verify",
+  async ({ query, set }) => {
+    try {
+      const { token } = query as Record<string, string | undefined>;
 
-        if (!token) {
-          set.status = 400;
-          return { success: false, error: "El token es obligatorio." };
-        }
-
-        const result = verifyTokenService(token);
-
-        if (!result.valid) {
-          set.status = 401;
-          return { success: false, error: result.error };
-        }
-
-        set.status = 200;
-        return {
-          success: true,
-          message: "Token válido",
-          data: result.decoded,
-        };
-      } catch (error: any) {
-        console.error("❌ Error en /auth/verify:", error);
-        set.status = 500;
-        return {
-          success: false,
-          error: error.message || "Error verificando token",
-        };
+      if (!token) {
+        set.status = 400;
+        return { success: false, error: "El token es obligatorio." };
       }
-    },
-    {
-      detail: {
-        summary: "Verifica si un token JWT es válido",
-        tags: ["Auth"],
-      },
-      query: t.Object({
-        token: t.String(),
-      }),
+
+      const result = verifyTokenService(token);
+
+      if (!result.success) {
+        set.status = 401;
+        return { success: false, error: result.error };
+      }
+
+      // Aquí usamos result.data y result.accessToken
+      set.status = 200;
+      return {
+        success: true,
+        message: "Token válido",
+        data: result.data,             // ← Usuario decodificado
+        accessToken: result.accessToken, // ← Token renovado
+      };
+    } catch (error: any) {
+      console.error("❌ Error en /auth/verify:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error.message || "Error verificando token",
+      };
     }
-  ).post(
+  },
+  {
+    detail: {
+      summary: "Verifica si un token JWT es válido",
+      tags: ["Auth"],
+    },
+    query: t.Object({
+      token: t.String(),
+    }),
+  }
+)
+
+.post(
     "/auth/refresh",
     async ({ body, set }) => {
       try {

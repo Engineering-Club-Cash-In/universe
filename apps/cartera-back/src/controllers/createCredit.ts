@@ -139,6 +139,7 @@ interface PagoData {
   reserva: string;
   observaciones: string;
   paymentFalse: boolean;
+  pagoConvenio: string;
 }
 
 // ========================================
@@ -536,6 +537,7 @@ const insertPayments = async (
     reserva: creditData.reserva?.toString() ?? "0",
     observaciones: "",
     paymentFalse: false,
+    pagoConvenio: "0",
   });
 
   // Cuota mensual
@@ -608,6 +610,7 @@ const insertPayments = async (
       reserva: "0",
       observaciones: "",
       paymentFalse: false,
+      pagoConvenio: "0",
     });
   }
 

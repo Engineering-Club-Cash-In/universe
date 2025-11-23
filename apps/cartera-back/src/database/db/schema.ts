@@ -56,23 +56,6 @@ export const conta_users = customSchema.table("conta_users", {
   updated_at: timestamp("updated_at").defaultNow(),
 });
 
-  created_at: timestamp("created_at").defaultNow(),
-  updated_at: timestamp("updated_at").defaultNow(),
-});
-export const platform_users = customSchema.table("platform_users", {
-  id: serial("id").primaryKey(),
-  email: varchar("email", { length: 150 }).notNull().unique(),
-  password_hash: varchar("password_hash", { length: 255 }).notNull(), // hash, nunca plano
-  role: userRoleEnum("role").notNull(),
-  is_active: boolean("is_active").notNull().default(true),
-
-  // Relaciones opcionales
-  asesor_id: integer("asesor_id").references(() => asesores.asesor_id),
-  admin_id: integer("admin_id").references(() => admins.admin_id),
-
-  created_at: timestamp("created_at").defaultNow(),
-  updated_at: timestamp("updated_at").defaultNow(),
-});
 // 1. Usuarios
 export const usuarios = customSchema.table("usuarios", {
   usuario_id: serial("usuario_id").primaryKey(),
@@ -283,6 +266,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   registerBy:varchar("registerby",{length:150}).notNull(),
     cuenta_empresa_id: integer("cuenta_empresa_id")
     .references(() => cuentasEmpresa.cuentaId), // 
+  pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
 });
 export const boletas = customSchema.table("boletas", {
   id: serial("id").primaryKey(),
@@ -531,6 +515,18 @@ export const convenios_pagos_resume = customSchema.table("convenios_pagos_resume
   pago_id: integer("pago_id")
     .notNull()
     .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+  
+  created_at: timestamp("created_at").defaultNow(),
+});export const convenio_cuotas = customSchema.table("convenio_cuotas", {
+  cuota_convenio_id: serial("cuota_convenio_id").primaryKey(),
+  convenio_id: integer("convenio_id")
+    .references(() => convenios_pago.convenio_id)
+    .notNull(),
+  
+  // Control mínimo
+  numero_cuota: integer("numero_cuota").notNull(), // 1, 2, 3... hasta numero_meses
+  fecha_vencimiento: date("fecha_vencimiento").notNull(), // Cuándo vence esta cuota
+  fecha_pago: timestamp("fecha_pago"), // NULL si no está pagada, timestamp cuando se paga
   
   created_at: timestamp("created_at").defaultNow(),
 });

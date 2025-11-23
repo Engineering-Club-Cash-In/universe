@@ -70,7 +70,20 @@ const [resetBuscador, setResetBuscador] = useState(false);
     cuotas: any[];
     cuotaMasAntigua?: number;
   } | null>(null);
-
+const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
+  convenio_id: number;
+  credito_id: number;
+  monto_total_convenio: string;
+  cuota_mensual: string;
+  pagos_realizados: number;
+  pagos_pendientes: number;
+  activo: boolean;
+  completado: boolean;
+  cuotasEnConvenio: any[];
+  pagosConvenio: any[];
+  cuotasConvenioMensuales: any[]; // 🔥 NUEVO
+  cuotaConvenioAPagar: string; // 🔥 NUEVO
+} | null>(null);
   const [cuotasPendientesInfo, setCuotasPendientesInfo] = useState<{
     total: number;
     cuotas: any[];
@@ -176,14 +189,14 @@ const [resetBuscador, setResetBuscador] = useState(false);
     cancelacion: CancelacionCredito | null;
   } | null>(null);
   // Función para buscar crédito y setear los campos
-  const fetchCredito = async (numero_credito_sifco: string) => {
+    const fetchCredito = async (numero_credito_sifco: string) => {
     setLoadingCredito(true);
     setErrorCredito(null);
     try {
       const result = await getCreditoByNumero(numero_credito_sifco);
       setDataCredito(result);
 
-      // FLUJO CANCELADO: solo info de crédito, usuario y cancelación
+      // FLUJO CANCELADO
       if (result.flujo === "CANCELADO") {
         setCreditoCanceladoInfo({
           credito: result.credito,
@@ -191,15 +204,15 @@ const [resetBuscador, setResetBuscador] = useState(false);
           cancelacion: result.cancelacion,
         });
         setDataCredito(result);
-
         setCuotaActualInfo(null);
         setCuotasAtrasadasInfo(null);
         setCuotasPendientesInfo(null);
         setCuotaSeleccionada(0);
         setSaldoAFavorUser(0);
-        setArchivosParaSubir([]); // Limpia los archivos después del submit
+        setArchivosParaSubir([]);
         setResetBuscador(true);
-        // Si quieres, podrías resetear el form aquí si lo necesitas
+        setConvenioActivoInfo(null); // 👈 AGREGA ESTO
+
         const today = new Date();
         const fechaHoy = today.toISOString().split("T")[0];
         formik.setValues((prev) => ({
@@ -210,16 +223,25 @@ const [resetBuscador, setResetBuscador] = useState(false);
           fecha_pago: fechaHoy,
           llamada: "",
           monto_boleta: Number(result.cancelacion?.monto_cancelacion || 0),
-          // Puedes dejar número de cuota vacío o en 0 porque no aplica, pero igual lo puedes dejar fijo
           numero_cuota: 0,
         }));
 
-        return; // No sigas con el resto
+        return;
       }
 
-      // FLUJO ACTIVO: el mismo de siempre
+      // FLUJO ACTIVO
       setCuotaSeleccionada(result.cuotasAtrasadas?.[0]?.numero_cuota ?? 0);
       setMora(result.moraActual || 0);
+      
+      // 👇 AGREGA INFO DE CONVENIO
+      if (result.convenioActivo) {
+        setConvenioActivoInfo({
+         ...result.convenioActivo
+        });
+      } else {
+        setConvenioActivoInfo(null);
+      }
+
       setCuotaActualInfo({
         numero: result.cuotaActual,
         pagada: !!result.cuotaActualPagada,
@@ -276,6 +298,7 @@ const [resetBuscador, setResetBuscador] = useState(false);
       setCuotasPendientesInfo(null);
       setCuotaSeleccionada(0);
       setSaldoAFavorUser(0);
+      setConvenioActivoInfo(null); // 👈 AGREGA ESTO
     } finally {
       setLoadingCredito(false);
     }
@@ -290,136 +313,168 @@ useEffect(() => {
     setMontoBaseBadDebt(montoBaseBadDebt);
   }
 }, [openBadDebt]);
-  const handleFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+const handleFormSubmit = (e: React.FormEvent) => {
+  e.preventDefault();
 
-    if (creditoCanceladoInfo) {
-      const { monto_boleta } = formik.values;
-      const monto_cancelacion = Number(
-        creditoCanceladoInfo.cancelacion?.monto_cancelacion || 0
-      );
+  // ===== MANEJO DE CRÉDITO CANCELADO =====
+  if (creditoCanceladoInfo) {
+    const { monto_boleta } = formik.values;
+    const monto_cancelacion = Number(
+      creditoCanceladoInfo.cancelacion?.monto_cancelacion || 0
+    );
 
-      if (monto_boleta < 0) {
-        alert(
-          "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
-        );
-        return;
-      }
-
-      // Solo abrir modal de incobrable si la boleta es menor que la cancelación
-      if (monto_boleta < monto_cancelacion) {
-        console.log(
-          "Monto boleta menor que monto cancelación, abriendo modal incobrable"
-        );
-        const resta = monto_cancelacion - monto_boleta;
-        console.log("Resta:", resta);
-        setMontoBaseBadDebt(resta); // Lo que falta cubrir, o el total incobrable
-
-        setOpenBadDebt(true); // Abre el modal incobrable
-        return;
-      }
-
-      // Si NO es incobrable, puedes hacer el submit normal
-      formik.handleSubmit();
-      return;
-    }
-    const { monto_boleta, otros } = formik.values;
-    const cuota = Number(dataCredito?.credito?.cuota || 0);
-
-    // Si no existen, ponemos 0
-    const otrosNum = Number(otros || 0); 
-
-    // Calcula el monto real de la boleta
-    const montoBoletaReal = Number(monto_boleta) - otrosNum - mora;
-    const montoBoletaSinMora = Number(monto_boleta) - otrosNum;
-
-    if (montoBoletaSinMora < 0) {
+    if (monto_boleta < 0) {
       alert(
         "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
       );
       return;
     }
 
-    if (cuotaActualInfo?.pagada) {
-      if (montoBoletaReal === cuota) {
-        if (cuotaSeleccionada == 0) {
-          alert(
-            "Si quiere pagar la cuota completa, debe seleccionar una cuota válida"
-          );
-          return;
-        }
-        formik.handleSubmit();
-        return;
-      }
-      if (otrosNum > 0  ) {
-        const sumaTotal = otrosNum  
+    if (monto_boleta < monto_cancelacion) {
+      const resta = monto_cancelacion - monto_boleta;
+      setMontoBaseBadDebt(resta);
+      setOpenBadDebt(true);
+      return;
+    }
 
-        if (monto_boleta !== sumaTotal) {
-          setExcedente(montoBoletaReal);
-          setModalMode("pagada");
-          setModalExcesoOpen(true);
-          return;
-        }
+    formik.handleSubmit();
+    return;
+  }
 
-        setCuotaSeleccionada(cuotaActualInfo?.numero); // Reiniciar cuota seleccionada
-        formik.handleSubmit();
-        return;
-      }
+  // ===== VALIDACIÓN: DEBE TENER CUOTA SELECCIONADA =====
+  if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
+    alert("⚠️ Por favor selecciona una cuota a pagar del menú desplegable");
+    return;
+  }
+
+  // ===== CRÉDITO ACTIVO =====
+  const { monto_boleta, otros } = formik.values;
+  const cuota = Number(dataCredito?.credito?.cuota || 0);
+  const otrosNum = Number(otros || 0);
+
+  const montoBoletaReal =
+    Number(monto_boleta) -
+    otrosNum -
+    mora -
+    (Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0);
+  const montoBoletaSinMora =
+    Number(monto_boleta) - otrosNum - (Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0);
+
+  if (montoBoletaSinMora < 0) {
+    alert(
+      "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
+    );
+    return;
+  }
+
+  // 👇 SIEMPRE USA LA CUOTA SELECCIONADA POR EL USUARIO
+  const cuotaAPagar: number = cuotaSeleccionada;
+  
+  console.log("=== CUOTA DETERMINADA ===");
+  console.log("Cuota seleccionada por usuario:", cuotaSeleccionada);
+  console.log("Cuota a usar:", cuotaAPagar);
+
+  // ===== MANEJO DE EXCEDENTES =====
+  const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
+  const cuotaRedondeada = Math.round(cuota * 100) / 100;
+
+  // Si hay excedente, abre el modal
+  if (montoRedondeado > cuotaRedondeada) {
+    setModalMode("excedente");
+    setExcedente(montoRedondeado - cuotaRedondeada);
+    setModalExcesoOpen(true);
+    return;
+  }
+
+  // Si la cuota actual ya está pagada y el monto no es exacto
+  if (cuotaActualInfo?.pagada && montoRedondeado !== cuotaRedondeada) {
+    // Si tiene "otros" y la suma cuadra
+    if (otrosNum > 0 && monto_boleta === otrosNum) {
+      // Todo bien, continuar
+    } else {
+      // Hay un desbalance
       setExcedente(montoBoletaReal);
       setModalMode("pagada");
       setModalExcesoOpen(true);
       return;
     }
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-   const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
-const cuotaRedondeada = Math.round(cuota * 100) / 100;
-    if (montoRedondeado > cuotaRedondeada) {
-      setModalMode("excedente");
-      setExcedente(montoRedondeado - cuotaRedondeada);
-      setModalExcesoOpen(true);
-      // No submit todavía
-    } else {
-      // Enviar normalmente
-      setCuotaSeleccionada(cuotaActualInfo?.numero); // Reiniciar cuota seleccionada
-      formik.handleSubmit();
-    }
-  };
+  }
 
+  // 👇 SETEA LA CUOTA EN FORMIK Y HACE SUBMIT
+  console.log("=== ANTES DEL SUBMIT ===");
+  console.log("formik.values.cuotaApagar ANTES:", formik.values.cuotaApagar);
+  
+  formik.values.cuotaApagar = cuotaAPagar;
+  
+  console.log("formik.values.cuotaApagar DESPUÉS:", formik.values.cuotaApagar);
+  console.log("=====================");
+  
+  formik.handleSubmit();
+};
   // Acciones del modal
-  const handleAbonoCapital = () => {
-    formik.setFieldValue("abono_directo_capital", excedente);
-    console.log("Abono a capital:", excedente);
-    console.log("Valores del formulario:", formik.values);
+const handleAbonoCapital = () => {
+  // ✅ Validar que haya cuota seleccionada
+  if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
+    alert("⚠️ Debes seleccionar una cuota antes de continuar");
     setModalExcesoOpen(false);
-    setCuotaSeleccionada(cuotaActualInfo?.numero); // Reiniciar cuota seleccionada
-    formik.handleSubmit();
-  };
-  const handleAbonoSiguienteCuota = () => {
-    formik.setFieldValue("abono_directo_capital", 0);
+    return;
+  }
+
+  console.log("=== ABONO A CAPITAL ===");
+  console.log("Excedente:", excedente);
+  console.log("Cuota seleccionada:", cuotaSeleccionada);
+  
+  // 👇 USA LA CUOTA SELECCIONADA
+  formik.values.abono_directo_capital = excedente;
+  formik.values.cuotaApagar = cuotaSeleccionada;
+  
+  setModalExcesoOpen(false);
+  formik.handleSubmit();
+};
+const handleAbonoSiguienteCuota = () => {
+  // ✅ Validar que haya cuota seleccionada
+  if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
+    alert("⚠️ Debes seleccionar una cuota antes de continuar");
     setModalExcesoOpen(false);
-    console.log(cuotaSeleccionada, " cuotaSeleccionada en abonoSiguienteCuota");
-    if (
-      cuotaSeleccionada === undefined ||
-      cuotaSeleccionada === null ||
-      cuotaSeleccionada === 0
-    ) {
-      alert("debe seleccionar una cuota");
-      return;
-    }
-    formik.handleSubmit();
-  };
+    return;
+  }
+
+  console.log("=== ABONO SIGUIENTE CUOTA ===");
+  console.log("Cuota seleccionada:", cuotaSeleccionada);
+  
+  // 👇 USA LA CUOTA SELECCIONADA
+  formik.values.abono_directo_capital = 0;
+  formik.values.cuotaApagar = cuotaSeleccionada;
+  
+  console.log("Cuota a pagar final:", formik.values.cuotaApagar);
+  
+  setModalExcesoOpen(false);
+  formik.handleSubmit();
+};
  
 
-  const handleAbonoOtros = () => {
-    // Toma el valor actual de otros y suma el excedente
-    const nuevosOtros =
-      Number(formik.values.otros || 0) + Number(excedente || 0);
-    formik.setFieldValue("otros", nuevosOtros);
-    setCuotaSeleccionada(cuotaActualInfo?.numero); // Reiniciar cuota seleccionada
-    formik.setFieldValue("abono_directo_capital", 0);
+const handleAbonoOtros = () => {
+  // ✅ Validar que haya cuota seleccionada
+  if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
+    alert("⚠️ Debes seleccionar una cuota antes de continuar");
     setModalExcesoOpen(false);
-    formik.handleSubmit();
-  };
+    return;
+  }
+
+  const nuevosOtros = Number(formik.values.otros || 0) + Number(excedente || 0);
+  
+  console.log("=== ABONO A OTROS ===");
+  console.log("Nuevos otros:", nuevosOtros);
+  console.log("Cuota seleccionada:", cuotaSeleccionada);
+  
+  // 👇 USA LA CUOTA SELECCIONADA
+  formik.values.otros = nuevosOtros;
+  formik.values.abono_directo_capital = 0;
+  formik.values.cuotaApagar = cuotaSeleccionada;
+  
+  setModalExcesoOpen(false);
+  formik.handleSubmit();
+};
   function useLiquidatePagosInversionistas() {
     return useMutation({
       mutationFn: liquidatePagosInversionistasService,
@@ -474,8 +529,8 @@ const cuotaRedondeada = Math.round(cuota * 100) / 100;
   const reversePago = useReversePagosInversionistas();
 
   // Handler:
-  function handleReverse(pago_id: number, credito_id: number) {
-    reversePago.mutate({ pago_id, credito_id }, {});
+  function handleReverse(pago_id: number, credito_id: number, reverseAccounting: boolean) {
+    reversePago.mutate({ pago_id, credito_id, reverseAccounting }, {});
   }
 async function handleResetCredito() {
  
@@ -562,6 +617,7 @@ async function handleResetCredito() {
     setArchivosParaSubir,
     resetBuscador,
     setResetBuscador,
-    mora
+    mora,
+    convenioActivoInfo
   };
 }

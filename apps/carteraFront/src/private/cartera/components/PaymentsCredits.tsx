@@ -390,7 +390,7 @@ const handleDownloadExcel = async () => {
                   <Button
                     className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow"
                     onClick={() =>
-                      handleReverse(item.pago.pago_id, item.pago.credito_id)
+                      handleReverse(item.pago.pago_id, item.pago.credito_id,true)
                     }
                     disabled={
                       item.pago.pagado === false ||

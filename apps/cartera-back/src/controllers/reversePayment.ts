@@ -3,7 +3,7 @@ import { z } from "zod";
 import { eq, and, or } from "drizzle-orm";
 import Big from "big.js"; 
 import { db } from "../database";
-import { pagos_credito, creditos, usuarios, cuotas_credito, boletas, pagos_credito_inversionistas } from "../database/db";
+import { pagos_credito, creditos, usuarios, cuotas_credito, boletas, pagos_credito_inversionistas, convenios_pago } from "../database/db";
 import { processAndReplaceCreditInvestorsReverse } from "./investor";
 import { updateMora } from "./latefee";
 // ============================================================================
@@ -12,6 +12,7 @@ import { updateMora } from "./latefee";
 export const reversePaymentSchema = z.object({
   credito_id: z.number().int().positive(),
   pago_id: z.number().int().positive(),
+    reverseAccounting: z.boolean().optional().default(true), 
 });
 
 // ============================================================================
@@ -46,7 +47,7 @@ export const reversePayment = async ({ body, set }: any) => {
         errors: parseResult.error.flatten().fieldErrors,
       };
     }
-    const { credito_id, pago_id } = parseResult.data;
+    const { credito_id, pago_id,reverseAccounting } = parseResult.data;
     console.log(`📋 Crédito ID: ${credito_id}`);
     console.log(`🧾 Pago ID: ${pago_id}`);
 
@@ -160,19 +161,28 @@ export const reversePayment = async ({ body, set }: any) => {
         activa: true,
       });
     }
-
+    if (pago.pagoConvenio && Number(pago.pagoConvenio) > 0) {
+      console.log(`⚠️ Reversando pago de convenio: ${pago.pagoConvenio}`);
+      const reverseConvenioResult = await reverseConvenioPayment({credito_id, monto_pago: Number(pago.pagoConvenio)});
+    console.log(`✅ Pago de convenio reversado: ${reverseConvenioResult.message}`);}
     // ========================================================================
     // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES
     // ========================================================================
-    await db
-      .update(creditos)
-      .set({
-        capital: nuevoCapital.toString(),
-        deudatotal: deudatotal.toString(),
-        cuota_interes: cuota_interes.toString(),
-        iva_12: iva_12.toString(),
-      })
-      .where(eq(creditos.credito_id, credito_id));
+     if (reverseAccounting) {
+      await db
+        .update(creditos)
+        .set({
+          capital: nuevoCapital.toString(),
+          deudatotal: deudatotal.toString(),
+          cuota_interes: cuota_interes.toString(),
+          iva_12: iva_12.toString(),
+        })
+        .where(eq(creditos.credito_id, credito_id));
+
+      console.log("✅ Crédito actualizado con nuevos valores");
+    } else {
+      console.log("⏭️ Crédito NO actualizado (reverseAccounting = false)");
+    }
 
     console.log("✅ Crédito actualizado con nuevos valores");
 
@@ -354,3 +364,129 @@ export const reversePayment = async ({ body, set }: any) => {
     };
   }
 };
+
+interface ReverseConvenioPaymentParams {
+  credito_id: number;
+  monto_pago: number;
+}
+
+interface ReverseConvenioPaymentResult {
+  success: boolean;
+  message: string;
+  convenio: {
+    convenio_id: number;
+    monto_total_convenio: string;
+    monto_pagado: string;
+    monto_pendiente: string;
+    cuota_mensual: string;
+    pagos_realizados: number;
+    pagos_pendientes: number;
+    completado: boolean;
+    activo: boolean;
+  };
+  monto_revertido: string;
+}
+
+export async function reverseConvenioPayment(
+  params: ReverseConvenioPaymentParams
+): Promise<ReverseConvenioPaymentResult> {
+  try {
+    const { credito_id, monto_pago } = params;
+
+    console.log("\n🔄 ========== REVIRTIENDO PAGO DE CONVENIO ==========");
+    console.log("🏦 Crédito ID:", credito_id);
+    console.log("💵 Monto a revertir:", monto_pago);
+
+    // 1. Buscar el convenio del crédito (puede estar completado o activo)
+    const [convenio] = await db
+      .select()
+      .from(convenios_pago)
+      .where(eq(convenios_pago.credito_id, credito_id))
+      .limit(1);
+
+    if (!convenio) {
+      throw new Error(`No se encontró un convenio para el crédito ID: ${credito_id}`);
+    }
+
+    console.log("📋 Convenio ID encontrado:", convenio.convenio_id);
+
+    // 2. Convertir valores a Big.js
+    const montoPagoBig = new Big(monto_pago);
+    const cuotaMensualBig = new Big(convenio.cuota_mensual);
+    const montoPagadoActualBig = new Big(convenio.monto_pagado);
+    const montoPendienteActualBig = new Big(convenio.monto_pendiente);
+
+    console.log("💵 Monto a revertir:", montoPagoBig.toString());
+
+    // 3. RESTAR del monto pagado (reversa)
+    const nuevoMontoPagadoBig = montoPagadoActualBig.minus(montoPagoBig);
+    
+    // 4. SUMAR al monto pendiente (reversa)
+    const nuevoMontoPendienteBig = montoPendienteActualBig.plus(montoPagoBig);
+
+    // Validar que no quede negativo
+    if (nuevoMontoPagadoBig.lt(0)) {
+      throw new Error("No se puede revertir más de lo que se ha pagado");
+    }
+
+    console.log("📊 Monto pagado anterior:", montoPagadoActualBig.toString());
+    console.log("📊 Monto pagado nuevo:", nuevoMontoPagadoBig.toString());
+    console.log("📊 Monto pendiente anterior:", montoPendienteActualBig.toString());
+    console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
+
+    // 5. Recalcular cuántas cuotas completas se han pagado
+    const cuotasCompletasPagadas = nuevoMontoPagadoBig.div(cuotaMensualBig).round(0, Big.roundDown);
+    const nuevosPagosRealizados = parseInt(cuotasCompletasPagadas.toString());
+    const nuevosPagosPendientes = convenio.numero_meses - nuevosPagosRealizados;
+
+    console.log("✅ Cuotas completas pagadas (después de reversa):", nuevosPagosRealizados);
+    console.log("⬇️ Cuotas pendientes (después de reversa):", nuevosPagosPendientes);
+
+    // 6. El convenio ya NO está completado si se revirtió un pago
+    const convenioCompletado = nuevoMontoPendienteBig.lte(0);
+    const convenioActivo = !convenioCompletado;
+
+    console.log("🔓 Convenio reactivado:", convenioActivo);
+
+    // 7. Actualizar el convenio
+    const [convenioActualizado] = await db
+      .update(convenios_pago)
+      .set({
+        monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+        monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+        pagos_realizados: nuevosPagosRealizados,
+        pagos_pendientes: nuevosPagosPendientes,
+        completado: convenioCompletado,
+        activo: convenioActivo,
+        updated_at: new Date(),
+      })
+      .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
+      .returning();
+
+    console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
+
+    // 8. Retornar resultado
+    return {
+      success: true,
+      message: `Pago de Q${montoPagoBig.toFixed(2)} revertido exitosamente del convenio`,
+      convenio: {
+        convenio_id: convenioActualizado.convenio_id,
+        monto_total_convenio: convenioActualizado.monto_total_convenio,
+        monto_pagado: convenioActualizado.monto_pagado,
+        monto_pendiente: convenioActualizado.monto_pendiente,
+        cuota_mensual: convenioActualizado.cuota_mensual,
+        pagos_realizados: convenioActualizado.pagos_realizados,
+        pagos_pendientes: convenioActualizado.pagos_pendientes,
+        completado: convenioActualizado.completado,
+        activo: convenioActualizado.activo,
+      },
+      monto_revertido: montoPagoBig.toFixed(2),
+    };
+
+  } catch (error) {
+    console.error("Error revirtiendo pago de convenio:", error);
+    throw new Error(
+      `Error al revertir pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
+    );
+  }
+}

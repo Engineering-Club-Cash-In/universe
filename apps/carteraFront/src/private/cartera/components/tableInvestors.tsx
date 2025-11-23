@@ -1,14 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { useState } from "react";
-import { CheckCircle, ChevronDown, ChevronUp, Download, Edit, FileDown, FileSpreadsheet, Loader2, MoreVertical } from "lucide-react";
+import { Check, CheckCircle, ChevronDown, ChevronsUpDown, ChevronUp, Download, Edit, FileDown, FileSpreadsheet, Loader2, MoreVertical } from "lucide-react";
 import { useGetInvestors } from "../hooks/getInvestor";
 import { useCatalogs } from "../hooks/catalogs";
 import { inversionistasService, type Investor, type InvestorPayload } from "../services/services";
@@ -16,13 +7,31 @@ import { useLiquidateByInvestor } from "../hooks/liquidateAllInvestor";
 import { useDownloadInvestorPDF } from "../hooks/downloadInvestorReport"; 
 import { InvestorModal } from "./modalInvestor"; 
 import { useFalsePayments } from "../hooks/falsePayments";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";import {
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { 
+  Command,  // 👈 AQUÍ está Command como componente
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button"; 
+import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { Table,TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
  
 const PER_PAGE_OPTIONS = [5, 10, 20, 50];
 
@@ -74,13 +83,13 @@ const handleCancelarGenerarPagos = () => {
 
 // 🆕 Cancelar liquidación
  
-  const downloadPDF = useDownloadInvestorPDF();
-  const [selectedInvestor, setSelectedInvestor] = useState<number | "">(1);
+ 
+  const [selectedInvestor, setSelectedInvestor] = useState<number | "">("");
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(10);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [expandedCredit, setExpandedCredit] = useState<number | null>(null);
-  const liquidateMutation = useLiquidateByInvestor();
+ 
 
   // Catálogo de inversionistas (para el filtro)
   const { investors = [], loading: loadingCatalogs } = useCatalogs() as {
@@ -93,11 +102,20 @@ const handleCancelarGenerarPagos = () => {
     InvestorPayload | undefined
   >();
   // Consulta con pag inación y filtro por id
-  const { data, isLoading, isError, isFetching, refetch } = useGetInvestors({
+const { 
+    data, 
+    isLoading, 
+    isError, 
+    isFetching,
+    refetch 
+  } = useGetInvestors({
     id: selectedInvestor !== "" ? Number(selectedInvestor) : undefined,
     page,
     perPage,
   });
+
+  const liquidateMutation = useLiquidateByInvestor();
+  const downloadPDF = useDownloadInvestorPDF();
   const tienePagosPendientes =
     data?.inversionistas.some((inv) =>
       (inv.creditos ?? []).some((cred) => (cred.pagos ?? []).length > 0)
@@ -119,7 +137,7 @@ const handleCancelarGenerarPagos = () => {
     setSelectedInvestorData(undefined);
     setModalOpen(true);
   };
- 
+ const [openCombobox, setOpenCombobox] = useState(false);
   const handleDescargarExcel = async () => {
     try {
       const result = await inversionistasService.getResumenGlobal({
@@ -166,32 +184,117 @@ const handleCancelarGenerarPagos = () => {
       </h2>
       <div className="grid grid-cols-1 sm:flex sm:flex-wrap sm:items-center sm:justify-between gap-3 mb-5">
         {/* Select inversionista */}
-        <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
-          <label className="text-blue-900 font-bold" htmlFor="investor-filter">
-            Filtrar inversionista:
-          </label>
-          <select
-            id="investor-filter"
-            className="border border-blue-300 rounded-lg px-3 py-2 bg-blue-50 text-blue-900 focus:ring-2 focus:ring-blue-400"
-            value={selectedInvestor}
-            onChange={(e) => {
-              setSelectedInvestor(
-                e.target.value === "" ? "" : Number(e.target.value)
-              );
-              setPage(1);
-              setExpandedRow(null);
-              setExpandedCredit(null);
-            }}
-            disabled={loadingCatalogs}
-          >
-            <option value="">Todos</option>
+       {/* Combobox inversionista */}
+{/* Combobox inversionista - Versión Profesional */}
+{/* Combobox inversionista - Versión Profesional CORREGIDO */}
+<div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
+  <label className="text-blue-900 font-bold">
+    Filtrar inversionista:
+  </label>
+  
+  <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
+    <PopoverTrigger asChild>
+      <Button
+        variant="outline"
+        role="combobox"
+        aria-expanded={openCombobox}
+        className="w-[280px] justify-between border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100 hover:text-blue-900 font-medium"
+        disabled={loadingCatalogs}
+      >
+        <span className="truncate">
+          {selectedInvestor !== ""
+            ? investors.find((inv) => inv.inversionista_id === selectedInvestor)?.nombre
+            : "Todos los inversionistas"}
+        </span>
+        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+      </Button>
+    </PopoverTrigger>
+    
+    <PopoverContent className="w-[280px] p-0 bg-white border-2 border-blue-200 shadow-lg">
+      <Command className="bg-white">
+        <CommandInput 
+          placeholder="Buscar inversionista..." 
+          className="h-10 border-b border-gray-200 text-gray-900 placeholder:text-gray-500"
+        />
+        <CommandList className="max-h-[300px] overflow-y-auto">
+          <CommandEmpty className="py-6 text-center text-sm text-gray-500">
+            No se encontró inversionista 🔍
+          </CommandEmpty>
+          <CommandGroup>
+            {/* Opción "Todos" */}
+            <CommandItem
+              value="todos-inversionistas-opcion"
+              onSelect={() => {
+                setSelectedInvestor("");
+                setPage(1);
+                setExpandedRow(null);
+                setExpandedCredit(null);
+                setOpenCombobox(false);
+              }}
+              className="px-3 py-3 cursor-pointer hover:bg-blue-100 aria-selected:bg-blue-100 data-[selected=true]:bg-blue-100"
+            >
+              <Check
+                className={cn(
+                  "mr-2 h-5 w-5 transition-opacity",
+                  selectedInvestor === ""
+                    ? "opacity-100 text-green-600" 
+                    : "opacity-0"
+                )}
+              />
+              <div className="flex items-center gap-2">
+                <span className="text-xl">📋</span>
+                <span className={cn(
+                  "font-semibold",
+                  selectedInvestor === ""
+                    ? "text-blue-900" 
+                    : "text-gray-700"
+                )}>
+                  Todos los inversionistas
+                </span>
+              </div>
+            </CommandItem>
+            
+            {/* Separador visual */}
+            <div className="h-px bg-gray-200 my-1" />
+            
+            {/* Lista de inversionistas */}
             {investors.map((inv) => (
-              <option key={inv.inversionista_id} value={inv.inversionista_id}>
-                {inv.nombre}
-              </option>
+              <CommandItem
+                key={inv.inversionista_id}
+                value={inv.nombre}
+                onSelect={() => {
+                  setSelectedInvestor(inv.inversionista_id);
+                  setPage(1);
+                  setExpandedRow(null);
+                  setExpandedCredit(null);
+                  setOpenCombobox(false);
+                }}
+                className="px-3 py-2.5 cursor-pointer hover:bg-blue-50 aria-selected:bg-blue-100 data-[selected=true]:bg-blue-100"
+              >
+                <Check
+                  className={cn(
+                    "mr-2 h-5 w-5 transition-opacity",
+                    selectedInvestor === inv.inversionista_id 
+                      ? "opacity-100 text-green-600" 
+                      : "opacity-0"
+                  )}
+                />
+                <span className={cn(
+                  "text-sm",
+                  selectedInvestor === inv.inversionista_id 
+                    ? "font-bold text-blue-900" 
+                    : "font-medium text-gray-700"
+                )}>
+                  {inv.nombre}
+                </span>
+              </CommandItem>
             ))}
-          </select>
-        </div>
+          </CommandGroup>
+        </CommandList>
+      </Command>
+    </PopoverContent>
+  </Popover>
+</div>
         {/* Select por página */}
         <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
           <label className="text-blue-900 font-bold" htmlFor="per-page">
@@ -343,7 +446,7 @@ const handleCancelarGenerarPagos = () => {
   <DropdownMenuContent align="end" className="w-56">
     {/* Descargar PDF */}
     <DropdownMenuItem
-      onClick={() => downloadPDF.mutate({ id: inv.inversionista_id })}
+      onClick={() => downloadPDF.mutate({ id: inv.inversionista_id,page:1,perPage:perPage })}
       disabled={downloadPDF.isPending}
       className="cursor-pointer"
     >
@@ -921,7 +1024,7 @@ const handleCancelarGenerarPagos = () => {
       Number(inv.subtotal?.total_cuota ?? 0) <= 0 ||
       downloadPDF.isPending
     }
-    onClick={() => downloadPDF.mutate({ id: inv.inversionista_id })}
+    onClick={() => downloadPDF.mutate({ id: inv.inversionista_id,page:1,perPage:perPage })}
   >
     {downloadPDF.isPending ? (
       <>

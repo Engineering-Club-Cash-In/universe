@@ -6,37 +6,39 @@ WORKDIR /app
 # 1. Copia archivos de dependencias
 COPY package.json package-lock.json* ./
 
-# 2. Limpiar cache
-RUN npm cache clean --force
+# 2. Limpiar TODO
+RUN npm cache clean --force && \
+    rm -rf node_modules package-lock.json
 
-# 3. Instalar dependencias
-RUN npm install
+# 3. Instalar dependencias frescas
+RUN npm install --legacy-peer-deps
 
-# 4. Copia el resto del código
+# 🔥 4. Forzar reinstalación de esbuild en node_modules de vite
+RUN cd node_modules/vite && \
+    rm -rf node_modules/esbuild && \
+    npm install esbuild@0.25.12 --force
+
+# 5. Verificar versión
+RUN npx esbuild --version
+
+# 6. Copia el resto del código
 COPY . .
 
-# 5. 🔥 Declarar la variable con valor por defecto
+# 7. Variables de entorno
 ARG VITE_BACK_URL=https://qk4sw4kc4c088c8csos400wc.s3.devteamatcci.site
-
-# 6. 🔥 Hacerla disponible como ENV para el build
 ENV VITE_BACK_URL=$VITE_BACK_URL
 
-# 7. 🔍 Debug: Mostrar la variable (opcional, para verificar)
 RUN echo "🔍 Building with VITE_BACK_URL=$VITE_BACK_URL"
 
-# 8. Build del proyecto (ahora con la variable)
+# 8. Build
 RUN npm run build
 
-# Etapa 2: Servir con Nginx
+# Etapa 2: Nginx
 FROM nginx:alpine
 
-# Limpiar contenido por defecto de nginx
 RUN rm -rf /usr/share/nginx/html/*
 
-# Copiar el build desde la etapa anterior
 COPY --from=build /app/dist /usr/share/nginx/html
-
-# 🔥 Copiar configuración custom de nginx (recomendado para SPAs)
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

@@ -136,30 +136,42 @@ export async function loginService(email: string, password: string) {
 }
 
 
-
 export function verifyTokenService(token: string) {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    
-    // Generar un nuevo token con tiempo extendido
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+
     const newToken = jwt.sign(
-      typeof decoded === 'string' ? { data: decoded } : { ...decoded }, // Copiar el payload del token actual
+      {
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+        admin_id: decoded.admin_id,
+        asesor_id: decoded.asesor_id,
+      },
       JWT_SECRET,
-      { expiresIn: '1h' } // O el tiempo que necesites: '2h', '30m', '7d', etc.
+      { expiresIn: "1h" }
     );
-    
-    return { 
-      valid: true, 
-      decoded,
-      newToken // Devolver el nuevo token con tiempo extendido
+
+    return {
+      success: true,
+      data: {
+        id: decoded.id,
+        email: decoded.email,
+        role: decoded.role,
+        admin_id: decoded.admin_id,
+        asesor_id: decoded.asesor_id,
+      },
+      accessToken: newToken,
     };
+
   } catch (err) {
-    return { 
-      valid: false, 
-      error: "Token inválido o expirado" 
+    return {
+      success: false,
+      error: "Token inválido o expirado",
     };
   }
 }
+
 
 /**
  * Crear usuario de contabilidad + usuario en plataforma

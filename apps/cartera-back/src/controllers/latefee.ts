@@ -5,6 +5,7 @@ import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
+import { stat } from "fs";
 /**
  * Create a new mora (penalty) for a credit.
  *
@@ -217,6 +218,7 @@ export async function procesarMoras() {
         credito_id: cuotas_credito.credito_id,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
+        statusCredit: creditos.statusCredit,
       })
       .from(cuotas_credito);
 
@@ -226,7 +228,11 @@ export async function procesarMoras() {
       fechaVenc.setHours(0, 0, 0, 0); // Resetear a medianoche
       
       // Ahora compara solo fechas completas (sin horas)
-      return fechaVenc < hoy && c.pagado === false;
+       return (
+        fechaVenc < hoy && 
+        c.pagado === false && 
+        c.statusCredit !== "EN_CONVENIO"
+      );
     });
  
 
@@ -261,6 +267,7 @@ export async function procesarMoras() {
         console.log(`[WARN] Credit ${creditoId} not found`);
         continue;
       }
+     
 
       const capital = new Big(credito.capital);
       console.log(`[DEBUG] Credit capital: ${capital.toString()}`);

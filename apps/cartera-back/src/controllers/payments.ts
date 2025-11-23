@@ -18,6 +18,7 @@ import {
   processAndReplaceCreditInvestorsReverse,
 } from "./investor";
 import { updateMora } from "./latefee";
+import { t } from "elysia";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
@@ -797,6 +798,7 @@ export async function insertarPago({
       reserva: "0",
       observaciones: "",
       registerBy: "ADMIN",
+      pagoConvenio: "0",
     })
     .returning();
   if (mora && Number(mora) > 0) {
@@ -1086,6 +1088,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
 
         -- 💸 Campos propios del pago
         p.mora AS "mora",
+        p.pago_convenio AS "pagoConvenio",
         p.otros AS "otros",
         p.reserva AS "reserva",
         p.membresias_pago AS "membresias",
@@ -1192,6 +1195,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       numeroAutorizacion: r.numeroAutorizacion,
       fechaPago: r.fechaPago,
       mora: r.mora,
+      pagoConvenio: r.pagoConvenio,
       otros: r.otros,
       reserva: r.reserva,
       membresias: r.membresias,
@@ -1226,6 +1230,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       totalAbonoSeguro: number;
       totalAbonoGps: number;
       totalMora: number;
+      totalConvenio: number;
       totalOtros: number;
       totalReserva: number;
       totalMembresias: number;
@@ -1242,6 +1247,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         acc.totalOtros += Number(r.otros || 0);
         acc.totalReserva += Number(r.reserva || 0);
         acc.totalMembresias += Number(r.membresias || 0);
+        acc.totalConvenio += Number(r.pago_convenio || 0);
         return acc;
       },
       {
@@ -1254,6 +1260,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         totalOtros: 0,
         totalReserva: 0,
         totalMembresias: 0,
+        totalConvenio: 0,
       }
     );
 
@@ -1280,6 +1287,9 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
       totalMembresias: new Big(totalesGenerales.totalMembresias)
         .round(2)
         .toNumber(),
+        totalConvenio: new Big(totalesGenerales.totalConvenio)
+        .round(2)
+        .toNumber(),
       totalGeneral: new Big(totalesGenerales.totalAbonoCapital)
         .plus(totalesGenerales.totalAbonoInteres)
         .plus(totalesGenerales.totalAbonoIva)
@@ -1289,6 +1299,7 @@ export async function getPagosConInversionistas(options: GetPagosOptions = {}) {
         .plus(totalesGenerales.totalOtros)
         .plus(totalesGenerales.totalReserva)
         .plus(totalesGenerales.totalMembresias)
+        .plus(totalesGenerales.totalConvenio)
         .round(2)
         .toNumber(),
     };

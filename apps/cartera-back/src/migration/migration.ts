@@ -552,6 +552,7 @@ export async function mapEstadoCuentaToPagosBig(
       paymentFalse: false,
       validationStatus: "validated" as const,
       registerBy: "SIFCO_SYNC",
+      pagoConvenio: "0",
     };
 
     await db.insert(pagos_credito).values(pago0).onConflictDoNothing();
@@ -674,6 +675,7 @@ export async function mapEstadoCuentaToPagosBig(
       paymentFalse: false,
       validationStatus: isPagado ? ("validated" as const) : ("no_required" as const),
       registerBy: "SIFCO_SYNC",
+      pagoConvenio: "0",
     };
   });
 

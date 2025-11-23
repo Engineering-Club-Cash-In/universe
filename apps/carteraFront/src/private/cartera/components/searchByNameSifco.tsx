@@ -129,28 +129,41 @@ export function BuscadorUsuarioSifco({ onSelect, reset, onReset }: BuscadorUsuar
               <span className="text-gray-400">Selecciona un crédito SIFCO</span>
             )}
           </SelectTrigger>
-          <SelectContent className="bg-white border rounded-xl shadow-lg max-w-full w-full">
-            {opcionesFiltradas.map((option) => (
-              <SelectItem
-                key={option.sifco}
-                value={option.sifco}
-                className="flex flex-col sm:flex-row sm:items-center gap-1 py-2 px-3 rounded-lg hover:bg-blue-50 transition-all w-full max-w-full"
-              >
-                <span className="flex items-center gap-2 min-w-0 max-w-full">
-                  <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
-                  <span className="font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md truncate max-w-[180px] whitespace-nowrap block">
-                    {option.nombre}
-                  </span>
-                </span>
-                <span className="flex items-center gap-1 min-w-0 max-w-full sm:ml-3">
-                  <BadgeDollarSign className="w-4 h-4 text-emerald-500 flex-shrink-0" />
-                  <span className="font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md tracking-wider truncate max-w-[150px] whitespace-nowrap block">
-                    {option.sifco}
-                  </span>
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
+        <SelectContent
+  className="
+    bg-white border rounded-xl shadow-lg 
+    max-w-full w-full 
+    max-h-72 overflow-y-auto 
+    scrollbar-thin scrollbar-thumb-blue-300 scrollbar-track-blue-50
+  "
+>
+  {opcionesFiltradas.map((option) => (
+    <SelectItem
+      key={option.sifco}
+      value={option.sifco}
+      className="
+        flex flex-col sm:flex-row sm:items-center gap-1 py-2 px-3 
+        rounded-lg hover:bg-blue-50 transition-all 
+        w-full max-w-full
+      "
+    >
+      <span className="flex items-center gap-2 min-w-0 max-w-full">
+        <User className="w-4 h-4 text-blue-700 flex-shrink-0" />
+        <span className="font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md truncate max-w-[180px] whitespace-nowrap block">
+          {option.nombre}
+        </span>
+      </span>
+
+      <span className="flex items-center gap-1 min-w-0 max-w-full sm:ml-3">
+        <BadgeDollarSign className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+        <span className="font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md tracking-wider truncate max-w-[150px] whitespace-nowrap block">
+          {option.sifco}
+        </span>
+      </span>
+    </SelectItem>
+  ))}
+</SelectContent>
+
         </Select>
       )}
     </div>

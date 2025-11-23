@@ -66,6 +66,7 @@ export function PagoForm() {
     resetBuscador,
     setResetBuscador,
     mora,
+    convenioActivoInfo,
   } = usePagoForm();
 
   const { bancos, loading: loadingBancos } = useBancos();
@@ -173,6 +174,8 @@ export function PagoForm() {
                 onCuotaSeleccionadaChange={setCuotaSeleccionada}
                 cuotasPendientesInfo={cuotasPendientesInfo ?? { cuotas: [] }}
                 mora={mora || 0}
+                convenioActivoInfo={convenioActivoInfo}
+                cuotaMensualAPagar={dataCredito.cuotaMensualAPagar} // 👈 NUEVO
               />
             )
           )}

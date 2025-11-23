@@ -1,10 +1,11 @@
 // src/routes/paymentAgreements.routes.ts
 import { Elysia, t } from "elysia";
 import { createPaymentAgreement, getPaymentAgreements } from "../controllers/paymentAgreement";
+import { authMiddleware } from "./midleware";
  
 
 export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements" })
-  
+  .use(authMiddleware)
   // CREATE - Crear convenio de pago
   .post(
     "/",

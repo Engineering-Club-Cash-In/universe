@@ -176,7 +176,68 @@ export interface Cuota {
   reserva: string;
   observaciones: string;
 }
+export interface ConvenioActivo {
+  convenio_id: number;
+  credito_id: number;
+  monto_total_convenio: string;
+  numero_meses: number;
+  cuota_mensual: string;
+  fecha_convenio: string;
+  monto_pagado: string;
+  monto_pendiente: string;
+  pagos_realizados: number;
+  pagos_pendientes: number;
+  activo: boolean;
+  completado: boolean;
+  motivo: string | null;
+  observaciones: string | null;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+  
+  // 🔥 NUEVOS CAMPOS TIPADOS
+  cuotasEnConvenio: CuotaEnConvenio[];
+  pagosConvenio: PagoConvenio[];
+  cuotasConvenioMensuales: CuotaConvenioMensual[];
+  cuotaConvenioAPagar: string;
+}
 
+// Cuota mensual del convenio (15 y 30)
+export interface CuotaConvenioMensual {
+  cuota_convenio_id: number;
+  convenio_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  fecha_pago: string | null;
+  created_at: string;
+}
+
+// Cuotas del crédito que están en el convenio
+export interface CuotaEnConvenio {
+  cuota_id: number;
+  credito_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  monto_capital: string;
+  monto_interes: string;
+  monto_total: string;
+  pagado: boolean;
+  createdAt: string;
+}
+
+// Pagos asociados al convenio (tabla pivot)
+export interface PagoConvenio {
+  id: number;
+  convenio_id: number;
+  pago_id: number;
+  created_at: string;
+}
+export interface ConvenioPagosResume {
+  id: number;
+  convenio_id: number;
+  pago_id: number;
+  created_at: string;
+}
 export interface GetCreditoByNumeroActivoResponse {
   flujo: "ACTIVO";
   credito: Credito;
@@ -189,6 +250,10 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
+    convenioActivo: ConvenioActivo | null;
+  cuotasEnConvenio: Cuota[];
+  pagosConvenio: ConvenioPagosResume[];
+
 }
 
 export interface CancelacionCredito {
@@ -575,10 +640,11 @@ export async function liquidatePagosInversionistasService({ pago_id, credito_id,
 }
 
 // Reversar pagos
-export async function reversePagosInversionistasService({ pago_id, credito_id }: { pago_id: number; credito_id: number }) {
+export async function reversePagosInversionistasService({ pago_id, credito_id,reverseAccounting }: { pago_id: number; credito_id: number, reverseAccounting: boolean }) {
   const res = await api.post(`${API_URL}/reversePayment`, {
     pago_id,
     credito_id,
+    reverseAccounting,
   });
   return res.data;
 }
@@ -1271,6 +1337,7 @@ export interface PagoDataInvestor {
   otros: number | null;
   reserva: number | null;
   membresias: number | null;
+  pagoConvenio: number | null;
   observaciones: string | null;
   registerBy: string | null;
   bancoNombre: string | null;
@@ -1308,6 +1375,7 @@ export interface TotalesPagos {
   totalReserva: number;
   totalMembresias: number;
   totalGeneral: number;
+  totalConvenio: number;
 }
 
 // 📊 Respuesta del servicio
@@ -1379,6 +1447,7 @@ export async function getPagosConInversionistasService(
           totalReserva: Number(data.totales.totalReserva ?? 0),
           totalMembresias: Number(data.totales.totalMembresias ?? 0),
           totalGeneral: Number(data.totales.totalGeneral ?? 0),
+          totalConvenio: Number(data.totales.totalConvenio ?? 0),
         }
       : undefined,
     // 📊 Incluir URL del Excel si viene
@@ -1861,76 +1930,38 @@ export const createPaymentAgreement = async (
   input: CreatePaymentAgreementInput
 ): Promise<PaymentAgreementResponse> => {
   try {
-    const response = await fetch(`${API_URL}/payment-agreements`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(input),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Failed to create payment agreement");
-    }
+    const { data } = await api.post(`${API_URL}/payment-agreements`, input);
 
     return data;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating payment agreement:", error);
-    throw error;
+    throw new Error(error?.response?.data?.message || "Failed to create payment agreement");
   }
 };
+
 
 // GET payment agreements with filters
 export const getPaymentAgreements = async (
   filters?: GetPaymentAgreementsFilters
 ): Promise<PaymentAgreementResponse> => {
   try {
-    const params = new URLSearchParams();
+    const params: Record<string, any> = {};
 
-    if (filters?.credit_id) {
-      params.append("credit_id", filters.credit_id.toString());
-    }
-    if (filters?.start_date) {
-      params.append("start_date", filters.start_date);
-    }
-    if (filters?.end_date) {
-      params.append("end_date", filters.end_date);
-    }
-    if (filters?.year) {
-      params.append("year", filters.year.toString());
-    }
-    if (filters?.month) {
-      params.append("month", filters.month.toString());
-    }
-    if (filters?.day) {
-      params.append("day", filters.day.toString());
-    }
-    if (filters?.status) {
-      params.append("status", filters.status);
-    }
+    if (filters?.credit_id) params.credit_id = filters.credit_id;
+    if (filters?.start_date) params.start_date = filters.start_date;
+    if (filters?.end_date) params.end_date = filters.end_date;
+    if (filters?.year) params.year = filters.year;
+    if (filters?.month) params.month = filters.month;
+    if (filters?.day) params.day = filters.day;
+    if (filters?.status) params.status = filters.status;
 
-    const url = `${API_URL}/payment-agreements${
-      params.toString() ? `?${params.toString()}` : ""
-    }`;
-
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        "Content-Type": "application/json",
-      },
+    const { data } = await api.get(`${API_URL}/payment-agreements`, {
+      params,
     });
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.message || "Failed to fetch payment agreements");
-    }
-
     return data;
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error fetching payment agreements:", error);
-    throw error;
+    throw new Error(error?.response?.data?.message || "Failed to fetch payment agreements");
   }
 };

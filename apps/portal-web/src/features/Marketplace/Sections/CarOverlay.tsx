@@ -18,6 +18,7 @@ import type {
   FilterParams,
   VehicleType,
 } from "../services/serviceMarketplace";
+import { MAX_DISPLAYED_VEHICLES } from "../constants/marketplace.constants";
 
 type VehicleTypeOption =
   | "sedan"
@@ -91,7 +92,7 @@ export const CarOverlay = () => {
   }, [condition, selectedType, searchFilters]);
 
   const { data: vehicles = [], isLoading } = useFilteredVehicles(activeFilters);
-  const displayedVehicles = vehicles.slice(0, 10);
+  const displayedVehicles = vehicles.slice(0, MAX_DISPLAYED_VEHICLES);
 
   const vehicleTypes = [
     { id: "sedan" as VehicleTypeOption, label: "Sedán", icon: <IconSedan /> },
@@ -221,12 +222,14 @@ export const CarOverlay = () => {
             onChange={setBrand}
             options={optionsBrands}
             placeholder="Marca"
+            color="primary"
           />
           <Select
             value={linea}
             onChange={setLinea}
             options={optionsLines}
             placeholder="Línea"
+            color="primary"
           />
           <Select
             value={year.toString()}
@@ -236,6 +239,7 @@ export const CarOverlay = () => {
               value: opt.value.toString(),
             }))}
             placeholder="Año"
+            color="primary"
           />
           <Select
             value={motorization}
@@ -245,6 +249,7 @@ export const CarOverlay = () => {
               value: opt.value,
             }))}
             placeholder="Motorización"
+            color="primary"
           />
           <Button onClick={handleSubmit} size="md">
             {hasActiveSearch && !hasChanges ? "Limpiar" : "Buscar"}

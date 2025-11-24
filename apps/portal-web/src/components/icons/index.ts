@@ -17,7 +17,8 @@ export * from "./IconPerson"
 export * from "./IconDocument"
 export * from "./IconOut"
 export * from "./IconGraph"
-export * from "./IconCalendarSmall"
+export * from "./IconCalendarSmall";
+export * from "./IconGear";
 export * from "./IconDownload"
 export * from "./IconTarget"
 export * from "./IconPlus"

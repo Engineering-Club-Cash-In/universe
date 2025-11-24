@@ -16,3 +16,11 @@ export * from "./IconMessage";
 export * from "./IconInfo";
 export * from "./IconUserCheck";
 export * from "./IconStart";
+
+export * from "./IconCoupe";
+export * from "./IconHatchBack";
+export * from "./IconMini";
+export * from "./IconPickup";
+export * from "./IconSedan";
+export * from "./IconSuv";
+export * from "./IconVan";

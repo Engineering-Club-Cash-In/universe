@@ -93,7 +93,7 @@ export const useLinesByBrand = (brandName: string) => {
  */
 export const useFilteredVehicles = (filters: FilterParams) => {
   return useQuery({
-    queryKey: ["vehicles", "filtered", filters],
+    queryKey: ["vehicles", "filtered", JSON.stringify(filters)],
     queryFn: () => getFilteredVehicles(filters),
   });
 };

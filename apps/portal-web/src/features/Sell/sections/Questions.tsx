@@ -37,7 +37,7 @@ export const Questions = () => {
       <ModalChatBot
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        options={[optionsSell.questions]}
+        options={optionsSell.questions}
       />
     </section>
   );

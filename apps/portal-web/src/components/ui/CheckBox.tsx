@@ -19,7 +19,6 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
   isLabelLink = false,
   labelHref,
 }) => {
-  console.log("CheckBox - checked:", checked, "onChange:", typeof onChange);
   
   const handleToggle = (e: React.MouseEvent) => {
     e.preventDefault();

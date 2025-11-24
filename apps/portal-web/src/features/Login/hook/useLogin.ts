@@ -13,7 +13,6 @@ const validationSchema = Yup.object({
     .email("Correo electrónico inválido")
     .required("El correo electrónico es requerido"),
   password: Yup.string()
-    .min(6, "La contraseña debe tener al menos 6 caracteres")
     .required("La contraseña es requerida"),
   rememberMe: Yup.boolean(),
 });
@@ -28,7 +27,7 @@ export const useLogin = () => {
       const result = await authClient.signIn.email({
         email: credentials.email,
         password: credentials.password,
-        rememberMe: credentials.rememberMe,
+        rememberMe: true,
         callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
       });
       console.log("Login result:", result.error);
@@ -72,6 +71,13 @@ export const useLogin = () => {
     },
     validationSchema,
     onSubmit: (values) => {
+      // Guardar o eliminar el email recordado según la opción
+      if (values.rememberMe) {
+        localStorage.setItem(REMEMBERED_EMAIL_KEY, values.email);
+      } else {
+        localStorage.removeItem(REMEMBERED_EMAIL_KEY);
+      }
+      
       loginMutation.mutate(values);
     },
   });

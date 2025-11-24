@@ -87,7 +87,7 @@ export const Profile = () => {
   if (isLoading) {
     return (
       <div>
-        <div className="w-full mt-4 p-8">
+        <div className="w-full mt-4 ">
           <NavBar />
           <div className="max-w-4xl mx-auto mt-16 mb-20">
             <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-8">
@@ -103,7 +103,7 @@ export const Profile = () => {
 
   return (
     <div>
-      <div className="w-full mt-4 p-8">
+      <div className="w-full mt-4 ">
         <NavBar />
         <Menu />
         <div className="max-w-7xl mx-auto mt-16 mb-20">

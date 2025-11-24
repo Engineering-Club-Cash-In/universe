@@ -11,9 +11,10 @@ interface SelectProps {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  color?: string;
 }
 
-export const Select = ({ options, value, onChange, placeholder = "Seleccionar..." }: SelectProps) => {
+export const Select = ({ options, value, onChange, placeholder = "Seleccionar...", color = "secondary" }: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement>(null);
 
@@ -63,11 +64,12 @@ export const Select = ({ options, value, onChange, placeholder = "Seleccionar...
         }}
       >
         <span>{selectedOption ? selectedOption.label : placeholder}</span>
-        <div style={{
+        <div className={"text-" + color} style={{
           display: "flex",
           alignItems: "center",
           transition: "transform 0.2s",
-          transform: isOpen ? "rotate(180deg)" : "rotate(0deg)"
+          transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+ 
         }}>
           <IconArrowDown width={16} height={16} />
         </div>
@@ -85,7 +87,8 @@ export const Select = ({ options, value, onChange, placeholder = "Seleccionar...
             opacity: 0.99,
             background: "#0F0F0F",
             zIndex: 1000,
-            overflow: "hidden",
+            maxHeight: "300px",
+            overflowY: "auto",
             boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
           }}
         >

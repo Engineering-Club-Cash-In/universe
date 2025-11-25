@@ -238,6 +238,8 @@ type PhotoData = {
   uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'failed';
   serverUrl?: string;
   uploadError?: string;
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 };
 
 type PhotosState = {
@@ -433,13 +435,13 @@ export default function VehiclePictures({
       
       // Update status to uploaded with server URL but keep blob preview for display
       setPhotos((prev) => {
-        const updated = {
+        const updated: PhotosState = {
           ...prev,
           [stepId]: {
             ...prev[stepId],
             [photoId]: {
               ...prev[stepId][photoId]!,
-              uploadStatus: 'uploaded',
+              uploadStatus: 'uploaded' as const,
               serverUrl,
               // Keep the blob URL for preview, serverUrl is for database
             },

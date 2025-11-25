@@ -115,15 +115,15 @@ interface VehicleInspectionFormProps {
   isWizardMode?: boolean;
 }
 
-export default function VehicleInspectionForm({ 
-  onComplete, 
-  isWizardMode = false 
+export default function VehicleInspectionForm({
+  onComplete,
+  isWizardMode = false
 }: VehicleInspectionFormProps) {
   const { formData, setFormData } = useInspection();
   const [scannerFile, setScannerFile] = useState<File | null>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
-  
+
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
@@ -141,10 +141,10 @@ export default function VehicleInspectionForm({
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     console.log(values);
-    
+
     // Save form data to context
     setFormData(values);
-    
+
     // Show success toast
     toast.success("Información básica guardada!");
 
@@ -203,80 +203,30 @@ export default function VehicleInspectionForm({
       }
     }
   };
-  
-  // Function to fill form with dummy data
-  const fillWithDummyData = async () => {
-    const dummyData = {
-      technicianName: "Juan Pérez García",
-      inspectionDate: new Date(),
-      vehicleMake: "Toyota",
-      vehicleModel: "Corolla Cross",
-      vehicleYear: "2023",
-      licensePlate: "P-123ABC",
-      vinNumber: "JTMB34FV2ND123456",
-      milesMileage: "15000",
-      kmMileage: "24140",
-      origin: "Importado" as const,
-      vehicleType: "SUV",
-      color: "Blanco Perlado",
-      cylinders: "4",
-      engineCC: "2000",
-      fuelType: "Gasolina" as const,
-      transmission: "Automático" as const,
-      inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
-      vehicleRating: "Comercial" as const,
-      marketValue: "185000",
-      suggestedCommercialValue: "175000",
-      bankValue: "165000",
-      currentConditionValue: "170000",
-      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
-      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
-      scannerUsed: "Sí" as const,
-      airbagWarning: "No" as const,
-      testDrive: "Sí" as const,
-    };
-    
-    // Use form.reset() to properly update all fields including selects
-    form.reset(dummyData);
-    
-    // Load and set the PDF file
-    try {
-      const response = await fetch('/sample.pdf');
-      const blob = await response.blob();
-      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
-      
-      setScannerFile(file);
-      form.setValue("scannerResult", file);
-    } catch (error) {
-      console.error('Error loading sample PDF:', error);
-    }
-    
-    // Save to context
-    setFormData(dummyData);
-    
-    toast.success("Formulario llenado con datos de prueba");
-  };
 
+
+
+  const handleOCRData = (mappedData: any) => {
     // Update form with OCR data and trigger validation only for filled fields
     Object.keys(mappedData).forEach(key => {
       if (mappedData[key]) {
-        form.setValue(key as any, mappedData[key], { 
+        form.setValue(key as any, mappedData[key], {
           shouldValidate: true,
           shouldDirty: true,
-          shouldTouch: true 
+          shouldTouch: true
         });
       }
     });
 
     // Clear validation errors for fields that OCR cannot fill
     const nonOCRFields = [
-      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage', 
+      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
       'fuelType', 'transmission', 'inspectionResult', 'vehicleRating',
       'marketValue', 'suggestedCommercialValue', 'bankValue', 'currentConditionValue',
       'vehicleEquipment', 'importantConsiderations', 'scannerUsed', 'scannerResult',
       'airbagWarning', 'missingAirbag', 'testDrive', 'noTestDriveReason'
     ];
-    
+
     nonOCRFields.forEach(field => {
       form.clearErrors(field as any);
     });
@@ -285,7 +235,7 @@ export default function VehicleInspectionForm({
     const currentData = form.getValues();
     const updatedData = { ...currentData, ...mappedData };
     setFormData(updatedData);
-    
+
     toast.success('Información de la tarjeta aplicada al formulario');
   };
 
@@ -319,26 +269,47 @@ export default function VehicleInspectionForm({
       airbagWarning: "No" as const,
       testDrive: "Sí" as const,
     };
-    
+
     // Use form.reset() to properly update all fields including selects
     form.reset(dummyData);
-    
+
     // Load and set the PDF file
     try {
       const response = await fetch('/sample.pdf');
       const blob = await response.blob();
       const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
-      
+
       setScannerFile(file);
       form.setValue("scannerResult", file);
     } catch (error) {
       console.error('Error loading sample PDF:', error);
     }
-    
+
     // Save to context
     setFormData(dummyData);
-    
+
     toast.success("Formulario llenado con datos de prueba");
+  };
+
+  const formatCurrency = (value: string | number) => {
+    if (!value) return "";
+    const num = Number(value);
+    if (isNaN(num)) return "";
+    return new Intl.NumberFormat("es-GT", {
+      style: "currency",
+      currency: "GTQ",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(num);
+  };
+
+  const handleCurrencyInput = (value: string) => {
+    // Remove non-digit characters
+    const rawValue = value.replace(/\D/g, "");
+    return {
+      raw: rawValue,
+      formatted: formatCurrency(rawValue),
+    };
   };
 
   return (
@@ -410,7 +381,7 @@ export default function VehicleInspectionForm({
             </CardContent>
           </Card>
 
-          <VehicleRegistrationOCR 
+          <VehicleRegistrationOCR
             onDataExtracted={handleOCRData}
             isProcessing={form.formState.isSubmitting}
           />
@@ -759,7 +730,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor de mercado</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -782,7 +753,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor comercial sugerido</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -807,7 +778,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor bancario</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -830,7 +801,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor vehículo condiciones actuales</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {

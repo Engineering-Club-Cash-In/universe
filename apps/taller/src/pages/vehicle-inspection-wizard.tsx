@@ -54,6 +54,7 @@ export default function VehicleInspectionWizard() {
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
+  const [_isSubmitting, setIsSubmitting] = useState(false);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -82,9 +83,11 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[]) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[], dataOverride?: any) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
+    // Use dataOverride if provided (from valuation step), otherwise use formData from context
+    const dataToUse = dataOverride || formData;
     
     // Verificar que las fotos estén disponibles
     if (!photosToUse || photosToUse.length === 0) {

@@ -7,3 +7,4 @@ export * from "./CheckBox"
 export * from "./BottomSheets";
 export * from "./Select";
 export * from "./InputIcon";
+export * from "./Interval";

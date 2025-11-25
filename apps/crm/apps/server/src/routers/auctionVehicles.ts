@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
-import { auctionExpenses, auctionVehicles } from "@/db/schema/auctionVehicles";
+import { auctionExpenses, auctionVehicles } from "../db/schema/auctionVehicles";
 import { db } from "../db";
 import {
 	vehicleInspections,
@@ -311,7 +311,7 @@ export const auctionRouter = {
 
 			// Group rows into nested structure
 			const grouped = auctions.reduce((acc, row) => {
-				let auction = acc.find((a) => a.auctionId === row.auctionId);
+				let auction = acc.find((a: { auctionId: string }) => a.auctionId === row.auctionId);
 				if (!auction) {
 					auction = {
 						auctionId: row.auctionId,

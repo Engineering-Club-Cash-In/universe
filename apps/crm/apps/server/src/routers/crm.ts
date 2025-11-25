@@ -1,6 +1,6 @@
 import { and, count, eq, or } from "drizzle-orm";
 import { z } from "zod";
-import { vehicleInspections } from "@/db/schema";
+import { vehicleInspections } from "../db/schema";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
@@ -38,7 +38,7 @@ export const crmRouter = {
 	}),
 
 	// Get sales users for assignment dropdown
-	getCrmUsers: crmProcedure.handler(async ({ context }) => {
+	getCrmUsers: crmProcedure.handler(async () => {
 		const users = await db
 			.select({
 				id: user.id,
@@ -1512,7 +1512,7 @@ export const crmRouter = {
 	// Validate opportunity documents - Para analistas
 	validateOpportunityDocuments: analystProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			try {
 				// 1. Obtener oportunidad con vehículo
 				const [opp] = await db

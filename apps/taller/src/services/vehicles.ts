@@ -157,7 +157,7 @@ export const getVehicleById = async (id: string) => {
 };
 
 // Search vehicles
-export const searchVehicles = async (query?: string, status?: string, vehicleType?: string, fuelType?: string) => {
+export const searchVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
   try {
     const vehicles = await vehiclesApi.search({
       query,

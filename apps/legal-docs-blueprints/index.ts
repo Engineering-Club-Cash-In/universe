@@ -1,112 +1,115 @@
-import express, { Request, Response } from 'express';
-import cors from 'cors';
+import { Elysia } from 'elysia';
+import { cors } from '@elysiajs/cors';
 import { contractGenerator } from './services/ContractGeneratorService';
 import { ContractType, GenerateContractRequest } from './types/contract';
 
-const app = express();
-const PORT = process.env.PORT || 4000;
-
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+const PORT = Number(process.env.PORT) || 4000;
 
 // ===== ENDPOINTS =====
 
-/**
- * GET /health - Health check
- */
-app.get('/health', async (req: Request, res: Response) => {
+const app = new Elysia()
+  .use(cors())
+
+  /**
+   * GET /health - Health check
+   */
+  .get('/health', async () => {
   const gotenbergHealth = await contractGenerator.checkGotenbergHealth();
 
-  res.json({
-    status: 'ok',
-    service: 'Contract Generator API',
-    timestamp: new Date().toISOString(),
-    gotenberg: gotenbergHealth ? 'available' : 'unavailable'
-  });
-});
+    return {
+      status: 'ok',
+      service: 'Contract Generator API',
+      timestamp: new Date().toISOString(),
+      gotenberg: gotenbergHealth ? 'available' : 'unavailable'
+    };
+  })
 
-/**
- * GET /contracts/types - Lista todos los tipos de contratos disponibles
- */
-app.get('/contracts/types', (req: Request, res: Response) => {
-  const availableContracts = contractGenerator.listAvailableContracts();
+  /**
+   * GET /contracts/types - Lista todos los tipos de contratos disponibles
+   */
+  .get('/contracts/types', () => {
+    const availableContracts = contractGenerator.listAvailableContracts();
 
-  res.json({
-    success: true,
-    count: availableContracts.length,
-    contracts: availableContracts
-  });
-});
+    return {
+      success: true,
+      count: availableContracts.length,
+      contracts: availableContracts
+    };
+  })
 
-/**
- * POST /generatecontrato - Genera un contrato según el tipo especificado
- *
- * Body:
- * {
- *   "contractType": "uso_carro_usado",
- *   "data": { ...campos del contrato... },
- *   "options": { "generatePdf": true, "filenamePrefix": "contrato_juan" }
- * }
- */
-app.post('/generatecontrato', async (req: Request, res: Response) => {
+  /**
+   * POST /generatecontrato - Genera un contrato según el tipo especificado
+   *
+   * Body:
+   * {
+   *   "contractType": "uso_carro_usado",
+   *   "data": { ...campos del contrato... },
+   *   "options": { "generatePdf": true, "filenamePrefix": "contrato_juan" }
+   * }
+   */
+  .post('/generatecontrato', async ({ body, set }) => {
   try {
-    const body: GenerateContractRequest = req.body;
+    const requestBody = body as GenerateContractRequest;
 
     // Validar que se envió el tipo de contrato
-    if (!body.contractType) {
-      return res.status(400).json({
+    if (!requestBody.contractType) {
+      set.status = 400;
+      return {
         success: false,
         error: 'El campo "contractType" es requerido',
         availableTypes: Object.values(ContractType)
-      });
+      };
     }
 
     // Validar que el tipo de contrato existe
-    if (!Object.values(ContractType).includes(body.contractType)) {
-      return res.status(400).json({
+    if (!Object.values(ContractType).includes(requestBody.contractType)) {
+      set.status = 400;
+      return {
         success: false,
-        error: `Tipo de contrato inválido: ${body.contractType}`,
+        error: `Tipo de contrato inválido: ${requestBody.contractType}`,
         availableTypes: Object.values(ContractType)
-      });
+      };
     }
 
     // Validar que se enviaron datos
-    if (!body.data || Object.keys(body.data).length === 0) {
-      return res.status(400).json({
+    if (!requestBody.data || Object.keys(requestBody.data).length === 0) {
+      set.status = 400;
+      return {
         success: false,
         error: 'El campo "data" es requerido y no puede estar vacío'
-      });
+      };
     }
 
     // Generar el contrato
-    console.log(`\n🚀 Generando contrato tipo: ${body.contractType}`);
+    console.log(`\n🚀 Generando contrato tipo: ${requestBody.contractType}`);
     const result = await contractGenerator.generateContract(
-      body.contractType,
-      body.data,
-      body.options
+      requestBody.contractType,
+      requestBody.data,
+      requestBody.options
     );
 
     // Responder según el resultado
     if (result.success) {
-      res.status(200).json(result);
+      set.status = 200;
+      return result;
     } else {
-      res.status(400).json(result);
+      set.status = 400;
+      return result;
     }
 
   } catch (error: any) {
     console.error('Error en /generatecontrato:', error);
-    res.status(500).json({
+    set.status = 500;
+    return {
       success: false,
       error: 'Error interno del servidor',
       message: error.message
-    });
+    };
   }
-});
+})
 
-/**
- * POST /contracts/batch - Genera múltiples contratos de manera secuencial
+  /**
+   * POST /contracts/batch - Genera múltiples contratos de manera secuencial
  *
  * Body:
  * {
@@ -114,61 +117,68 @@ app.post('/generatecontrato', async (req: Request, res: Response) => {
  *     {
  *       "contractType": "reconocimiento_deuda",
  *       "data": { ...campos... },
- *       "options": { "generatePdf": true, "filenamePrefix": "cliente_001" }
+ *       "emails": ["cliente@ejemplo.com", "cci@ejemplo.com"],
+ *       "options": { "generatePdf": true, "filenamePrefix": "cliente_001", "gender": "male" }
  *     },
  *     {
  *       "contractType": "garantia_mobiliaria",
  *       "data": { ...campos... },
- *       "options": { "generatePdf": true }
+ *       "emails": ["cliente@ejemplo.com"],
+ *       "options": { "generatePdf": true, "gender": "female" }
  *     }
  *   ]
  * }
  */
-app.post('/contracts/batch', async (req: Request, res: Response) => {
+  .post('/contracts/batch', async ({ body, set }) => {
   try {
-    const { contracts } = req.body;
+    const { contracts } = body as { contracts: any[] };
 
     // Validar que se envió el array de contratos
     if (!contracts || !Array.isArray(contracts)) {
-      return res.status(400).json({
+      set.status = 400;
+      return {
         success: false,
         error: 'El campo "contracts" es requerido y debe ser un array'
-      });
+      };
     }
 
     // Validar que el array no esté vacío
     if (contracts.length === 0) {
-      return res.status(400).json({
+      set.status = 400;
+      return {
         success: false,
         error: 'El array "contracts" no puede estar vacío'
-      });
+      };
     }
 
     // Validar cada contrato en el array
     for (let i = 0; i < contracts.length; i++) {
       const contract = contracts[i];
-      
+
       if (!contract.contractType) {
-        return res.status(400).json({
+        set.status = 400;
+        return {
           success: false,
           error: `Contrato en posición ${i}: falta el campo "contractType"`,
           availableTypes: Object.values(ContractType)
-        });
+        };
       }
 
       if (!Object.values(ContractType).includes(contract.contractType)) {
-        return res.status(400).json({
+        set.status = 400;
+        return {
           success: false,
           error: `Contrato en posición ${i}: tipo inválido "${contract.contractType}"`,
           availableTypes: Object.values(ContractType)
-        });
+        };
       }
 
       if (!contract.data || Object.keys(contract.data).length === 0) {
-        return res.status(400).json({
+        set.status = 400;
+        return {
           success: false,
           error: `Contrato en posición ${i}: falta el campo "data" o está vacío`
-        });
+        };
       }
     }
 
@@ -178,36 +188,50 @@ app.post('/contracts/batch', async (req: Request, res: Response) => {
     const result = await contractGenerator.generateContractsBatch(contracts);
 
     // Responder con los resultados
-    res.status(200).json(result);
+    set.status = 200;
+    return result;
 
   } catch (error: any) {
     console.error('Error en /contracts/batch:', error);
-    res.status(500).json({
+    set.status = 500;
+    return {
       success: false,
       error: 'Error interno del servidor',
       message: error.message,
       results: []
-    });
+    };
   }
-});
+})
 
-/**
- * POST /contracts/:type - Endpoint alternativo por tipo específico
- * Ejemplo: POST /contracts/uso_carro_usado
- */
-app.post('/contracts/:type', async (req: Request, res: Response) => {
+  /**
+   * POST /contracts/:type - Endpoint alternativo por tipo específico
+   * Ejemplo: POST /contracts/uso_carro_usado
+   */
+  .post('/contracts/:type', async ({ params, body, query, set }) => {
   try {
-    const contractType = req.params.type as ContractType;
-    const data = req.body;
-    const options = req.query.pdf === 'false' ? { generatePdf: false } : {};
+    const contractType = params.type as ContractType;
+    const { emails, gender, ...data } = body as any;
+
+    // Construir opciones desde query params y body
+    const options: any = {};
+    if (query.pdf === 'false') {
+      options.generatePdf = false;
+    }
+    if (emails && Array.isArray(emails)) {
+      options.emails = emails;
+    }
+    if (gender) {
+      options.gender = gender;
+    }
 
     // Validar tipo
     if (!Object.values(ContractType).includes(contractType)) {
-      return res.status(400).json({
+      set.status = 400;
+      return {
         success: false,
         error: `Tipo de contrato inválido: ${contractType}`,
         availableTypes: Object.values(ContractType)
-      });
+      };
     }
 
     // Generar
@@ -218,26 +242,29 @@ app.post('/contracts/:type', async (req: Request, res: Response) => {
     );
 
     if (result.success) {
-      res.status(200).json(result);
+      set.status = 200;
+      return result;
     } else {
-      res.status(400).json(result);
+      set.status = 400;
+      return result;
     }
 
   } catch (error: any) {
-    console.error(`Error en /contracts/${req.params.type}:`, error);
-    res.status(500).json({
+    console.error(`Error en /contracts/${params.type}:`, error);
+    set.status = 500;
+    return {
       success: false,
       error: 'Error interno del servidor',
       message: error.message
-    });
+    };
   }
-});
+})
 
-/**
- * GET / - Documentación básica de la API
- */
-app.get('/', (req: Request, res: Response) => {
-  res.json({
+  /**
+   * GET / - Documentación básica de la API
+   */
+  .get('/', () => {
+  return {
     service: 'Contract Generator API',
     version: '1.0.0',
     description: 'API para generación de contratos legales desde templates DOCX',
@@ -275,12 +302,14 @@ app.get('/', (req: Request, res: Response) => {
         }
       }
     }
+  };
+})
+  .listen({
+    port: PORT,
+    hostname: '0.0.0.0'
   });
-});
 
-// Iniciar servidor
-app.listen(PORT, () => {
-  console.log(`
+console.log(`
 ╔═══════════════════════════════════════════════════════════╗
 ║  📄 Contract Generator API                                ║
 ║  🚀 Server running on http://localhost:${PORT}              ║
@@ -292,17 +321,14 @@ app.listen(PORT, () => {
 ║  • POST /contracts/batch       - Genera múltiples         ║
 ║  • POST /contracts/:type       - Genera por tipo          ║
 ╚═══════════════════════════════════════════════════════════╝
-  `);
+`);
 
-  // Verificar Gotenberg
-  contractGenerator.checkGotenbergHealth().then(healthy => {
-    if (healthy) {
-      console.log('✓ Gotenberg está disponible y listo');
-    } else {
-      console.warn('⚠ Gotenberg no está disponible. Solo se generarán archivos DOCX.');
-      console.warn('  Ejecuta: docker-compose up -d');
-    }
-  });
+// Verificar Gotenberg
+contractGenerator.checkGotenbergHealth().then(healthy => {
+  if (healthy) {
+    console.log('✓ Gotenberg está disponible y listo');
+  } else {
+    console.warn('⚠ Gotenberg no está disponible. Solo se generarán archivos DOCX.');
+    console.warn('  Ejecuta: docker-compose up -d');
+  }
 });
-
-export default app;

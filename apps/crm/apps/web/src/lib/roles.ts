@@ -3,6 +3,8 @@ export const ROLES = {
 	ADMIN: "admin",
 	SALES: "sales",
 	ANALYST: "analyst",
+	COBROS: "cobros",
+	JURIDICO: "juridico",
 } as const;
 
 export type UserRole = (typeof ROLES)[keyof typeof ROLES];
@@ -24,6 +26,16 @@ export const ROLE_CONFIG = {
 		color: "bg-purple-100 text-purple-800",
 		icon: "FileText",
 	},
+	[ROLES.COBROS]: {
+		label: "Cobros",
+		color: "bg-green-100 text-green-800",
+		icon: "DollarSign",
+	},
+	[ROLES.JURIDICO]: {
+		label: "Jurídico",
+		color: "bg-amber-100 text-amber-800",
+		icon: "Scale",
+	},
 } as const;
 
 // Permission checks
@@ -38,6 +50,20 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.SALES,
 	canApproveOpportunities: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
+	canAccessCobros: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.COBROS,
+	canAccessWhatsApp: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+	canAccessJuridico: (role: string) =>
+		role === ROLES.ADMIN ||
+		role === ROLES.JURIDICO ||
+		role === ROLES.SALES ||
+		role === ROLES.ANALYST,
+	canCreateLegalContracts: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+	canAssignLegalContracts: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+	canDeleteLegalContracts: (role: string) => role === ROLES.ADMIN,
 } as const;
 
 // Helper functions

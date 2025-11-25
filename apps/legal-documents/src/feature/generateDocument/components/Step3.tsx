@@ -1,8 +1,9 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle, AlertCircle, User, Calendar } from "lucide-react";
+import { CheckCircle, AlertCircle, User, Calendar, Sparkles } from "lucide-react";
 import { type Document, type Field, type RenapData } from "../hooks/useStep2";
 import { useStep3 } from "../hooks/useStep3";
 
@@ -27,12 +28,14 @@ export function Step3({
 }: Step3Props) {
   const { documents = [], fields = [], renapData } = data;
 
+  // IMPORTANT: Hook must be called before any early returns
   const {
     fieldValues,
     fieldErrors,
     selectedDocuments,
     relevantFields,
     handleFieldChange,
+    autoFillWithFakeData,
   } = useStep3({
     documents,
     fields,
@@ -42,6 +45,9 @@ export function Step3({
     onValidationChange,
     shouldValidate,
   });
+
+  // Check if we should show development mode button
+  const isDevelopment = import.meta.env.DEV;
 
   if (!documents.length) {
     return (
@@ -97,8 +103,20 @@ export function Step3({
       {/* Campos del Formulario */}
       {relevantFields.length > 0 && (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-4">
             <CardTitle>Información Requerida</CardTitle>
+            {isDevelopment && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={autoFillWithFakeData}
+                className="gap-2"
+              >
+                <Sparkles className="h-4 w-4" />
+                Auto-llenar (Dev)
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

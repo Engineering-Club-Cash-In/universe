@@ -21,11 +21,19 @@ import {
 	type NewVehicle,
 	type NewVehicleInspection,
 	type NewVehiclePhoto,
+	vehicleDocuments,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
 } from "../db/schema";
-import { protectedProcedure, publicProcedure } from "../lib/orpc";
+import { crmProcedure, protectedProcedure, publicProcedure } from "../lib/orpc";
+import {
+	deleteFileFromR2,
+	generateUniqueFilename,
+	getFileUrl,
+	uploadFileToR2,
+	validateFile,
+} from "../lib/storage";
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
@@ -1073,5 +1081,159 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 						"No se pudo generar la valoración por IA. Por favor complete la valoración manualmente.",
 				});
 			}
+		}),
+
+	// Vehicle Documents Management
+	getVehicleDocuments: crmProcedure
+		.input(z.object({ vehicleId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// Verify user has access to the vehicle
+			const [vehicle] = await db
+				.select()
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle) {
+				throw new Error("Vehículo no encontrado");
+			}
+
+			// Get documents with uploader info
+			const documents = await db
+				.select({
+					id: vehicleDocuments.id,
+					filename: vehicleDocuments.filename,
+					originalName: vehicleDocuments.originalName,
+					mimeType: vehicleDocuments.mimeType,
+					size: vehicleDocuments.size,
+					documentType: vehicleDocuments.documentType,
+					description: vehicleDocuments.description,
+					uploadedAt: vehicleDocuments.uploadedAt,
+					filePath: vehicleDocuments.filePath,
+					uploadedBy: vehicleDocuments.uploadedBy,
+				})
+				.from(vehicleDocuments)
+				.where(eq(vehicleDocuments.vehicleId, input.vehicleId))
+				.orderBy(vehicleDocuments.uploadedAt);
+
+			// Generate signed URLs for each document
+			const documentsWithUrls = await Promise.all(
+				documents.map(async (doc) => {
+					const url = await getFileUrl(doc.filePath);
+					return {
+						...doc,
+						url,
+					};
+				}),
+			);
+
+			return documentsWithUrls;
+		}),
+
+	uploadVehicleDocument: crmProcedure
+		.input(
+			z.object({
+				vehicleId: z.string().uuid(),
+				documentType: z.string(),
+				description: z.string().optional(),
+				file: z.object({
+					name: z.string(),
+					type: z.string(),
+					size: z.number(),
+					data: z.string(), // Base64
+				}),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verify vehicle exists
+			const [vehicle] = await db
+				.select()
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle) {
+				throw new Error("Vehículo no encontrado");
+			}
+
+			// Only admin and sales can upload documents
+			if (!["admin", "sales"].includes(context.userRole)) {
+				throw new Error("No tienes permiso para subir documentos");
+			}
+
+			// Create File/Blob from data
+			const fileBuffer = Buffer.from(input.file.data, "base64");
+			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+
+			// Validate file
+			const validation = validateFile({
+				type: input.file.type,
+				size: input.file.size,
+			} as File);
+
+			if (!validation.valid) {
+				throw new Error(validation.error);
+			}
+
+			// Generate unique filename
+			const uniqueFilename = generateUniqueFilename(input.file.name);
+
+			// Upload to R2
+			const { key } = await uploadFileToR2(
+				fileBlob,
+				uniqueFilename,
+				input.vehicleId,
+			);
+
+			// Save to database
+			const [newDocument] = await db
+				.insert(vehicleDocuments)
+				.values({
+					vehicleId: input.vehicleId,
+					filename: uniqueFilename,
+					originalName: input.file.name,
+					mimeType: input.file.type,
+					size: input.file.size,
+					documentType: input.documentType,
+					description: input.description,
+					uploadedBy: context.userId,
+					filePath: key,
+				})
+				.returning();
+
+			return newDocument;
+		}),
+
+	deleteVehicleDocument: crmProcedure
+		.input(z.object({ documentId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Get document
+			const [document] = await db
+				.select()
+				.from(vehicleDocuments)
+				.where(eq(vehicleDocuments.id, input.documentId))
+				.limit(1);
+
+			if (!document) {
+				throw new Error("Documento no encontrado");
+			}
+
+			// Verify permissions (admin or uploader)
+			if (
+				context.userRole === "admin" ||
+				document.uploadedBy === context.userId
+			) {
+				// Delete from R2
+				await deleteFileFromR2(document.filePath);
+
+				// Delete from database
+				await db
+					.delete(vehicleDocuments)
+					.where(eq(vehicleDocuments.id, input.documentId));
+
+				return { success: true };
+			}
+
+			throw new Error("No tienes permiso para eliminar este documento");
 		}),
 };

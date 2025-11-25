@@ -1,5 +1,3 @@
-import type React from "react";
-
 import { useState, useRef, useEffect } from "react";
 import { useInspection } from "../contexts/InspectionContext";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -14,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -39,11 +36,11 @@ import {
 } from "@/components/ui/card";
 import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
-  // Section 1
+  // Section 1: Technician Info
   technicianName: z.string().min(1, { message: "El nombre es requerido" }),
   inspectionDate: z.date({ message: "La fecha es requerida" }),
 
-  // Section 2
+  // Section 2: Vehicle Info
   vehicleMake: z.string().min(1, { message: "La marca es requerida" }),
   vehicleModel: z.string().min(1, { message: "La línea es requerida" }),
   vehicleYear: z.string().min(1, { message: "El año es requerido" }),
@@ -176,22 +173,10 @@ export default function VehicleInspectionForm({
       fuelType: undefined,
       transmission: undefined,
       inspectionResult: "",
-      vehicleRating: undefined,
-      marketValue: "",
-      suggestedCommercialValue: "",
-      bankValue: "",
-      currentConditionValue: "",
-      vehicleEquipment: "",
-      importantConsiderations: "",
-      scannerUsed: undefined,
-      scannerResult: undefined,
-      airbagWarning: undefined,
-      missingAirbag: "",
       testDrive: undefined,
       noTestDriveReason: "",
     });
 
-    setScannerFile(null);
     setFormSubmitted(true);
   }
 
@@ -276,6 +261,7 @@ export default function VehicleInspectionForm({
     toast.success('Información de la tarjeta aplicada al formulario');
   };
 
+  // Function to fill form with dummy data
   const fillWithDummyData = async () => {
     const dummyData = {
       technicianName: "Juan Pérez García",
@@ -295,15 +281,6 @@ export default function VehicleInspectionForm({
       fuelType: "Gasolina" as const,
       transmission: "Automático" as const,
       inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
-      vehicleRating: "Comercial" as const,
-      marketValue: "185000",
-      suggestedCommercialValue: "175000",
-      bankValue: "165000",
-      currentConditionValue: "170000",
-      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
-      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
-      scannerUsed: "Sí" as const,
-      airbagWarning: "No" as const,
       testDrive: "Sí" as const,
     };
 

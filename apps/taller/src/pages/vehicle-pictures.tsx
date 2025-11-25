@@ -702,15 +702,21 @@ export default function VehiclePictures({
       }
 
       // Prepare photo data with server URLs for context
+      console.log("=== INICIO handleFinish - Estado completo de photos ===");
+      console.log("photos state:", photos);
+      console.log("Número de steps:", Object.keys(photos).length);
+
       const photoDataForContext = [];
       for (const [stepId, stepPhotos] of Object.entries(photos)) {
+        console.log(`Processing step: ${stepId}`, stepPhotos);
         const step = inspectionSteps.find(s => s.id === stepId);
         for (const [photoId, photoData] of Object.entries(stepPhotos)) {
+          console.log(`  Processing photo: ${photoId}`, photoData);
           if (photoData) {
             const photo = step?.photos.find(p => p.id === photoId);
-            
+
             // Debug: log what we're sending
-            console.log(`Photo ${photoId}:`, {
+            console.log(`  Photo ${photoId} details:`, {
               uploadStatus: photoData.uploadStatus,
               hasServerUrl: !!photoData.serverUrl,
               serverUrl: photoData.serverUrl,
@@ -738,11 +744,12 @@ export default function VehiclePictures({
         }
       }
       console.log('Final photos being sent to context:', photoDataForContext);
+      console.log('Total photos to save in context:', photoDataForContext.length);
       setContextPhotos(photoDataForContext);
 
       // Automatically trigger completion when in wizard mode
       if (onComplete) {
-        toast.success(`¡Fotos subidas exitosamente! Enviando inspección...`);
+        toast.success(`¡${photoDataForContext.length} fotos guardadas exitosamente!`);
         // Pasar las fotos directamente sin delay
         onComplete(photoDataForContext);
       } else {

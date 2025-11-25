@@ -12,6 +12,9 @@ import {
   AnyContractData
 } from '../types/contract';
 import { GenderTranslator, Gender, MaritalStatus } from './GenderTranslator';
+import { documensoService } from './DocumensoService';
+import { getRequiredEmailCount } from '../config/docusealConfig';
+import { crmApiService } from './CrmApiService';
 
 /**
  * Servicio genérico para generación de contratos desde templates DOCX
@@ -41,7 +44,8 @@ export class ContractGeneratorService {
     this.registerTemplate(
       {
         type: ContractType.USO_CARRO_USADO,
-        templateFilename: "contrato_uso_carro_usado.docx",
+        templateFilename: "contrato_uso_carro_usado/contrato_uso_carro_usado.docx",
+        templateFilenameFemale: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer.docx", 
         description: "Contrato privado de uso de bien mueble (vehículo usado)",
         requiredFields: [
           "nombreCompleto",
@@ -52,6 +56,7 @@ export class ContractGeneratorService {
     this.registerTemplate({
       type: ContractType.RECONOCIMIENTO_DEUDA,
       templateFilename: 'reconocimiento_deuda/reconocimiento_deuda_template.docx',
+      templateFilenameFemale: 'reconocimiento_deuda/reconocimiento_deuda_template-mujer.docx',
       description: 'Contrato de reconocimiento de deuda',
       requiredFields: ['nombreCompleto']
     });
@@ -59,7 +64,8 @@ export class ContractGeneratorService {
     // Registrar contrato de garantía mobiliaria
     this.registerTemplate({
       type: ContractType.GARANTIA_MOBILIARIA,
-      templateFilename: 'garantia_mobiliaria.docx',
+      templateFilename: 'garantia_mobiliaria/garantia_mobiliaria.docx',
+      templateFilenameFemale: 'garantia_mobiliaria/garantia_mobiliaria-mujer.docx',
       description: 'Contrato de garantía mobiliaria con vehículo',
       requiredFields: [
         'nombreCompleto',
@@ -69,7 +75,8 @@ export class ContractGeneratorService {
     // Registrar carta de emisión de cheques
     this.registerTemplate({
       type: ContractType.CARTA_EMISION_CHEQUES,
-      templateFilename: 'carta_emision_cheques.docx',
+      templateFilename: 'carta_emision_cheques/carta_emision_cheques.docx',
+      templateFilenameFemale: 'carta_emision_cheques/carta_emision_cheques-mujer.docx',
       description: 'Carta de emisión de cheques / Solicitud de desembolso',
       requiredFields: [
         'nombreCompleto',
@@ -79,7 +86,8 @@ export class ContractGeneratorService {
     // Registrar descargo de responsabilidades
     this.registerTemplate({
       type: ContractType.DESCARGO_RESPONSABILIDADES,
-      templateFilename: 'descargo_responsabilidades.docx',
+      templateFilename: 'descargo_responsabilidades/descargo_responsabilidades.docx',
+      templateFilenameFemale: 'descargo_responsabilidades/descargo_responsabilidades-mujer.docx',
       description: 'Descargo de responsabilidades de vehículo',
       requiredFields: [
         'nombreCompleto',
@@ -90,6 +98,7 @@ export class ContractGeneratorService {
     this.registerTemplate({
       type: ContractType.COBERTURA_INREXSA,
       templateFilename: 'cobertura_inrexsa.docx',
+      templateFilenameFemale: 'cobertura_inrexsa.docx',
       description: 'Carta de cobertura INREXSA',
       requiredFields: [
         'nombreCompleto',
@@ -99,7 +108,8 @@ export class ContractGeneratorService {
     // Registrar pagaré único libre de protesto
     this.registerTemplate({
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
-      templateFilename: 'pagare_unico_libre_de_protesto.docx',
+      templateFilename: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto.docx',
+      templateFilenameFemale: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-mujer.docx',
       description: 'Pagaré único libre de protesto',
       requiredFields: [
         'nombreCompleto',
@@ -109,71 +119,53 @@ export class ContractGeneratorService {
     // Registrar declaración de vendedor
     this.registerTemplate({
       type: ContractType.DECLARACION_DE_VENDEDOR,
-      templateFilename: 'declaracion_de_vendedor.docx',
+      templateFilename: 'declaracion_vendedor/declaracion_de_vendedor.docx',
+      templateFilenameFemale: 'declaracion_vendedor/declaracion_de_vendedor-mujer.docx',
       description: 'Declaración de vendedor de vehículo',
-      requiredFields: [
-        'date_day',
-        'date_month',
-        'date_year_letters',
-        'debtor_name',
-        'debtor_dpi_letters',
-        'debtor_dpi_numbers',
-        'gender_letter',
-        'vehicle_type',
-        'vehicle_brand',
-        'vehicle_color',
-        'vehicle_usage',
-        'vehicle_chassis',
-        'vehicle_fuel',
-        'vehicle_engine',
-        'vehicle_series',
-        'vehicle_line',
-        'vehicle_model',
-        'vehicle_cc',
-        'vehicle_seats',
-        'vehicle_cylinders',
-        'vehicle_iscv'
-      ]
+      requiredFields: []
     });
 
     // Registrar carta carro nuevo
     this.registerTemplate({
       type: ContractType.CARTA_CARRO_NUEVO,
-      templateFilename: 'carta_carro_nuevo.docx',
+      templateFilename: 'carta_carro_nuevo/carta_carro_nuevo.docx',
+      templateFilenameFemale: 'carta_carro_nuevo/carta_carro_nuevo-mujer.docx',
       description: 'Carta de conformidad para adquisición de carro nuevo',
-      requiredFields: [
-        'date_day',
-        'date_month',
-        'date_year_numbers',
-        'debtor_name',
-        'debtor_dpi_letters',
-        'debtor_dpi_numbers',
-        'gender_letter',
-        'vehicle_type',
-        'vehicle_brand',
-        'vehicle_color',
-        'vehicle_usage',
-        'vehicle_chassis',
-        'vehicle_fuel',
-        'vehicle_engine',
-        'vehicle_series',
-        'vehicle_line',
-        'vehicle_model',
-        'vehicle_cc',
-        'vehicle_seats',
-        'vehicle_cylinders',
-        'vehicle_iscv',
-        'business_name'
-      ]
+      requiredFields: []
     });
 
-    // Aquí se pueden registrar más templates a futuro:
-    // this.registerTemplate({
-    //   type: ContractType.RECONOCIMIENTO_DEUDA,
-    //   templateFilename: 'contrato_reconocimiento_deuda.docx',
-    //   description: 'Contrato de reconocimiento de deuda',
-    //   requiredFields: ['client_name', 'loan_amount', 'interest_rate']
-    // });
+    this.registerTemplate({
+      type: ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
+      templateFilename: 'carta_aceptacion_gps/carta_aceptacion_gps.docx',
+      templateFilenameFemale: 'carta_aceptacion_gps/carta_aceptacion_gps-mujer.docx',
+      description: 'Carta de aceptación para instalación de GPS en vehículo',
+      requiredFields: []
+    }); 
+
+    this.registerTemplate({
+      type: ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
+      templateFilename: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo.docx',
+      templateFilenameFemale: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-mujer.docx',
+      description: 'Carta de solicitud de traspaso de vehículo',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.CONTRATO_PRIVADO_USO,
+      templateFilename: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo.docx',
+      templateFilenameFemale: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-mujer.docx',
+      description: 'Contrato privado de uso de bien mueble',
+      requiredFields: []
+    });
+
+    this.registerTemplate({
+      type: ContractType.SOLICITUD_COMPRA_VEHICULO,
+      templateFilename: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo.docx',
+      templateFilenameFemale: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer.docx',
+      description: 'Carta de solicitud de compra de vehículo',
+      requiredFields: []
+    });
+
   }
 
   /**
@@ -314,9 +306,12 @@ export class ContractGeneratorService {
     contracts: Array<{
       contractType: ContractType;
       data: Record<string, any>;
-      options?: { generatePdf?: boolean; filenamePrefix?: string };
+      emails?: string[];
+      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female" };
     }>
   ): Promise<{
+    success: boolean;
+    message: string;
     results: ContractGenerationResponse[];
     summary: {
       total: number;
@@ -332,12 +327,12 @@ export class ContractGeneratorService {
 
     // Procesar cada contrato de manera secuencial
     for (let i = 0; i < contracts.length; i++) {
-      const { contractType, data, options } = contracts[i];
-      
+      const { contractType, data, emails, options } = contracts[i];
+
       console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
-      
+
       try {
-        const result = await this.generateContract(contractType, data, options);
+        const result = await this.generateContract(contractType, data, { ...options, emails });
         results.push(result);
         
         if (result.success) {
@@ -383,6 +378,8 @@ export class ContractGeneratorService {
     console.log(`   ⏱️  Duración: ${(duration / 1000).toFixed(2)}s`);
 
     return {
+      success: true,
+      message: `${summary.successful} de ${summary.total} contratos generados exitosamente`,
       results,
       summary
     };
@@ -394,7 +391,7 @@ export class ContractGeneratorService {
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { generatePdf?: boolean; filenamePrefix?: string } = {}
+    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[] } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
@@ -413,7 +410,7 @@ export class ContractGeneratorService {
       }
 
       // 3. Cargar template
-      const templatePath = path.join(this.templatesDir, config.templateFilename);
+      const templatePath = path.join(this.templatesDir, options.gender === "female" ? config.templateFilenameFemale : config.templateFilename);
       const templateContent = await fs.readFile(templatePath, 'binary');
       const zip = new PizZip(templateContent);
 
@@ -424,11 +421,8 @@ export class ContractGeneratorService {
         nullGetter: () => '', // Reemplazar nulls con string vacío
       });
 
-      // 5. Preparar datos con términos de género si aplica
-      const preparedData = this.prepareDataWithGender(contractType, data);
-
       // 6. Renderizar con los datos
-      doc.render(preparedData);
+      doc.render(data);
 
       // 7. Generar buffer del DOCX
       const docxBuffer = doc.getZip().generate({
@@ -453,9 +447,10 @@ export class ContractGeneratorService {
 
       // 11. Generar PDF si se solicita
       let pdfPath: string | undefined;
+      let pdfBuffer: Buffer | undefined;
       if (options.generatePdf !== false) { // Por defecto genera PDF
         try {
-          const pdfBuffer = await this.convertToPdf(docxBuffer);
+          pdfBuffer = await this.convertToPdf(docxBuffer);
           const pdfFilename = `${baseFilename}.pdf`;
           pdfPath = path.join(this.outputDir, pdfFilename);
           await fs.writeFile(pdfPath, pdfBuffer);
@@ -466,8 +461,130 @@ export class ContractGeneratorService {
         }
       }
 
+      // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
+      let signingLinks: string[] | undefined;
+      let shouldCleanupFiles = false;
+
+      if (options.emails && options.emails.length > 0 && pdfBuffer) {
+        try {
+          console.log(`🔗 Creando documento en Documenso para firma...`);
+
+          // Validar número de emails
+          const requiredEmails = getRequiredEmailCount(contractType);
+          if (options.emails.length !== requiredEmails) {
+            console.warn(`⚠ Se esperaban ${requiredEmails} email(s) pero se recibieron ${options.emails.length}`);
+          }
+
+          // Crear documento y obtener links de firma (detección automática de posiciones)
+          signingLinks = await documensoService.createDocumentAndGetSigningLinks(
+            baseFilename,
+            pdfBuffer,
+            contractType,
+            options.emails
+          );
+
+          console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
+
+          // Marcar para limpieza: archivo subido exitosamente a Documenso/R2
+          shouldCleanupFiles = true;
+        } catch (documensoError) {
+          console.error('⚠ Error al crear documento en Documenso:', documensoError);
+          // No fallar si Documenso falla, los archivos ya están generados
+        }
+      }
+
+      // 13. Limpiar archivos locales si se subieron exitosamente a R2
+      if (shouldCleanupFiles) {
+        try {
+          await this.cleanupLocalFiles(docxPath, pdfPath);
+          console.log(`🗑️  Archivos locales eliminados (ya están en R2)`);
+        } catch (cleanupError) {
+          console.warn('⚠ Error al limpiar archivos locales:', cleanupError);
+          // No fallar si la limpieza falla
+        }
+      }
+
+      // Construir datos de firmantes para el frontend
+      const submissionData = (options.emails || []).map((email, index) => {
+        const signingLink = signingLinks?.[index] || '';
+
+        return {
+          id: index + 1,
+          slug: `documenso-${Date.now()}-${index}`,
+          uuid: `uuid-${Date.now()}-${index}`,
+          name: null,
+          email: email,
+          phone: null,
+          completed_at: null,
+          declined_at: null,
+          external_id: null,
+          submission_id: index + 1,
+          metadata: { contractType, generatedAt: new Date().toISOString() },
+          opened_at: null,
+          sent_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status: 'pending',
+          application_key: null,
+          values: Object.entries(data).map(([field, value]) => ({
+            field,
+            value: value as string | number | null
+          })),
+          preferences: {
+            send_email: true,
+            send_sms: false
+          },
+          role: 'SIGNER',
+          embed_src: signingLink // Link de firma de Documenso
+        };
+      });
+
+      // 14. Guardar contrato en CRM (si hay DPI y signing links)
+      if (data.dpi && signingLinks && signingLinks.length > 0) {
+        const templateId = Math.floor(Math.random() * 100000);
+
+        // Preparar response completo para guardar en CRM
+        const fullApiResponse = {
+          templateId,
+          success: true,
+          nameDocument: [{ enum: contractType, label: config.description }],
+          data: submissionData,
+          signing_links: signingLinks,
+          contractType,
+          docx_path: docxPath,
+          pdf_path: pdfPath,
+          message: `Contrato ${contractType} generado exitosamente`,
+          generatedAt: new Date().toISOString()
+        };
+
+        // Llamar al CRM de manera no-bloqueante
+        crmApiService.saveContractSilently({
+          dpi: data.dpi,
+          contractType,
+          contractName: config.description,
+          signingLinks,
+          templateId,
+          apiResponse: fullApiResponse,
+        }).catch(err => {
+          console.error('[ContractGeneratorService] Error al guardar en CRM:', err);
+          // No bloquear la respuesta si falla el guardado en CRM
+        });
+      } else {
+        if (!data.dpi) {
+          console.warn('[ContractGeneratorService] No se guardará en CRM: falta DPI en los datos');
+        }
+        if (!signingLinks || signingLinks.length === 0) {
+          console.warn('[ContractGeneratorService] No se guardará en CRM: no hay signing links');
+        }
+      }
+
       return {
+        templateId: Math.floor(Math.random() * 100000), // ID de template simulado
         success: true,
+        nameDocument: [{ enum: contractType, label: config.description }],
+        data: submissionData,
+        signing_links: signingLinks,
+        // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,
         pdf_path: pdfPath,
@@ -479,7 +596,11 @@ export class ContractGeneratorService {
       console.error('Error generando contrato:', error);
 
       return {
+        templateId: 0,
         success: false,
+        nameDocument: [{ enum: contractType, label: contractType }],
+        data: [],
+        signing_links: undefined,
         contractType,
         message: 'Error al generar contrato',
         error: error.message || 'Error desconocido'
@@ -529,6 +650,25 @@ export class ContractGeneratorService {
   }
 
   /**
+   * Limpia archivos locales después de subir exitosamente a R2
+   */
+  private async cleanupLocalFiles(docxPath: string, pdfPath?: string): Promise<void> {
+    const filesToDelete = [docxPath];
+    if (pdfPath) {
+      filesToDelete.push(pdfPath);
+    }
+
+    for (const filePath of filesToDelete) {
+      try {
+        await fs.unlink(filePath);
+        console.log(`  ✓ Eliminado: ${path.basename(filePath)}`);
+      } catch (error) {
+        console.warn(`  ⚠ No se pudo eliminar ${path.basename(filePath)}:`, error);
+      }
+    }
+  }
+
+  /**
    * Verifica si Gotenberg está disponible
    */
   public async checkGotenbergHealth(): Promise<boolean> {
@@ -545,4 +685,6 @@ export class ContractGeneratorService {
 }
 
 // Exportar instancia singleton por defecto
-export const contractGenerator = new ContractGeneratorService();
+export const contractGenerator = new ContractGeneratorService({
+  gotenbergUrl: process.env.GOTENBERG_URL || 'http://localhost:3000'
+});

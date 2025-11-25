@@ -50,6 +50,34 @@
 			"when": 1761172213373,
 			"tag": "0006_certain_leopardon",
 			"breakpoints": true
+		},
+		{
+			"idx": 7,
+			"version": "7",
+			"when": 1761870302656,
+			"tag": "0007_far_iceman",
+			"breakpoints": true
+		},
+		{
+			"idx": 8,
+			"version": "7",
+			"when": 1762195180827,
+			"tag": "0008_pale_the_hunter",
+			"breakpoints": true
+		},
+		{
+			"idx": 9,
+			"version": "7",
+			"when": 1762195229314,
+			"tag": "0009_shiny_storm",
+			"breakpoints": true
+		},
+		{
+			"idx": 10,
+			"version": "7",
+			"when": 1762199964642,
+			"tag": "0010_nasty_molly_hayes",
+			"breakpoints": true
 		}
 	]
 }

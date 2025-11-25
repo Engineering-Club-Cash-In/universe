@@ -100,6 +100,7 @@ function RouteComponent() {
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
+	const [editingLead, setEditingLead] = useState<Lead | null>(null);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const processedCompanyIdRef = useRef<string | null>(null);
@@ -138,6 +139,7 @@ function RouteComponent() {
 			phone: "",
 			age: "",
 			dpi: "",
+			clientType: "individual" as "individual" | "comerciante" | "empresa",
 			maritalStatus: "single" as "single" | "married" | "divorced" | "widowed",
 			dependents: "0",
 			monthlyIncome: "",
@@ -191,7 +193,7 @@ function RouteComponent() {
 			},
 		},
 		onSubmit: async ({ value }) => {
-			createLeadMutation.mutate({
+			const leadData = {
 				...value,
 				age: value.age ? Number.parseInt(value.age) : undefined,
 				dependents: Number.parseInt(value.dependents),
@@ -201,6 +203,7 @@ function RouteComponent() {
 				loanAmount: value.loanAmount
 					? Number.parseFloat(value.loanAmount)
 					: undefined,
+				clientType: value.clientType,
 				maritalStatus: value.maritalStatus || undefined,
 				occupation: value.occupation || undefined,
 				workTime: value.workTime || undefined,
@@ -214,7 +217,16 @@ function RouteComponent() {
 				assignedTo: value.assignedTo || undefined,
 				jobTitle: value.jobTitle || undefined,
 				notes: value.notes || undefined,
-			});
+			};
+
+			if (editingLead) {
+				updateLeadMutation.mutate({
+					id: editingLead.id,
+					...leadData,
+				});
+			} else {
+				createLeadMutation.mutate(leadData);
+			}
 		},
 	});
 
@@ -226,6 +238,7 @@ function RouteComponent() {
 			});
 			toast.success("Lead creado exitosamente");
 			setIsCreateDialogOpen(false);
+			setEditingLead(null);
 			createLeadForm.reset();
 		},
 		onError: (error: any) => {
@@ -240,6 +253,9 @@ function RouteComponent() {
 				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 			});
 			toast.success("Lead actualizado exitosamente");
+			setIsCreateDialogOpen(false);
+			setEditingLead(null);
+			createLeadForm.reset();
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al actualizar el lead");
@@ -293,6 +309,67 @@ function RouteComponent() {
 			}
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
+
+	// Populate form when editing a lead
+	useEffect(() => {
+		if (editingLead) {
+			createLeadForm.setFieldValue("firstName", editingLead.firstName || "");
+			createLeadForm.setFieldValue("lastName", editingLead.lastName || "");
+			createLeadForm.setFieldValue("email", editingLead.email || "");
+			createLeadForm.setFieldValue("phone", editingLead.phone || "");
+			createLeadForm.setFieldValue(
+				"age",
+				editingLead.age ? String(editingLead.age) : "",
+			);
+			createLeadForm.setFieldValue("dpi", editingLead.dpi || "");
+			createLeadForm.setFieldValue("clientType", "individual");
+			createLeadForm.setFieldValue(
+				"maritalStatus",
+				editingLead.maritalStatus || "single",
+			);
+			createLeadForm.setFieldValue(
+				"dependents",
+				editingLead.dependents ? String(editingLead.dependents) : "0",
+			);
+			createLeadForm.setFieldValue(
+				"monthlyIncome",
+				editingLead.monthlyIncome ? String(editingLead.monthlyIncome) : "",
+			);
+			createLeadForm.setFieldValue(
+				"loanAmount",
+				editingLead.loanAmount ? String(editingLead.loanAmount) : "",
+			);
+			createLeadForm.setFieldValue(
+				"occupation",
+				editingLead.occupation || "employee",
+			);
+			createLeadForm.setFieldValue(
+				"workTime",
+				editingLead.workTime || "1_to_5",
+			);
+			createLeadForm.setFieldValue(
+				"loanPurpose",
+				editingLead.loanPurpose || "personal",
+			);
+			createLeadForm.setFieldValue("ownsHome", editingLead.ownsHome || false);
+			createLeadForm.setFieldValue(
+				"ownsVehicle",
+				editingLead.ownsVehicle || false,
+			);
+			createLeadForm.setFieldValue(
+				"hasCreditCard",
+				editingLead.hasCreditCard || false,
+			);
+			createLeadForm.setFieldValue("jobTitle", editingLead.jobTitle || "");
+			createLeadForm.setFieldValue(
+				"companyId",
+				editingLead.company?.id || "none",
+			);
+			createLeadForm.setFieldValue("source", editingLead.source || "website");
+			createLeadForm.setFieldValue("assignedTo", editingLead.assignedTo || "");
+			createLeadForm.setFieldValue("notes", editingLead.notes || "");
+		}
+	}, [editingLead]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;
@@ -452,6 +529,7 @@ function RouteComponent() {
 							onOpenChange={(open) => {
 								setIsCreateDialogOpen(open);
 								if (!open) {
+									setEditingLead(null);
 									createLeadForm.reset();
 								}
 							}}
@@ -464,7 +542,9 @@ function RouteComponent() {
 							</DialogTrigger>
 							<DialogContent className="max-h-[90vh] min-w-[800px] max-w-4xl overflow-y-auto">
 								<DialogHeader>
-									<DialogTitle>Crear Nuevo Lead</DialogTitle>
+									<DialogTitle>
+										{editingLead ? "Editar Lead" : "Crear Nuevo Lead"}
+									</DialogTitle>
 								</DialogHeader>
 								<form
 									onSubmit={(e) => {
@@ -843,6 +923,44 @@ function RouteComponent() {
 											</div>
 										</div>
 										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createLeadForm.Field name="clientType">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Tipo de Cliente{" "}
+																<span className="text-red-500">*</span>
+															</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(
+																		value as
+																			| "individual"
+																			| "comerciante"
+																			| "empresa",
+																	)
+																}
+															>
+																<SelectTrigger id={field.name}>
+																	<SelectValue />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="individual">
+																		Cliente Individual
+																	</SelectItem>
+																	<SelectItem value="comerciante">
+																		Comerciante Individual
+																	</SelectItem>
+																	<SelectItem value="empresa">
+																		Empresa (S.A, Ltda, etc.)
+																	</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
 											<div>
 												<createLeadForm.Field name="maritalStatus">
 													{(field) => (
@@ -1369,11 +1487,43 @@ function RouteComponent() {
 					</DialogHeader>
 					{selectedLead && (
 						<div className="space-y-6">
+							{/* Header con nombre y estado */}
+							<div className="flex items-start justify-between">
+								<div>
+									<h3 className="font-semibold text-lg">
+										{selectedLead.firstName} {selectedLead.lastName}
+									</h3>
+									<p className="text-muted-foreground text-sm">
+										{selectedLead.email}
+									</p>
+								</div>
+								<div className="flex flex-col gap-2">
+									<Badge
+										className={getStatusBadgeColor(selectedLead.status)}
+										variant="outline"
+									>
+										{getStatusLabel(selectedLead.status)}
+									</Badge>
+									{selectedLead.fit !== null && (
+										<Badge
+											variant={selectedLead.fit ? "default" : "secondary"}
+											className={
+												selectedLead.fit
+													? "bg-green-500 hover:bg-green-600"
+													: ""
+											}
+										>
+											{selectedLead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
+										</Badge>
+									)}
+								</div>
+							</div>
+
 							{/* Top Section - Personal & Contact Info */}
 							<div className="grid grid-cols-2 gap-6">
 								{/* Personal Information */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
 										Información Personal
 									</h3>
 									<div className="grid grid-cols-2 gap-4">
@@ -1429,8 +1579,8 @@ function RouteComponent() {
 								</div>
 
 								{/* Contact Information */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
 										Información de Contacto
 									</h3>
 									<div className="space-y-3">
@@ -1472,8 +1622,8 @@ function RouteComponent() {
 							{/* Middle Section - Financial & Work Info */}
 							<div className="grid grid-cols-2 gap-6">
 								{/* Financial Information */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
 										Información Financiera
 									</h3>
 									<div className="grid grid-cols-2 gap-4">
@@ -1511,8 +1661,10 @@ function RouteComponent() {
 								</div>
 
 								{/* Work Information */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Información Laboral</h3>
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
+										Información Laboral
+									</h3>
 									<div className="grid grid-cols-2 gap-4">
 										<div>
 											<Label className="font-medium text-muted-foreground text-sm">
@@ -1541,8 +1693,8 @@ function RouteComponent() {
 							{/* Bottom Section - Assets & Status */}
 							<div className="grid grid-cols-3 gap-6">
 								{/* Assets */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Activos</h3>
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">Activos</h3>
 									<div className="space-y-3">
 										<div className="flex items-center gap-2">
 											<Checkbox
@@ -1571,8 +1723,8 @@ function RouteComponent() {
 								</div>
 
 								{/* Lead Status */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Estado del Lead</h3>
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">Estado del Lead</h3>
 									<div className="space-y-3">
 										<div>
 											<Label className="font-medium text-muted-foreground text-sm">
@@ -1600,8 +1752,8 @@ function RouteComponent() {
 								</div>
 
 								{/* Additional Information */}
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
 										Información del Sistema
 									</h3>
 									<div className="space-y-3">
@@ -1627,8 +1779,10 @@ function RouteComponent() {
 
 							{/* Scoring Section */}
 							{selectedLead.score && (
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">Análisis de Riesgo</h3>
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
+										Análisis de Riesgo
+									</h3>
 									<div className="grid grid-cols-3 gap-4">
 										<div className="space-y-2">
 											<Label className="font-medium text-muted-foreground text-sm">
@@ -1685,8 +1839,8 @@ function RouteComponent() {
 
 							{/* Credit Analysis Section - Análisis de Capacidad de Pago */}
 							{creditAnalysisQuery.data && (
-								<div className="space-y-4">
-									<h3 className="font-semibold text-lg">
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="font-semibold text-base">
 										Análisis de Capacidad de Pago
 									</h3>
 
@@ -1882,6 +2036,21 @@ function RouteComponent() {
 									</div>
 								</div>
 							)}
+
+							{/* Acciones */}
+							<div className="flex gap-3 border-t pt-6">
+								<Button
+									variant="outline"
+									className="flex-1"
+									onClick={() => {
+										setEditingLead(selectedLead);
+										setIsDetailsDialogOpen(false);
+										setIsCreateDialogOpen(true);
+									}}
+								>
+									Editar Lead
+								</Button>
+							</div>
 
 							{/* Notes Section - Full Width */}
 							{selectedLead.notes && (

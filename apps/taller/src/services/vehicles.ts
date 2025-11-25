@@ -51,6 +51,8 @@ export interface PhotoData {
   title: string;
   description?: string;
   url: string;
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 }
 
 // Main function to create a full vehicle inspection

@@ -98,6 +98,7 @@ const formSchema = z.object({
     message: "Esta información es requerida",
   }),
   scannerResult: z.instanceof(File).optional(),
+  scannerResultUrl: z.string().optional(),
   airbagWarning: z.enum(["Sí", "No"], {
     message: "Esta información es requerida",
   }),
@@ -121,6 +122,8 @@ export default function VehicleInspectionForm({
 }: VehicleInspectionFormProps) {
   const { formData, setFormData } = useInspection();
   const [scannerFile, setScannerFile] = useState<File | null>(null);
+  const [scannerUploading, setScannerUploading] = useState(false);
+  const [tempVehicleId] = useState(() => 'temp-' + Date.now());
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
 
@@ -192,12 +195,46 @@ export default function VehicleInspectionForm({
     setFormSubmitted(true);
   }
 
-  const handleScannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleScannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (file.type === "application/pdf") {
         setScannerFile(file);
         form.setValue("scannerResult", file);
+
+        // Upload immediately to get URL
+        setScannerUploading(true);
+        try {
+          const uploadFormData = new FormData();
+          uploadFormData.append('file', file);
+          uploadFormData.append('vehicleId', tempVehicleId);
+          uploadFormData.append('category', 'scanner');
+          uploadFormData.append('photoType', 'result');
+          uploadFormData.append('title', 'Resultado del Scanner');
+
+          const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+            method: 'POST',
+            credentials: 'include',
+            body: uploadFormData,
+          });
+
+          if (!response.ok) {
+            throw new Error('Error al subir el archivo');
+          }
+
+          const result = await response.json();
+          const scannerUrl = result.data.url;
+
+          form.setValue("scannerResultUrl", scannerUrl);
+          toast.success("Archivo del scanner subido correctamente");
+        } catch (error) {
+          console.error('Error uploading scanner file:', error);
+          toast.error("Error al subir el archivo del scanner");
+          setScannerFile(null);
+          form.setValue("scannerResult", undefined);
+        } finally {
+          setScannerUploading(false);
+        }
       } else {
         alert("Por favor suba un archivo PDF");
       }
@@ -923,11 +960,22 @@ export default function VehicleInspectionForm({
                             field.onChange(e.target.files?.[0] || null);
                           }}
                           className="flex-1"
+                          disabled={scannerUploading}
                         />
                       </FormControl>
-                      {scannerFile && (
+                      {scannerUploading && (
+                        <FormDescription className="text-blue-600">
+                          Subiendo archivo...
+                        </FormDescription>
+                      )}
+                      {scannerFile && !scannerUploading && form.watch("scannerResultUrl") && (
                         <FormDescription className="text-green-600">
-                          Archivo cargado: {scannerFile.name}
+                          ✓ Archivo subido: {scannerFile.name}
+                        </FormDescription>
+                      )}
+                      {scannerFile && !scannerUploading && !form.watch("scannerResultUrl") && (
+                        <FormDescription className="text-yellow-600">
+                          Archivo seleccionado: {scannerFile.name} (pendiente de subir)
                         </FormDescription>
                       )}
                       <FormMessage />

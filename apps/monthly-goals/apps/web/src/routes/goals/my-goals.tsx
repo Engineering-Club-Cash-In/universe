@@ -43,6 +43,8 @@ function MyGoalsPage() {
   const { data: session } = authClient.useSession();
   const { canEditGoals } = usePermissions();
   const queryClient = useQueryClient();
+  const areas = useQuery(orpc.areas.list.queryOptions());
+  
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState(
     currentDate.getMonth() + 1
@@ -134,6 +136,16 @@ function MyGoalsPage() {
     else return "necesita_atencion";
   };
 
+  // Generar opciones de área dinámicamente desde los datos
+  const areaOptions = useMemo(() => {
+    if (!myGoals.data) return [];
+    const uniqueAreas = new Set(myGoals.data.map((goal: any) => goal.areaName).filter(Boolean));
+    return Array.from(uniqueAreas).sort().map((area) => ({
+      label: area as string,
+      value: area as string,
+    }));
+  }, [myGoals.data]);
+
   // Definir columnas para TanStack Table
   const columns = useMemo<ColumnDef<any>[]>(
     () => [
@@ -144,10 +156,22 @@ function MyGoalsPage() {
           <div>
             <div className="font-medium">{row.getValue("userName")}</div>
             <div className="text-sm text-gray-500">
-              {row.original.areaName} - {row.original.departmentName}
+             {row.original.departmentName}
             </div>
           </div>
         ),
+      },
+      {
+        accessorKey: "areaName",
+        header: createFilterableHeader("Área", areaOptions),
+        cell: ({ row }) => (
+          <div className="font-medium">{row.getValue("areaName")}</div>
+        ),
+        filterFn: (row, id, value) => {
+          if (!value || value.length === 0) return true;
+          const areaName = row.getValue("areaName") as string;
+          return value.includes(areaName);
+        },
       },
       {
         accessorKey: "goalTemplateName",
@@ -299,7 +323,7 @@ function MyGoalsPage() {
         },
       },
     ],
-    [canEditGoals, session]
+    [canEditGoals, session, areaOptions]
   );
 
   const months = [

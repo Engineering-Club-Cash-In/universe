@@ -38,6 +38,12 @@ export const cobrosRole = ac.newRole({
 	report: ["read"],
 });
 
+export const juridicoRole = ac.newRole({
+	user: ["read"],
+	lead: ["read"],
+	report: ["read"],
+});
+
 export const auth = betterAuth({
 	database: drizzleAdapter(db, {
 		provider: "pg",
@@ -51,6 +57,7 @@ export const auth = betterAuth({
 				sales: salesRole,
 				analyst: analystRole,
 				cobros: cobrosRole,
+				juridico: juridicoRole,
 			},
 			schema: {
 				user: {

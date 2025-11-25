@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Alert, AlertDescription } from './ui/alert';
 import { Badge } from './ui/badge';
 import { toast } from 'sonner';
-import { vehiclesApi } from '../utils/orpc';
+import { client } from '../utils/orpc';
 
 interface OCRResult {
   success: boolean;
@@ -87,7 +87,7 @@ export default function VehicleRegistrationOCR({
           const base64Data = base64.split(',')[1]; // Remove data:image/...;base64, prefix
 
           // Send to backend OCR endpoint using ORPC client
-          const ocrResult: OCRResult = await vehiclesApi.processRegistrationOCR({
+          const ocrResult: OCRResult = await client.processVehicleRegistrationOCR({
             imageBase64: base64Data,
             mimeType: selectedFile.type,
           });
@@ -154,6 +154,7 @@ export default function VehicleRegistrationOCR({
         {/* File Selection */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Button
+            type="button"
             variant="outline"
             onClick={() => cameraInputRef.current?.click()}
             disabled={processing || isProcessing}
@@ -162,8 +163,9 @@ export default function VehicleRegistrationOCR({
             <Camera className="h-6 w-6" />
             <span>Tomar Foto</span>
           </Button>
-          
+
           <Button
+            type="button"
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
             disabled={processing || isProcessing}
@@ -205,6 +207,7 @@ export default function VehicleRegistrationOCR({
                 </span>
               </div>
               <Button
+                type="button"
                 variant="ghost"
                 size="sm"
                 onClick={clearSelection}
@@ -234,6 +237,7 @@ export default function VehicleRegistrationOCR({
 
             {/* Process Button */}
             <Button
+              type="button"
               onClick={processOCR}
               disabled={processing || isProcessing}
               className="w-full"

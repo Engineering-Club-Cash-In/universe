@@ -1,14 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  CheckCircle,
-  FileText,
-  ExternalLink,
-  Mail,
-  Clock,
-  Copy,
-} from "lucide-react";
+import { CheckCircle, FileText, ExternalLink, Copy } from "lucide-react";
 import { type GenerateDocumentsResponse } from "@/services/documents";
 
 interface Step4Props {
@@ -16,24 +8,66 @@ interface Step4Props {
   readonly isLoading: boolean;
 }
 
-// Función para copiar todos los links al portapapeles
-const copyAllLinksToClipboard = (
-  documentsResponse: GenerateDocumentsResponse
-) => {
+// Función para copiar todos los links de clientes al portapapeles
+const copyAllClientLinks = (documentsResponse: GenerateDocumentsResponse) => {
   const { results = [] } = documentsResponse;
 
-  const allLinks = results.flatMap((result) => {
-    const name = result.nameDocument?.[0]?.label || `Template-${result.templateId}`;
+  const clientLinks = results.flatMap((result) => {
+    const name =
+      result.nameDocument?.[0]?.label || `Template-${result.templateId}`;
+    // El link del cliente es el embed_src (primer link)
     const link = result.data?.[0]?.embed_src || "No Link Available";
-    return [`${name}: ${link}`];
+    return [`${name} (Cliente): ${link}`];
   });
 
-  const textToCopy = allLinks.join("\n\n");
+  const textToCopy = clientLinks.join("\n\n");
 
   navigator.clipboard
     .writeText(textToCopy)
     .then(() => {
-      alert("✅ Todos los enlaces han sido copiados al portapapeles");
+      alert("✅ Todos los enlaces de clientes han sido copiados al portapapeles");
+    })
+    .catch(() => {
+      alert("❌ Error al copiar los enlaces");
+    });
+};
+
+// Función para copiar todos los links de representantes al portapapeles
+const copyAllRepresentativeLinks = (
+  documentsResponse: GenerateDocumentsResponse
+) => {
+  const { results = [] } = documentsResponse;
+
+  const representativeLinks = results.flatMap((result) => {
+    const name =
+      result.nameDocument?.[0]?.label || `Template-${result.templateId}`;
+    const clientLink = result.data?.[0]?.embed_src;
+    
+    // Los signing_links contienen todos los links
+    // Filtrar para obtener solo los que NO son del cliente (representante y otros)
+    const signingLinks = result.signing_links || [];
+    const otherLinks = signingLinks.filter(link => link !== clientLink);
+    
+    if (otherLinks.length === 0) {
+      return [];
+    }
+    
+    // El primer link que no es del cliente es el del representante
+    const representativeLink = otherLinks[0];
+    return [`${name} (Representante): ${representativeLink}`];
+  });
+
+  if (representativeLinks.length === 0) {
+    alert("ℹ️ No hay enlaces de representantes disponibles");
+    return;
+  }
+
+  const textToCopy = representativeLinks.join("\n\n");
+
+  navigator.clipboard
+    .writeText(textToCopy)
+    .then(() => {
+      alert("✅ Todos los enlaces de representantes han sido copiados al portapapeles");
     })
     .catch(() => {
       alert("❌ Error al copiar los enlaces");
@@ -101,13 +135,22 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
               <FileText className="h-5 w-5" />
               Resumen de Generación
             </div>
-            <button
-              onClick={() => copyAllLinksToClipboard(documentsResponse)}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-            >
-              <Copy className="h-4 w-4" />
-              Copiar Todos los Enlaces
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => copyAllClientLinks(documentsResponse)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+              >
+                <Copy className="h-4 w-4" />
+                Copiar Enlaces Clientes
+              </button>
+              <button
+                onClick={() => copyAllRepresentativeLinks(documentsResponse)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-sm font-medium"
+              >
+                <Copy className="h-4 w-4" />
+                Copiar Enlaces Representantes
+              </button>
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -139,68 +182,18 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
         <h3 className="text-lg font-semibold">Documentos Generados</h3>
 
         {results.map((result, index) => (
-          <Card
-            key={`template-${result.templateId}`}
-            className="overflow-hidden"
-          >
-            <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">
-                  Plantilla ID: {result.templateId}
-                </CardTitle>
-                <Badge variant={result.success ? "default" : "destructive"}>
-                  {result.success ? "Exitoso" : "Error"}
-                </Badge>
-              </div>
-            </CardHeader>
-
+          <>
             {result.success &&
               result.data.map((submission) => (
-                <CardContent key={submission.id} className="pt-0">
+                <div key={submission.id} className="pt-0">
                   <div className="space-y-4">
                     {/* Información del Documento */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                      <div className="space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Mail className="h-4 w-4 text-blue-500" />
-                          <span className="font-medium">Email:</span>
-                          <span>{submission.email}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-green-500" />
-                          <span className="font-medium">Estado:</span>
-                          <Badge variant="outline" className="text-xs">
-                            {submission.status}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <div>
-                          <span className="font-medium">ID:</span>
-                          <span className="ml-2">{submission.id}</span>
-                        </div>
-                        <div>
-                          <span className="font-medium">Enviado:</span>
-                          <span className="ml-2">
-                            {new Date(submission.sent_at).toLocaleString(
-                              "es-GT"
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <Separator />
 
                     {/* Acceso al Documento */}
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="font-medium">Documento Generado</h4>
-                      </div>
-
                       {/* Tarjeta de Documento con Botones de Acción */}
-                      <div className="border rounded-lg p-6 bg-gradient-to-r from-blue-50 to-indigo-50">
-                        <div className="flex items-center justify-between">
+                      <div className="border rounded-lg p-6 bg-gradient-to-r ">
+                        <div className="flex items-center justify-between mb-4">
                           <div className="flex items-center gap-4">
                             <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                               <FileText className="h-6 w-6 text-blue-600" />
@@ -210,55 +203,96 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                                 {result.nameDocument[0]?.label ||
                                   `Documento #${submission.id}`}
                               </h5>
-                              <p className="text-xs text-gray-500 mb-1">
-                                ID: {submission.id}
-                              </p>
-                              <p className="text-sm text-gray-600">
-                                Estado:{" "}
-                                <span className="font-medium text-green-600">
-                                  {submission.status}
-                                </span>
-                              </p>
                               <p className="text-xs text-gray-500">
-                                Enviado:{" "}
-                                {new Date(submission.sent_at).toLocaleString(
+                                Creado el: {" "}
+                                {new Date(submission.created_at).toLocaleString(
                                   "es-GT"
                                 )}
                               </p>
                             </div>
                           </div>
-
-                          <div className="flex flex-col gap-2">
-                            <a
-                              href={submission.embed_src}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
-                            >
-                              <ExternalLink className="h-4 w-4" />
-                              Abrir Documento
-                            </a>
-                            <button
-                              onClick={() => {
-                                const documentName =
-                                  result.nameDocument[0]?.label ||
-                                  `Documento #${submission.id}`;
-                                const textToCopy = `${documentName}: ${submission.embed_src}`;
-                                navigator.clipboard.writeText(textToCopy);
-                              }}
-                              className="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 bg-white text-gray-700 rounded-md hover:bg-gray-50 transition-colors text-sm"
-                            >
-                              📋 Copiar Enlace
-                            </button>
-                          </div>
                         </div>
 
-                        {/* URL del documento (truncada) */}
-                        <div className="mt-3 p-2 bg-gray-100 rounded text-xs font-mono text-gray-600 break-all">
-                          🔗{" "}
-                          {submission.embed_src.length > 80
-                            ? submission.embed_src.substring(0, 80) + "..."
-                            : submission.embed_src}
+                        {/* Enlaces disponibles */}
+                        <div className="space-y-3">
+                          {/* Link del Cliente */}
+                          <div className="border-l-4 border-blue-500 pl-4 py-2">
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-gray-900">
+                                  👤 Link del Cliente
+                                </p>
+                                <div className="mt-1 p-2 bg-blue-50 rounded text-xs font-mono text-gray-600 break-all">
+                                  {submission.embed_src.length > 60
+                                    ? submission.embed_src.substring(0, 60) + "..."
+                                    : submission.embed_src}
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-2 ml-4">
+                                <a
+                                  href={submission.embed_src}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-xs font-medium whitespace-nowrap"
+                                >
+                                  <ExternalLink className="h-3 w-3" />
+                                  Abrir
+                                </a>
+                                <button
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(submission.embed_src);
+                                    alert("✅ Link del cliente copiado");
+                                  }}
+                                  className="inline-flex items-center gap-2 px-3 py-1.5 border border-blue-300 bg-white text-blue-700 rounded-md hover:bg-blue-50 transition-colors text-xs whitespace-nowrap"
+                                >
+                                  <Copy className="h-3 w-3" />
+                                  Copiar
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Links adicionales (Representante y otros) */}
+                          {result.signing_links && result.signing_links.length > 0 && (() => {
+                            const otherLinks = result.signing_links.filter(link => link !== submission.embed_src);
+                            return otherLinks.map((link, linkIndex) => (
+                              <div key={linkIndex} className="border-l-4 border-green-500 pl-4 py-2">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1">
+                                    <p className="text-sm font-medium text-gray-900">
+                                      {linkIndex === 0 ? "🏢 Link del Representante" : `👥 Link Adicional ${linkIndex}`}
+                                    </p>
+                                    <div className="mt-1 p-2 bg-green-50 rounded text-xs font-mono text-gray-600 break-all">
+                                      {link.length > 60
+                                        ? link.substring(0, 60) + "..."
+                                        : link}
+                                    </div>
+                                  </div>
+                                  <div className="flex flex-col gap-2 ml-4">
+                                    <a
+                                      href={link}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors text-xs font-medium whitespace-nowrap"
+                                    >
+                                      <ExternalLink className="h-3 w-3" />
+                                      Abrir
+                                    </a>
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(link);
+                                        alert(`✅ Link ${linkIndex === 0 ? "del representante" : "adicional"} copiado`);
+                                      }}
+                                      className="inline-flex items-center gap-2 px-3 py-1.5 border border-green-300 bg-white text-green-700 rounded-md hover:bg-green-50 transition-colors text-xs whitespace-nowrap"
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                      Copiar
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            ));
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -267,9 +301,9 @@ export function Step4({ documentsResponse, isLoading }: Step4Props) {
                   {index < result.data.length - 1 && (
                     <Separator className="mt-4" />
                   )}
-                </CardContent>
+                </div>
               ))}
-          </Card>
+          </>
         ))}
       </div>
 

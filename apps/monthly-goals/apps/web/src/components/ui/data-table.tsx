@@ -262,7 +262,7 @@ export function createFilterableHeader(title: string, options: Array<{ label: st
 	return ({ column }: { column: Column<any, unknown> }) => {
 		const filterValue = column.getFilterValue() as string[] || [];
 		const hasActiveFilters = filterValue.length > 0;
-		
+
 		return (
 			<div className="flex items-center space-x-2">
 				<Button
@@ -283,7 +283,7 @@ export function createFilterableHeader(title: string, options: Array<{ label: st
 							<Filter className="h-3 w-3" />
 						</Button>
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="w-48">
+					<DropdownMenuContent align="end" className="w-48 max-h-[300px] overflow-y-auto">
 						<DropdownMenuItem
 							onClick={() => {
 								// Seleccionar todos

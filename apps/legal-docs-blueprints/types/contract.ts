@@ -10,9 +10,13 @@ export enum ContractType {
   DESCARGO_RESPONSABILIDADES = 'descargo_responsabilidades',
   COBERTURA_INREXSA = 'cobertura_inrexsa',
   PAGARE_UNICO_LIBRE_PROTESTO = 'pagare_unico_libre_protesto',
-  DECLARACION_DE_VENDEDOR = 'declaracion_de_vendedor',
+  DECLARACION_DE_VENDEDOR = 'declaracion_vendedor',
   CARTA_CARRO_NUEVO = 'carta_carro_nuevo',
   RECONOCIMIENTO_DEUDA = 'reconocimiento_deuda_feb_2025',
+  CARTA_SOLICITUD_TRASPASO_VEHICULO = 'carta_traspaso_vehiculo_rdbe',
+  CONTRATO_PRIVADO_USO = 'contrato_privado_uso_carro_nuevo',
+  SOLICITUD_COMPRA_VEHICULO = 'solicitud_compra_vehiculo_tercero',
+  CARTA_ACEPTACION_INSTALACION_GPS = 'carta_aceptacion_instalacion_gps'
   // Agrega más tipos aquí según sea necesario
 }
 
@@ -673,12 +677,21 @@ export type AnyContractData = UsoCarroUsadoData | GarantiaMobiliariaData | Carta
  * Interfaz para la respuesta de generación de contrato
  */
 export interface ContractGenerationResponse {
+  templateId?: number;
   success: boolean;
+  nameDocument?: {
+    enum: string;
+    label: string;
+  }[];
+  data?: {
+    [key: string]: any;
+  }[];
   contractType: ContractType;
   docx_path?: string;
   pdf_path?: string;
   docx_url?: string;
   pdf_url?: string;
+  signing_links?: string[];
   message: string;
   error?: string;
   generatedAt?: string;
@@ -714,6 +727,8 @@ export interface ContractTemplateConfig {
   /** Nombre del archivo template en /templates */
   templateFilename: string;
 
+  templateFilenameFemale: string;
+
   /** Descripción del contrato */
   description: string;
 
@@ -731,9 +746,13 @@ export interface GenerateContractRequest {
   /** Datos específicos del contrato */
   data: Record<string, any>;
 
+  /** Emails de los firmantes (número depende del tipo de contrato) */
+  emails?: string[];
+
   /** Opciones adicionales */
   options?: {
     generatePdf?: boolean;
     filenamePrefix?: string;
+    gender?: "male" | "female";
   };
 }

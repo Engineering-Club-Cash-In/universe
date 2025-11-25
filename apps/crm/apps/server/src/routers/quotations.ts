@@ -257,8 +257,6 @@ export const quotationsRouter = {
 				Number(quotation.totalFinanced),
 				Number(quotation.interestRate),
 				quotation.termMonths,
-				Number(quotation.insuranceCost),
-				Number(quotation.gpsCost),
 			);
 
 			return {

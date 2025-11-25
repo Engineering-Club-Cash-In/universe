@@ -1,4 +1,4 @@
-import { vehiclesApi } from '../utils/orpc';
+import { client } from '../utils/orpc';
 
 // Types for the vehicle inspection data
 export interface VehicleData {
@@ -63,7 +63,7 @@ export const createFullInspection = async (
   photos?: PhotoData[]
 ) => {
   try {
-    const response = await vehiclesApi.createFullInspection({
+    const response = await client.createFullVehicleInspection({
       vehicle: vehicleData,
       inspection: inspectionData,
       checklistItems,
@@ -127,7 +127,7 @@ export const prepareInspectionData = (formData: any) => {
 // Get all vehicles
 export const getAllVehicles = async () => {
   try {
-    const vehicles = await vehiclesApi.getAll();
+    const vehicles = await client.getVehicles();
     return {
       success: true,
       data: vehicles
@@ -144,7 +144,7 @@ export const getAllVehicles = async () => {
 // Get vehicle by ID
 export const getVehicleById = async (id: string) => {
   try {
-    const vehicle = await vehiclesApi.getById(id);
+    const vehicle = await client.getVehicleById({ id });
     return {
       success: true,
       data: vehicle
@@ -161,7 +161,7 @@ export const getVehicleById = async (id: string) => {
 // Search vehicles
 export const searchVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
   try {
-    const vehicles = await vehiclesApi.search({
+    const vehicles = await client.searchVehicles({
       query,
       status,
       vehicleType,
@@ -183,7 +183,7 @@ export const searchVehicles = async (query?: string, status?: "pending" | "avail
 // Get statistics
 export const getVehicleStatistics = async () => {
   try {
-    const stats = await vehiclesApi.getStatistics();
+    const stats = await client.getVehicleStatistics();
     return {
       success: true,
       data: stats

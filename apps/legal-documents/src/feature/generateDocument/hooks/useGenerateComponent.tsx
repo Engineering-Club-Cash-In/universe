@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { type Document, type Field, type RenapData } from "./useStep2";
 import {
   documentsService,
+  type Contracts,
   type DocumentSubmission,
   type GenerateDocumentsResponse,
 } from "@/services/documents";
@@ -117,7 +118,7 @@ export function useGenerateComponent() {
       }
 
       // Construir el payload para cada documento seleccionado
-      const payload: DocumentSubmission[] =
+      const payload: Contracts[] =
         formData.documents?.map((document) => {
           // Obtener los campos que pertenecen a este documento
           const documentFields =
@@ -127,9 +128,9 @@ export function useGenerateComponent() {
 
           // Construir los campos con sus valores
           const fields = documentFields.map((field) => {
-            let value = formData.fieldValues?.[field.key] || "";
+            const value = formData.fieldValues?.[field.key] || "";
 
-            if (field.is_double_line) {
+            /*  if (field.is_double_line) {
               // para cada documento se requiere diferente mínimo de caracteres para el doble renglón
               const minCharacters = document.count_doble_line ?? 160;
               const currentLength = value.length;
@@ -145,25 +146,33 @@ export function useGenerateComponent() {
                   `➕ Agregando ${underscoresNeeded} guiones al campo ${field.name} (${currentLength} → ${minCharacters} caracteres)`
                 );
               }
-            }
+            }*/
 
-            return {
-              key: field.name, // Usar el nombre del campo como key
-              value: value,
-            };
+            return { [field.key]: value };
           });
 
           return {
-            id: document.id,
-            email: email,
-            fields: fields,
+            options: {
+              generatePdf: true,
+              gender: formData.renapData?.gender === "M" ? "male" : "female",
+              filenamePrefix: document.nombre_documento + "_" + Date.now(),
+            },
+            // convertir el array de fields a un objeto key-value, incluyendo el DPI
+            data: Object.assign({}, ...fields, { dpi: formData.dpi }),
+            contractType: document.nombre_documento,
+            // Agregar email del cliente (por ahora solo 1, se puede expandir para múltiples firmantes)
+            emails: email ? [email] : undefined,
           };
         }) || [];
 
-      console.log("Payload a enviar:", JSON.stringify(payload, null, 2));
+      const contracts: DocumentSubmission = {
+        contracts: payload,
+      };
+
+      console.log("Payload a enviar:", JSON.stringify(contracts, null, 2));
 
       // Usar el servicio para generar documentos
-      const result = await documentsService.generateDocuments(payload);
+      const result = await documentsService.generateDocuments(contracts);
       console.log("Respuesta del servidor:", result);
 
       // Guardar la respuesta y avanzar al Step 4

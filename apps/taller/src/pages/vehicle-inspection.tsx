@@ -477,7 +477,19 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Cantidad de millas recorridas</FormLabel>
                       <FormControl>
-                        <Input placeholder="Millas" type="number" {...field} />
+                        <Input
+                          placeholder="Millas"
+                          type="number"
+                          {...field}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            const miles = parseFloat(e.target.value);
+                            if (!isNaN(miles)) {
+                              const km = Math.round(miles * 1.60934);
+                              form.setValue("kmMileage", km.toString());
+                            }
+                          }}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -495,6 +507,14 @@ export default function VehicleInspectionForm({
                           placeholder="Kilómetros"
                           type="number"
                           {...field}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            const km = parseFloat(e.target.value);
+                            if (!isNaN(km)) {
+                              const miles = Math.round(km * 0.621371);
+                              form.setValue("milesMileage", miles.toString());
+                            }
+                          }}
                         />
                       </FormControl>
                       <FormMessage />

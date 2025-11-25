@@ -48,8 +48,7 @@ const STEPS = [
 ];
 
 export default function VehicleInspectionWizard() {
-  const { formData, checklistItems, photos, resetInspection } = useInspection();
-  const [currentStep, setCurrentStep] = useState(0);
+  const { formData, checklistItems, photos, resetInspection, currentStep, setCurrentStep } = useInspection();
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
@@ -271,11 +270,12 @@ export default function VehicleInspectionWizard() {
 
             {currentStep === 2 && (
               <div>
-                <VehiclePictures 
-                  onComplete={(photosFromComponent) => {
+                <VehiclePictures
+                  onComplete={() => {
                     setPhotosCompleted(true);
-                    // Pasar las fotos directamente, sin delays
-                    handleCompleteInspection(photosFromComponent);
+                    // Avanzar al paso de valuación
+                    setCurrentStep(3);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                   isWizardMode={true}
                 />

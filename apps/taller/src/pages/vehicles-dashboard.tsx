@@ -12,6 +12,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Car,
+  ClipboardCheck,
+  DollarSign,
+  User,
+  Calendar,
+  Gauge,
+  Fuel,
+  Palette,
+  Hash,
 } from "lucide-react";
 import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
 import { vehiclesApi } from "../utils/orpc";
@@ -1135,168 +1144,216 @@ export default function VehiclesDashboard() {
 
               <TabsContent value="details" className="mt-4">
                 {selectedVehicle && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-                    {/* Primera columna */}
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <h3 className="text-lg font-semibold border-b pb-2">Información General</h3>
-                        <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Marca:</span>
-                            <span className="text-sm font-medium">{selectedVehicle.vehicleMake}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Modelo:</span>
-                            <span className="text-sm font-medium">{selectedVehicle.vehicleModel}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Año:</span>
-                            <span className="text-sm">{selectedVehicle.vehicleYear}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Placa:</span>
-                            <span className="text-sm font-mono">{selectedVehicle.licensePlate}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">VIN:</span>
-                            <span className="text-xs font-mono break-all">{selectedVehicle.vinNumber}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Color:</span>
-                            <span className="text-sm">{selectedVehicle.color}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Kilometraje:</span>
-                            <span className="text-sm">{selectedVehicle.kmMileage} km</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Tipo:</span>
-                            <span className="text-sm">{selectedVehicle.vehicleType}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Combustible:</span>
-                            <span className="text-sm">{selectedVehicle.fuelType}</span>
-                          </div>
-                        </div>
+                  <div className="space-y-6 py-4">
+                    {/* Header con estado y calificación */}
+                    <div className="flex flex-wrap items-center gap-3 pb-4 border-b">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Estado:</span>
+                        {renderStatusBadge(selectedVehicle.status)}
                       </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">Calificación:</span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            selectedVehicle.vehicleRating === "Comercial"
+                              ? "bg-green-100 text-green-800 border-green-300"
+                              : "bg-red-100 text-red-800 border-red-300"
+                          )}
+                        >
+                          {selectedVehicle.vehicleRating}
+                        </Badge>
+                      </div>
+                      {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 && (
+                        <Badge variant="outline" className="bg-red-100 text-red-800 border-red-300">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          {selectedVehicle.alerts.length} {selectedVehicle.alerts.length === 1 ? "alerta" : "alertas"}
+                        </Badge>
+                      )}
+                    </div>
 
-                      <div className="space-y-3">
-                        <h3 className="text-lg font-semibold border-b pb-2">Inspección</h3>
-                        <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Fecha:</span>
-                            <span className="text-sm">
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* Información del Vehículo */}
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <Car className="h-4 w-4" />
+                            Información del Vehículo
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                            <div className="text-muted-foreground">Marca</div>
+                            <div className="font-medium">{selectedVehicle.vehicleMake}</div>
+
+                            <div className="text-muted-foreground">Modelo</div>
+                            <div className="font-medium">{selectedVehicle.vehicleModel}</div>
+
+                            <div className="text-muted-foreground">Año</div>
+                            <div className="font-medium">{selectedVehicle.vehicleYear}</div>
+
+                            <div className="text-muted-foreground">Tipo</div>
+                            <div className="font-medium">{selectedVehicle.vehicleType}</div>
+                          </div>
+
+                          <div className="pt-2 border-t space-y-2">
+                            <div className="flex items-center gap-2 text-sm">
+                              <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Placa:</span>
+                              <span className="font-mono font-medium">{selectedVehicle.licensePlate}</span>
+                            </div>
+                            <div className="flex items-start gap-2 text-sm">
+                              <Hash className="h-3.5 w-3.5 text-muted-foreground mt-0.5" />
+                              <span className="text-muted-foreground">VIN:</span>
+                              <span className="font-mono text-xs break-all">{selectedVehicle.vinNumber}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Palette className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Color:</span>
+                              <span className="font-medium">{selectedVehicle.color}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Kilometraje:</span>
+                              <span className="font-medium">{Number(selectedVehicle.kmMileage).toLocaleString()} km</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm">
+                              <Fuel className="h-3.5 w-3.5 text-muted-foreground" />
+                              <span className="text-muted-foreground">Combustible:</span>
+                              <span className="font-medium">{selectedVehicle.fuelType}</span>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {/* Datos de Inspección */}
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <ClipboardCheck className="h-4 w-4" />
+                            Datos de Inspección
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="flex items-center gap-2 text-sm">
+                            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-muted-foreground">Fecha:</span>
+                            <span className="font-medium">
                               {selectedVehicle.inspectionDate ?
                                 format(
                                   typeof selectedVehicle.inspectionDate === 'string'
                                     ? new Date(selectedVehicle.inspectionDate)
                                     : selectedVehicle.inspectionDate,
-                                  "dd/MM/yyyy",
+                                  "dd 'de' MMMM, yyyy",
                                   { locale: es }
                                 ) : 'N/A'
                               }
                             </span>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Técnico:</span>
-                            <span className="text-sm">{selectedVehicle.technicianName}</span>
+                          <div className="flex items-center gap-2 text-sm">
+                            <User className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-muted-foreground">Técnico:</span>
+                            <span className="font-medium">{selectedVehicle.technicianName}</span>
                           </div>
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm font-medium text-muted-foreground">Estado:</span>
-                            {renderStatusBadge(selectedVehicle.status)}
+
+                          <div className="pt-2 border-t grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                            <div className="text-muted-foreground">Prueba de manejo</div>
+                            <div className="font-medium">{selectedVehicle.testDrive}</div>
+
+                            <div className="text-muted-foreground">Testigo airbag</div>
+                            <div className={cn(
+                              "font-medium",
+                              selectedVehicle.airbagWarning === "Sí" && "text-red-600"
+                            )}>{selectedVehicle.airbagWarning}</div>
+
+                            <div className="text-muted-foreground">Scanner</div>
+                            <div className="font-medium">{selectedVehicle.hasScanner ? "Sí" : "No"}</div>
+
+                            <div className="text-muted-foreground">Fotos</div>
+                            <div className="font-medium">{selectedVehicle.photos}</div>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Prueba de manejo:</span>
-                            <span className="text-sm">{selectedVehicle.testDrive}</span>
+
+                          {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 && (
+                            <div className="pt-3 border-t">
+                              <p className="text-sm text-muted-foreground mb-2">Alertas detectadas:</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {selectedVehicle.alerts.map((alert: string, index: number) => (
+                                  <Badge
+                                    key={index}
+                                    variant="outline"
+                                    className="bg-red-50 text-red-700 border-red-200 text-xs"
+                                  >
+                                    {alert}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      {/* Valoración */}
+                      <Card>
+                        <CardHeader className="pb-3">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            <DollarSign className="h-4 w-4" />
+                            Valoración
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="space-y-3">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">Valor de mercado</span>
+                              <span className="text-lg font-semibold">
+                                {Number(selectedVehicle.marketValue).toLocaleString("es-GT", {
+                                  style: "currency",
+                                  currency: "GTQ",
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 0,
+                                })}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">Valor comercial sugerido</span>
+                              <span className="text-lg font-semibold text-primary">
+                                {Number(selectedVehicle.suggestedCommercialValue).toLocaleString("es-GT", {
+                                  style: "currency",
+                                  currency: "GTQ",
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 0,
+                                })}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-muted-foreground">Valor actual condición</span>
+                              <span className="text-lg font-semibold">
+                                {Number(selectedVehicle.currentConditionValue).toLocaleString("es-GT", {
+                                  style: "currency",
+                                  currency: "GTQ",
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 0,
+                                })}
+                              </span>
+                            </div>
                           </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Testigo de airbag:</span>
-                            <span className="text-sm">{selectedVehicle.airbagWarning}</span>
-                          </div>
-                        </div>
-                      </div>
+                        </CardContent>
+                      </Card>
                     </div>
 
-                    {/* Segunda columna */}
-                    <div className="space-y-4">
-                      <div className="space-y-3">
-                        <h3 className="text-lg font-semibold border-b pb-2">Valoración</h3>
-                        <div className="space-y-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm font-medium text-muted-foreground">Calificación:</span>
-                            <span
-                              className={cn(
-                                "text-sm font-semibold px-2 py-1 rounded",
-                                selectedVehicle.vehicleRating === "Comercial"
-                                  ? "text-green-700 bg-green-100"
-                                  : "text-red-700 bg-red-100"
-                              )}
-                            >
-                              {selectedVehicle.vehicleRating}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Valor de mercado:</span>
-                            <span className="text-sm font-semibold">
-                              {Number(selectedVehicle.marketValue).toLocaleString("es-GT", {
-                                style: "currency",
-                                currency: "GTQ",
-                                minimumFractionDigits: 0,
-                                maximumFractionDigits: 0,
-                              })}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Valor comercial:</span>
-                            <span className="text-sm font-semibold">
-                              {Number(selectedVehicle.suggestedCommercialValue).toLocaleString("es-GT", {
-                                style: "currency",
-                                currency: "GTQ",
-                                minimumFractionDigits: 0,
-                                maximumFractionDigits: 0,
-                              })}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-muted-foreground">Valor actual:</span>
-                            <span className="text-sm font-semibold">
-                              {Number(selectedVehicle.currentConditionValue).toLocaleString("es-GT", {
-                                style: "currency",
-                                currency: "GTQ",
-                                minimumFractionDigits: 0,
-                                maximumFractionDigits: 0,
-                              })}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {selectedVehicle.alerts && selectedVehicle.alerts.length > 0 && (
-                        <div className="space-y-3">
-                          <h3 className="text-lg font-semibold text-red-600 border-b border-red-200 pb-2">
-                            Alertas
-                          </h3>
-                          <div className="flex flex-wrap gap-2">
-                            {selectedVehicle.alerts.map((alert: string, index: number) => (
-                              <Badge
-                                key={index}
-                                variant="outline"
-                                className="bg-red-100 text-red-800 border-red-300"
-                              >
-                                {alert}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-3">
-                        <h3 className="text-lg font-semibold border-b pb-2">Resultado de Inspección</h3>
-                        <div className="text-sm border rounded-md p-4 bg-muted/30 max-h-32 overflow-y-auto">
+                    {/* Resultado de Inspección */}
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <FileText className="h-4 w-4" />
+                          Resultado de la Inspección
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <p className="text-sm leading-relaxed">
                           {selectedVehicle.inspectionResult}
-                        </div>
-                      </div>
-                    </div>
+                        </p>
+                      </CardContent>
+                    </Card>
                   </div>
                 )}
               </TabsContent>
@@ -1325,21 +1382,49 @@ export default function VehiclesDashboard() {
 
               <TabsContent value="scanner" className="mt-4">
                 <div className="py-4">
-                  <div className="border rounded-md p-6 flex flex-col items-center justify-center gap-4 bg-muted/50">
-                    <FileText className="h-16 w-16 text-muted-foreground opacity-50" />
-                    <div className="text-center">
-                      <h3 className="font-medium">
-                        Reporte_Scanner_
-                        {selectedVehicle?.licensePlate.replace(/[-\s]/g, "")}.pdf
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        Archivo PDF - 2.4 MB
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      Descargar reporte
-                    </Button>
-                  </div>
+                  {(() => {
+                    const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
+                    const latestInspection = rawVehicle?.inspections?.[0];
+                    const scannerUrl = latestInspection?.scannerResultUrl;
+
+                    if (!scannerUrl) {
+                      return (
+                        <div className="border rounded-md p-6 flex flex-col items-center justify-center gap-4 bg-muted/50">
+                          <FileText className="h-16 w-16 text-muted-foreground opacity-30" />
+                          <div className="text-center">
+                            <h3 className="font-medium text-muted-foreground">
+                              No hay reporte de scanner disponible
+                            </h3>
+                            <p className="text-sm text-muted-foreground">
+                              El reporte no fue cargado durante la inspección
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="border rounded-md p-6 flex flex-col items-center justify-center gap-4 bg-muted/50">
+                        <FileText className="h-16 w-16 text-primary opacity-70" />
+                        <div className="text-center">
+                          <h3 className="font-medium">
+                            Reporte de Scanner - {selectedVehicle?.licensePlate}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            Archivo PDF
+                          </p>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(scannerUrl, "_blank")}
+                        >
+                          <FileText className="h-4 w-4 mr-2" />
+                          Ver reporte
+                        </Button>
+                      </div>
+                    );
+                  })()}
                 </div>
               </TabsContent>
 

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { VehicleType, TransmissionType, MotorizationType } from "../services/serviceMarketplace";
+import { DEFAULT_YEAR, INIT_YEAR, KMS_FINISH, PRICE_FINISH } from "../constants/marketplace.constants";
 
 export interface FilterState {
   // Selects
@@ -57,9 +58,9 @@ const initialState = {
   cilindros: "" as number | "",
   anio: "" as number | "",
   color: "",
-  precioRange: [0, 500000] as [number, number],
-  anioRange: [2000, 2025] as [number, number],
-  kmsRange: [0, 200000] as [number, number],
+  precioRange: [0, PRICE_FINISH] as [number, number],
+  anioRange: [INIT_YEAR, DEFAULT_YEAR] as [number, number],
+  kmsRange: [0, KMS_FINISH] as [number, number],
   extras: [] as string[],
   condicion: "todos" as "todos" | "nuevo" | "usado",
 };

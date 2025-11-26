@@ -1,10 +1,10 @@
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState, useRef, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BarFilters, PreLovedCar } from "../components";
 import { useFilterStore } from "../store/filters";
 import { getVehicles, type Vehicle } from "../services/serviceMarketplace";
 import { IconLeftArrow, IconRightArrow } from "@/components/icons";
-import { ITEMS_PER_PAGE } from "../constants/marketplace.constants";
+import { ITEMS_PER_PAGE, DEFAULT_PAGE } from "../constants/marketplace.constants";
 import { motion, AnimatePresence } from "framer-motion";
 
 // Helper functions para reducir complejidad
@@ -46,7 +46,7 @@ const hasAllExtras = (
 
 export const ViewCars = () => {
   const filters = useFilterStore();
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage, setCurrentPage] = useState(DEFAULT_PAGE);
   const contentRef = useRef<HTMLDivElement>(null);
 
   const { data: vehicles = [], isLoading } = useQuery({
@@ -77,19 +77,21 @@ export const ViewCars = () => {
     });
   }, [vehicles, filters]);
 
-  // Reset page when filters change
-  if (
-    currentPage > Math.ceil(filteredVehicles.length / ITEMS_PER_PAGE) &&
-    filteredVehicles.length > 0
-  ) {
-    setCurrentPage(1);
-  }
-
   // Pagination
   const totalPages = Math.ceil(filteredVehicles.length / ITEMS_PER_PAGE);
-  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const startIndex = (currentPage - DEFAULT_PAGE) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentVehicles = filteredVehicles.slice(startIndex, endIndex);
+
+  // Reset page when filters change
+  useEffect(() => {
+    if (
+      currentPage > Math.ceil(filteredVehicles.length / ITEMS_PER_PAGE) &&
+      filteredVehicles.length > 0
+    ) {
+      setCurrentPage(DEFAULT_PAGE);
+    }
+  }, [filteredVehicles.length, currentPage]);
 
   // Scroll to top when page changes
   useEffect(() => {
@@ -98,23 +100,23 @@ export const ViewCars = () => {
     }
   }, [currentPage]);
 
-  const handlePrevPage = () => {
+  const handlePrevPage = useCallback(() => {
     if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
+      setCurrentPage((prev) => prev - 1);
     }
-  };
+  }, [currentPage]);
 
-  const handleNextPage = () => {
+  const handleNextPage = useCallback(() => {
     if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
+      setCurrentPage((prev) => prev + 1);
     }
-  };
+  }, [currentPage, totalPages]);
 
-  const handlePageClick = (page: number) => {
+  const handlePageClick = useCallback((page: number) => {
     setCurrentPage(page);
-  };
+  }, []);
 
-  const renderContent = () => {
+  const renderContent = useCallback(() => {
     if (isLoading) {
       return <p className="text-white/70">Cargando vehículos...</p>;
     }
@@ -151,17 +153,17 @@ export const ViewCars = () => {
         </div>
 
         {/* Paginación */}
-        {totalPages > 1 && (
+        {totalPages > DEFAULT_PAGE && (
           <div className="flex items-center justify-center gap-4 mt-12">
             {/* Flecha izquierda */}
             <button
               onClick={handlePrevPage}
-              disabled={currentPage === 1}
+              disabled={currentPage === DEFAULT_PAGE}
               className={`
                 border-none rounded-full w-10 h-10 flex items-center justify-center
                 transition-all duration-300
                 ${
-                  currentPage === 1
+                  currentPage === DEFAULT_PAGE
                     ? "bg-white/10 cursor-not-allowed opacity-50"
                     : "bg-primary cursor-pointer opacity-100 hover:scale-110"
                 }
@@ -172,7 +174,7 @@ export const ViewCars = () => {
 
             {/* Puntitos */}
             <div className="flex gap-2">
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+              {Array.from({ length: totalPages }, (_, i) => i + DEFAULT_PAGE).map(
                 (page) => (
                   <button
                     key={page}
@@ -211,7 +213,7 @@ export const ViewCars = () => {
         )}
       </>
     );
-  };
+  }, [isLoading, filteredVehicles.length, currentVehicles, currentPage, totalPages, handlePrevPage, handleNextPage, handlePageClick]);
 
   return (
     <div className="flex min-h-screen relative pt-12">

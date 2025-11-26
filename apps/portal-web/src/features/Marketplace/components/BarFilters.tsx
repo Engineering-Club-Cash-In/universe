@@ -52,14 +52,13 @@ export const BarFilters = () => {
   return (
     <div className="w-full">
       {/* Radio Group - Condición */}
-      <div className="mb-6">
-        <h3 className="text-white text-base font-semibold mb-3">
+      <fieldset className="mb-6 border-none p-0 m-0">
+        <legend className="text-white text-base font-semibold mb-3">
           Condición
-        </h3>
+        </legend>
         <div className="flex flex-col gap-2">
-          <motion.button
-            onClick={() => setCondicion("todos")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm ${
+          <motion.label
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm cursor-pointer ${
               condicion === "todos"
                 ? "bg-primary text-white"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
@@ -67,11 +66,18 @@ export const BarFilters = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
+            <input
+              type="radio"
+              name="condicion"
+              value="todos"
+              checked={condicion === "todos"}
+              onChange={() => setCondicion("todos")}
+              className="sr-only"
+            />{' '}
             Todos
-          </motion.button>
-          <motion.button
-            onClick={() => setCondicion("nuevo")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm ${
+          </motion.label>
+          <motion.label
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm cursor-pointer ${
               condicion === "nuevo"
                 ? "bg-primary text-white"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
@@ -79,11 +85,18 @@ export const BarFilters = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
+            <input
+              type="radio"
+              name="condicion"
+              value="nuevo"
+              checked={condicion === "nuevo"}
+              onChange={() => setCondicion("nuevo")}
+              className="sr-only"
+            />{' '}
             Nuevos
-          </motion.button>
-          <motion.button
-            onClick={() => setCondicion("usado")}
-            className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm ${
+          </motion.label>
+          <motion.label
+            className={`px-4 py-2 rounded-lg font-semibold transition-colors text-sm cursor-pointer ${
               condicion === "usado"
                 ? "bg-primary text-white"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
@@ -91,13 +104,22 @@ export const BarFilters = () => {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
           >
+            <input
+              type="radio"
+              name="condicion"
+              value="usado"
+              checked={condicion === "usado"}
+              onChange={() => setCondicion("usado")}
+              className="sr-only"
+            />{' '}
             Usados
-          </motion.button>
+          </motion.label>
         </div>
-      </div>
+      </fieldset>
 
       {/* Selects */}
-      <div className="flex flex-col gap-3 mb-6">
+      <fieldset className="flex flex-col gap-3 mb-6 border-none p-0 m-0">
+        <legend className="sr-only">Filtros de vehículo</legend>
         <Select
           value={marca}
           onChange={setMarca}
@@ -154,7 +176,7 @@ export const BarFilters = () => {
           placeholder="Color"
           color="primary"
         />
-      </div>
+      </fieldset>
 
       {/* Intervals */}
       <div className="flex flex-col gap-5 mb-6">

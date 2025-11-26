@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getVehicles, getBrands } from "../services/serviceMarketplace";
 import type { VehicleType, TransmissionType, MotorizationType, Brand, Vehicle } from "../services/serviceMarketplace";
+import { INIT_YEAR, KMS_FINISH, PRICE_FINISH } from "../constants/marketplace.constants";
 
 export const useBarFilter = () => {
   // Get all vehicles and brands
@@ -27,8 +28,8 @@ export const useBarFilter = () => {
     const uniqueModelos = Array.from(
       new Set(
         vehicles
-          .map((v) => v.linea)
-          .filter((linea: unknown): linea is string => typeof linea === 'string')
+          .map((v: Vehicle) => v.linea)
+          .filter(Boolean)
       )
     );
     return uniqueModelos.map((linea) => ({
@@ -102,14 +103,14 @@ export const useBarFilter = () => {
     const precios = vehicles.map((v) => v.precio);
     return {
       min: Math.min(...precios, 0),
-      max: Math.max(...precios, 500000),
+      max: Math.max(...precios, PRICE_FINISH),
     };
   }, [vehicles]);
 
   const anioRange = useMemo(() => {
     const anios = vehicles.map((v) => v.modelo);
     return {
-      min: Math.min(...anios, 2000),
+      min: Math.min(...anios, INIT_YEAR),
       max: Math.max(...anios, new Date().getFullYear()),
     };
   }, [vehicles]);
@@ -118,7 +119,7 @@ export const useBarFilter = () => {
     const kms = vehicles.map((v) => v.kms);
     return {
       min: Math.min(...kms, 0),
-      max: Math.max(...kms, 200000),
+      max: Math.max(...kms, KMS_FINISH),
     };
   }, [vehicles]);
 

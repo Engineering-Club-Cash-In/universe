@@ -1,5 +1,6 @@
 import { NavBar } from "@/components";
-import { HeaderMarket, CarOverlay } from "./Sections";
+import { HeaderMarket, CarOverlay,  CalculatorCredit } from "./Sections";
+import { FindYourIdealModel } from "../HomePage/sections";
 
 export const Marketplace = () => {
   return (
@@ -7,7 +8,8 @@ export const Marketplace = () => {
         <NavBar />
         <HeaderMarket />
         <CarOverlay />
-        {/* Marketplace content goes here */}
+        <FindYourIdealModel />
+        <CalculatorCredit />
     </div>
   );
 }

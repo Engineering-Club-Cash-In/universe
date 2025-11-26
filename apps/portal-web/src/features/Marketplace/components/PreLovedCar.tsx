@@ -1,19 +1,22 @@
 import { motion } from "framer-motion";
 import type { Vehicle } from "../services/serviceMarketplace";
-import { IconCalendarSmall, IconDollarSimple, IconGear } from "../icons";
+import { IconCalendarSmall, IconDollarSimple } from "../icons";
+import { IconGear } from "@/components";
+import { useNavigate } from "@tanstack/react-router";
+import { formatPrice } from "@/utils";
 
 interface PreLovedCarProps {
   vehicle: Vehicle;
-  onClick?: () => void;
 }
 
-export const PreLovedCar = ({ vehicle, onClick }: PreLovedCarProps) => {
-  const formatPrice = (price: number) => {
-    return new Intl.NumberFormat("es-GT", {
-      style: "currency",
-      currency: "GTQ",
-      minimumFractionDigits: 0,
-    }).format(price);
+export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
+  const navigate = useNavigate();
+
+  const handleClick = () => {
+    navigate({
+      to: "/marketplace/search/$id",
+      params: { id: vehicle.id.toString() },
+    });
   };
 
   return (
@@ -21,7 +24,7 @@ export const PreLovedCar = ({ vehicle, onClick }: PreLovedCarProps) => {
       className="relative cursor-pointer group h-56 "
       whileHover={{ scale: 1.05 }}
       transition={{ duration: 0.3 }}
-      onClick={onClick}
+      onClick={handleClick}
     >
       {/* Imagen del vehículo */}
       <div className="w-full h-full relative overflow-hidden rounded-3xl">

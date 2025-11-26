@@ -49,6 +49,8 @@ export interface Vehicle {
   linea: string;
   modelo: number;
   precio: number;
+  precioNuevo?: number;
+  cuotaMinima?: number;
   transmision: TransmissionType;
   nuevo: boolean;
   motorizacion: MotorizationType;

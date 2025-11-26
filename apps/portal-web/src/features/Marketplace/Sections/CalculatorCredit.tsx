@@ -155,18 +155,17 @@ export const CalculatorCredit = () => {
             </div>
 
             {/* Resultados */}
-            <div className="bg-white/10 rounded-lg p-6 mt-6 shadow-sm">
-              <h3 className="text-lg font-semibold mb-4 ">Resultados</h3>
+            <div className="rounded-lg mt-6 shadow-sm">
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-primary">Tasa de interés:</span>
-                  <span className="text-xl font-bold text-blue-600">
+                  <span className="text-xl  text-blue-600">
                     {resultado.interes}%
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-primary">Pago mensual:</span>
-                  <span className="text-xl font-bold text-green-600">
+                  <span className="text-xl text-green-600">
                     Q.
                     {resultado.pagoMensual
                       .toFixed(2)

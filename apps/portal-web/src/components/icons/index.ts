@@ -22,3 +22,12 @@ export * from "./IconGear";
 export * from "./IconDownload"
 export * from "./IconTarget"
 export * from "./IconPlus"
+
+export * from "./IconGas"   
+export * from "./IconKms"   
+export * from "./IconPrint" 
+export * from "./IconLike"
+export * from "./IconShare"
+export * from "./IconCall"
+export * from "./IconWhatsApp"
+export * from "./IconReport"

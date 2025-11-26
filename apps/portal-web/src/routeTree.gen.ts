@@ -21,8 +21,9 @@ import { Route as DocumentsRouteImport } from './routes/documents'
 import { Route as CreditRouteImport } from './routes/credit'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as MarketplaceIndexRouteImport } from './routes/marketplace.index'
-import { Route as MarketplaceSearchRouteImport } from './routes/marketplace.search'
+import { Route as MarketplaceIndexRouteImport } from './routes/marketplace/index'
+import { Route as MarketplaceSearchIndexRouteImport } from './routes/marketplace/search/index'
+import { Route as MarketplaceSearchIdRouteImport } from './routes/marketplace/search/$id'
 
 const StylesRoute = StylesRouteImport.update({
   id: '/styles',
@@ -89,9 +90,14 @@ const MarketplaceIndexRoute = MarketplaceIndexRouteImport.update({
   path: '/marketplace/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MarketplaceSearchRoute = MarketplaceSearchRouteImport.update({
-  id: '/marketplace/search',
-  path: '/marketplace/search',
+const MarketplaceSearchIndexRoute = MarketplaceSearchIndexRouteImport.update({
+  id: '/marketplace/search/',
+  path: '/marketplace/search/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MarketplaceSearchIdRoute = MarketplaceSearchIdRouteImport.update({
+  id: '/marketplace/search/$id',
+  path: '/marketplace/search/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -108,8 +114,9 @@ export interface FileRoutesByFullPath {
   '/register': typeof RegisterRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
-  '/marketplace/search': typeof MarketplaceSearchRoute
   '/marketplace': typeof MarketplaceIndexRoute
+  '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
+  '/marketplace/search': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -124,8 +131,9 @@ export interface FileRoutesByTo {
   '/register': typeof RegisterRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
-  '/marketplace/search': typeof MarketplaceSearchRoute
   '/marketplace': typeof MarketplaceIndexRoute
+  '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
+  '/marketplace/search': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -141,8 +149,9 @@ export interface FileRoutesById {
   '/register': typeof RegisterRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
-  '/marketplace/search': typeof MarketplaceSearchRoute
   '/marketplace/': typeof MarketplaceIndexRoute
+  '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
+  '/marketplace/search/': typeof MarketplaceSearchIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -159,8 +168,9 @@ export interface FileRouteTypes {
     | '/register'
     | '/sell'
     | '/styles'
-    | '/marketplace/search'
     | '/marketplace'
+    | '/marketplace/search/$id'
+    | '/marketplace/search'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -175,8 +185,9 @@ export interface FileRouteTypes {
     | '/register'
     | '/sell'
     | '/styles'
-    | '/marketplace/search'
     | '/marketplace'
+    | '/marketplace/search/$id'
+    | '/marketplace/search'
   id:
     | '__root__'
     | '/'
@@ -191,8 +202,9 @@ export interface FileRouteTypes {
     | '/register'
     | '/sell'
     | '/styles'
-    | '/marketplace/search'
     | '/marketplace/'
+    | '/marketplace/search/$id'
+    | '/marketplace/search/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -208,8 +220,9 @@ export interface RootRouteChildren {
   RegisterRoute: typeof RegisterRoute
   SellRoute: typeof SellRoute
   StylesRoute: typeof StylesRoute
-  MarketplaceSearchRoute: typeof MarketplaceSearchRoute
   MarketplaceIndexRoute: typeof MarketplaceIndexRoute
+  MarketplaceSearchIdRoute: typeof MarketplaceSearchIdRoute
+  MarketplaceSearchIndexRoute: typeof MarketplaceSearchIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -305,11 +318,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MarketplaceIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/marketplace/search': {
-      id: '/marketplace/search'
+    '/marketplace/search/': {
+      id: '/marketplace/search/'
       path: '/marketplace/search'
       fullPath: '/marketplace/search'
-      preLoaderRoute: typeof MarketplaceSearchRouteImport
+      preLoaderRoute: typeof MarketplaceSearchIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/marketplace/search/$id': {
+      id: '/marketplace/search/$id'
+      path: '/marketplace/search/$id'
+      fullPath: '/marketplace/search/$id'
+      preLoaderRoute: typeof MarketplaceSearchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -328,8 +348,9 @@ const rootRouteChildren: RootRouteChildren = {
   RegisterRoute: RegisterRoute,
   SellRoute: SellRoute,
   StylesRoute: StylesRoute,
-  MarketplaceSearchRoute: MarketplaceSearchRoute,
   MarketplaceIndexRoute: MarketplaceIndexRoute,
+  MarketplaceSearchIdRoute: MarketplaceSearchIdRoute,
+  MarketplaceSearchIndexRoute: MarketplaceSearchIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

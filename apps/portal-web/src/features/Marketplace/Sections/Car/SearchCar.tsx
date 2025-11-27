@@ -1,5 +1,7 @@
 import { useParams } from "@tanstack/react-router";
 import { useEffect, useState, useRef } from "react";
+import { IconPDF } from "@/components/icons/IconPDF";
+import { motion } from "framer-motion";
 import {
   getVehicleById,
   type Vehicle,
@@ -11,6 +13,7 @@ import {
   DetailCar,
   ButtonsActions,
   ExtrasCar,
+  SimilarCars,
 } from "./components";
 
 export const SearchCar = () => {
@@ -63,6 +66,14 @@ export const SearchCar = () => {
             <p className="text-white/70 leading-relaxed">
               {vehicle.descripcion}
             </p>
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              className="mt-4 flex items-center gap-2 p-4 bg-white text-black rounded-lg font-medium"
+            >
+              <IconPDF />
+              Descargar Diagnóstico
+            </motion.button>
           </div>
 
           {/* Información general */}
@@ -87,6 +98,7 @@ export const SearchCar = () => {
             // @ts-ignore
             printRef={printRef}
           />
+          <SimilarCars currentVehicleId={vehicle.id} />
         </div>
       </div>
     </div>

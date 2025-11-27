@@ -1,81 +1,14 @@
-import { useMemo, useState, useRef, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { BarFilters, PreLovedCar } from "../components";
-import { useFilterStore } from "../store/filters";
-import { getVehicles, type Vehicle } from "../services/serviceMarketplace";
+import { useFilteredVehiclesFromStore } from "../hooks/useFilteredVehicles";
 import { IconLeftArrow, IconRightArrow } from "@/components/icons";
 import { ITEMS_PER_PAGE, DEFAULT_PAGE } from "../constants/marketplace.constants";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Helper functions para reducir complejidad
-const matchesCondition = (vehicle: Vehicle, condicion: string) => {
-  if (condicion === "todos") return true;
-  if (condicion === "nuevo") return vehicle.nuevo;
-  if (condicion === "usado") return !vehicle.nuevo;
-  return true;
-};
-
-const matchesStringField = (
-  vehicleValue: string | undefined,
-  filterValue: string
-) => {
-  if (!filterValue) return true;
-  return vehicleValue === filterValue;
-};
-
-const matchesNumberField = (
-  vehicleValue: number | undefined,
-  filterValue: number | ""
-) => {
-  if (filterValue === "") return true;
-  return vehicleValue === filterValue;
-};
-
-const matchesRange = (value: number, range: [number, number]) => {
-  return value >= range[0] && value <= range[1];
-};
-
-const hasAllExtras = (
-  vehicleExtras: string[] | undefined,
-  requiredExtras: string[]
-) => {
-  if (requiredExtras.length === 0) return true;
-  const extras = vehicleExtras || [];
-  return requiredExtras.every((extra) => extras.includes(extra));
-};
-
 export const ViewCars = () => {
-  const filters = useFilterStore();
+  const { filteredVehicles, isLoading } = useFilteredVehiclesFromStore();
   const [currentPage, setCurrentPage] = useState(DEFAULT_PAGE);
   const contentRef = useRef<HTMLDivElement>(null);
-
-  const { data: vehicles = [], isLoading } = useQuery({
-    queryKey: ["vehicles"],
-    queryFn: getVehicles,
-  });
-
-  const filteredVehicles = useMemo(() => {
-    return vehicles.filter((vehicle: Vehicle) => {
-      return (
-        matchesCondition(vehicle, filters.condicion) &&
-        matchesStringField(vehicle.marca, filters.marca) &&
-        matchesStringField(vehicle.linea, filters.modelo) &&
-        matchesStringField(vehicle.tipo, filters.tipo) &&
-        matchesStringField(vehicle.motorizacion, filters.combustible) &&
-        matchesStringField(
-          vehicle.infoGeneral?.transmision,
-          filters.transmision
-        ) &&
-        matchesNumberField(vehicle.infoGeneral?.puertas, filters.puertas) &&
-        matchesNumberField(vehicle.infoGeneral?.cilindros, filters.cilindros) &&
-        matchesStringField(vehicle.infoGeneral?.color, filters.color) &&
-        matchesRange(vehicle.precio, filters.precioRange) &&
-        matchesRange(vehicle.modelo, filters.anioRange) &&
-        matchesRange(vehicle.kms, filters.kmsRange) &&
-        hasAllExtras(vehicle.extras, filters.extras)
-      );
-    });
-  }, [vehicles, filters]);
 
   // Pagination
   const totalPages = Math.ceil(filteredVehicles.length / ITEMS_PER_PAGE);

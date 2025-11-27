@@ -31,3 +31,5 @@ export * from "./IconShare"
 export * from "./IconCall"
 export * from "./IconWhatsApp"
 export * from "./IconReport"
+
+export * from "./InfoCar"

@@ -9,14 +9,14 @@ import {
   IconCoupe,
   IconVan,
 } from "@/components";
-import { useMarketplace, useFilteredVehicles } from "../hooks/useMarketplace";
+import { useMarketplace } from "../hooks/useMarketplace";
+import { useFilteredVehicles } from "../hooks/useFilteredVehicles";
 import { motion, AnimatePresence } from "framer-motion";
 import { PreLovedCar } from "../components/PreLovedCar";
 import { useState, useMemo } from "react";
 import type {
   MotorizationType,
   FilterParams,
-  VehicleType,
 } from "../services/serviceMarketplace";
 import {
   DEFAULT_YEAR,
@@ -75,7 +75,7 @@ export const CarOverlay = () => {
 
     // Solo aplicar tipo si está seleccionado
     if (selectedType) {
-      filters.tipo = selectedType as VehicleType;
+      filters.tipo = selectedType;
     }
 
     // Aplicar filtros de búsqueda solo si se ha dado click en buscar
@@ -89,7 +89,7 @@ export const CarOverlay = () => {
       filters.modelo = searchFilters.modelo;
     }
     if (searchFilters.motorizacion) {
-      filters.motorizacion = searchFilters.motorizacion as MotorizationType;
+      filters.motorizacion = searchFilters.motorizacion;
     }
 
     return filters;
@@ -334,7 +334,6 @@ export const CarOverlay = () => {
                   >
                     <PreLovedCar
                       vehicle={vehicle}
-                      onClick={() => console.log("Ver vehículo:", vehicle.id)}
                     />
                   </motion.div>
                 ))}

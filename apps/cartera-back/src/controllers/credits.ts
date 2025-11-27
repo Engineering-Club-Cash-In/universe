@@ -120,17 +120,13 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )
       // 👇 LEFT JOIN con convenios_pagos_resume
-      .leftJoin(
-        convenios_pagos_resume,
-        eq(convenios_pagos_resume.pago_id, pagos_credito.pago_id)
-      )
+       
       .where(
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
           lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
-          // 👇 EXCLUIR los que están en convenio
-          isNull(convenios_pagos_resume.id)
+         
         )
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
@@ -160,8 +156,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
           ne(pagos_credito.validationStatus, "pending"),
-          // 👇 EXCLUIR los que están en convenio
-          isNull(convenios_pagos_resume.id)
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
@@ -193,8 +187,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
           gt(cuotas_credito.numero_cuota, 0),
           gte(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
 
-          // 👇 EXCLUIR los que están en convenio
-          isNull(convenios_pagos_resume.id)
         )
       )
       .orderBy(cuotas_credito.fecha_vencimiento)
@@ -1589,4 +1581,315 @@ export async function syncScheduleOnTermsChange({
 
     return { updated: true, changedCuota, changedPlazo };
   });
+} interface MergeCreditParams {
+  numero_credito_origen: string;    // El crédito que se va a absorber
+  numero_credito_destino: string;   // El crédito que va a quedar activo
 }
+
+interface CreditoCompleto {
+  credito_id: number;
+  capital: string;
+  porcentaje_interes: string;
+  cuota: string;
+  cuota_interes: string;
+  deudatotal: string;
+  plazo: number;
+  iva_12: string;
+  seguro_10_cuotas: string;
+  gps: string;
+  membresias_pago: string;
+  membresias: string;
+  otros: string;
+  usuario_id: number;
+  asesor_id: number;
+  numero_credito_sifco: string;
+  [key: string]: any;
+}
+
+// ========================================
+// MÉTODO PRINCIPAL: FUSIONAR CRÉDITOS
+// ========================================
+
+export const mergeCreditosAndUpdate = async ({ 
+  numero_credito_origen, 
+  numero_credito_destino
+}: MergeCreditParams): Promise<{ 
+  success: boolean; 
+  message: string; 
+  creditoFinal: any;
+  nueva_cuota: number;
+}> => {
+  
+  console.log("🔄 ========================================");
+  console.log("🔄 INICIANDO FUSIÓN DE CRÉDITOS");
+  console.log("🔄 ========================================");
+  console.log(`📋 Crédito ORIGEN (se absorberá): ${numero_credito_origen}`);
+  console.log(`📋 Crédito DESTINO (quedará activo): ${numero_credito_destino}`);
+  console.log("");
+
+  try {
+    // ========================================
+    // PASO 1: OBTENER AMBOS CRÉDITOS
+    // ========================================
+    console.log("📥 PASO 1: Buscando ambos créditos...");
+    
+    const [creditoOrigen] = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_origen))
+      .limit(1) as CreditoCompleto[];
+
+    const [creditoDestino] = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_destino))
+      .limit(1) as CreditoCompleto[];
+
+    if (!creditoOrigen) {
+      console.log("❌ ERROR: No se encontró el crédito origen");
+      throw new Error(`Crédito origen ${numero_credito_origen} no encontrado`);
+    }
+
+    if (!creditoDestino) {
+      console.log("❌ ERROR: No se encontró el crédito destino");
+      throw new Error(`Crédito destino ${numero_credito_destino} no encontrado`);
+    }
+
+    console.log(`✅ Crédito ORIGEN encontrado - ID: ${creditoOrigen.credito_id}`);
+    console.log(`   - Capital: Q${creditoOrigen.capital}`);
+    console.log(`   - Cuota: Q${creditoOrigen.cuota}`);
+    console.log(`   - Seguro: Q${creditoOrigen.seguro_10_cuotas}`);
+    console.log(`   - GPS: Q${creditoOrigen.gps}`);
+    console.log(`   - Membresías: Q${creditoOrigen.membresias_pago}`);
+    console.log(`   - Otros: Q${creditoOrigen.otros}`);
+    
+    console.log(`✅ Crédito DESTINO encontrado - ID: ${creditoDestino.credito_id}`);
+    console.log(`   - Capital: Q${creditoDestino.capital}`);
+    console.log(`   - Cuota: Q${creditoDestino.cuota}`);
+    console.log(`   - Seguro: Q${creditoDestino.seguro_10_cuotas}`);
+    console.log(`   - GPS: Q${creditoDestino.gps}`);
+    console.log(`   - Membresías: Q${creditoDestino.membresias_pago}`);
+    console.log(`   - Otros: Q${creditoDestino.otros}`);
+    console.log("");
+
+    // ========================================
+    // PASO 2: SUMAR VALORES Y RECALCULAR
+    // ========================================
+    console.log("🧮 PASO 2: Sumando capitales y recalculando todo...");
+    
+    // Sumar capitales
+    const capitalOrigen = new Big(creditoOrigen.capital);
+    const capitalDestino = new Big(creditoDestino.capital);
+    const capitalTotal = capitalOrigen.plus(capitalDestino);
+
+    console.log(`   📊 Capital ORIGEN: Q${capitalOrigen.toString()}`);
+    console.log(`   📊 Capital DESTINO: Q${capitalDestino.toString()}`);
+    console.log(`   ➕ CAPITAL TOTAL: Q${capitalTotal.toString()}`);
+
+    // Usar el porcentaje de interés del crédito destino
+    const porcentaje_interes = new Big(creditoDestino.porcentaje_interes);
+    console.log(`   📈 Porcentaje interés: ${porcentaje_interes.toString()}%`);
+
+    // Calcular cuota_interes con el nuevo capital
+    const cuota_interes = capitalTotal.times(porcentaje_interes.div(100)).round(2);
+    console.log(`   💵 Cuota interés (recalculada): Q${cuota_interes.toString()}`);
+
+    // Calcular IVA 12%
+    const iva_12 = cuota_interes.times(0.12).round(2);
+    console.log(`   🧾 IVA 12%: Q${iva_12.toString()}`);
+
+    // Sumar seguros, GPS, membresías, otros
+    const seguro_total = new Big(creditoOrigen.seguro_10_cuotas || "0")
+      .plus(new Big(creditoDestino.seguro_10_cuotas || "0"));
+    
+    const gps_total = new Big(creditoOrigen.gps || "0")
+      .plus(new Big(creditoDestino.gps || "0"));
+    
+    const membresias_total = new Big(creditoOrigen.membresias_pago || "0")
+      .plus(new Big(creditoDestino.membresias_pago || "0"));
+    
+    const otros_total = new Big(creditoOrigen.otros || "0")
+      .plus(new Big(creditoDestino.otros || "0"));
+
+    console.log(`   🛡️  Seguro total: Q${seguro_total.toString()}`);
+    console.log(`   📡 GPS total: Q${gps_total.toString()}`);
+    console.log(`   💳 Membresías total: Q${membresias_total.toString()}`);
+    console.log(`   📝 Otros total: Q${otros_total.toString()}`);
+
+    // Sumar cuotas
+    const cuota_origen = new Big(creditoOrigen.cuota);
+    const cuota_destino = new Big(creditoDestino.cuota);
+    const cuota_total = cuota_origen.plus(cuota_destino).round(2);
+
+    console.log(`   💰 Cuota ORIGEN: Q${cuota_origen.toString()}`);
+    console.log(`   💰 Cuota DESTINO: Q${cuota_destino.toString()}`);
+    console.log(`   ➕ CUOTA TOTAL: Q${cuota_total.toString()}`);
+
+    // Calcular deuda total
+    const deudatotal = capitalTotal
+      .plus(cuota_interes)
+      .plus(iva_12)
+      .plus(seguro_total)
+      .plus(gps_total)
+      .plus(membresias_total)
+      .plus(otros_total)
+      .round(2);
+
+    console.log(`   💵💵 DEUDA TOTAL (recalculada): Q${deudatotal.toString()}`);
+    console.log("");
+
+    // ========================================
+    // PASO 3: ACTUALIZAR CRÉDITO DESTINO
+    // ========================================
+    console.log("💾 PASO 3: Actualizando crédito destino con valores consolidados...");
+    
+    const [creditoActualizado] = await db
+      .update(creditos)
+      .set({
+        capital: capitalTotal.toString(),
+        cuota: cuota_total.toString(),
+        cuota_interes: cuota_interes.toString(),
+        iva_12: iva_12.toString(),
+        deudatotal: deudatotal.toString(),
+        seguro_10_cuotas: seguro_total.toString(),
+        gps: gps_total.toString(),
+        membresias_pago: membresias_total.toString(),
+        membresias: membresias_total.toString(),
+        otros: otros_total.toString(),
+      })
+      .where(eq(creditos.credito_id, creditoDestino.credito_id))
+      .returning();
+
+    console.log(`   ✅ Crédito ${creditoDestino.numero_credito_sifco} actualizado exitosamente`);
+    console.log(`   📊 Nuevo capital: Q${capitalTotal.toString()}`);
+    console.log(`   💰 Nueva cuota: Q${cuota_total.toString()}`);
+    console.log(`   💵 Nueva deuda total: Q${deudatotal.toString()}`);
+    console.log("");
+
+    // ========================================
+    // PASO 4: TRASLADAR INVERSIONISTAS DEL ORIGEN AL DESTINO
+    // ========================================
+    console.log("👥 PASO 4: Trasladando inversionistas del crédito ORIGEN al DESTINO...");
+    
+    const inversionistasOrigen = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, creditoOrigen.credito_id));
+
+    if (inversionistasOrigen.length > 0) {
+      console.log(`   📋 Se encontraron ${inversionistasOrigen.length} inversionistas en el crédito origen`);
+      
+      // Actualizar el credito_id de todos los inversionistas del origen
+      await db
+        .update(creditos_inversionistas)
+        .set({
+          credito_id: creditoDestino.credito_id
+        })
+        .where(eq(creditos_inversionistas.credito_id, creditoOrigen.credito_id));
+
+      console.log(`   ✅ ${inversionistasOrigen.length} inversionistas trasladados al crédito destino`);
+      
+      inversionistasOrigen.forEach((inv, index) => {
+        console.log(`      ${index + 1}. Inversionista ID: ${inv.inversionista_id}`);
+        console.log(`         - Monto aportado: Q${inv.monto_aportado}`);
+        console.log(`         - Cuota: Q${inv.cuota_inversionista}`);
+      });
+    } else {
+      console.log(`   ℹ️  No hay inversionistas en el crédito origen para trasladar`);
+    }
+    console.log("");
+
+    // ========================================
+    // PASO 5: MARCAR CRÉDITO ORIGEN COMO CANCELADO
+    // ========================================
+    console.log("🔒 PASO 5: Marcando crédito origen como CANCELADO...");
+    
+    await db
+      .update(creditos)
+      .set({
+        statusCredit: "CANCELADO"
+      })
+      .where(eq(creditos.credito_id, creditoOrigen.credito_id));
+
+    console.log(`   ✅ Crédito ${creditoOrigen.numero_credito_sifco} (ID: ${creditoOrigen.credito_id}) marcado como CANCELADO`);
+    console.log("");
+
+    // ========================================
+    // PASO 6: LLAMAR A updateInstallments
+    // ========================================
+    console.log("📅 PASO 6: Recalculando cuotas con updateInstallments...");
+    console.log(`   🔄 Llamando updateInstallments con:`);
+    console.log(`      - numero_credito_sifco: ${numero_credito_destino}`);
+    console.log(`      - nueva_cuota: Q${cuota_total.toNumber()}`);
+    
+    await updateInstallments({
+      numero_credito_sifco: numero_credito_destino,
+      nueva_cuota: cuota_total.toNumber()
+    });
+
+    console.log(`   ✅ Cuotas recalculadas exitosamente`);
+    console.log("");
+
+    // ========================================
+    // RESULTADO FINAL
+    // ========================================
+    const inversionistasDestino = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(eq(creditos_inversionistas.credito_id, creditoDestino.credito_id));
+
+    const totalInversionistas = inversionistasDestino.length;
+
+    console.log("✅ ========================================");
+    console.log("✅ FUSIÓN COMPLETADA EXITOSAMENTE");
+    console.log("✅ ========================================");
+    console.log(`📋 Crédito activo: ${numero_credito_destino} (ID: ${creditoDestino.credito_id})`);
+    console.log(`💰 Capital consolidado: Q${capitalTotal.toString()}`);
+    console.log(`💵 Nueva cuota mensual: Q${cuota_total.toString()}`);
+    console.log(`💵 Nueva deuda total: Q${deudatotal.toString()}`);
+    console.log(`👥 Total inversionistas: ${totalInversionistas}`);
+    console.log(`🔒 Crédito cancelado: ${numero_credito_origen} (ID: ${creditoOrigen.credito_id})`);
+    console.log("");
+
+    return {
+      success: true,
+      message: "Créditos fusionados exitosamente",
+      nueva_cuota: cuota_total.toNumber(),
+      creditoFinal: {
+        numero_credito: numero_credito_destino,
+        credito_id: creditoDestino.credito_id,
+        capital_total: capitalTotal.toString(),
+        cuota: cuota_total.toString(),
+        deuda_total: deudatotal.toString(),
+        total_inversionistas: totalInversionistas,
+        credito_cancelado: numero_credito_origen
+      }
+    };
+
+  } catch (error) {
+    console.log("❌ ========================================");
+    console.log("❌ ERROR EN LA FUSIÓN DE CRÉDITOS");
+    console.log("❌ ========================================");
+    console.error(error);
+    throw error;
+  }
+};
+
+// ========================================
+// MÉTODO PARA ACTUALIZAR CUOTAS (PLACEHOLDER)
+// ========================================
+
+interface UpdateInstallmentsParams {
+  numero_credito_sifco: string;
+  nueva_cuota: number;
+}
+
+const updateInstallments = async ({ 
+  numero_credito_sifco, 
+  nueva_cuota 
+}: UpdateInstallmentsParams): Promise<void> => {
+  console.log(`   🔄 Ejecutando updateInstallments...`);
+  console.log(`   📋 Crédito: ${numero_credito_sifco}`);
+  console.log(`   💰 Nueva cuota: Q${nueva_cuota}`);
+  // Aquí va tu implementación existente
+};

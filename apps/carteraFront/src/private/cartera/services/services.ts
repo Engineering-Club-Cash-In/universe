@@ -422,7 +422,7 @@ export const getCreditosPaginados = async (params: {
   page?: number;
   perPage?: number;
   numero_credito_sifco?: string;
-  estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
+  estado: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO";
   excel: boolean;
   asesor_id?: number;        // 👈 NUEVO
   nombre_usuario?: string;   // 👈 NUEVO
@@ -1963,5 +1963,24 @@ export const getPaymentAgreements = async (
   } catch (error: any) {
     console.error("Error fetching payment agreements:", error);
     throw new Error(error?.response?.data?.message || "Failed to fetch payment agreements");
+  }
+};
+// Toggle payment agreement status (activate/deactivate)
+export const togglePaymentAgreementStatus = async (
+  convenio_id: number,
+  activo: boolean
+): Promise<{ success: boolean; message: string }> => {
+  try {
+    const { data } = await api.post(`${API_URL}/payment-agreements/toggle-status`, {
+      convenio_id,
+      activo,
+    });
+
+    return data;
+  } catch (error: any) {
+    console.error("Error toggling payment agreement status:", error);
+    throw new Error(
+      error?.response?.data?.message || "Failed to toggle payment agreement status"
+    );
   }
 };

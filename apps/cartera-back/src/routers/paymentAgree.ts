@@ -1,6 +1,6 @@
 // src/routes/paymentAgreements.routes.ts
 import { Elysia, t } from "elysia";
-import { createPaymentAgreement, getPaymentAgreements } from "../controllers/paymentAgreement";
+import { createPaymentAgreement, getPaymentAgreements, updateConvenioStatus } from "../controllers/paymentAgreement";
 import { authMiddleware } from "./midleware";
  
 
@@ -125,6 +125,43 @@ export const paymentAgreementsRouter = new Elysia({ prefix: "/payment-agreements
       detail: {
         summary: "Get payment agreements",
         description: "Get all payment agreements with optional filters",
+        tags: ["Payment Agreements"],
+      },
+    }
+  ).post(
+    "/toggle-status",
+    async ({ body, set }) => {
+      try {
+        const result = await updateConvenioStatus(body.convenio_id, body.activo);
+
+        if (!result.success) {
+          set.status = 400;
+          return {
+            success: false,
+            message: result.message,
+            error: result.error,
+          };
+        }
+
+        set.status = 200;
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return {
+          success: false,
+          message: "Internal server error",
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        convenio_id: t.Number({ minimum: 1 }),
+        activo: t.Boolean(),
+      }),
+      detail: {
+        summary: "Toggle payment agreement status",
+        description: "Activate or deactivate a payment agreement",
         tags: ["Payment Agreements"],
       },
     }

@@ -2,6 +2,7 @@ import { asc, desc, inArray, sql } from "drizzle-orm";
 import { detail_document_field, docusealDocuments, field } from "../database/schemas/docuseal";
 import { db } from "../database";
 import { and, eq } from "drizzle-orm";
+import { getRenapData } from "./renap";
 
 /**
  * 🔤 Converts snake_case names into a clean readable format
@@ -80,27 +81,16 @@ export async function getDocusealDocumentsController() {
 }
 
 /**
- * 🌎 Fetch RENAP info from external API
+ * 🌎 Fetch RENAP info using direct Centinela API
  */
 async function fetchRenapInfo(dpi: string) {
-  const url = `https://crmapi.s3.devteamatcci.site/info/renap-only`;
+  const response = await getRenapData(dpi);
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dpi }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`RENAP API failed with status ${response.status}`);
+  if (!response.success) {
+    throw new Error(`RENAP API error: ${response.message || "unknown error"}`);
   }
 
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(`RENAP API error: ${data.message || "unknown error"}`);
-  }
-
-  return data;
+  return response;
 }
 
 /**

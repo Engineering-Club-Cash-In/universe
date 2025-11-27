@@ -44,6 +44,8 @@ function generateAmortizationTable(
 	totalFinanced: number,
 	monthlyRate: number,
 	termMonths: number,
+	_insuranceCost: number,
+	_gpsCost: number,
 ): AmortizationRow[] {
 	const table: AmortizationRow[] = [];
 	let balance = totalFinanced;

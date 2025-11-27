@@ -51,6 +51,8 @@ export interface PhotoData {
   title: string;
   description?: string;
   url: string;
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 }
 
 // Main function to create a full vehicle inspection
@@ -157,12 +159,7 @@ export const getVehicleById = async (id: string) => {
 };
 
 // Search vehicles
-export const searchVehicles = async (
-  query?: string,
-  status?: "pending" | "available" | "sold" | "maintenance" | "auction",
-  vehicleType?: string,
-  fuelType?: string
-) => {
+export const searchVehicles = async (query?: string, status?: "pending" | "available" | "sold" | "maintenance" | "auction", vehicleType?: string, fuelType?: string) => {
   try {
     const vehicles = await client.searchVehicles({
       query,

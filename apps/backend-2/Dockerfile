@@ -32,6 +32,7 @@ COPY --from=install /temp/prod/node_modules ./node_modules
 COPY . .
 
 # Compilamos la app
+RUN bun i
 RUN bun build \
     --compile \
     --minify-whitespace \

@@ -48,14 +48,12 @@ const STEPS = [
 ];
 
 export default function VehicleInspectionWizard() {
-  const { formData, checklistItems, photos, resetInspection } = useInspection();
-  const [currentStep, setCurrentStep] = useState(0);
+  const { formData, checklistItems, photos, resetInspection, currentStep, setCurrentStep } = useInspection();
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [savedPhotos, setSavedPhotos] = useState<any[]>([]);
+  const [_isSubmitting, setIsSubmitting] = useState(false);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -85,12 +83,12 @@ export default function VehicleInspectionWizard() {
     }
   };
 
-  const handleCompleteInspection = async (photosFromPictures?: any[], completeFormData?: any) => {
+  const handleCompleteInspection = async (photosFromPictures?: any[], dataOverride?: any) => {
     // Usar las fotos pasadas directamente o las del contexto
     const photosToUse = photosFromPictures || photos;
-    // Usar los datos completos pasados o los del contexto
-    const dataToUse = completeFormData || formData;
-
+    // Use dataOverride if provided (from valuation step), otherwise use formData from context
+    const dataToUse = dataOverride || formData;
+    
     // Verificar que las fotos estén disponibles
     if (!photosToUse || photosToUse.length === 0) {
       console.error("No hay fotos disponibles");
@@ -275,18 +273,11 @@ export default function VehicleInspectionWizard() {
             {currentStep === 2 && (
               <div>
                 <VehiclePictures
-                  onComplete={(photosFromComponent) => {
-                    console.log("=== CALLBACK onComplete del wizard ===");
-                    console.log("Fotos recibidas:", photosFromComponent);
-                    console.log("Cantidad:", photosFromComponent?.length || 0);
-
+                  onComplete={() => {
                     setPhotosCompleted(true);
-                    setSavedPhotos(photosFromComponent);
-
-                    // No mostrar toast aquí, VehiclePictures ya lo hace
-                    // toast.success("Fotos guardadas. Continúa con la valoración.");
-
-                    handleNextStep();
+                    // Avanzar al paso de valuación
+                    setCurrentStep(3);
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                   isWizardMode={true}
                 />

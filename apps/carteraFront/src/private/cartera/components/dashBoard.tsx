@@ -7,11 +7,17 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@/components/ui/sidebar";
-import { Banknote, CreditCard, ListOrdered, LogOut, Landmark } from "lucide-react";
+import {
+  Banknote,
+  CreditCard,
+  ListOrdered,
+  LogOut,
+  Landmark,
+} from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
-import { useAuth } from "@/Provider/authProvider"; 
+import { useAuth } from "@/Provider/authProvider";
 
 const menuOptions = [
   {
@@ -63,7 +69,7 @@ const menuOptions = [
     path: "/mora",
     roles: ["ADMIN"],
   },
-   {
+  {
     key: "banks-fee",
     label: "Bancos",
     icon: <Landmark className="mr-2 h-5 w-5" />,
@@ -135,7 +141,7 @@ export function DashBoardCartera() {
     <>
       {/* 🔹 Hamburguesa SOLO en mobile */}
       <button
-        className="fixed top-4 left-4 z-50 md:hidden p-2 rounded-full bg-white shadow-lg border border-blue-100 hover:shadow-xl hover:scale-105 transition-all duration-200"
+        className="fixed top-4 left-4 z-50 lg:hidden p-2 rounded-full bg-white shadow-lg border border-blue-100 hover:shadow-xl hover:scale-105 transition-all duration-200"
         onClick={() => setMenuOpen(true)}
         aria-label="Abrir menú"
       >
@@ -143,10 +149,8 @@ export function DashBoardCartera() {
       </button>
 
       {/* 🔹 Sidebar COMPLETAMENTE ESTÁTICO - SIN COLAPSO - SIEMPRE VISIBLE */}
-      <Sidebar 
-        className="hidden md:flex fixed left-0 top-0 h-screen bg-gradient-to-b from-[#f8fbff] to-white border-r-4 border-blue-600 shadow-xl w-[260px] flex-col overflow-hidden"
-        // ⚠️ IMPORTANTE: Quitamos cualquier prop que permita colapsar
-      >
+      <Sidebar className="hidden lg:flex fixed left-0 top-0 h-screen bg-gradient-to-b from-[#f8fbff] to-white border-r-4 border-blue-600 shadow-xl w-[260px] flex-col overflow-hidden">
+        {" "}
         {/* Header fijo en la parte superior */}
         <SidebarHeader className="flex-shrink-0 flex flex-col items-center justify-center py-6 px-6 border-b border-blue-100">
           <img
@@ -166,14 +170,11 @@ export function DashBoardCartera() {
             </div>
           )}
         </SidebarHeader>
-
         {/* Contenido con scroll independiente */}
         <SidebarContent className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
           <div className="flex flex-col h-full justify-between">
             {/* Menú principal */}
-            <div className="flex-1">
-              {renderMenu()}
-            </div>
+            <div className="flex-1">{renderMenu()}</div>
 
             {/* Botón de logout fijo en la parte inferior */}
             <div className="mt-6 pt-4 border-t border-blue-100">
@@ -196,13 +197,13 @@ export function DashBoardCartera() {
 
       {/* 🔹 Drawer en mobile - MEJORADO */}
       {menuOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div className="fixed inset-0 z-50 flex lg:hidden">
           {/* Overlay con animación */}
           <div
             className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm animate-fadeIn"
             onClick={() => setMenuOpen(false)}
           />
-          
+
           {/* Drawer con animación de entrada */}
           <aside className="relative bg-gradient-to-b from-white to-blue-50 w-80 max-w-[85vw] h-full shadow-2xl border-r-4 border-blue-600 flex flex-col overflow-hidden animate-slideInLeft">
             {/* Botón de cerrar */}

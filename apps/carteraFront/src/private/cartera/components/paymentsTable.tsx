@@ -177,7 +177,48 @@ export function PaymentsTable() {
       }
     );
   };
+// --- helper para el status de validación con iconos ---
+const getValidationStatusConfig = (status: string) => {
+  const configs: Record<string, { 
+    label: string; 
+    color: string; 
+    bgColor: string;
+    icon: JSX.Element;
+  }> = {
+    no_requiere: {
+      label: "No requiere",
+      color: "text-gray-700",
+      bgColor: "bg-gray-100",
+      icon: <Check className="w-4 h-4" />
+    },
+    no_required: {
+      label: "No requiere",
+      color: "text-gray-700",
+      bgColor: "bg-gray-100",
+      icon: <Check className="w-4 h-4" />
+    },
+    pendiente: {
+      label: "Pendiente",
+      color: "text-yellow-700",
+      bgColor: "bg-yellow-100",
+      icon: <Loader2 className="w-4 h-4" />
+    },
+    pending: {
+      label: "Pendiente",
+      color: "text-yellow-700",
+      bgColor: "bg-yellow-100",
+      icon: <Loader2 className="w-4 h-4" />
+    },
+    validated: {
+      label: "Validado",
+      color: "text-green-700",
+      bgColor: "bg-green-100",
+      icon: <Check className="w-4 h-4" />
+    },
+  };
 
+  return configs[status] || configs.no_required;
+};
   // Función para verificar si tiene cuenta asignada
   const tieneCuentaAsignada = (pago: PagoDataInvestor) => {
     return (
@@ -244,30 +285,7 @@ export function PaymentsTable() {
       setIsDownloadingExcel(false);
     }
   };
-  const validationStatusToSpanish = (status: string): string => {
-    const translations: Record<string, string> = {
-      no_requiere: "No requiere validación",
-      pendiente: "Pendiente",
-      validated: "Validado",
-      // Por si acaso vienen en inglés también
-      no_required: "No requiere validación",
-      pending: "Pendiente",
-    };
-    return translations[status];
-  };
-
-  // Si quieres también los colores para badges/chips
-  const getValidationStatusColor = (status: string): string => {
-    const colors: Record<string, string> = {
-      no_requiere: "gray",
-      no_required: "gray",
-      pendiente: "yellow",
-      pending: "yellow",
-      validated: "green",
-    };
-
-    return colors[status] || "gray";
-  };
+ 
   const handleOpenBoleta = (boleta?: any[] | { urlBoleta?: string } | null) => {
     if (!boleta) {
       alert("⚠️ No hay boleta disponible para este pago.");
@@ -546,262 +564,277 @@ export function PaymentsTable() {
           </div>
         ) : isMobile ? (
           // 📱 Vista móvil
-          <div className="flex flex-col gap-4">
-            {pagos.map((pago, idx) => (
-              <div
-                key={pago.pagoId}
-                className={`bg-white border border-blue-200 rounded-xl shadow-sm p-4 ${
-                  openIdx === idx ? "ring-2 ring-blue-300" : ""
-                }`}
-              >
-                {/* 🧭 Header principal */}
-                <div
-                  className="flex justify-between items-center cursor-pointer"
-                  onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
-                >
-                  <div>
-                    <p className="text-blue-800 font-bold text-lg">
-                      {pago.credito?.numeroCreditoSifco}
-                    </p>
-                    <p className="text-blue-700 font-semibold">
-                      {formatDate(pago.fechaPago)}
-                    </p>
-                  </div>
-                  {openIdx === idx ? (
-                    <ChevronUp className="text-blue-700" />
-                  ) : (
-                    <ChevronDown className="text-blue-700" />
-                  )}
-                </div>
-
-                {/* 💰 Monto + usuario */}
-                <div className="mt-3">
-                  <p className="text-green-700 font-bold text-xl">
-                    {formatCurrency(pago.montoBoleta)}
-                  </p>
-                  <p className="text-blue-900 font-semibold">
-                    {pago.usuario?.nombre}
-                  </p>
-                </div>
-
-                {/* 🔘 Acciones */}
-                <div className="flex gap-3 mt-3">
-                  {/* 👁️ Este botón lo ven TODOS */}
-                  <button
-                    onClick={() => handleOpenBoleta(pago.boleta)}
-                    className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
-                  >
-                    <FileText className="w-4 h-4" /> Ver Boleta
-                  </button>
-
-                  {/* 🔒 Inversionistas - Deshabilitado si NO es admin */}
-                  <button
-                    onClick={() =>
-                      handleOpenInversionistas(pago.inversionistas)
-                    }
-                    disabled={user?.role !== "ADMIN"}
-                    className={`font-semibold flex items-center gap-1 ${
-                      user?.role !== "ADMIN"
-                        ? "text-gray-400 cursor-not-allowed opacity-50"
-                        : "text-blue-700 hover:text-blue-900"
-                    }`}
-                    title={user?.role !== "ADMIN" ? "Solo administradores" : ""}
-                  >
-                    <Users2 className="w-4 h-4" /> Inversionistas
-                  </button>
-
-                  {/* 🔒 Validar Pago - Deshabilitado si NO es admin O ya está validado */}
-                  <button
-                    onClick={() => aplicarPago(pago.pagoId)}
-                    disabled={
-                      user?.role !== "ADMIN" ||
-                      isPending ||
-                      pago.validationStatus === "validated" ||
-                      !tieneCuentaAsignada(pago) // Deshabilitar si no tiene cuenta asignada
-                    }
-                    className={`font-semibold flex items-center gap-1 ${
-                      pago.validationStatus === "validated"
-                        ? "text-gray-400 cursor-not-allowed"
-                        : user?.role !== "ADMIN"
-                          ? "text-gray-400 cursor-not-allowed opacity-50"
-                          : "text-green-700 hover:text-green-900"
-                    } disabled:opacity-50`}
-                    title={
-                      user?.role !== "ADMIN"
-                        ? "Solo administradores"
-                        : !tieneCuentaAsignada(pago)
-                          ? "Debe asignar una cuenta primero" // 👈 NUEVO
-                          : pago.validationStatus === "validated"
-                            ? "Ya validado"
-                            : ""
-                    }
-                  >
-                    <Check className="w-4 h-4" />
-                    {pago.validationStatus === "validated"
-                      ? "Ya Validado"
-                      : !tieneCuentaAsignada(pago)
-                        ? "Sin Cuenta" // 👈 NUEVO
-                        : isPending
-                          ? "Validando..."
-                          : "Validar Pago"}
-                  </button>
-                  <button
-                    className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow"
-                    onClick={() =>
-                      handleReverse(pago.pagoId, pago.credito?.creditoId || 0,false)
-                    }
-                    disabled={reversePago.isPending || user?.role !== "ADMIN"}
-                  >
-                    {reversePago.isPending ? (
-                      <>
-                        <Loader2 className="animate-spin w-4 h-4 mr-1" />
-                        Revirtiendo...
-                      </>
-                    ) : (
-                      "Revertir Pago"
-                    )}
-                  </button>
-                </div>
-
-                {/* 🔽 Colapsable */}
-                <div
-                  className={`transition-all duration-500 overflow-hidden ${
-                    openIdx === idx
-                      ? "max-h-[1000px] opacity-100 mt-4"
-                      : "max-h-0 opacity-0"
-                  }`}
-                >
-                  <div className="grid grid-cols-2 gap-3">
-                    {[
-                      { label: "Crédito ID", value: pago.credito?.creditoId },
-                      {
-                        label: "Capital",
-                        value: formatCurrency(pago.credito?.capital),
-                      },
-                      {
-                        label: "Deuda Total",
-                        value: formatCurrency(pago.credito?.deudaTotal),
-                      },
-                      {
-                        label: "Membresías",
-                        value: formatCurrency(pago.membresias),
-                        rawValue: pago.membresias,
-                      },
-                      {
-                        label: "Mora",
-                        value: formatCurrency(pago.mora),
-                        rawValue: pago.mora,
-                      },
-                      {
-                        label: "Convenio",
-                        value: formatCurrency(pago.pagoConvenio),
-                        rawValue: pago.pagoConvenio,
-                      },
-                      {
-                        label: "Reserva",
-                        value: formatCurrency(pago.reserva),
-                        rawValue: pago.reserva,
-                      },
-                      {
-                        label: "Otros",
-                        value: formatCurrency(pago.otros),
-                        rawValue: pago.otros,
-                      },
-                      {
-                        label: "Interés",
-                        value: formatCurrency(pago.abono_interes),
-                        rawValue: pago.abono_interes,
-                      },
-                      {
-                        label: "IVA 12%",
-                        value: formatCurrency(pago.abono_iva_12),
-                        rawValue: pago.abono_iva_12,
-                      },
-                      {
-                        label: "Seguro",
-                        value: formatCurrency(pago.abono_seguro),
-                        rawValue: pago.abono_seguro,
-                      },
-                      {
-                        label: "GPS",
-                        value: formatCurrency(pago.abono_gps),
-                        rawValue: pago.abono_gps,
-                      },
-                      {
-                        label: "validationStatus",
-                        value: (
-                          <span
-                            className={`badge badge-${getValidationStatusColor(pago.validationStatus)}`}
-                          >
-                            {validationStatusToSpanish(pago.validationStatus)}
-                          </span>
-                        ),
-                      },
-                      {
-                        label: "Cuenta Destino",
-                        value: tieneCuentaAsignada(pago)
-                          ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
-                          : "No asignada",
-                      },
-                      {
-                        label: "Número de Cuenta",
-                        value: pago.cuentaEmpresaNumero || "—",
-                      },
-                      pago.cuota
-                        ? {
-                            label: "Número de Cuota",
-                            value: pago.cuota.numeroCuota,
-                          }
-                        : null,
-                      pago.cuota
-                        ? {
-                            label: "Fecha Vencimiento",
-                            value: formatDate(pago.cuota.fechaVencimiento),
-                          }
-                        : null,
-                      {
-                        label: "Observaciones",
-                        value: pago.observaciones || "—",
-                      },
-                      pago.usuario.Categoria
-                        ? { label: "Categoria", value: pago.usuario.Categoria }
-                        : null,
-                      { label: "Banco", value: pago.bancoNombre || "—" },
-                      {
-                        label: "numeroautorizacion",
-                        value: pago.numeroautorizacion || "—",
-                      },
-                      {
-                        label: "Registrado por",
-                        value: pago.registerBy || "—",
-                      },
-                    ]
-                      .filter(Boolean)
-                      .filter((f: any) => {
-                        // 👈 NUEVO: Ocultar si rawValue es 0 o "0.00"
-                        if (f.rawValue !== undefined) {
-                          return Number(f.rawValue) !== 0;
-                        }
-                        return true; // Mostrar campos sin rawValue
-                      })
-                      .map((f: any, i) => (
-                        <div
-                          key={i}
-                          className="bg-blue-50 rounded-lg p-2 border border-blue-100"
-                        >
-                          <p className="text-blue-800 text-sm font-bold">
-                            {f.label}
-                          </p>
-                          <p className="text-blue-900 font-semibold text-sm">
-                            {f.value ?? "--"}
-                          </p>
-                        </div>
-                      ))}
-                  </div>
-                </div>
-              </div>
-            ))}
+        // 📱 Vista móvil
+<div className="flex flex-col gap-4">
+  {pagos.map((pago, idx) => {
+    const statusConfig = getValidationStatusConfig(pago.validationStatus); // 👈 NUEVO
+    
+    return (
+      <div
+        key={pago.pagoId}
+        className={`bg-white border border-blue-200 rounded-xl shadow-sm p-4 ${
+          openIdx === idx ? "ring-2 ring-blue-300" : ""
+        }`}
+      >
+        {/* 🧭 Header principal */}
+        <div
+          className="flex justify-between items-center cursor-pointer"
+          onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
+        >
+          <div>
+            <p className="text-blue-800 font-bold text-lg">
+              {pago.credito?.numeroCreditoSifco}
+            </p>
+            <p className="text-blue-700 font-semibold">
+              {formatDate(pago.fechaPago)}
+            </p>
           </div>
+          {openIdx === idx ? (
+            <ChevronUp className="text-blue-700" />
+          ) : (
+            <ChevronDown className="text-blue-700" />
+          )}
+        </div>
+
+        {/* 💰 Monto + usuario */}
+        <div className="mt-3">
+          <p className="text-green-700 font-bold text-xl">
+            {formatCurrency(pago.montoBoleta)}
+          </p>
+          <p className="text-blue-900 font-semibold">
+            {pago.usuario?.nombre}
+          </p>
+          
+          {/* 👇 NUEVO - Badge de estado en móvil */}
+          <div className="mt-2 flex items-center gap-2">
+            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm ${statusConfig.bgColor} ${statusConfig.color}`}>
+              {statusConfig.icon}
+              {statusConfig.label}
+            </span>
+          </div>
+        </div>
+
+        {/* 🔘 Acciones */}
+        <div className="flex gap-3 mt-3 flex-wrap">
+          {/* 👁️ Este botón lo ven TODOS */}
+          <button
+            onClick={() => handleOpenBoleta(pago.boleta)}
+            className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
+          >
+            <FileText className="w-4 h-4" /> Ver Boleta
+          </button>
+
+          {/* 🔒 Inversionistas - Deshabilitado si NO es admin */}
+          <button
+            onClick={() =>
+              handleOpenInversionistas(pago.inversionistas)
+            }
+            disabled={user?.role !== "ADMIN"}
+            className={`font-semibold flex items-center gap-1 ${
+              user?.role !== "ADMIN"
+                ? "text-gray-400 cursor-not-allowed opacity-50"
+                : "text-blue-700 hover:text-blue-900"
+            }`}
+            title={user?.role !== "ADMIN" ? "Solo administradores" : ""}
+          >
+            <Users2 className="w-4 h-4" /> Inversionistas
+          </button>
+
+          {/* 🔒 Validar Pago - Deshabilitado si NO es admin O ya está validado */}
+          <button
+            onClick={() => aplicarPago(pago.pagoId)}
+            disabled={
+              user?.role !== "ADMIN" ||
+              isPending ||
+              pago.validationStatus === "validated" ||
+              !tieneCuentaAsignada(pago)
+            }
+            className={`font-semibold flex items-center gap-1 ${
+              pago.validationStatus === "validated"
+                ? "text-gray-400 cursor-not-allowed"
+                : user?.role !== "ADMIN"
+                  ? "text-gray-400 cursor-not-allowed opacity-50"
+                  : "text-green-700 hover:text-green-900"
+            } disabled:opacity-50`}
+            title={
+              user?.role !== "ADMIN"
+                ? "Solo administradores"
+                : !tieneCuentaAsignada(pago)
+                  ? "Debe asignar una cuenta primero"
+                  : pago.validationStatus === "validated"
+                    ? "Ya validado"
+                    : ""
+            }
+          >
+            <Check className="w-4 h-4" />
+            {pago.validationStatus === "validated"
+              ? "Ya Validado"
+              : !tieneCuentaAsignada(pago)
+                ? "Sin Cuenta"
+                : isPending
+                  ? "Validando..."
+                  : "Validar Pago"}
+          </button>
+          
+          <button
+            className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
+            onClick={() =>
+              handleReverse(pago.pagoId, pago.credito?.creditoId || 0, false)
+            }
+            disabled={reversePago.isPending || user?.role !== "ADMIN"}
+          >
+            {reversePago.isPending ? (
+              <>
+                <Loader2 className="animate-spin w-4 h-4" />
+                Revirtiendo...
+              </>
+            ) : (
+              <>
+                <Undo2 className="w-4 h-4" />
+                Revertir
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* 🔽 Colapsable */}
+        <div
+          className={`transition-all duration-500 overflow-hidden ${
+            openIdx === idx
+              ? "max-h-[1000px] opacity-100 mt-4"
+              : "max-h-0 opacity-0"
+          }`}
+        >
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: "Crédito ID", value: pago.credito?.creditoId },
+              {
+                label: "Capital",
+                value: formatCurrency(pago.credito?.capital),
+              },
+              {
+                label: "Deuda Total",
+                value: formatCurrency(pago.credito?.deudaTotal),
+              },
+              {
+                label: "Membresías",
+                value: formatCurrency(pago.membresias),
+                rawValue: pago.membresias,
+              },
+              {
+                label: "Mora",
+                value: formatCurrency(pago.mora),
+                rawValue: pago.mora,
+              },
+              {
+                label: "Convenio",
+                value: formatCurrency(pago.pagoConvenio),
+                rawValue: pago.pagoConvenio,
+              },
+              {
+                label: "Reserva",
+                value: formatCurrency(pago.reserva),
+                rawValue: pago.reserva,
+              },
+              {
+                label: "Otros",
+                value: formatCurrency(pago.otros),
+                rawValue: pago.otros,
+              },
+              {
+                label: "Interés",
+                value: formatCurrency(pago.abono_interes),
+                rawValue: pago.abono_interes,
+              },
+              {
+                label: "IVA 12%",
+                value: formatCurrency(pago.abono_iva_12),
+                rawValue: pago.abono_iva_12,
+              },
+              {
+                label: "Seguro",
+                value: formatCurrency(pago.abono_seguro),
+                rawValue: pago.abono_seguro,
+              },
+              {
+                label: "GPS",
+                value: formatCurrency(pago.abono_gps),
+                rawValue: pago.abono_gps,
+              },
+              {
+                label: "Estado de Validación",
+                value: (
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
+                    {statusConfig.icon}
+                    {statusConfig.label}
+                  </span>
+                ),
+              },
+              {
+                label: "Cuenta Destino",
+                value: tieneCuentaAsignada(pago)
+                  ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
+                  : "No asignada",
+              },
+              {
+                label: "Número de Cuenta",
+                value: pago.cuentaEmpresaNumero || "—",
+              },
+              pago.cuota
+                ? {
+                    label: "Número de Cuota",
+                    value: pago.cuota.numeroCuota,
+                  }
+                : null,
+              pago.cuota
+                ? {
+                    label: "Fecha Vencimiento",
+                    value: formatDate(pago.cuota.fechaVencimiento),
+                  }
+                : null,
+              {
+                label: "Observaciones",
+                value: pago.observaciones || "—",
+              },
+              pago.usuario.Categoria
+                ? { label: "Categoria", value: pago.usuario.Categoria }
+                : null,
+              { label: "Banco", value: pago.bancoNombre || "—" },
+              {
+                label: "numeroautorizacion",
+                value: pago.numeroautorizacion || "—",
+              },
+              {
+                label: "Registrado por",
+                value: pago.registerBy || "—",
+              },
+            ]
+              .filter(Boolean)
+              .filter((f: any) => {
+                if (f.rawValue !== undefined) {
+                  return Number(f.rawValue) !== 0;
+                }
+                return true;
+              })
+              .map((f: any, i) => (
+                <div
+                  key={i}
+                  className="bg-blue-50 rounded-lg p-2 border border-blue-100"
+                >
+                  <p className="text-blue-800 text-sm font-bold">
+                    {f.label}
+                  </p>
+                  <p className="text-blue-900 font-semibold text-sm">
+                    {f.value ?? "--"}
+                  </p>
+                </div>
+              ))}
+          </div>
+        </div>
+      </div>
+    );
+  })}
+</div>
         ) : (
           // 💻 Vista escritorio
           <div className="overflow-x-hidden rounded-xl bg-white shadow border border-blue-100 w-full">
@@ -824,359 +857,373 @@ export function PaymentsTable() {
                   <TableHead className="text-center font-bold text-blue-800">
                     Categoria
                   </TableHead>
+                   <TableHead className="text-center font-bold text-blue-800">
+                    Status
+                  </TableHead>
                   <TableHead className="text-center font-bold text-blue-800">
                     Acciones
                   </TableHead>
                 </TableRow>
               </TableHeader>
 
-              <TableBody>
-                {pagos.map((pago, idx) => (
-                  <React.Fragment key={pago.pagoId}>
-                    <TableRow
-                      className={`hover:bg-blue-50 cursor-pointer ${
-                        openIdx === idx ? "ring-2 ring-blue-300" : ""
-                      }`}
-                      onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
+             <TableBody>
+  {pagos.map((pago, idx) => {
+    const statusConfig = getValidationStatusConfig(pago.validationStatus); // 👈 NUEVO - Obtener config del status
+    
+    return (
+      <React.Fragment key={pago.pagoId}>
+        <TableRow
+          className={`hover:bg-blue-50 cursor-pointer ${
+            openIdx === idx ? "ring-2 ring-blue-300" : ""
+          }`}
+          onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
+        >
+          <TableCell className="text-center">
+            {openIdx === idx ? <ChevronUp /> : <ChevronDown />}
+          </TableCell>
+          <TableCell className="text-center text-blue-700 font-bold">
+            {pago.credito?.numeroCreditoSifco}
+          </TableCell>
+          <TableCell className="text-center text-green-800 font-bold">
+            {formatCurrency(pago.montoBoleta)}
+          </TableCell>
+          <TableCell className="text-center text-blue-700 font-bold">
+            {formatDate(pago.fechaPago)}
+          </TableCell>
+          <TableCell className="text-center text-blue-900 font-semibold">
+            {pago.usuario?.nombre}
+          </TableCell>
+          <TableCell className="text-center text-blue-900 font-semibold">
+            {pago.usuario?.Categoria}
+          </TableCell>
+          {/* 👇 NUEVO - Celda del Status con icono y color */}
+          <TableCell className="text-center">
+            <div className="flex items-center justify-center">
+              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
+                {statusConfig.icon}
+                {statusConfig.label}
+              </span>
+            </div>
+          </TableCell>
+          <TableCell className="text-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-2 hover:bg-blue-50 rounded-full transition shadow-sm border border-gray-200">
+                  <MoreVertical className="w-5 h-5 text-blue-600" />
+                </button>
+              </DropdownMenuTrigger>
+
+              <DropdownMenuContent
+                align="end"
+                side="top"
+                sideOffset={5}
+                className="w-56 bg-white shadow-lg border border-gray-200"
+              >
+                {/* 👁️ Ver Boleta - TODOS pueden verla */}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenBoleta(pago.boleta);
+                  }}
+                  className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
+                >
+                  <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
+                  <span className="font-semibold">Ver Boleta</span>
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator className="bg-gray-200" />
+                
+                {/* 🏦 Seleccionar Cuenta */}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleAbrirModalCuenta(pago.pagoId, e);
+                  }}
+                  className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
+                >
+                  <BadgeDollarSign className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
+                  <span className="font-semibold">
+                    {pago.cuentaEmpresaNombre
+                      ? "Cambiar Cuenta"
+                      : "Asignar Cuenta"}
+                  </span>
+                </DropdownMenuItem>
+                
+                <DropdownMenuSeparator className="bg-gray-200" />
+                
+                {/* 🔒 Inversionistas - Solo ADMIN */}
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (user?.role === "ADMIN") {
+                      handleOpenInversionistas(pago.inversionistas);
+                    }
+                  }}
+                  disabled={user?.role !== "ADMIN"}
+                  className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                    user?.role !== "ADMIN"
+                      ? "opacity-50 text-gray-400 bg-gray-50"
+                      : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                  }`}
+                >
+                  <Users2
+                    className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
+                  />
+                  <span className="font-semibold">
+                    Ver Inversionistas
+                  </span>
+                  {user?.role !== "ADMIN" && (
+                    <span className="ml-auto text-xs text-gray-400 font-normal">
+                      Admin
+                    </span>
+                  )}
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator className="bg-gray-200" />
+
+                {/* 🔒 Validar Pago - Solo ADMIN Y con cuenta asignada */}
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (
+                      user?.role === "ADMIN" &&
+                      pago.validationStatus !== "validated" &&
+                      tieneCuentaAsignada(pago)
+                    ) {
+                      aplicarPago(pago.pagoId);
+                    }
+                  }}
+                  disabled={
+                    user?.role !== "ADMIN" ||
+                    isPending ||
+                    pago.validationStatus === "validated" ||
+                    !tieneCuentaAsignada(pago)
+                  }
+                  className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                    pago.validationStatus === "validated" ||
+                    user?.role !== "ADMIN" ||
+                    !tieneCuentaAsignada(pago)
+                      ? "opacity-50 text-gray-400 bg-gray-50"
+                      : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                  }`}
+                >
+                  <Check
+                    className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                      pago.validationStatus === "validated" ||
+                      user?.role !== "ADMIN" ||
+                      !tieneCuentaAsignada(pago)
+                        ? "text-gray-400"
+                        : "text-blue-600"
+                    }`}
+                  />
+                  <span className="font-semibold">
+                    {pago.validationStatus === "validated"
+                      ? "Ya Validado"
+                      : !tieneCuentaAsignada(pago)
+                        ? "Sin Cuenta"
+                        : isPending
+                          ? "Validando..."
+                          : "Validar Pago"}
+                  </span>
+                  {user?.role !== "ADMIN" && (
+                    <span className="ml-auto text-xs text-gray-400 font-normal">
+                      Admin
+                    </span>
+                  )}
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator className="bg-gray-200" />
+
+                {/* 🔒 Revertir Pago - Solo ADMIN */}
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (user?.role === "ADMIN") {
+                      handleReverse(
+                        pago.pagoId,
+                        pago.credito?.creditoId || 0,
+                        false
+                      );
+                    }
+                  }}
+                  disabled={
+                    reversePago.isPending || user?.role !== "ADMIN"
+                  }
+                  className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                    user?.role !== "ADMIN"
+                      ? "opacity-50 text-gray-400 bg-gray-50"
+                      : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                  }`}
+                >
+                  <Undo2
+                    className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
+                  />
+                  <span className="font-semibold">
+                    {reversePago.isPending
+                      ? "Revirtiendo..."
+                      : "Revertir Pago"}
+                  </span>
+                  {user?.role !== "ADMIN" && (
+                    <span className="ml-auto text-xs text-gray-400 font-normal">
+                      Admin
+                    </span>
+                  )}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </TableCell>
+        </TableRow>
+
+        {/* 🔹 Colapso */}
+        <TableRow>
+          <TableCell colSpan={8} className="p-0"> {/* 👈 CAMBIÉ colSpan de 6 a 8 porque ahora hay más columnas */}
+            <div
+              className={`transition-all duration-500 overflow-hidden ${
+                openIdx === idx
+                  ? "max-h-[1000px] opacity-100"
+                  : "max-h-0 opacity-0"
+              }`}
+            >
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-5 p-4 bg-blue-50 border-t border-blue-200">
+                {[
+                  {
+                    label: "Crédito ID",
+                    value: pago.credito?.creditoId,
+                  },
+                  {
+                    label: "Capital",
+                    value: formatCurrency(pago.credito?.capital),
+                  },
+                  {
+                    label: "Deuda Total",
+                    value: formatCurrency(pago.credito?.deudaTotal),
+                  },
+                  {
+                    label: "Membresías",
+                    value: formatCurrency(pago.membresias),
+                    rawValue: pago.membresias,
+                  },
+                  {
+                    label: "Mora",
+                    value: formatCurrency(pago.mora),
+                    rawValue: pago.mora,
+                  },
+                  {
+                    label: "Convenio",
+                    value: formatCurrency(pago.pagoConvenio),
+                    rawValue: pago.pagoConvenio,
+                  },
+                  {
+                    label: "Reserva",
+                    value: formatCurrency(pago.reserva),
+                    rawValue: pago.reserva,
+                  },
+                  {
+                    label: "Otros",
+                    value: formatCurrency(pago.otros),
+                    rawValue: pago.otros,
+                  },
+                  {
+                    label: "Interés",
+                    value: formatCurrency(pago.abono_interes),
+                    rawValue: pago.abono_interes,
+                  },
+                  {
+                    label: "Abono Capital",
+                    value: formatCurrency(pago.abono_capital),
+                    rawValue: pago.abono_capital,
+                  },
+                  {
+                    label: "IVA 12%",
+                    value: formatCurrency(pago.abono_iva_12),
+                    rawValue: pago.abono_iva_12,
+                  },
+                  {
+                    label: "Seguro",
+                    value: formatCurrency(pago.abono_seguro),
+                    rawValue: pago.abono_seguro,
+                  },
+                  {
+                    label: "GPS",
+                    value: formatCurrency(pago.abono_gps),
+                    rawValue: pago.abono_gps,
+                  },
+                  {
+                    label: "Estado de Validación",
+                    value: (
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
+                        {statusConfig.icon}
+                        {statusConfig.label}
+                      </span>
+                    ),
+                  },
+                  pago.cuota
+                    ? {
+                        label: "Número de Cuota",
+                        value: pago.cuota.numeroCuota,
+                      }
+                    : null,
+                  pago.cuota
+                    ? {
+                        label: "Fecha Vencimiento",
+                        value: formatDate(
+                          pago.cuota.fechaVencimiento
+                        ),
+                      }
+                    : null,
+                  {
+                    label: "Observaciones",
+                    value: pago.observaciones || "—",
+                  },
+                  {
+                    label: "Banco",
+                    value: pago.bancoNombre || "—",
+                  },
+                  {
+                    label: "numeroautorizacion",
+                    value: pago.numeroautorizacion || "—",
+                  },
+                  {
+                    label: "Registrado por",
+                    value: pago.registerBy || "—",
+                  },
+                  {
+                    label: "Cuenta Destino",
+                    value: tieneCuentaAsignada(pago)
+                      ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
+                      : "No asignada",
+                  },
+                  {
+                    label: "Número de Cuenta",
+                    value: pago.cuentaEmpresaNumero || "—",
+                  },
+                ]
+                  .filter(Boolean)
+                  .filter((f: any) => {
+                    if (f.rawValue !== undefined) {
+                      return Number(f.rawValue) !== 0;
+                    }
+                    return true;
+                  })
+                  .map((f: any, i) => (
+                    <div
+                      key={i}
+                      className="bg-white rounded-lg border border-blue-100 p-3"
                     >
-                      <TableCell className="text-center">
-                        {openIdx === idx ? <ChevronUp /> : <ChevronDown />}
-                      </TableCell>
-                      <TableCell className="text-center text-blue-700 font-bold">
-                        {pago.credito?.numeroCreditoSifco}
-                      </TableCell>
-                      <TableCell className="text-center text-green-800 font-bold">
-                        {formatCurrency(pago.montoBoleta)}
-                      </TableCell>
-                      <TableCell className="text-center text-blue-700 font-bold">
-                        {formatDate(pago.fechaPago)}
-                      </TableCell>
-                      <TableCell className="text-center text-blue-900 font-semibold">
-                        {pago.usuario?.nombre}
-                      </TableCell>
-                      <TableCell className="text-center text-blue-900 font-semibold">
-                        {pago.usuario?.Categoria}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <button className="p-2 hover:bg-blue-50 rounded-full transition shadow-sm border border-gray-200">
-                              <MoreVertical className="w-5 h-5 text-blue-600" />
-                            </button>
-                          </DropdownMenuTrigger>
-
-                          <DropdownMenuContent
-                            align="end"
-                            side="top" // 👈 NUEVO: Abre hacia arriba
-                            sideOffset={5} // 👈 NUEVO: Separación del botón
-                            className="w-56 bg-white shadow-lg border border-gray-200"
-                          >
-                            {/* 👁️ Ver Boleta - TODOS pueden verla */}
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenBoleta(pago.boleta);
-                              }}
-                              className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center" // 👈 flex items-center
-                            >
-                              <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />{" "}
-                              {/* 👈 flex-shrink-0 */}
-                              <span className="font-semibold">Ver Boleta</span>
-                            </DropdownMenuItem>
-
-                            <DropdownMenuSeparator className="bg-gray-200" />
-                            {/* 🏦 NUEVO - Seleccionar Cuenta */}
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAbrirModalCuenta(pago.pagoId, e);
-                              }}
-                              className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
-                            >
-                              <BadgeDollarSign className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
-                              <span className="font-semibold">
-                                {pago.cuentaEmpresaNombre
-                                  ? "Cambiar Cuenta"
-                                  : "Asignar Cuenta"}
-                              </span>
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator className="bg-gray-200" />
-                            {/* 🔒 Inversionistas - Solo ADMIN */}
-                            <DropdownMenuItem
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (user?.role === "ADMIN") {
-                                  handleOpenInversionistas(pago.inversionistas);
-                                }
-                              }}
-                              disabled={user?.role !== "ADMIN"}
-                              className={`cursor-pointer py-2.5 px-3 flex items-center ${
-                                user?.role !== "ADMIN"
-                                  ? "opacity-50 text-gray-400 bg-gray-50"
-                                  : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
-                              }`}
-                            >
-                              <Users2
-                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
-                              />
-                              <span className="font-semibold">
-                                Ver Inversionistas
-                              </span>
-                              {user?.role !== "ADMIN" && (
-                                <span className="ml-auto text-xs text-gray-400 font-normal">
-                                  Admin
-                                </span>
-                              )}
-                            </DropdownMenuItem>
-
-                            <DropdownMenuSeparator className="bg-gray-200" />
-
-                            {/* 🔒 Validar Pago - Solo ADMIN */}
-                            {/* 🔒 Validar Pago - Solo ADMIN Y con cuenta asignada */}
-                            <DropdownMenuItem
-                              onClick={() => {
-                                if (
-                                  user?.role === "ADMIN" &&
-                                  pago.validationStatus !== "validated" &&
-                                  tieneCuentaAsignada(pago) // 👈 NUEVO
-                                ) {
-                                  aplicarPago(pago.pagoId);
-                                }
-                              }}
-                              disabled={
-                                user?.role !== "ADMIN" ||
-                                isPending ||
-                                pago.validationStatus === "validated" ||
-                                !tieneCuentaAsignada(pago) // 👈 NUEVO
-                              }
-                              className={`cursor-pointer py-2.5 px-3 flex items-center ${
-                                pago.validationStatus === "validated" ||
-                                user?.role !== "ADMIN" ||
-                                !tieneCuentaAsignada(pago) // 👈 NUEVO
-                                  ? "opacity-50 text-gray-400 bg-gray-50"
-                                  : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
-                              }`}
-                            >
-                              <Check
-                                className={`w-4 h-4 mr-2 flex-shrink-0 ${
-                                  pago.validationStatus === "validated" ||
-                                  user?.role !== "ADMIN" ||
-                                  !tieneCuentaAsignada(pago) // 👈 NUEVO
-                                    ? "text-gray-400"
-                                    : "text-blue-600"
-                                }`}
-                              />
-                              <span className="font-semibold">
-                                {pago.validationStatus === "validated"
-                                  ? "Ya Validado"
-                                  : !tieneCuentaAsignada(pago) // 👈 NUEVO
-                                    ? "Sin Cuenta"
-                                    : isPending
-                                      ? "Validando..."
-                                      : "Validar Pago"}
-                              </span>
-                              {user?.role !== "ADMIN" && (
-                                <span className="ml-auto text-xs text-gray-400 font-normal">
-                                  Admin
-                                </span>
-                              )}
-                            </DropdownMenuItem>
-
-                            <DropdownMenuSeparator className="bg-gray-200" />
-
-                            {/* 🔒 Revertir Pago - Solo ADMIN */}
-                            <DropdownMenuItem
-                              onClick={() => {
-                                if (user?.role === "ADMIN") {
-                                  handleReverse(
-                                    pago.pagoId,
-                                    pago.credito?.creditoId || 0,false
-                                  );
-                                }
-                              }}
-                              disabled={
-                                reversePago.isPending || user?.role !== "ADMIN"
-                              }
-                              className={`cursor-pointer py-2.5 px-3 flex items-center ${
-                                user?.role !== "ADMIN"
-                                  ? "opacity-50 text-gray-400 bg-gray-50"
-                                  : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
-                              }`}
-                            >
-                              <Undo2
-                                className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
-                              />
-                              <span className="font-semibold">
-                                {reversePago.isPending
-                                  ? "Revirtiendo..."
-                                  : "Revertir Pago"}
-                              </span>
-                              {user?.role !== "ADMIN" && (
-                                <span className="ml-auto text-xs text-gray-400 font-normal">
-                                  Admin
-                                </span>
-                              )}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-
-                    {/* 🔹 Colapso */}
-                    <TableRow>
-                      <TableCell colSpan={6} className="p-0">
-                        <div
-                          className={`transition-all duration-500 overflow-hidden ${
-                            openIdx === idx
-                              ? "max-h-[1000px] opacity-100"
-                              : "max-h-0 opacity-0"
-                          }`}
-                        >
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-5 p-4 bg-blue-50 border-t border-blue-200">
-                            {[
-                              {
-                                label: "Crédito ID",
-                                value: pago.credito?.creditoId,
-                              },
-                              {
-                                label: "Capital",
-                                value: formatCurrency(pago.credito?.capital),
-                              },
-                              {
-                                label: "Deuda Total",
-                                value: formatCurrency(pago.credito?.deudaTotal),
-                              },
-                              {
-                                label: "Membresías",
-                                value: formatCurrency(pago.membresias),
-                                rawValue: pago.membresias,
-                              },
-                              {
-                                label: "Mora",
-                                value: formatCurrency(pago.mora),
-                                rawValue: pago.mora,
-                              },
-                              {
-                                label: "Convenio",
-                                value: formatCurrency(pago.pagoConvenio),
-                                rawValue: pago.pagoConvenio,
-                              },
-                              {
-                                label: "Reserva",
-                                value: formatCurrency(pago.reserva),
-                                rawValue: pago.reserva,
-                              },
-                              {
-                                label: "Otros",
-                                value: formatCurrency(pago.otros),
-                                rawValue: pago.otros,
-                              },
-                              {
-                                label: "Interés",
-                                value: formatCurrency(pago.abono_interes),
-                                rawValue: pago.abono_interes,
-                              },
-                              {
-                                label: "Abono Capital",
-                                value: formatCurrency(pago.abono_capital),
-                                rawValue: pago.abono_capital,
-                              },
-                              {
-                                label: "IVA 12%",
-                                value: formatCurrency(pago.abono_iva_12),
-                                rawValue: pago.abono_iva_12,
-                              },
-                              {
-                                label: "Seguro",
-                                value: formatCurrency(pago.abono_seguro),
-                                rawValue: pago.abono_seguro,
-                              },
-                              {
-                                label: "GPS",
-                                value: formatCurrency(pago.abono_gps),
-                                rawValue: pago.abono_gps,
-                              },
-                              {
-                                label: "Estado de Validación",
-                                value: (
-                                  <span
-                                    className={`badge badge-${getValidationStatusColor(pago.validationStatus)}`}
-                                  >
-                                    {validationStatusToSpanish(
-                                      pago.validationStatus
-                                    )}
-                                  </span>
-                                ),
-                              },
-                              pago.cuota
-                                ? {
-                                    label: "Número de Cuota",
-                                    value: pago.cuota.numeroCuota,
-                                  }
-                                : null,
-                              pago.cuota
-                                ? {
-                                    label: "Fecha Vencimiento",
-                                    value: formatDate(
-                                      pago.cuota.fechaVencimiento
-                                    ),
-                                  }
-                                : null,
-                              {
-                                label: "Observaciones",
-                                value: pago.observaciones || "—",
-                              },
-                              {
-                                label: "Banco",
-                                value: pago.bancoNombre || "—",
-                              },
-                              {
-                                label: "numeroautorizacion",
-                                value: pago.numeroautorizacion || "—",
-                              },
-                              {
-                                label: "Registrado por",
-                                value: pago.registerBy || "—",
-                              },
-                              {
-                                label: "Cuenta Destino",
-                                value: tieneCuentaAsignada(pago)
-                                  ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
-                                  : "No asignada",
-                              },
-                              {
-                                label: "Número de Cuenta",
-                                value: pago.cuentaEmpresaNumero || "—",
-                              },
-                            ]
-                              .filter(Boolean)
-                              .filter((f: any) => {
-                                // 👈 NUEVO: Ocultar si rawValue es 0 o "0.00"
-                                if (f.rawValue !== undefined) {
-                                  return Number(f.rawValue) !== 0;
-                                }
-                                return true; // Mostrar campos sin rawValue
-                              })
-                              .map((f: any, i) => (
-                                <div
-                                  key={i}
-                                  className="bg-white rounded-lg border border-blue-100 p-3"
-                                >
-                                  <p className="text-blue-800 text-sm font-bold">
-                                    {f.label}
-                                  </p>
-                                  <p className="text-blue-900 font-semibold text-sm">
-                                    {f.value ?? "--"}
-                                  </p>
-                                </div>
-                              ))}
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  </React.Fragment>
-                ))}
-              </TableBody>
+                      <p className="text-blue-800 text-sm font-bold">
+                        {f.label}
+                      </p>
+                      <p className="text-blue-900 font-semibold text-sm">
+                        {f.value ?? "--"}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </TableCell>
+        </TableRow>
+      </React.Fragment>
+    );
+  })}
+</TableBody>
             </Table>
           </div>
         )}

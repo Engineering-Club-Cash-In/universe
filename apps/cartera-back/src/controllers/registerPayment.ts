@@ -594,8 +594,6 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
   console.log(pagoConvenio.success);
   console.log(pagoConvenio.message);
   console.log(pagoConvenio.convenio);
-  console.log(pagoConvenio.cuotas_procesadas);
-  console.log(pagoConvenio.cuotas_aplicadas);
   montoConvenio = new Big(pagoConvenio.monto_aplicado);
   console.log("monto convenio:", montoConvenio.toString());
 } else {
@@ -603,9 +601,7 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
 }
  
     console.log("monto convenio:", montoConvenio.toString());
-    let disponible = 
-      new Big(montoEfectivo)
-      .minus(montoConvenio);
+    let disponible =montoEfectivo  
     // 🔥 PROCESAR MORA - Ahora solo pasas los IDs
     const resultadoMora = await procesarPagoMora({
       credito_id: credito.credito_id,
@@ -1831,6 +1827,11 @@ export async function aplicarPagoAlCredito(pago_id: number) {
     if (!pago.paymentFalse && pago.credito_id !== null) {
       await insertPagosCreditoInversionistas(pago_id, pago.credito_id);
       console.log("✅ Pagos a inversionistas insertados");
+      
+    await db
+      .update(cuotas_credito)
+      .set({ liquidado_inversionistas: true,fecha_liquidacion_inversionistas: new Date() })
+      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
     }
 
     return {

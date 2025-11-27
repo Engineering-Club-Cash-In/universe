@@ -7,11 +7,14 @@ import z from "zod";
 interface UpdateInstallmentsParams {
   numero_credito_sifco: string;
   nueva_cuota: number;
+  all?: boolean;
 }
 
 const updateInstallments = async ({ 
   numero_credito_sifco, 
-  nueva_cuota 
+  nueva_cuota ,
+
+  all = false,
 }: UpdateInstallmentsParams): Promise<void> => {
   
   // 1️⃣ Obtener crédito y pagos en paralelo (en lugar de secuencial)
@@ -44,7 +47,7 @@ const updateInstallments = async ({
               .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
               .limit(1)
           ),
-          eq(pagos_credito.pagado, false)
+          eq(pagos_credito.pagado, all)
         )
       )
       .orderBy(pagos_credito.cuota_id)

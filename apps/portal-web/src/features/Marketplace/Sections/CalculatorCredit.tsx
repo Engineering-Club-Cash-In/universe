@@ -4,6 +4,8 @@ import { useModalOptionsCall } from "@/hooks";
 import { motion } from "framer-motion";
 
 export const CalculatorCredit = () => {
+  const IMAGE = import.meta.env.VITE_IMAGE_URL + "/calculator.jpg";
+
   const [monto, setMonto] = useState<string>("");
   const [enganche, setEnganche] = useState<string>("10");
   const [tiempo, setTiempo] = useState<string>("12");
@@ -60,137 +62,163 @@ export const CalculatorCredit = () => {
   const resultado = calcularCredito();
 
   return (
-    <div className="relative max-w-7xl mx-auto mt-44 mb-30">
-      {/* Div decorativo izquierdo */}
-      <div
-        className="absolute left-0 top-0 bottom-0 w-64 rounded-l-xl"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(154, 159, 245, 0.15) 0%, rgba(154, 159, 245, 0.08) 50%, rgba(154, 159, 245, 0) 100%)",
-          maskImage: "linear-gradient(to right, black 0%, transparent 100%)",
-          WebkitMaskImage:
-            "linear-gradient(to right, black 0%, transparent 100%)",
-        }}
-      />
+    <div className="relative w-full mt-56 mb-30 flex">
+      {/* Imagen a la izquierda */}
+      <div className="relative w-[438px] shrink-0 hidden lg:block">
+        <img
+          src={IMAGE}
+          alt="Calculadora de crédito"
+          className="w-full h-full object-cover"
+        />
+        {/* Overlay oscuro con gradiente */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(90deg, rgba(15, 15, 15, 0.50) 0%, rgba(15, 15, 15, 0.80) 76.92%, #0F0F0F 100%)",
+          }}
+        />
+      </div>
 
-      {/* Div decorativo derecho */}
-      <div
-        className="absolute right-0 top-0 bottom-0 w-64 rounded-r-xl"
-        style={{
-          background:
-            "linear-gradient(90deg, rgba(90, 93, 143, 0) 0%, rgba(90, 93, 143, 0.08) 50%, rgba(90, 93, 143, 0.15) 100%)",
-          maskImage: "linear-gradient(to left, black 0%, transparent 100%)",
-          WebkitMaskImage:
-            "linear-gradient(to left, black 0%, transparent 100%)",
-        }}
-      />
+      {/* Container de la calculadora a la derecha */}
+      <div className="flex-1 flex justify-center ">
+        <div className="relative lg:max-w-3/4 w-full">
+          {/* Div decorativo izquierdo */}
+          <div
+            className="absolute left-0 top-0 bottom-0 w-64 rounded-l-xl"
+            style={{
+              background:
+                "linear-gradient(90deg, rgba(154, 159, 245, 0.15) 0%, rgba(154, 159, 245, 0.08) 50%, rgba(154, 159, 245, 0) 100%)",
+              maskImage:
+                "linear-gradient(to right, black 0%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, black 0%, transparent 100%)",
+            }}
+          />
 
-      {/* Div principal */}
-      <div
-        style={{
-          background:
-            "linear-gradient(180deg, rgba(90, 93, 143, 0.05) 0%, rgba(154, 159, 245, 0.05) 100%)",
-        }}
-        className="relative rounded-xl py-8 border border-primary/50 flex flex-col items-center"
-      >
-        <div className="w-1/2">
-          <h2 className="text-header-body mb-1">
-            Calculadora de préstamo de auto
-          </h2>
-          <p className="text-primary text-base  mb-6 ">
-            Usa nuestra calculadora para estimar tus pagos mensuales de auto
-          </p>
+          {/* Div decorativo derecho */}
+          <div
+            className="absolute right-0 top-0 bottom-0 w-64 rounded-r-xl"
+            style={{
+              background:
+                "linear-gradient(90deg, rgba(90, 93, 143, 0) 0%, rgba(90, 93, 143, 0.08) 50%, rgba(90, 93, 143, 0.15) 100%)",
+              maskImage: "linear-gradient(to left, black 0%, transparent 100%)",
+              WebkitMaskImage:
+                "linear-gradient(to left, black 0%, transparent 100%)",
+            }}
+          />
 
-          <div className="space-y-6">
-            {/* Campo Monto */}
-            <div>
-              <label
-                htmlFor="monto"
-                className="block text-sm font-medium  mb-2"
-              >
-                Monto del vehículo
-              </label>
-              <Input
-                variant="primary"
-                size="medium"
-                name="monto"
-                value={monto}
-                onChange={(value) => setMonto(value)}
-                placeholder="Ej: 300000"
-                className="w-full"
-                type="number"
-              />
-            </div>
+          {/* Div principal */}
+          <div
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(90, 93, 143, 0.05) 0%, rgba(154, 159, 245, 0.05) 100%)",
+            }}
+            className="relative rounded-xl py-8 px-8 border border-primary/50 flex flex-col items-center"
+          >
+            <div className="w-full lg:w-3/4">
+              <h2 className="text-header-body mb-1">
+                Calculadora de préstamo de auto
+              </h2>
+              <p className="text-primary text-base mb-6">
+                Usa nuestra calculadora para estimar tus pagos mensuales de auto
+              </p>
 
-            {/* Campo Enganche */}
-            <div>
-              <label
-                htmlFor="enganche"
-                className="block text-sm font-medium  mb-2"
-              >
-                Enganche
-              </label>
-              <Select
-                value={enganche}
-                onChange={(value) => setEnganche(value)}
-                options={engancheOptions}
-                color="primary"
-              />
-            </div>
+              <div className="space-y-6">
+                {/* Campo Monto */}
 
-            {/* Campo Tiempo */}
-            <div>
-              <label
-                htmlFor="tiempo"
-                className="block text-sm font-medium mb-2"
-              >
-                Tiempo de crédito
-              </label>
-              <Select
-                value={tiempo}
-                onChange={(value) => setTiempo(value)}
-                options={tiempoOptions}
-                color="primary"
-              />
-            </div>
-
-            {/* Resultados */}
-            <div className="rounded-lg mt-6 shadow-sm">
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-primary">Tasa de interés:</span>
-                  <span className="text-xl  text-blue-600">
-                    {resultado.interes}%
-                  </span>
+                {/* Campo Enganche */}
+                <div className="flex lg:flex-row w-full flex-col gap-6">
+                  <div className="w-full">
+                    <label
+                      htmlFor="monto"
+                      className="block text-sm font-medium mb-2"
+                    >
+                      Monto del vehículo
+                    </label>
+                    <Input
+                      variant="primary"
+                      size="medium"
+                      name="monto"
+                      value={monto}
+                      onChange={(value) => setMonto(value)}
+                      placeholder="Ej: 300000"
+                      className="w-full"
+                      type="number"
+                    />
+                  </div>
+                  <div className="w-full">
+                    <label
+                      htmlFor="enganche"
+                      className="block text-sm font-medium mb-2"
+                    >
+                      Enganche
+                    </label>
+                    <Select
+                      value={enganche}
+                      onChange={(value) => setEnganche(value)}
+                      options={engancheOptions}
+                      color="primary"
+                    />
+                  </div>
+                  {/* Campo Tiempo */}
+                  <div className="w-full">
+                    <label
+                      htmlFor="tiempo"
+                      className="block text-sm font-medium mb-2"
+                    >
+                      Tiempo de crédito
+                    </label>
+                    <Select
+                      value={tiempo}
+                      onChange={(value) => setTiempo(value)}
+                      options={tiempoOptions}
+                      color="primary"
+                    />
+                  </div>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-primary">Pago mensual:</span>
-                  <span className="text-xl text-green-600">
-                    Q.
-                    {resultado.pagoMensual
-                      .toFixed(2)
-                      .replaceAll(/\d(?=(\d{3})+\.)/g, "$&,")}
-                  </span>
+
+                {/* Resultados */}
+                <div className="rounded-lg mt-6 shadow-sm">
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-primary">Tasa de interés:</span>
+                      <span className="text-xl text-blue-600">
+                        {resultado.interes}%
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-primary">Pago mensual:</span>
+                      <span className="text-xl text-green-600">
+                        Q.
+                        {resultado.pagoMensual
+                          .toFixed(2)
+                          .replaceAll(/\d(?=(\d{3})+\.)/g, "$&,")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="w-full flex justify-center">
+                  {/* Botón Aplicar al Crédito */}
+                  <motion.button
+                    onClick={() => setIsModalOpen(true)}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className="w-1/2 mt-6 py-4 rounded-lg font-semibold text-white text-lg"
+                    style={{
+                      background:
+                        "linear-gradient(180deg, #9A9FF5 0%, #5A5D8F 100%)",
+                    }}
+                  >
+                    Aplicar al crédito
+                  </motion.button>
                 </div>
               </div>
             </div>
-
-            {/* Botón Aplicar al Crédito */}
-            <motion.button
-              onClick={() => setIsModalOpen(true)}
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full mt-6 py-4 rounded-lg font-semibold text-white text-lg"
-              style={{
-                background:
-                  "linear-gradient(180deg, #9A9FF5 0%, #5A5D8F 100%)",
-              }}
-            >
-              Aplicar al crédito
-            </motion.button>
           </div>
         </div>
       </div>
+
       <ModalChatBot
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}

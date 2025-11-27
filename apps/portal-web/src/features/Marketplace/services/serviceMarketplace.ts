@@ -41,6 +41,13 @@ export interface GeneralInfo {
   puertas: number;
   cilindros: number;
   transmision: TransmissionType;
+  motorization?: MotorizationType;
+  stockCode?: string;
+  year?: number;
+  kpgCity?: number;
+  kpgHighway?: number;
+  engine?: string;
+  typeHandling?: string;
 }
 
 export interface Vehicle {

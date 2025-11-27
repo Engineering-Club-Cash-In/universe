@@ -1,11 +1,21 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {   useRef, useState } from "react";
-import { Download, FileSpreadsheet, Loader2, Search, SearchIcon, User, UserIcon, X, XIcon } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  Download,
+  FileSpreadsheet,
+  Loader2,
+  Search,
+  SearchIcon,
+  User,
+  UserIcon,
+  X,
+  XIcon,
+} from "lucide-react";
 import { useCreditosPaginadosWithFilters } from "../hooks/credits";
 import { Button } from "@/components/ui/button";
-import { Eye, Pencil, XCircle, MoreVertical } from "lucide-react";
- 
+import { Eye, Pencil, XCircle, MoreVertical, FileCheck } from "lucide-react";
+
 import {
   Table,
   TableBody,
@@ -15,12 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import React from "react";
-import { 
-  Hash,
-  Info, 
-  ListOrdered,
-  RefreshCw,
-} from "lucide-react";
+import { Hash, Info, ListOrdered, RefreshCw } from "lucide-react";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -30,17 +35,20 @@ import type { Investor } from "../services/services";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModalCancelCredit } from "./modalCreditCancel";
 import { openReportInNewTab, useActivateCredit } from "../hooks/cancelCredit";
-import { useIsMobile } from "../hooks/useIsMobile"; 
+import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
-import { ModalCreateMora } from "./createMoraModal"; 
+import { ModalCreateMora } from "./createMoraModal";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
+
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
-    const { user } = useAuth();
+  const { user } = useAuth();
   const isAdmin = user?.role === "ADMIN";
-const userAsesorId = user?.asesor_id;
+  const userAsesorId = user?.asesor_id;
   const navigate = useNavigate();
+
   const {
     data,
     refetch,
@@ -65,119 +73,134 @@ const userAsesorId = user?.asesor_id;
     estado,
     estados,
     handleExcel,
-     asesorId,
-  handleAsesorId,
-  setAsesorId,
-nombreUsuarioInput,
-  setNombreUsuarioInput,
-  handleSearchNombreUsuario,
-  clearNombreUsuario, 
+    asesorId,
+    handleAsesorId,
+    setAsesorId,
+    nombreUsuarioInput,
+    setNombreUsuarioInput,
+    handleSearchNombreUsuario,
+    clearNombreUsuario,
   } = useCreditosPaginadosWithFilters({
-  initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined
-});
+    initialAsesorId: !isAdmin && userAsesorId ? userAsesorId : undefined,
+  });
+
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [creditToEdit, setCreditToEdit] = useState<any | null>(null);
   const [investorsToEdit, setInvestorsToEdit] = useState<any[]>([]);
   const queryClient = useQueryClient();
   const isMobile = useIsMobile();
+
   const estadoSeleccionado = useMemo(
     () => estados.find((e) => e.value === estado),
     [estado]
   );
+
   type CreditStatus =
     | "ACTIVO"
     | "PENDIENTE_CANCELACION"
     | "CANCELADO"
     | "INCOBRABLE"
-    |"MOROSO"
+    | "MOROSO"
+    | "EN_CONVENIO";
 
   // Helpers de permisos
-  const canEdit = (s: CreditStatus) => ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION"].includes(s);
-
+  const canEdit = (s: CreditStatus) =>
+    ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"].includes(s);
   const canCancel = (s: CreditStatus) => ["ACTIVO", "MOROSO"].includes(s);
   const canActivate = (s: CreditStatus) => s === "PENDIENTE_CANCELACION";
-  const canViewPayments = (_s: CreditStatus) => true; 
-// Dentro del componente, después de los otros hooks:
-const reportCancelation = useReport("cancelation");
-const reportCancelationIntern = useReport("cancelation-intern");
-const reportCostDetail = useReport("cost-detail");
-const canViewReports = (s: CreditStatus) => 
-  s === "PENDIENTE_CANCELACION" || s === "CANCELADO";
-// State para el modal de reportes
-const [reportModalOpen, setReportModalOpen] = useState(false);
-const [selectedCreditForReport, setSelectedCreditForReport] = useState<any | null>(null);
-const handleGenerateReport = (
-  numeroSifco: string,
-  format: "pdf" | "excel",
-  reportType: "cancelation" | "cancelation-intern" | "cost-detail"
-) => {
-  const reportMutation =
-    reportType === "cancelation"
-      ? reportCancelation
-      : reportType === "cancelation-intern"
-      ? reportCancelationIntern
-      : reportCostDetail;
+  const canViewPayments = (_s: CreditStatus) => true;
+  const canCreateConvenio = (s: CreditStatus) =>
+    ["ACTIVO", "MOROSO"].includes(s);
 
-  reportMutation.mutate(
-    {
-      numero_sifco: numeroSifco,
-      format,
-    },
-    {
-      onSuccess: (response) => {
-        if (response.url) {
-          openReportInNewTab(response.url);
-        } else {
-          alert("No se generó la URL del reporte");
-        }
-      },
-      onError: (err: any) => {
-        alert(err?.message || `Error al generar reporte ${reportType}`);
-      },
-    }
-  );
-};
-const isGeneratingReport =
-  reportCancelation.status === "pending" ||
-  reportCancelationIntern.status === "pending" ||
-  reportCostDetail.status === "pending";
-const handleOpenEdit = (credit: any, inversionistas: any) => {
-  console.log(credit);
-  setCreditToEdit({
-    capital: credit.capital,
-    porcentaje_interes: credit.porcentaje_interes,
-    plazo: credit.plazo,
-    no_poliza: credit.no_poliza,
-    observaciones: credit.observaciones,
-    credito_id: credit.credito_id,
-    cuota: credit.cuota,
-    numero_credito_sifco: credit.numero_credito_sifco,
-    otros: credit.otros ?? 0,
-    seguro_10_cuotas: credit.seguro_10_cuotas ?? 0,
-    membresias_pago: credit.membresias_pago ?? 0,
-    gps: credit.gps ?? 0,
-    asesor_id: credit.asesor_id, // ✅ NUEVO (eliminamos mora)
-  });
+  // Dentro del componente, después de los otros hooks:
+  const reportCancelation = useReport("cancelation");
+  const reportCancelationIntern = useReport("cancelation-intern");
+  const reportCostDetail = useReport("cost-detail");
+  const canViewReports = (s: CreditStatus) =>
+    s === "PENDIENTE_CANCELACION" || s === "CANCELADO";
 
-  setInvestorsToEdit(
-    inversionistas.map((inv: any) => ({
-      inversionista_id: inv.inversionista_id,
-      porcentaje_participacion: inv.porcentaje_participacion,
-      monto_aportado: inv.monto_aportado,
-      porcentaje_cash_in: inv.porcentaje_cash_in,
-      porcentaje_inversion: inv.porcentaje_participacion_inversionista,
-      cuota_inversionista: inv.cuota_inversionista ?? 0,
-    }))
-  );
-  
-  setEditModalOpen(true);
-};
+  // State para el modal de reportes
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [selectedCreditForReport, setSelectedCreditForReport] = useState<
+    any | null
+  >(null);
+
+  const handleGenerateReport = (
+    numeroSifco: string,
+    format: "pdf" | "excel",
+    reportType: "cancelation" | "cancelation-intern" | "cost-detail"
+  ) => {
+    const reportMutation =
+      reportType === "cancelation"
+        ? reportCancelation
+        : reportType === "cancelation-intern"
+          ? reportCancelationIntern
+          : reportCostDetail;
+
+    reportMutation.mutate(
+      {
+        numero_sifco: numeroSifco,
+        format,
+      },
+      {
+        onSuccess: (response) => {
+          if (response.url) {
+            openReportInNewTab(response.url);
+          } else {
+            alert("No se generó la URL del reporte");
+          }
+        },
+        onError: (err: any) => {
+          alert(err?.message || `Error al generar reporte ${reportType}`);
+        },
+      }
+    );
+  };
+
+  const isGeneratingReport =
+    reportCancelation.status === "pending" ||
+    reportCancelationIntern.status === "pending" ||
+    reportCostDetail.status === "pending";
+
+  const handleOpenEdit = (credit: any, inversionistas: any) => {
+    console.log(credit);
+    setCreditToEdit({
+      capital: credit.capital,
+      porcentaje_interes: credit.porcentaje_interes,
+      plazo: credit.plazo,
+      no_poliza: credit.no_poliza,
+      observaciones: credit.observaciones,
+      credito_id: credit.credito_id,
+      cuota: credit.cuota,
+      numero_credito_sifco: credit.numero_credito_sifco,
+      otros: credit.otros ?? 0,
+      seguro_10_cuotas: credit.seguro_10_cuotas ?? 0,
+      membresias_pago: credit.membresias_pago ?? 0,
+      gps: credit.gps ?? 0,
+      asesor_id: credit.asesor_id,
+    });
+
+    setInvestorsToEdit(
+      inversionistas.map((inv: any) => ({
+        inversionista_id: inv.inversionista_id,
+        porcentaje_participacion: inv.porcentaje_participacion,
+        monto_aportado: inv.monto_aportado,
+        porcentaje_cash_in: inv.porcentaje_cash_in,
+        porcentaje_inversion: inv.porcentaje_participacion_inversionista,
+        cuota_inversionista: inv.cuota_inversionista ?? 0,
+      }))
+    );
+
+    setEditModalOpen(true);
+  };
+
   const inputRef = useRef<HTMLInputElement>(null);
   const { investors, advisors } = useCatalogs() as {
     investors: Investor[];
     advisors: any[];
     loading: boolean;
   };
+
   const [openMoraModal, setOpenMoraModal] = useState(false);
   const [selectedCreditMora, setSelectedCreditMora] = useState<any | null>(
     null
@@ -191,36 +214,46 @@ const handleOpenEdit = (credit: any, inversionistas: any) => {
     setSelectedCreditId(creditId);
     setModalOpen(true);
   };
- 
-const handleKeyPress = (e: React.KeyboardEvent) => {
-  if (e.key === 'Enter') {
-    handleSearchNombreUsuario();
-  }
-};
-console.log("👥 Advisors:", advisors);
-console.log("🎯 Asesor ID actual:", asesorId);
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      handleSearchNombreUsuario();
+    }
+  };
+
+  console.log("👥 Advisors:", advisors);
+  console.log("🎯 Asesor ID actual:", asesorId);
+
   // Cuando cierras el modal, resetea ambos states (opcional)
   const handleCloseModal = () => {
     setModalOpen(false);
     setSelectedCreditId(null);
   };
 
- if (isLoading) {
-  return (
-    <div className="
-   fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
-      <div className="text-center space-y-6">
-        <div className="relative">
-          <div className="w-24 h-24 border-8 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div>
-        </div>
-        <div className="space-y-2">
-          <h2 className="text-2xl font-bold text-gray-800">Cargando créditos</h2>
-          <p className="text-gray-600">Por favor espera un momento...</p>
+  // 🆕 Handler para activar convenio (por ahora vacío, lo conectarás después)
+  const handleActivarConvenio = (creditId: number) => {
+    console.log("🎯 Activar convenio para crédito:", creditId);
+    // TODO: Aquí llamarás al hook/servicio cuando esté listo
+  };
+
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+        <div className="text-center space-y-6">
+          <div className="relative">
+            <div className="w-24 h-24 border-8 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto"></div>
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl font-bold text-gray-800">
+              Cargando créditos
+            </h2>
+            <p className="text-gray-600">Por favor espera un momento...</p>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
+
   if (isError)
     return <div className="text-red-500">{(error as any)?.message}</div>;
 
@@ -245,15 +278,13 @@ console.log("🎯 Asesor ID actual:", asesorId);
       </div>
     );
   }
-// eslint-disable-next-line react-hooks/rules-of-hooks
 
   return (
-    
     <div
       className={`
-   fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8
-    ${isMobile ? "" : "overflow-x-auto"}
-  `}
+        fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8
+        ${isMobile ? "" : "overflow-x-auto"}
+      `}
     >
       {/* Título */}
       <div className="flex flex-col items-center mb-6">
@@ -265,232 +296,247 @@ console.log("🎯 Asesor ID actual:", asesorId);
           junto con su información más relevante y pagos asociados.
         </p>
       </div>
-   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full max-w-4xl mx-auto mb-6">
-  {/* Filtro por # Crédito SIFCO */}
-  <label className="flex items-center gap-2 font-medium text-blue-800">
-    <Hash className="w-5 h-5" />
-    <input
-      ref={inputRef}
-      className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
-      type="text"
-      placeholder="Buscar # Crédito SIFCO"
-      defaultValue={creditoSifco}
-      onBlur={(e) => {
-        if (e.target.value !== creditoSifco) {
-          handleSifco(e.target.value);
-          setPage(1);
-        }
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          if (inputRef.current && inputRef.current.value !== creditoSifco) {
-            handleSifco(inputRef.current.value);
-            setPage(1);
-          }
-        }
-      }}
-    />
-    <button
-      type="button"
-      className="ml-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
-      onClick={() => {
-        if (inputRef.current && inputRef.current.value !== creditoSifco) {
-          handleSifco(inputRef.current.value);
-          setPage(1);
-        }
-      }}
-    >
-      Buscar
-    </button>
-    {creditoSifco && (
-      <button
-        type="button"
-        className="ml-1 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
-        onClick={clearSifco}
-        title="Limpiar filtro"
-      >
-        <X className="w-4 h-4" />
-      </button>
-    )}
-  </label>
 
-  {/* 👤 Filtro por Asesor */}
- <label className="flex items-center gap-2 font-medium text-blue-800">
-  <User className="w-5 h-5" />
-  <select
-    id="asesor"
-    name="asesor"
-    value={asesorId ?? ""}
-    onChange={(e) => {
-      const newValue = e.target.value ? Number(e.target.value) : undefined;
-      setAsesorId(newValue);
-      setPage(1);
-    }}
-    disabled={!isAdmin && userAsesorId !== null}
-    className={[
-      "border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full",
-      !isAdmin && userAsesorId !== null
-        ? "cursor-not-allowed opacity-60"
-        : "",
-    ].join(" ")}
-  >
-    <option value="">Todos los asesores</option>
-    {advisors.map((adv) => (
-      <option key={adv.asesor_id} value={adv.asesor_id}>
-        {adv.nombre}
-      </option>
-    ))}
-  </select>
-  {!isAdmin && userAsesorId && (
-    <span className="text-xs text-blue-600 ml-2" title="Solo puedes ver créditos de tu asesoría">
-      🔒
-    </span>
-  )}
-</label>
-
-  {/* 🔍 Filtro por Nombre de Usuario */}
- <label className="flex items-center gap-2 font-medium text-blue-800">
-  <Search className="w-5 h-5" />
-  <div className="relative w-full flex gap-2">
-    <div className="relative w-full">
-      <input
-        type="text"
-        placeholder="Buscar por nombre..."
-        value={nombreUsuarioInput}
-        onChange={(e) => setNombreUsuarioInput(e.target.value)}
-        onKeyDown={handleKeyPress}
-        className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-      />
-      {nombreUsuarioInput && (
-        <button
-          type="button"
-          onClick={clearNombreUsuario}
-          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
-          title="Limpiar filtro"
-        >
-          <X className="w-4 h-4" />
-        </button>
-      )}
-    </div>
-    <button
-      type="button"
-      onClick={handleSearchNombreUsuario}
-      className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
-    >
-      Buscar
-    </button>
-  </div>
-</label>
-
-  {/* Filtro por Estado */}
-  <label className="flex items-center gap-2 font-medium text-blue-800">
-    <AlertCircle className="w-5 h-5" />
-    <div className="relative w-full">
-      <select
-        className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full appearance-none pr-8"
-        value={estado}
-        onChange={(e) => {
-          setEstado(
-            e.target.value as
-              | "ACTIVO"
-              | "CANCELADO"
-              | "INCOBRABLE"
-              | "PENDIENTE_CANCELACION"
-              | "MOROSO"
-          );
-          setPage(1);
-        }}
-      >
-        <option value="">Seleccionar estado</option>
-        {estados.map((est) => (
-          <option
-            key={est.value}
-            value={est.value}
-            style={{
-              backgroundColor: est.color.includes("bg-green")
-                ? "#bbf7d0"
-                : est.color.includes("bg-red")
-                  ? "#fecaca"
-                  : est.color.includes("bg-yellow")
-                    ? "#fef9c3"
-                    : est.color.includes("bg-blue")
-                      ? "#dbeafe"
-                      : est.color.includes("bg-purple")
-                        ? "#e9d5ff"
-                        : undefined,
-              color: est.color.includes("text-green")
-                ? "#166534"
-                : est.color.includes("text-red")
-                  ? "#991b1b"
-                  : est.color.includes("text-yellow")
-                    ? "#a16207"
-                    : est.color.includes("text-blue")
-                      ? "#1e40af"
-                      : est.color.includes("text-purple")
-                        ? "#6b21a8"
-                        : undefined,
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full max-w-4xl mx-auto mb-6">
+        {/* Filtro por # Crédito SIFCO */}
+        <label className="flex items-center gap-2 font-medium text-blue-800">
+          <Hash className="w-5 h-5" />
+          <input
+            ref={inputRef}
+            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400"
+            type="text"
+            placeholder="Buscar # Crédito SIFCO"
+            defaultValue={creditoSifco}
+            onBlur={(e) => {
+              if (e.target.value !== creditoSifco) {
+                handleSifco(e.target.value);
+                setPage(1);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                if (
+                  inputRef.current &&
+                  inputRef.current.value !== creditoSifco
+                ) {
+                  handleSifco(inputRef.current.value);
+                  setPage(1);
+                }
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="ml-2 px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 transition"
+            onClick={() => {
+              if (inputRef.current && inputRef.current.value !== creditoSifco) {
+                handleSifco(inputRef.current.value);
+                setPage(1);
+              }
             }}
           >
-            {est.label}
-          </option>
-        ))}
-      </select>
-      {estado && (
-        <span
-          className={`absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-bold pointer-events-none ${
-            estadoSeleccionado?.color || ""
-          }`}
+            Buscar
+          </button>
+          {creditoSifco && (
+            <button
+              type="button"
+              className="ml-1 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+              onClick={clearSifco}
+              title="Limpiar filtro"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </label>
+
+        {/* 👤 Filtro por Asesor */}
+        <label className="flex items-center gap-2 font-medium text-blue-800">
+          <User className="w-5 h-5" />
+          <select
+            id="asesor"
+            name="asesor"
+            value={asesorId ?? ""}
+            onChange={(e) => {
+              const newValue = e.target.value
+                ? Number(e.target.value)
+                : undefined;
+              setAsesorId(newValue);
+              setPage(1);
+            }}
+            disabled={!isAdmin && userAsesorId !== null}
+            className={[
+              "border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full",
+              !isAdmin && userAsesorId !== null
+                ? "cursor-not-allowed opacity-60"
+                : "",
+            ].join(" ")}
+          >
+            <option value="">Todos los asesores</option>
+            {advisors.map((adv) => (
+              <option key={adv.asesor_id} value={adv.asesor_id}>
+                {adv.nombre}
+              </option>
+            ))}
+          </select>
+          {!isAdmin && userAsesorId && (
+            <span
+              className="text-xs text-blue-600 ml-2"
+              title="Solo puedes ver créditos de tu asesoría"
+            >
+              🔒
+            </span>
+          )}
+        </label>
+
+        {/* 🔍 Filtro por Nombre de Usuario */}
+        <label className="flex items-center gap-2 font-medium text-blue-800">
+          <Search className="w-5 h-5" />
+          <div className="relative w-full flex gap-2">
+            <div className="relative w-full">
+              <input
+                type="text"
+                placeholder="Buscar por nombre..."
+                value={nombreUsuarioInput}
+                onChange={(e) => setNombreUsuarioInput(e.target.value)}
+                onKeyDown={handleKeyPress}
+                className="border border-blue-200 rounded-lg px-3 py-2 pr-10 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+              />
+              {nombreUsuarioInput && (
+                <button
+                  type="button"
+                  onClick={clearNombreUsuario}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full bg-blue-100 text-blue-600 hover:bg-blue-200 transition"
+                  title="Limpiar filtro"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleSearchNombreUsuario}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition whitespace-nowrap"
+            >
+              Buscar
+            </button>
+          </div>
+        </label>
+
+        {/* Filtro por Estado */}
+        <label className="flex items-center gap-2 font-medium text-blue-800">
+          <AlertCircle className="w-5 h-5" />
+          <div className="relative w-full">
+            <select
+              className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full appearance-none pr-8"
+              value={estado}
+              onChange={(e) => {
+                setEstado(
+                  e.target.value as
+                    | "ACTIVO"
+                    | "CANCELADO"
+                    | "INCOBRABLE"
+                    | "PENDIENTE_CANCELACION"
+                    | "MOROSO"
+                    | "EN_CONVENIO"
+                );
+                setPage(1);
+              }}
+            >
+              <option value="">Seleccionar estado</option>
+              {estados.map((est) => (
+                <option
+                  key={est.value}
+                  value={est.value}
+                  style={{
+                    backgroundColor: est.color.includes("bg-green")
+                      ? "#bbf7d0"
+                      : est.color.includes("bg-red")
+                        ? "#fecaca"
+                        : est.color.includes("bg-yellow")
+                          ? "#fef9c3"
+                          : est.color.includes("bg-blue")
+                            ? "#dbeafe"
+                            : est.color.includes("bg-purple")
+                              ? "#e9d5ff"
+                              : est.color.includes("bg-orange")
+                                ? "#fed7aa"
+                                : undefined,
+                    color: est.color.includes("text-green")
+                      ? "#166534"
+                      : est.color.includes("text-red")
+                        ? "#991b1b"
+                        : est.color.includes("text-yellow")
+                          ? "#a16207"
+                          : est.color.includes("text-blue")
+                            ? "#1e40af"
+                            : est.color.includes("text-purple")
+                              ? "#6b21a8"
+                              : est.color.includes("text-orange")
+                                ? "#c2410c"
+                                : undefined,
+                  }}
+                >
+                  {est.label}
+                </option>
+              ))}
+            </select>
+            {estado && (
+              <span
+                className={`absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs font-bold pointer-events-none ${
+                  estadoSeleccionado?.color || ""
+                }`}
+              >
+                {estadoSeleccionado?.label}
+              </span>
+            )}
+          </div>
+        </label>
+
+        {/* Items por página */}
+        <label className="flex items-center gap-2 font-medium text-blue-800">
+          <ListOrdered className="w-5 h-5" />
+          <select
+            className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
+            value={perPage}
+            onChange={handlePerPage}
+          >
+            {[5, 10, 20, 50, 100, 200].map((n) => (
+              <option key={n} value={n}>
+                {n} por página
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/* Botón Descargar Excel */}
+        <button
+          type="button"
+          onClick={async () => {
+            try {
+              handleExcel(true);
+              const response = await refetch();
+
+              if (response.data && "excelUrl" in response.data) {
+                const url = (response.data as any).excelUrl;
+                window.open(url, "_blank");
+              } else {
+                alert("No se pudo generar el Excel 😢");
+              }
+            } catch (err) {
+              console.error("❌ Error generando Excel:", err);
+              alert("Error al generar el Excel");
+            } finally {
+              handleExcel(false);
+            }
+          }}
+          className="px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
         >
-          {estadoSeleccionado?.label}
-        </span>
-      )}
-    </div>
-  </label>
+          <FileSpreadsheet className="w-5 h-5" />
+          Descargar Excel
+        </button>
+      </div>
 
-  {/* Items por página */}
-  <label className="flex items-center gap-2 font-medium text-blue-800">
-    <ListOrdered className="w-5 h-5" />
-    <select
-      className="border border-blue-200 rounded-lg px-3 py-2 bg-blue-50 text-blue-800 focus:ring-2 focus:ring-blue-400 w-full"
-      value={perPage}
-      onChange={handlePerPage}
-    >
-      {[5, 10, 20, 50, 100, 200].map((n) => (
-        <option key={n} value={n}>
-          {n} por página
-        </option>
-      ))}
-    </select>
-  </label>
-
-  {/* Botón Descargar Excel */}
-  <button
-    type="button"
-    onClick={async () => {
-      try {
-        handleExcel(true);
-        const response = await refetch();
-
-        if (response.data && "excelUrl" in response.data) {
-          const url = (response.data as any).excelUrl;
-          window.open(url, "_blank");
-        } else {
-          alert("No se pudo generar el Excel 😢");
-        }
-      } catch (err) {
-        console.error("❌ Error generando Excel:", err);
-        alert("Error al generar el Excel");
-      } finally {
-        handleExcel(false);
-      }
-    }}
-    className="px-6 py-2 rounded-lg bg-green-600 text-white font-semibold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
-  >
-    <FileSpreadsheet className="w-5 h-5" />
-    Descargar Excel
-  </button>
-</div>
-   {isFetching && !isLoading && (
+      {isFetching && !isLoading && (
         <div className="absolute top-2 right-2 z-10">
           <div className="flex items-center gap-2 bg-blue-100 text-blue-700 px-3 py-2 rounded-lg shadow-md">
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -498,996 +544,47 @@ console.log("🎯 Asesor ID actual:", asesorId);
           </div>
         </div>
       )}
-      {/* Tabla, sin scroll horizontal, diseño responsivo */}
 
+      {/* Tabla responsive */}
       {isMobile ? (
-<div className="space-y-4">
-  {data.data.map((item: any, idx: number) => (
-    <div
-      key={item.creditos.credito_id}
-      className="border rounded-xl p-4 shadow bg-white"
-    >
-      {/* Header */}
-      <div className="flex justify-between items-center mb-2">
-        <h3 className="text-blue-800 font-bold text-lg">
-          #{item.creditos.numero_credito_sifco}
-        </h3>
-        <Button
-          onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
-          className="text-blue-600 text-sm"
-          variant="ghost"
-        >
-          {expandedRow === idx ? "Ocultar" : "Ver más"}
-        </Button>
-      </div>
-
-      {/* Estado */}
-      <p className="text-sm text-gray-700">
-        <strong>Usuario:</strong> {item.usuarios.nombre}
-      </p>
-      <p className="text-sm text-gray-700">
-        <strong>Deuda Total:</strong> Q
-        {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}
-      </p>
-      <p className="text-sm text-gray-700">
-        <strong>Cuota:</strong> Q
-        {Number(item.creditos.cuota).toLocaleString("es-GT", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}
-      </p>
-      <p className="text-sm text-gray-700">
-        <strong>Estado:</strong>{" "}
-        <span
-          className={`font-bold ${
-            item.creditos.statusCredit === "ACTIVO"
-              ? "text-green-600"
-              : item.creditos.statusCredit === "CANCELADO"
-              ? "text-red-600"
-              : item.creditos.statusCredit === "INCOBRABLE"
-              ? "text-purple-700"
-              : item.creditos.statusCredit === "PENDIENTE_CANCELACION"
-              ? "text-yellow-500"
-              : "text-gray-500"
-          }`}
-        >
-          {item.creditos.statusCredit === "PENDIENTE_CANCELACION"
-            ? "Pendiente de Cancelación"
-            : item.creditos.statusCredit === "INCOBRABLE"
-            ? "Incobrable"
-            : item.creditos.statusCredit}
-        </span>
-      </p>
-
-      {/* Acciones */}
-        <div className="flex justify-center flex-wrap gap-2 mt-3">
-        <Button
-          variant="outline"
-          className="text-blue-700 border-blue-300 hover:bg-blue-50"
-          onClick={() =>
-            navigate(`/pagos/${item.creditos.numero_credito_sifco}`)
-          }
-        >
-          <Eye className="w-4 h-4 mr-1" /> Ver pagos
-        </Button>
-         <Button
-              variant="outline"
-              className="text-red-700 border-red-300 hover:bg-red-50"
-              onClick={() => handleOpenModal(item.creditos.credito_id)}
-            >
-              <XCircle className="w-4 h-4 mr-1" /> Cancelar
-            </Button>
-        {user?.role === "ADMIN" && (
-          <>
-            <Button
-              variant="outline"
-              className="text-yellow-700 border-yellow-300 hover:bg-yellow-50"
-              onClick={() =>
-                handleOpenEdit(item.creditos, item.inversionistas)
-              }
-            >
-              <Pencil className="w-4 h-4 mr-1" /> Editar
-            </Button>
-           
-            <Button
-              variant="outline"
-              className="text-purple-700 border-purple-300 hover:bg-purple-50"
-              onClick={() => {
-                setSelectedCreditMora(item.creditos);
-                setOpenMoraModal(true);
-              }}
-            >
-              ➕ Mora
-            </Button>
-          </>
-        )}
-        {canViewReports(item.creditos.statusCredit) &&
-  user?.role === "ADMIN" && (
-    <Button
-      variant="outline"
-      size="sm"
-      className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
-      onClick={() => {
-        setSelectedCreditForReport(item.creditos);
-        setReportModalOpen(true);
-      }}
-    >
-      <Download className="w-4 h-4" />
-      Reportes
-    </Button>
-  )}
-      </div>
-
-      {/* Expandible */}
-      {expandedRow === idx && (
-        <div className="mt-4 space-y-4">
-          {/* Detalles del crédito */}
-          <div className="bg-blue-50 rounded-2xl p-4">
-            <h4 className="text-xl font-extrabold text-blue-800 mb-2 text-center uppercase">
-              Detalles del crédito
-            </h4>
-            <div className="grid grid-cols-2 gap-3 text-center">
-              {[
-                ["Capital", item.creditos.capital],
-                ["Porcentaje Interés", `${item.creditos.porcentaje_interes}%`],
-                ["Deuda Total", item.creditos.deudatotal],
-                ["Cuota", item.creditos.cuota],
-                ["Cuota Interés", item.creditos.cuota_interes],
-                ["IVA 12%", item.creditos.iva_12],
-                ["Seguro 10 Cuotas", item.creditos.seguro_10_cuotas],
-                ["GPS", item.creditos.gps],
-                ["Membresías", item.creditos.membresias],
-                ["Royalti", item.creditos.royalti],
-                ["Plazo", item.creditos.plazo],
-                ["Formato Crédito", item.creditos.formato_credito],
-              ].map(([label, value]) => (
-                 <div
-                  key={label}
-                  className="p-3 rounded-lg bg-white border shadow-sm flex flex-col items-center"
-                >
-                  <span className="font-bold text-blue-700">{label}:</span>
-                  <span className="text-gray-900 font-semibold">
-                    {typeof value === "number"
-                      ? `Q${Number(value).toLocaleString("es-GT", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}`
-                      : value}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            {/* Observaciones */}
-            <div className="mt-4">
-              <span className="font-bold text-blue-700">Observaciones:</span>
-              <div className="text-sm text-gray-800 p-2 border rounded-md bg-gray-50">
-                <details>
-                  <summary className="cursor-pointer text-blue-600 font-semibold">
-                    {item.creditos.observaciones
-                      ? "Ver observaciones"
-                      : "No hay observaciones"}
-                  </summary>
-                  {item.creditos.observaciones && (
-                    <p className="mt-2 whitespace-pre-line">
-                      {item.creditos.observaciones}
-                    </p>
-                  )}
-                </details>
-              </div>
-            </div>
-          </div>
-
-       {/* ?='===== Mora ====== */}
-{item?.mora?.activa && (
-  <div className="bg-yellow-50 rounded-2xl p-4">
-    <h4 className="text-lg font-extrabold text-yellow-800 mb-3 text-center">
-      Detalles de Mora
-    </h4>
-    <div className="grid grid-cols-2 gap-3 text-center">
-      <div className="p-3 bg-white border rounded-lg shadow-sm">
-        <span className="font-bold text-yellow-700 block">Monto Mora</span>
-        <span className="text-gray-900 font-semibold">
-          Q
-          {Number(item.mora?.monto_mora || 0).toLocaleString("es-GT", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </span>
-      </div>
-      <div className="p-3 bg-white border rounded-lg shadow-sm">
-        <span className="font-bold text-yellow-700 block">% Mora</span>
-        <span className="text-gray-900 font-semibold">
-          {item.mora?.porcentaje_mora}%
-        </span>
-      </div>
-      <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
-        <span className="font-bold text-yellow-700 block">
-          Cuotas atrasadas
-        </span>
-        <span className="text-gray-900 font-semibold">
-          {item.mora?.cuotas_atrasadas}
-        </span>
-      </div>
-    </div>
-  </div>
-)}
-
-{/* ====== Incobrable ====== */}
-{item.incobrable && (
-  <div className="bg-purple-50 rounded-2xl p-4">
-    <h4 className="text-lg font-extrabold text-purple-800 mb-3 text-center">
-      Información de Incobrable
-    </h4>
-    <div className="grid grid-cols-2 gap-3 text-center">
-      <div className="p-3 bg-white border rounded-lg shadow-sm">
-        <span className="font-bold text-purple-700 block">Motivo</span>
-        <span className="text-gray-900 font-semibold">
-          {item.incobrable.motivo}
-        </span>
-      </div>
-      <div className="p-3 bg-white border rounded-lg shadow-sm">
-        <span className="font-bold text-purple-700 block">Monto</span>
-        <span className="text-gray-900 font-semibold">
-          Q
-          {Number(item.incobrable.monto_incobrable).toLocaleString("es-GT", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </span>
-      </div>
-      <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
-        <span className="font-bold text-purple-700 block">Fecha Registro</span>
-        <span className="text-gray-900 font-semibold">
-          {new Date(item.incobrable.fecha_registro).toLocaleDateString("es-ES", {
-            day: "2-digit",
-            month: "short",
-            year: "numeric",
-          })}
-        </span>
-      </div>
-      <div className="col-span-2">
-        <span className="font-bold text-purple-700">Observaciones:</span>
-        <details className="cursor-pointer mt-1">
-          <summary className="text-purple-700 font-semibold select-none">
-            Ver observaciones
-          </summary>
-          <p className="mt-2 text-sm text-gray-900 leading-relaxed whitespace-pre-line">
-            {item.incobrable.observaciones || "--"}
-          </p>
-        </details>
-      </div>
-    </div>
-  </div>
-)}
-
-{/* ====== Cancelación ====== */}
-{item.cancelacion && (
-  <div className="bg-red-50 rounded-2xl p-4">
-    <h4 className="text-lg font-extrabold text-red-800 mb-3 text-center">
-      Información de Cancelación
-    </h4>
-    <div className="grid grid-cols-2 gap-3 text-center">
-      <div className="p-3 bg-white border rounded-lg shadow-sm">
-        <span className="font-bold text-red-700 block">Motivo</span>
-        <span className="text-gray-900 font-semibold">
-          {item.cancelacion.motivo}
-        </span>
-      </div>
-      <div className="p-3 bg-white border rounded-lg shadow-sm">
-        <span className="font-bold text-red-700 block">Monto</span>
-        <span className="text-gray-900 font-semibold">
-          Q
-          {Number(item.cancelacion.monto_cancelacion).toLocaleString("es-GT", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </span>
-      </div>
-      <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
-        <span className="font-bold text-red-700 block">Fecha</span>
-        <span className="text-gray-900 font-semibold">
-          {new Date(item.cancelacion.fecha_cancelacion).toLocaleDateString(
-            "es-ES",
-            {
-              day: "2-digit",
-              month: "short",
-              year: "numeric",
-            }
-          )}
-        </span>
-      </div>
-      <div className="col-span-2">
-        <span className="font-bold text-red-700">Observaciones:</span>
-        <details className="cursor-pointer mt-1">
-          <summary className="text-red-700 font-semibold select-none">
-            Ver observaciones
-          </summary>
-          <p className="mt-2 text-sm text-gray-900 leading-relaxed whitespace-pre-line">
-            {item.cancelacion.observaciones || "--"}
-          </p>
-        </details>
-      </div>
-    </div>
-  </div>
-)}
-
-
-          {/* Usuario */}
-             <div className="bg-blue-50 rounded-2xl p-4">
-            <h4 className="text-xl font-extrabold text-blue-800 mb-3 text-center">
-              Información del usuario
-            </h4>
-            <div className="grid grid-cols-2 gap-4 text-center">
-              <div>
-                <span className="font-bold text-blue-700">Nombre:</span>
-                <p className="text-gray-900">{item.usuarios.nombre}</p>
-              </div>
-              <div>
-                <span className="font-bold text-blue-700">NIT:</span>
-                <p className="text-gray-900">{item.usuarios.nit}</p>
-              </div>
-              <div>
-                <span className="font-bold text-blue-700">Categoría:</span>
-                <p className="text-gray-900">{item.usuarios.categoria}</p>
-              </div>
-              <div>
-                <span className="font-bold text-blue-700">Saldo a favor:</span>
-                <p className="text-gray-900">
-                  Q
-                  {Number(item.usuarios.saldo_a_favor).toLocaleString("es-GT", {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Inversionistas */}
-          {user?.role === "ADMIN" && (
-           <div className="bg-blue-50 rounded-2xl p-4">
-            <h4 className="text-xl font-extrabold text-blue-800 mb-3 text-center">
-              Inversionistas asociados
-            </h4>
-            <div className="space-y-4">
-              {item.inversionistas.map((inv: any, idx: number) => (
-            <div
-                  key={idx}
-                  className="border border-blue-200 bg-white rounded-xl p-4 shadow-sm"
-                >
-                  <h5 className="font-bold text-blue-700 mb-2 text-center">
-                    {inv.nombre}
-                  </h5>
-                  <div className="grid grid-cols-2 gap-3 text-sm text-center">    
-                    {[
-                      ["Emite Factura", inv.emite_factura ? "Sí" : "No"],
-                      ["Monto Aportado", inv.monto_aportado],
-                      ["Monto Cash In", inv.monto_cash_in],
-                      ["Monto Inversión", inv.monto_inversionista],
-                      ["IVA Cash In", inv.iva_cash_in],
-                      ["IVA Inversión", inv.iva_inversionista],
-                      [
-                        "% Inversión",
-                        inv.porcentaje_participacion_inversionista,
-                      ],
-                      ["% Cash In", inv.porcentaje_cash_in],
-                      ["Cuota", inv.cuota_inversionista],
-                    ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="p-2 rounded-md bg-gray-50 shadow-sm"
-                      >
-                        <span className="font-bold text-blue-700 block">
-                          {label}
-                        </span>
-                        <span className="text-gray-900 font-semibold">
-                          {typeof value === "number"
-                            ? `Q${Number(value).toLocaleString("es-GT", {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}`
-                            : value}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>) }
-        </div>
-      )}
-    </div>
-  ))}
-</div>
-
+        <MobileView
+          data={data}
+          expandedRow={expandedRow}
+          setExpandedRow={setExpandedRow}
+          navigate={navigate}
+          handleOpenModal={handleOpenModal}
+          handleOpenEdit={handleOpenEdit}
+          setSelectedCreditMora={setSelectedCreditMora}
+          setOpenMoraModal={setOpenMoraModal}
+          setSelectedCreditForReport={setSelectedCreditForReport}
+          setReportModalOpen={setReportModalOpen}
+          handleActivarConvenio={handleActivarConvenio}
+          user={user}
+          canViewReports={canViewReports}
+          canCreateConvenio={canCreateConvenio}
+        />
       ) : (
-      <div>
-  <Table className="w-full min-w-[1200px] border-separate border-spacing-y-1">
-    <TableHeader>
-      <TableRow className="bg-blue-50 border-b-2 border-blue-200 rounded-t-xl">
-        <TableHead className="text-gray-900 font-bold text-center">
-          Crédito SIFCO
-        </TableHead>
-        <TableHead className="text-gray-900 font-bold text-center">
-          Usuario
-        </TableHead>
-        <TableHead className="text-gray-900 font-bold text-center">
-          Deuda Total
-        </TableHead>
-        <TableHead className="text-gray-900 font-bold text-center">
-          Cuota
-        </TableHead>
-        <TableHead className="text-gray-900 font-bold text-center">
-          Fecha de Creación
-        </TableHead>
-        <TableHead className="text-gray-900 font-bold text-center">
-          Acciones
-        </TableHead>
-      </TableRow>
-    </TableHeader>
-
-    <TableBody>
-      {data.data.map((item: any, idx: any) => (
-        <React.Fragment key={item.creditos.credito_id}>
-          {/* Row principal */}
-          <TableRow
-            className={`hover:bg-blue-50 cursor-pointer transition duration-200 rounded-lg ${
-              expandedRow === idx ? "ring-2 ring-blue-300" : ""
-            }`}
-            onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
-          >
-            <TableCell className="text-blue-700 font-semibold text-center underline hover:text-blue-900 transition">
-              {item.creditos.numero_credito_sifco}
-            </TableCell>
-            <TableCell className="text-indigo-700 font-bold text-center">
-              {item.usuarios.nombre}
-            </TableCell>
-            <TableCell className="text-green-600 font-bold text-center">
-              Q
-              {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </TableCell>
-            <TableCell className="text-indigo-700 font-bold text-center">
-              Q
-              {Number(item.creditos.cuota).toLocaleString("es-GT", {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
-              })}
-            </TableCell>
-            <TableCell className="text-indigo-700 font-bold text-center">
-              {item.creditos?.fecha_creacion
-                ? new Date(item.creditos.fecha_creacion).toLocaleDateString(
-                    "es-ES",
-                    {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    }
-                  )
-                : "--"}
-            </TableCell>
-
-            {/* Acciones */}
-            <TableCell className="text-center">
-              <div className="flex flex-col items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-gray-700 border-gray-300"
-                  onClick={() =>
-                    setExpandedRow(expandedRow === idx ? null : idx)
-                  }
-                >
-                  {expandedRow === idx ? "Ocultar acciones" : "Ver acciones"}
-                </Button>
-
-                {expandedRow === idx && (
-                  <div className="flex flex-wrap justify-center gap-2 p-2 border rounded-md bg-gray-50 shadow-sm w-full md:w-auto">
-                    {canViewPayments(item.creditos.statusCredit) && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
-                        onClick={() =>
-                          navigate(
-                            `/pagos/${item.creditos.numero_credito_sifco}`
-                          )
-                        }
-                      >
-                        <Eye className="w-4 h-4" />
-                        Ver pagos
-                      </Button>
-                    )}
-
-                    {canEdit(item.creditos.statusCredit) &&
-                      user?.role === "ADMIN" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-1 text-yellow-700 border-yellow-300 hover:bg-yellow-50"
-                          onClick={() =>
-                            handleOpenEdit(item.creditos, item.inversionistas)
-                          }
-                        >
-                          <Pencil className="w-4 h-4" />
-                          Editar
-                        </Button>
-                      )}
-
-                    {canCancel(item.creditos.statusCredit) &&
-                      user?.role === "ADMIN" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-1 text-red-700 border-red-300 hover:bg-red-50"
-                          onClick={() =>
-                            handleOpenModal(item.creditos.credito_id)
-                          }
-                        >
-                          <XCircle className="w-4 h-4" />
-                          Cancelar
-                        </Button>
-                      )}
-
-                    {canEdit(item.creditos.statusCredit) &&
-                      user?.role === "ADMIN" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-1 text-purple-700 border-purple-300 hover:bg-purple-50"
-                          onClick={() => {
-                            setSelectedCreditMora(item.creditos);
-                            setOpenMoraModal(true);
-                          }}
-                        >
-                          ➕ Mora
-                        </Button>
-                      )}
-{canViewReports(item.creditos.statusCredit) && user?.role === "ADMIN" && (
-  <Button
-    variant="outline"
-    className="text-green-700 border-green-300 hover:bg-green-50"
-    onClick={() => {
-      setSelectedCreditForReport(item.creditos);
-      setReportModalOpen(true);
-    }}
-  >
-    <Download className="w-4 h-4 mr-1" /> Reportes
-  </Button>
-)}
-                    {canActivate(item.creditos.statusCredit) &&
-                      user?.role === "ADMIN" && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
-                          onClick={() =>
-                            activateCreditMutation.mutate({
-                              creditId: item.creditos.credito_id,
-                              accion: "ACTIVAR",
-                            })
-                          }
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                          Activar
-                        </Button>
-                      )}
-
-                    {(canEdit(item.creditos.statusCredit) ||
-                      canCancel(item.creditos.statusCredit) ||
-                      canActivate(item.creditos.statusCredit)) &&
-                      user?.role !== "ADMIN" && (
-                        <span className="text-gray-400 italic">
-                          Sin permisos
-                        </span>
-                      )}
-                  </div>
-                )}
-              </div>
-            </TableCell>
-          </TableRow>
-
-          {/* Row expandida */}
-          {expandedRow === idx && (
-            <TableRow>
-              <TableCell colSpan={6} className="p-0 bg-blue-50 rounded-b-2xl">
-                <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 text-gray-900">
-                  {/* ====== Detalles del crédito ====== */}
-                  <div className="col-span-full">
-                    <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
-                      Detalles del crédito
-                    </h4>
-                  </div>
-
-                  {[
-                    ["Capital", item.creditos.capital],
-                    ["Porcentaje Interés", `${item.creditos.porcentaje_interes}%`],
-                    ["Deuda Total", item.creditos.deudatotal],
-                    ["Cuota", item.creditos.cuota],
-                       ["Cuota Interés", item.creditos.cuota_interes],
-                    ["IVA 12%", item.creditos.iva_12],
-                    ["Seguro", item.creditos.seguro_10_cuotas],
-                    ["GPS", item.creditos.gps],
-                    ["Membresías", item.creditos.membresias],
-                    ["Royalti", item.creditos.royalti],
-                    ["Plazo", item.creditos.plazo],
-                    ["Tipo", item.creditos.tipoCredito],
-                    ["Formato", item.creditos.formato_credito],
-                  ].map(([label, value]) => (
-                    <div
-                      key={label}
-                      className="p-3 rounded-lg bg-white border shadow-sm hover:shadow-md transition"
-                    >
-                      <span className="font-bold text-blue-700">{label}:</span>
-                      <p className="text-gray-800">
-                        {typeof value === "number"
-                          ? `Q${Number(value).toLocaleString("es-GT", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}`
-                          : value}
-                      </p>
-                    </div>
-                  ))}
-
-                  {/* Observaciones */}
-                  <div className="col-span-full">
-                    <span className="font-bold text-blue-700">
-                      Observaciones:
-                    </span>
-                    <div className="text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
-                      <details className="cursor-pointer">
-                        <summary className="text-blue-600 font-semibold select-none">
-                          {item.creditos.observaciones
-                            ? "Ver observaciones"
-                            : "No hay observaciones"}
-                        </summary>
-                        {item.creditos.observaciones && (
-                          <p className="mt-2 whitespace-pre-line leading-relaxed">
-                            {item.creditos.observaciones}
-                          </p>
-                        )}
-                      </details>
-                    </div>
-                  </div>
-
-                  {/* Mora */}
-                  {item?.mora?.activa && (
-                    <div className="col-span-full">
-                      <h5 className="text-lg font-bold text-red-700 border-b pb-1 mb-2">
-                        Detalles de Mora
-                      </h5>
-                      <p>
-                        <span className="font-bold">Monto:</span> Q
-                        {Number(item.mora.monto_mora).toLocaleString("es-GT", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </p>
-                      <p>
-                        <span className="font-bold">Porcentaje:</span>{" "}
-                        {item.mora.porcentaje_mora}%
-                      </p>
-                      <p>
-                        <span className="font-bold">Cuotas atrasadas:</span>{" "}
-                        {item.mora.cuotas_atrasadas}
-                      </p>
-                     
-                    </div>
-                  )}
-
-                  {/* Rubros */}
-                  <div className="col-span-full">
-                    <h5 className="text-lg font-bold text-blue-700 border-b pb-1 mb-2">
-                      Otros Rubros
-                    </h5>
-                    <details className="cursor-pointer">
-                      <summary>
-                        Q
-                        {Number(item.creditos.otros).toLocaleString("es-GT", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </summary>
-                      <ul className="ml-4 mt-1 list-disc text-gray-700">
-                        {item.rubros?.map((r: any, idx: number) => (
-                          <li key={idx}>
-                            {r.nombre_rubro} - Q
-                            {Number(r.monto).toLocaleString("es-GT")}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  </div>
-
-                  {/* Incobrable */}
-                  {item.incobrable && (
-                    <div className="col-span-full mt-6">
-                      <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
-                        Información de Incobrable
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-3 rounded-lg bg-white border shadow-sm">
-                          <span className="font-bold text-blue-700">Motivo:</span>
-                          <p className="text-gray-800">
-                            {item.incobrable.motivo}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white border shadow-sm">
-                          <span className="font-bold text-blue-700">
-                            Fecha Registro:
-                          </span>
-                          <p className="text-gray-800">
-                            {new Date(
-                              item.incobrable.fecha_registro
-                            ).toLocaleDateString("es-ES", {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                            })}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white border shadow-sm">
-                          <span className="font-bold text-blue-700">
-                            Monto Incobrable:
-                          </span>
-                          <p className="text-gray-800">
-                            Q
-                            {Number(item.incobrable.monto_incobrable).toLocaleString(
-                              "es-GT",
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              }
-                            )}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white border shadow-sm col-span-full">
-                          <span className="font-bold text-blue-700">
-                            Observaciones:
-                          </span>
-                          <div className="max-h-24 overflow-y-auto text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
-                            {item.incobrable.observaciones || "--"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Cancelación */}
-                  {item.cancelacion && (
-                    <div className="col-span-full mt-6">
-                      <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
-                        Información de Cancelación
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-3 rounded-lg bg-white border shadow-sm">
-                          <span className="font-bold text-blue-700">Motivo:</span>
-                          <p className="text-gray-800">
-                            {item.cancelacion.motivo}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white border shadow-sm">
-                          <span className="font-bold text-blue-700">Fecha:</span>
-                          <p className="text-gray-800">
-                            {new Date(
-                              item.cancelacion.fecha_cancelacion
-                            ).toLocaleDateString("es-ES", {
-                              day: "2-digit",
-                              month: "short",
-                              year: "numeric",
-                            })}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white border shadow-sm">
-                          <span className="font-bold text-blue-700">
-                            Monto Cancelación:
-                          </span>
-                          <p className="text-gray-800">
-                            Q
-                            {Number(item.cancelacion.monto_cancelacion).toLocaleString(
-                              "es-GT",
-                              {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              }
-                            )}
-                          </p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white border shadow-sm col-span-full">
-                          <span className="font-bold text-blue-700">
-                            Observaciones:
-                          </span>
-                          <div className="max-h-24 overflow-y-auto text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
-                            {item.cancelacion.observaciones || "--"}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Usuario */}
-                  <div className="col-span-full mt-6">
-                    <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
-                      Información del usuario
-                    </h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div>
-                        <span className="font-bold text-blue-700">Nombre:</span>
-                        <p>{item.usuarios.nombre}</p>
-                      </div>
-                      <div>
-                        <span className="font-bold text-blue-700">NIT:</span>
-                        <p>{item.usuarios.nit}</p>
-                      </div>
-                      <div>
-                        <span className="font-bold text-blue-700">Categoría:</span>
-                        <p>{item.usuarios.categoria}</p>
-                      </div>
-                      <div>
-                        <span className="font-bold text-blue-700">
-                          Saldo a favor:
-                        </span>
-                        <p>
-                          Q
-                          {Number(item.usuarios.saldo_a_favor).toLocaleString(
-                            "es-GT",
-                            {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            }
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Inversionistas */}
-                  {user?.role === "ADMIN" && (
-                  <div className="col-span-full mt-6">
-                    <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
-                      Inversionistas asociados
-                    </h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {item.inversionistas.map((inv: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className="border border-blue-200 bg-gradient-to-br from-white to-blue-50 rounded-xl p-5 shadow-sm hover:shadow-md transition"
-                        >
-                          <div className="flex items-center justify-between mb-4">
-                            <h5 className="text-lg font-bold text-blue-700">
-                              {inv.nombre}
-                            </h5>
-                            <span
-                              className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                                inv.emite_factura
-                                  ? "bg-green-100 text-green-700 border border-green-200"
-                                  : "bg-gray-100 text-gray-600 border border-gray-200"
-                              }`}
-                            >
-                              {inv.emite_factura ? "Emite Factura" : "Sin Factura"}
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 gap-3 text-sm">
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                Monto Aportado
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                Q
-                                {Number(inv.monto_aportado).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                Monto Cash In
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                Q
-                                {Number(inv.monto_cash_in).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                Monto Inversión
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                Q
-                                {Number(inv.monto_inversionista).toLocaleString(
-                                  "es-GT",
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  }
-                                )}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                IVA Cash In
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                Q
-                                {Number(inv.iva_cash_in).toLocaleString("es-GT", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                IVA Inversión
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                Q
-                                {Number(inv.iva_inversionista).toLocaleString(
-                                  "es-GT",
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  }
-                                )}
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                % Inversión
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                {inv.porcentaje_participacion_inversionista}%
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                % Cash In
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                {inv.porcentaje_cash_in}%
-                              </span>
-                            </div>
-                            <div>
-                              <span className="font-bold text-blue-700 block">
-                                Cuota
-                              </span>
-                              <span className="text-gray-900 font-semibold">
-                                Q
-                                {Number(inv.cuota_inversionista).toLocaleString(
-                                  "es-GT",
-                                  {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  }
-                                )}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div> )}
-                </div>
-              </TableCell>
-            </TableRow>
-          )}
-        </React.Fragment>
-      ))}
-    </TableBody>Inversionistas asociados
-  </Table>
-</div>
-
+        <DesktopView
+          data={data}
+          expandedRow={expandedRow}
+          setExpandedRow={setExpandedRow}
+          navigate={navigate}
+          handleOpenModal={handleOpenModal}
+          handleOpenEdit={handleOpenEdit}
+          setSelectedCreditMora={setSelectedCreditMora}
+          setOpenMoraModal={setOpenMoraModal}
+          setSelectedCreditForReport={setSelectedCreditForReport}
+          setReportModalOpen={setReportModalOpen}
+          handleActivarConvenio={handleActivarConvenio}
+          activateCreditMutation={activateCreditMutation}
+          user={user}
+          canViewReports={canViewReports}
+          canEdit={canEdit}
+          canCancel={canCancel}
+          canActivate={canActivate}
+          canViewPayments={canViewPayments}
+          canCreateConvenio={canCreateConvenio}
+        />
       )}
 
       {/* Paginación */}
@@ -1515,20 +612,22 @@ console.log("🎯 Asesor ID actual:", asesorId);
       {isFetching && (
         <div className="text-blue-500 mt-2">Cargando página...</div>
       )}
-     <ModalEditCredit
-  open={editModalOpen}
-  onClose={() => setEditModalOpen(false)}
-  initialValues={creditToEdit}
-  investorsInitial={investorsToEdit}
-  onSuccess={() => {
-    setEditModalOpen(false);
-    queryClient.invalidateQueries({
-      queryKey: ["creditos-paginados", mes, anio, page, perPage],
-    });
-  }}
-  investorsOptions={investors}
-  advisorsOptions={advisors} // ✅ NUEVO
-/>
+
+      <ModalEditCredit
+        open={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        initialValues={creditToEdit}
+        investorsInitial={investorsToEdit}
+        onSuccess={() => {
+          setEditModalOpen(false);
+          queryClient.invalidateQueries({
+            queryKey: ["creditos-paginados", mes, anio, page, perPage],
+          });
+        }}
+        investorsOptions={investors}
+        advisorsOptions={advisors}
+      />
+
       <ModalCancelCredit
         open={modalOpen}
         onClose={handleCloseModal}
@@ -1539,6 +638,7 @@ console.log("🎯 Asesor ID actual:", asesorId);
           });
         }}
       />
+
       <ModalCreateMora
         open={openMoraModal}
         onClose={() => setOpenMoraModal(false)}
@@ -1550,161 +650,1140 @@ console.log("🎯 Asesor ID actual:", asesorId);
           });
         }}
       />
-      {/* Después del ModalCreateMora, antes del cierre del div principal */}
 
-{/* Modal de Reportes */}
-{reportModalOpen && selectedCreditForReport && (
-  <Dialog open={reportModalOpen} onOpenChange={setReportModalOpen}>
-    <DialogContent className="max-w-md bg-white border-2 border-blue-200 shadow-2xl rounded-2xl">
-      <div className="space-y-4 p-2">
-        <h3 className="text-xl font-bold text-blue-800 flex items-center gap-2">
-          <Download className="w-6 h-6" />
-          Descargar Reportes
-        </h3>
-        
-        <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
-          <p className="text-sm text-gray-700">
-            Crédito: <span className="font-bold text-blue-800">{selectedCreditForReport.numero_credito_sifco}</span>
-          </p>
-        </div>
+      {/* Modal de Reportes */}
+      {reportModalOpen && selectedCreditForReport && (
+        <Dialog open={reportModalOpen} onOpenChange={setReportModalOpen}>
+          <DialogContent className="max-w-md bg-white border-2 border-blue-200 shadow-2xl rounded-2xl">
+            <div className="space-y-4 p-2">
+              <h3 className="text-xl font-bold text-blue-800 flex items-center gap-2">
+                <Download className="w-6 h-6" />
+                Descargar Reportes
+              </h3>
 
-        <div className="space-y-4">
-          {/* Sección: Cancelación */}
-          <div>
-            <h4 className="text-sm font-bold text-gray-600 mb-2">Reporte de Cancelación</h4>
-            <div className="grid grid-cols-2 gap-2">
+              <div className="bg-blue-50 p-3 rounded-lg border border-blue-200">
+                <p className="text-sm text-gray-700">
+                  Crédito:{" "}
+                  <span className="font-bold text-blue-800">
+                    {selectedCreditForReport.numero_credito_sifco}
+                  </span>
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                {/* Sección: Cancelación */}
+                <div>
+                  <h4 className="text-sm font-bold text-gray-600 mb-2">
+                    Reporte de Cancelación
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-red-50 hover:bg-red-100 text-red-700 border-red-300 font-semibold"
+                      onClick={() =>
+                        handleGenerateReport(
+                          selectedCreditForReport.numero_credito_sifco,
+                          "pdf",
+                          "cancelation"
+                        )
+                      }
+                      disabled={isGeneratingReport}
+                    >
+                      📄 PDF
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-green-50 hover:bg-green-100 text-green-700 border-green-300 font-semibold"
+                      onClick={() =>
+                        handleGenerateReport(
+                          selectedCreditForReport.numero_credito_sifco,
+                          "excel",
+                          "cancelation"
+                        )
+                      }
+                      disabled={isGeneratingReport}
+                    >
+                      📊 Excel
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Sección: Cancelación Interna */}
+                <div>
+                  <h4 className="text-sm font-bold text-gray-600 mb-2">
+                    Reporte Interno
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-300 font-semibold"
+                      onClick={() =>
+                        handleGenerateReport(
+                          selectedCreditForReport.numero_credito_sifco,
+                          "pdf",
+                          "cancelation-intern"
+                        )
+                      }
+                      disabled={isGeneratingReport}
+                    >
+                      📋 PDF
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-300 font-semibold"
+                      onClick={() =>
+                        handleGenerateReport(
+                          selectedCreditForReport.numero_credito_sifco,
+                          "excel",
+                          "cancelation-intern"
+                        )
+                      }
+                      disabled={isGeneratingReport}
+                    >
+                      📊 Excel
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Sección: Detalle de Costos */}
+                <div>
+                  <h4 className="text-sm font-bold text-gray-600 mb-2">
+                    Detalle de Costos
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300 font-semibold"
+                      onClick={() =>
+                        handleGenerateReport(
+                          selectedCreditForReport.numero_credito_sifco,
+                          "pdf",
+                          "cost-detail"
+                        )
+                      }
+                      disabled={isGeneratingReport}
+                    >
+                      💰 PDF
+                    </Button>
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300 font-semibold"
+                      onClick={() =>
+                        handleGenerateReport(
+                          selectedCreditForReport.numero_credito_sifco,
+                          "excel",
+                          "cost-detail"
+                        )
+                      }
+                      disabled={isGeneratingReport}
+                    >
+                      📊 Excel
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {isGeneratingReport && (
+                <div className="flex items-center justify-center gap-2 bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                  <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
+                  <span className="text-sm font-medium text-yellow-700">
+                    Generando reporte...
+                  </span>
+                </div>
+              )}
+
               <Button
                 variant="outline"
-                size="sm"
-                className="bg-red-50 hover:bg-red-100 text-red-700 border-red-300 font-semibold"
-                onClick={() =>
-                  handleGenerateReport(
-                    selectedCreditForReport.numero_credito_sifco,
-                    "pdf",
-                    "cancelation"
-                  )
-                }
-                disabled={isGeneratingReport}
+                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold border-gray-300"
+                onClick={() => {
+                  setReportModalOpen(false);
+                  setSelectedCreditForReport(null);
+                }}
               >
-                📄 PDF
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-green-50 hover:bg-green-100 text-green-700 border-green-300 font-semibold"
-                onClick={() =>
-                  handleGenerateReport(
-                    selectedCreditForReport.numero_credito_sifco,
-                    "excel",
-                    "cancelation"
-                  )
-                }
-                disabled={isGeneratingReport}
-              >
-                📊 Excel
+                Cerrar
               </Button>
             </div>
-          </div>
-
-          {/* Sección: Cancelación Interna */}
-          <div>
-            <h4 className="text-sm font-bold text-gray-600 mb-2">Reporte Interno</h4>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-300 font-semibold"
-                onClick={() =>
-                  handleGenerateReport(
-                    selectedCreditForReport.numero_credito_sifco,
-                    "pdf",
-                    "cancelation-intern"
-                  )
-                }
-                disabled={isGeneratingReport}
-              >
-                📋 PDF
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-purple-50 hover:bg-purple-100 text-purple-700 border-purple-300 font-semibold"
-                onClick={() =>
-                  handleGenerateReport(
-                    selectedCreditForReport.numero_credito_sifco,
-                    "excel",
-                    "cancelation-intern"
-                  )
-                }
-                disabled={isGeneratingReport}
-              >
-                📊 Excel
-              </Button>
-            </div>
-          </div>
-
-          {/* Sección: Detalle de Costos */}
-          <div>
-            <h4 className="text-sm font-bold text-gray-600 mb-2">Detalle de Costos</h4>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300 font-semibold"
-                onClick={() =>
-                  handleGenerateReport(
-                    selectedCreditForReport.numero_credito_sifco,
-                    "pdf",
-                    "cost-detail"
-                  )
-                }
-                disabled={isGeneratingReport}
-              >
-                💰 PDF
-              </Button>
-
-              <Button
-                variant="outline"
-                size="sm"
-                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-300 font-semibold"
-                onClick={() =>
-                  handleGenerateReport(
-                    selectedCreditForReport.numero_credito_sifco,
-                    "excel",
-                    "cost-detail"
-                  )
-                }
-                disabled={isGeneratingReport}
-              >
-                📊 Excel
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {isGeneratingReport && (
-          <div className="flex items-center justify-center gap-2 bg-yellow-50 p-3 rounded-lg border border-yellow-200">
-            <Loader2 className="w-4 h-4 animate-spin text-yellow-600" />
-            <span className="text-sm font-medium text-yellow-700">Generando reporte...</span>
-          </div>
-        )}
-
-        <Button
-          variant="outline"
-          className="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold border-gray-300"
-          onClick={() => {
-            setReportModalOpen(false);
-            setSelectedCreditForReport(null);
-          }}
-        >
-          Cerrar
-        </Button>
-      </div>
-    </DialogContent>
-  </Dialog>
-)}
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
+
+// 🆕 Componente para mostrar info de convenio
+// 🆕 Componente para mostrar info de convenio
+// 🆕 Componente para mostrar info de convenio
+function ConvenioInfo({ creditId }: { creditId: number }) {
+
+  // Usamos el hook para traer los convenios de este crédito
+  const { data, isLoading } = usePaymentAgreements(
+    { credit_id: creditId },
+    { enabled: !!creditId }
+  );
+  console.log("📄 Datos del convenio:", data);
+
+  // 🆕 Hook para toggle del convenio
+  const toggleMutation = useTogglePaymentAgreementStatus();
+
+  // 🆕 Handler para activar/desactivar convenio
+  const handleToggleConvenio = (convenioId: number, activo: boolean) => {
+    toggleMutation.mutate({
+      convenio_id: convenioId,
+      activo: !activo, // Invertimos el estado actual
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="bg-orange-50 rounded-2xl p-4">
+        <div className="flex items-center justify-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-orange-600" />
+          <span className="text-sm text-orange-700">Cargando convenio...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!data || !data.success || data.data.length === 0) {
+    return null;
+  }
+
+  const convenio = data.data[0]; // Tomamos el primer convenio activo
+
+  return (
+    <div className="bg-orange-50 rounded-2xl p-4">
+      {/* Header con botón */}
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-lg font-extrabold text-orange-800">
+          Detalles del Convenio de Pago
+        </h4>
+        <Button
+          variant="outline"
+          size="sm"
+          className={`${
+            convenio.activo
+              ? "bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
+              : "bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
+          } font-semibold`}
+          onClick={() => handleToggleConvenio(convenio.convenio_id, convenio.activo)}
+          disabled={toggleMutation.isPending}
+        >
+          {toggleMutation.isPending ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin mr-1" />
+              Procesando...
+            </>
+          ) : convenio.activo ? (
+            "🔴 Desactivar"
+          ) : (
+            "✅ Activar"
+          )}
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 text-center">
+        <div className="p-3 bg-white border rounded-lg shadow-sm">
+          <span className="font-bold text-orange-700 block">
+            Fecha Convenio
+          </span>
+          <span className="text-gray-900 font-semibold">
+            {new Date(convenio.fecha_convenio).toLocaleDateString("es-GT", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            })}
+          </span>
+        </div>
+        <div className="p-3 bg-white border rounded-lg shadow-sm">
+          <span className="font-bold text-orange-700 block">Monto Total</span>
+          <span className="text-gray-900 font-semibold">
+            Q
+            {Number(convenio.monto_total_convenio).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        </div>
+        <div className="p-3 bg-white border rounded-lg shadow-sm">
+          <span className="font-bold text-orange-700 block">Monto Pagado</span>
+          <span className="text-gray-900 font-semibold">
+            Q
+            {Number(convenio.monto_pagado).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        </div>
+        <div className="p-3 bg-white border rounded-lg shadow-sm">
+          <span className="font-bold text-orange-700 block">
+            Monto Pendiente
+          </span>
+          <span className="text-gray-900 font-semibold">
+            Q
+            {Number(convenio.monto_pendiente).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        </div>
+        <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
+          <span className="font-bold text-orange-700 block">
+            Total de Pagos
+          </span>
+          <span className="text-gray-900 font-semibold">
+            {convenio.summary?.paid_payments || 0} de{" "}
+            {convenio.summary?.total_payments || 0} completados
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Componente auxiliar para vista mobile
+function MobileView({
+  data,
+  expandedRow,
+  setExpandedRow,
+  navigate,
+  handleOpenModal,
+  handleOpenEdit,
+  setSelectedCreditMora,
+  setOpenMoraModal,
+  setSelectedCreditForReport,
+  setReportModalOpen,
+  handleActivarConvenio,
+  user,
+  canViewReports,
+  canCreateConvenio,
+}: any) {
+  return (
+    <div className="space-y-4">
+      {data.data.map((item: any, idx: number) => (
+        <div
+          key={item.creditos.credito_id}
+          className="border rounded-xl p-4 shadow bg-white"
+        >
+          {/* Header */}
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-blue-800 font-bold text-lg">
+              #{item.creditos.numero_credito_sifco}
+            </h3>
+            <Button
+              onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
+              className="text-blue-600 text-sm"
+              variant="ghost"
+            >
+              {expandedRow === idx ? "Ocultar" : "Ver más"}
+            </Button>
+          </div>
+
+          {/* Estado */}
+          <p className="text-sm text-gray-700">
+            <strong>Usuario:</strong> {item.usuarios.nombre}
+          </p>
+          <p className="text-sm text-gray-700">
+            <strong>Deuda Total:</strong> Q
+            {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+          <p className="text-sm text-gray-700">
+            <strong>Cuota:</strong> Q
+            {Number(item.creditos.cuota).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+          <p className="text-sm text-gray-700">
+            <strong>Estado:</strong>{" "}
+            <span
+              className={`font-bold ${
+                item.creditos.statusCredit === "ACTIVO"
+                  ? "text-green-600"
+                  : item.creditos.statusCredit === "CANCELADO"
+                    ? "text-red-600"
+                    : item.creditos.statusCredit === "INCOBRABLE"
+                      ? "text-purple-700"
+                      : item.creditos.statusCredit === "PENDIENTE_CANCELACION"
+                        ? "text-yellow-500"
+                        : item.creditos.statusCredit === "EN_CONVENIO"
+                          ? "text-orange-600"
+                          : "text-gray-500"
+              }`}
+            >
+              {item.creditos.statusCredit === "PENDIENTE_CANCELACION"
+                ? "Pendiente de Cancelación"
+                : item.creditos.statusCredit === "INCOBRABLE"
+                  ? "Incobrable"
+                  : item.creditos.statusCredit === "EN_CONVENIO"
+                    ? "En Convenio"
+                    : item.creditos.statusCredit}
+            </span>
+          </p>
+
+          {/* Acciones */}
+          <div className="flex justify-center flex-wrap gap-2 mt-3">
+            <Button
+              variant="outline"
+              className="text-blue-700 border-blue-300 hover:bg-blue-50"
+              onClick={() =>
+                navigate(`/pagos/${item.creditos.numero_credito_sifco}`)
+              }
+            >
+              <Eye className="w-4 h-4 mr-1" /> Ver pagos
+            </Button>
+            <Button
+              variant="outline"
+              className="text-red-700 border-red-300 hover:bg-red-50"
+              onClick={() => handleOpenModal(item.creditos.credito_id)}
+            >
+              <XCircle className="w-4 h-4 mr-1" /> Cancelar
+            </Button>
+            {user?.role === "ADMIN" && (
+              <>
+                <Button
+                  variant="outline"
+                  className="text-yellow-700 border-yellow-300 hover:bg-yellow-50"
+                  onClick={() =>
+                    handleOpenEdit(item.creditos, item.inversionistas)
+                  }
+                >
+                  <Pencil className="w-4 h-4 mr-1" /> Editar
+                </Button>
+                <Button
+                  variant="outline"
+                  className="text-purple-700 border-purple-300 hover:bg-purple-50"
+                  onClick={() => {
+                    setSelectedCreditMora(item.creditos);
+                    setOpenMoraModal(true);
+                  }}
+                >
+                  ➕ Mora
+                </Button>
+                 
+              </>
+            )}
+            {canViewReports(item.creditos.statusCredit) &&
+              user?.role === "ADMIN" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
+                  onClick={() => {
+                    setSelectedCreditForReport(item.creditos);
+                    setReportModalOpen(true);
+                  }}
+                >
+                  <Download className="w-4 h-4" />
+                  Reportes
+                </Button>
+              )}
+          </div>
+
+          {/* Expandible */}
+          {expandedRow === idx && (
+            <div className="mt-4 space-y-4">
+              {/* Detalles del crédito */}
+              <DetallesCredito item={item} />
+
+              {/* 🆕 Info de convenio si está EN_CONVENIO */}
+              {item.creditos.statusCredit === "EN_CONVENIO" && (
+                <ConvenioInfo creditId={item.creditos.credito_id} />
+              )}
+
+              {/* Mora */}
+              {item?.mora?.activa && <MoraInfo mora={item.mora} />}
+
+              {/* Incobrable */}
+              {item.incobrable && (
+                <IncobrableInfo incobrable={item.incobrable} />
+              )}
+
+              {/* Cancelación */}
+              {item.cancelacion && (
+                <CancelacionInfo cancelacion={item.cancelacion} />
+              )}
+
+              {/* Usuario */}
+              <UsuarioInfo usuario={item.usuarios} />
+
+              {/* Inversionistas */}
+              {user?.role === "ADMIN" && (
+                <InversionistasInfo inversionistas={item.inversionistas} />
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Componente auxiliar para vista desktop
+function DesktopView({
+  data,
+  expandedRow,
+  setExpandedRow,
+  navigate,
+  handleOpenModal,
+  handleOpenEdit,
+  setSelectedCreditMora,
+  setOpenMoraModal,
+  setSelectedCreditForReport,
+  setReportModalOpen,
+  handleActivarConvenio,
+  activateCreditMutation,
+  user,
+  canViewReports,
+  canEdit,
+  canCancel,
+  canActivate,
+  canViewPayments,
+  canCreateConvenio,
+}: any) {
+  return (
+    <div>
+      <Table className="w-full min-w-[1200px] border-separate border-spacing-y-1">
+        <TableHeader>
+          <TableRow className="bg-blue-50 border-b-2 border-blue-200 rounded-t-xl">
+            <TableHead className="text-gray-900 font-bold text-center">
+              Crédito SIFCO
+            </TableHead>
+            <TableHead className="text-gray-900 font-bold text-center">
+              Usuario
+            </TableHead>
+            <TableHead className="text-gray-900 font-bold text-center">
+              Deuda Total
+            </TableHead>
+            <TableHead className="text-gray-900 font-bold text-center">
+              Cuota
+            </TableHead>
+            <TableHead className="text-gray-900 font-bold text-center">
+              Fecha de Creación
+            </TableHead>
+            <TableHead className="text-gray-900 font-bold text-center">
+              Acciones
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+
+        <TableBody>
+          {data.data.map((item: any, idx: any) => (
+            <React.Fragment key={item.creditos.credito_id}>
+              {/* Row principal */}
+              <TableRow
+                className={`hover:bg-blue-50 cursor-pointer transition duration-200 rounded-lg ${
+                  expandedRow === idx ? "ring-2 ring-blue-300" : ""
+                }`}
+                onClick={() => setExpandedRow(expandedRow === idx ? null : idx)}
+              >
+                <TableCell className="text-blue-700 font-semibold text-center underline hover:text-blue-900 transition">
+                  {item.creditos.numero_credito_sifco}
+                </TableCell>
+                <TableCell className="text-indigo-700 font-bold text-center">
+                  {item.usuarios.nombre}
+                </TableCell>
+                <TableCell className="text-green-600 font-bold text-center">
+                  Q
+                  {Number(item.creditos.deudatotal).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </TableCell>
+                <TableCell className="text-indigo-700 font-bold text-center">
+                  Q
+                  {Number(item.creditos.cuota).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </TableCell>
+                <TableCell className="text-indigo-700 font-bold text-center">
+                  {item.creditos?.fecha_creacion
+                    ? new Date(item.creditos.fecha_creacion).toLocaleDateString(
+                        "es-ES",
+                        {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        }
+                      )
+                    : "--"}
+                </TableCell>
+
+                {/* Acciones */}
+                <TableCell className="text-center">
+                  <div className="flex flex-col items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-gray-700 border-gray-300"
+                      onClick={() =>
+                        setExpandedRow(expandedRow === idx ? null : idx)
+                      }
+                    >
+                      {expandedRow === idx
+                        ? "Ocultar acciones"
+                        : "Ver acciones"}
+                    </Button>
+
+                    {expandedRow === idx && (
+                      <div className="flex flex-wrap justify-center gap-2 p-2 border rounded-md bg-gray-50 shadow-sm w-full md:w-auto">
+                        {canViewPayments(item.creditos.statusCredit) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
+                            onClick={() =>
+                              navigate(
+                                `/pagos/${item.creditos.numero_credito_sifco}`
+                              )
+                            }
+                          >
+                            <Eye className="w-4 h-4" />
+                            Ver pagos
+                          </Button>
+                        )}
+
+                        {canEdit(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-yellow-700 border-yellow-300 hover:bg-yellow-50"
+                              onClick={() =>
+                                handleOpenEdit(
+                                  item.creditos,
+                                  item.inversionistas
+                                )
+                              }
+                            >
+                              <Pencil className="w-4 h-4" />
+                              Editar
+                            </Button>
+                          )}
+
+                        {canCancel(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-red-700 border-red-300 hover:bg-red-50"
+                              onClick={() =>
+                                handleOpenModal(item.creditos.credito_id)
+                              }
+                            >
+                              <XCircle className="w-4 h-4" />
+                              Cancelar
+                            </Button>
+                          )}
+
+                        {canEdit(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-purple-700 border-purple-300 hover:bg-purple-50"
+                              onClick={() => {
+                                setSelectedCreditMora(item.creditos);
+                                setOpenMoraModal(true);
+                              }}
+                            >
+                              ➕ Mora
+                            </Button>
+                          )}
+
+                        {canCreateConvenio(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-orange-700 border-orange-300 hover:bg-orange-50"
+                              onClick={() =>
+                                handleActivarConvenio(item.creditos.credito_id)
+                              }
+                            >
+                              <FileCheck className="w-4 h-4" />
+                              Crear Convenio
+                            </Button>
+                          )}
+
+                        {canViewReports(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              className="text-green-700 border-green-300 hover:bg-green-50"
+                              onClick={() => {
+                                setSelectedCreditForReport(item.creditos);
+                                setReportModalOpen(true);
+                              }}
+                            >
+                              <Download className="w-4 h-4 mr-1" /> Reportes
+                            </Button>
+                          )}
+
+                        {canActivate(item.creditos.statusCredit) &&
+                          user?.role === "ADMIN" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
+                              onClick={() =>
+                                activateCreditMutation.mutate({
+                                  creditId: item.creditos.credito_id,
+                                  accion: "ACTIVAR",
+                                })
+                              }
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              Activar
+                            </Button>
+                          )}
+
+                        {(canEdit(item.creditos.statusCredit) ||
+                          canCancel(item.creditos.statusCredit) ||
+                          canActivate(item.creditos.statusCredit)) &&
+                          user?.role !== "ADMIN" && (
+                            <span className="text-gray-400 italic">
+                              Sin permisos
+                            </span>
+                          )}
+                      </div>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+
+              {/* Row expandida */}
+              {expandedRow === idx && (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="p-0 bg-blue-50 rounded-b-2xl"
+                  >
+                    <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6 text-gray-900">
+                      <DetallesCredito item={item} fullWidth />
+
+                      {/* 🆕 Info de convenio si está EN_CONVENIO */}
+                      {item.creditos.statusCredit === "EN_CONVENIO" && (
+                        <div className="col-span-full">
+                          <ConvenioInfo creditId={item.creditos.credito_id} />
+                        </div>
+                      )}
+
+                      {item?.mora?.activa && (
+                        <div className="col-span-full">
+                          <MoraInfo mora={item.mora} />
+                        </div>
+                      )}
+
+                      {item.incobrable && (
+                        <div className="col-span-full mt-6">
+                          <IncobrableInfo incobrable={item.incobrable} />
+                        </div>
+                      )}
+
+                      {item.cancelacion && (
+                        <div className="col-span-full mt-6">
+                          <CancelacionInfo cancelacion={item.cancelacion} />
+                        </div>
+                      )}
+
+                      <div className="col-span-full mt-6">
+                        <UsuarioInfo usuario={item.usuarios} />
+                      </div>
+
+                      {user?.role === "ADMIN" && (
+                        <div className="col-span-full mt-6">
+                          <InversionistasInfo
+                            inversionistas={item.inversionistas}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </React.Fragment>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+// Componentes auxiliares para reutilización
+function DetallesCredito({
+  item,
+  fullWidth = false,
+}: {
+  item: any;
+  fullWidth?: boolean;
+}) {
+  return (
+    <>
+      {fullWidth && (
+        <div className="col-span-full">
+          <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
+            Detalles del crédito
+          </h4>
+        </div>
+      )}
+
+      {!fullWidth && (
+        <div className="bg-blue-50 rounded-2xl p-4">
+          <h4 className="text-xl font-extrabold text-blue-800 mb-2 text-center uppercase">
+            Detalles del crédito
+          </h4>
+        </div>
+      )}
+
+      <div
+        className={
+          fullWidth
+            ? "col-span-full grid grid-cols-3 gap-4"
+            : "grid grid-cols-2 gap-3 text-center"
+        }
+      >
+        {[
+          ["Capital", item.creditos.capital],
+          ["Porcentaje Interés", `${item.creditos.porcentaje_interes}%`],
+          ["Deuda Total", item.creditos.deudatotal],
+          ["Cuota", item.creditos.cuota],
+          ["Cuota Interés", item.creditos.cuota_interes],
+          ["IVA 12%", item.creditos.iva_12],
+          ["Seguro 10 Cuotas", item.creditos.seguro_10_cuotas],
+          ["GPS", item.creditos.gps],
+          ["Membresías", item.creditos.membresias],
+          ["Royalti", item.creditos.royalti],
+          ["Plazo", item.creditos.plazo],
+          ["Formato Crédito", item.creditos.formato_credito],
+        ].map(([label, value]) => (
+          <div
+            key={label}
+            className={`p-3 rounded-lg bg-white border shadow-sm ${
+              fullWidth
+                ? "hover:shadow-md transition"
+                : "flex flex-col items-center"
+            }`}
+          >
+            <span className="font-bold text-blue-700">{label}:</span>
+            <p className="text-gray-800">
+              {typeof value === "number"
+                ? `Q${Number(value).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}`
+                : value}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Observaciones */}
+      <div className={fullWidth ? "col-span-full" : "mt-4"}>
+        <span className="font-bold text-blue-700">Observaciones:</span>
+        <div className="text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
+          <details className="cursor-pointer">
+            <summary className="text-blue-600 font-semibold select-none">
+              {item.creditos.observaciones
+                ? "Ver observaciones"
+                : "No hay observaciones"}
+            </summary>
+            {item.creditos.observaciones && (
+              <p className="mt-2 whitespace-pre-line leading-relaxed">
+                {item.creditos.observaciones}
+              </p>
+            )}
+          </details>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function MoraInfo({ mora }: { mora: any }) {
+  return (
+    <div className="bg-yellow-50 rounded-2xl p-4">
+      <h4 className="text-lg font-extrabold text-yellow-800 mb-3 text-center">
+        Detalles de Mora
+      </h4>
+      <div className="grid grid-cols-2 gap-3 text-center">
+        <div className="p-3 bg-white border rounded-lg shadow-sm">
+          <span className="font-bold text-yellow-700 block">Monto Mora</span>
+          <span className="text-gray-900 font-semibold">
+            Q
+            {Number(mora?.monto_mora || 0).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </span>
+        </div>
+        <div className="p-3 bg-white border rounded-lg shadow-sm">
+          <span className="font-bold text-yellow-700 block">% Mora</span>
+          <span className="text-gray-900 font-semibold">
+            {mora?.porcentaje_mora}%
+          </span>
+        </div>
+        <div className="p-3 bg-white border rounded-lg shadow-sm col-span-2">
+          <span className="font-bold text-yellow-700 block">
+            Cuotas atrasadas
+          </span>
+          <span className="text-gray-900 font-semibold">
+            {mora?.cuotas_atrasadas}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function IncobrableInfo({ incobrable }: { incobrable: any }) {
+  return (
+    <div>
+      <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
+        Información de Incobrable
+      </h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-blue-700">Motivo:</span>
+          <p className="text-gray-800">{incobrable.motivo}</p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-blue-700">Fecha Registro:</span>
+          <p className="text-gray-800">
+            {new Date(incobrable.fecha_registro).toLocaleDateString("es-ES", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+            })}
+          </p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-blue-700">Monto Incobrable:</span>
+          <p className="text-gray-800">
+            Q
+            {Number(incobrable.monto_incobrable).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm col-span-full">
+          <span className="font-bold text-blue-700">Observaciones:</span>
+          <div className="max-h-24 overflow-y-auto text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
+            {incobrable.observaciones || "--"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CancelacionInfo({ cancelacion }: { cancelacion: any }) {
+  return (
+    <div>
+      <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
+        Información de Cancelación
+      </h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-blue-700">Motivo:</span>
+          <p className="text-gray-800">{cancelacion.motivo}</p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-blue-700">Fecha:</span>
+          <p className="text-gray-800">
+            {new Date(cancelacion.fecha_cancelacion).toLocaleDateString(
+              "es-ES",
+              {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+              }
+            )}
+          </p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm">
+          <span className="font-bold text-blue-700">Monto Cancelación:</span>
+          <p className="text-gray-800">
+            Q
+            {Number(cancelacion.monto_cancelacion).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+        <div className="p-3 rounded-lg bg-white border shadow-sm col-span-full">
+          <span className="font-bold text-blue-700">Observaciones:</span>
+          <div className="max-h-24 overflow-y-auto text-sm text-gray-800 p-2 border rounded-md bg-gray-50 break-words">
+            {cancelacion.observaciones || "--"}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UsuarioInfo({ usuario }: { usuario: any }) {
+  return (
+    <div>
+      <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
+        Información del usuario
+      </h4>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div>
+          <span className="font-bold text-blue-700">Nombre:</span>
+          <p>{usuario.nombre}</p>
+        </div>
+        <div>
+          <span className="font-bold text-blue-700">NIT:</span>
+          <p>{usuario.nit}</p>
+        </div>
+        <div>
+          <span className="font-bold text-blue-700">Categoría:</span>
+          <p>{usuario.categoria}</p>
+        </div>
+        <div>
+          <span className="font-bold text-blue-700">Saldo a favor:</span>
+          <p>
+            Q
+            {Number(usuario.saldo_a_favor).toLocaleString("es-GT", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InversionistasInfo({ inversionistas }: { inversionistas: any[] }) {
+  return (
+    <div>
+      <h4 className="text-xl font-bold text-blue-800 border-b pb-2 mb-4">
+        Inversionistas asociados
+      </h4>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {inversionistas.map((inv: any, idx: number) => (
+          <div
+            key={idx}
+            className="border border-blue-200 bg-gradient-to-br from-white to-blue-50 rounded-xl p-5 shadow-sm hover:shadow-md transition"
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h5 className="text-lg font-bold text-blue-700">{inv.nombre}</h5>
+              <span
+                className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                  inv.emite_factura
+                    ? "bg-green-100 text-green-700 border border-green-200"
+                    : "bg-gray-100 text-gray-600 border border-gray-200"
+                }`}
+              >
+                {inv.emite_factura ? "Emite Factura" : "Sin Factura"}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="font-bold text-blue-700 block">
+                  Monto Aportado
+                </span>
+                <span className="text-gray-900 font-semibold">
+                  Q
+                  {Number(inv.monto_aportado).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">
+                  Monto Cash In
+                </span>
+                <span className="text-gray-900 font-semibold">
+                  Q
+                  {Number(inv.monto_cash_in).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">
+                  Monto Inversión
+                </span>
+                <span className="text-gray-900 font-semibold">
+                  Q
+                  {Number(inv.monto_inversionista).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">
+                  IVA Cash In
+                </span>
+                <span className="text-gray-900 font-semibold">
+                  Q
+                  {Number(inv.iva_cash_in).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">
+                  IVA Inversión
+                </span>
+                <span className="text-gray-900 font-semibold">
+                  Q
+                  {Number(inv.iva_inversionista).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">
+                  % Inversión
+                </span>
+                <span className="text-gray-900 font-semibold">
+                  {inv.porcentaje_participacion_inversionista}%
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">% Cash In</span>
+                <span className="text-gray-900 font-semibold">
+                  {inv.porcentaje_cash_in}%
+                </span>
+              </div>
+              <div>
+                <span className="font-bold text-blue-700 block">Cuota</span>
+                <span className="text-gray-900 font-semibold">
+                  Q
+                  {Number(inv.cuota_inversionista).toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+ 

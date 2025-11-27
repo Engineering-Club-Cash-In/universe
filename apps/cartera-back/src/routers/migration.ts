@@ -8,6 +8,7 @@ import { authMiddleware } from "./midleware";
 import { listarCreditosConDetalle } from "../migration/migrationCredits";
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
+import { liquidarCuotasPorUsuario } from "../controllers/liquidateInvestor";
 // ✅ Schema para sync de pagos desde SIFCO (param opcional)
 const syncCreditPaymentsSchema = z.object({
   numero_credito_sifco: z.string().min(1).optional(),
@@ -264,3 +265,70 @@ export const sifcoRouter = new Elysia()
   }
 )
 
+.post(
+    "/liquidar-cuotas",
+    async ({ body, set }) => {
+      try {
+        console.log("[liquidar-cuotas] Iniciando liquidación...");
+
+        const { nombre_usuario, meses_liquidar } = body;
+
+        // Validaciones básicas
+        if (!nombre_usuario || !meses_liquidar) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "nombre_usuario y meses_liquidar son requeridos",
+          };
+        }
+
+        if (meses_liquidar <= 0) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "meses_liquidar debe ser mayor a 0",
+          };
+        }
+
+        // Llamar al servicio
+        const resultado = await liquidarCuotasPorUsuario({
+          nombre_usuario,
+          meses_liquidar,
+        });
+
+        if (resultado.success) {
+          set.status = 200;
+          return resultado;
+        } else {
+          set.status = 400;
+          return resultado;
+        }
+      } catch (error: any) {
+        console.error("[ERROR] /liquidar-cuotas:", error?.message || error);
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al procesar liquidación de cuotas",
+          error: error?.message ?? String(error),
+        };
+      }
+    },
+    {
+      detail: {
+        summary: "Liquida cuotas de créditos por nombre de usuario",
+        tags: ["Liquidaciones"],
+        description: "Marca las cuotas como liquidadas hasta el mes especificado para todos los créditos del usuario",
+      },
+      body: t.Object({
+        nombre_usuario: t.String({
+          description: "Nombre del usuario (búsqueda flexible)",
+          examples: ["Christopher Miguel", "Fernando Alfonso"],
+        }),
+        meses_liquidar: t.Number({
+          description: "Hasta qué cuota marcar como liquidada",
+          examples: [2, 5, 10],
+          minimum: 1,
+        }),
+      }),
+    }
+  );

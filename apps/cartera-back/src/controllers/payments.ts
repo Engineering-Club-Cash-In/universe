@@ -90,7 +90,8 @@ export async function getAllPagosWithCreditAndInversionistas(
         usuario_categoria: usuarios.categoria,
         usuario_nit: usuarios.nit,
         validationStatus: pagos_credito.validationStatus,
-
+        liquidacion_inversionistas: cuotas_credito.liquidado_inversionistas,
+        fechaLiquidacion: cuotas_credito.fecha_liquidacion_inversionistas,
         paymentFalse: pagos_credito.paymentFalse,
       })
       .from(pagos_credito)
@@ -307,7 +308,8 @@ export async function getPayments(
 export async function insertPagosCreditoInversionistas(
   pago_id: number,
   credito_id: number,
-  excludeCube: boolean = false
+  excludeCube: boolean = false,
+  cuotaPagada:boolean = false
 ) {
   console.log(
     "\n🔍 ========== INICIO insertPagosCreditoInversionistas =========="
@@ -500,12 +502,12 @@ export async function insertPagosCreditoInversionistas(
     console.log(`      addition: false (RESTA)`);
     console.log(`      inversionista_id: ${inv.inversionista_id}`);
 
-    await processAndReplaceCreditInvestors(
+  if (!cuotaPagada) {  await processAndReplaceCreditInvestors(
       credito_id,
       abono_capital.toNumber(),
       false,
       inv.inversionista_id
-    );
+    );}
 
     console.log(`   📊 Porcentajes:`);
     console.log(`      porcentaje_cash_in: ${inv.porcentaje_cash_in}`);
@@ -1376,7 +1378,7 @@ export async function obtenerCreditosConPagosPendientes(
       .where(
         and(
           eq(creditos_inversionistas.inversionista_id, inversionistaId),
-          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO","PENDIENTE_CANCELACION","EN_CONVENIO"]) // Solo créditos vigentes
+          inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "PENDIENTE_CANCELACION", "EN_CONVENIO"]) // Solo créditos vigentes
         )
       );
 
@@ -1385,99 +1387,112 @@ export async function obtenerCreditosConPagosPendientes(
       creditosInversionista.length
     );
 
-    // 2️⃣ PASO 2: Por cada crédito, obtener cuota actual y pagos pendientes
+    // 2️⃣ PASO 2: Por cada crédito, buscar la PRIMERA CUOTA NO LIQUIDADA con sus PAGOS
     const creditosConPagos = await Promise.all(
       creditosInversionista.map(async (credito) => {
-        // 📅 Buscar la CUOTA ACTUAL (próxima cuota sin pagar completamente)
-        // - Debe pertenecer al crédito
-        // - No debe estar pagada (pagado = false)
-        // - Fecha de vencimiento >= hoy
-        const [cuotaActual] = await db
-          .select()
+        // 📅 Buscar la PRIMERA CUOTA NO LIQUIDADA CON SUS PAGOS (en un solo query)
+        const cuotaConPagos = await db
+          .select({
+            // Campos de la cuota
+            cuotaId: cuotas_credito.cuota_id,
+            numeroCuota: cuotas_credito.numero_cuota,
+            fechaVencimiento: cuotas_credito.fecha_vencimiento,
+            pagadoCuota: cuotas_credito.pagado,
+            liquidadoInversionistas: cuotas_credito.liquidado_inversionistas,
+            fechaLiquidacion: cuotas_credito.fecha_liquidacion_inversionistas,
+            // Campos del pago
+            pagoId: pagos_credito.pago_id,
+            fechaPago: pagos_credito.fecha_pago,
+            montoBoleta: pagos_credito.monto_boleta,
+            abonoCapital: pagos_credito.abono_capital,
+            abonoInteres: pagos_credito.abono_interes,
+            abonoIva: pagos_credito.abono_iva_12,
+            abonoSeguro: pagos_credito.abono_seguro,
+            abonoGps: pagos_credito.abono_gps,
+            validationStatus: pagos_credito.validationStatus,
+            pagadoPago: pagos_credito.pagado,
+          })
           .from(cuotas_credito)
+          .innerJoin(
+            pagos_credito,
+            eq(cuotas_credito.cuota_id, pagos_credito.cuota_id)
+          )
           .where(
             and(
               eq(cuotas_credito.credito_id, credito.creditoId),
-              eq(cuotas_credito.pagado, false), // 🔥 Solo cuotas NO pagadas
-              gte(cuotas_credito.fecha_vencimiento, hoy) // Desde hoy en adelante
+              eq(cuotas_credito.liquidado_inversionistas, false) // 🔥 NO liquidada
             )
           )
-          .orderBy(cuotas_credito.fecha_vencimiento) // Ordenar por fecha más próxima
-          .limit(1); // Solo la primera (más cercana)
+          .orderBy(cuotas_credito.numero_cuota, pagos_credito.fecha_pago); // Primero por cuota, luego por fecha de pago
+
         console.log(
-          `🔍 Crédito ${credito.creditoId}: Cuota actual encontrada:`,
-          cuotaActual
+          `🔍 Crédito ${credito.creditoId}: Registros encontrados:`,
+          cuotaConPagos.length
         );
-        // ⚠️ Si no hay cuota pendiente, este crédito no tiene pagos por procesar
-        if (!cuotaActual) {
+
+        // ⚠️ Si no hay registros, este crédito no tiene cuotas sin liquidar con pagos
+        if (cuotaConPagos.length === 0) {
           console.log(
-            `⚠️ Crédito ${credito.creditoId}: No hay cuota pendiente`
+            `⚠️ Crédito ${credito.creditoId}: No hay cuotas sin liquidar con pagos`
           );
           return null;
         }
 
-        // 3️⃣ PASO 3: Buscar PAGOS de esta cuota que NO estén pagados
-        // Estos son los pagos registrados en pagos_credito que aún no se han
-        // distribuido entre los inversionistas
-        const pagosPendientes = await db
-          .select()
-          .from(pagos_credito)
-          .where(
-            and(
-              eq(pagos_credito.credito_id, credito.creditoId), // Del crédito actual
-              eq(pagos_credito.cuota_id, cuotaActual.cuota_id), // De la cuota actual
-              eq(pagos_credito.pagado, false), // 🔥 Solo pagos NO pagados
-              // Solo pagos validados o pendientes de validación
-              eq(pagos_credito.validationStatus, "no_required")
-            )
-          )
-          .orderBy(pagos_credito.fecha_pago);
-        console.log(
-          `🔍 Crédito ${credito.creditoId}, Cuota ${cuotaActual.numero_cuota}: Pagos pendientes encontrados:`,
-          pagosPendientes
-        );
-        // ⚠️ Si no hay pagos pendientes, este crédito no tiene nada por distribuir
-        if (pagosPendientes.length === 0) {
-          console.log(
-            `⚠️ Crédito ${credito.creditoId}, Cuota ${cuotaActual.numero_cuota}: No hay pagos pendientes`
-          );
-          return null;
-        }
+        // 🎯 Todos los registros son de la MISMA cuota (la más baja sin liquidar)
+        // porque ordenamos por numero_cuota y tomamos todas las filas de esa cuota
+        const primeraFila = cuotaConPagos[0];
+        const numeroCuota = primeraFila.numeroCuota;
 
-        console.log(
-          `✅ Crédito ${credito.creditoId}, Cuota ${cuotaActual.numero_cuota}: ${pagosPendientes.length} pagos pendientes`
+        // Filtrar solo los pagos de la primera cuota (por si acaso vinieron más)
+        const pagosDeLaCuota = cuotaConPagos.filter(
+          (row) => row.numeroCuota === numeroCuota
         );
 
-        // 4️⃣ PASO 4: Si generateFalsePayment=true, generar pagos en pagos_credito_inversionistas
+        console.log(
+          `✅ Crédito ${credito.creditoId}, Cuota ${numeroCuota}: ${pagosDeLaCuota.length} pagos encontrados`
+        );
+
+        // 4️⃣ PASO 4: Si generateFalsePayment=true, generar distribución
         if (generateFalsePayment) {
           console.log(
-            `🚀 Generando pagos para inversionista ${inversionistaId}...`
+            `🚀 Generando distribución de pagos para crédito ${credito.creditoId}...`
           );
 
-          // Procesar cada pago pendiente
-          for (const pago of pagosPendientes) {
-            try {
-              console.log(
-                `  📝 Procesando pago ${pago.pago_id} del crédito ${credito.creditoId}...`
-              );
+          // 🎯 Tomar solo el PRIMER pago de la lista
+          const primerPago = pagosDeLaCuota[0];
+          
+          // 📋 Verificar si la cuota está pagada
+          const cuotaPagada = primeraFila.pagadoCuota ?? false;
+          
+          console.log(
+            `  📊 Cuota ${numeroCuota} - Estado pagado: ${cuotaPagada ? 'SÍ' : 'NO'}`
+          );
 
-              // 🎯 Llamar a insertPagosCreditoInversionistas
-              // - pago_id: ID del pago a distribuir
-              // - credito_id: ID del crédito
-              // - true: Excluir Cube Investments
-              await insertPagosCreditoInversionistas(
-                pago.pago_id,
-                credito.creditoId,
-                true
-              );
+          try {
+            console.log(
+              `  📝 Procesando distribución con pago ${primerPago.pagoId} del crédito ${credito.creditoId}...`
+            );
 
-              console.log(`  ✅ Pago ${pago.pago_id} procesado correctamente`);
-            } catch (error) {
-              console.error(
-                `  ❌ Error procesando pago ${pago.pago_id}:`,
-                error
-              );
-            }
+            // 🎯 Llamar a insertPagosCreditoInversionistas
+            // - pago_id: ID del primer pago
+            // - credito_id: ID del crédito
+            // - true: Excluir Cube Investments
+            // - cuotaPagada: Si la cuota está pagada o no
+            await insertPagosCreditoInversionistas(
+              primerPago.pagoId,
+              credito.creditoId,
+              true,
+              cuotaPagada // 👈 Pasamos si la cuota está pagada
+            );
+
+            console.log(
+              `  ✅ Distribución completada correctamente (cuota pagada: ${cuotaPagada})`
+            );
+          } catch (error) {
+            console.error(
+              `  ❌ Error procesando distribución del pago ${primerPago.pagoId}:`,
+              error
+            );
           }
         }
 
@@ -1493,44 +1508,46 @@ export async function obtenerCreditosConPagosPendientes(
             porcentajeParticipacion: credito.porcentajeParticipacion,
           },
           cuotaActual: {
-            cuotaId: cuotaActual.cuota_id,
-            numeroCuota: cuotaActual.numero_cuota,
-            fechaVencimiento: cuotaActual.fecha_vencimiento,
+            cuotaId: primeraFila.cuotaId,
+            numeroCuota: primeraFila.numeroCuota,
+            fechaVencimiento: primeraFila.fechaVencimiento,
+            pagado: primeraFila.pagadoCuota,
+            liquidadoInversionistas: primeraFila.liquidadoInversionistas,
+            fechaLiquidacion: primeraFila.fechaLiquidacion,
             montoCuota: credito.cuota,
-            capital: credito.capital,
           },
-          pagosPendientes: pagosPendientes.map((p) => ({
-            pagoId: p.pago_id,
-            creditoId: p.credito_id,
-            cuotaId: p.cuota_id,
-            fechaPago: p.fecha_pago,
-            montoBoleta: p.monto_boleta,
-            abonoCapital: p.abono_capital,
-            abonoInteres: p.abono_interes,
-            abonoIva: p.abono_iva_12,
-            abonoSeguro: p.abono_seguro,
-            abonoGps: p.abono_gps,
-            validationStatus: p.validationStatus,
-            pagado: p.pagado,
+          pagosEncontrados: pagosDeLaCuota.map((row) => ({
+            pagoId: row.pagoId,
+            creditoId: credito.creditoId,
+            cuotaId: row.cuotaId,
+            fechaPago: row.fechaPago,
+            montoBoleta: row.montoBoleta,
+            abonoCapital: row.abonoCapital,
+            abonoInteres: row.abonoInteres,
+            abonoIva: row.abonoIva,
+            abonoSeguro: row.abonoSeguro,
+            abonoGps: row.abonoGps,
+            validationStatus: row.validationStatus,
+            pagado: row.pagadoPago,
           })),
         };
       })
     );
 
-    // 6️⃣ PASO 6: Filtrar nulls (créditos sin pagos pendientes)
-    const creditosConPagosPendientes = creditosConPagos.filter(
+    // 6️⃣ PASO 6: Filtrar nulls (créditos sin cuotas pendientes)
+    const creditosConCuotasPendientes = creditosConPagos.filter(
       (c) => c !== null
     );
 
     console.log(
-      `✅ Total créditos con pagos pendientes: ${creditosConPagosPendientes.length}`
+      `✅ Total créditos con cuotas NO liquidadas: ${creditosConCuotasPendientes.length}`
     );
 
     return {
       success: true,
       inversionistaId,
-      totalCreditosConPagos: creditosConPagosPendientes.length,
-      data: creditosConPagosPendientes,
+      totalCreditosConCuotas: creditosConCuotasPendientes.length,
+      data: creditosConCuotasPendientes,
       pagosGenerados: generateFalsePayment, // Indica si se generaron los pagos
     };
   } catch (error: any) {

@@ -31,6 +31,9 @@ export async function createPaymentAgreement(
   input: CreatePaymentAgreementInput
 ) {
   try {
+    console.log("🚀 ========== INICIANDO CREACIÓN DE CONVENIO ==========");
+    console.log("📦 Input recibido:", JSON.stringify(input, null, 2));
+
     const {
       credit_id,
       payment_ids,
@@ -41,7 +44,11 @@ export async function createPaymentAgreement(
       created_by,
     } = input;
 
-    // Validate input
+    // ============================================
+    // 📋 VALIDACIONES DE INPUT
+    // ============================================
+    console.log("✅ Paso 1: Validando input...");
+    
     if (!credit_id || !payment_ids || payment_ids.length === 0) {
       throw new Error("Credit ID and payment IDs are required");
     }
@@ -54,6 +61,13 @@ export async function createPaymentAgreement(
       throw new Error("Number of months must be greater than 0");
     }
 
+    console.log("✅ Input validado correctamente");
+
+    // ============================================
+    // 👤 BUSCAR USUARIO CREADOR
+    // ============================================
+    console.log("✅ Paso 2: Buscando usuario creador...");
+    
     const [usuario] = await db
       .select({ email: platform_users.email })
       .from(platform_users)
@@ -64,7 +78,14 @@ export async function createPaymentAgreement(
       throw new Error("Usuario no encontrado");
     }
 
-    // 👇 1. Buscar los PAGOS directamente (ya vienen del frontend)
+    console.log("✅ Usuario encontrado:", usuario.email);
+
+    // ============================================
+    // 💰 BUSCAR LOS PAGOS Y CUOTAS
+    // ============================================
+    console.log("✅ Paso 3: Buscando pagos y cuotas asociadas...");
+    console.log("🔍 Payment IDs:", payment_ids);
+    
     const pagos = await db
       .select({
         pago: pagos_credito,
@@ -77,6 +98,9 @@ export async function createPaymentAgreement(
       )
       .where(inArray(pagos_credito.pago_id, payment_ids));
 
+    console.log("📊 Pagos encontrados:", pagos.length);
+    console.log("📋 Detalle de pagos:", JSON.stringify(pagos, null, 2));
+
     if (pagos.length === 0) {
       throw new Error("No se encontraron pagos con los IDs proporcionados");
     }
@@ -85,19 +109,35 @@ export async function createPaymentAgreement(
       throw new Error("Algunos pagos no existen");
     }
 
-    // 👇 2. Verificar que todos los pagos pertenezcan al mismo crédito
+    console.log("✅ Todos los pagos existen");
+
+    // ============================================
+    // 🔍 VERIFICAR QUE PERTENEZCAN AL MISMO CRÉDITO
+    // ============================================
+    console.log("✅ Paso 4: Verificando que todos los pagos pertenezcan al crédito...");
+    
     const allFromSameCredit = pagos.every(
       (item) => item.pago.credito_id === credit_id
     );
 
     if (!allFromSameCredit) {
+      console.error("❌ Pagos de diferentes créditos detectados!");
+      console.error("Crédito esperado:", credit_id);
+      console.error("Créditos en pagos:", pagos.map(p => p.pago.credito_id));
       throw new Error("Todos los pagos deben pertenecer al mismo crédito");
     }
 
-    // 👇 3. VALIDAR que los PAGOS NO estén pagados
+    console.log("✅ Todos los pagos pertenecen al crédito:", credit_id);
+
+    // ============================================
+    // ⚠️ VALIDAR QUE LOS PAGOS NO ESTÉN PAGADOS
+    // ============================================
+    console.log("✅ Paso 5: Validando que los pagos NO estén marcados como pagados...");
+    
     const pagosPagados = pagos.filter((item) => item.pago.pagado === true);
 
     if (pagosPagados.length > 0) {
+      console.error("❌ Pagos pagados detectados:", pagosPagados.length);
       const numerosCuotasPagadas = pagosPagados
         .map((item) => `Cuota #${item.cuota.numero_cuota}`)
         .join(", ");
@@ -106,10 +146,17 @@ export async function createPaymentAgreement(
       );
     }
 
-    // 👇 4. VALIDAR que las CUOTAS NO estén pagadas (doble verificación)
+    console.log("✅ Ningún pago está marcado como pagado");
+
+    // ============================================
+    // ⚠️ VALIDAR QUE LAS CUOTAS NO ESTÉN PAGADAS
+    // ============================================
+    console.log("✅ Paso 6: Validando que las cuotas NO estén pagadas (doble verificación)...");
+    
     const cuotasPagadas = pagos.filter((item) => item.cuota.pagado === true);
 
     if (cuotasPagadas.length > 0) {
+      console.error("❌ Cuotas pagadas detectadas:", cuotasPagadas.length);
       const numerosCuotasPagadas = cuotasPagadas
         .map((item) => `Cuota #${item.cuota.numero_cuota}`)
         .join(", ");
@@ -118,7 +165,13 @@ export async function createPaymentAgreement(
       );
     }
 
-    // 5. Check if credit exists
+    console.log("✅ Ninguna cuota está pagada");
+
+    // ============================================
+    // 🏦 VERIFICAR QUE EL CRÉDITO EXISTA
+    // ============================================
+    console.log("✅ Paso 7: Verificando que el crédito exista...");
+    
     const [creditExists] = await db
       .select()
       .from(creditos)
@@ -128,7 +181,15 @@ export async function createPaymentAgreement(
       throw new Error("Crédito no encontrado");
     }
 
-    // 6. Check if credit already has an active agreement
+    console.log("✅ Crédito encontrado!");
+    console.log("📊 Estado actual del crédito:", creditExists.statusCredit);
+    console.log("📊 Cliente:", creditExists.credito_id);
+
+    // ============================================
+    // 🔍 VERIFICAR QUE NO TENGA CONVENIO ACTIVO
+    // ============================================
+    console.log("✅ Paso 8: Verificando que NO tenga un convenio activo...");
+    
     const existingAgreement = await db
       .select()
       .from(convenios_pago)
@@ -141,13 +202,29 @@ export async function createPaymentAgreement(
       );
 
     if (existingAgreement.length > 0) {
+      console.error("❌ Ya existe un convenio activo!");
+      console.error("Convenio existente:", existingAgreement[0]);
       throw new Error("El crédito ya tiene un convenio de pago activo");
     }
 
-    // 7. Calculate monthly installment
-    const monthly_installment = total_agreement_amount / number_of_months;
+    console.log("✅ No hay convenios activos para este crédito");
 
-    // 8. Create the agreement
+    // ============================================
+    // 💵 CALCULAR CUOTA MENSUAL
+    // ============================================
+    console.log("✅ Paso 9: Calculando cuota mensual...");
+    
+    const monthly_installment = total_agreement_amount / number_of_months;
+    
+    console.log("💰 Monto total convenio:", total_agreement_amount);
+    console.log("📅 Número de meses:", number_of_months);
+    console.log("💵 Cuota mensual calculada:", monthly_installment);
+
+    // ============================================
+    // 📝 CREAR EL CONVENIO DE PAGO
+    // ============================================
+    console.log("✅ Paso 10: Creando el convenio de pago...");
+    
     const [agreement] = await db
       .insert(convenios_pago)
       .values({
@@ -160,7 +237,7 @@ export async function createPaymentAgreement(
         monto_pendiente: total_agreement_amount.toString(),
         pagos_realizados: 0,
         pagos_pendientes: number_of_months,
-        activo: true,
+        activo: false,
         completado: false,
         motivo: reason,
         observaciones: observations,
@@ -172,15 +249,31 @@ export async function createPaymentAgreement(
       throw new Error("Error al crear el convenio de pago");
     }
 
-    // 👇 9. Asociar los PAGOS al convenio (tabla pivot)
+    console.log("✅ Convenio creado exitosamente!");
+    console.log("🆔 Convenio ID:", agreement.convenio_id);
+    console.log("📋 Convenio completo:", JSON.stringify(agreement, null, 2));
+
+    // ============================================
+    // 🔗 ASOCIAR PAGOS AL CONVENIO (Tabla Pivot)
+    // ============================================
+    console.log("✅ Paso 11: Asociando pagos al convenio...");
+    
     const agreementPaymentsData = payment_ids.map((pago_id) => ({
       convenio_id: agreement.convenio_id,
       pago_id: pago_id,
     }));
 
+    console.log("📦 Datos a insertar en pivot:", agreementPaymentsData);
+
     await db.insert(convenios_pagos_resume).values(agreementPaymentsData);
 
-    // 🔥 10. CREAR LAS CUOTAS DEL CONVENIO
+    console.log("✅ Pagos asociados al convenio correctamente");
+
+    // ============================================
+    // 📅 CREAR LAS CUOTAS DEL CONVENIO
+    // ============================================
+    console.log("✅ Paso 12: Creando las cuotas del convenio...");
+    
     const fechaCreacion = new Date();
     const diaCreacion = fechaCreacion.getDate();
     
@@ -190,13 +283,15 @@ export async function createPaymentAgreement(
     if (diaCreacion > 15) {
       // Si es después del 15, vence el 30 del mes actual
       primeraFechaVencimiento.setDate(30);
+      console.log("📆 Primera cuota vencerá el día 30 (creado después del 15)");
     } else {
       // Si es el 15 o antes, vence el 15 del mes actual
       primeraFechaVencimiento.setDate(15);
+      console.log("📆 Primera cuota vencerá el día 15 (creado el 15 o antes)");
     }
     
-    console.log("📅 Fecha de creación del convenio:", fechaCreacion);
-    console.log("📅 Primera fecha de vencimiento:", primeraFechaVencimiento);
+    console.log("📅 Fecha de creación del convenio:", fechaCreacion.toISOString());
+    console.log("📅 Primera fecha de vencimiento:", primeraFechaVencimiento.toISOString());
     
     // Crear todas las cuotas del convenio
     const cuotasConvenio = [];
@@ -236,20 +331,62 @@ export async function createPaymentAgreement(
     }
     
     await db.insert(convenio_cuotas).values(cuotasConvenio);
+    
+    console.log("✅ Cuotas del convenio creadas exitosamente!");
 
-    // 11. Update credit status to "EN_CONVENIO"
-    await db
-      .update(creditos)
-      .set({
-        statusCredit: "EN_CONVENIO",
-      })
-      .where(eq(creditos.credito_id, credit_id));
-
+    // ============================================
+    // 🔄 ACTUALIZAR ESTADO DEL CRÉDITO
+    // ============================================
+    console.log("🔥 ========== ACTUALIZANDO ESTADO DEL CRÉDITO ==========");
+    console.log("🔥 Crédito ID:", credit_id);
+    console.log("🔥 Estado actual:", creditExists.statusCredit);
+    console.log("🔥 Estado nuevo: EN_CONVENIO");
+    console.log("🔥 Convenio ID:", agreement.convenio_id);
+  // ============================================
+    // 💸 CONDONAR LA MORA
+    // ============================================
+    console.log("✅ Paso 13: Condonando mora del crédito...");
+    
     await condonarMora({
       credito_id: credit_id,
       motivo: "Condonación de mora por creación de convenio de pago",
       usuario_email: usuario.email,
     });
+    const resultadoUpdate = await db
+      .update(creditos)
+      .set({
+        statusCredit: "EN_CONVENIO",
+      })
+      .where(eq(creditos.credito_id, credit_id))
+      .returning();
+
+    console.log("🔥 Resultado del UPDATE:", JSON.stringify(resultadoUpdate, null, 2));
+    console.log("🔥 Cantidad de registros actualizados:", resultadoUpdate.length);
+
+    if (resultadoUpdate.length > 0) {
+      console.log("✅ Nuevo estado del crédito:", resultadoUpdate[0].statusCredit);
+      console.log("✅ ¡Estado actualizado correctamente!");
+    } else {
+      console.error("❌ NO SE ACTUALIZÓ NINGÚN REGISTRO!");
+      console.error("❌ Verificar que el credit_id existe:", credit_id);
+    }
+
+    console.log("🔥 ========== FIN ACTUALIZACIÓN DE ESTADO ==========");
+
+  
+
+    console.log("✅ Mora condonada exitosamente");
+
+    // ============================================
+    // 🎉 RESPUESTA EXITOSA
+    // ============================================
+    console.log("🎉 ========== CONVENIO CREADO EXITOSAMENTE ==========");
+    console.log("✅ Todo el proceso completado sin errores");
+    console.log("🆔 Convenio ID:", agreement.convenio_id);
+    console.log("💰 Monto total:", total_agreement_amount);
+    console.log("📅 Cuotas creadas:", number_of_months);
+    console.log("📊 Estado del crédito:", resultadoUpdate[0]?.statusCredit || "UNKNOWN");
+    console.log("🎉 ========================================");
 
     return {
       success: true,
@@ -257,7 +394,11 @@ export async function createPaymentAgreement(
       message: "Convenio de pago creado exitosamente",
     };
   } catch (error) {
-    console.error("Error creating payment agreement:", error);
+    console.error("💥 ========== ERROR EN CREACIÓN DE CONVENIO ==========");
+    console.error("❌ Error:", error);
+    console.error("❌ Mensaje:", error instanceof Error ? error.message : "Error desconocido");
+    console.error("❌ Stack:", error instanceof Error ? error.stack : "No stack available");
+    console.error("💥 ========================================");
 
     return {
       success: false,
@@ -267,7 +408,6 @@ export async function createPaymentAgreement(
     };
   }
 }
-
 interface GetPaymentAgreementsFilters {
   credit_id?: number;
   start_date?: Date;
@@ -545,9 +685,7 @@ interface ProcessConvenioPaymentResult {
   } | null;
   pago_completo: boolean;
   monto_aplicado: string;
-  monto_restante: string;
-  cuotas_procesadas: ConvenioCuotaProcessed[];
-  cuotas_aplicadas: string;
+  monto_restante: string; 
 }
 
 export async function processConvenioPayment(
@@ -581,9 +719,7 @@ export async function processConvenioPayment(
         convenio: null,
         pago_completo: false,
         monto_aplicado: "0",
-        monto_restante: "0",
-        cuotas_procesadas: [],
-        cuotas_aplicadas: "0",
+        monto_restante: "0",  
       };
     }
 
@@ -691,13 +827,7 @@ export async function processConvenioPayment(
   console.log("⚠️ Pago parcial - no se marca cuota del convenio como pagada");
 }
 
-    // 11. 🔥 Procesar las cuotas del convenio con toda la info precargada
-    const resultadoCuotas = await processConvenioCuotas({
-      convenio_id: convenio.convenio_id,
-      monto_disponible: parseFloat(montoAplicarBig.toFixed(2)),
-      creditoInfo: creditoInfo,
-      pagoMetadata: pagoMetadata,
-    });
+   
 
     // 12. Retornar resultado
     return {
@@ -721,8 +851,6 @@ export async function processConvenioPayment(
       pago_completo: pagoCompleto,
       monto_aplicado: montoAplicarBig.toFixed(2),
       monto_restante: nuevoMontoPendienteBig.toFixed(2),
-      cuotas_procesadas: resultadoCuotas.cuotas_procesadas,
-      cuotas_aplicadas: resultadoCuotas.monto_aplicado_total,
     };
   } catch (error) {
     console.error("Error procesando pago de convenio:", error);
@@ -1259,3 +1387,17 @@ export async function processConvenioCuotas(
     );
   }
 }
+
+
+export const updateConvenioStatus = async (
+  convenio_id: number,
+  status:boolean
+) => {
+  try {
+    await db.update(convenios_pago)
+      .set({ activo: status, updated_at: new Date() })
+      .where(eq(convenios_pago.convenio_id, convenio_id));
+    return { success: true, message: "Convenio status updated successfully" };
+  } catch (error) {
+    console.error("Error updating convenio status:", error);
+    return { success: false, message: "Error updating convenio status", error };   } }

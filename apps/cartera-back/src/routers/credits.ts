@@ -6,6 +6,7 @@ import {
   getCreditoByNumero,
   getCreditosIncobrables,
   getCreditosWithUserByMesAnio, 
+  mergeCreditosAndUpdate, 
   resetCredit, 
 } from "../controllers/credits";
 import { z } from "zod";
@@ -39,6 +40,16 @@ const MontoAdicionalSchema = z.object({
   monto: z.number({ invalid_type_error: "monto debe ser numérico" }),
 });
 
+const mergeCreditSchema = t.Object({
+  numero_credito_origen: t.String({
+    minLength: 1,
+    description: "Número de crédito SIFCO que será absorbido (se cancela)"
+  }),
+  numero_credito_destino: t.String({
+    minLength: 1,
+    description: "Número de crédito SIFCO que quedará activo"
+  })
+});
 const RouterBodySchema = z.object({
   creditId: z.coerce.number().int().positive(),
   motivo: z.string().optional(),
@@ -692,4 +703,105 @@ export const creditRouter = new Elysia()
   body: t.Object({
     numero_credito_sifco: t.Optional(t.String())
   })
-});
+})
+.post(
+    "/merge",
+    async ({ body, set }) => {
+      try {
+        console.log("📨 Solicitud de fusión recibida:");
+        console.log(`   Origen: ${body.numero_credito_origen}`);
+        console.log(`   Destino: ${body.numero_credito_destino}`);
+        console.log("");
+
+        // Validar que no sean el mismo crédito
+        if (body.numero_credito_origen === body.numero_credito_destino) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "El crédito origen y destino no pueden ser el mismo",
+            error: "SAME_CREDIT"
+          };
+        }
+
+        // Ejecutar la fusión
+        const resultado = await mergeCreditosAndUpdate({
+          numero_credito_origen: body.numero_credito_origen,
+          numero_credito_destino: body.numero_credito_destino
+        });
+
+        set.status = 200;
+        return resultado;
+
+      } catch (error: any) {
+        console.error("❌ Error en el endpoint de fusión:", error);
+
+        // Manejar errores específicos
+        if (error.message?.includes("no encontrado")) {
+          set.status = 404;
+          return {
+            success: false,
+            message: error.message,
+            error: "CREDIT_NOT_FOUND"
+          };
+        }
+
+        // Error genérico
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al fusionar créditos",
+          error: error.message || "Unknown error"
+        };
+      }
+    },
+    {
+      body: mergeCreditSchema,
+      detail: {
+        summary: "Fusionar dos créditos",
+        description: `
+          Fusiona dos créditos Pool en uno solo.
+          
+          **Proceso:**
+          1. Suma los capitales de ambos créditos
+          2. Recalcula intereses, IVA y deuda total
+          3. Traslada inversionistas del crédito origen al destino
+          4. Marca el crédito origen como CANCELADO
+          5. Actualiza las cuotas del crédito destino
+          
+          **Nota:** El crédito DESTINO es el que quedará activo con todos los valores consolidados.
+        `,
+        tags: ["Créditos"]
+      },
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          nueva_cuota: t.Number(),
+          creditoFinal: t.Object({
+            numero_credito: t.String(),
+            credito_id: t.Number(),
+            capital_total: t.String(),
+            cuota: t.String(),
+            deuda_total: t.String(),
+            total_inversionistas: t.Number(),
+            credito_cancelado: t.String()
+          })
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        }),
+        404: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        }),
+        500: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        })
+      }
+    }
+  );

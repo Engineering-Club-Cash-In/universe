@@ -4,3 +4,4 @@ export * from "./InfoGeneral";
 export * from "./DetailCar";
 export * from "./ButtonsActions";
 export * from "./Extras"
+export * from "./SimilarCars"

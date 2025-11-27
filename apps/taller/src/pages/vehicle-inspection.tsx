@@ -71,7 +71,37 @@ const formSchema = z.object({
     .string()
     .min(1, { message: "El resultado de la inspección es requerido" }),
 
-  // Section 3: Test Drive
+  // Section 3
+  vehicleRating: z.enum(["Comercial", "No comercial"], {
+    message: "La calificación es requerida",
+  }),
+  marketValue: z
+    .string({ message: "El valor de mercado es requerido" })
+    .min(1, { message: "El valor de mercado es requerido" }),
+  suggestedCommercialValue: z
+    .string({ message: "El valor comercial sugerido es requerido" })
+    .min(1, { message: "El valor comercial sugerido es requerido" }),
+  bankValue: z
+    .string({ message: "El valor bancario es requerido" })
+    .min(1, { message: "El valor bancario es requerido" }),
+  currentConditionValue: z
+    .string({ message: "El valor en condiciones actuales es requerido" })
+    .min(1, { message: "El valor en condiciones actuales es requerido" }),
+  vehicleEquipment: z
+    .string({ message: "El equipamiento es requerido" })
+    .min(1, { message: "El equipamiento es requerido" }),
+  importantConsiderations: z.string().optional(),
+  scannerUsed: z.enum(["Sí", "No"], {
+    message: "Esta información es requerida",
+  }),
+  scannerResult: z.instanceof(File).optional(),
+  scannerResultUrl: z.string().optional(),
+  airbagWarning: z.enum(["Sí", "No"], {
+    message: "Esta información es requerida",
+  }),
+  missingAirbag: z.string().optional(),
+
+  // Section 4
   testDrive: z.enum(["Sí", "No"], {
     message: "Esta información es requerida",
   }),
@@ -88,9 +118,12 @@ export default function VehicleInspectionForm({
   isWizardMode = false
 }: VehicleInspectionFormProps) {
   const { formData, setFormData } = useInspection();
+  const [scannerFile, setScannerFile] = useState<File | null>(null);
+  const [scannerUploading, setScannerUploading] = useState(false);
+  const [tempVehicleId] = useState(() => 'temp-' + Date.now());
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
-  
+
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
@@ -108,10 +141,10 @@ export default function VehicleInspectionForm({
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     console.log(values);
-    
+
     // Save form data to context
     setFormData(values);
-    
+
     // Show success toast
     toast.success("Información básica guardada!");
 
@@ -147,7 +180,54 @@ export default function VehicleInspectionForm({
     setFormSubmitted(true);
   }
 
-  // Function to handle OCR data
+  const handleScannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.type === "application/pdf") {
+        setScannerFile(file);
+        form.setValue("scannerResult", file);
+
+        // Upload immediately to get URL
+        setScannerUploading(true);
+        try {
+          const uploadFormData = new FormData();
+          uploadFormData.append('file', file);
+          uploadFormData.append('vehicleId', tempVehicleId);
+          uploadFormData.append('category', 'scanner');
+          uploadFormData.append('photoType', 'result');
+          uploadFormData.append('title', 'Resultado del Scanner');
+
+          const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+            method: 'POST',
+            credentials: 'include',
+            body: uploadFormData,
+          });
+
+          if (!response.ok) {
+            throw new Error('Error al subir el archivo');
+          }
+
+          const result = await response.json();
+          const scannerUrl = result.data.url;
+
+          form.setValue("scannerResultUrl", scannerUrl);
+          toast.success("Archivo del scanner subido correctamente");
+        } catch (error) {
+          console.error('Error uploading scanner file:', error);
+          toast.error("Error al subir el archivo del scanner");
+          setScannerFile(null);
+          form.setValue("scannerResult", undefined);
+        } finally {
+          setScannerUploading(false);
+        }
+      } else {
+        alert("Por favor suba un archivo PDF");
+      }
+    }
+  };
+
+
+
   const handleOCRData = (mappedData: any) => {
     // Update form with OCR data and trigger validation only for filled fields
     Object.keys(mappedData).forEach(key => {
@@ -163,8 +243,10 @@ export default function VehicleInspectionForm({
     // Clear validation errors for fields that OCR cannot fill
     const nonOCRFields = [
       'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
-      'fuelType', 'transmission', 'inspectionResult',
-      'testDrive', 'noTestDriveReason'
+      'fuelType', 'transmission', 'inspectionResult', 'vehicleRating',
+      'marketValue', 'suggestedCommercialValue', 'bankValue', 'currentConditionValue',
+      'vehicleEquipment', 'importantConsiderations', 'scannerUsed', 'scannerResult',
+      'airbagWarning', 'missingAirbag', 'testDrive', 'noTestDriveReason'
     ];
 
     nonOCRFields.forEach(field => {
@@ -205,10 +287,43 @@ export default function VehicleInspectionForm({
     // Use form.reset() to properly update all fields including selects
     form.reset(dummyData);
 
+    // Load and set the PDF file
+    try {
+      const response = await fetch('/sample.pdf');
+      const blob = await response.blob();
+      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
+
+      setScannerFile(file);
+      form.setValue("scannerResult", file);
+    } catch (error) {
+      console.error('Error loading sample PDF:', error);
+    }
+
     // Save to context
     setFormData(dummyData);
 
     toast.success("Formulario llenado con datos de prueba");
+  };
+
+  const formatCurrency = (value: string | number) => {
+    if (!value) return "";
+    const num = Number(value);
+    if (isNaN(num)) return "";
+    return new Intl.NumberFormat("es-GT", {
+      style: "currency",
+      currency: "GTQ",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(num);
+  };
+
+  const handleCurrencyInput = (value: string) => {
+    // Remove non-digit characters
+    const rawValue = value.replace(/\D/g, "");
+    return {
+      raw: rawValue,
+      formatted: formatCurrency(rawValue),
+    };
   };
 
   return (
@@ -280,7 +395,7 @@ export default function VehicleInspectionForm({
             </CardContent>
           </Card>
 
-          <VehicleRegistrationOCR 
+          <VehicleRegistrationOCR
             onDataExtracted={handleOCRData}
             isProcessing={form.formState.isSubmitting}
           />
@@ -376,7 +491,19 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Cantidad de millas recorridas</FormLabel>
                       <FormControl>
-                        <Input placeholder="Millas" type="number" {...field} />
+                        <Input
+                          placeholder="Millas"
+                          type="number"
+                          {...field}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            const miles = parseFloat(e.target.value);
+                            if (!isNaN(miles)) {
+                              const km = Math.round(miles * 1.60934);
+                              form.setValue("kmMileage", km.toString());
+                            }
+                          }}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -394,6 +521,14 @@ export default function VehicleInspectionForm({
                           placeholder="Kilómetros"
                           type="number"
                           {...field}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            const km = parseFloat(e.target.value);
+                            if (!isNaN(km)) {
+                              const miles = Math.round(km * 0.621371);
+                              form.setValue("milesMileage", miles.toString());
+                            }
+                          }}
                         />
                       </FormControl>
                       <FormMessage />
@@ -575,6 +710,306 @@ export default function VehicleInspectionForm({
                   </FormItem>
                 )}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="px-3 py-0.5 sm:px-6 sm:py-1">
+              <CardTitle className="text-xl sm:text-2xl">Valoración del Vehículo</CardTitle>
+              <CardDescription className="text-sm sm:text-base">
+                Información sobre el valor y condiciones
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="px-3 py-2 sm:px-6 sm:py-3 space-y-4 sm:space-y-5">
+              <FormField
+                control={form.control}
+                name="vehicleRating"
+                render={({ field }) => (
+                  <FormItem className="space-y-3">
+                    <FormLabel>Calificación del vehículo</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        className="flex flex-col space-y-1"
+                      >
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="Comercial" />
+                          </FormControl>
+                          <FormLabel className="font-normal">
+                            Comercial
+                          </FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="No comercial" />
+                          </FormControl>
+                          <FormLabel className="font-normal">
+                            No comercial
+                          </FormLabel>
+                        </FormItem>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                <FormField
+                  control={form.control}
+                  name="marketValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Valor de mercado</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="suggestedCommercialValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Valor comercial sugerido</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                <FormField
+                  control={form.control}
+                  name="bankValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Valor bancario</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="currentConditionValue"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Valor vehículo condiciones actuales</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Valor en moneda local"
+                          value={formatCurrency(field.value)}
+                          onChange={(e) => {
+                            const result = handleCurrencyInput(e.target.value);
+                            field.onChange(result.raw);
+                          }}
+                          onBlur={field.onBlur}
+                          name={field.name}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+
+              <FormField
+                control={form.control}
+                name="vehicleEquipment"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Equipamiento del vehículo</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Ej: Aire AC, cámaras de reversa, tapicería de cuero, sistema de navegación, sensores de estacionamiento, techo panorámico, etc."
+                        className="min-h-[100px]"
+                        {...field}
+                        value={field.value || ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="importantConsiderations"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Aspectos importantes a considerar</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        placeholder="Observaciones sobre estado físico, legal o técnico del vehículo"
+                        className="min-h-[100px]"
+                        {...field}
+                        value={field.value || ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="scannerUsed"
+                render={({ field }) => (
+                  <FormItem className="space-y-3">
+                    <FormLabel>¿Se le pasó escáner al vehículo?</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        className="flex flex-col space-y-1"
+                      >
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="Sí" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Sí</FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="No" />
+                          </FormControl>
+                          <FormLabel className="font-normal">No</FormLabel>
+                        </FormItem>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {form.watch("scannerUsed") === "Sí" && (
+                <FormField
+                  control={form.control}
+                  name="scannerResult"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Resultado del scanner (subir PDF)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="file"
+                          accept=".pdf"
+                          onChange={(e) => {
+                            handleScannerUpload(e);
+                            field.onChange(e.target.files?.[0] || null);
+                          }}
+                          className="flex-1"
+                          disabled={scannerUploading}
+                        />
+                      </FormControl>
+                      {scannerUploading && (
+                        <FormDescription className="text-blue-600">
+                          Subiendo archivo...
+                        </FormDescription>
+                      )}
+                      {scannerFile && !scannerUploading && form.watch("scannerResultUrl") && (
+                        <FormDescription className="text-green-600">
+                          ✓ Archivo subido: {scannerFile.name}
+                        </FormDescription>
+                      )}
+                      {scannerFile && !scannerUploading && !form.watch("scannerResultUrl") && (
+                        <FormDescription className="text-yellow-600">
+                          Archivo seleccionado: {scannerFile.name} (pendiente de subir)
+                        </FormDescription>
+                      )}
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <FormField
+                control={form.control}
+                name="airbagWarning"
+                render={({ field }) => (
+                  <FormItem className="space-y-3">
+                    <FormLabel>¿Presenta testigos de airbag u otros en tablero?</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        value={field.value}
+                        className="flex flex-col space-y-1"
+                      >
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="Sí" />
+                          </FormControl>
+                          <FormLabel className="font-normal">Sí</FormLabel>
+                        </FormItem>
+                        <FormItem className="flex items-center space-x-3 space-y-0">
+                          <FormControl>
+                            <RadioGroupItem value="No" />
+                          </FormControl>
+                          <FormLabel className="font-normal">No</FormLabel>
+                        </FormItem>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {form.watch("airbagWarning") === "Sí" && (
+                <FormField
+                  control={form.control}
+                  name="missingAirbag"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Indique qué airbag no posee</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Ej. Airbag lateral izquierdo"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </CardContent>
           </Card>
 

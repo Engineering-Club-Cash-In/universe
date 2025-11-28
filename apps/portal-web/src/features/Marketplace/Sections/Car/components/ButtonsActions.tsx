@@ -140,7 +140,7 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
       {/* Sección de contacto */}
       <div className="space-y-2">
         <h3 className="text-white text-lg ">Contacta a nuestro asesor</h3>
-        <div className="flex gap-4">
+        <div className="flex flex-col xl:flex-row  gap-4">
           {/* Botón llamar */}
           <button
             onClick={makeCall}

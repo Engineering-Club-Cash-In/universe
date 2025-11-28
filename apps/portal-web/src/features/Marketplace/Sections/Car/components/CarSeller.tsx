@@ -10,13 +10,13 @@ export const CarSeller = ({ seller }: CarSellerProps) => {
       <img
         src={seller.image}
         alt={seller.nombre}
-        className="w-24 h-24 object-contain rounded-full"
+        className="max-w-24 max-h-24 object-contain rounded-full"
       />
       <div>
         <p className="">{seller.nombre}</p>
         {/* BottomSheet Vendedor  Verificado */}
 
-        <div className="mt-2 flex items-center gap-2 bg-green-100/20 text-green-500 px-3 py-1 rounded-full w-max text-sm">
+        <div className="mt-2 flex items-center gap-2 bg-green-100/20 text-green-500 px-3 py-1 rounded-full  text-sm">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             className="h-4 w-4"

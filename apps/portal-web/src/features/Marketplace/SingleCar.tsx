@@ -9,7 +9,7 @@ export const SingleCar = () => {
       <NavBar />
       <div className="flex min-h-screen relative pt-12">
         {/* Sidebar de filtros */}
-        <div className="w-80 sticky left-0 top-0 h-screen overflow-y-auto bg-linear-to-b from-[rgba(154,159,245,0.05)] to-[rgba(90,93,143,0.05)] p-8 px-6 border-r border-white/10 self-start">
+        <div className="max-w-80 sticky left-0 top-0 h-screen overflow-y-auto bg-linear-to-b from-[rgba(154,159,245,0.05)] to-[rgba(90,93,143,0.05)] p-8 px-6 border-r border-white/10 self-start">
           <BarFilters />
         </div>
 

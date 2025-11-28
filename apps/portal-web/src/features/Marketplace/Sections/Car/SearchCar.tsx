@@ -52,7 +52,7 @@ export const SearchCar = () => {
   }
 
   return (
-    <div className="w-full pl-20 pr-10">
+    <div className="w-full px-10">
       {/* Layout de dos columnas */}
       <div ref={printRef} className="grid grid-cols-1 lg:grid-cols-3 gap-16">
         {/* COLUMNA 1 - Información principal del vehículo */}

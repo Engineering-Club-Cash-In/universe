@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StylesRouteImport } from './routes/styles'
 import { Route as SellRouteImport } from './routes/sell'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RegisterRouteImport } from './routes/register'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as LoginRouteImport } from './routes/login'
@@ -33,6 +34,11 @@ const StylesRoute = StylesRouteImport.update({
 const SellRoute = SellRouteImport.update({
   id: '/sell',
   path: '/sell',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegisterRoute = RegisterRouteImport.update({
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/marketplace': typeof MarketplaceIndexRoute
@@ -129,6 +136,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/marketplace': typeof MarketplaceIndexRoute
@@ -147,6 +155,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/profile': typeof ProfileRoute
   '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
   '/marketplace/': typeof MarketplaceIndexRoute
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/profile'
     | '/register'
+    | '/reset-password'
     | '/sell'
     | '/styles'
     | '/marketplace'
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/profile'
     | '/register'
+    | '/reset-password'
     | '/sell'
     | '/styles'
     | '/marketplace'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/profile'
     | '/register'
+    | '/reset-password'
     | '/sell'
     | '/styles'
     | '/marketplace/'
@@ -218,6 +230,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ProfileRoute: typeof ProfileRoute
   RegisterRoute: typeof RegisterRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
   SellRoute: typeof SellRoute
   StylesRoute: typeof StylesRoute
   MarketplaceIndexRoute: typeof MarketplaceIndexRoute
@@ -239,6 +252,13 @@ declare module '@tanstack/react-router' {
       path: '/sell'
       fullPath: '/sell'
       preLoaderRoute: typeof SellRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/register': {
@@ -346,6 +366,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ProfileRoute: ProfileRoute,
   RegisterRoute: RegisterRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
   SellRoute: SellRoute,
   StylesRoute: StylesRoute,
   MarketplaceIndexRoute: MarketplaceIndexRoute,

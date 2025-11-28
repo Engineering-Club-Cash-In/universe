@@ -151,12 +151,12 @@ export const ViewCars = () => {
   return (
     <div className="flex min-h-screen relative pt-12">
       {/* Sidebar de filtros */}
-      <div className="w-80 sticky left-0 top-0 h-screen overflow-y-auto bg-linear-to-b from-[rgba(154,159,245,0.05)] to-[rgba(90,93,143,0.05)] p-8 px-6 border-r border-white/10 self-start">
+      <div className="max-w-80 sticky left-0 top-0 h-screen overflow-y-auto bg-linear-to-b from-[rgba(154,159,245,0.05)] to-[rgba(90,93,143,0.05)] p-8 px-6 border-r border-white/10 self-start">
         <BarFilters />
       </div>
 
       {/* Contenido principal */}
-      <div ref={contentRef} className="flex-1 flex flex-col items-center">
+      <div ref={contentRef} className="flex-1 flex flex-col items-center px-10">
         <div className="w-full max-w-[1400px]">
           <h1 className="text-header-4 text-white/80 mb-8  ">
             Resultados de vehículos

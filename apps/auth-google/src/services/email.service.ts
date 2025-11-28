@@ -22,28 +22,35 @@ export async function sendPasswordResetEmail(
   const mailOptions = {
     from: env.SMTP_FROM,
     to: email,
-    subject: "Restablecer contraseña",
+    subject: "Restablecer contraseña - CashIn",
     html: `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Restablecer Contraseña</title>
+        <title>Restablecer Contraseña - CashIn</title>
       </head>
       <body style="font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #ffffff; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #0f0f0f;">
         <div style="background-color: #0f0f0f; border: 1px solid rgba(148, 153, 236, 0.3); border-radius: 12px; overflow: hidden;">
           
-          <!-- Header -->
+          <!-- Header con Logo -->
           <div style="background: linear-gradient(135deg, rgba(148, 153, 236, 0.2) 0%, rgba(148, 153, 236, 0.1) 100%); padding: 30px; text-align: center; border-bottom: 1px solid rgba(148, 153, 236, 0.3);">
-            <h1 style="color: rgba(148, 153, 236, 1); margin: 0; font-size: 24px; font-weight: 600;">🔐 Restablecer Contraseña</h1>
+            <h1 style="color: rgba(148, 153, 236, 1); margin: 0 0 10px 0; font-size: 32px; font-weight: 700; letter-spacing: 1px;">
+              💰 CashIn
+            </h1>
+            <p style="color: #808080; margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">Portal Financiero</p>
           </div>
           
           <!-- Content -->
           <div style="padding: 30px; background-color: #0f0f0f;">
+            <h2 style="color: rgba(148, 153, 236, 1); margin: 0 0 20px 0; font-size: 20px; font-weight: 600;">
+              🔐 Restablecer Contraseña
+            </h2>
+            
             <p style="color: #e0e0e0; margin-bottom: 20px;">Hola,</p>
             
-            <p style="color: #b0b0b0; margin-bottom: 20px;">Recibimos una solicitud para restablecer la contraseña de tu cuenta.</p>
+            <p style="color: #b0b0b0; margin-bottom: 20px;">Recibimos una solicitud para restablecer la contraseña de tu cuenta en <strong style="color: rgba(148, 153, 236, 1);">CashIn</strong>.</p>
             
             <p style="color: #b0b0b0; margin-bottom: 30px;">Haz clic en el siguiente botón para crear una nueva contraseña:</p>
             
@@ -57,8 +64,7 @@ export async function sendPasswordResetEmail(
                         border-radius: 8px; 
                         font-weight: 600;
                         font-size: 14px;
-                        display: inline-block;
-                        transition: all 0.3s ease;">
+                        display: inline-block;">
                 Restablecer Contraseña
               </a>
             </div>
@@ -86,8 +92,14 @@ export async function sendPasswordResetEmail(
           
           <!-- Footer -->
           <div style="background-color: rgba(148, 153, 236, 0.05); padding: 20px; text-align: center; border-top: 1px solid rgba(148, 153, 236, 0.2);">
+            <p style="color: rgba(148, 153, 236, 0.8); font-size: 14px; font-weight: 600; margin: 0 0 5px 0;">
+              💰 CashIn
+            </p>
             <p style="color: #505050; font-size: 11px; margin: 0;">
-              © ${new Date().getFullYear()} Auth Service. Todos los derechos reservados.
+              © ${new Date().getFullYear()} CashIn. Todos los derechos reservados.
+            </p>
+            <p style="color: #404040; font-size: 10px; margin: 10px 0 0 0;">
+              Este es un correo automático, por favor no respondas a este mensaje.
             </p>
           </div>
         </div>
@@ -95,11 +107,11 @@ export async function sendPasswordResetEmail(
       </html>
     `,
     text: `
-      Restablecer Contraseña
+      CashIn - Restablecer Contraseña
       
       Hola,
       
-      Recibimos una solicitud para restablecer la contraseña de tu cuenta.
+      Recibimos una solicitud para restablecer la contraseña de tu cuenta en CashIn.
       
       Visita el siguiente enlace para crear una nueva contraseña:
       ${resetUrl}
@@ -108,6 +120,8 @@ export async function sendPasswordResetEmail(
       Tu contraseña no será modificada.
       
       Este enlace expirará en 1 hora por seguridad.
+      
+      © ${new Date().getFullYear()} CashIn. Todos los derechos reservados.
     `,
   };
 

@@ -135,8 +135,40 @@ const requireCobros = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireJuridico = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessJuridico(userRole)) {
+		throw new ORPCError("FORBIDDEN", { message: "Juridico access required" });
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+			// Agregar flags de permisos específicos al contexto
+			canCreateLegalContracts: PERMISSIONS.canCreateLegalContracts(userRole),
+			canAssignLegalContracts: PERMISSIONS.canAssignLegalContracts(userRole),
+			canDeleteLegalContracts: PERMISSIONS.canDeleteLegalContracts(userRole),
+		},
+	});
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
 export const analystProcedure = publicProcedure.use(requireAnalyst);
 export const cobrosProcedure = publicProcedure.use(requireCobros);
+export const juridicoProcedure = publicProcedure.use(requireJuridico);

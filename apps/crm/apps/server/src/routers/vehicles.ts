@@ -1,16 +1,16 @@
 import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
 	mapOCRToVehicleForm,
 	vehicleRegistrationOCRSchema,
-} from "@/lib/ocr-schema";
+} from "../lib/ocr-schema";
 import {
 	prepareValuationContext,
 	vehicleValuationSchema,
-} from "@/lib/valuation-schema";
+} from "../lib/valuation-schema";
 import { db } from "../db";
 import {
 	casosCobros,
@@ -21,90 +21,197 @@ import {
 	type NewVehicle,
 	type NewVehicleInspection,
 	type NewVehiclePhoto,
+	vehicleDocuments,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
 } from "../db/schema";
-import { protectedProcedure, publicProcedure } from "../lib/orpc";
+import { crmProcedure, protectedProcedure, publicProcedure } from "../lib/orpc";
+import {
+	deleteFileFromR2,
+	generateUniqueFilename,
+	getFileUrl,
+	uploadFileToR2,
+	validateFile,
+} from "../lib/storage";
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
-	getAll: publicProcedure.handler(async () => {
-		const result = await db
-			.select()
-			.from(vehicles)
-			.leftJoin(
-				vehicleInspections,
-				eq(vehicles.id, vehicleInspections.vehicleId),
-			)
-			.orderBy(desc(vehicles.createdAt));
+	getAll: publicProcedure
+		.input(
+			z.object({
+				limit: z.number().optional().default(10),
+				offset: z.number().optional().default(0),
+				query: z.string().optional(),
+				status: z.string().optional(),
+				category: z.string().optional(),
+			}).optional()
+		)
+		.handler(async ({ input }) => {
+			const limit = input?.limit ?? 10;
+			const offset = input?.offset ?? 0;
+			const query = input?.query;
+			const status = input?.status;
+			const category = input?.category;
 
-		// Get all photos for all vehicles
-		const allPhotos = await db
-			.select()
-			.from(vehiclePhotos)
-			.orderBy(vehiclePhotos.category, vehiclePhotos.photoType);
-
-		// Group photos by vehicle ID
-		const photosByVehicle = new Map();
-		allPhotos.forEach((photo) => {
-			if (!photosByVehicle.has(photo.vehicleId)) {
-				photosByVehicle.set(photo.vehicleId, []);
+			// Build conditions
+			const conditions = [];
+			if (query) {
+				conditions.push(
+					or(
+						ilike(vehicles.make, `%${query}%`),
+						ilike(vehicles.model, `%${query}%`),
+						ilike(vehicles.licensePlate, `%${query}%`),
+						ilike(vehicles.vinNumber, `%${query}%`),
+					)
+				);
 			}
-			photosByVehicle.get(photo.vehicleId).push(photo);
-		});
+			if (status && status !== 'all') {
+				conditions.push(eq(vehicles.status, status as any));
+			}
 
-		// Get all checklist items for all inspections
-		const allInspectionIds = result
-			.filter((row) => row.vehicle_inspections)
-			.map((row) => row.vehicle_inspections!.id);
+			// Category filters
+			if (category === 'commercial') {
+				conditions.push(eq(vehicleInspections.vehicleRating, 'Comercial'));
+			} else if (category === 'non-commercial') {
+				conditions.push(eq(vehicleInspections.vehicleRating, 'No comercial'));
+			} else if (category === 'alerts') {
+				conditions.push(sql`json_array_length(${vehicleInspections.alerts}) > 0`);
+			}
 
-		const allChecklistItems =
-			allInspectionIds.length > 0
-				? await db
+			// 1. Get total count and paginated IDs
+			// We need to join if we are filtering by inspection properties
+			const needsJoin = category === 'commercial' || category === 'non-commercial' || category === 'alerts';
+
+			const idsQueryBase = db
+				.selectDistinct({ id: vehicles.id, createdAt: vehicles.createdAt })
+				.from(vehicles);
+
+			const countQueryBase = db
+				.select({ count: sql<number>`count(distinct ${vehicles.id})` })
+				.from(vehicles);
+
+			const idsQuery = needsJoin
+				? idsQueryBase.innerJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				: idsQueryBase;
+
+			const countQuery = needsJoin
+				? countQueryBase.innerJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				: countQueryBase;
+
+			const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+			const [totalResult] = await countQuery.where(whereClause);
+			const total = Number(totalResult?.count || 0);
+
+			const paginatedIds = await idsQuery
+				.where(whereClause)
+				.orderBy(desc(vehicles.createdAt))
+				.limit(limit)
+				.offset(offset);
+
+			const vehicleIdsArray = paginatedIds.map(r => r.id);
+
+			if (vehicleIdsArray.length === 0) {
+				return {
+					data: [],
+					total,
+					limit,
+					offset
+				};
+			}
+
+			// 2. Fetch full data for these IDs
+			const result = await db
+				.select()
+				.from(vehicles)
+				.leftJoin(
+					vehicleInspections,
+					eq(vehicles.id, vehicleInspections.vehicleId),
+				)
+				.where(
+					or(...vehicleIdsArray.map(id => eq(vehicles.id, id)))
+				)
+				.orderBy(desc(vehicles.createdAt));
+
+			// Get photos only for these vehicles
+			const allPhotos = await db
+				.select()
+				.from(vehiclePhotos)
+				.where(
+					or(...vehicleIdsArray.map(id => eq(vehiclePhotos.vehicleId, id)))
+				)
+				.orderBy(vehiclePhotos.category, vehiclePhotos.photoType);
+
+			// Group photos by vehicle ID
+			const photosByVehicle = new Map();
+			allPhotos.forEach((photo) => {
+				if (!photosByVehicle.has(photo.vehicleId)) {
+					photosByVehicle.set(photo.vehicleId, []);
+				}
+				photosByVehicle.get(photo.vehicleId).push(photo);
+			});
+
+			// Get all checklist items for all inspections of these vehicles
+			const allInspectionIds = result
+				.filter((row) => row.vehicle_inspections)
+				.map((row) => row.vehicle_inspections!.id);
+
+			const allChecklistItems =
+				allInspectionIds.length > 0
+					? await db
 						.select()
 						.from(inspectionChecklistItems)
+						.where(
+							or(...allInspectionIds.map(id => eq(inspectionChecklistItems.inspectionId, id)))
+						)
 						.orderBy(inspectionChecklistItems.category)
-				: [];
+					: [];
 
-		// Group checklist items by inspection ID
-		const checklistByInspection = new Map();
-		allChecklistItems.forEach((item) => {
-			if (!checklistByInspection.has(item.inspectionId)) {
-				checklistByInspection.set(item.inspectionId, []);
-			}
-			checklistByInspection.get(item.inspectionId).push(item);
-		});
+			// Group checklist items by inspection ID
+			const checklistByInspection = new Map();
+			allChecklistItems.forEach((item) => {
+				if (!checklistByInspection.has(item.inspectionId)) {
+					checklistByInspection.set(item.inspectionId, []);
+				}
+				checklistByInspection.get(item.inspectionId).push(item);
+			});
 
-		// Group vehicles with their inspections and photos
-		const vehiclesMap = new Map();
+			// Group vehicles with their inspections and photos
+			const vehiclesMap = new Map();
 
-		result.forEach((row) => {
-			const vehicleId = row.vehicles.id;
+			// Initialize map with the order of IDs to preserve sort order
+			vehicleIdsArray.forEach(_id => {
+				// We'll populate this as we process results
+				// But wait, result might have multiple rows per vehicle.
+				// We need to ensure we return them in the correct order.
+			});
 
-			if (!vehiclesMap.has(vehicleId)) {
-				vehiclesMap.set(vehicleId, {
-					...row.vehicles,
-					inspections: [],
-					photos: photosByVehicle.get(vehicleId) || [],
-				});
-			}
+			result.forEach((row) => {
+				const vehicleId = row.vehicles.id;
 
-			if (row.vehicle_inspections) {
-				const inspectionWithChecklist = {
-					...row.vehicle_inspections,
-					checklistItems:
-						checklistByInspection.get(row.vehicle_inspections.id) || [],
-				};
-				vehiclesMap.get(vehicleId).inspections.push(inspectionWithChecklist);
-			}
-		});
+				if (!vehiclesMap.has(vehicleId)) {
+					vehiclesMap.set(vehicleId, {
+						...row.vehicles,
+						inspections: [],
+						photos: photosByVehicle.get(vehicleId) || [],
+					});
+				}
 
-		// Get payment agreements for vehicles
-		const allVehicleIds = Array.from(vehiclesMap.keys());
-		const vehicleConvenios =
-			allVehicleIds.length > 0
-				? await db
+				if (row.vehicle_inspections) {
+					const inspectionWithChecklist = {
+						...row.vehicle_inspections,
+						checklistItems:
+							checklistByInspection.get(row.vehicle_inspections.id) || [],
+					};
+					vehiclesMap.get(vehicleId).inspections.push(inspectionWithChecklist);
+				}
+			});
+
+			// Get payment agreements for vehicles
+			const vehicleConvenios =
+				vehicleIdsArray.length > 0
+					? await db
 						.select({
 							vehicleId: contratosFinanciamiento.vehicleId,
 							hasActiveConvenio: conveniosPago.activo,
@@ -121,27 +228,33 @@ export const vehiclesRouter = {
 						.where(
 							and(
 								or(
-									...allVehicleIds.map((id) =>
+									...vehicleIdsArray.map((id) =>
 										eq(contratosFinanciamiento.vehicleId, id),
 									),
 								),
 								eq(conveniosPago.activo, true),
 							),
 						)
-				: [];
+					: [];
 
-		// Add convenio info to vehicles
-		const vehiclesWithConvenios = Array.from(vehiclesMap.values()).map(
-			(vehicle) => ({
-				...vehicle,
-				hasPaymentAgreement: vehicleConvenios.some(
-					(c) => c.vehicleId === vehicle.id && c.hasActiveConvenio,
-				),
-			}),
-		);
+			// Add convenio info to vehicles and sort by the original paginated order
+			const vehiclesWithConvenios = vehicleIdsArray
+				.map(id => vehiclesMap.get(id))
+				.filter(Boolean) // Should be all, but just in case
+				.map((vehicle) => ({
+					...vehicle,
+					hasPaymentAgreement: vehicleConvenios.some(
+						(c) => c.vehicleId === vehicle.id && c.hasActiveConvenio,
+					),
+				}));
 
-		return vehiclesWithConvenios;
-	}),
+			return {
+				data: vehiclesWithConvenios,
+				total,
+				limit,
+				offset
+			};
+		}),
 
 	// Get vehicle by ID with all related data
 	getById: protectedProcedure
@@ -777,16 +890,16 @@ REGLAS IMPORTANTES:
 								},
 								isPDF
 									? {
-											type: "file",
-											data: fileBuffer,
-											mediaType: "application/pdf",
-											filename: "tarjeta_circulacion.pdf",
-										}
+										type: "file",
+										data: fileBuffer,
+										mediaType: "application/pdf",
+										filename: "tarjeta_circulacion.pdf",
+									}
 									: {
-											type: "image",
-											image: fileBuffer,
-											mediaType: input.mimeType,
-										},
+										type: "image",
+										image: fileBuffer,
+										mediaType: input.mimeType,
+									},
 							],
 						},
 					],
@@ -934,16 +1047,15 @@ DOCUMENTACIÓN:
 - Fotos del motor: ${context.hasEnginePhotos ? "Sí" : "No"}
 
 OBSERVACIONES DEL VALUADOR EN FOTOS:
-${
-	context.hasPhotoComments
-		? context.photoComments
-				.map(
-					(comment) =>
-						`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
-				)
-				.join("\n")
-		: "Sin observaciones especiales en las fotografías"
-}
+${context.hasPhotoComments
+									? context.photoComments
+										.map(
+											(comment: { category: string; photoType: string; comment: string }) =>
+												`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
+										)
+										.join("\n")
+									: "Sin observaciones especiales en las fotografías"
+								}
 
 CONSIDERACIONES ESPECIALES:
 ${context.importantConsiderations}
@@ -969,5 +1081,159 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 						"No se pudo generar la valoración por IA. Por favor complete la valoración manualmente.",
 				});
 			}
+		}),
+
+	// Vehicle Documents Management
+	getVehicleDocuments: crmProcedure
+		.input(z.object({ vehicleId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// Verify user has access to the vehicle
+			const [vehicle] = await db
+				.select()
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle) {
+				throw new Error("Vehículo no encontrado");
+			}
+
+			// Get documents with uploader info
+			const documents = await db
+				.select({
+					id: vehicleDocuments.id,
+					filename: vehicleDocuments.filename,
+					originalName: vehicleDocuments.originalName,
+					mimeType: vehicleDocuments.mimeType,
+					size: vehicleDocuments.size,
+					documentType: vehicleDocuments.documentType,
+					description: vehicleDocuments.description,
+					uploadedAt: vehicleDocuments.uploadedAt,
+					filePath: vehicleDocuments.filePath,
+					uploadedBy: vehicleDocuments.uploadedBy,
+				})
+				.from(vehicleDocuments)
+				.where(eq(vehicleDocuments.vehicleId, input.vehicleId))
+				.orderBy(vehicleDocuments.uploadedAt);
+
+			// Generate signed URLs for each document
+			const documentsWithUrls = await Promise.all(
+				documents.map(async (doc) => {
+					const url = await getFileUrl(doc.filePath);
+					return {
+						...doc,
+						url,
+					};
+				}),
+			);
+
+			return documentsWithUrls;
+		}),
+
+	uploadVehicleDocument: crmProcedure
+		.input(
+			z.object({
+				vehicleId: z.string().uuid(),
+				documentType: z.string(),
+				description: z.string().optional(),
+				file: z.object({
+					name: z.string(),
+					type: z.string(),
+					size: z.number(),
+					data: z.string(), // Base64
+				}),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verify vehicle exists
+			const [vehicle] = await db
+				.select()
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle) {
+				throw new Error("Vehículo no encontrado");
+			}
+
+			// Only admin and sales can upload documents
+			if (!["admin", "sales"].includes(context.userRole)) {
+				throw new Error("No tienes permiso para subir documentos");
+			}
+
+			// Create File/Blob from data
+			const fileBuffer = Buffer.from(input.file.data, "base64");
+			const fileBlob = new Blob([fileBuffer], { type: input.file.type });
+
+			// Validate file
+			const validation = validateFile({
+				type: input.file.type,
+				size: input.file.size,
+			} as File);
+
+			if (!validation.valid) {
+				throw new Error(validation.error);
+			}
+
+			// Generate unique filename
+			const uniqueFilename = generateUniqueFilename(input.file.name);
+
+			// Upload to R2
+			const { key } = await uploadFileToR2(
+				fileBlob,
+				uniqueFilename,
+				input.vehicleId,
+			);
+
+			// Save to database
+			const [newDocument] = await db
+				.insert(vehicleDocuments)
+				.values({
+					vehicleId: input.vehicleId,
+					filename: uniqueFilename,
+					originalName: input.file.name,
+					mimeType: input.file.type,
+					size: input.file.size,
+					documentType: input.documentType,
+					description: input.description,
+					uploadedBy: context.userId,
+					filePath: key,
+				})
+				.returning();
+
+			return newDocument;
+		}),
+
+	deleteVehicleDocument: crmProcedure
+		.input(z.object({ documentId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Get document
+			const [document] = await db
+				.select()
+				.from(vehicleDocuments)
+				.where(eq(vehicleDocuments.id, input.documentId))
+				.limit(1);
+
+			if (!document) {
+				throw new Error("Documento no encontrado");
+			}
+
+			// Verify permissions (admin or uploader)
+			if (
+				context.userRole === "admin" ||
+				document.uploadedBy === context.userId
+			) {
+				// Delete from R2
+				await deleteFileFromR2(document.filePath);
+
+				// Delete from database
+				await db
+					.delete(vehicleDocuments)
+					.where(eq(vehicleDocuments.id, input.documentId));
+
+				return { success: true };
+			}
+
+			throw new Error("No tienes permiso para eliminar este documento");
 		}),
 };

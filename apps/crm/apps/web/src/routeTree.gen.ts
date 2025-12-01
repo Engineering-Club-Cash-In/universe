@@ -13,9 +13,11 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as VehiclesIndexRouteImport } from './routes/vehicles/index'
+import { Route as JuridicoIndexRouteImport } from './routes/juridico/index'
 import { Route as CobrosIndexRouteImport } from './routes/cobros/index'
 import { Route as VehiclesInspectionRouteImport } from './routes/vehicles/inspection'
 import { Route as VehiclesAuctionVehiclesRouteImport } from './routes/vehicles/auction-vehicles'
+import { Route as JuridicoLeadIdRouteImport } from './routes/juridico/$leadId'
 import { Route as CrmWhatsappRouteImport } from './routes/crm/whatsapp'
 import { Route as CrmVendorsRouteImport } from './routes/crm/vendors'
 import { Route as CrmQuoterRouteImport } from './routes/crm/quoter'
@@ -27,6 +29,7 @@ import { Route as CrmAnalysisRouteImport } from './routes/crm/analysis'
 import { Route as CobrosIdRouteImport } from './routes/cobros/$id'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as AdminSettingsRouteImport } from './routes/admin/settings'
+import { Route as AdminImportRouteImport } from './routes/admin/import'
 import { Route as AdminReportsIndexRouteImport } from './routes/admin/reports/index'
 import { Route as CrmAdminMiniagentRouteImport } from './routes/crm/admin/miniagent'
 
@@ -50,6 +53,11 @@ const VehiclesIndexRoute = VehiclesIndexRouteImport.update({
   path: '/vehicles/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JuridicoIndexRoute = JuridicoIndexRouteImport.update({
+  id: '/juridico/',
+  path: '/juridico/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CobrosIndexRoute = CobrosIndexRouteImport.update({
   id: '/cobros/',
   path: '/cobros/',
@@ -63,6 +71,11 @@ const VehiclesInspectionRoute = VehiclesInspectionRouteImport.update({
 const VehiclesAuctionVehiclesRoute = VehiclesAuctionVehiclesRouteImport.update({
   id: '/vehicles/auction-vehicles',
   path: '/vehicles/auction-vehicles',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JuridicoLeadIdRoute = JuridicoLeadIdRouteImport.update({
+  id: '/juridico/$leadId',
+  path: '/juridico/$leadId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CrmWhatsappRoute = CrmWhatsappRouteImport.update({
@@ -120,6 +133,11 @@ const AdminSettingsRoute = AdminSettingsRouteImport.update({
   path: '/admin/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminImportRoute = AdminImportRouteImport.update({
+  id: '/admin/import',
+  path: '/admin/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminReportsIndexRoute = AdminReportsIndexRouteImport.update({
   id: '/admin/reports/',
   path: '/admin/reports/',
@@ -135,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
@@ -146,9 +165,11 @@ export interface FileRoutesByFullPath {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
+  '/juridico': typeof JuridicoIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/admin/reports': typeof AdminReportsIndexRoute
@@ -157,6 +178,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
@@ -168,9 +190,11 @@ export interface FileRoutesByTo {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros': typeof CobrosIndexRoute
+  '/juridico': typeof JuridicoIndexRoute
   '/vehicles': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/admin/reports': typeof AdminReportsIndexRoute
@@ -180,6 +204,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/dashboard': typeof DashboardRoute
   '/login': typeof LoginRoute
+  '/admin/import': typeof AdminImportRoute
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/users': typeof AdminUsersRoute
   '/cobros/$id': typeof CobrosIdRoute
@@ -191,9 +216,11 @@ export interface FileRoutesById {
   '/crm/quoter': typeof CrmQuoterRoute
   '/crm/vendors': typeof CrmVendorsRoute
   '/crm/whatsapp': typeof CrmWhatsappRoute
+  '/juridico/$leadId': typeof JuridicoLeadIdRoute
   '/vehicles/auction-vehicles': typeof VehiclesAuctionVehiclesRoute
   '/vehicles/inspection': typeof VehiclesInspectionRoute
   '/cobros/': typeof CobrosIndexRoute
+  '/juridico/': typeof JuridicoIndexRoute
   '/vehicles/': typeof VehiclesIndexRoute
   '/crm/admin/miniagent': typeof CrmAdminMiniagentRoute
   '/admin/reports/': typeof AdminReportsIndexRoute
@@ -204,6 +231,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/login'
+    | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
@@ -215,9 +243,11 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros'
+    | '/juridico'
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/admin/reports'
@@ -226,6 +256,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/login'
+    | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
@@ -237,9 +268,11 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros'
+    | '/juridico'
     | '/vehicles'
     | '/crm/admin/miniagent'
     | '/admin/reports'
@@ -248,6 +281,7 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboard'
     | '/login'
+    | '/admin/import'
     | '/admin/settings'
     | '/admin/users'
     | '/cobros/$id'
@@ -259,9 +293,11 @@ export interface FileRouteTypes {
     | '/crm/quoter'
     | '/crm/vendors'
     | '/crm/whatsapp'
+    | '/juridico/$leadId'
     | '/vehicles/auction-vehicles'
     | '/vehicles/inspection'
     | '/cobros/'
+    | '/juridico/'
     | '/vehicles/'
     | '/crm/admin/miniagent'
     | '/admin/reports/'
@@ -271,6 +307,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DashboardRoute: typeof DashboardRoute
   LoginRoute: typeof LoginRoute
+  AdminImportRoute: typeof AdminImportRoute
   AdminSettingsRoute: typeof AdminSettingsRoute
   AdminUsersRoute: typeof AdminUsersRoute
   CobrosIdRoute: typeof CobrosIdRoute
@@ -282,9 +319,11 @@ export interface RootRouteChildren {
   CrmQuoterRoute: typeof CrmQuoterRoute
   CrmVendorsRoute: typeof CrmVendorsRoute
   CrmWhatsappRoute: typeof CrmWhatsappRoute
+  JuridicoLeadIdRoute: typeof JuridicoLeadIdRoute
   VehiclesAuctionVehiclesRoute: typeof VehiclesAuctionVehiclesRoute
   VehiclesInspectionRoute: typeof VehiclesInspectionRoute
   CobrosIndexRoute: typeof CobrosIndexRoute
+  JuridicoIndexRoute: typeof JuridicoIndexRoute
   VehiclesIndexRoute: typeof VehiclesIndexRoute
   CrmAdminMiniagentRoute: typeof CrmAdminMiniagentRoute
   AdminReportsIndexRoute: typeof AdminReportsIndexRoute
@@ -320,6 +359,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VehiclesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/juridico/': {
+      id: '/juridico/'
+      path: '/juridico'
+      fullPath: '/juridico'
+      preLoaderRoute: typeof JuridicoIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cobros/': {
       id: '/cobros/'
       path: '/cobros'
@@ -339,6 +385,13 @@ declare module '@tanstack/react-router' {
       path: '/vehicles/auction-vehicles'
       fullPath: '/vehicles/auction-vehicles'
       preLoaderRoute: typeof VehiclesAuctionVehiclesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/juridico/$leadId': {
+      id: '/juridico/$leadId'
+      path: '/juridico/$leadId'
+      fullPath: '/juridico/$leadId'
+      preLoaderRoute: typeof JuridicoLeadIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/crm/whatsapp': {
@@ -418,6 +471,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/import': {
+      id: '/admin/import'
+      path: '/admin/import'
+      fullPath: '/admin/import'
+      preLoaderRoute: typeof AdminImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/reports/': {
       id: '/admin/reports/'
       path: '/admin/reports'
@@ -439,6 +499,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DashboardRoute: DashboardRoute,
   LoginRoute: LoginRoute,
+  AdminImportRoute: AdminImportRoute,
   AdminSettingsRoute: AdminSettingsRoute,
   AdminUsersRoute: AdminUsersRoute,
   CobrosIdRoute: CobrosIdRoute,
@@ -450,9 +511,11 @@ const rootRouteChildren: RootRouteChildren = {
   CrmQuoterRoute: CrmQuoterRoute,
   CrmVendorsRoute: CrmVendorsRoute,
   CrmWhatsappRoute: CrmWhatsappRoute,
+  JuridicoLeadIdRoute: JuridicoLeadIdRoute,
   VehiclesAuctionVehiclesRoute: VehiclesAuctionVehiclesRoute,
   VehiclesInspectionRoute: VehiclesInspectionRoute,
   CobrosIndexRoute: CobrosIndexRoute,
+  JuridicoIndexRoute: JuridicoIndexRoute,
   VehiclesIndexRoute: VehiclesIndexRoute,
   CrmAdminMiniagentRoute: CrmAdminMiniagentRoute,
   AdminReportsIndexRoute: AdminReportsIndexRoute,

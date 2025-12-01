@@ -72,6 +72,11 @@ export const activityStatusEnum = pgEnum("activity_status", [
 	"completed",
 	"cancelled",
 ]);
+export const clientTypeEnum = pgEnum("client_type", [
+	"individual", // Cliente individual
+	"comerciante", // Comerciante individual
+	"empresa", // Empresa (S.A, Ltda, etc.)
+]);
 
 // Companies table
 export const companies = pgTable("companies", {
@@ -112,6 +117,7 @@ export const leads = pgTable("leads", {
 	phone: text("phone").notNull(),
 	age: integer("age"),
 	dpi: text("dpi"),
+	clientType: clientTypeEnum("client_type").notNull().default("individual"),
 	maritalStatus: maritalStatusEnum("marital_status"),
 	dependents: integer("dependents").default(0),
 	monthlyIncome: decimal("monthly_income", { precision: 12, scale: 2 }),
@@ -255,6 +261,7 @@ export const clients = pgTable("clients", {
 		.notNull()
 		.references(() => companies.id),
 	opportunityId: uuid("opportunity_id").references(() => opportunities.id),
+	leadId: uuid("lead_id").references(() => leads.id),
 	contactPerson: text("contact_person").notNull(),
 	contractValue: decimal("contract_value", { precision: 12, scale: 2 }),
 	startDate: timestamp("start_date"),

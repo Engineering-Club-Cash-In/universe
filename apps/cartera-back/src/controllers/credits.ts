@@ -202,7 +202,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const moraActual = await db
       .select()
       .from(moras_credito)
-      .where(and(eq(moras_credito.credito_id, creditoId)));
+      .where(and(eq(moras_credito.credito_id, creditoId), eq(moras_credito.activa, true)));
 const convenioActivo = await db
   .select()
   .from(convenios_pago)

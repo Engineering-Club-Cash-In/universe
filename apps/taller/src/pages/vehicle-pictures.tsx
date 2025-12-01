@@ -2,7 +2,7 @@
 
 import type React from "react";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useInspection } from "../contexts/InspectionContext";
 import {
   Camera,
@@ -238,6 +238,8 @@ type PhotoData = {
   uploadStatus: 'pending' | 'uploading' | 'uploaded' | 'failed';
   serverUrl?: string;
   uploadError?: string;
+  valuatorComment?: string;
+  noCommentsChecked?: boolean;
 };
 
 type PhotosState = {
@@ -251,11 +253,11 @@ interface VehiclePicturesProps {
   isWizardMode?: boolean;
 }
 
-export default function VehiclePictures({ 
-  onComplete, 
-  isWizardMode = false 
+export default function VehiclePictures({
+  onComplete,
+  isWizardMode = false
 }: VehiclePicturesProps) {
-  const { setPhotos: setContextPhotos } = useInspection();
+  const { setPhotos: setContextPhotos, photos: contextPhotos } = useInspection();
   const [activeStep, setActiveStep] = useState(inspectionSteps[0].id);
   const [photoIndex, setPhotoIndex] = useState(0);
   
@@ -274,7 +276,29 @@ export default function VehiclePictures({
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
+  // Restaurar fotos del contexto al montar (después de recarga)
+  useEffect(() => {
+    if (contextPhotos && contextPhotos.length > 0) {
+      setPhotos((prev) => {
+        const updated = { ...prev };
+        contextPhotos.forEach((cp) => {
+          if (updated[cp.category] && updated[cp.category][cp.photoType] !== undefined && cp.url) {
+            updated[cp.category][cp.photoType] = {
+              file: null as unknown as File,
+              preview: cp.url,
+              uploadStatus: 'uploaded' as const,
+              serverUrl: cp.url,
+              valuatorComment: cp.valuatorComment,
+              noCommentsChecked: cp.noCommentsChecked,
+            };
+          }
+        });
+        return updated;
+      });
+    }
+  }, []); // Solo al montar
+
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
@@ -433,13 +457,13 @@ export default function VehiclePictures({
       
       // Update status to uploaded with server URL but keep blob preview for display
       setPhotos((prev) => {
-        const updated = {
+        const updated: PhotosState = {
           ...prev,
           [stepId]: {
             ...prev[stepId],
             [photoId]: {
               ...prev[stepId][photoId]!,
-              uploadStatus: 'uploaded',
+              uploadStatus: 'uploaded' as const,
               serverUrl,
               // Keep the blob URL for preview, serverUrl is for database
             },
@@ -550,6 +574,7 @@ export default function VehiclePictures({
             file,
             preview,
             uploadStatus: 'pending',
+            noCommentsChecked: true,
           };
         } catch (error) {
           console.error(`Error loading sample image for ${photo.id}:`, error);
@@ -578,6 +603,7 @@ export default function VehiclePictures({
                 file,
                 preview,
                 uploadStatus: 'pending',
+                noCommentsChecked: true,
               };
             }
           }, 'image/jpeg', 0.9);
@@ -676,15 +702,21 @@ export default function VehiclePictures({
       }
 
       // Prepare photo data with server URLs for context
+      console.log("=== INICIO handleFinish - Estado completo de photos ===");
+      console.log("photos state:", photos);
+      console.log("Número de steps:", Object.keys(photos).length);
+
       const photoDataForContext = [];
       for (const [stepId, stepPhotos] of Object.entries(photos)) {
+        console.log(`Processing step: ${stepId}`, stepPhotos);
         const step = inspectionSteps.find(s => s.id === stepId);
         for (const [photoId, photoData] of Object.entries(stepPhotos)) {
+          console.log(`  Processing photo: ${photoId}`, photoData);
           if (photoData) {
             const photo = step?.photos.find(p => p.id === photoId);
-            
+
             // Debug: log what we're sending
-            console.log(`Photo ${photoId}:`, {
+            console.log(`  Photo ${photoId} details:`, {
               uploadStatus: photoData.uploadStatus,
               hasServerUrl: !!photoData.serverUrl,
               serverUrl: photoData.serverUrl,
@@ -699,6 +731,8 @@ export default function VehiclePictures({
                 title: photo?.title || '',
                 description: photo?.description,
                 url: photoData.serverUrl, // Use server URL from R2
+                valuatorComment: photoData.valuatorComment,
+                noCommentsChecked: photoData.noCommentsChecked,
               });
             } else if (photoData.uploadStatus === 'uploaded' && !photoData.serverUrl) {
               console.error(`ERROR: Photo ${photoId} marked as uploaded but has no serverUrl!`);
@@ -710,11 +744,12 @@ export default function VehiclePictures({
         }
       }
       console.log('Final photos being sent to context:', photoDataForContext);
+      console.log('Total photos to save in context:', photoDataForContext.length);
       setContextPhotos(photoDataForContext);
 
       // Automatically trigger completion when in wizard mode
       if (onComplete) {
-        toast.success(`¡Fotos subidas exitosamente! Enviando inspección...`);
+        toast.success(`¡${photoDataForContext.length} fotos guardadas exitosamente!`);
         // Pasar las fotos directamente sin delay
         onComplete(photoDataForContext);
       } else {
@@ -783,8 +818,8 @@ export default function VehiclePictures({
                 )}
               >
                 <CheckCircle2 className="mr-1 h-3 w-3" />
-                <span className="hidden sm:inline">Completar y Enviar Inspección</span>
-                <span className="sm:hidden">Completar</span>
+                <span className="hidden sm:inline">Continuar a Valuación</span>
+                <span className="sm:hidden">Continuar</span>
               </Button>
             </div>
           </div>

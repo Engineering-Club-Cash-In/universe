@@ -47,7 +47,7 @@ export function Step3({
   });
 
   // Check if we should show development mode button
-  const isDevelopment = process.env.NODE_ENV === 'development' || import.meta.env?.DEV;
+  const isDevelopment = import.meta.env.DEV;
 
   if (!documents.length) {
     return (

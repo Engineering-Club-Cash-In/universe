@@ -1,3 +1,4 @@
+import { Footer } from "@/features";
 import React, { type FC } from "react";
 
 interface PageProps {
@@ -8,15 +9,15 @@ interface PageProps {
 export const Page: FC<PageProps> = ({ children, url = "/Layer_1.svg" }) => {
   return (
     <div
-      className="p-6 flex flex-col gap-4 bg-dark text-light min-h-screen"
+      className="flex flex-col gap-4 bg-dark text-light min-h-screen"
       style={{
         backgroundImage: `url(${url})`,
-        backgroundSize: "cover",
+         backgroundSize: "100% auto",
         backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
       }}
     >
       {children}
+      <Footer />
     </div>
   );
 };

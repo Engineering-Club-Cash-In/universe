@@ -4,7 +4,7 @@
   font-family: "PlusJakarta";
   src: url("/PlusJakartaSans-VariableFont_wght.ttf") format("truetype");
   font-weight: 100 700;
-   font-style: normal;
+  font-style: normal;
   font-display: swap;
 }
 
@@ -36,9 +36,11 @@
 /* Configuración de tema */
 @theme {
   --font-hero: "Hero", sans-serif;
-    --font-plus-jakarta: "PlusJakarta", sans-serif;
-  --color-primary: rgba(216, 231, 16, 0.87);
-  --color-secondary: rgb(79, 87, 247);
+  --font-plus-jakarta: "PlusJakarta", sans-serif;
+  --color-primary: rgba(148, 153, 236, 1);
+  --color-secondary: #D4AF37;
+  --color-gray: #BFBFBF;
+  --color-blue: rgb(79, 87, 247);
   --color-dark: #0f0f0f;
   --color-light: #ffffff;
 
@@ -46,7 +48,7 @@
   --text-header-1--font-weight: 700;
   --text-header-1--line-height: 1.2;
 
-  --text-header-2: 64px;
+  --text-header-2: 60px;
   --text-header-2--font-weight: 400;
   --text-header-2--line-height: 1.2;
 
@@ -59,7 +61,7 @@
   --text-header-4--line-height: 1.2;
 
   --text-header-body: 30px;
-  --text-header-body--font-weight: 700;
+  --text-header-body--font-weight: 400;
   --text-header-body--line-height: 1.2;
 
   --text-body: 24px;
@@ -71,5 +73,32 @@
 @layer base {
   body {
     font-family: var(--font-hero);
+  }
+
+  /* Scrollbar personalizado */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(148, 153, 236, 0.8) 0%, rgba(148, 153, 236, 0.5) 100%);
+    border-radius: 10px;
+    transition: all 0.3s ease;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(148, 153, 236, 1) 0%, rgba(148, 153, 236, 0.8) 100%);
+  }
+
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 153, 236, 0.8) rgba(255, 255, 255, 0.05);
   }
 }

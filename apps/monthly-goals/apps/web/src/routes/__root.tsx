@@ -97,29 +97,30 @@ function RootComponent() {
 												Sistema de Metas
 											</h3>
 											<div className="space-y-1 ml-2">
-												<Link
-													to="/goals/my-goals"
-													className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-													activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
-												>
-													Actualizar Progreso
-												</Link>
-												<Link
-													to="/goals"
-													className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
-													activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
-												>
-													Dashboard de Metas
-												</Link>
 												{canConfigureGoals && (
 													<Link
 														to="/goals/configure"
 														className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
 														activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
 													>
-														Asignar Metas Mensuales
+														1. Asignar Metas Mensuales
 													</Link>
 												)}
+												<Link
+													to="/goals/my-goals"
+													className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+													activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
+												>
+													2. Actualizar Progreso de Metas
+												</Link>
+												<Link
+													to="/goals/reports"
+													className="block px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
+													activeProps={{ className: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300" }}
+												>
+													3. Ver Metas
+												</Link>
+												
 											</div>
 										</div>
 

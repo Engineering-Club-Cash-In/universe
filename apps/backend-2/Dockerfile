@@ -1,5 +1,5 @@
 # Imagen base de Bun
-FROM oven/bun:1.2.16 AS base
+FROM oven/bun AS base
 WORKDIR /usr/src/app
 
 # =========================
@@ -32,6 +32,7 @@ COPY --from=install /temp/prod/node_modules ./node_modules
 COPY . .
 
 # Compilamos la app
+RUN bun i
 RUN bun build \
     --compile \
     --minify-whitespace \

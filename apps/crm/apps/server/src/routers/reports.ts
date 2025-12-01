@@ -1,4 +1,4 @@
-import { and, between, count, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { count, eq, gte, sql, sum } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { auctionVehicles } from "../db/schema/auctionVehicles";
@@ -9,8 +9,6 @@ import {
 } from "../db/schema/cobros";
 import {
 	clients,
-	companies,
-	creditAnalysis,
 	leads,
 	opportunities,
 	salesStages,
@@ -30,10 +28,7 @@ const dateRangeSchema = z.object({
  */
 export const getDashboardExecutivo = protectedProcedure
 	.input(dateRangeSchema)
-	.handler(async ({ input }) => {
-		const startDate = input.startDate ? new Date(input.startDate) : undefined;
-		const endDate = input.endDate ? new Date(input.endDate) : undefined;
-
+	.handler(async () => {
 		// KPI 1: Cartera total activa
 		const carteraActiva = await db
 			.select({
@@ -132,7 +127,7 @@ export const getDashboardExecutivo = protectedProcedure
  */
 export const getReporteCobranza = protectedProcedure
 	.input(dateRangeSchema)
-	.handler(async ({ input }) => {
+	.handler(async () => {
 		// Casos activos por responsable
 		const casosPorResponsable = await db
 			.select({
@@ -202,7 +197,7 @@ export const getReporteCobranza = protectedProcedure
  */
 export const getReporteCartera = protectedProcedure
 	.input(dateRangeSchema)
-	.handler(async ({ input }) => {
+	.handler(async () => {
 		// Resumen general de cartera
 		const resumenCartera = await db
 			.select({

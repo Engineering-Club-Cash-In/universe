@@ -8,18 +8,20 @@ import {
 	Calculator,
 	Car,
 	ChevronDown,
+	Database,
 	FileText,
 	Gavel,
 	Key,
 	LayoutDashboard,
 	MessageSquare,
+	Scale,
 	Settings,
 	TrendingUp,
 	UserCircle,
 	Users,
 } from "lucide-react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 import { ModeToggle } from "./mode-toggle";
@@ -200,6 +202,20 @@ export default function Header() {
 							</Button>
 						)}
 
+						{/* Jurídico */}
+						{session && userRole && PERMISSIONS.canAccessJuridico(userRole) && (
+							<Button
+								variant={isActive("/juridico") ? "secondary" : "ghost"}
+								size="sm"
+								asChild
+							>
+								<Link to="/juridico">
+									<Scale className="mr-2 h-4 w-4" />
+									Jurídico
+								</Link>
+							</Button>
+						)}
+
 						{/* Admin Dropdown */}
 						{session && userRole && PERMISSIONS.canAccessAdmin(userRole) && (
 							<DropdownMenu>
@@ -219,6 +235,12 @@ export default function Header() {
 										<Link to="/admin/users" className="cursor-pointer">
 											<Users className="mr-2 h-4 w-4" />
 											Usuarios
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/admin/import" className="cursor-pointer">
+											<Database className="mr-2 h-4 w-4" />
+											Importación
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>

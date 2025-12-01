@@ -730,3 +730,106 @@ export const updateAllInstallments = async ({
     throw error;
   }
 };
+
+interface AjustarCuotasCompletoParams {
+  numero_credito_sifco: string;
+  cuota_real_actual: number;
+  crear_cuotas_historicas?: boolean; // Flag opcional
+}
+
+const ajustarCuotasCompleto = async ({
+  numero_credito_sifco,
+  cuota_real_actual,
+  crear_cuotas_historicas = false,
+}: AjustarCuotasCompletoParams): Promise<void> => {
+  
+  console.log(`\n🔧 Ajuste completo del crédito ${numero_credito_sifco}`);
+
+  // 1️⃣ Obtener crédito
+  const creditoResult = await db
+    .select({ 
+      credito_id: creditos.credito_id,
+      plazo: creditos.plazo,
+      fecha_desembolso: creditos.fecha_creacion,
+    })
+    .from(creditos)
+    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+    .limit(1);
+
+  const credito = creditoResult[0];
+  if (!credito) throw new Error("Crédito no encontrado");
+
+  // 2️⃣ Obtener cuotas y pagos existentes
+  const [cuotasExistentes, pagosExistentes] = await Promise.all([
+    db.select()
+      .from(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, credito.credito_id))
+      .orderBy(cuotas_credito.numero_cuota),
+    
+    db.select()
+      .from(pagos_credito)
+      .where(eq(pagos_credito.credito_id, credito.credito_id))
+      .orderBy(pagos_credito.cuota_id),
+  ]);
+
+  const cuotas_faltantes = cuota_real_actual - 1;
+
+  console.log(`📊 Estado:`);
+  console.log(`   Cuotas existentes: ${cuotasExistentes.length}`);
+  console.log(`   Pagos existentes: ${pagosExistentes.length}`);
+  console.log(`   Cuotas históricas faltantes: ${cuotas_faltantes}`);
+
+  await db.transaction(async (tx) => {
+    
+    // 3️⃣ OPCIONAL: Crear cuotas históricas en cuotas_credito
+    if (crear_cuotas_historicas && cuotas_faltantes > 0) {
+      console.log(`\n🔄 Creando ${cuotas_faltantes} cuotas históricas...`);
+      
+      const fechaBase = new Date(credito.fecha_desembolso);
+      
+      for (let i = 1; i <= cuotas_faltantes; i++) {
+        const fechaVencimiento = new Date(fechaBase);
+        fechaVencimiento.setMonth(fechaVencimiento.getMonth() + i);
+
+        await tx.insert(cuotas_credito).values({
+          credito_id: credito.credito_id,
+          numero_cuota: i,
+          fecha_vencimiento: fechaVencimiento.toISOString().split('T')[0],
+          pagado: true, // ✅ Marcadas como pagadas (históricas)
+          liquidado_inversionistas: true, // Asumimos que ya se liquidaron
+          fecha_liquidacion_inversionistas: fechaVencimiento,
+        });
+        
+        console.log(`   ✅ Cuota histórica #${i} creada`);
+      }
+    }
+
+    // 4️⃣ Renumerar cuotas existentes
+    console.log(`\n🔄 Renumerando cuotas existentes...`);
+    
+    for (let i = 0; i < cuotasExistentes.length; i++) {
+      const cuota = cuotasExistentes[i];
+      const nuevo_numero = cuota_real_actual + i;
+      
+      await tx
+        .update(cuotas_credito)
+        .set({ numero_cuota: nuevo_numero })
+        .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
+      
+      console.log(`   ✅ Cuota #${cuota.numero_cuota} → #${nuevo_numero}`);
+    }
+
+    // 5️⃣ Los pagos ya están vinculados por cuota_id (FK)
+    // No necesitas actualizar nada en pagos_credito
+    console.log(`\n✅ Pagos vinculados automáticamente vía FK (cuota_id)`);
+  });
+
+  console.log(`\n🎉 Ajuste completado exitosamente!`);
+};
+
+// 🔥 Uso:
+await ajustarCuotasCompleto({
+  numero_credito_sifco: "SIFCO-12345",
+  cuota_real_actual: 19,
+  crear_cuotas_historicas: true, // 👈 Crea cuotas #1-18
+});

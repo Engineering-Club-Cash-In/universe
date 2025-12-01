@@ -639,17 +639,23 @@ export function ListaCreditosPagos() {
         }}
       />
 
-      <ModalCreateMora
-        open={openMoraModal}
-        onClose={() => setOpenMoraModal(false)}
-        creditoId={selectedCreditMora?.credito_id}
-        numeroCreditoSifco={selectedCreditMora?.numero_credito_sifco}
-        onSuccess={() => {
-          queryClient.invalidateQueries({
-            queryKey: ["creditos-paginados", mes, anio, page, perPage],
-          });
-        }}
-      />
+    <ModalCreateMora
+  open={openMoraModal}
+  onClose={() => {
+    setOpenMoraModal(false);
+    setSelectedCreditMora(null);
+  }}
+  creditoId={selectedCreditMora?.credito_id}
+  numeroCreditoSifco={selectedCreditMora?.numero_credito_sifco}
+  onSuccess={() => {
+    // 🔥 Delay TAMBIÉN acá para asegurar que el modal ya se cerró
+    setTimeout(() => {
+      queryClient.invalidateQueries({
+        queryKey: ["creditos-paginados", mes, anio, page, perPage],
+      });
+    }, 50); // 👈 Otro delay pequeño acá
+  }}
+/>
 
       {/* Modal de Reportes */}
       {reportModalOpen && selectedCreditForReport && (
@@ -1303,21 +1309,7 @@ function DesktopView({
                               ➕ Mora
                             </Button>
                           )}
-
-                        {canCreateConvenio(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-orange-700 border-orange-300 hover:bg-orange-50"
-                              onClick={() =>
-                                handleActivarConvenio(item.creditos.credito_id)
-                              }
-                            >
-                              <FileCheck className="w-4 h-4" />
-                              Crear Convenio
-                            </Button>
-                          )}
+ 
 
                         {canViewReports(item.creditos.statusCredit) &&
                           user?.role === "ADMIN" && (

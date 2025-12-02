@@ -425,7 +425,7 @@ export class ContractGeneratorService {
             get: (scope: any) => {
               const value = scope[tag];
               if (value === null || value === undefined || value === '') {
-                return '-';
+                return '- ';
               }
               return value;
             }

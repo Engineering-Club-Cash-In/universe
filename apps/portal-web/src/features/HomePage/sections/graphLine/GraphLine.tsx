@@ -2,9 +2,12 @@ import { Button } from "@components/ui";
 import { ResponsiveLine } from "@nivo/line";
 import { Link } from "@tanstack/react-router";
 import { useGraphLine } from "./hooks/useGraphLine";
+import { useIsMobile } from "@/hooks";
 
 export const GraphLine = () => {
   const { chartData, isLoading, isError } = useGraphLine();
+
+  const isMobile = useIsMobile();
 
   if (isLoading) {
     return (
@@ -33,14 +36,31 @@ export const GraphLine = () => {
   }
 
   return (
-    <section className="text-center w-full mt-52 px-12">
+    <section className="text-center w-full lg:mt-52 lg:px-12 mt-26 px-4">
+      {/* Línea decorativa superior - solo mobile */}
+      {isMobile && (
+        <div
+          className="w-full mb-10"
+          style={{
+            height: "10px",
+            opacity: 0.5,
+            background: "linear-gradient(90deg, #0F0F0F 0%, #9A9FF5 50%, #0F0F0F 100%)",
+          }}
+        />
+      )}
       <div>
-        <h2 className="text-header-2">¿Listo para invertir?</h2>
+        <h2 className="text-2xl lg:text-header-2">¿Listo para invertir?</h2>
       </div>
-      <div className="w-full h-[500px] bg-dark rounded-lg p-6">
+      <div
+        className={`w-full borderv mt-2 border-primary lg:border-0  bg-dark rounded-lg ${isMobile ? "h-[550px] p-2" : "h-[500px] p-6"}`}
+      >
         <ResponsiveLine
           data={chartData}
-          margin={{ top: 50, right: 60, bottom: 100, left: 80 }}
+          margin={
+            isMobile
+              ? { top: 20, right: 20, bottom: 140, left: 50 }
+              : { top: 50, right: 60, bottom: 100, left: 80 }
+          }
           xScale={{ type: "linear", min: "auto", max: "auto" }}
           yScale={{
             type: "linear",
@@ -56,7 +76,7 @@ export const GraphLine = () => {
             tickSize: 5,
             tickPadding: 5,
             tickRotation: 0,
-            legend: "Años",
+            legend: isMobile ? "" : "Años",
             legendOffset: 45,
             legendPosition: "middle",
             tickValues: [0, 1, 2, 3, 4, 5],
@@ -65,14 +85,14 @@ export const GraphLine = () => {
               legend: {
                 text: {
                   fontFamily: "Hero",
-                  fontSize: 16,
+                  fontSize: isMobile ? 12 : 16,
                   fontWeight: 400,
                 },
               },
               ticks: {
                 text: {
                   fontFamily: "Hero",
-                  fontSize: 12,
+                  fontSize: isMobile ? 10 : 12,
                   fontWeight: 400,
                 },
               },
@@ -82,20 +102,20 @@ export const GraphLine = () => {
             tickSize: 0,
             tickPadding: 5,
             tickRotation: 0,
-            legend: "Valor de inversión (Q)",
+            legend: isMobile ? "" : "Valor de inversión (Q)",
             legendOffset: -70,
             style: {
               legend: {
                 text: {
                   fontFamily: "Hero",
-                  fontSize: 16,
+                  fontSize: isMobile ? 12 : 16,
                   fontWeight: 400,
                 },
               },
               ticks: {
                 text: {
                   fontFamily: "Hero",
-                  fontSize: 12,
+                  fontSize: isMobile ? 10 : 12,
                   fontWeight: 400,
                 },
               },
@@ -104,7 +124,7 @@ export const GraphLine = () => {
             format: (value) => `Q${value}K`,
           }}
           colors={{ datum: "color" }}
-          lineWidth={3}
+          lineWidth={isMobile ? 2 : 3}
           pointSize={0}
           pointColor={{ theme: "background" }}
           pointBorderWidth={0}
@@ -118,9 +138,9 @@ export const GraphLine = () => {
             return (
               <div
                 style={{
-                  width: "225px",
+                  width: isMobile ? "180px" : "225px",
                   background: "#1f1f1f",
-                  padding: "12px 16px",
+                  padding: isMobile ? "8px 12px" : "12px 16px",
                   borderRadius: "4px",
                   fontFamily: "Hero",
                   boxShadow: "0 2px 4px rgba(0, 0, 0, 0.25)",
@@ -129,7 +149,7 @@ export const GraphLine = () => {
                 <div
                   style={{
                     color: "#ffffff",
-                    fontSize: "14px",
+                    fontSize: isMobile ? "12px" : "14px",
                     fontWeight: "bold",
                     marginBottom: "8px",
                   }}
@@ -148,13 +168,18 @@ export const GraphLine = () => {
                   >
                     <div
                       style={{
-                        width: "12px",
-                        height: "12px",
+                        width: isMobile ? "10px" : "12px",
+                        height: isMobile ? "10px" : "12px",
                         borderRadius: "50%",
                         backgroundColor: point.seriesColor,
                       }}
                     />
-                    <span style={{ color: "#ffffff", fontSize: "12px" }}>
+                    <span
+                      style={{
+                        color: "#ffffff",
+                        fontSize: isMobile ? "10px" : "12px",
+                      }}
+                    >
                       {point.seriesId}: Q{point.data.yFormatted}K
                     </span>
                   </div>
@@ -165,16 +190,16 @@ export const GraphLine = () => {
           legends={[
             {
               anchor: "bottom",
-              direction: "row",
+              direction: isMobile ? "column" : "row",
               justify: false,
               translateX: 0,
-              translateY: 100,
-              itemsSpacing: 20,
+              translateY: isMobile ? 130 : 100,
+              itemsSpacing: isMobile ? 8 : 20,
               itemDirection: "left-to-right",
-              itemWidth: 150,
+              itemWidth: isMobile ? 120 : 150,
               itemHeight: 20,
               itemOpacity: 0.85,
-              symbolSize: 12,
+              symbolSize: isMobile ? 10 : 12,
               symbolShape: "circle",
               symbolBorderColor: "rgba(0, 0, 0, .5)",
               effects: [
@@ -191,7 +216,7 @@ export const GraphLine = () => {
           theme={{
             background: "#0f0f0f",
             text: {
-              fontSize: 12,
+              fontSize: isMobile ? 10 : 12,
               fill: "#ffffff",
               outlineWidth: 0,
               outlineColor: "transparent",
@@ -205,7 +230,7 @@ export const GraphLine = () => {
               },
               legend: {
                 text: {
-                  fontSize: 14,
+                  fontSize: isMobile ? 12 : 14,
                   fill: "#ffffff",
                   fontWeight: 600,
                 },
@@ -216,7 +241,7 @@ export const GraphLine = () => {
                   strokeWidth: 1,
                 },
                 text: {
-                  fontSize: 11,
+                  fontSize: isMobile ? 9 : 11,
                   fill: "#ffffff",
                 },
               },
@@ -230,19 +255,19 @@ export const GraphLine = () => {
             legends: {
               title: {
                 text: {
-                  fontSize: 14,
+                  fontSize: isMobile ? 12 : 14,
                   fill: "#ffffff",
                 },
               },
               text: {
                 fontFamily: "Hero",
-                fontSize: 16,
+                fontSize: isMobile ? 12 : 16,
                 fill: "#ffffff",
               },
               ticks: {
                 line: {},
                 text: {
-                  fontSize: 10,
+                  fontSize: isMobile ? 8 : 10,
                   fill: "#ffffff",
                 },
               },
@@ -251,27 +276,38 @@ export const GraphLine = () => {
               container: {
                 background: "#1f1f1f",
                 color: "#ffffff",
-                fontSize: 12,
+                fontSize: isMobile ? 10 : 12,
                 borderRadius: "4px",
                 boxShadow: "0 1px 2px rgba(0, 0, 0, 0.25)",
-                padding: "8px 12px",
+                padding: isMobile ? "6px 10px" : "8px 12px",
               },
             },
           }}
         />
       </div>
       <div className="w-full mx-auto flex items-center justify-center mt-6">
-        <h2 className="text-[35px] lg:px-20">
-          Compara y descubre porque nuestras oportunidades superan otras
-          opciones del mercado. Usa la calculadora de rendimiento y comprueba
-          cuanto podrias generar con nosotros.
+        <h2 className="text-xl lg:text-4xl px-6 lg:px-20">
+          {isMobile
+            ? "Queremos darte soluciones pensadas para cada etapa de tu camino financiero."
+            : " Compara y descubre porque nuestras oportunidades superan otras opciones del mercado. Usa la calculadora de rendimiento y comprueba cuanto podrias generar con nosotros."}
         </h2>
       </div>
       <div className="mt-6 flex justify-center">
         <Link to="/invest" hash="how-it-works">
-          <Button size="lg">Calcula tu inversión</Button>
+          <Button size={isMobile ? "sm" : "lg"}>Calcula tu inversión</Button>
         </Link>
       </div>
+      {/* Línea decorativa inferior - solo mobile */}
+      {isMobile && (
+        <div
+          className="w-full mt-10"
+          style={{
+            height: "10px",
+            opacity: 0.5,
+            background: "linear-gradient(90deg, #0F0F0F 0%, #9A9FF5 50%, #0F0F0F 100%)",
+          }}
+        />
+      )}
     </section>
   );
 };

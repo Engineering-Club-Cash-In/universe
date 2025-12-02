@@ -2,6 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import { IconLeftArrow, IconRightArrow } from "@components/icons";
 import { Button } from "@components/ui";
+import { useIsMobile } from "@/hooks";
 const url = import.meta.env.VITE_IMAGE_URL;
 
 interface CarouselSlide {
@@ -47,7 +48,7 @@ const slides: CarouselSlide[] = [
     title: "¿Quieres vender tu auto? Nosotros nos encargamos",
     buttonText: "Vende tu auto",
     buttonLink: "/sell",
-  }
+  },
 ];
 
 export const CarrouselStart: React.FC = () => {
@@ -74,6 +75,8 @@ export const CarrouselStart: React.FC = () => {
   const handleNext = () => {
     setCurrentIndex((prev) => (prev === slides.length - 1 ? 0 : prev + 1));
   };
+
+  const isMobile = useIsMobile();
 
   return (
     <section className="relative w-full h-screen overflow-hidden">
@@ -121,14 +124,15 @@ export const CarrouselStart: React.FC = () => {
             <div
               className="absolute top-0 left-0 right-0 pointer-events-none"
               style={{
-                height: '200px',
-                background: 'linear-gradient(180deg, #0F0F0F 4.33%, rgba(15, 15, 15, 0.00) 100%)'
+                height: "200px",
+                background:
+                  "linear-gradient(180deg, #0F0F0F 4.33%, rgba(15, 15, 15, 0.00) 100%)",
               }}
             />
           </div>
 
           {/* Content overlay */}
-          <div className="relative z-10 h-full flex py-12 px-28">
+          <div className="relative z-10 h-full flex py-12 px-6 lg:px-28">
             <motion.div
               initial={false}
               animate={{
@@ -140,7 +144,7 @@ export const CarrouselStart: React.FC = () => {
               }}
               className="max-w-3xl"
             >
-              <h1 className="text-[35px] md:text-[45px] lg:text-[55px] text-white mb-4">
+              <h1 className="text-2xl  lg:text-[55px] text-white mb-4">
                 {slide.title}
               </h1>
 
@@ -149,7 +153,9 @@ export const CarrouselStart: React.FC = () => {
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                <Button>{slide.buttonText}</Button>
+                <Button size={isMobile ? "sm" : "lg"}>
+                  {slide.buttonText}
+                </Button>
               </motion.a>
             </motion.div>
           </div>

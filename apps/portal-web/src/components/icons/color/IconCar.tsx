@@ -1,10 +1,11 @@
-export const IconCar = () => (
+export const IconCar =  ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="50"
     height="23"
     viewBox="0 0 50 23"
     fill="none"
+    {...props}
   >
     <g opacity="0.99">
       <g opacity="0.99">

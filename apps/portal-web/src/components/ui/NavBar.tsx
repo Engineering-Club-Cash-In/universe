@@ -4,6 +4,7 @@ import { Link } from "./Link";
 import { InvestorsLogo } from "@/features/footer/icons";
 import { useMatchRoute } from "@tanstack/react-router";
 import { IconUser, IconMenu, IconX } from "../icons";
+import { useIsMobile } from "@/hooks";
 
 export const NavBar = () => {
   const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
@@ -29,12 +30,24 @@ export const NavBar = () => {
   ];
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
+  const isMobile = useIsMobile();
 
   return (
     <>
       <nav
-        className="sticky top-6 sm:top-8 left-4 sm:left-8 right-16 sm:right-8 flex items-center justify-between lg:justify-between z-50 gap-4 mx-4 md:mx-20"
+        className="sticky top-4 md:top-8 left-4 lg:left-8 right-16 lg:right-8 flex items-center justify-between  z-50 gap-4 mx-4 md:mx-20  lg:bg-transparent"
         aria-label="Main navigation"
+        style={
+          isMobile
+            ? {
+                padding: "10px 16px",
+
+                background:
+                  "linear-gradient(180deg, #0F0F0F 0%, #0F0F0F 75%, rgba(15, 15, 15, 0.00) 100%)",
+                borderRadius: "42px",
+              }
+            : {}
+        }
       >
         {/* Mobile: Logo a la izquierda */}
         <Link href={"/"} className="lg:hidden font-semibold text-lg flex gap-2">
@@ -52,7 +65,7 @@ export const NavBar = () => {
 
         {/* Desktop navbar */}
         <div
-          className={`hidden lg:flex items-center justify-between w-full max-w-[1250px] h-[61px] rounded-[56px] px-4 sm:px-6 py-3 ${isInvestorPage ? "border border-secondary" : "border-[0.8px] border-transparent"} `}
+          className={`hidden lg:flex items-center justify-between w-full max-w-[1250px] h-[61px] rounded-[56px] px-4 md:px-6 py-3 ${isInvestorPage ? "border border-secondary" : "border-[0.8px] border-transparent"} `}
           style={{
             background:
               "linear-gradient(181.54deg, #0F0F0F 1.31%, #262626 98.69%)",
@@ -66,7 +79,7 @@ export const NavBar = () => {
         >
           <Link
             href={"/"}
-            className="text-light font-plus-jakarta font-bold text-lg sm:text-xl"
+            className="text-light font-plus-jakarta font-bold text-lg md:text-xl"
           >
             CashIn
           </Link>
@@ -94,7 +107,7 @@ export const NavBar = () => {
 
           <div
             className={`flex items-center justify-center shrink-0 
-              ${isInvestorPage ? "w-24 lg:w-20 h-10 " : "w-10 sm:w-8 h-8 "}
+              ${isInvestorPage ? "w-24 lg:w-20 h-10 " : "w-10 md:w-8 h-8 "}
             `}
           >
             {isInvestorPage ? (

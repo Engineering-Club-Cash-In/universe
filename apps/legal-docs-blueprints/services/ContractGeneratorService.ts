@@ -418,8 +418,20 @@ export class ContractGeneratorService {
       const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
         linebreaks: true,
-        nullGetter: () => '', // Reemplazar nulls con string vacío
-      });
+        nullGetter: () => '-', // Reemplazar nulls con '-'
+        parser: (tag: string) => {
+          // remplazar cadenas vacías por guion
+          return {
+            get: (scope: any) => {
+              const value = scope[tag];
+              if (value === null || value === undefined || value === '') {
+                return '-';
+              }
+              return value;
+            }
+          };
+        }
+      })
 
       // 6. Renderizar con los datos
       doc.render(data);

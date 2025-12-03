@@ -982,3 +982,181 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
     `✅ Resumen final -> OK=${totalOk} | FAIL=${totalFail} | TOTAL=${totalOk + totalFail}`
   );
 }
+
+/**
+ * Versión 2: Recibe el número de crédito y un array de inversionistas
+ * desde Python (u otro origen externo)
+ */
+export async function fillPagosInversionistasV2(
+  numeroCredito: string,
+  inversionistasData: {
+    inversionista: string;
+    capital: string | number;
+    porcentajeCashIn: string | number;
+    porcentajeInversionista: string | number;
+    porcentaje: string | number;
+    cuota?: string | number;
+    cuotaInversionista?: string | number;
+  }[]
+) {
+  console.log("🚀 Iniciando fillPagosInversionistasV2...");
+  console.log(`📋 Número de crédito: ${numeroCredito}`);
+  console.log(`👥 Inversionistas a procesar: ${inversionistasData.length}`);
+
+  // 1. Obtener el crédito de la DB
+  const credito = await db.query.creditos.findFirst({
+    columns: { credito_id: true, numero_credito_sifco: true },
+    where: (c, { eq }) => eq(c.numero_credito_sifco, numeroCredito),
+  });
+
+  if (!credito) {
+    throw new Error(
+      `[ERROR] No se encontró el crédito con numero_credito_sifco=${numeroCredito}`
+    );
+  }
+
+  console.log(`✅ Crédito encontrado: ID=${credito.credito_id}`);
+
+  // Contadores
+  let ok = 0;
+  let fail = 0;
+  const errores: { inversionista: string; error: string }[] = [];
+
+  // 2. Procesar cada inversionista
+  for (const rowData of inversionistasData) {
+    try {
+      console.log(`\n👤 Procesando inversionista: ${rowData.inversionista}`);
+
+      // 2.1 Resolver inversionista en DB
+      const inv = await db.query.inversionistas.findFirst({
+        columns: { inversionista_id: true, nombre: true },
+        where: (i, { eq }) => eq(i.nombre, rowData.inversionista.trim()),
+      });
+
+      if (!inv) {
+        throw new Error(
+          `No existe inversionista con nombre="${rowData.inversionista}"`
+        );
+      }
+
+      console.log(`✅ Inversionista encontrado: ID=${inv.inversionista_id}`);
+
+      // 2.2 Calcular montos
+      const montoAportado = toBigExcel(rowData.capital);
+      const porcentajeCashIn = toBigExcel(rowData.porcentajeCashIn);
+      const porcentajeInversion = toBigExcel(rowData.porcentajeInversionista);
+      const interes = toBigExcel(rowData.porcentaje);
+
+      console.log(`💰 Capital: ${montoAportado.toString()}`);
+      console.log(`📊 % CashIn: ${porcentajeCashIn.toString()}`);
+      console.log(`📊 % Inversión: ${porcentajeInversion.toString()}`);
+      console.log(`📈 Interés: ${interes.toString()}`);
+
+      // Calcular cuota de interés base
+      const cuotaInteres = montoAportado.times(interes);
+      console.log(`💵 Cuota Interés: ${cuotaInteres.toString()}`);
+
+      // Dividir entre inversionista y cashin
+      const montoInversionista = cuotaInteres
+        .times(porcentajeInversion)
+        .toFixed(2);
+
+      const montoCashIn = cuotaInteres
+        .times(porcentajeCashIn)
+        .toFixed(2);
+
+      console.log(`👤 Monto Inversionista: ${montoInversionista}`);
+      console.log(`🏦 Monto CashIn: ${montoCashIn}`);
+
+      // IVA sobre cada parte
+      const ivaInversionista =
+        Number(montoInversionista) > 0
+          ? new Big(montoInversionista).times(0.12).toFixed(2)
+          : "0.00";
+
+      const ivaCashIn =
+        Number(montoCashIn) > 0
+          ? new Big(montoCashIn).times(0.12).toFixed(2)
+          : "0.00";
+
+      console.log(`🧾 IVA Inversionista: ${ivaInversionista}`);
+      console.log(`🧾 IVA CashIn: ${ivaCashIn}`);
+
+      // Determinar cuota a usar
+      const cuotaInv =
+        rowData.cuotaInversionista && rowData.cuotaInversionista !== "0"
+          ? String(rowData.cuotaInversionista)
+          : String(rowData.cuota || "0");
+
+      console.log(`📌 Cuota final: ${cuotaInv}`);
+
+      // 2.3 Armar registro
+      const registro = {
+        credito_id: credito.credito_id,
+        inversionista_id: inv.inversionista_id,
+        monto_aportado: montoAportado.toString(),
+        porcentaje_cash_in: porcentajeCashIn.toString(),
+        porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+        monto_inversionista: montoInversionista,
+        monto_cash_in: montoCashIn,
+        iva_inversionista: ivaInversionista,
+        iva_cash_in: ivaCashIn,
+        fecha_creacion: new Date(),
+        cuota_inversionista: cuotaInv,
+      };
+
+      // 2.4 Upsert
+      await db
+        .insert(creditos_inversionistas)
+        .values(registro)
+        .onConflictDoUpdate({
+          target: [
+            creditos_inversionistas.credito_id,
+            creditos_inversionistas.inversionista_id,
+          ],
+          set: {
+            monto_aportado: sql`EXCLUDED.monto_aportado`,
+            porcentaje_cash_in: sql`EXCLUDED.porcentaje_cash_in`,
+            porcentaje_participacion_inversionista:
+              sql`EXCLUDED.porcentaje_participacion_inversionista`,
+            monto_inversionista: sql`EXCLUDED.monto_inversionista`,
+            monto_cash_in: sql`EXCLUDED.monto_cash_in`,
+            iva_inversionista: sql`EXCLUDED.iva_inversionista`,
+            iva_cash_in: sql`EXCLUDED.iva_cash_in`,
+            cuota_inversionista: sql`EXCLUDED.cuota_inversionista`,
+          },
+        });
+
+      console.log(`✅ Registro guardado exitosamente`);
+      ok++;
+    } catch (err) {
+      console.error(`❌ Error procesando inversionista ${rowData.inversionista}:`, err);
+      errores.push({
+        inversionista: rowData.inversionista,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      fail++;
+    }
+  }
+
+  // Resumen
+  const resultado = {
+    credito: numeroCredito,
+    exitosos: ok,
+    fallidos: fail,
+    total: inversionistasData.length,
+    errores: errores,
+  };
+
+  console.log(`\n🎉 Resumen final:`);
+  console.log(`✅ Exitosos: ${ok}`);
+  console.log(`❌ Fallidos: ${fail}`);
+  console.log(`📊 Total: ${inversionistasData.length}`);
+
+  if (errores.length > 0) {
+    console.log(`\n⚠️ Errores encontrados:`);
+    errores.forEach((e) => console.log(`  - ${e.inversionista}: ${e.error}`));
+  }
+
+  return resultado;
+}

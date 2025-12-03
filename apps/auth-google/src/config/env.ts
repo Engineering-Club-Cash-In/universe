@@ -44,7 +44,7 @@ function validateEnv(): EnvConfig {
   }
 
   // Validaciones adicionales
-  const port = parseInt(process.env.PORT || "3000", 10);
+  const port = parseInt(process.env.PORT || "9500", 10);
   if (isNaN(port) || port < 1 || port > 65535) {
     throw new Error(`❌ Invalid PORT value: ${process.env.PORT}`);
   }

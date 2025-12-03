@@ -23,15 +23,15 @@ export const Testimonies = () => {
   ];
 
   return (
-    <section className="text-center w-full mt-50 px-4">
+    <section className="text-center w-full mt-32 lg:mt-50 px-6">
       <div className="w-full flex justify-center">
-        <h2 className="text-[50px] w-2xl">
+        <h2 className="text-2xl lg:text-[50px] w-2xl">
           Un sueño cumplido habla más que mil palabras
         </h2>
       </div>
 
       {/* Grid de testimonios */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-36 w-full mt-16 px-28">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 lg:gap-36 w-full mt-10 lg:mt-16 lg:px-28">
         {testimonies.map((testimony, index) => (
           <div
             key={index}

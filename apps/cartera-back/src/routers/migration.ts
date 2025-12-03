@@ -1,6 +1,6 @@
 // routes/sifco.ts
 import { Elysia, t } from "elysia";
-import { fillPagosInversionistas, mapPagosPorCreditos, syncClienteConPrestamos } from "../migration/migration";
+import { fillPagosInversionistas, fillPagosInversionistasV2, mapPagosPorCreditos, syncClienteConPrestamos } from "../migration/migration";
  
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
@@ -329,6 +329,34 @@ export const sifcoRouter = new Elysia()
           examples: [2, 5, 10],
           minimum: 1,
         }),
+      }),
+    }
+  ).post(
+    "/pagos-inversionistas/v2",
+    async ({ body }) => {
+      const { numeroCredito, inversionistasData } = body;
+
+      const resultado = await fillPagosInversionistasV2(
+        numeroCredito,
+        inversionistasData
+      );
+
+      return resultado;
+    },
+    {
+      body: t.Object({
+        numeroCredito: t.String(),
+        inversionistasData: t.Array(
+          t.Object({
+            inversionista: t.String(),
+            capital: t.Union([t.String(), t.Number()]),
+            porcentajeCashIn: t.Union([t.String(), t.Number()]),
+            porcentajeInversionista: t.Union([t.String(), t.Number()]),
+            porcentaje: t.Union([t.String(), t.Number()]),
+            cuota: t.Optional(t.Union([t.String(), t.Number()])),
+            cuotaInversionista: t.Optional(t.Union([t.String(), t.Number()])),
+          })
+        ),
       }),
     }
   );

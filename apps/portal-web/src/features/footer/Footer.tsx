@@ -10,6 +10,7 @@ import {
   Whatsapp,
 } from "./icons";
 import { Link } from "@components/ui";
+import { useIsMobile } from "@/hooks";
 
 // Navigation sections configuration
 const FOOTER_SECTIONS = [
@@ -56,17 +57,19 @@ const SOCIAL_CONTACTS = [
     label: "clubcashin-com",
     href: "https://linkedin.com/company/clubcashin-com",
   },
+  {
+    icon: Location,
+    label: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
+    className: "max-w-[280px] text-center",
+    href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
+  },
 ];
 
-const LOCATION_INFO = {
-  icon: Location,
-  address: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
-  href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
-};
-
 export const Footer: React.FC = () => {
+  const isMobile = useIsMobile();
+
   return (
-    <footer className="relative bg-[#0F0F0F] lg:h-[550px] h-full">
+    <footer className="relative bg-[#0F0F0F] lg:h-[550px] h-full ">
       {/* Gradient shadow at the top - always visible */}
       <div
         style={{
@@ -80,7 +83,7 @@ export const Footer: React.FC = () => {
       <div
         style={{
           backgroundImage: `url(${Map})`,
-          backgroundSize: "100% auto",
+          backgroundSize: isMobile ? "400% auto" : "100% auto",
           backgroundPosition: "center",
           backgroundRepeat: "no-repeat",
           opacity: 0.3,
@@ -89,21 +92,23 @@ export const Footer: React.FC = () => {
       />
 
       {/* Content */}
-      <div className="flex justify-end flex-col gap-6 h-full px-40 py-6 lg:py-20 z-10 relative">
+      <div className="flex justify-end flex-col gap-6 h-full p-10 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
-        <div className="flex gap-10 items-center">
+        <div className="flex flex-col lg:flex-row gap-10 lg:items-center">
           <h1 className="text-header-3">Cashin</h1>
-          <Investors />
-          <Tranki />
-          <Listo />
+          <div className="flex gap-10">
+            <Investors />
+            <Tranki />
+            <Listo />
+          </div>
         </div>
 
         <div className="border-t border-white border-2"></div>
 
         {/* Main content grid */}
-        <div className="grid grid-cols-5 gap-6 lg:gap-0 w-full">
+        <div className="grid grid-cols-1  lg:grid-cols-5 gap-6 lg:gap-0 w-full ">
           {/* Navigation links */}
-          <div className="w-full col-span-3 lg:col-span-2 flex gap-14">
+          <div className="order-2 lg:order-1  w-full col-span-3 lg:col-span-2 flex flex-col lg:flex-row gap-10 lg:gap-14">
             {FOOTER_SECTIONS.map((section) => (
               <div key={section.title} className="flex flex-col gap-6">
                 <div className="text-[20px] font-bold">{section.title}</div>
@@ -121,7 +126,7 @@ export const Footer: React.FC = () => {
           </div>
 
           {/* Social media and contact */}
-          <div className="w-full col-span-2 lg:col-span-3 flex flex-col lg:flex-row justify-end gap-8 lg:pr-14">
+          <div className="order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  lg:justify-end gap-8 lg:pr-14 ">
             {SOCIAL_CONTACTS.map((contact) => {
               const IconComponent = contact.icon;
               return (
@@ -130,22 +135,13 @@ export const Footer: React.FC = () => {
                   href={contact.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer"
+                  className={`flex flex-col items-center gap-1 text-[14px] font-normal transition-all hover:scale-110 hover:text-gray-300 cursor-pointer ${contact.className || ""}`}
                 >
                   <IconComponent />
-                  {contact.label}
+                  <div className="hidden lg:block">{contact.label}</div>
                 </a>
               );
             })}
-            <a
-              href={LOCATION_INFO.href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center gap-1 text-[14px] font-normal max-w-[280px] text-center transition-all hover:scale-105 hover:text-gray-300 cursor-pointer"
-            >
-              <Location />
-              {LOCATION_INFO.address}
-            </a>
           </div>
         </div>
       </div>

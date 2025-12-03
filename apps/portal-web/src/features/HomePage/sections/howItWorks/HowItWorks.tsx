@@ -24,19 +24,19 @@ export const HowItWorks: React.FC = () => {
   ];
 
   return (
-    <section className="text-center w-full mt-60 px-20">
+    <section className="text-center w-full mt-24 lg:mt-60 px-6 lg:px-20">
       <div>
-        <h2 className="text-header-2 mb-6">¿Cómo funciona?</h2>
-        <h3 className="text-header-body">
+        <h2 className="text-2xl lg:text-header-2 mb-6">¿Cómo funciona?</h2>
+        <h3 className="text-sm lg:text-header-body">
           Explora estos videos y entiende paso a paso cómo te ayudamos en cada proceso.
         </h3>
       </div>
 
-      <div className="flex flex-col mt-8 md:flex-row gap-20">
+      <div className="flex flex-col mt-8 md:flex-row gap-8 lg:gap-20">
         {items.map((item, index) => (
           <div
             key={index}
-            className="relative flex-1 h-[335px] overflow-hidden group cursor-pointer"
+            className="relative flex-1 lg:h-[335px] overflow-hidden group cursor-pointer"
           >
             <img
               src={item.image}

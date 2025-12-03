@@ -19,7 +19,7 @@ ARG VITE_FRONTEND_URL=https://portal.s2.devteamatcci.site
 ARG VITE_WHATSAPP_PHONE_NUMBER=+59899683075
 ARG VITE_PHONE_NUMBER=+50222341368
 ARG VITE_URL_INSPECTION=https://taller.s3.devteamatcci.site/vehicle-inspection
-ARG VITE_BETTER_AUTH_URL=https://better-auth.devteamatcci.site
+ARG VITE_BETTER_AUTH_URL=https://better-auth.s2.devteamatcci.site
 
 ENV VITE_IMAGE_URL=${VITE_IMAGE_URL}
 ENV VITE_FRONTEND_URL=${VITE_FRONTEND_URL}

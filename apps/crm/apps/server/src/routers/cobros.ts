@@ -320,7 +320,7 @@ export const cobrosRouter = {
 				offset: z.number().default(0),
 			}),
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			// Si la integración con Cartera-Back está habilitada, obtener datos directamente
 			if (isCarteraBackEnabled()) {
 				try {
@@ -1199,7 +1199,6 @@ export const cobrosRouter = {
 
 				// 2. Obtener detalles completos del crédito de cartera-back
 				let creditoCompleto: CreditoDirectoResponse | null = null;
-				let usingFallback = false;
 
 				try {
 					creditoCompleto = await carteraBackClient.getCredito(numeroSifco);
@@ -1260,7 +1259,6 @@ export const cobrosRouter = {
 									cuotasAtrasadas: [],
 									moraActual: creditoListado.mora?.monto_mora || "0.00",
 								};
-								usingFallback = true;
 								console.log(
 									`[Cobros] ✓ Usando datos del listado (fallback) para ${numeroSifco}`,
 								);
@@ -1289,7 +1287,6 @@ export const cobrosRouter = {
 
 				// 3. Obtener datos del vehículo del CRM (si existe referencia a contrato)
 				let vehiculo = null;
-				let cliente = null;
 				if (reference[0]?.contratoFinanciamientoId) {
 					const contrato = await db
 						.select()
@@ -1308,15 +1305,6 @@ export const cobrosRouter = {
 							.limit(1);
 
 						vehiculo = vehiculoResult[0] || null;
-
-						// Obtener cliente para datos de contacto
-						const clienteResult = await db
-							.select()
-							.from(clients)
-							.where(eq(clients.id, contrato[0].clientId))
-							.limit(1);
-
-						cliente = clienteResult[0] || null;
 					}
 				}
 

@@ -6,24 +6,24 @@ export const Header = () => {
 
   const items = [
     {
-      icon: <IconCar2 width={isMobile ? 64 : 64} />,
+      icon: <IconCar2 width={isMobile ? 36 : 64} />,
       title: "100% Seguro",
     },
     {
-      icon: <IconArrow width={isMobile ? 64 : 64} />,
+      icon: <IconArrow width={isMobile ? 36 : 64} />,
       title: "Proceso Rápido",
     },
     {
-      icon: <IconShield width={isMobile ? 64 : 64} />,
+      icon: <IconShield width={isMobile ? 36 : 64} />,
       title: "Transparente",
     },
   ];
 
   return (
-    <section className="relative mt-6 flex justify-center items-center flex-col gap-6 py-30">
+    <section className="relative mt-6 flex justify-center items-center flex-col gap-6 py-12 lg:py-30 px-6 lg:px-0">
       {/* Fondo con gradiente */}
       <div
-        className="absolute inset-0 z-0"
+        className="hidden lg:block absolute inset-0 z-0"
         style={{
           opacity: 0.2,
           background:
@@ -31,10 +31,10 @@ export const Header = () => {
         }}
       />
 
-      <div className="flex flex-row lg:gap-16 items-center z-10 gap-10">
+      <div className="flex flex-row gap-6 lg:gap-16 items-center z-10 ">
         {items.map((item, index) => (
           <div key={index} className="flex flex-col items-center gap-4 lg:p-6">
-            <div className="flex w-16 h-16 lg:w-32 lg:h-32 p-3 lg:p-8 justify-center items-center text-center shrink-0 rounded-full bg-primary/10 text-primary">
+            <div className="flex w-18 h-18 lg:w-32 lg:h-32 p-3 lg:p-8 justify-center items-center text-center shrink-0 rounded-full bg-primary/10 text-primary">
               {item.icon}
             </div>
             <p className="text-sm lg:text-body text-gray">{item.title}</p>

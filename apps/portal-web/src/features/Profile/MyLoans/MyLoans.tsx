@@ -6,6 +6,7 @@ import { useAuth } from "@/lib";
 import { getCredits } from "../services";
 import { useModalOptionsCall } from "@/hooks";
 import { ModalChatBot } from "@/components";
+import { ContainerMenu } from "../components/ContainerMenu";
 
 export const MyLoans = () => {
   const { user } = useAuth();
@@ -95,183 +96,189 @@ export const MyLoans = () => {
   return (
     <div>
       <NavBar />
-      <Menu />
-      <div className="max-w-7xl mx-auto mt-26 mb-20 px-8">
-        <h1 className="text-header-body font-bold mb-8">Mis Créditos</h1>
+      <ContainerMenu>
+        <div className="">
+          <h1 className="text-header-body font-bold mb-8">Mis Créditos</h1>
 
-        {credits && credits.length > 0 ? (
-          <div className="space-y-10">
-            {credits.map((credit) => (
-              <div
-                key={credit.id}
-                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden hover:border-primary/30 transition-colors"
-              >
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                  {/* Imagen del vehículo */}
-                  <div className="lg:col-span-4">
-                    <div className="relative h-full min-h-[280px] lg:min-h-full">
-                      <img
-                        src={credit.vehiculo.foto}
-                        alt={`${credit.vehiculo.marca} ${credit.vehiculo.modelo}`}
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent"></div>
-                      <div className="absolute bottom-4 left-4 right-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <IconCar2 className="w-6 h-6 text-white" />
-                          <span className="text-white/80 text-base">
-                            {getVehicleTypeLabel(credit.vehiculo.tipo)}
-                          </span>
+          {credits && credits.length > 0 ? (
+            <div className="space-y-10">
+              {credits.map((credit) => (
+                <div
+                  key={credit.id}
+                  className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden hover:border-primary/30 transition-colors"
+                >
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Imagen del vehículo */}
+                    <div className="lg:col-span-4">
+                      <div className="relative h-full min-h-[280px] lg:min-h-full">
+                        <img
+                          src={credit.vehiculo.foto}
+                          alt={`${credit.vehiculo.marca} ${credit.vehiculo.modelo}`}
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent"></div>
+                        <div className="absolute bottom-4 left-4 right-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <IconCar2 className="w-6 h-6 text-white" />
+                            <span className="text-white/80 text-base">
+                              {getVehicleTypeLabel(credit.vehiculo.tipo)}
+                            </span>
+                          </div>
+                          <h3 className="text-white text-2xl font-bold">
+                            {credit.vehiculo.marca}
+                          </h3>
+                          <p className="text-white/90 text-xl">
+                            {credit.vehiculo.modelo}
+                          </p>
                         </div>
-                        <h3 className="text-white text-2xl font-bold">
-                          {credit.vehiculo.marca}
-                        </h3>
-                        <p className="text-white/90 text-xl">
-                          {credit.vehiculo.modelo}
-                        </p>
                       </div>
                     </div>
-                  </div>
 
-                  {/* Información del crédito */}
-                  <div className="lg:col-span-8 p-6">
-                    {/* Header con ID y estado */}
-                    <div className="flex justify-between items-start mb-6">
-                      <div>
-                        <h3 className="text-body font-semibold mb-1">
-                          Crédito #{credit.id}
-                        </h3>
-                      </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
-                          credit.estado
-                        )}`}
-                      >
-                        {getStatusLabel(credit.estado)}
-                      </span>
-                    </div>
-
-                    {/* Grid de información */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                      {/* Monto del préstamo */}
-                      <div>
-                        <p className="text-base text-white/65 mb-1">
-                          Monto del Préstamo
-                        </p>
-                        <p className="text-xl font-bold">
-                          {formatCurrency(credit.montoPrestamo)}
-                        </p>
-                      </div>
-
-                      {/* Pago mensual */}
-                      <div>
-                        <p className="text-base text-white/65 mb-1">Pago Mensual</p>
-                        <p className="text-xl font-bold">
-                          {formatCurrency(credit.pagoMensual)}
-                        </p>
-                      </div>
-
-                      {/* Tasa de interés */}
-                      <div>
-                        <p className="text-base text-white/65 mb-1">
-                          Tasa de Interés
-                        </p>
-                        <p className="text-xl font-bold">
-                          {credit.tasaInteres}%
-                        </p>
-                      </div>
-
-                      {/* Pagos restantes */}
-                      <div>
-                        <p className="text-base text-white/65 mb-1">
-                          Pagos Restantes
-                        </p>
-                        <p className="text-xl font-bold">
-                          {credit.pagosRestantes}
-                        </p>
-                      </div>
-
-                      {/* Fecha de inicio */}
-                      <div className="flex items-center gap-4">
-                        <div className=" flex items-center justify-center shrink-0">
-                          <div className="w-6 h-6 ">
-                            <IconCalendarSmall width={24} height={24} />
-                          </div>
+                    {/* Información del crédito */}
+                    <div className="lg:col-span-8 p-6">
+                      {/* Header con ID y estado */}
+                      <div className="flex justify-between items-start mb-6">
+                        <div>
+                          <h3 className="text-body font-semibold mb-1">
+                            Crédito #{credit.id}
+                          </h3>
                         </div>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
+                            credit.estado
+                          )}`}
+                        >
+                          {getStatusLabel(credit.estado)}
+                        </span>
+                      </div>
+
+                      {/* Grid de información */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        {/* Monto del préstamo */}
                         <div>
                           <p className="text-base text-white/65 mb-1">
-                            Fecha de Inicio
+                            Monto del Préstamo
                           </p>
-                          <p className="text-base font-semibold">
-                            {formatDate(credit.fechaInicio)}
+                          <p className="text-xl font-bold">
+                            {formatCurrency(credit.montoPrestamo)}
                           </p>
                         </div>
-                      </div>
 
-                      {/* Fecha de fin */}
-                      <div className="flex items-center gap-4">
-                        <div className=" flex items-center justify-center shrink-0">
-                          <div className="w-6 h-6 ">
-                            <IconCalendarSmall width={24} height={24} />
-                          </div>
-                        </div>
+                        {/* Pago mensual */}
                         <div>
                           <p className="text-base text-white/65 mb-1">
-                            Fecha de Fin
+                            Pago Mensual
                           </p>
-                          <p className="text-base font-semibold">
-                            {formatDate(credit.fechaFin)}
+                          <p className="text-xl font-bold">
+                            {formatCurrency(credit.pagoMensual)}
                           </p>
                         </div>
-                      </div>
 
-                      {/* Próximo pago - solo si no está finalizado */}
-                      {credit.estado !== "finalizado" && (
+                        {/* Tasa de interés */}
+                        <div>
+                          <p className="text-base text-white/65 mb-1">
+                            Tasa de Interés
+                          </p>
+                          <p className="text-xl font-bold">
+                            {credit.tasaInteres}%
+                          </p>
+                        </div>
+
+                        {/* Pagos restantes */}
+                        <div>
+                          <p className="text-base text-white/65 mb-1">
+                            Pagos Restantes
+                          </p>
+                          <p className="text-xl font-bold">
+                            {credit.pagosRestantes}
+                          </p>
+                        </div>
+
+                        {/* Fecha de inicio */}
                         <div className="flex items-center gap-4">
                           <div className=" flex items-center justify-center shrink-0">
-                            <div className="w-6 h-6 text-primary">
-                              <IconSignDollar width={24} height={24} />
-                              </div>
+                            <div className="w-6 h-6 ">
+                              <IconCalendarSmall width={24} height={24} />
                             </div>
+                          </div>
                           <div>
-                            <p className="text-base text-white/65 mb-1">Próximo Pago</p>
+                            <p className="text-base text-white/65 mb-1">
+                              Fecha de Inicio
+                            </p>
                             <p className="text-base font-semibold">
-                              {formatDate(credit.proximoPago)}
+                              {formatDate(credit.fechaInicio)}
                             </p>
                           </div>
                         </div>
+
+                        {/* Fecha de fin */}
+                        <div className="flex items-center gap-4">
+                          <div className=" flex items-center justify-center shrink-0">
+                            <div className="w-6 h-6 ">
+                              <IconCalendarSmall width={24} height={24} />
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-base text-white/65 mb-1">
+                              Fecha de Fin
+                            </p>
+                            <p className="text-base font-semibold">
+                              {formatDate(credit.fechaFin)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Próximo pago - solo si no está finalizado */}
+                        {credit.estado !== "finalizado" && (
+                          <div className="flex items-center gap-4">
+                            <div className=" flex items-center justify-center shrink-0">
+                              <div className="w-6 h-6 text-primary">
+                                <IconSignDollar width={24} height={24} />
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-base text-white/65 mb-1">
+                                Próximo Pago
+                              </p>
+                              <p className="text-base font-semibold">
+                                {formatDate(credit.proximoPago)}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Botón de realizar pago */}
+                      {(credit.estado === "activo" ||
+                        credit.estado === "atrasado") && (
+                        <div className="flex justify-end pt-4 border-t border-white/10">
+                          <button
+                            className="px-6 py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+                            onClick={() => {
+                              setIsModalOpen(true);
+                            }}
+                          >
+                            Realizar Pago
+                          </button>
+                        </div>
                       )}
                     </div>
-
-                    {/* Botón de realizar pago */}
-                    {(credit.estado === "activo" ||
-                      credit.estado === "atrasado") && (
-                      <div className="flex justify-end pt-4 border-t border-white/10">
-                        <button
-                          className="px-6 py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
-                          onClick={() => {
-                            setIsModalOpen(true);
-                          }}
-                        >
-                          Realizar Pago
-                        </button>
-                      </div>
-                    )}
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-12 text-center">
-            <IconCar2 className="w-16 h-16 text-white/30 mx-auto mb-4" />
-            <p className="text-white/65 text-lg">No tienes créditos aún</p>
-            <p className="text-white/50 text-sm mt-2">
-              Solicita un crédito vehicular para verlo aquí
-            </p>
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-12 text-center">
+              <IconCar2 className="w-16 h-16 text-white/30 mx-auto mb-4" />
+              <p className="text-white/65 text-lg">No tienes créditos aún</p>
+              <p className="text-white/50 text-sm mt-2">
+                Solicita un crédito vehicular para verlo aquí
+              </p>
+            </div>
+          )}
+        </div>
+      </ContainerMenu>
+
       <ModalChatBot
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}

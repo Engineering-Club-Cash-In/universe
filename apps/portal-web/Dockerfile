@@ -1,5 +1,5 @@
 # Build stage
-FROM oven/bun:latest AS builder
+FROM docker.io/oven/bun:latest AS builder
 
 # Set working directory
 WORKDIR /app
@@ -32,7 +32,7 @@ ENV VITE_BETTER_AUTH_URL=${VITE_BETTER_AUTH_URL}
 RUN bun run build
 
 # Production stage
-FROM nginx:alpine
+FROM docker.io/nginx:alpine
 
 # Copy built assets from builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html

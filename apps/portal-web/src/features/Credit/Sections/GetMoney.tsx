@@ -5,7 +5,7 @@ import {
   IconClock,
   Button,
 } from "@/components";
-import { useModalOptionsCall } from "@/hooks";
+import { useModalOptionsCall, useIsMobile } from "@/hooks";
 import { ModalChatBot } from "@/components";
 
 const imageUrl = import.meta.env.VITE_IMAGE_URL;
@@ -13,6 +13,7 @@ const imageUrl = import.meta.env.VITE_IMAGE_URL;
 export const GetMoney = () => {
   const imageSrc = `${imageUrl}/car2.png`;
   const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
+  const isMobile = useIsMobile();
 
   const items = [
     {
@@ -38,13 +39,55 @@ export const GetMoney = () => {
   ];
 
   return (
-    <section className="flex flex-col lg:flex-row gap-40 mt-56 mb-20 px-20 items-center">
+    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-40 lg:mt-56 lg:mb-20 lg:px-20 items-center">
+      {isMobile && (
+        <div
+          className="w-full"
+          style={{
+            height: "10px",
+            opacity: 0.5,
+            background:
+              "linear-gradient(90deg, #0F0F0F 0%, #9A9FF5 50%, #0F0F0F 100%)",
+          }}
+        />
+      )}
+
       {/* Lado izquierdo - Contenido */}
       <div className="flex flex-col justify-center">
-        <h2 className="text-header-2 font-bold mb-4">
+        <h2 className="text-xl lg:text-header-2 font-bold mb-4">
           Obtén dinero sin dejar tu auto
         </h2>
-        <p className="text-gray text-xl mb-12">
+
+        {/* Lado derecho - Imagen */}
+        <div className=" justify-end items-center lg:hidden">
+          <div className="relative w-full ">
+            {/* Borde con blur - Solo en mobile */}
+            {isMobile && (
+              <div
+                className="absolute rounded-2xl"
+                style={{
+                  background:
+                    "linear-gradient(0deg, rgba(154, 159, 245, 0.50) 0%, rgba(0, 0, 0, 0.50) 100%)",
+                  filter: "blur(7.372386455535889px)",
+                  inset: "-8px",
+                }}
+              />
+            )}
+            <img
+              src={imageSrc}
+              alt="Auto"
+              className="w-full h-full object-cover rounded-2xl relative"
+            />
+            {/* Badge en esquina superior derecha */}
+            <div className="absolute top-6 right-6 bg-primary px-2 py-1 lg:px-6 lg:py-3 rounded-2xl z-20">
+              <span className="text-black font-semibold lg:text-base text-xs">
+                Préstamo con Garantía
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <p className="  text-gray lg:text-xl mb-12 mt-6 lg:mt-0">
           Tu auto tiene valor y nosotros te lo reconocemos. Obtén un préstamo
           equivalente al valor de tu vehículo o un poco menos, mientras sigues
           disfrutando de él. Tú conservas las llaves, nosotros te damos el
@@ -52,7 +95,7 @@ export const GetMoney = () => {
         </p>
 
         {/* Grid de items - 2 columnas responsive */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-12">
+        <div className="grid grid-cols-2  lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6 mb-12 text-start">
           {items.map((item, index) => (
             <div
               key={index}
@@ -62,25 +105,28 @@ export const GetMoney = () => {
               <div className="mb-4 w-8 text-primary">{item.icon}</div>
 
               {/* Título */}
-              <h3 className="text mb-2 font-bold">{item.title}</h3>
+              <h3 className="text-sm lg:text-base mb-2 font-bold">{item.title}</h3>
 
               {/* Descripción */}
-              <p className="text-sm text-gray">{item.description}</p>
+              <p className="text-xs lg:text-sm text-gray">{item.description}</p>
             </div>
           ))}
         </div>
 
         {/* Botón */}
         <div>
-          <Button size="lg" onClick={() => setIsModalOpen(true)}>
+          <Button
+            size={isMobile ? "sm" : "lg"}
+            onClick={() => setIsModalOpen(true)}
+          >
             Solicitar préstamo
           </Button>
         </div>
       </div>
 
       {/* Lado derecho - Imagen */}
-      <div className="flex justify-end items-center">
-        <div className="relative w-full max-w-[691px] md:w-[691px] md:h-[598px]">
+      <div className=" justify-end items-center hidden lg:flex">
+        <div className="relative  lg:w-[40vw]">
           <img
             src={imageSrc}
             alt="Auto"

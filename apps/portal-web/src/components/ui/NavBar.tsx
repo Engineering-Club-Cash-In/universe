@@ -41,9 +41,8 @@ export const NavBar = () => {
           isMobile
             ? {
                 padding: "10px 16px",
-
                 background:
-                  "linear-gradient(180deg, #0F0F0F 0%, #0F0F0F 75%, rgba(15, 15, 15, 0.00) 100%)",
+                  "linear-gradient(180deg, #0F0F0F 0%, #0F0F0F 100%, rgba(15, 15, 15, 0.00) 100%)",
                 borderRadius: "42px",
               }
             : {}

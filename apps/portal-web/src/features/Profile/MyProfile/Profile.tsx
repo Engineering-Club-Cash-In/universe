@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
 import { InfoPerson } from "./InfoPerson";
-import { Menu } from "../components/Menu";
+import { ContainerMenu } from "../components/ContainerMenu";
 
 interface UserData {
   id: string;
@@ -105,10 +105,9 @@ export const Profile = () => {
 
   return (
     <div>
-      <div className="w-full mt-4 ">
+      <div className="w-full mt-4">
         <NavBar />
-        <Menu />
-        <div className="max-w-7xl mx-auto mt-16 mb-20">
+        <ContainerMenu>
           {/* Header - Mi Perfil */}
           <div className="mb-12">
             <h1 className="text-header-2 mb-6">Mi Perfil</h1>
@@ -145,7 +144,7 @@ export const Profile = () => {
               />
             </div>
           )}
-        </div>
+        </ContainerMenu>
       </div>
     </div>
   );

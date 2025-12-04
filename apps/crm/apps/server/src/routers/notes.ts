@@ -1,7 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { entityNotes, noteAttachments } from "../db/schema";
+import { entityNotes } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
 
 export const notesRouter = {
@@ -22,7 +22,7 @@ export const notesRouter = {
 				entityId: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			const notes = await db
 				.select({
 					id: entityNotes.id,

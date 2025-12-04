@@ -17,7 +17,8 @@ import type {
 	CreatePagoInput,
 	CreateUsuarioInput,
 	CreditActionInput,
-	CreditoConInversionistas,
+	CreditoDirectoResponse,
+	CreditoDetailResponse,
 	GetAllCreditsParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -384,21 +385,21 @@ export class CarteraBackClient {
 		return response.data;
 	}
 
-	async getCredito(numeroSifco: string): Promise<CreditoConInversionistas> {
-		const response = await this.request<
-			CarteraBackApiResponse<CreditoConInversionistas>
-		>(
+	async getCredito(numeroSifco: string): Promise<CreditoDirectoResponse> {
+		// El endpoint /credito NO usa el wrapper CarteraBackApiResponse
+		// Retorna los datos directamente
+		const response = await this.request<CreditoDirectoResponse>(
 			`/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
 			{ method: "GET" },
 			true, // use cache
 		);
-		if (!response.data) throw new Error(`Crédito ${numeroSifco} not found`);
-		return response.data;
+		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
+		return response;
 	}
 
 	async getAllCreditos(
 		params: GetAllCreditsParams,
-	): Promise<PaginatedResponse<CarteraCredito>> {
+	): Promise<PaginatedResponse<CreditoDetailResponse>> {
 		const queryParams = new URLSearchParams({
 			mes: params.mes.toString(),
 			anio: params.anio.toString(),
@@ -411,16 +412,31 @@ export class CarteraBackClient {
 			excel: "false",
 		});
 
-		const response = await this.request<
-			CarteraBackApiResponse<PaginatedResponse<CarteraCredito>>
-		>(
-			`/getAllCredits?${queryParams}`,
-			{ method: "GET" },
-			true, // use cache
+		// Este endpoint retorna PaginatedResponse directamente, no envuelto en CarteraBackApiResponse
+		const response =
+			await this.request<PaginatedResponse<CreditoDetailResponse>>(
+				`/getAllCredits?${queryParams}`,
+				{ method: "GET" },
+				true, // use cache
+			);
+
+		// Validar que la respuesta tenga la estructura de PaginatedResponse
+		if (!response.data || !Array.isArray(response.data)) {
+			console.error(
+				"[CarteraBackClient] Invalid PaginatedResponse structure:",
+				response,
+			);
+			throw new Error(
+				"Invalid response structure: expected PaginatedResponse with data array",
+			);
+		}
+
+		// Log resumido en lugar de imprimir todo
+		console.log(
+			`[CarteraBackClient] getAllCreditos: ${response.data.length} créditos obtenidos (página ${response.page}/${response.totalPages})`,
 		);
 
-		if (!response.data) throw new Error("No data returned from getAllCreditos");
-		return response.data;
+		return response;
 	}
 
 	async creditAction(

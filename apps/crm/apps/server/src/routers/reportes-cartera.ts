@@ -3,15 +3,35 @@
  * Combina datos de CRM y cartera-back para reportes completos
  */
 
-import { and, count, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { carteraBackReferences } from "../db/schema/cartera-back";
-import { casosCobros, contratosFinanciamiento } from "../db/schema/cobros";
-import { clients } from "../db/schema/crm";
+import { casosCobros } from "../db/schema/cobros";
 import { adminProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 import { isCarteraBackEnabled } from "../services/cartera-back-integration";
+import type { CarteraCuotaCredito } from "../types/cartera-back";
+
+// Helper para calcular días de mora exactos
+function calcularDiasMoraExactos(cuotasAtrasadas: CarteraCuotaCredito[]): number {
+	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
+		return 0;
+	}
+
+	const cuotaMasAntigua = cuotasAtrasadas.reduce((antigua, actual) => {
+		const fechaAntigua = new Date(antigua.fecha_vencimiento);
+		const fechaActual = new Date(actual.fecha_vencimiento);
+		return fechaActual < fechaAntigua ? actual : antigua;
+	});
+
+	const fechaVencimiento = new Date(cuotaMasAntigua.fecha_vencimiento);
+	const hoy = new Date();
+	const diffMs = hoy.getTime() - fechaVencimiento.getTime();
+	const diasMora = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+	return Math.max(0, diasMora);
+}
 
 export const reportesCarteraRouter = {
 	// ========================================================================
@@ -60,7 +80,7 @@ export const reportesCarteraRouter = {
 								.where(
 									eq(
 										carteraBackReferences.numeroCreditoSifco,
-										credito.numero_credito_sifco,
+										credito.creditos.numero_credito_sifco,
 									),
 								)
 								.limit(1);
@@ -154,31 +174,31 @@ export const reportesCarteraRouter = {
 
 							// Obtener detalles completos desde cartera-back
 							const creditoCompleto = await carteraBackClient.getCredito(
-								credito.numero_credito_sifco,
+								credito.creditos.numero_credito_sifco,
 							);
 
 							return {
 								// Datos financieros de cartera-back
-								creditoId: credito.credito_id,
-								numeroSifco: credito.numero_credito_sifco,
-								capital: credito.capital,
-								porcentajeInteres: credito.porcentaje_interes,
-								cuota: credito.cuota,
-								plazo: credito.plazo,
-								statusCredit: credito.statusCredit,
-								deudaTotal: credito.deudatotal,
-								diasMora: creditoCompleto.dias_mora || 0,
-								montoMora: creditoCompleto.monto_mora ?? "0",
-								cuotasAtrasadas: creditoCompleto.cuotas_atrasadas ?? 0,
-								cuotasPagadas: creditoCompleto.cuotas_pagadas ?? 0,
-								cuotasPendientes: creditoCompleto.cuotas_pendientes ?? 0,
-								capitalRestante: creditoCompleto.capital_restante ?? "0",
-								totalRestante: creditoCompleto.total_restante ?? "0",
+								creditoId: credito.creditos.credito_id,
+								numeroSifco: credito.creditos.numero_credito_sifco,
+								capital: credito.creditos.capital,
+								porcentajeInteres: credito.creditos.porcentaje_interes,
+								cuota: credito.creditos.cuota,
+								plazo: credito.creditos.plazo,
+								statusCredit: credito.creditos.statusCredit,
+								deudaTotal: credito.creditos.deudatotal,
+								diasMora: calcularDiasMoraExactos(creditoCompleto.cuotasAtrasadas || []),
+								montoMora: creditoCompleto.moraActual ?? "0",
+								cuotasAtrasadas: creditoCompleto.cuotasAtrasadas?.length || 0,
+								cuotasPagadas: creditoCompleto.cuotasPagadas?.length || 0,
+								cuotasPendientes: creditoCompleto.cuotasPendientes?.length || 0,
+											capitalRestante: "0", // No disponible
+											totalRestante: "0", // No disponible
 								// Cliente
 								clienteNombre: creditoCompleto.usuario.nombre,
 								clienteNit: creditoCompleto.usuario.nit,
 								// Asesor
-								asesorNombre: creditoCompleto.asesor?.nombre || null,
+											asesorNombre: null, // No disponible
 								// Datos CRM
 								agenteCobranza: casoCobros[0]?.responsableCobros || null,
 								numeroContactos,
@@ -186,14 +206,11 @@ export const reportesCarteraRouter = {
 								tieneConvenio,
 								tieneRecuperacion,
 								// Inversionistas
-								tieneInversionistas:
-									(creditoCompleto.creditos_inversionistas?.length || 0) > 0,
-								numeroInversionistas:
-									creditoCompleto.creditos_inversionistas?.length || 0,
+											tieneInversionistas: false,
 							};
 						} catch (error) {
 							console.error(
-								`Error procesando crédito ${credito.numero_credito_sifco}:`,
+								`Error procesando crédito ${credito.creditos.numero_credito_sifco}:`,
 								error,
 							);
 							return {
@@ -211,10 +228,12 @@ export const reportesCarteraRouter = {
 					(acc, credito) => {
 						if ("error" in credito && credito.error) return acc;
 
-						const capital = Number.parseFloat(credito.capital) || 0;
+						const capital =
+							Number.parseFloat((credito as any).capital ?? "0") || 0;
 						const capitalRestante =
-							Number.parseFloat(credito.capitalRestante ?? "0") || 0;
-						const montoMora = Number.parseFloat(credito.montoMora ?? "0") || 0;
+							Number.parseFloat((credito as any).capitalRestante ?? "0") || 0;
+						const montoMora =
+							Number.parseFloat((credito as any).montoMora ?? "0") || 0;
 
 						acc.montoDesembolsado += capital;
 						acc.montoRecuperado += capital - capitalRestante;

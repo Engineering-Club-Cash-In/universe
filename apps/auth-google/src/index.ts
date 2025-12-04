@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
-import { serve } from "@hono/node-server";
 import { testConnection } from "./db/connection";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
@@ -55,42 +54,28 @@ app.notFound(notFoundHandler);
 // Error handler
 app.onError(errorHandler);
 
-// Iniciar servidor
-const startServer = async () => {
-  try {
-    // Verificar conexión a la base de datos
-    const dbConnected = await testConnection();
-    if (!dbConnected) {
-      console.error("Failed to connect to database. Exiting...");
-      process.exit(1);
-    }
-
-    // Iniciar servidor con Hono + Node.js adapter
-    serve(
-      {
-        fetch: app.fetch,
-        port: env.PORT,
-      },
-      (info) => {
-        console.log(`
+// Verificar conexión a la base de datos al iniciar
+testConnection().then((connected) => {
+  if (connected) {
+    console.log(`
 ╔═══════════════════════════════════════════════╗
 ║   🚀 Auth Google Service Running              ║
-║   📡 Port: ${info.port}                              ║
+║   📡 Port: ${env.PORT}                              ║
 ║   🌍 Environment: ${env.NODE_ENV}            ║
 ║   🔐 Better Auth: Enabled                     ║
 ║   🗄️  Database: Connected                      ║
 ║   🛡️  Rate Limiting: Enabled                   ║
-║   ⚡ Hono Framework: Active                    ║
+║   ⚡ Hono + Bun Server: Active                 ║
 ╚═══════════════════════════════════════════════╝
-      `);
-      }
-    );
-  } catch (error) {
-    console.error("Failed to start server:", error);
+    `);
+  } else {
+    console.error("Failed to connect to database. Exiting...");
     process.exit(1);
   }
+});
+
+// Exportar app - Bun detecta esto y levanta el servidor automáticamente
+export default {
+  port: env.PORT,
+  fetch: app.fetch,
 };
-
-startServer();
-
-export default app;

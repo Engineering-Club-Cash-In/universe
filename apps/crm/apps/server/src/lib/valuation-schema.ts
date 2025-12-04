@@ -32,7 +32,53 @@ export function prepareValuationContext(
 	vehicleData: any,
 	checklistItems: any[],
 	photos: any[],
-) {
+): {
+	location: string;
+	evaluationDate: string;
+	currency: string;
+	make: string;
+	model: string;
+	year: string;
+	age: number;
+	licensePlate: string;
+	vin: string;
+	color: string;
+	vehicleType: string;
+	cylinders: string;
+	engineCC: string;
+	fuelType: string;
+	transmission: string;
+	origin: string;
+	kmMileage: string;
+	milesMileage: string;
+	technicianName: string;
+	inspectionDate: string;
+	inspectionResult: string;
+	criticalIssues: string[];
+	warningIssues: string[];
+	criticalIssueCount: number;
+	warningIssueCount: number;
+	vehicleEquipment: string;
+	importantConsiderations: string;
+	scannerUsed: boolean;
+	airbagWarning: boolean;
+	missingAirbag: string;
+	testDrive: boolean;
+	noTestDriveReason: string;
+	photoCount: number;
+	photoCategories: Record<string, number>;
+	hasExteriorPhotos: boolean;
+	hasInteriorPhotos: boolean;
+	hasEnginePhotos: boolean;
+	hasDamagePhotos: boolean;
+	photoComments: Array<{
+		category: string;
+		photoType: string;
+		title: string;
+		comment: string;
+	}>;
+	hasPhotoComments: boolean;
+} {
 	const today = new Date().toLocaleDateString("es-GT");
 
 	// Calculate age

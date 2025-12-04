@@ -4,9 +4,9 @@
   "description": "Google Authentication Service",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
@@ -21,7 +21,6 @@
   "license": "ISC",
   "packageManager": "pnpm@10.18.1",
   "dependencies": {
-    "@hono/node-server": "^1.19.6",
     "better-auth": "^1.0.0",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.33.0",

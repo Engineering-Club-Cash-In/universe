@@ -1,12 +1,14 @@
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
-import { auctionExpenses, auctionVehicles } from "@/db/schema/auctionVehicles";
+import { auctionExpenses, auctionVehicles } from "../db/schema/auctionVehicles";
 import { db } from "../db";
 import {
+	auctionExpenses,
+	auctionVehicles,
 	vehicleInspections,
 	vehiclePhotos,
 	vehicles,
-} from "../db/schema/vehicles";
+} from "../db/schema";
 import { protectedProcedure } from "../lib/orpc";
 
 export const auctionRouter = {
@@ -311,7 +313,7 @@ export const auctionRouter = {
 
 			// Group rows into nested structure
 			const grouped = auctions.reduce((acc, row) => {
-				let auction = acc.find((a) => a.auctionId === row.auctionId);
+				let auction = acc.find((a: { auctionId: string }) => a.auctionId === row.auctionId);
 				if (!auction) {
 					auction = {
 						auctionId: row.auctionId,
@@ -357,11 +359,14 @@ export const auctionRouter = {
 					acc.push(auction);
 				}
 
+				// TypeScript narrowing: auction is now guaranteed to be defined
+				if (!auction) return acc;
+
 				// Agrupar inspecciones
 				if (
 					row.inspectionId &&
 					!auction.inspections.find(
-						(i: { id: string }) => i.id === row.inspectionId,
+						(i) => i.id === row.inspectionId,
 					)
 				) {
 					auction.inspections.push({
@@ -391,7 +396,7 @@ export const auctionRouter = {
 				if (
 					row.photoId &&
 					!auction.photos.find(
-						(p: { id: string | null }) => p.id === row.photoId,
+						(p) => p.id === row.photoId,
 					)
 				) {
 					auction.photos.push({
@@ -409,7 +414,7 @@ export const auctionRouter = {
 				// Agrupar gastos
 				if (
 					row.expenseId &&
-					!auction.expenses.find((e: { id: string }) => e.id === row.expenseId)
+					!auction.expenses.find((e) => e.id === row.expenseId)
 				) {
 					auction.expenses.push({
 						id: row.expenseId,

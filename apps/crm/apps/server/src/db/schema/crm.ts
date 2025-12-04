@@ -261,6 +261,7 @@ export const clients = pgTable("clients", {
 		.notNull()
 		.references(() => companies.id),
 	opportunityId: uuid("opportunity_id").references(() => opportunities.id),
+	leadId: uuid("lead_id").references(() => leads.id),
 	contactPerson: text("contact_person").notNull(),
 	contractValue: decimal("contract_value", { precision: 12, scale: 2 }),
 	startDate: timestamp("start_date"),

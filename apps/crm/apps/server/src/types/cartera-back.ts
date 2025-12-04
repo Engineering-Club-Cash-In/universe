@@ -110,6 +110,43 @@ export interface CreateCreditoInput {
 	no_poliza?: string;
 }
 
+/**
+ * Estructura REAL devuelta por el endpoint /getAllCredits
+ * Los datos vienen anidados, no como un objeto plano
+ */
+export interface CreditoDetailResponse {
+	creditos: CarteraCredito;
+	usuarios: CarteraUsuario;
+	asesores: CarteraAsesor | null;
+	inversionistas: Array<{
+		credito_id: number;
+		inversionista_id: number;
+		nombre: string;
+		emite_factura: boolean;
+		monto_aportado: string;
+		monto_cash_in: string;
+		monto_inversionista: string;
+		iva_cash_in: string;
+		iva_inversionista: string;
+		porcentaje_participacion_inversionista: string;
+		porcentaje_cash_in: string;
+		cuota_inversionista: string;
+	}>;
+	resumen: {
+		total_cash_in_monto: number;
+		total_cash_in_iva: number;
+		total_inversion_monto: number;
+		total_inversion_iva: number;
+	};
+	rubros: unknown[];
+	mora: CarteraMoraCredito | null;
+	deuda_total_con_mora: string;
+}
+
+/**
+ * @deprecated Usar CreditoDetailResponse en su lugar
+ * Este tipo representa una estructura que NO coincide con la API real
+ */
 export interface CreditoConInversionistas extends CarteraCredito {
 	usuario: CarteraUsuario;
 	asesor: {
@@ -132,6 +169,19 @@ export interface CreditoConInversionistas extends CarteraCredito {
 	cuotas_atrasadas?: number;
 	ultimo_pago?: CarteraPagoCredito;
 	proxima_cuota?: CarteraCuotaCredito;
+}
+
+/**
+ * Estructura real devuelta por el endpoint /credito?numero_credito_sifco=XXX
+ * Retorna los datos del crédito con las cuotas separadas por estado
+ */
+export interface CreditoDirectoResponse {
+	credito: CarteraCredito;
+	usuario: CarteraUsuario;
+	cuotasPagadas: CarteraCuotaCredito[];
+	cuotasPendientes: CarteraCuotaCredito[];
+	cuotasAtrasadas: CarteraCuotaCredito[];
+	moraActual: string; // decimal viene como string
 }
 
 export interface UpdateCreditoInput {

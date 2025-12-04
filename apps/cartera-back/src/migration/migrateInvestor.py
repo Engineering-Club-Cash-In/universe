@@ -13,7 +13,7 @@ ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
 HOJAS_A_PROCESAR = [
     "Noviembre 2025",
-    "Octubre 2025",
+
     "Diciembre 2025"
      
     # Agregá más según necesites
@@ -180,6 +180,12 @@ def enviar_a_api(numero_credito: str, inversionistas: List[Dict[str, Any]]) -> D
     
     print(f"\n   🚀 Enviando {len(inversionistas)} inversionistas a la API...")
     
+    # 🔍 MOSTRAR PAYLOAD COMPLETO PARA DEBUG
+    print(f"\n   📦 PAYLOAD:")
+    import json
+    print(json.dumps(payload, indent=2, ensure_ascii=False)[:500])  # Primeros 500 caracteres
+    print("   ...")
+    
     try:
         response = requests.post(
             API_ENDPOINT,
@@ -187,6 +193,12 @@ def enviar_a_api(numero_credito: str, inversionistas: List[Dict[str, Any]]) -> D
             headers={"Content-Type": "application/json"},
             timeout=60
         )
+        
+        # 🔍 MOSTRAR STATUS CODE
+        print(f"\n   📡 Status Code: {response.status_code}")
+        
+        if response.status_code != 200:
+            print(f"   ❌ Response Text: {response.text[:500]}")
         
         response.raise_for_status()
         resultado = response.json()
@@ -197,20 +209,26 @@ def enviar_a_api(numero_credito: str, inversionistas: List[Dict[str, Any]]) -> D
         
         if resultado.get('errores'):
             print(f"\n   ⚠️ Errores reportados:")
-            for error in resultado['errores'][:3]:  # Primeros 3 errores
-                print(f"      - {error['inversionista']}: {error['error']}")
-            if len(resultado['errores']) > 3:
-                print(f"      ... y {len(resultado['errores']) - 3} errores más")
+            for error in resultado.get('errores', []):
+                print(f"      - {error.get('inversionista', 'N/A')}: {error.get('error', 'N/A')}")
         
         return resultado
         
     except requests.exceptions.ConnectionError:
         print(f"   ❌ API no disponible - ¿Está corriendo el backend?")
-        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": []}
-    except requests.exceptions.RequestException as e:
-        print(f"   ❌ Error al comunicarse con la API: {e}")
-        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": []}
-
+        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": "API no disponible"}]}
+    except requests.exceptions.Timeout:
+        print(f"   ❌ Timeout - La API tardó mucho en responder")
+        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": "Timeout"}]}
+    except requests.exceptions.HTTPError as e:
+        print(f"   ❌ Error HTTP: {e}")
+        print(f"   Response: {response.text[:500]}")
+        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": str(e)}]}
+    except Exception as e:
+        print(f"   ❌ Error inesperado: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": str(e)}]}
 # ============================================
 # 🚀 FUNCIÓN PRINCIPAL
 # ============================================

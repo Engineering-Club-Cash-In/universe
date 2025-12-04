@@ -982,11 +982,6 @@ export async function fillPagosInversionistas(numeroCredito?: string) {
     `✅ Resumen final -> OK=${totalOk} | FAIL=${totalFail} | TOTAL=${totalOk + totalFail}`
   );
 }
-
-/**
- * Versión 2: Recibe el número de crédito y un array de inversionistas
- * desde Python (u otro origen externo)
- */
 export async function fillPagosInversionistasV2(
   numeroCredito: string,
   inversionistasData: {
@@ -1000,22 +995,58 @@ export async function fillPagosInversionistasV2(
   }[]
 ) {
   console.log("🚀 Iniciando fillPagosInversionistasV2...");
-  console.log(`📋 Número de crédito: ${numeroCredito}`);
-  console.log(`👥 Inversionistas a procesar: ${inversionistasData.length}`);
+  console.log(`📋 Número de crédito RECIBIDO: "${numeroCredito}"`);
+  console.log(`📋 Longitud: ${numeroCredito.length} caracteres`);
+  console.log(`👥 Inversionistas recibidos: ${inversionistasData.length}`);
+  
+  // 🔍 MOSTRAR PRIMER INVERSIONISTA PARA DEBUG
+  if (inversionistasData.length > 0) {
+    console.log(`📝 Ejemplo primer inversionista:`, JSON.stringify(inversionistasData[0], null, 2));
+  }
 
-  // 1. Obtener el crédito de la DB
+  // 🧹 LIMPIAR Y NORMALIZAR el número de crédito
+  const numeroCreditoLimpio = numeroCredito.toString().trim().replace(/\s+/g, '');
+  console.log(`🧹 Número de crédito LIMPIO: "${numeroCreditoLimpio}"`);
+
+  // 1. Obtener el crédito de la DB (búsqueda FLEXIBLE)
+  console.log(`🔍 Buscando crédito en DB...`);
+  
   const credito = await db.query.creditos.findFirst({
     columns: { credito_id: true, numero_credito_sifco: true },
-    where: (c, { eq }) => eq(c.numero_credito_sifco, numeroCredito),
+    where: (c, { eq, or, like, sql }) => 
+      or(
+        eq(c.numero_credito_sifco, numeroCreditoLimpio),
+        eq(c.numero_credito_sifco, numeroCredito),
+        like(c.numero_credito_sifco, `%${numeroCreditoLimpio}%`),
+        // Buscar también quitando ceros a la izquierda
+        eq(c.numero_credito_sifco, numeroCreditoLimpio.replace(/^0+/, '')),
+      )
   });
 
   if (!credito) {
+    console.error(`❌ CRÉDITO NO ENCONTRADO EN DB`);
+    console.error(`   Buscado: "${numeroCreditoLimpio}"`);
+    
+    // 🔍 Buscar créditos similares para debugging
+    const creditosSimilares = await db.query.creditos.findMany({
+      columns: { numero_credito_sifco: true },
+      where: (c, { like }) => like(c.numero_credito_sifco, `%${numeroCreditoLimpio.slice(-8)}%`),
+      limit: 5
+    });
+    
+    if (creditosSimilares.length > 0) {
+      console.log(`💡 Créditos similares encontrados en DB:`);
+      creditosSimilares.forEach(c => console.log(`   - "${c.numero_credito_sifco}"`));
+    }
+    
     throw new Error(
-      `[ERROR] No se encontró el crédito con numero_credito_sifco=${numeroCredito}`
+      `[ERROR] No se encontró el crédito con numero_credito_sifco=${numeroCreditoLimpio}`
     );
   }
 
-  console.log(`✅ Crédito encontrado: ID=${credito.credito_id}`);
+  console.log(`✅ Crédito encontrado en DB:`);
+  console.log(`   ID: ${credito.credito_id}`);
+  console.log(`   Número SIFCO en DB: "${credito.numero_credito_sifco}"`);
 
   // Contadores
   let ok = 0;
@@ -1025,21 +1056,46 @@ export async function fillPagosInversionistasV2(
   // 2. Procesar cada inversionista
   for (const rowData of inversionistasData) {
     try {
-      console.log(`\n👤 Procesando inversionista: ${rowData.inversionista}`);
+      console.log(`\n👤 Procesando inversionista: "${rowData.inversionista}"`);
 
-      // 2.1 Resolver inversionista en DB
+      // 🧹 NORMALIZAR nombre del inversionista
+      const nombreInversionistaLimpio = rowData.inversionista.toString().trim();
+      console.log(`   Buscando en DB...`);
+
+      // 2.1 Resolver inversionista en DB (búsqueda FLEXIBLE)
       const inv = await db.query.inversionistas.findFirst({
         columns: { inversionista_id: true, nombre: true },
-        where: (i, { eq }) => eq(i.nombre, rowData.inversionista.trim()),
+        where: (i, { eq, or, like, sql }) => 
+          or(
+            eq(i.nombre, nombreInversionistaLimpio),
+            eq(i.nombre, rowData.inversionista),
+            like(i.nombre, `%${nombreInversionistaLimpio}%`),
+            // Búsqueda case-insensitive
+            sql`LOWER(${i.nombre}) = LOWER(${nombreInversionistaLimpio})`
+          )
       });
 
       if (!inv) {
+        console.error(`   ❌ INVERSIONISTA NO ENCONTRADO EN DB`);
+        console.error(`      Buscado: "${nombreInversionistaLimpio}"`);
+        
+        // 🔍 Buscar inversionistas similares
+        const inversionistasSimilares = await db.query.inversionistas.findMany({
+          columns: { nombre: true },
+          limit: 5
+        });
+        
+        console.log(`   💡 Primeros inversionistas en DB:`);
+        inversionistasSimilares.slice(0, 3).forEach(i => console.log(`      - "${i.nombre}"`));
+        
         throw new Error(
-          `No existe inversionista con nombre="${rowData.inversionista}"`
+          `No existe inversionista con nombre="${nombreInversionistaLimpio}"`
         );
       }
 
-      console.log(`✅ Inversionista encontrado: ID=${inv.inversionista_id}`);
+      console.log(`   ✅ Inversionista encontrado:`);
+      console.log(`      ID: ${inv.inversionista_id}`);
+      console.log(`      Nombre en DB: "${inv.nombre}"`);
 
       // 2.2 Calcular montos
       const montoAportado = toBigExcel(rowData.capital);
@@ -1047,14 +1103,14 @@ export async function fillPagosInversionistasV2(
       const porcentajeInversion = toBigExcel(rowData.porcentajeInversionista);
       const interes = toBigExcel(rowData.porcentaje);
 
-      console.log(`💰 Capital: ${montoAportado.toString()}`);
-      console.log(`📊 % CashIn: ${porcentajeCashIn.toString()}`);
-      console.log(`📊 % Inversión: ${porcentajeInversion.toString()}`);
-      console.log(`📈 Interés: ${interes.toString()}`);
+      console.log(`   💰 Valores calculados:`);
+      console.log(`      Capital: ${montoAportado.toString()}`);
+      console.log(`      % CashIn: ${porcentajeCashIn.toString()}`);
+      console.log(`      % Inversión: ${porcentajeInversion.toString()}`);
+      console.log(`      % Interés: ${interes.toString()}`);
 
       // Calcular cuota de interés base
       const cuotaInteres = montoAportado.times(interes);
-      console.log(`💵 Cuota Interés: ${cuotaInteres.toString()}`);
 
       // Dividir entre inversionista y cashin
       const montoInversionista = cuotaInteres
@@ -1065,8 +1121,8 @@ export async function fillPagosInversionistasV2(
         .times(porcentajeCashIn)
         .toFixed(2);
 
-      console.log(`👤 Monto Inversionista: ${montoInversionista}`);
-      console.log(`🏦 Monto CashIn: ${montoCashIn}`);
+      console.log(`      Monto Inversionista: ${montoInversionista}`);
+      console.log(`      Monto CashIn: ${montoCashIn}`);
 
       // IVA sobre cada parte
       const ivaInversionista =
@@ -1079,16 +1135,11 @@ export async function fillPagosInversionistasV2(
           ? new Big(montoCashIn).times(0.12).toFixed(2)
           : "0.00";
 
-      console.log(`🧾 IVA Inversionista: ${ivaInversionista}`);
-      console.log(`🧾 IVA CashIn: ${ivaCashIn}`);
-
       // Determinar cuota a usar
       const cuotaInv =
         rowData.cuotaInversionista && rowData.cuotaInversionista !== "0"
           ? String(rowData.cuotaInversionista)
           : String(rowData.cuota || "0");
-
-      console.log(`📌 Cuota final: ${cuotaInv}`);
 
       // 2.3 Armar registro
       const registro = {
@@ -1105,7 +1156,10 @@ export async function fillPagosInversionistasV2(
         cuota_inversionista: cuotaInv,
       };
 
+      console.log(`   💾 Registro a guardar:`, JSON.stringify(registro, null, 2));
+
       // 2.4 Upsert
+      console.log(`   💾 Guardando en DB...`);
       await db
         .insert(creditos_inversionistas)
         .values(registro)
@@ -1124,13 +1178,14 @@ export async function fillPagosInversionistasV2(
             iva_inversionista: sql`EXCLUDED.iva_inversionista`,
             iva_cash_in: sql`EXCLUDED.iva_cash_in`,
             cuota_inversionista: sql`EXCLUDED.cuota_inversionista`,
+            fecha_creacion: sql`EXCLUDED.fecha_creacion`,
           },
         });
 
-      console.log(`✅ Registro guardado exitosamente`);
+      console.log(`   ✅ Registro guardado exitosamente`);
       ok++;
     } catch (err) {
-      console.error(`❌ Error procesando inversionista ${rowData.inversionista}:`, err);
+      console.error(`   ❌ Error procesando inversionista ${rowData.inversionista}:`, err);
       errores.push({
         inversionista: rowData.inversionista,
         error: err instanceof Error ? err.message : String(err),
@@ -1151,7 +1206,6 @@ export async function fillPagosInversionistasV2(
   console.log(`\n🎉 Resumen final:`);
   console.log(`✅ Exitosos: ${ok}`);
   console.log(`❌ Fallidos: ${fail}`);
-  console.log(`📊 Total: ${inversionistasData.length}`);
 
   if (errores.length > 0) {
     console.log(`\n⚠️ Errores encontrados:`);

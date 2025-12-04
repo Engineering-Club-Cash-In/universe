@@ -312,16 +312,64 @@ export function ContactoModal({
 							/>
 
 							<form.Field
-								name="compromisosPago"
-								children={(field) => (
-									<div className="space-y-2">
-										<Label>Compromisos de Pago</Label>
-										<Textarea
-											placeholder="Fechas y montos específicos prometidos por el cliente"
-											value={field.state.value}
-											onChange={(e) => field.handleChange(e.target.value)}
-										/>
-									</div>
+								name="estadoContacto"
+								children={(estadoField) => (
+									<form.Field
+										name="compromisosPago"
+										validators={{
+											onChange: ({ value, fieldApi }) => {
+												const estadoContacto = form.getFieldValue("estadoContacto");
+												const estadosExitosos = [
+													"contactado",
+													"promesa_pago",
+													"acuerdo_parcial",
+												];
+
+												// Requerir compromisos solo para contactos exitosos
+												if (
+													estadosExitosos.includes(estadoContacto) &&
+													(!value || value.trim() === "")
+												) {
+													return "El compromiso de pago es obligatorio cuando el contacto fue exitoso";
+												}
+												return undefined;
+											},
+										}}
+										children={(field) => {
+											const estadoContacto = form.getFieldValue("estadoContacto");
+											const estadosExitosos = [
+												"contactado",
+												"promesa_pago",
+												"acuerdo_parcial",
+											];
+											const esRequerido = estadosExitosos.includes(estadoContacto);
+
+											return (
+												<div className="space-y-2">
+													<Label>
+														Compromisos de Pago {esRequerido && "*"}
+													</Label>
+													<Textarea
+														placeholder="Fechas y montos específicos prometidos por el cliente"
+														value={field.state.value}
+														onChange={(e) => field.handleChange(e.target.value)}
+														className={
+															field.state.meta.isTouched &&
+															field.state.meta.errors.length > 0
+																? "border-red-500"
+																: ""
+														}
+													/>
+													{field.state.meta.isTouched &&
+														field.state.meta.errors.length > 0 && (
+															<p className="text-red-500 text-sm">
+																{field.state.meta.errors.join(", ")}
+															</p>
+														)}
+												</div>
+											);
+										}}
+									/>
 								)}
 							/>
 						</div>

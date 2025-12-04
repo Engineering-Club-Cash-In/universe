@@ -8,6 +8,7 @@ import {
 	Calculator,
 	Car,
 	ChevronDown,
+	Database,
 	FileText,
 	Gavel,
 	Key,
@@ -234,6 +235,12 @@ export default function Header() {
 										<Link to="/admin/users" className="cursor-pointer">
 											<Users className="mr-2 h-4 w-4" />
 											Usuarios
+										</Link>
+									</DropdownMenuItem>
+									<DropdownMenuItem asChild>
+										<Link to="/admin/import" className="cursor-pointer">
+											<Database className="mr-2 h-4 w-4" />
+											Importación
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>

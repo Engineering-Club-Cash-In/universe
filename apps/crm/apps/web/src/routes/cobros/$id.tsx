@@ -86,6 +86,13 @@ function Pagination({
 	);
 }
 
+// Helper para detectar si es un UUID o un ID numérico
+function isUUID(id: string): boolean {
+	return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+		id,
+	);
+}
+
 function RouteComponent() {
 	const { id } = Route.useParams();
 	const { tipo } = Route.useSearch();
@@ -96,11 +103,20 @@ function RouteComponent() {
 	const [cuotasPage, setCuotasPage] = useState(1);
 	const ITEMS_PER_PAGE = 5; // Reducido a 5 para testing, cambia a 10 en producción
 
-	// Obtener detalles del contrato/caso usando la nueva API unificada
-	const casoDetails = useQuery({
-		...orpc.getDetallesContrato.queryOptions({
-			input: { id, tipo },
-		}),
+	// Determinar si es un crédito de Cartera-Back (ID numérico) o del CRM (UUID)
+	const esCarteraBack = !isUUID(id);
+
+	// Obtener detalles del contrato/caso
+	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
+	// @ts-expect-error - TypeScript no puede inferir correctamente el tipo de query options condicionales
+	const casoDetails: any = useQuery({
+		...(esCarteraBack
+			? orpc.getDetallesCreditoCarteraBack.queryOptions({
+					input: { creditoId: id },
+				})
+			: orpc.getDetallesContrato.queryOptions({
+					input: { id, tipo },
+				})),
 		enabled: !!session && !!id,
 	});
 
@@ -338,8 +354,10 @@ function RouteComponent() {
 								</div>
 							</div>
 
-							{/* Botones de Contacto */}
-							<Separator />
+							{/* Botones de Contacto - Solo si existe caso de cobros */}
+							{caso.id ? (
+								<>
+									<Separator />
 							<div className="flex gap-2">
 								<ContactoModal
 									casoCobroId={caso.id}
@@ -377,6 +395,15 @@ function RouteComponent() {
 									</Button>
 								</ContactoModal>
 							</div>
+								</>
+							) : (
+								<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
+									<p className="text-sm text-yellow-800">
+										Este crédito aún no tiene caso de cobros asignado. Se creará
+										automáticamente cuando sea necesario realizar gestión de cobranza.
+									</p>
+								</div>
+							)}
 						</CardContent>
 					</Card>
 

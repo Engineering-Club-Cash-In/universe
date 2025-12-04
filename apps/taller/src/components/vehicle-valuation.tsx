@@ -20,7 +20,7 @@ import {
 } from './ui/form';
 import { formatCurrency, handleCurrencyInput } from '../utils/currency';
 import { toast } from 'sonner';
-import { vehiclesApi } from '../utils/orpc';
+import { client } from '../utils/orpc';
 import { useInspection } from '../contexts/InspectionContext';
 
 const valuationSchema = z.object({
@@ -51,16 +51,13 @@ const valuationSchema = z.object({
     message: "Esta información es requerida",
   }),
   missingAirbag: z.string().optional(),
-  testDrive: z.enum(["Sí", "No"], {
-    message: "Esta información es requerida",
-  }),
-  noTestDriveReason: z.string().optional(),
 });
 
 interface VehicleValuationProps {
   vehicleData: any; // Data from previous steps
   onComplete: (valuationData: z.infer<typeof valuationSchema>) => void;
   isWizardMode?: boolean;
+  isSubmitting?: boolean;
 }
 
 interface AIValuationResult {
@@ -71,10 +68,11 @@ interface AIValuationResult {
   confidence: string;
 }
 
-export default function VehicleValuation({ 
-  vehicleData, 
-  onComplete, 
-  isWizardMode = false 
+export default function VehicleValuation({
+  vehicleData,
+  onComplete,
+  isWizardMode = false,
+  isSubmitting = false
 }: VehicleValuationProps) {
   const { checklistItems, photos } = useInspection();
   const [aiValuation, setAiValuation] = useState<AIValuationResult | null>(null);
@@ -93,7 +91,6 @@ export default function VehicleValuation({
       importantConsiderations: "",
       scannerUsed: undefined,
       airbagWarning: undefined,
-      testDrive: undefined,
     },
   });
 
@@ -111,10 +108,10 @@ export default function VehicleValuation({
 
   const getAIValuation = async () => {
     setLoadingAI(true);
-    
+
     try {
       // Call AI valuation endpoint with complete context
-      const result = await vehiclesApi.getAIValuation({
+      const result = await client.getAIVehicleValuation({
         vehicleData,
         checklistItems,
         photos
@@ -511,66 +508,19 @@ export default function VehicleValuation({
                   )}
                 />
               )}
-
-              <FormField
-                control={form.control}
-                name="testDrive"
-                render={({ field }) => (
-                  <FormItem className="space-y-3">
-                    <FormLabel>¿Se realizó prueba de manejo?</FormLabel>
-                    <FormControl>
-                      <RadioGroup
-                        onValueChange={field.onChange}
-                        value={field.value}
-                        className="flex flex-col space-y-1"
-                      >
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="Sí" />
-                          </FormControl>
-                          <FormLabel className="font-normal">Sí</FormLabel>
-                        </FormItem>
-                        <FormItem className="flex items-center space-x-3 space-y-0">
-                          <FormControl>
-                            <RadioGroupItem value="No" />
-                          </FormControl>
-                          <FormLabel className="font-normal">No</FormLabel>
-                        </FormItem>
-                      </RadioGroup>
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {form.watch("testDrive") === "No" && (
-                <FormField
-                  control={form.control}
-                  name="noTestDriveReason"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>
-                        Indique por qué no se realizó la prueba de manejo
-                      </FormLabel>
-                      <FormControl>
-                        <Textarea
-                          placeholder="Razón por la que no se realizó la prueba"
-                          className="min-h-[80px]"
-                          {...field}
-                          value={field.value || ""}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
             </CardContent>
           </Card>
 
           {isWizardMode && (
-            <Button type="submit" className="w-full">
-              Finalizar Inspección
+            <Button type="submit" className="w-full" disabled={isSubmitting}>
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Enviando inspección...
+                </>
+              ) : (
+                "Finalizar Inspección"
+              )}
             </Button>
           )}
         </form>

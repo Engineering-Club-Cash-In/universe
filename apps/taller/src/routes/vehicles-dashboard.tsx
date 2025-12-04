@@ -1,8 +1,7 @@
-import { createRoute } from '@tanstack/react-router'
-import type { RootRoute } from '@tanstack/react-router'
+import { createRoute, type AnyRoute } from '@tanstack/react-router'
 import VehiclesDashboard from '../pages/vehicles-dashboard'
 
-export default (parentRoute: RootRoute) =>
+export default (parentRoute: AnyRoute) =>
   createRoute({
     path: '/vehicles',
     component: VehiclesDashboard,

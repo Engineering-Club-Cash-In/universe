@@ -1,5 +1,3 @@
-import type React from "react";
-
 import { useState, useRef, useEffect } from "react";
 import { useInspection } from "../contexts/InspectionContext";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -14,7 +12,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Form,
   FormControl,
-  FormDescription,
   FormField,
   FormItem,
   FormLabel,
@@ -39,11 +36,11 @@ import {
 } from "@/components/ui/card";
 import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
-  // Section 1
+  // Section 1: Technician Info
   technicianName: z.string().min(1, { message: "El nombre es requerido" }),
   inspectionDate: z.date({ message: "La fecha es requerida" }),
 
-  // Section 2
+  // Section 2: Vehicle Info
   vehicleMake: z.string().min(1, { message: "La marca es requerida" }),
   vehicleModel: z.string().min(1, { message: "La línea es requerida" }),
   vehicleYear: z.string().min(1, { message: "El año es requerido" }),
@@ -98,6 +95,7 @@ const formSchema = z.object({
     message: "Esta información es requerida",
   }),
   scannerResult: z.instanceof(File).optional(),
+  scannerResultUrl: z.string().optional(),
   airbagWarning: z.enum(["Sí", "No"], {
     message: "Esta información es requerida",
   }),
@@ -115,15 +113,17 @@ interface VehicleInspectionFormProps {
   isWizardMode?: boolean;
 }
 
-export default function VehicleInspectionForm({ 
-  onComplete, 
-  isWizardMode = false 
+export default function VehicleInspectionForm({
+  onComplete,
+  isWizardMode = false
 }: VehicleInspectionFormProps) {
   const { formData, setFormData } = useInspection();
   const [scannerFile, setScannerFile] = useState<File | null>(null);
+  const [scannerUploading, setScannerUploading] = useState(false);
+  const [tempVehicleId] = useState(() => 'temp-' + Date.now());
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
-  
+
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
@@ -141,10 +141,10 @@ export default function VehicleInspectionForm({
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     console.log(values);
-    
+
     // Save form data to context
     setFormData(values);
-    
+
     // Show success toast
     toast.success("Información básica guardada!");
 
@@ -173,37 +173,94 @@ export default function VehicleInspectionForm({
       fuelType: undefined,
       transmission: undefined,
       inspectionResult: "",
-      vehicleRating: undefined,
-      marketValue: "",
-      suggestedCommercialValue: "",
-      bankValue: "",
-      currentConditionValue: "",
-      vehicleEquipment: "",
-      importantConsiderations: "",
-      scannerUsed: undefined,
-      scannerResult: undefined,
-      airbagWarning: undefined,
-      missingAirbag: "",
       testDrive: undefined,
       noTestDriveReason: "",
     });
 
-    setScannerFile(null);
     setFormSubmitted(true);
   }
 
-  const handleScannerUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleScannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       if (file.type === "application/pdf") {
         setScannerFile(file);
         form.setValue("scannerResult", file);
+
+        // Upload immediately to get URL
+        setScannerUploading(true);
+        try {
+          const uploadFormData = new FormData();
+          uploadFormData.append('file', file);
+          uploadFormData.append('vehicleId', tempVehicleId);
+          uploadFormData.append('category', 'scanner');
+          uploadFormData.append('photoType', 'result');
+          uploadFormData.append('title', 'Resultado del Scanner');
+
+          const response = await fetch(`${import.meta.env.VITE_SERVER_URL || 'http://localhost:3000'}/api/upload-vehicle-photo`, {
+            method: 'POST',
+            credentials: 'include',
+            body: uploadFormData,
+          });
+
+          if (!response.ok) {
+            throw new Error('Error al subir el archivo');
+          }
+
+          const result = await response.json();
+          const scannerUrl = result.data.url;
+
+          form.setValue("scannerResultUrl", scannerUrl);
+          toast.success("Archivo del scanner subido correctamente");
+        } catch (error) {
+          console.error('Error uploading scanner file:', error);
+          toast.error("Error al subir el archivo del scanner");
+          setScannerFile(null);
+          form.setValue("scannerResult", undefined);
+        } finally {
+          setScannerUploading(false);
+        }
       } else {
         alert("Por favor suba un archivo PDF");
       }
     }
   };
-  
+
+
+
+  const handleOCRData = (mappedData: any) => {
+    // Update form with OCR data and trigger validation only for filled fields
+    Object.keys(mappedData).forEach(key => {
+      if (mappedData[key]) {
+        form.setValue(key as any, mappedData[key], {
+          shouldValidate: true,
+          shouldDirty: true,
+          shouldTouch: true
+        });
+      }
+    });
+
+    // Clear validation errors for fields that OCR cannot fill
+    const nonOCRFields = [
+      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
+      'fuelType', 'transmission', 'inspectionResult', 'vehicleRating',
+      'marketValue', 'suggestedCommercialValue', 'bankValue', 'currentConditionValue',
+      'vehicleEquipment', 'importantConsiderations', 'scannerUsed', 'scannerResult',
+      'airbagWarning', 'missingAirbag', 'testDrive', 'noTestDriveReason'
+    ];
+
+    nonOCRFields.forEach(field => {
+      form.clearErrors(field as any);
+    });
+
+    // Save to context
+    const currentData = form.getValues();
+    const updatedData = { ...currentData, ...mappedData };
+    setFormData(updatedData);
+
+    toast.success('Información de la tarjeta aplicada al formulario');
+  };
+
   // Function to fill form with dummy data
   const fillWithDummyData = async () => {
     const dummyData = {
@@ -224,121 +281,49 @@ export default function VehicleInspectionForm({
       fuelType: "Gasolina" as const,
       transmission: "Automático" as const,
       inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
-      vehicleRating: "Comercial" as const,
-      marketValue: "185000",
-      suggestedCommercialValue: "175000",
-      bankValue: "165000",
-      currentConditionValue: "170000",
-      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
-      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
-      scannerUsed: "Sí" as const,
-      airbagWarning: "No" as const,
       testDrive: "Sí" as const,
     };
-    
+
     // Use form.reset() to properly update all fields including selects
     form.reset(dummyData);
-    
+
     // Load and set the PDF file
     try {
       const response = await fetch('/sample.pdf');
       const blob = await response.blob();
       const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
-      
+
       setScannerFile(file);
       form.setValue("scannerResult", file);
     } catch (error) {
       console.error('Error loading sample PDF:', error);
     }
-    
+
     // Save to context
     setFormData(dummyData);
-    
+
     toast.success("Formulario llenado con datos de prueba");
   };
 
-    // Update form with OCR data and trigger validation only for filled fields
-    Object.keys(mappedData).forEach(key => {
-      if (mappedData[key]) {
-        form.setValue(key as any, mappedData[key], { 
-          shouldValidate: true,
-          shouldDirty: true,
-          shouldTouch: true 
-        });
-      }
-    });
-
-    // Clear validation errors for fields that OCR cannot fill
-    const nonOCRFields = [
-      'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage', 
-      'fuelType', 'transmission', 'inspectionResult', 'vehicleRating',
-      'marketValue', 'suggestedCommercialValue', 'bankValue', 'currentConditionValue',
-      'vehicleEquipment', 'importantConsiderations', 'scannerUsed', 'scannerResult',
-      'airbagWarning', 'missingAirbag', 'testDrive', 'noTestDriveReason'
-    ];
-    
-    nonOCRFields.forEach(field => {
-      form.clearErrors(field as any);
-    });
-
-    // Save to context
-    const currentData = form.getValues();
-    const updatedData = { ...currentData, ...mappedData };
-    setFormData(updatedData);
-    
-    toast.success('Información de la tarjeta aplicada al formulario');
+  const formatCurrency = (value: string | number) => {
+    if (!value) return "";
+    const num = Number(value);
+    if (isNaN(num)) return "";
+    return new Intl.NumberFormat("es-GT", {
+      style: "currency",
+      currency: "GTQ",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(num);
   };
 
-  const fillWithDummyData = async () => {
-    const dummyData = {
-      technicianName: "Juan Pérez García",
-      inspectionDate: new Date(),
-      vehicleMake: "Toyota",
-      vehicleModel: "Corolla Cross",
-      vehicleYear: "2023",
-      licensePlate: "P-123ABC",
-      vinNumber: "JTMB34FV2ND123456",
-      milesMileage: "15000",
-      kmMileage: "24140",
-      origin: "Importado" as const,
-      vehicleType: "SUV",
-      color: "Blanco Perlado",
-      cylinders: "4",
-      engineCC: "2000",
-      fuelType: "Gasolina" as const,
-      transmission: "Automático" as const,
-      inspectionResult: "Vehículo en excelentes condiciones generales. Motor sin ruidos anormales, transmisión automática funcionando suavemente. Carrocería sin golpes mayores, pintura en buen estado. Interior bien conservado sin desgaste excesivo.",
-      vehicleRating: "Comercial" as const,
-      marketValue: "185000",
-      suggestedCommercialValue: "175000",
-      bankValue: "165000",
-      currentConditionValue: "170000",
-      vehicleEquipment: "Aire acondicionado automático dual zone, Sistema de infoentretenimiento con pantalla táctil 8\", Apple CarPlay/Android Auto, Cámara de reversa, Sensores de estacionamiento delanteros y traseros, Asientos de cuero sintético, Volante multifunción con controles de audio, Control crucero adaptativo, Sistema keyless entry",
-      importantConsiderations: "Mantenimientos realizados en agencia hasta la fecha. Cuenta con garantía de fábrica vigente hasta 2026. Único dueño, papelería completa y al día.",
-      scannerUsed: "Sí" as const,
-      airbagWarning: "No" as const,
-      testDrive: "Sí" as const,
+  const handleCurrencyInput = (value: string) => {
+    // Remove non-digit characters
+    const rawValue = value.replace(/\D/g, "");
+    return {
+      raw: rawValue,
+      formatted: formatCurrency(rawValue),
     };
-    
-    // Use form.reset() to properly update all fields including selects
-    form.reset(dummyData);
-    
-    // Load and set the PDF file
-    try {
-      const response = await fetch('/sample.pdf');
-      const blob = await response.blob();
-      const file = new File([blob], 'reporte_scanner_ejemplo.pdf', { type: 'application/pdf' });
-      
-      setScannerFile(file);
-      form.setValue("scannerResult", file);
-    } catch (error) {
-      console.error('Error loading sample PDF:', error);
-    }
-    
-    // Save to context
-    setFormData(dummyData);
-    
-    toast.success("Formulario llenado con datos de prueba");
   };
 
   return (
@@ -410,7 +395,7 @@ export default function VehicleInspectionForm({
             </CardContent>
           </Card>
 
-          <VehicleRegistrationOCR 
+          <VehicleRegistrationOCR
             onDataExtracted={handleOCRData}
             isProcessing={form.formState.isSubmitting}
           />
@@ -506,7 +491,19 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Cantidad de millas recorridas</FormLabel>
                       <FormControl>
-                        <Input placeholder="Millas" type="number" {...field} />
+                        <Input
+                          placeholder="Millas"
+                          type="number"
+                          {...field}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            const miles = parseFloat(e.target.value);
+                            if (!isNaN(miles)) {
+                              const km = Math.round(miles * 1.60934);
+                              form.setValue("kmMileage", km.toString());
+                            }
+                          }}
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -524,6 +521,14 @@ export default function VehicleInspectionForm({
                           placeholder="Kilómetros"
                           type="number"
                           {...field}
+                          onChange={(e) => {
+                            field.onChange(e);
+                            const km = parseFloat(e.target.value);
+                            if (!isNaN(km)) {
+                              const miles = Math.round(km * 0.621371);
+                              form.setValue("milesMileage", miles.toString());
+                            }
+                          }}
                         />
                       </FormControl>
                       <FormMessage />
@@ -759,7 +764,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor de mercado</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -782,7 +787,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor comercial sugerido</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -807,7 +812,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor bancario</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -830,7 +835,7 @@ export default function VehicleInspectionForm({
                     <FormItem>
                       <FormLabel>Valor vehículo condiciones actuales</FormLabel>
                       <FormControl>
-                        <Input 
+                        <Input
                           placeholder="Valor en moneda local"
                           value={formatCurrency(field.value)}
                           onChange={(e) => {
@@ -932,11 +937,22 @@ export default function VehicleInspectionForm({
                             field.onChange(e.target.files?.[0] || null);
                           }}
                           className="flex-1"
+                          disabled={scannerUploading}
                         />
                       </FormControl>
-                      {scannerFile && (
+                      {scannerUploading && (
+                        <FormDescription className="text-blue-600">
+                          Subiendo archivo...
+                        </FormDescription>
+                      )}
+                      {scannerFile && !scannerUploading && form.watch("scannerResultUrl") && (
                         <FormDescription className="text-green-600">
-                          Archivo cargado: {scannerFile.name}
+                          ✓ Archivo subido: {scannerFile.name}
+                        </FormDescription>
+                      )}
+                      {scannerFile && !scannerUploading && !form.watch("scannerResultUrl") && (
+                        <FormDescription className="text-yellow-600">
+                          Archivo seleccionado: {scannerFile.name} (pendiente de subir)
                         </FormDescription>
                       )}
                       <FormMessage />

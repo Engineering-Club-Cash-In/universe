@@ -1,10 +1,5 @@
 import { NavBar } from "@components/ui";
-import {
-  CarrouselStart,
-  HowItWorks,
-  Testimonies,
-  GraphLine,
-} from "./sections";
+import { CarrouselStart, HowItWorks, Testimonies, GraphLine } from "./sections";
 import { WhoWeAre } from "./sections/whoWeAre/WhoWeAre";
 import { HowSellOrBuy } from "./sections/howSellOrBuy/HowSellOrBuy";
 
@@ -22,7 +17,7 @@ export const HomePage = () => {
           className="absolute top-0 left-0 right-0 h-[200px] pointer-events-none z-40"
         />
       </div>
-      <div className="w-full mt-6 p-8 ">
+      <div className="w-full mt-6 lg:p-8 ">
         <NavBar />
         <WhoWeAre />
         <HowItWorks />

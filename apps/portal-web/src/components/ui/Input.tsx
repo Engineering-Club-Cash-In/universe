@@ -6,10 +6,11 @@ interface InputProps {
   onBlur?: (e: React.FocusEvent<HTMLInputElement>) => void;
   name?: string;
   placeholder?: string;
-  type?: "text" | "password" | "email";
+  type?: "text" | "password" | "email" | "number";
   variant?: "primary" | "secondary";
   className?: string;
   error?: string;
+  size?: "small" | "medium" | "large";
 }
 
 export const Input = ({
@@ -21,30 +22,31 @@ export const Input = ({
   type = "text",
   className = "",
   error,
+  size = "medium",
+  variant = "secondary",
 }: InputProps) => {
   const hasError = !!error;
 
   return (
-    <div className="relative w-full max-w-[500px]">
+    <div className="relative w-full  ">
       <input
         name={name}
         className={`
           flex
           w-full
-          px-[25px]
-          py-[25.833px]
-          rounded-[12.5px]
-          bg-[#D9D9D9]
+          ${size === "small" ? "p-2 text-sm" : ""}
+          ${size === "medium" ? "p-4 text-base" : ""}
+          ${size === "large" ? "p-6 text-base" : ""}
+          rounded-lg
+          ${variant === "primary" ? "bg-transparent border border-[#374151] text-white" : "bg-[#D9D9D9] border-0 text-black"}
           font-[Hero]
-          text-[16px]
           font-normal
           leading-[110%]
           tracking-[-0.267px]
-          border-0
           outline-none
           focus:ring-2
           focus:ring-gray-400
-          ${hasError ? "text-red-500 placeholder:text-red-500 pr-[55px]" : "text-[#0F0F0F]"}
+          ${hasError ? "text-red-500 placeholder:text-red-500 pr-[55px]" : ""}
           ${className}
         `}
         placeholder={placeholder}

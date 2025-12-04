@@ -12,9 +12,8 @@ import {
   type MotorizationType,
   type FilterParams,
 } from "../services/serviceMarketplace";
-import { useState, useMemo } from "react";
-type ConditionType = "todos" | "nuevos" | "usados";
-
+import { useMemo } from "react";
+import { useFilterStore } from "../store/filters";
 
 /**
  * Hook para obtener todas las marcas
@@ -99,12 +98,20 @@ export const useFilteredVehicles = (filters: FilterParams) => {
 };
 
 export const useMarketplace = () => {
-  const [condition, setCondition] = useState<ConditionType>("todos");
-  const [brand, setBrand] = useState<string>("");
-  const [linea, setLinea] = useState<string>("");
-  const [type, setType] = useState<VehicleType | "">("");
-  const [year, setYear] = useState<number | "">("");
-  const [motorization, setMotorization] = useState<MotorizationType | "">("");
+  const {
+    condicion: condition,
+    marca: brand,
+    modelo: linea,
+    tipo: type,
+    combustible: motorization,
+    anio: year,
+    setCondicion: setCondition,
+    setMarca: setBrand,
+    setModelo: setLinea,
+    setTipo: setType,
+    setCombustible: setMotorization,
+    setAnio: setYear,
+  } = useFilterStore();
 
   const brands = useBrands();
   const optionsBrands = useMemo(() => {

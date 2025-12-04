@@ -5,7 +5,6 @@ import BMW from "./assets/BMW.svg";
 import Mercedes from "./assets/Mercedes.svg";
 import Volkswagen from "./assets/Volkswagen.svg";
 import Ford from "./assets/Ford.svg";
-import { Button } from "@components/ui";
 import { IconLeftArrow, IconRightArrow } from "@components/icons";
 
 const carBrands = [
@@ -88,9 +87,9 @@ export const FindYourIdealModel: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-44 overflow-hidden py-2">
+    <section className="text-center w-full mt-26 overflow-hidden py-2 px-20 lg:px-0 lg:max-w-360 lg:mx-auto">
       <div>
-        <h2 className="text-header-2 mb-24">Encuentra tu modelo ideal</h2>
+        <h2 className="text-header-2 mb-24">Encuentra la marca ideal</h2>
       </div>
 
       <div className="relative w-full mt-16">
@@ -181,9 +180,7 @@ export const FindYourIdealModel: React.FC = () => {
         </div>
       </div>
 
-      <div className="mt-24 flex justify-center">
-        <Button size="lg">Ver Marketplace</Button>
-      </div>
+     
     </section>
   );
 };

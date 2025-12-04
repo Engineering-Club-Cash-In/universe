@@ -9,16 +9,20 @@ import {
   IconCoupe,
   IconVan,
 } from "@/components";
-import { useMarketplace, useFilteredVehicles } from "../hooks/useMarketplace";
-import { motion } from "framer-motion";
+import { useMarketplace } from "../hooks/useMarketplace";
+import { useFilteredVehicles } from "../hooks/useFilteredVehicles";
+import { motion, AnimatePresence } from "framer-motion";
 import { PreLovedCar } from "../components/PreLovedCar";
 import { useState, useMemo } from "react";
 import type {
   MotorizationType,
   FilterParams,
-  VehicleType,
 } from "../services/serviceMarketplace";
-import { MAX_DISPLAYED_VEHICLES } from "../constants/marketplace.constants";
+import {
+  DEFAULT_YEAR,
+  MAX_DISPLAYED_VEHICLES,
+} from "../constants/marketplace.constants";
+import { Link } from "@tanstack/react-router";
 
 type VehicleTypeOption =
   | "sedan"
@@ -71,7 +75,7 @@ export const CarOverlay = () => {
 
     // Solo aplicar tipo si está seleccionado
     if (selectedType) {
-      filters.tipo = selectedType as VehicleType;
+      filters.tipo = selectedType;
     }
 
     // Aplicar filtros de búsqueda solo si se ha dado click en buscar
@@ -85,7 +89,7 @@ export const CarOverlay = () => {
       filters.modelo = searchFilters.modelo;
     }
     if (searchFilters.motorizacion) {
-      filters.motorizacion = searchFilters.motorizacion as MotorizationType;
+      filters.motorizacion = searchFilters.motorizacion;
     }
 
     return filters;
@@ -138,7 +142,7 @@ export const CarOverlay = () => {
       // Limpiar también los selects
       setBrand("");
       setLinea("");
-      setYear("");
+      setYear(DEFAULT_YEAR);
       setMotorization("");
     } else {
       // Aplicar filtros de búsqueda
@@ -182,9 +186,9 @@ export const CarOverlay = () => {
             Todos
           </motion.button>
           <motion.button
-            onClick={() => setCondition("nuevos")}
+            onClick={() => setCondition("nuevo")}
             className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-              condition === "nuevos"
+              condition === "nuevo"
                 ? "bg-primary text-white"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
             }`}
@@ -194,9 +198,9 @@ export const CarOverlay = () => {
             Nuevos
           </motion.button>
           <motion.button
-            onClick={() => setCondition("usados")}
+            onClick={() => setCondition("usado")}
             className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-              condition === "usados"
+              condition === "usado"
                 ? "bg-primary text-white"
                 : "bg-white/5 text-white/80 hover:bg-white/10"
             }`}
@@ -233,7 +237,7 @@ export const CarOverlay = () => {
           />
           <Select
             value={year.toString()}
-            onChange={(val) => setYear(val ? Number(val) : "")}
+            onChange={(val) => setYear(val ? Number(val) : DEFAULT_YEAR)}
             options={optionsYear.map((opt) => ({
               label: opt.label,
               value: opt.value.toString(),
@@ -304,36 +308,46 @@ export const CarOverlay = () => {
 
       {/* Sección 4: Lista de vehículos */}
       <div className="w-full lg:w-[90%]">
-        <h3 className="text-header-body mb-8">Autos Pre-loved</h3>
+        <h3 className="text-header-body mb-8">Vista previa de vehículos</h3>
 
         {isLoading ? (
           <div className="flex justify-center items-center py-12">
             <p className="text-white/60">Cargando vehículos...</p>
           </div>
         ) : (
-          <>
+          <div className="flex flex-col gap-12 items-center">
             {/* Grid de vehículos */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8 mb-8">
-              {displayedVehicles.map((vehicle) => (
-                <PreLovedCar
-                  key={vehicle.id}
-                  vehicle={vehicle}
-                  onClick={() => console.log("Ver vehículo:", vehicle.id)}
-                />
-              ))}
+              <AnimatePresence mode="popLayout">
+                {displayedVehicles.map((vehicle, index) => (
+                  <motion.div
+                    key={vehicle.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.8 }}
+                    transition={{
+                      duration: 0.4,
+                      delay: index * 0.05,
+                      ease: "easeOut",
+                    }}
+                  >
+                    <PreLovedCar
+                      vehicle={vehicle}
+                    />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
             </div>
 
             {/* Botón Ver Todos */}
 
-            <div className="flex justify-center">
-              <Button
-                onClick={() => console.log("Ver todos los vehículos")}
-                size="md"
-              >
-                Ver todos
-              </Button>
+            <div className="flex justify-center items-center ">
+              <Link to="/marketplace/search" className="w-full h-full">
+                <Button size="md">Ver todos</Button>
+              </Link>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

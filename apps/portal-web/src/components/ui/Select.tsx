@@ -14,15 +14,24 @@ interface SelectProps {
   color?: string;
 }
 
-export const Select = ({ options, value, onChange, placeholder = "Seleccionar...", color = "secondary" }: SelectProps) => {
+export const Select = ({
+  options,
+  value,
+  onChange,
+  placeholder = "Seleccionar...",
+  color = "secondary",
+}: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement>(null);
 
-  const selectedOption = options.find(option => option.value === value);
+  const selectedOption = options.find((option) => option.value === value);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (selectRef.current && !selectRef.current.contains(event.target as Node)) {
+      if (
+        selectRef.current &&
+        !selectRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
@@ -64,13 +73,15 @@ export const Select = ({ options, value, onChange, placeholder = "Seleccionar...
         }}
       >
         <span>{selectedOption ? selectedOption.label : placeholder}</span>
-        <div className={"text-" + color} style={{
-          display: "flex",
-          alignItems: "center",
-          transition: "transform 0.2s",
-          transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
- 
-        }}>
+        <div
+          className={"text-" + color}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            transition: "transform 0.2s",
+            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+          }}
+        >
           <IconArrowDown width={16} height={16} />
         </div>
       </button>
@@ -102,13 +113,15 @@ export const Select = ({ options, value, onChange, placeholder = "Seleccionar...
                 cursor: "pointer",
                 fontSize: "16px",
                 transition: "background-color 0.2s",
-                backgroundColor: option.value === value ? "#1F2937" : "transparent",
+                backgroundColor:
+                  option.value === value ? "#1F2937" : "transparent",
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = "#1F2937";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = option.value === value ? "#1F2937" : "transparent";
+                e.currentTarget.style.backgroundColor =
+                  option.value === value ? "#1F2937" : "transparent";
               }}
             >
               {option.label}

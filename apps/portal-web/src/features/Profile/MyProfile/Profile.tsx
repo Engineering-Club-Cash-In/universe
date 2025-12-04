@@ -25,6 +25,8 @@ export const Profile = () => {
         // Obtener la sesión directamente de better-auth
         const sessionData = await authClient.getSession();
 
+        console.log("Session data:", sessionData);
+
         if (sessionData?.data?.user) {
           const userData = sessionData.data.user as UserData;
           

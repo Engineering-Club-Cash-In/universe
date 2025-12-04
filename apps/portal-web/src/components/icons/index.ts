@@ -22,6 +22,7 @@ export * from "./IconGear";
 export * from "./IconDownload"
 export * from "./IconTarget"
 export * from "./IconPlus"
+export * from "./IconMenu"
 
 export * from "./IconGas"   
 export * from "./IconKms"   

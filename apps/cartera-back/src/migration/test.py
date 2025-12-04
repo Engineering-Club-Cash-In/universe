@@ -1,143 +1,160 @@
 import os
 import pandas as pd
-from typing import Any
 
-# Configuración
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
-ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
-HOJA_PRUEBA = "Noviembre 2025"
+ARCHIVO_EXCEL ="Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
-def limpiar_valor(valor: Any) -> str:
-    if pd.isna(valor):
-        return "0"
-    valor_str = str(valor).strip()
-    if valor_str.upper().startswith('Q'):
-        valor_str = valor_str[1:].strip()
-    valor_str = valor_str.replace(',', '')
-    return valor_str
+archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
 
-def probar_lectura():
-    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+CREDITO_DEBUG = "01010214111980"
+HOJA_DEBUG = "Diciembre 2025"
+
+print(f"🔍 DEBUGGING ESPECÍFICO")
+print(f"   Crédito: {CREDITO_DEBUG}")
+print(f"   Hoja: {HOJA_DEBUG}\n")
+
+# Leer Excel
+print("📂 Leyendo Excel...")
+df_raw = pd.read_excel(archivo_path, sheet_name=HOJA_DEBUG, header=None)
+print(f"✅ Excel leído: {len(df_raw)} filas totales\n")
+
+# Mostrar primeras 20 filas para encontrar headers
+print(f"🔍 BUSCANDO HEADERS EN LAS PRIMERAS 20 FILAS:\n")
+
+for idx, row in df_raw.head(20).iterrows():
+    row_str = ' '.join(str(cell) for cell in row if pd.notna(cell))
+    print(f"Fila {idx}: {row_str[:150]}...")
+
+print(f"\n{'='*70}\n")
+
+# Buscar headers (hasta fila 100)
+header_row = None
+for idx, row in df_raw.iterrows():
+    if idx > 100:  # Buscar más lejos
+        break
+    row_str = ' '.join(str(cell).lower() for cell in row if pd.notna(cell))
+    if 'credito' in row_str or 'inversionista' in row_str:
+        header_row = idx
+        print(f"✅ Headers encontrados en fila {idx}\n")
+        break
+
+if header_row is None:
+    print("❌ No se encontraron headers")
+    exit()
+
+# Leer con headers
+df = pd.read_excel(archivo_path, sheet_name=HOJA_DEBUG, header=header_row)
+
+print(f"✅ Excel leído correctamente con headers")
+print(f"📊 Total de filas de datos: {len(df)}")
+print(f"📋 Columnas encontradas: {len(df.columns)}\n")
+
+# Mostrar nombres de columnas
+print("📋 COLUMNAS:")
+for i, col in enumerate(df.columns[:15], 1):  # Primeras 15 columnas
+    print(f"   {i}. '{col}'")
+print()
+
+# Buscar TODAS las filas del crédito
+print(f"🔍 Buscando crédito {CREDITO_DEBUG}...\n")
+
+filas_credito = df[
+    df['# crédito SIFCO'].astype(str).str.contains(CREDITO_DEBUG, na=False, regex=False)
+]
+
+print(f"✅ Filas encontradas: {len(filas_credito)}\n")
+
+if len(filas_credito) == 0:
+    print("❌ NO SE ENCONTRÓ EL CRÉDITO")
+    print("\n🔍 Mostrando primeros 5 créditos en la hoja:")
+    for idx, row in df.head(5).iterrows():
+        print(f"   - {row['# crédito SIFCO']}")
+    exit()
+
+# Mostrar TODAS las filas encontradas
+for idx, row in filas_credito.iterrows():
+    numero_credito_raw = str(row['# crédito SIFCO']).strip()
+    numero_credito_base = numero_credito_raw.split('_')[0]
     
-    print(f"📂 Leyendo: {archivo_path}")
-    print(f"📄 Hoja: {HOJA_PRUEBA}\n")
+    print(f"{'='*70}")
+    print(f"📋 Fila {idx} del DataFrame")
+    print(f"{'='*70}")
+    print(f"   # crédito SIFCO (raw):  '{numero_credito_raw}'")
+    print(f"   # crédito SIFCO (base): '{numero_credito_base}'")
+    print(f"   # (cuota):              {row.get('#', 'N/A')}")
+    print(f"   Inversionista:          '{row['Inversionista']}'")
+    print(f"   Capital (raw):          {row['Capital']}")
+    print(f"   Capital (type):         {type(row['Capital'])}")
     
-    if not os.path.exists(archivo_path):
-        print(f"❌ Archivo no encontrado: {archivo_path}")
-        return
+    # Simular limpieza
+    def limpiar_valor(valor):
+        if pd.isna(valor):
+            return "0"
+        valor_str = str(valor).strip()
+        if valor_str.upper().startswith('Q'):
+            valor_str = valor_str[1:].strip()
+        valor_str = valor_str.replace(',', '')
+        return valor_str
     
-    # Leer Excel
-    df_raw = pd.read_excel(archivo_path, sheet_name=HOJA_PRUEBA, header=None)
+    capital_limpio = limpiar_valor(row['Capital'])
+    print(f"   Capital (limpio):       '{capital_limpio}'")
+    print()
+
+# Ahora simular el agrupamiento
+print(f"\n{'='*70}")
+print(f"🔄 SIMULANDO AGRUPAMIENTO POR CRÉDITO BASE")
+print(f"{'='*70}\n")
+
+creditos_data = {}
+
+for idx, row in filas_credito.iterrows():
+    numero_credito_raw = str(row['# crédito SIFCO']).strip()
+    numero_credito = numero_credito_raw.split('_')[0]
     
-    # Buscar headers
-    header_row = None
-    for idx, row in df_raw.iterrows():
-        if idx > 20:
-            break
-        row_str = ' '.join(str(cell).lower() for cell in row if pd.notna(cell))
-        if 'credito' in row_str or 'inversionista' in row_str:
-            header_row = idx
-            print(f"✅ Headers en fila {idx}\n")
-            break
+    if numero_credito not in creditos_data:
+        creditos_data[numero_credito] = []
     
-    if header_row is None:
-        print("❌ No encontré headers")
-        return
+    def limpiar_valor(valor):
+        if pd.isna(valor):
+            return "0"
+        valor_str = str(valor).strip()
+        if valor_str.upper().startswith('Q'):
+            valor_str = valor_str[1:].strip()
+        valor_str = valor_str.replace(',', '')
+        return valor_str
     
-    # Leer con headers
-    df = pd.read_excel(archivo_path, sheet_name=HOJA_PRUEBA, header=header_row)
-    
-    print(f"📊 Total de filas: {len(df)}")
-    print(f"📊 Total de columnas: {len(df.columns)}\n")
-    
-    # 🎯 MAPEO CORRECTO según tu Excel real
-    columnas_mapeo = {
-        'credito_sifco': '# crédito SIFCO',
-        'inversionista': 'Inversionista',
-        'capital': 'Capital',
-        'porcentaje_interes': '%',
-        'porcentaje_cashin': '% Cash-In',
-        'porcentaje_inversionista': '% Inversionista',
-        'cuota': 'Cuota',
-        'cuota_inversionista': 'Cuota Inverionista',  # Ojo al typo en tu Excel
+    inversionista_data = {
+        "inversionista": str(row['Inversionista']).strip(),
+        "capital": limpiar_valor(row['Capital']),
+        "porcentajeCashIn": limpiar_valor(row['% Cash-In']),
+        "porcentajeInversionista": limpiar_valor(row['% Inversionista']),
+        "porcentaje": limpiar_valor(row['%']),
+        "cuota": limpiar_valor(row['Cuota']),
+        "cuotaInversionista": limpiar_valor(row.get('Cuota Inverionista', 0)),
     }
     
-    print("🔍 VERIFICANDO COLUMNAS:")
-    columnas = {}
-    faltantes = []
-    
-    for key, nombre_excel in columnas_mapeo.items():
-        if nombre_excel in df.columns:
-            columnas[key] = nombre_excel
-            print(f"   ✅ {key} → '{nombre_excel}'")
-        else:
-            faltantes.append(nombre_excel)
-            print(f"   ❌ {key} → '{nombre_excel}' NO ENCONTRADA")
-    
-    if faltantes:
-        print(f"\n⚠️ Columnas faltantes: {faltantes}")
-        print(f"\n💡 Columnas disponibles que contienen palabras clave:")
-        for col in df.columns:
-            col_lower = str(col).lower()
-            if any(x in col_lower for x in ['credito', 'inversion', 'cash', 'cuota', '%']):
-                print(f"   - '{col}'")
-        return
-    
-    print(f"\n✅ ¡Todas las columnas encontradas!\n")
-    
-    # Buscar primera fila con datos válidos
-    print("📝 EJEMPLO DE PRIMERA FILA CON DATOS:")
-    
-    primera_fila = None
-    for idx, row in df.iterrows():
-        if pd.notna(row[columnas['credito_sifco']]) and pd.notna(row[columnas['inversionista']]):
-            if str(row[columnas['credito_sifco']]).lower() not in ['total', 'suma', 'promedio']:
-                primera_fila = row
-                print(f"\n   (Fila {idx} del DataFrame)")
-                break
-    
-    if primera_fila is not None:
-        print(f"\n   📋 Crédito SIFCO: {primera_fila[columnas['credito_sifco']]}")
-        print(f"   👤 Inversionista: {primera_fila[columnas['inversionista']]}")
-        print(f"\n   💰 Capital:")
-        print(f"      Raw: {primera_fila[columnas['capital']]}")
-        print(f"      Limpio: {limpiar_valor(primera_fila[columnas['capital']])}")
-        print(f"\n   📊 Porcentajes:")
-        print(f"      % Interés (raw): {primera_fila[columnas['porcentaje_interes']]}")
-        print(f"      % Interés (limpio): {limpiar_valor(primera_fila[columnas['porcentaje_interes']])}")
-        print(f"      % Cash-In (raw): {primera_fila[columnas['porcentaje_cashin']]}")
-        print(f"      % Cash-In (limpio): {limpiar_valor(primera_fila[columnas['porcentaje_cashin']])}")
-        print(f"      % Inversionista (raw): {primera_fila[columnas['porcentaje_inversionista']]}")
-        print(f"      % Inversionista (limpio): {limpiar_valor(primera_fila[columnas['porcentaje_inversionista']])}")
-        print(f"\n   💵 Cuotas:")
-        print(f"      Cuota (raw): {primera_fila[columnas['cuota']]}")
-        print(f"      Cuota (limpia): {limpiar_valor(primera_fila[columnas['cuota']])}")
-        print(f"      Cuota Inversionista (raw): {primera_fila[columnas['cuota_inversionista']]}")
-        print(f"      Cuota Inversionista (limpia): {limpiar_valor(primera_fila[columnas['cuota_inversionista']])}")
-        
-        # 🎯 SIMULAR EL PAYLOAD QUE SE ENVIARÁ A LA API
-        print(f"\n\n🚀 PAYLOAD QUE SE ENVIARÍA A LA API:")
-        payload_ejemplo = {
-            "inversionista": str(primera_fila[columnas['inversionista']]).strip(),
-            "capital": limpiar_valor(primera_fila[columnas['capital']]),
-            "porcentajeCashIn": limpiar_valor(primera_fila[columnas['porcentaje_cashin']]),
-            "porcentajeInversionista": limpiar_valor(primera_fila[columnas['porcentaje_inversionista']]),
-            "porcentaje": limpiar_valor(primera_fila[columnas['porcentaje_interes']]),
-            "cuota": limpiar_valor(primera_fila[columnas['cuota']]),
-            "cuotaInversionista": limpiar_valor(primera_fila[columnas['cuota_inversionista']]),
-        }
-        
-        import json
-        print(json.dumps(payload_ejemplo, indent=2, ensure_ascii=False))
-        
-    else:
-        print("   ⚠️ No se encontró ninguna fila con datos válidos")
+    creditos_data[numero_credito].append(inversionista_data)
 
-if __name__ == "__main__":
-    try:
-        probar_lectura()
-        print("\n✅ Script ejecutado exitosamente!")
-    except Exception as e:
-        print(f"\n❌ Error general: {e}")
-        import traceback
-        traceback.print_exc()
+# Mostrar resultado agrupado
+for credito, inversionistas in creditos_data.items():
+    print(f"📋 Crédito base: {credito}")
+    print(f"👥 Inversionistas: {len(inversionistas)}\n")
+    
+    for inv in inversionistas:
+        print(f"   Inversionista: {inv['inversionista']}")
+        print(f"   Capital: {inv['capital']}")
+        print(f"   % Cash-In: {inv['porcentajeCashIn']}")
+        print(f"   % Inversionista: {inv['porcentajeInversionista']}")
+        print()
+
+print(f"\n{'='*70}")
+print(f"🚀 ESTO ES LO QUE SE ENVIARÍA A LA API")
+print(f"{'='*70}\n")
+
+import json
+for credito, inversionistas in creditos_data.items():
+    payload = {
+        "numeroCredito": credito,
+        "inversionistasData": inversionistas
+    }
+    print(json.dumps(payload, indent=2, ensure_ascii=False))

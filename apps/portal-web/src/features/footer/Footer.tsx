@@ -92,11 +92,11 @@ export const Footer: React.FC = () => {
       />
 
       {/* Content */}
-      <div className="flex justify-end flex-col gap-6 h-full p-10 lg:px-40 lg:py-20 z-10 relative">
+      <div className="flex justify-end flex-col gap-6 h-full p-8 lg:px-40 lg:py-20 z-10 relative">
         {/* Logo section */}
-        <div className="flex flex-col lg:flex-row gap-10 lg:items-center">
-          <h1 className="text-header-3">Cashin</h1>
-          <div className="flex gap-10">
+        <div className="flex flex-col lg:flex-row gap-6 lg:gap-10 lg:items-center">
+          <h1 className="text-3xl lg:text-header-3">Cashin</h1>
+          <div className="flex gap-6 lg:gap-10">
             <Investors />
             <Tranki />
             <Listo />
@@ -126,7 +126,7 @@ export const Footer: React.FC = () => {
           </div>
 
           {/* Social media and contact */}
-          <div className="order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  lg:justify-end gap-8 lg:pr-14 ">
+          <div className="order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  lg:justify-end gap-4 lg:gap-8 lg:pr-14 ">
             {SOCIAL_CONTACTS.map((contact) => {
               const IconComponent = contact.icon;
               return (

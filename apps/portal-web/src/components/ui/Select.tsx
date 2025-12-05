@@ -1,3 +1,4 @@
+import { useIsMobile } from "@/hooks";
 import { IconArrowDown } from "../icons";
 import { useState, useRef, useEffect } from "react";
 
@@ -23,6 +24,7 @@ export const Select = ({
 }: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
 
   const selectedOption = options.find((option) => option.value === value);
 
@@ -61,7 +63,7 @@ export const Select = ({
           alignItems: "center",
           justifyContent: "space-between",
           cursor: "pointer",
-          fontSize: "16px",
+          fontSize: isMobile ? "14px" : "16px",
           fontFamily: "inherit",
           transition: "border-color 0.2s",
         }}

@@ -1,4 +1,4 @@
-export const Users = () => {
+export const Users = ({ ...props }: React.SVGProps<SVGSVGElement>) => {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -6,6 +6,7 @@ export const Users = () => {
       height="29"
       viewBox="0 0 29 29"
       fill="none"
+      {...props}
     >
       <path
         d="M19.2884 25.3154V22.9044C19.2884 21.6255 18.7804 20.399 17.8761 19.4947C16.9718 18.5904 15.7453 18.0824 14.4664 18.0824H7.23338C5.95451 18.0824 4.72801 18.5904 3.82371 19.4947C2.91941 20.399 2.41138 21.6255 2.41138 22.9044V25.3154"

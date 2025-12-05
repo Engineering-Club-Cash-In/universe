@@ -110,7 +110,7 @@ export const Profile = () => {
         <ContainerMenu>
           {/* Header - Mi Perfil */}
           <div className="mb-12">
-            <h1 className="text-header-2 mb-6">Mi Perfil</h1>
+            <h1 className="text-2xl font-bold lg:text-header-2 mb-6">Mi Perfil</h1>
 
             <div className="flex items-center gap-6">
               {/* Imagen de perfil */}
@@ -129,7 +129,7 @@ export const Profile = () => {
 
               {/* Información básica */}
               <div>
-                <p className="text-header-4 mb-2">{user?.name || "Usuario"}</p>
+                <p className="text-body lg:text-header-4 mb-2">{user?.name || "Usuario"}</p>
                 <p className="text-gray text-lg">{user?.email}</p>
               </div>
             </div>

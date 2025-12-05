@@ -1,10 +1,11 @@
-export const IconSearch = () => (
+export const IconSearch = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="29"
     height="29"
     viewBox="0 0 29 29"
     fill="none"
+    {...props}
   >
     <path
       d="M25.3147 25.3171L20.0828 20.0852"

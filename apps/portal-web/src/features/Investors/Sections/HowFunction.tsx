@@ -1,5 +1,6 @@
 import { IconAddUser, IconWallet, IconQ } from "@/components";
 import { Calculator } from "../component/Calculator";
+import { useIsMobile } from "@/hooks";
 
 export const HowFunction = () => {
   interface Item {
@@ -9,40 +10,42 @@ export const HowFunction = () => {
     icon: React.ReactNode;
   }
 
+  const isMobile = useIsMobile();
+
   const items: Item[] = [
     {
       step: "Paso 1",
       title: "Crea tu perfil inversor",
       description:
         "Inicia tu camino a través de nuestro WhatsApp o un agente. Te ayudaremos a registrarte y resolveremos todas tus dudas, paso a paso.",
-      icon: <IconAddUser width={32} height={32} />,
+      icon: <IconAddUser width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />,
     },
     {
       step: "Paso 2",
       title: "Elige tu estrategia",
       description:
         "Selecciona el modelo que mejor se adapte a ti y define el monto que deseas invertir. El proceso es transparente y seguro desde el primer momento.",
-      icon: <IconWallet width={32} height={32} />,
+      icon: <IconWallet width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />,
     },
     {
       step: "Paso 3",
       title: "Invierte con seguridad",
       description:
         "Realiza tu primera inversión y monitorea tu rendimiento en tiempo real.",
-      icon: <IconQ width={32} height={32} />,
+      icon: <IconQ width={isMobile ? 24 : 32} height={isMobile ? 24 : 32} />,
     },
   ];
 
   return (
     <section
       id="how-it-works"
-      className="pt-56 mb-24 px-20 flex flex-col lg:flex-row gap-40 items-center w-full"
+      className="pt-24 lg:pt-56 lg:mb-24 px-8 lg:px-20 flex flex-col-reverse lg:flex-row gap-16 lg:gap-40 items-center w-full"
     >
-      <div className="w-full lg:w-2/5 flex flex-col gap-8">
-        <h2 className="text-header-body font-bold text-center text-secondary">
+      <div className="w-full lg:w-2/5 flex flex-col lg:gap-8 gap-6">
+        <h2 className="text-xl lg:text-header-body font-bold text-center text-secondary">
           ¿Cómo funciona?
         </h2>
-        <p className="text-body text-center">
+        <p className="lg:text-body text-center">
           Comenzar a invertir con nosotros es sencillo y rápido. Solo sigue
           estos tres pasos:
         </p>
@@ -56,8 +59,8 @@ export const HowFunction = () => {
                 <span className="text-secondary font-semibold text-[12px]">
                   {item.step}
                 </span>
-                <h3 className="text-lg font-bold">{item.title}</h3>
-                <p className="text-gray text-sm">{item.description}</p>
+                <h3 className="lg:text-lg font-bold">{item.title}</h3>
+                <p className="text-gray text-xs lg:text-sm">{item.description}</p>
               </div>
             </div>
           ))}

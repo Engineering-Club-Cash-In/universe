@@ -10,8 +10,9 @@ export const Now = () => {
     setIsModalOpen,
   } = useModalOptionsCall();
 
+
   return (
-    <section className="w-full px-4 py-16 md:py-36">
+    <section className="w-full px-8 lg:px-4 py-12 lg:py-36">
       <div className="w-full md:w-1/2 mx-auto">
         {/* Contenedor principal con estilos especificados */}
         <div
@@ -33,14 +34,14 @@ export const Now = () => {
               transition={{ duration: 0.5 }}
             >
               <IconStart className="w-5 h-5" />
-              <span className="text-sm font-medium ">
+              <span className="text-[10px] lg:text-sm font-medium ">
                 Tu futuro financiero comienza hoy
               </span>
             </motion.div>
 
             {/* Título */}
             <motion.h2
-              className="text-3xl md:text-4xl lg:text-5xl font-bold text-white mb-4"
+              className="text-2xl md:text-3xl lg:text-5xl font-bold text-white mb-4"
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
@@ -51,22 +52,12 @@ export const Now = () => {
             </motion.h2>
 
             {/* Descripción */}
-            <motion.p
-              className="text-lg text-gray mb-8 max-w-2xl"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-            >
-              Únete a miles de inversionistas que ya están construyendo su
-              patrimonio con nosotros. Seguridad, rendimientos y el respaldo de
-              expertos.
-            </motion.p>
+            
 
             {/* Botón Invierte Ahora con motion */}
             <motion.button
               onClick={() => setIsModalOpen(true)}
-              className="px-16 py-6 rounded-xl font-semibold text-secondary border border-secondary text-2xl mb-12"
+              className="mt-4 lg:mt-0 px-12 lg:px-16 py-4 lg:py-6 rounded-xl font-semibold text-secondary border border-secondary text-2xl mb-8 lg:mb-12"
               initial={{ opacity: 0, scale: 0.9 }}
               whileInView={{ opacity: 1, scale: 1 }}
               viewport={{ once: true }}
@@ -80,20 +71,38 @@ export const Now = () => {
               Invierte Ahora
             </motion.button>
 
+            <motion.p
+              className=" text-gray mb-8  lg:hidden leading-8"
+              initial={{ opacity: 0, y: 20 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.5, delay: 0.2 }}
+            >
+              Únete a miles de inversionistas que ya están construyendo su
+              patrimonio con nosotros. Seguridad, rendimientos y el respaldo de
+              expertos.
+            </motion.p>
+
             {/* Tres viñetas/puntos */}
             <motion.div
-              className="flex gap-2 items-center text-gray"
+              className="flex flex-col lg:flex-row gap-2 lg:items-center text-gray"
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
               viewport={{ once: true }}
               transition={{ duration: 0.5, delay: 0.4 }}
             >
-              <div className="w-2 h-2 rounded-full bg-secondary" />
-              <span>Registro en 10 minutos</span>
-              <div className="w-2 h-2 rounded-full ml-12 bg-secondary" />
-              <span>Sin comisiones ocultas</span>
-              <div className="w-2 h-2 rounded-full ml-12 bg-secondary" />
-              <span>Soporte 24/7</span>
+              <div className="flex gap-1 items-center">
+                <div className="w-2 h-2 rounded-full bg-secondary" />
+                <span>Registro en 10 minutos</span>
+              </div>
+              <div className="flex gap-1 items-center">
+                <div className="w-2 h-2 rounded-full lg:ml-12 bg-secondary" />
+                <span>Sin comisiones ocultas</span>
+              </div>
+              <div className="flex gap-1 items-center">
+                <div className="w-2 h-2 rounded-full lg:ml-12 bg-secondary" />
+                <span>Soporte 24/7</span>
+              </div>
             </motion.div>
           </div>
         </div>

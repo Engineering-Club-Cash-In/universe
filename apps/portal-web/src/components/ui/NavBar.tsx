@@ -3,8 +3,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "./Link";
 import { InvestorsLogo } from "@/features/footer/icons";
 import { useMatchRoute } from "@tanstack/react-router";
-import { IconUser, IconMenu, IconX } from "../icons";
+import {
+  IconUser,
+  IconMenu,
+  IconX,
+  IconPerson,
+  IconArrow,
+  IconCar2,
+  IconDocument,
+  IconOut,
+} from "../icons";
 import { useIsMobile } from "@/hooks";
+import { useAuth } from "@/lib/useAuth";
+import { authClient } from "@/lib/auth";
 
 export const NavBar = () => {
   const [isUserMenuOpen, setIsUserMenuOpen] = React.useState(false);
@@ -12,6 +23,7 @@ export const NavBar = () => {
 
   const matchRoute = useMatchRoute();
   const isInvestorPage = !!matchRoute({ to: "/invest" });
+  const { isAuthenticated } = useAuth();
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
@@ -28,6 +40,41 @@ export const NavBar = () => {
     { label: "Inicia sesión", href: "/login" },
     { label: "Regístrate", href: "/register" },
   ];
+
+  // Items del menú de perfil (cuando está autenticado)
+  const profileMenuItems = [
+    {
+      id: "/profile",
+      label: "Mi Perfil",
+      icon: <IconPerson width="24" height="24" />,
+    },
+    {
+      id: "/investments",
+      label: "Mis Inversiones",
+      icon: <IconArrow width="24" height="24" />,
+    },
+    {
+      id: "/loans",
+      label: "Mis Préstamos",
+      icon: <IconCar2 width="24" height="24" />,
+    },
+    {
+      id: "/documents",
+      label: "Documentos",
+      icon: <IconDocument width="24" height="24" />,
+    },
+  ];
+
+  const handleLogout = async () => {
+    try {
+      await authClient.signOut();
+      setIsMobileMenuOpen(false);
+      globalThis.location.href = "/login";
+    } catch (error) {
+      console.error("Error during logout:", error);
+      globalThis.location.href = "/login";
+    }
+  };
 
   const closeMobileMenu = () => setIsMobileMenuOpen(false);
   const isMobile = useIsMobile();
@@ -199,7 +246,7 @@ export const NavBar = () => {
             className="fixed inset-0 z-100 bg-[#0F0F0F] flex flex-col"
           >
             {/* Header del menú móvil */}
-            <div className="flex items-center justify-between px-12 pt-20 ">
+            <div className="flex items-center justify-between px-12 pt-12 ">
               <Link
                 href={"/"}
                 className="text-light font-plus-jakarta font-bold text-lg"
@@ -219,7 +266,7 @@ export const NavBar = () => {
             </div>
 
             {/* Links del menú */}
-            <div className="flex-1 flex flex-col justify-center items-center gap-8 px-8">
+            <div className="flex-1 flex flex-col justify-center items-center gap-6 px-8 overflow-y-auto">
               {defaultNavItems.map((item, index) => (
                 <motion.div
                   key={item.href}
@@ -237,35 +284,99 @@ export const NavBar = () => {
                 </motion.div>
               ))}
 
-              {/* Separador */}
-              <div className="w-16 h-px bg-light/30 my-4" />
+              {/* Separador decorativo */}
+              <div
+                className="w-full h-2.5 my-2"
+                style={{
+                  opacity: 0.5,
+                  background:
+                    "linear-gradient(90deg, #0F0F0F 0%, #9A9FF5 50%, #0F0F0F 100%)",
+                }}
+              />
 
-              {/* User menu items */}
-              {userMenuItems.map((item, index) => (
-                <motion.div
-                  key={item.href}
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: (defaultNavItems.length + index) * 0.1 }}
-                >
-                  <Link
-                    href={item.href}
-                    className="text-xl font-medium text-light/80 hover:text-primary transition-colors"
-                    onClick={closeMobileMenu}
+              {/* Si está autenticado: mostrar items del perfil */}
+              {isAuthenticated ? (
+                <>
+                  {profileMenuItems.map((item, index) => (
+                    <motion.div
+                      key={item.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        delay: (defaultNavItems.length + index) * 0.1,
+                      }}
+                    >
+                      <Link
+                        href={item.id}
+                        className="flex items-center gap-3 text-xl font-medium text-light/80 hover:text-primary transition-colors"
+                        onClick={closeMobileMenu}
+                      >
+                        <span className="text-primary">{item.icon}</span>
+                        {item.label}
+                      </Link>
+                    </motion.div>
+                  ))}
+
+                  {/* Separador antes de cerrar sesión */}
+                  <div
+                    className="w-full h-2.5 my-2"
+                    style={{
+                      opacity: 0.5,
+                      background:
+                        "linear-gradient(90deg, #0F0F0F 0%, #9A9FF5 50%, #0F0F0F 100%)",
+                    }}
+                  />
+
+                  {/* Cerrar sesión */}
+                  <motion.button
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      delay:
+                        (defaultNavItems.length + profileMenuItems.length) *
+                        0.1,
+                    }}
+                    onClick={handleLogout}
+                    className="flex items-center gap-3 text-xl font-medium text-red-400  transition-colors"
                   >
-                    {item.label}
-                  </Link>
-                </motion.div>
-              ))}
+                    <IconOut width="24" height="24" />
+                    Cerrar Sesión
+                  </motion.button>
+                </>
+              ) : (
+                <>
+                  {/* Si no está autenticado: mostrar login/registro */}
+                  {userMenuItems.map((item, index) => (
+                    <motion.div
+                      key={item.href}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        delay: (defaultNavItems.length + index) * 0.1,
+                      }}
+                    >
+                      <Link
+                        href={item.href}
+                        className="text-xl font-medium text-light/80 hover:text-primary transition-colors"
+                        onClick={closeMobileMenu}
+                      >
+                        {item.label}
+                      </Link>
+                    </motion.div>
+                  ))}
+                </>
+              )}
             </div>
 
             {/* Logo al fondo */}
             <div className="flex justify-center pb-12">
-              <img
-                src="/logo1.png"
-                alt="CashIn company logo"
-                className="w-10 h-10 object-contain opacity-50"
-              />
+              <Link href={"/"} onClick={closeMobileMenu}>
+                <img
+                  src="/logo1.png"
+                  alt="CashIn company logo"
+                  className="w-10 h-10 object-contain opacity-50"
+                />
+              </Link>
             </div>
           </motion.div>
         )}

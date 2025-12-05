@@ -13,7 +13,7 @@ export const ContainerMenu = ({ children }: ContainerMenuProps) => {
       </div>
 
       {/* Contenido principal - con margen izquierdo en desktop para el menú fijo */}
-      <div className=" mx-auto lg:ml-60 my-20 px-10 lg:px-20">{children}</div>
+      <div className=" mx-auto lg:ml-60 mt-10 mb-20 lg:mt-20 lg:mb-20 px-8 lg:px-20">{children}</div>
     </>
   );
 };

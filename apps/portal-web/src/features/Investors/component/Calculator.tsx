@@ -61,7 +61,7 @@ export const Calculator: React.FC = () => {
 
   return (
     <div
-      className="p-16 rounded-3xl"
+      className="p-6 lg:p-16 rounded-3xl"
       style={{
         border: "0.86px solid rgba(212, 175, 55, 0.20)",
         background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
@@ -70,8 +70,8 @@ export const Calculator: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
         {/* Primer Grid - Inputs */}
         <div className="flex flex-col gap-6">
-          <div>
-            <div className="bg-secondary/20 w-1/2 px-4 py-2 rounded-2xl  border-secondary flex gap-2 items-center">
+          <div className="lg:w-1/2 flex items-center justify-center lg:justify-start">
+            <div className="bg-secondary/20 w-auto px-4 py-2 rounded-2xl  border-secondary flex gap-2 items-center">
               <IconCalculator />
               <span className="text-secondary text-xs font-semibold">
                 Simulador Interactivo
@@ -106,13 +106,13 @@ export const Calculator: React.FC = () => {
             <label className="block text-white mb-2 text-sm">
               Modelo de Inversión
             </label>
-            <div className="flex flex-col lg:flex-row gap-2 min-h-10">
+            <div className="flex flex-wrap gap-2">
               {investmentTypeOptions.map((option) => (
                 <button
                   key={option.value}
                   onClick={() => setInvestmentType(option.value)}
+                  className="rounded-md py-2 px-4 lg:py-3 text-white text-start  lg:text-center cursor-pointer transition-all text-xs flex-1 min-w-[120px]"
                   style={{
-                    borderRadius: "6px",
                     border:
                       investmentType === option.value
                         ? "1px solid #D4AF37"
@@ -121,12 +121,6 @@ export const Calculator: React.FC = () => {
                       investmentType === option.value
                         ? "rgba(212, 175, 55, 0.10)"
                         : "transparent",
-                    padding: "12px 16px",
-                    color: "#FFFFFF",
-                    textAlign: "left",
-                    cursor: "pointer",
-                    transition: "all 0.2s",
-                    fontSize: "12px",
                   }}
                 >
                   {option.label}
@@ -135,11 +129,11 @@ export const Calculator: React.FC = () => {
             </div>
           </div>
 
-          <p className="">
+          <p className="text-sm lg:text-base">
             <span className="text-secondary font-semibold">
               Inversión Tradicional:{" "}
             </span>
-            <span className="">
+            <span className="font-normal">
               Recibes intereses periódicos y el capital al final del plazo. El
               rendimiento es estable y predecible.
             </span>
@@ -148,7 +142,7 @@ export const Calculator: React.FC = () => {
 
         {/* Segundo Grid - Visualización */}
         <div
-          className="flex flex-col gap-4 justify-center p-8"
+          className="flex flex-col gap-4 justify-center p-4 lg:p-8"
           style={{
             borderRadius: "13.765px",
             border: "1.721px solid rgba(212, 175, 55, 0.30)",
@@ -165,15 +159,23 @@ export const Calculator: React.FC = () => {
           {results ? (
             <>
               <div>
-                <p className="text-sm text-gray-400 mb-1">Monto Invertido</p>
-                <p className="text-2xl font-bold text-white">
-                  Q {results.principal.toLocaleString()}
+                <p className="text-xs lg:text-sm text-gray-400 mb-1">
+                  Monto Invertido
+                </p>
+                <p className="lg:text-2xl font-bold text-white">
+                  Q{" "}
+                  {results.principal.toLocaleString("es-GT", {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
                 </p>
               </div>
 
               <div>
-                <p className="text-sm text-gray-400 mb-1">Ganancia Estimada</p>
-                <p className="text-2xl font-bold text-secondary">
+                <p className=" text-xs lg:text-sm  text-gray-400 mb-1">
+                  Ganancia Estimada
+                </p>
+                <p className="lg:text-2xl font-bold text-secondary">
                   + Q{" "}
                   {results.profit.toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
@@ -183,8 +185,10 @@ export const Calculator: React.FC = () => {
               </div>
 
               <div>
-                <p className="text-sm text-gray-400 mb-1">Total al Finalizar</p>
-                <p className="text-4xl font-bold text-white">
+                <p className="text-xs lg:text-sm text-gray-400 mb-1">
+                  Total al Finalizar
+                </p>
+                <p className="text-2xl lg:text-4xl font-bold text-white">
                   Q{" "}
                   {results.totalReturn.toLocaleString("es-GT", {
                     minimumFractionDigits: 2,
@@ -202,14 +206,14 @@ export const Calculator: React.FC = () => {
                 Contáctanos para Invertir
               </motion.button>
 
-              <p className="text-center text-gray text-xs">
+              <p className="text-center text-gray text-[10px] lg:text-xs">
                 * Los rendimientos son proyecciones basadas en datos históricos
                 y no garantizan resultados futuros.
               </p>
             </>
           ) : (
             <div className="flex items-center justify-center h-full">
-              <p className="text-gray-500 text-center">
+              <p className="text-gray-500 text-center text-sm lg:text-base">
                 Selecciona las opciones para ver los resultados
               </p>
             </div>

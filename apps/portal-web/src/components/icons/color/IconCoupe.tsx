@@ -1,4 +1,4 @@
-export const IconCoupe = () => {
+export const IconCoupe = ({ ...props }: React.SVGProps<SVGSVGElement>) => {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -6,6 +6,7 @@ export const IconCoupe = () => {
       height="36"
       viewBox="0 0 81 36"
       fill="none"
+      {...props}
     >
       <path
         opacity="0.99"

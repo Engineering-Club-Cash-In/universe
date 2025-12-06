@@ -1,4 +1,4 @@
-export const IconHatchBack = () => {
+export const IconHatchBack = ({ ...props }: React.SVGProps<SVGSVGElement>) => {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -6,6 +6,7 @@ export const IconHatchBack = () => {
       height="40"
       viewBox="0 0 80 40"
       fill="none"
+      {...props}
     >
       <path
         opacity="0.99"

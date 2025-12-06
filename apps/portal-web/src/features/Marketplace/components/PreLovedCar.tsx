@@ -4,6 +4,7 @@ import { IconCalendarSmall, IconDollarSimple } from "../icons";
 import { IconGear } from "@/components";
 import { useNavigate } from "@tanstack/react-router";
 import { formatPrice } from "@/utils";
+import { useIsMobile } from "@/hooks";
 
 interface PreLovedCarProps {
   vehicle: Vehicle;
@@ -19,9 +20,11 @@ export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
     });
   };
 
+  const isMobile = useIsMobile();
+
   return (
     <motion.div
-      className="relative cursor-pointer group h-56 "
+      className="relative cursor-pointer group h-32 lg:h-56 "
       whileHover={{ scale: 1.05 }}
       transition={{ duration: 0.3 }}
       onClick={handleClick}
@@ -40,7 +43,7 @@ export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
 
       {/* Card de información */}
       <div
-        className="absolute bottom-2 left-1/2 transform -translate-x-1/2 p-2 transition-all duration-300 rounded-4xl bg-dark/75"
+        className="absolute bottom-2 left-1/2 transform -translate-x-1/2 p-1 lg:p-2 transition-all duration-300 rounded-4xl bg-dark/75"
         style={{
           boxShadow: "0 2.628px 2.628px 0 rgba(0, 0, 0, 0.25)",
           width: "calc(100% - 16px)",
@@ -58,32 +61,32 @@ export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
         {/* Información básica - siempre visible */}
         <div className="flex flex-col justify-between items-center">
           {/* Marca y línea */}
-          <h3 className="text-white text-base">
+          <h3 className="text-white text-xs lg:text-base">
             {vehicle.marca} {vehicle.linea}
           </h3>
 
           {/* Grid de información con iconos */}
-          <div className="grid grid-cols-3 gap-2 text-xs items-center justify-center">
+          <div className="flex   gap-1 lg:gap-2 text-[8px] lg:text-xs items-center justify-center">
             {/* Año */}
-            <div className="flex items-center gap-1 text-white/70 justify-center">
+            <div className="flex items-center gap-1 text-white/70 lg:justify-center">
               <div>
-                <IconCalendarSmall />
+                <IconCalendarSmall width={isMobile ? 6 : 10} height={isMobile ? 6 : 10} />
               </div>
               <span>{vehicle.modelo}</span>
             </div>
 
             {/* Precio */}
-            <div className="flex items-center gap-1 text-white/70 justify-center">
+            <div className="flex items-center gap-1 text-white/70 lg:justify-center">
               <div>
-                <IconDollarSimple />
+                <IconDollarSimple width={isMobile ? 6 : 10} height={isMobile ? 6 : 10} />
               </div>
               <span className="truncate">{formatPrice(vehicle.precio)}</span>
             </div>
 
             {/* Transmisión */}
-            <div className="flex items-center gap-1 text-white/70 justify-center">
+            <div className="flex items-center gap-1 text-white/70 lg:justify-center">
               <div>
-                <IconGear />
+                <IconGear width={isMobile ? 6 : 10} height={isMobile ? 6 : 10} />
               </div>
               <span className="capitalize">{vehicle.transmision}</span>
             </div>
@@ -92,9 +95,9 @@ export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
       </div>
 
       {/* Badge de nuevo/usado */}
-      <div className="absolute top-4 right-4">
+      <div className="absolute top-2 right-2 lg:top-4 lg:right-4">
         <div
-          className={`px-3 py-1 rounded-full text-xs font-semibold ${
+          className={`px-2 lg:px-3 py-1 rounded-full text-[10px] lg:text-xs font-semibold ${
             vehicle.nuevo
               ? "bg-green-500/90 text-white"
               : "bg-blue-500/90 text-white"

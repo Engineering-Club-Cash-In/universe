@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { BarFilters, PreLovedCar } from "../components";
+import { BarFilters, PreLovedCar, ShowBarFiltersMobile } from "../components";
 import { useFilteredVehiclesFromStore } from "../hooks/useFilteredVehicles";
 import { IconLeftArrow, IconRightArrow } from "@/components/icons";
-import { ITEMS_PER_PAGE, DEFAULT_PAGE } from "../constants/marketplace.constants";
+import {
+  ITEMS_PER_PAGE,
+  DEFAULT_PAGE,
+} from "../constants/marketplace.constants";
 import { motion, AnimatePresence } from "framer-motion";
+import { useIsMobile } from "@/hooks";
 
 export const ViewCars = () => {
   const { filteredVehicles, isLoading } = useFilteredVehiclesFromStore();
@@ -49,6 +53,8 @@ export const ViewCars = () => {
     setCurrentPage(page);
   }, []);
 
+  const isMobile = useIsMobile();
+
   const renderContent = useCallback(() => {
     if (isLoading) {
       return <p className="text-white/70">Cargando vehículos...</p>;
@@ -64,7 +70,7 @@ export const ViewCars = () => {
 
     return (
       <>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 lg:gap-6">
           <AnimatePresence mode="popLayout">
             {currentVehicles.map((vehicle, index) => (
               <motion.div
@@ -87,13 +93,13 @@ export const ViewCars = () => {
 
         {/* Paginación */}
         {totalPages > DEFAULT_PAGE && (
-          <div className="flex items-center justify-center gap-4 mt-12">
+          <div className="flex items-center justify-center gap-4 mt-8 lg:mt-12">
             {/* Flecha izquierda */}
             <button
               onClick={handlePrevPage}
               disabled={currentPage === DEFAULT_PAGE}
               className={`
-                border-none rounded-full w-10 h-10 flex items-center justify-center
+                border-none rounded-full h-6 w-6 lg:w-10 lg:h-10 flex items-center justify-center
                 transition-all duration-300
                 ${
                   currentPage === DEFAULT_PAGE
@@ -102,28 +108,32 @@ export const ViewCars = () => {
                 }
               `}
             >
-              <IconLeftArrow width={24} height={24} />
+              <IconLeftArrow
+                width={isMobile ? 16 : 24}
+                height={isMobile ? 16 : 24}
+              />
             </button>
 
             {/* Puntitos */}
             <div className="flex gap-2">
-              {Array.from({ length: totalPages }, (_, i) => i + DEFAULT_PAGE).map(
-                (page) => (
-                  <button
-                    key={page}
-                    onClick={() => handlePageClick(page)}
-                    className={`
-                    h-3 rounded-md border-none cursor-pointer transition-all duration-300
+              {Array.from(
+                { length: totalPages },
+                (_, i) => i + DEFAULT_PAGE
+              ).map((page) => (
+                <button
+                  key={page}
+                  onClick={() => handlePageClick(page)}
+                  className={`
+                    h-2 lg:h-3 rounded-md border-none cursor-pointer transition-all duration-300
                     ${
                       currentPage === page
                         ? "w-8 bg-primary"
                         : "w-3 bg-white/30 hover:bg-white/50"
                     }
                   `}
-                    aria-label={`Página ${page}`}
-                  />
-                )
-              )}
+                  aria-label={`Página ${page}`}
+                />
+              ))}
             </div>
 
             {/* Flecha derecha */}
@@ -131,7 +141,7 @@ export const ViewCars = () => {
               onClick={handleNextPage}
               disabled={currentPage === totalPages}
               className={`
-                border-none rounded-full w-10 h-10 flex items-center justify-center
+                border-none rounded-full h-6 w-6 lg:w-10 lg:h-10 flex items-center justify-center
                 transition-all duration-300
                 ${
                   currentPage === totalPages
@@ -140,25 +150,43 @@ export const ViewCars = () => {
                 }
               `}
             >
-              <IconRightArrow width={24} height={24} />
+              <IconRightArrow
+                width={isMobile ? 16 : 24}
+                height={isMobile ? 16 : 24}
+              />
             </button>
           </div>
         )}
       </>
     );
-  }, [isLoading, filteredVehicles.length, currentVehicles, currentPage, totalPages, handlePrevPage, handleNextPage, handlePageClick]);
+  }, [
+    isLoading,
+    filteredVehicles.length,
+    currentVehicles,
+    currentPage,
+    totalPages,
+    handlePrevPage,
+    handleNextPage,
+    handlePageClick,
+  ]);
 
   return (
-    <div className="flex min-h-screen relative pt-12">
+    <div className="flex min-h-screen relative pt-6 lg:pt-12">
       {/* Sidebar de filtros */}
-      <div className="max-w-80 sticky left-0 top-0 h-screen overflow-y-auto bg-linear-to-b from-[rgba(154,159,245,0.05)] to-[rgba(90,93,143,0.05)] p-8 px-6 border-r border-white/10 self-start">
+      <div className="hidden lg:block max-w-80 sticky left-0 top-0 h-screen overflow-y-auto bg-linear-to-b from-[rgba(154,159,245,0.05)] to-[rgba(90,93,143,0.05)] p-8 px-6 border-r border-white/10 self-start">
         <BarFilters />
       </div>
 
       {/* Contenido principal */}
-      <div ref={contentRef} className="flex-1 flex flex-col items-center px-10">
-        <div className="w-full max-w-[1400px]">
-          <h1 className="text-header-4 text-white/80 mb-8  ">
+      <div
+        ref={contentRef}
+        className="flex-1 flex flex-col items-center px-8 lg:px-10"
+      >
+        {
+          isMobile && <ShowBarFiltersMobile showClearButton/>
+        }
+        <div className="w-full lg:max-w-[1400px] text-center lg:text-start mt-6 lg:mt-0">
+          <h1 className="text-2xl lg:text-header-4 text-white/80 mb-8  ">
             Resultados de vehículos
           </h1>
           {renderContent()}

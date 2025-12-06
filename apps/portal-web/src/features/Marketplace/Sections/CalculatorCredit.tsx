@@ -62,7 +62,7 @@ export const CalculatorCredit = () => {
   const resultado = calcularCredito();
 
   return (
-    <div className="relative w-full mt-56 mb-30 flex">
+    <div className="relative w-full mt-12 lg:mt-56 mb-16 lg:mb-30 flex px-8 lg:px-0">
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
         <img
@@ -114,13 +114,13 @@ export const CalculatorCredit = () => {
               background:
                 "linear-gradient(180deg, rgba(90, 93, 143, 0.05) 0%, rgba(154, 159, 245, 0.05) 100%)",
             }}
-            className="relative rounded-xl py-8 px-8 border border-primary/50 flex flex-col items-center"
+            className="relative rounded-xl p-6 lg:p-8 border border-primary/50 flex flex-col items-center"
           >
-            <div className="w-full lg:w-3/4">
-              <h2 className="text-header-body mb-1">
+            <div className="w-full lg:w-3/4 ">
+              <h2 className="text-center lg:text-header-body mb-2">
                 Calculadora de préstamo de auto
               </h2>
-              <p className="text-primary text-base mb-6">
+              <p className="text-primary text-xs lg:text-base mb-6 text-center">
                 Usa nuestra calculadora para estimar tus pagos mensuales de auto
               </p>
 
@@ -132,7 +132,7 @@ export const CalculatorCredit = () => {
                   <div className="w-full">
                     <label
                       htmlFor="monto"
-                      className="block text-sm font-medium mb-2"
+                      className="block text-xs lg:text-sm font-medium mb-2"
                     >
                       Monto del vehículo
                     </label>
@@ -150,7 +150,7 @@ export const CalculatorCredit = () => {
                   <div className="w-full">
                     <label
                       htmlFor="enganche"
-                      className="block text-sm font-medium mb-2"
+                      className="block text-xs lg:text-sm font-medium mb-2"
                     >
                       Enganche
                     </label>
@@ -165,7 +165,7 @@ export const CalculatorCredit = () => {
                   <div className="w-full">
                     <label
                       htmlFor="tiempo"
-                      className="block text-sm font-medium mb-2"
+                      className="block text-xs lg:text-sm font-medium mb-2"
                     >
                       Tiempo de crédito
                     </label>
@@ -182,14 +182,14 @@ export const CalculatorCredit = () => {
                 <div className="rounded-lg mt-6 shadow-sm">
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
-                      <span className="text-primary">Tasa de interés:</span>
-                      <span className="text-xl text-blue-600">
+                      <span className="text-white">Tasa de interés:</span>
+                      <span className="text-xl text-white font-semibold">
                         {resultado.interes}%
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-primary">Pago mensual:</span>
-                      <span className="text-xl text-green-600">
+                      <span className="text-xl text-primary font-semibold">
                         Q.
                         {resultado.pagoMensual
                           .toFixed(2)
@@ -204,7 +204,7 @@ export const CalculatorCredit = () => {
                     onClick={() => setIsModalOpen(true)}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    className="w-1/2 mt-6 py-4 rounded-lg font-semibold text-white text-lg"
+                    className="w-full lg:w-1/2 mt-6 py-4 rounded-lg font-semibold text-white text-lg"
                     style={{
                       background:
                         "linear-gradient(180deg, #9A9FF5 0%, #5A5D8F 100%)",

@@ -10,19 +10,16 @@ import {
   IconVan,
 } from "@/components";
 import { useMarketplace } from "../hooks/useMarketplace";
-import { useFilteredVehicles } from "../hooks/useFilteredVehicles";
+import { useFilteredVehiclesFromStore } from "../hooks/useFilteredVehicles";
 import { motion, AnimatePresence } from "framer-motion";
 import { PreLovedCar } from "../components/PreLovedCar";
-import { useState, useMemo } from "react";
-import type {
-  MotorizationType,
-  FilterParams,
-} from "../services/serviceMarketplace";
 import {
   DEFAULT_YEAR,
   MAX_DISPLAYED_VEHICLES,
 } from "../constants/marketplace.constants";
 import { Link } from "@tanstack/react-router";
+import { useIsMobile } from "@/hooks";
+import { ShowBarFiltersMobile } from "../components";
 
 type VehicleTypeOption =
   | "sedan"
@@ -53,167 +50,104 @@ export const CarOverlay = () => {
     condition,
     setCondition,
   } = useMarketplace();
+  const isMobile = useIsMobile();
 
-  // Estado para controlar cuándo aplicar filtros de búsqueda
-  const [searchFilters, setSearchFilters] = useState<{
-    marca: string;
-    linea: string;
-    modelo: number;
-    motorizacion: MotorizationType | "";
-  }>({
-    marca: "",
-    linea: "",
-    modelo: 0,
-    motorizacion: "",
-  });
-
-  // Crear filtros dinámicos basados en la condición y tipo seleccionado
-  const activeFilters = useMemo<FilterParams>(() => {
-    const filters: FilterParams = {
-      condition: condition,
-    };
-
-    // Solo aplicar tipo si está seleccionado
-    if (selectedType) {
-      filters.tipo = selectedType;
-    }
-
-    // Aplicar filtros de búsqueda solo si se ha dado click en buscar
-    if (searchFilters.marca) {
-      filters.marca = searchFilters.marca;
-    }
-    if (searchFilters.linea) {
-      filters.linea = searchFilters.linea;
-    }
-    if (searchFilters.modelo) {
-      filters.modelo = searchFilters.modelo;
-    }
-    if (searchFilters.motorizacion) {
-      filters.motorizacion = searchFilters.motorizacion;
-    }
-
-    return filters;
-  }, [condition, selectedType, searchFilters]);
-
-  const { data: vehicles = [], isLoading } = useFilteredVehicles(activeFilters);
+  const { filteredVehicles: vehicles, isLoading } = useFilteredVehiclesFromStore();
   const displayedVehicles = vehicles.slice(0, MAX_DISPLAYED_VEHICLES);
 
   const vehicleTypes = [
-    { id: "sedan" as VehicleTypeOption, label: "Sedán", icon: <IconSedan /> },
-    { id: "suv" as VehicleTypeOption, label: "SUV", icon: <IconSuv /> },
+    {
+      id: "sedan" as VehicleTypeOption,
+      label: "Sedán",
+      icon: <IconSedan {...(isMobile ? { width: 34, height: 34 } : {})} />,
+    },
+    {
+      id: "suv" as VehicleTypeOption,
+      label: "SUV",
+      icon: <IconSuv {...(isMobile ? { width: 34, height: 34 } : {})} />,
+    },
     {
       id: "hatchback" as VehicleTypeOption,
       label: "Hatchback",
-      icon: <IconHatchBack />,
+      icon: <IconHatchBack {...(isMobile ? { width: 34, height: 34 } : {})} />,
     },
     {
       id: "pickup" as VehicleTypeOption,
       label: "Pickup",
-      icon: <IconPickup />,
+      icon: <IconPickup {...(isMobile ? { width: 34, height: 34 } : {})} />,
     },
-    { id: "coupe" as VehicleTypeOption, label: "Coupé", icon: <IconCoupe /> },
-    { id: "van" as VehicleTypeOption, label: "Van", icon: <IconVan /> },
-    { id: "mini" as VehicleTypeOption, label: "Mini", icon: <IconMini /> },
+    {
+      id: "coupe" as VehicleTypeOption,
+      label: "Coupé",
+      icon: <IconCoupe {...(isMobile ? { width: 34, height: 34 } : {})} />,
+    },
+    {
+      id: "van" as VehicleTypeOption,
+      label: "Van",
+      icon: <IconVan {...(isMobile ? { width: 34, height: 34 } : {})} />,
+    },
+    {
+      id: "mini" as VehicleTypeOption,
+      label: "Mini",
+      icon: <IconMini {...(isMobile ? { width: 34, height: 34 } : {})} />,
+    },
   ];
 
   const handleSubmit = () => {
     // Verificar si hay una búsqueda activa
-    const hasActiveSearch =
-      searchFilters.marca ||
-      searchFilters.linea ||
-      searchFilters.modelo ||
-      searchFilters.motorizacion;
+    const hasChanges = brand !== "" ||
+      linea !== "" ||
+      (year !== "") ||
+      motorization !== "";
 
-    // Verificar si los valores actuales son diferentes a los filtros activos
-    const hasChanges =
-      brand !== searchFilters.marca ||
-      linea !== searchFilters.linea ||
-      (year ? Number(year) : 0) !== searchFilters.modelo ||
-      motorization !== searchFilters.motorizacion;
-
-    if (hasActiveSearch && !hasChanges) {
-      // Si hay búsqueda activa y no hay cambios, limpiar
-      setSearchFilters({
-        marca: "",
-        linea: "",
-        modelo: 0,
-        motorizacion: "",
-      });
-      // Limpiar también los selects
+    if (hasChanges) {
+      // Limpiar los filtros
       setBrand("");
       setLinea("");
-      setYear(DEFAULT_YEAR);
+      setYear("");
       setMotorization("");
     } else {
-      // Aplicar filtros de búsqueda
-      setSearchFilters({
-        marca: brand,
-        linea: linea,
-        modelo: year ? Number(year) : 0,
-        motorizacion: motorization,
-      });
+      // No hacer nada si no hay cambios
+      return;
     }
   };
 
-  // Verificar si hay búsqueda activa para cambiar el texto del botón
-  const hasActiveSearch =
-    searchFilters.marca ||
-    searchFilters.linea ||
-    searchFilters.modelo ||
-    searchFilters.motorizacion;
+  const hasChanges = brand !== "" ||
+    linea !== "" ||
+    (year !== "") ||
+    motorization !== "";
 
-  const hasChanges =
-    brand !== searchFilters.marca ||
-    linea !== searchFilters.linea ||
-    (year ? Number(year) : 0) !== searchFilters.modelo ||
-    motorization !== searchFilters.motorizacion;
+  const conditionOptions = [
+    { id: "todos" as const, label: "Todos" },
+    { id: "nuevo" as const, label: "Nuevos" },
+    { id: "usado" as const, label: "Usados" },
+  ];
 
   return (
-    <div className=" px-8 py-26 flex flex-col gap-12 justify-center items-center">
+    <div className=" px-8 py-8 lg:py-26 flex flex-col gap-8 lg:gap-12 justify-center items-center ">
       {/* Sección 1: Botones de Condición */}
       <div>
         <div className="flex gap-4">
-          <motion.button
-            onClick={() => setCondition("todos")}
-            className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-              condition === "todos"
-                ? "bg-primary/45 text-white"
-                : "bg-white/5 text-white/80 hover:bg-white/10"
-            }`}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            Todos
-          </motion.button>
-          <motion.button
-            onClick={() => setCondition("nuevo")}
-            className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-              condition === "nuevo"
-                ? "bg-primary text-white"
-                : "bg-white/5 text-white/80 hover:bg-white/10"
-            }`}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            Nuevos
-          </motion.button>
-          <motion.button
-            onClick={() => setCondition("usado")}
-            className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-              condition === "usado"
-                ? "bg-primary text-white"
-                : "bg-white/5 text-white/80 hover:bg-white/10"
-            }`}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            Usados
-          </motion.button>
+          {conditionOptions.map((option) => (
+            <motion.button
+              key={option.id}
+              onClick={() => setCondition(option.id)}
+              className={`px-5 lg:px-8 py-2 lg:py-3 rounded-4xl font-semibold transition-colors border border-white ${
+                condition === option.id
+                  ? "text-primary"
+                  : " text-white/80 hover:bg-white/10"
+              }`}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              {option.label}
+            </motion.button>
+          ))}
         </div>
       </div>
 
       {/* Sección 2: Filtros con Selects */}
-      <div className="w-full lg:w-3/4">
+      <div className="w-full hidden lg:block lg:w-3/4">
         <div
           className="grid grid-cols-1 md:grid-cols-5 gap-4  rounded-3xl p-4"
           style={{
@@ -256,15 +190,17 @@ export const CarOverlay = () => {
             color="primary"
           />
           <Button onClick={handleSubmit} size="md">
-            {hasActiveSearch && !hasChanges ? "Limpiar" : "Buscar"}
+            {hasChanges ? "Limpiar" : "Buscar"}
           </Button>
         </div>
       </div>
 
       {/* Sección 3: Buscar por Tipo */}
       <div className="w-full lg:w-[90%]">
-        <h3 className="text-header-body mb-6">Buscar por tipo</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-8">
+        <h3 className="text-2xl text-center lg:text-start lg:text-header-body mb-4 lg:mb-6">
+          Buscar por tipo
+        </h3>
+        <div className="grid grid-cols-4 lg:grid-cols-7 gap-4 lg:gap-8">
           {vehicleTypes.map((vehicleType) => (
             <motion.div
               key={vehicleType.id}
@@ -275,30 +211,26 @@ export const CarOverlay = () => {
                   setSelectedType(vehicleType.id);
                 }
               }}
-              className={`cursor-pointer rounded-xl p-6 flex flex-col items-center justify-center gap-3 transition-all border ${
+              className={`cursor-pointer rounded-xl p-4 lg:p-6 flex flex-col items-center justify-center gap-1 lg:gap-3 transition-all border ${
                 selectedType === vehicleType.id
-                  ? "bg-primary/20 border-primary"
-                  : "bg-white/5 border-white/10 hover:bg-white/10"
+                  ? "border-transparent text-white"
+                  : "bg-transparent border-[#545786] text-primary"
               }`}
+              style={
+                selectedType === vehicleType.id
+                  ? {
+                      background:
+                        "linear-gradient(180deg, #545786 0%, #545786, #4a4d9a 100%)",
+                    }
+                  : undefined
+              }
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
             >
-              <div
-                className={`w-12 h-12 flex items-center justify-center ${
-                  selectedType === vehicleType.id
-                    ? "text-primary"
-                    : "text-white/70"
-                }`}
-              >
+              <div className="w-12 h-12 flex items-center justify-center">
                 {vehicleType.icon}
               </div>
-              <span
-                className={`text-sm font-semibold ${
-                  selectedType === vehicleType.id
-                    ? "text-primary"
-                    : "text-white/80"
-                }`}
-              >
+              <span className="text-[10px] lg:text-sm font-semibold">
                 {vehicleType.label}
               </span>
             </motion.div>
@@ -306,18 +238,22 @@ export const CarOverlay = () => {
         </div>
       </div>
 
+      {isMobile && <ShowBarFiltersMobile />}
+
       {/* Sección 4: Lista de vehículos */}
-      <div className="w-full lg:w-[90%]">
-        <h3 className="text-header-body mb-8">Vista previa de vehículos</h3>
+      <div className="w-full lg:w-[90%] lg:text-start text-center">
+        <h3 className="text-2xl lg:text-header-body mb-4 lg:mb-8">
+          Autos destacados
+        </h3>
 
         {isLoading ? (
           <div className="flex justify-center items-center py-12">
             <p className="text-white/60">Cargando vehículos...</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-12 items-center">
+          <div className="flex flex-col gap-4 lg:gap-12 items-center">
             {/* Grid de vehículos */}
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-8 mb-8">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-5 gap-6 lg:gap-8 mb-8 w-full">
               <AnimatePresence mode="popLayout">
                 {displayedVehicles.map((vehicle, index) => (
                   <motion.div
@@ -332,9 +268,7 @@ export const CarOverlay = () => {
                       ease: "easeOut",
                     }}
                   >
-                    <PreLovedCar
-                      vehicle={vehicle}
-                    />
+                    <PreLovedCar vehicle={vehicle} />
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -344,7 +278,7 @@ export const CarOverlay = () => {
 
             <div className="flex justify-center items-center ">
               <Link to="/marketplace/search" className="w-full h-full">
-                <Button size="md">Ver todos</Button>
+                <Button size={isMobile ? "sm" : "md"}>Ver todos</Button>
               </Link>
             </div>
           </div>

@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 
 interface ButtonProps {
-  children: string;
+  children: React.ReactNode;
   size?: "lg" | "md" | "sm";
   onClick?: () => void;
   type?: "button" | "submit" | "reset";

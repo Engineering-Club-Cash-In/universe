@@ -7,7 +7,7 @@ export const HeaderMarket = () => {
     "Todos nuestros vehículos han sido evaluados y certificados por expertos. Garantizamos calidad, seguridad y la mejor experiencia de compra.";
 
   return (
-    <div className="-mt-20 relative h-[858px] overflow-hidden">
+    <div className="mt-4 lg:-mt-20 relative h-80 lg:h-screen overflow-hidden">
       {/* Imagen de fondo */}
       <img
         src={imageUrl}
@@ -32,8 +32,8 @@ export const HeaderMarket = () => {
 
       {/* Contenido centrado */}
       <div className="relative h-full flex flex-col items-center justify-center px-8 text-center">
-        <h1 className="text-header-2 mb-6">{title}</h1>
-        <p className="text-header-body max-w-4xl text-white/90">{subtitle}</p>
+        <h1 className="text-2xl lg:text-header-2 mb-6">{title}</h1>
+        <p className="leading-6 text-sm lg:text-header-body w-3/4 lg:max-w-4xl text-white/90">{subtitle}</p>
       </div>
     </div>
   );

@@ -4,7 +4,11 @@ import { useBarFilter } from "../hooks/useBarFilter";
 import { useFilterNavigation } from "../hooks/useFilterNavigation";
 import { motion } from "framer-motion";
 
-export const BarFilters = () => {
+interface BarFiltersProps {
+  onComplete?: () => void;
+}
+
+export const BarFilters = ({ onComplete }: BarFiltersProps) => {
   const {
     marca,
     modelo,
@@ -269,7 +273,9 @@ export const BarFilters = () => {
       <div className="flex flex-col gap-2">
         <Button
           onClick={() => {
-            /* Apply filters logic */
+            if (onComplete) {
+              onComplete();
+            }
           }}
           size="md"
         >

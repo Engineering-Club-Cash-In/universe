@@ -1,4 +1,4 @@
-export const IconSuv = () => {
+export const IconSuv = ({ ...props }: React.SVGProps<SVGSVGElement>) => {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -6,6 +6,7 @@ export const IconSuv = () => {
       height="37"
       viewBox="0 0 80 37"
       fill="none"
+      {...props}
     >
       <path
         opacity="0.99"

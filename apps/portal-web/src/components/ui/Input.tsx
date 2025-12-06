@@ -1,3 +1,4 @@
+import { useIsMobile } from "@/hooks";
 import { IconX } from "@components/icons";
 
 interface InputProps {
@@ -22,10 +23,11 @@ export const Input = ({
   type = "text",
   className = "",
   error,
-  size = "medium",
   variant = "secondary",
 }: InputProps) => {
   const hasError = !!error;
+
+  const isMobile = useIsMobile();
 
   return (
     <div className="relative w-full  ">
@@ -34,9 +36,8 @@ export const Input = ({
         className={`
           flex
           w-full
-          ${size === "small" ? "p-2 text-sm" : ""}
-          ${size === "medium" ? "p-4 text-base" : ""}
-          ${size === "large" ? "p-6 text-base" : ""}
+          ${isMobile ? "p-4 text-sm" : ""}
+          ${!isMobile ? "p-4 text-base" : ""}
           rounded-lg
           ${variant === "primary" ? "bg-transparent border border-[#374151] text-white" : "bg-[#D9D9D9] border-0 text-black"}
           font-[Hero]

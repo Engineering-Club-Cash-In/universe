@@ -7,7 +7,7 @@ import {
   IconWhatsApp,
   IconReport,
 } from "@/components";
-import { useModalOptionsCall } from "@/hooks";
+import { useIsMobile, useModalOptionsCall } from "@/hooks";
 import { motion } from "framer-motion";
 import { useState, type RefObject } from "react";
 import { useReactToPrint } from "react-to-print";
@@ -19,8 +19,67 @@ interface ButtonsActionsProps {
 
 export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
   const { openWhatsApp, makeCall } = useModalOptionsCall();
+  const isMobile = useIsMobile();
+
+  return (
+    <div className=" rounded-3xl lg:pt-2">
+      {!isMobile && (
+        <IconsActionsSocial vehicle={vehicle} printRef={printRef} />
+      )}
+      {/* Sección de contacto */}
+      <div className="space-y-2">
+        <h3 className="text-white text-xxs lg:text-lg ">
+          Contacta a nuestro asesor
+        </h3>
+        <div className="flex lg:flex-wrap  gap-2 lg:gap-4">
+          {/* Botón llamar */}
+          <button
+            onClick={makeCall}
+            className="w-full lg:w-auto px-2 py-2 lg:px-6 lg:py-3 text-mini lg:text-base bg-primary hover:bg-primary/90 rounded-2xl lg:rounded-full text-white lg:font-semibold transition-colors flex items-center justify-center gap-1 lg:gap-3"
+          >
+            <IconCall width={isMobile ? 10 : 18} height={isMobile ? 10 : 18} />
+            {isMobile ? "Llamar" : `Llamar al asesor`}
+          </button>
+
+          {/* Botón WhatsApp */}
+          <button
+            onClick={() =>
+              openWhatsApp(
+                `Hola, estoy interesado en el vehículo ${vehicle.marca} ${vehicle.linea} ${vehicle.modelo}.`
+              )
+            }
+            className="w-full lg:w-auto px-2 py-2 lg:px-6 lg:py-3 text-mini lg:text-base bg-green-500 hover:bg-green-600 rounded-2xl lg:rounded-full text-white lg:font-semibold transition-colors flex items-center justify-center gap-1 lg:gap-3"
+          >
+            <IconWhatsApp
+              width={isMobile ? 10 : 18}
+              height={isMobile ? 10 : 18}
+            />
+            WhatsApp
+          </button>
+        </div>
+
+        {/* Link reportar */}
+        <button className="flex gap-2 pt-4 items-center cursor-pointer hover:underline">
+          <IconReport width={isMobile ? 10 : 18} height={isMobile ? 10 : 18} />
+          <span className="text-xs lg:text-base text-white/70">
+            Reporta este auto
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export const IconsActionsSocial = ({
+  vehicle,
+  printRef,
+}: {
+  vehicle: Vehicle;
+  printRef?: RefObject<HTMLDivElement>;
+}) => {
   const [isLiked, setIsLiked] = useState(false);
   const [showCopyMessage, setShowCopyMessage] = useState(false);
+  const isMobile = useIsMobile();
 
   const handleLike = () => {
     setIsLiked(!isLiked);
@@ -87,89 +146,51 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
       }
     `,
   });
-
   return (
-    <div className=" rounded-3xl pt-2">
-      {/* Íconos horizontales con borde individual */}
-      <div className="flex items-center gap-6 mb-6 relative">
-        {/* Botón Like con animación */}
-        <motion.button
-          whileTap={{ scale: 0.9 }}
-          onClick={handleLike}
-          className={`flex items-center justify-center p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-all ${
-            isLiked ? "text-red-500 border-red-500" : "text-primary"
-          }`}
+    <div className="flex items-center gap-4 lg:gap-6 mb-6 relative">
+      {/* Botón Like con animación */}
+      <motion.button
+        whileTap={{ scale: 0.9 }}
+        onClick={handleLike}
+        className={`flex items-center justify-center p-2 lg:p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-all ${
+          isLiked ? "text-red-500 border-red-500" : "text-primary"
+        }`}
+      >
+        <motion.div
+          animate={{
+            scale: isLiked ? [1, 1.3, 1] : 1,
+          }}
+          transition={{ duration: 0.3 }}
         >
+          <IconLike width={isMobile ? 12 : 16} height={isMobile ? 12 : 16} />
+        </motion.div>
+      </motion.button>
+
+      {/* Botón Share */}
+      <button
+        onClick={handleShare}
+        className="flex items-center justify-center p-2 lg:p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-colors relative"
+      >
+        <IconShare width={isMobile ? 12 : 16} height={isMobile ? 12 : 16} />
+        {showCopyMessage && (
           <motion.div
-            animate={{
-              scale: isLiked ? [1, 1.3, 1] : 1,
-            }}
-            transition={{ duration: 0.3 }}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap"
           >
-            <IconLike />
+            ¡Link copiado!
           </motion.div>
-        </motion.button>
+        )}
+      </button>
 
-        {/* Botón Share */}
-        <button
-          onClick={handleShare}
-          className="flex items-center justify-center p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-colors relative"
-        >
-          <IconShare />
-          {showCopyMessage && (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="absolute -top-12 left-1/2 transform -translate-x-1/2 bg-green-500 text-white text-xs px-3 py-1 rounded-lg whitespace-nowrap"
-            >
-              ¡Link copiado!
-            </motion.div>
-          )}
-        </button>
-
-        {/* Botón Print */}
-        <button
-          onClick={handlePrint}
-          className="flex items-center justify-center p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-colors"
-        >
-          <IconPrint />
-        </button>
-      </div>
-
-      {/* Sección de contacto */}
-      <div className="space-y-2">
-        <h3 className="text-white text-lg ">Contacta a nuestro asesor</h3>
-        <div className="flex flex-col xl:flex-row  gap-4">
-          {/* Botón llamar */}
-          <button
-            onClick={makeCall}
-            className="w-full px-6 py-3 bg-primary hover:bg-primary/90 rounded-full text-white font-semibold transition-colors flex items-center justify-center gap-3"
-          >
-            <IconCall />
-            Llamar a asesor
-          </button>
-
-          {/* Botón WhatsApp */}
-          <button
-            onClick={() =>
-              openWhatsApp(
-                `Hola, estoy interesado en el vehículo ${vehicle.marca} ${vehicle.linea} ${vehicle.modelo}.`
-              )
-            }
-            className="w-full px-6 py-3 bg-green-500 hover:bg-green-600 rounded-full text-white font-semibold transition-colors flex items-center justify-center gap-3"
-          >
-            <IconWhatsApp />
-            WhatsApp
-          </button>
-        </div>
-
-        {/* Link reportar */}
-        <button className="flex gap-2 pt-4 cursor-pointer hover:underline">
-          <IconReport />
-          <span className="text-white/70">Reporta este auto</span>
-        </button>
-      </div>
+      {/* Botón Print */}
+      <button
+        onClick={handlePrint}
+        className="flex items-center justify-center p-2 lg:p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-colors"
+      >
+        <IconPrint width={isMobile ? 12 : 16} height={isMobile ? 12 : 16} />
+      </button>
     </div>
   );
 };

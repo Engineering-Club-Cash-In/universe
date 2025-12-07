@@ -6,17 +6,17 @@ interface CarSellerProps {
 
 export const CarSeller = ({ seller }: CarSellerProps) => {
   return (
-    <div className="border rounded-2xl p-4 flex items-center gap-4">
+    <div className="border rounded-2xl p-2 lg:p-4 flex lg:flex-wrap items-center gap-4">
       <img
         src={seller.image}
         alt={seller.nombre}
-        className="max-w-24 max-h-24 object-contain rounded-full"
+        className="w-8 h-8 lg:w-24 lg:h-24 rounded-full"
       />
-      <div>
-        <p className="">{seller.nombre}</p>
+      <div className="">
+        <p className="text-xs lg:text-base">{seller.nombre}</p>
         {/* BottomSheet Vendedor  Verificado */}
 
-        <div className="mt-2 flex items-center gap-2 bg-green-100/20 text-green-500 px-3 py-1 rounded-full  text-sm">
+        <div className="mt-2 flex items-center gap-2 bg-green-100/20 text-green-500 px-3 py-1 rounded-full text-mini lg:text-sm">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             className="h-4 w-4"

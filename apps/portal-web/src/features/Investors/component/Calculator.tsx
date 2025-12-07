@@ -206,7 +206,7 @@ export const Calculator: React.FC = () => {
                 Contáctanos para Invertir
               </motion.button>
 
-              <p className="text-center text-gray text-[10px] lg:text-xs">
+              <p className="text-center text-gray text-xxs lg:text-xs">
                 * Los rendimientos son proyecciones basadas en datos históricos
                 y no garantizan resultados futuros.
               </p>

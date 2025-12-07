@@ -230,7 +230,7 @@ export const CarOverlay = () => {
               <div className="w-12 h-12 flex items-center justify-center">
                 {vehicleType.icon}
               </div>
-              <span className="text-[10px] lg:text-sm font-semibold">
+              <span className="text-xxs lg:text-sm font-semibold">
                 {vehicleType.label}
               </span>
             </motion.div>

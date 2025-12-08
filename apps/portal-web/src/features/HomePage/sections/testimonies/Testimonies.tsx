@@ -50,7 +50,7 @@ export const Testimonies = () => {
                 <h3 className="text-white text-start text-3xl font-bold mb-2">
                   {testimony.name}
                 </h3>
-                <p className="text-white/90 text-start text-sm leading-7 md:hidden lg:block">
+                <p className="text-white/90 text-start text-sm leading-7  lg:block">
                   {testimony.testimony}
                 </p>
               </div>

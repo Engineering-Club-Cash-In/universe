@@ -12,6 +12,7 @@ import {
   pgSchema,
   pgEnum,
   uniqueIndex,
+  unique,
 } from "drizzle-orm/pg-core";
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
@@ -384,7 +385,14 @@ export const pagos_credito_inversionistas = customSchema.table(
       .notNull()
       .default("NO_LIQUIDADO"),
     cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(), // Cuota del crédito
-  }
+  },
+  (table) => ({
+    // 🆕 CONSTRAINT ÚNICO: Un inversionista no puede tener múltiples registros para el mismo pago
+    uniquePagoInversionista: unique("unique_pago_inversionista").on(
+      table.pago_id,
+      table.inversionista_id
+    ),
+  })
 );
 export const bancos = customSchema.table('bancos', {
   banco_id: serial('banco_id').primaryKey(),

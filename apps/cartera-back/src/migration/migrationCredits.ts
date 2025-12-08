@@ -334,3 +334,75 @@ export async function mapExcelToCredito(
     throw error;
   }
 }
+
+
+// 🎯 NUEVO CONTROLLER - Recibe el objeto CreditoAgrupado directo
+export async function procesarCreditoIndividual(credito: CreditoAgrupado) {
+  try {
+    console.log(`🔎 Procesando crédito ${credito.creditoBase}...`);
+    console.log(`📋 Cliente: ${credito.cliente}`);
+    console.log(`👥 Inversionistas: ${credito.filas.length}`);
+    
+    // 1️⃣ Consultar detalle en SIFCO
+    const detalle = await consultarPrestamoDetalle(credito.creditoBase);
+    
+    // 🔥 Si no hay detalle en SIFCO
+    if (!detalle) {
+      console.warn(`⏭️ ${credito.creditoBase} - no disponible en SIFCO`);
+      return {
+        success: false,
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status: "no_encontrado",
+        error: "No disponible en SIFCO o timeout",
+        detalle: null,
+        dbRow: null
+      };
+    }
+    
+    // 2️⃣ Mapear y guardar en DB
+    try {
+      const dbRow = await mapExcelToCredito(detalle, credito);
+      const status = 
+        new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
+          ? "insertado"
+          : "actualizado";
+      
+      console.log(`✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`);
+      
+      return {
+        success: true,
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status,
+        detalle,
+        dbRow,
+        credito_id: dbRow.credito_id
+      };
+      
+    } catch (err: any) {
+      console.error(`❌ Error al insertar ${credito.creditoBase}:`, err.message);
+      return {
+        success: false,
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status: "fallido",
+        error: String(err?.message || err),
+        detalle,
+        dbRow: null
+      };
+    }
+    
+  } catch (err: any) {
+    console.error(`❌ Error general con ${credito.creditoBase}:`, err.message);
+    return {
+      success: false,
+      creditoBase: credito.creditoBase,
+      cliente: credito.cliente,
+      status: "fallido",
+      error: String(err?.message || err),
+      detalle: null,
+      dbRow: null
+    };
+  }
+}

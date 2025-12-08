@@ -211,15 +211,15 @@ function MyGoalsPage() {
 
     let percentage = 0;
 
-    if (!isNaN(target) && target > 0) {
+    if (!isNaN(target)) {
       if (isInverse) {
-        // Para metas inversas: menor o igual = 100%
+        // Para metas inversas: menor o igual al target = 100%
         if (achieved <= target) {
           percentage = 100;
         } else {
-          percentage = Math.max((target / achieved) * 100, 0);
+          percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
         }
-      } else {
+      } else if (target > 0) {
         // Para metas normales: mayor es mejor
         percentage = (achieved / target) * 100;
       }
@@ -248,16 +248,14 @@ function MyGoalsPage() {
           const isInverse = row.original.isInverse;
 
           let percentage = 0;
-          if (target > 0) {
-            if (isInverse) {
-              if (achieved <= target) {
-                percentage = 100;
-              } else {
-                percentage = Math.max((target / achieved) * 100, 0);
-              }
+          if (isInverse) {
+            if (achieved <= target) {
+              percentage = 100;
             } else {
-              percentage = (achieved / target) * 100;
+              percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
             }
+          } else if (target > 0) {
+            percentage = (achieved / target) * 100;
           }
 
           return getStatusBadge(
@@ -274,16 +272,14 @@ function MyGoalsPage() {
           const isInverse = row.original.isInverse;
 
           let percentage = 0;
-          if (target > 0) {
-            if (isInverse) {
-              if (achieved <= target) {
-                percentage = 100;
-              } else {
-                percentage = Math.max((target / achieved) * 100, 0);
-              }
+          if (isInverse) {
+            if (achieved <= target) {
+              percentage = 100;
             } else {
-              percentage = (achieved / target) * 100;
+              percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
             }
+          } else if (target > 0) {
+            percentage = (achieved / target) * 100;
           }
 
           const status = getStatusText(
@@ -498,16 +494,14 @@ function MyGoalsPage() {
                       const isInverse = updatingGoal.isInverse;
 
                       let percentage = 0;
-                      if (target > 0) {
-                        if (isInverse) {
-                          if (achieved <= target) {
-                            percentage = 100;
-                          } else {
-                            percentage = Math.max((target / achieved) * 100, 0);
-                          }
+                      if (isInverse) {
+                        if (achieved <= target) {
+                          percentage = 100;
                         } else {
-                          percentage = (achieved / target) * 100;
+                          percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
                         }
+                      } else if (target > 0) {
+                        percentage = (achieved / target) * 100;
                       }
                       return Math.round(percentage);
                     })()}%
@@ -520,16 +514,14 @@ function MyGoalsPage() {
                     const isInverse = updatingGoal.isInverse;
 
                     let percentage = 0;
-                    if (target > 0) {
-                      if (isInverse) {
-                        if (achieved <= target) {
-                          percentage = 100;
-                        } else {
-                          percentage = Math.max((target / achieved) * 100, 0);
-                        }
+                    if (isInverse) {
+                      if (achieved <= target) {
+                        percentage = 100;
                       } else {
-                        percentage = (achieved / target) * 100;
+                        percentage = target === 0 ? 0 : Math.max((target / achieved) * 100, 0);
                       }
+                    } else if (target > 0) {
+                      percentage = (achieved / target) * 100;
                     }
                     return Math.min(percentage, 100);
                   })()}

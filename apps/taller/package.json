@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@hookform/resolvers": "^5.2.1",
+    "@hookform/resolvers": "3.9.1",
     "@orpc/client": "1.6.6",
     "@orpc/react": "1.6.6",
     "@orpc/tanstack-query": "1.6.6",

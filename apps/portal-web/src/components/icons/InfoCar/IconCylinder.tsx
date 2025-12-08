@@ -1,10 +1,11 @@
-export const IconCylinder = () => (
+export const IconCylinder = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="12"
     height="17"
     viewBox="0 0 12 17"
     fill="none"
+    {...props}
   >
     <path
       opacity="0.99"

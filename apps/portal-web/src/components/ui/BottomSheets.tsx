@@ -12,7 +12,7 @@ export const BoottomSheets = ({
 }: BoottomSheetsProps) => {
   return (
     <div
-      className={`rounded-4xl px-4 py-2 text-sm font-bold border-primary text-primary ${className}`}
+      className={`rounded-4xl px-6 py-4  font-bold border-primary text-primary ${className}`}
       style={{ backgroundColor }}
     >
       {children}

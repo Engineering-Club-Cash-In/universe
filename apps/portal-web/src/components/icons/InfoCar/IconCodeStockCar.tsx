@@ -1,10 +1,11 @@
-export const IconCodeStockCar = () => (
+export const IconCodeStockCar = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="19"
     height="15"
     viewBox="0 0 19 15"
     fill="none"
+    {...props}
   >
     <path
       opacity="0.99"

@@ -38,11 +38,14 @@
   --font-hero: "Hero", sans-serif;
   --font-plus-jakarta: "PlusJakarta", sans-serif;
   --color-primary: rgba(148, 153, 236, 1);
-  --color-secondary: #D4AF37;
-  --color-gray: #BFBFBF;
+  --color-secondary: #d4af37;
+  --color-gray: #bfbfbf;
   --color-blue: rgb(79, 87, 247);
   --color-dark: #0f0f0f;
   --color-light: #ffffff;
+
+  --text-xxs: 10px;
+  --text-mini: 8px;
 
   --text-header-1: 72px;
   --text-header-1--font-weight: 700;
@@ -87,13 +90,21 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(148, 153, 236, 0.8) 0%, rgba(148, 153, 236, 0.5) 100%);
+    background: linear-gradient(
+      180deg,
+      rgba(148, 153, 236, 0.8) 0%,
+      rgba(148, 153, 236, 0.5) 100%
+    );
     border-radius: 10px;
     transition: all 0.3s ease;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(148, 153, 236, 1) 0%, rgba(148, 153, 236, 0.8) 100%);
+    background: linear-gradient(
+      180deg,
+      rgba(148, 153, 236, 1) 0%,
+      rgba(148, 153, 236, 0.8) 100%
+    );
   }
 
   /* Firefox */

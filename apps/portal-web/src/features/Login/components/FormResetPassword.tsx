@@ -1,5 +1,6 @@
 import { Input, Button, Link } from "@components/ui";
 import { useResetPassword } from "../hook/useResetPassword";
+import { useIsMobile } from "@/hooks";
 
 interface FormResetPasswordProps {
   token: string;
@@ -9,10 +10,12 @@ export const FormResetPassword = ({ token }: FormResetPasswordProps) => {
   const { formik, isLoading, errorMessage, successMessage } =
     useResetPassword(token);
 
+  const isMobile = useIsMobile();
+
   return (
     <div className="w-full flex justify-center mb-20 mt-26 items-center">
-      <div className="w-[500px] flex flex-col text-center">
-        <h2 className="text-header-2">Restablecer contraseña</h2>
+      <div className="w-full lg:w-[500px] flex flex-col text-center">
+        <h2 className="text-4xl lg:text-header-2">Restablecer contraseña</h2>
         <p className="text-white/60 mt-2">
           Ingresa tu nueva contraseña para continuar
         </p>
@@ -62,10 +65,14 @@ export const FormResetPassword = ({ token }: FormResetPasswordProps) => {
           />
 
           <div className="flex justify-center items-center mt-4 flex-col gap-8">
-            <Button type="submit" isLoading={isLoading || !!successMessage}>
+            <Button
+              type="submit"
+              isLoading={isLoading || !!successMessage}
+              size={isMobile ? "md" : "lg"}
+            >
               {isLoading ? "Restableciendo..." : "Restablecer contraseña"}
             </Button>
-            <div className="flex justify-center items-center flex-col">
+            <div className="flex justify-center items-center flex-col text-sm lg:text-base">
               <span>¿Recordaste tu contraseña?</span>
               <Link href="/login" underline>
                 Inicia sesión

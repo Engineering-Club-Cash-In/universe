@@ -1,15 +1,17 @@
 import { Input, ButtonIcon, CheckBox, Button, Link } from "@components/ui";
 import { IconGoogle } from "@components/icons";
 import { useRegister } from "../hook/useRegister";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 export const FormRegister = () => {
   const { formik, handleGoogleRegister, isLoading, isGoogleLoading } =
     useRegister();
+  const isMobile = useIsMobile();
 
   return (
     <div className="w-full flex justify-center mb-20 mt-6 items-center">
-      <div className="w-[500px] flex flex-col text-center">
-        <h2 className="text-header-2">Crea tu usuario</h2>
+      <div className="w-full lg:w-[500px] flex flex-col text-center">
+        <h2 className="text-4xl lg:text-header-2">Crea tu usuario</h2>
         <form
           className="w-full mt-10 flex flex-col gap-6"
           onSubmit={formik.handleSubmit}
@@ -83,7 +85,7 @@ export const FormRegister = () => {
           <ButtonIcon
             icon={<IconGoogle />}
             onClick={handleGoogleRegister}
-            variant="lg"
+            variant={isMobile ? "md" : "lg"}
             isLoading={isGoogleLoading}
           >
             {isGoogleLoading ? "Redirigiendo a Google..." : "Google"}
@@ -101,10 +103,14 @@ export const FormRegister = () => {
             </p>
           )}
           <div className="flex justify-center items-center mt-4 flex-col gap-8">
-            <Button type="submit" isLoading={isLoading}>
+            <Button
+              type="submit"
+              isLoading={isLoading}
+              size={isMobile ? "md" : "lg"}
+            >
               Crear cuenta
             </Button>
-            <div className="flex justify-center items-center flex-col">
+            <div className="flex justify-center items-center flex-col text-sm lg:text-base">
               <span>¿Ya tienes una cuenta?</span>
               <Link href="/login" underline>
                 Inicia sesión

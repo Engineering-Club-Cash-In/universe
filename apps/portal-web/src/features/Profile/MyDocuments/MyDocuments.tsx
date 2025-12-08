@@ -5,7 +5,6 @@ import {
   IconPerson,
   IconPlus,
 } from "@/components";
-import { Menu } from "../components";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
 import {
@@ -17,6 +16,7 @@ import {
 import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { ContainerMenu } from "../components/ContainerMenu";
+import { useIsMobile } from "@/hooks";
 
 export const MyDocuments = () => {
   const { user } = useAuth();
@@ -88,13 +88,14 @@ export const MyDocuments = () => {
     window.open(url, "_blank");
   };
 
+  const isMobile = useIsMobile();
+
   const isLoading = loadingContracts || loadingPersonalDocs;
 
   if (isLoading) {
     return (
       <div>
         <NavBar />
-        <Menu />
         <div className="max-w-7xl mx-auto mt-26 mb-20">
           <div className="flex justify-center items-center py-20">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -109,14 +110,19 @@ export const MyDocuments = () => {
       <NavBar />
       <ContainerMenu>
         <div className="">
-          <h1 className="text-header-body font-bold mb-8">Mis Documentos</h1>
+          <h1 className="text-xl lg:text-header-body font-bold mb-8">
+            Mis Documentos
+          </h1>
 
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_10px_1fr] gap-8 lg:gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_10px_1fr] gap-12 lg:gap-8">
             {/* Sección de Contratos */}
             <div className="lg:pr-8">
-              <div className="flex items-center gap-3 mb-6">
-                <IconTarget className="w-6 h-6 text-primary" />
-                <h2 className="text-2xl font-bold">Contratos</h2>
+              <div className="flex items-center gap-3 mb-4 lg:mb-6">
+                <IconTarget
+                  width={isMobile ? 20 : 24}
+                  height={isMobile ? 20 : 24}
+                />
+                <h2 className="lg:text-2xl font-bold">Contratos</h2>
               </div>
 
               {contracts && contracts.length > 0 ? (
@@ -124,7 +130,7 @@ export const MyDocuments = () => {
                   {contracts.map((contract) => (
                     <div
                       key={contract.id}
-                      className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-5 hover:border-primary/30 transition-colors"
+                      className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-4 lg:p-5 hover:border-primary/30 transition-colors"
                     >
                       {/* Header con tipo */}
                       <div className="flex items-start justify-between mb-3">
@@ -148,7 +154,7 @@ export const MyDocuments = () => {
                       {/* Botón de descarga */}
                       <motion.button
                         onClick={() => handleDownload(contract.url)}
-                        className="w-full px-4 py-2.5  text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                        className="w-full px-4 py-2 text-sm lg:text-base text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
                         style={{
                           background:
                             "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
@@ -156,7 +162,7 @@ export const MyDocuments = () => {
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                       >
-                        <IconDownload className="w-5 h-5" />
+                        <IconDownload width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} />
                         Descargar Contrato
                       </motion.button>
                     </div>
@@ -183,7 +189,7 @@ export const MyDocuments = () => {
             <div className="lg:pl-8">
               <div className="flex items-center gap-3 mb-6">
                 <IconPerson className="w-6 h-6 text-primary" />
-                <h2 className="text-2xl font-bold">Documentos Personales</h2>
+                <h2 className="lg:text-2xl font-bold">Documentos Personales</h2>
               </div>
 
               {/* Input file oculto */}
@@ -198,7 +204,7 @@ export const MyDocuments = () => {
               <div className="space-y-6">
                 {/* DPI */}
                 <div>
-                  <h3 className="text-lg font-semibold mb-3">DPI</h3>
+                  <h3 className="lg:text-lg font-semibold mb-2">DPI</h3>
                   {personalDocs?.dpi ? (
                     <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-3">
@@ -216,7 +222,7 @@ export const MyDocuments = () => {
                           whileHover={{ scale: 1.05 }}
                           whileTap={{ scale: 0.95 }}
                         >
-                          <IconDownload className="w-5 h-5" />
+                          <IconDownload width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} />
                         </motion.button>
                       </div>
                       <motion.button
@@ -239,7 +245,7 @@ export const MyDocuments = () => {
                     <motion.button
                       onClick={() => handleFileSelect("dpi")}
                       disabled={uploadMutation.isPending}
-                      className="w-full p-6 bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 rounded-xl transition-colors flex flex-col items-center gap-2 disabled:opacity-50"
+                      className="w-full p-4 lg:p-6 bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 rounded-xl transition-colors flex flex-col items-center gap-2 disabled:opacity-50"
                       whileHover={{
                         scale: uploadMutation.isPending ? 1 : 1.02,
                       }}
@@ -257,7 +263,7 @@ export const MyDocuments = () => {
 
                 {/* Estados de Cuenta */}
                 <div>
-                  <h3 className="text-lg font-semibold mb-3">
+                  <h3 className="lg:text-lg font-semibold mb-3">
                     Estados de Cuenta
                   </h3>
                   <div className="space-y-3">
@@ -283,7 +289,7 @@ export const MyDocuments = () => {
                               whileHover={{ scale: 1.05 }}
                               whileTap={{ scale: 0.95 }}
                             >
-                              <IconDownload className="w-5 h-5" />
+                              <IconDownload width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} />
                             </motion.button>
                           </div>
                         ))}
@@ -294,7 +300,7 @@ export const MyDocuments = () => {
                             background:
                               "linear-gradient(180deg, rgba(148, 153, 236, 0.25) 0%, rgba(84, 87, 134, 0.25) 100%)",
                           }}
-                          className="w-full px-4 py-3 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                          className="w-full px-4 py-2 text-sm lg:text-base lg:py-3 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
                           whileHover={{
                             scale: uploadMutation.isPending ? 1 : 1.02,
                           }}
@@ -302,7 +308,7 @@ export const MyDocuments = () => {
                             scale: uploadMutation.isPending ? 1 : 0.98,
                           }}
                         >
-                          <IconPlus className="w-5 h-5" />
+                          <IconPlus width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} />
                           {uploadMutation.isPending &&
                           uploadType === "estado_cuenta"
                             ? "Subiendo..."
@@ -313,7 +319,7 @@ export const MyDocuments = () => {
                       <motion.button
                         onClick={() => handleFileSelect("estado_cuenta")}
                         disabled={uploadMutation.isPending}
-                        className="w-full p-6 bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 rounded-xl transition-colors flex flex-col items-center gap-2 disabled:opacity-50"
+                        className="w-full p-4 lg:p-6  bg-white/5 hover:bg-white/10 border-2 border-dashed border-white/20 rounded-xl transition-colors flex flex-col items-center gap-2 disabled:opacity-50"
                         whileHover={{
                           scale: uploadMutation.isPending ? 1 : 1.02,
                         }}
@@ -321,7 +327,7 @@ export const MyDocuments = () => {
                           scale: uploadMutation.isPending ? 1 : 0.98,
                         }}
                       >
-                        <IconPlus className="w-8 h-8 text-white/40" />
+                        <IconPlus width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} className="text-white/40" />
                         <span className="text-sm text-white/65">
                           {uploadMutation.isPending &&
                           uploadType === "estado_cuenta"

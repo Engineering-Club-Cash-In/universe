@@ -13,7 +13,7 @@ export const Now = () => {
 
   return (
     <section className="w-full px-8 lg:px-4 py-12 lg:py-36">
-      <div className="w-full md:w-1/2 mx-auto">
+      <div className="w-full lg:w-1/2 mx-auto">
         {/* Contenedor principal con estilos especificados */}
         <div
           className="relative overflow-hidden"

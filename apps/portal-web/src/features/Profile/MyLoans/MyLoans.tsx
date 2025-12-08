@@ -1,16 +1,16 @@
 import { NavBar } from "@/components";
-import { Menu } from "../components";
 import { IconCalendarSmall, IconCar2, IconSignDollar } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
 import { getCredits } from "../services";
-import { useModalOptionsCall } from "@/hooks";
+import { useIsMobile, useModalOptionsCall } from "@/hooks";
 import { ModalChatBot } from "@/components";
 import { ContainerMenu } from "../components/ContainerMenu";
 
 export const MyLoans = () => {
   const { user } = useAuth();
   const { optionPayment, isModalOpen, setIsModalOpen } = useModalOptionsCall();
+  const isMobile = useIsMobile();
 
   // Obtener créditos
   const { data: credits, isLoading } = useQuery({
@@ -83,7 +83,6 @@ export const MyLoans = () => {
     return (
       <div>
         <NavBar />
-        <Menu />
         <div className="max-w-7xl mx-auto mt-26 mb-20">
           <div className="flex justify-center items-center py-20">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -98,7 +97,9 @@ export const MyLoans = () => {
       <NavBar />
       <ContainerMenu>
         <div className="">
-          <h1 className="text-header-body font-bold mb-8">Mis Créditos</h1>
+          <h1 className="text-2xl lg:text-header-body font-bold mb-4 lg:mb-8">
+            Mis Créditos
+          </h1>
 
           {credits && credits.length > 0 ? (
             <div className="space-y-10">
@@ -107,10 +108,10 @@ export const MyLoans = () => {
                   key={credit.id}
                   className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden hover:border-primary/30 transition-colors"
                 >
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gpa-4 lg:gap-6">
                     {/* Imagen del vehículo */}
                     <div className="lg:col-span-4">
-                      <div className="relative h-full min-h-[280px] lg:min-h-full">
+                      <div className="relative h-full min-h-[250px] lg:min-h-full">
                         <img
                           src={credit.vehiculo.foto}
                           alt={`${credit.vehiculo.marca} ${credit.vehiculo.modelo}`}
@@ -120,14 +121,14 @@ export const MyLoans = () => {
                         <div className="absolute bottom-4 left-4 right-4">
                           <div className="flex items-center gap-2 mb-2">
                             <IconCar2 className="w-6 h-6 text-white" />
-                            <span className="text-white/80 text-base">
+                            <span className="text-white/80 text-sm lg:text-base">
                               {getVehicleTypeLabel(credit.vehiculo.tipo)}
                             </span>
                           </div>
-                          <h3 className="text-white text-2xl font-bold">
+                          <h3 className="text-white text-xl lg:text-2xl font-bold">
                             {credit.vehiculo.marca}
                           </h3>
-                          <p className="text-white/90 text-xl">
+                          <p className="text-white/90 lg:text-xl">
                             {credit.vehiculo.modelo}
                           </p>
                         </div>
@@ -135,11 +136,11 @@ export const MyLoans = () => {
                     </div>
 
                     {/* Información del crédito */}
-                    <div className="lg:col-span-8 p-6">
+                    <div className="lg:col-span-8 p-4 lg:p-6">
                       {/* Header con ID y estado */}
                       <div className="flex justify-between items-start mb-6">
                         <div>
-                          <h3 className="text-body font-semibold mb-1">
+                          <h3 className="lg:text-body font-semibold mb-1">
                             Crédito #{credit.id}
                           </h3>
                         </div>
@@ -156,40 +157,40 @@ export const MyLoans = () => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         {/* Monto del préstamo */}
                         <div>
-                          <p className="text-base text-white/65 mb-1">
+                          <p className="text-sm lg:text-base text-white/65 mb-1">
                             Monto del Préstamo
                           </p>
-                          <p className="text-xl font-bold">
+                          <p className="lg:text-xl font-bold">
                             {formatCurrency(credit.montoPrestamo)}
                           </p>
                         </div>
 
                         {/* Pago mensual */}
                         <div>
-                          <p className="text-base text-white/65 mb-1">
+                          <p className="text-sm lg:text-base text-white/65 mb-1">
                             Pago Mensual
                           </p>
-                          <p className="text-xl font-bold">
+                          <p className="lg:text-xl font-bold">
                             {formatCurrency(credit.pagoMensual)}
                           </p>
                         </div>
 
                         {/* Tasa de interés */}
                         <div>
-                          <p className="text-base text-white/65 mb-1">
+                          <p className="text-sm lg:text-base text-white/65 mb-1">
                             Tasa de Interés
                           </p>
-                          <p className="text-xl font-bold">
+                          <p className="lg:text-xl font-bold">
                             {credit.tasaInteres}%
                           </p>
                         </div>
 
                         {/* Pagos restantes */}
                         <div>
-                          <p className="text-base text-white/65 mb-1">
+                          <p className="text-sm lg:text-base text-white/65 mb-1">
                             Pagos Restantes
                           </p>
-                          <p className="text-xl font-bold">
+                          <p className="lg:text-xl font-bold">
                             {credit.pagosRestantes}
                           </p>
                         </div>
@@ -197,15 +198,18 @@ export const MyLoans = () => {
                         {/* Fecha de inicio */}
                         <div className="flex items-center gap-4">
                           <div className=" flex items-center justify-center shrink-0">
-                            <div className="w-6 h-6 ">
-                              <IconCalendarSmall width={24} height={24} />
+                            <div className=" ">
+                              <IconCalendarSmall
+                                width={isMobile ? 18 : 24}
+                                height={isMobile ? 18 : 24}
+                              />
                             </div>
                           </div>
                           <div>
-                            <p className="text-base text-white/65 mb-1">
+                            <p className="text-sm lg:text-base text-white/65 mb-1">
                               Fecha de Inicio
                             </p>
-                            <p className="text-base font-semibold">
+                            <p className="lg:text-xl font-semibold">
                               {formatDate(credit.fechaInicio)}
                             </p>
                           </div>
@@ -214,15 +218,18 @@ export const MyLoans = () => {
                         {/* Fecha de fin */}
                         <div className="flex items-center gap-4">
                           <div className=" flex items-center justify-center shrink-0">
-                            <div className="w-6 h-6 ">
-                              <IconCalendarSmall width={24} height={24} />
+                            <div className=" ">
+                              <IconCalendarSmall
+                                width={isMobile ? 18 : 24}
+                                height={isMobile ? 18 : 24}
+                              />
                             </div>
                           </div>
                           <div>
-                            <p className="text-base text-white/65 mb-1">
+                            <p className="text-sm lg:text-base text-white/65 mb-1">
                               Fecha de Fin
                             </p>
-                            <p className="text-base font-semibold">
+                            <p className="lg:text-xl font-semibold">
                               {formatDate(credit.fechaFin)}
                             </p>
                           </div>
@@ -232,15 +239,18 @@ export const MyLoans = () => {
                         {credit.estado !== "finalizado" && (
                           <div className="flex items-center gap-4">
                             <div className=" flex items-center justify-center shrink-0">
-                              <div className="w-6 h-6 text-primary">
-                                <IconSignDollar width={24} height={24} />
+                              <div className=" text-primary">
+                                <IconSignDollar
+                                  width={isMobile ? 18 : 24}
+                                  height={isMobile ? 18 : 24}
+                                />
                               </div>
                             </div>
                             <div>
-                              <p className="text-base text-white/65 mb-1">
+                              <p className="text-sm lg:text-base text-white/65 mb-1">
                                 Próximo Pago
                               </p>
-                              <p className="text-base font-semibold">
+                              <p className="lg:text-xl font-semibold">
                                 {formatDate(credit.proximoPago)}
                               </p>
                             </div>
@@ -253,7 +263,7 @@ export const MyLoans = () => {
                         credit.estado === "atrasado") && (
                         <div className="flex justify-end pt-4 border-t border-white/10">
                           <button
-                            className="px-6 py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
+                            className="px-6 py-2 lg:py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
                             onClick={() => {
                               setIsModalOpen(true);
                             }}

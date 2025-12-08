@@ -5,16 +5,16 @@ import {
   IconGraph,
   Button,
 } from "@/components";
-import { Menu } from "../components";
 import { getInvestmentsStats, getInvestments } from "../services";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
-import { useModalOptionsCall } from "@/hooks";
+import { useIsMobile, useModalOptionsCall } from "@/hooks";
 import { ModalChatBot } from "@/components";
 import { ContainerMenu } from "../components/ContainerMenu";
 
 export const MyInvestments = () => {
   const { user } = useAuth();
+  const isMobile = useIsMobile();
 
   const { isModalOpen, modalOptionsInvestors, setIsModalOpen } =
     useModalOptionsCall();
@@ -93,7 +93,6 @@ export const MyInvestments = () => {
     return (
       <div>
         <NavBar />
-        <Menu />
         <div className="max-w-7xl mx-auto mt-26 mb-20">
           <div className="flex justify-center items-center py-20">
             <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
@@ -108,14 +107,16 @@ export const MyInvestments = () => {
       <NavBar />
       <ContainerMenu>
         <div className="">
-          <h1 className="text-header-body font-bold mb-8">Mis Inversiones</h1>
+          <h1 className="text-2xl lg:text-header-body font-bold mb-8">
+            Mis Inversiones
+          </h1>
 
           {/* Estadísticas */}
           {stats && (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
               {/* Total Invertido */}
               <div
-                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6"
+                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-4 lg:p-6"
                 style={
                   {
                     /* borderRadius: "9.13px",
@@ -128,12 +129,14 @@ export const MyInvestments = () => {
                 }
               >
                 <div className="flex items-center gap-4">
-                  <div className="bg-blue-200 text-blue-700 p-6 rounded-xl">
+                  <div className="bg-blue-200 text-blue-700 p-4 lg:p-6 rounded-xl">
                     <IconSignDollar />
                   </div>
                   <div>
-                    <p className="text-base  mb-1">Total Invertido</p>
-                    <p className="text-2xl font-bold">
+                    <p className="text-sm lg:text-base  mb-1">
+                      Total Invertido
+                    </p>
+                    <p className="text-lg lg:text-2xl font-bold">
                       {formatCurrency(stats.totalInvertido)}
                     </p>
                   </div>
@@ -142,7 +145,7 @@ export const MyInvestments = () => {
 
               {/* Total Rendimiento */}
               <div
-                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6"
+                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-4 lg:p-6"
                 style={
                   {
                     /*
@@ -156,12 +159,14 @@ export const MyInvestments = () => {
                 }
               >
                 <div className="flex items-center gap-4">
-                  <div className=" bg-green-200 text-green-700 p-6 rounded-xl">
+                  <div className=" bg-green-200 text-green-700 p-4 lg:p-6 rounded-xl">
                     <IconArrow width={24} height={24} />
                   </div>
                   <div>
-                    <p className="text-base  mb-1">Rendimiento Total</p>
-                    <p className="text-2xl font-bold">
+                    <p className="text-sm lg:text-base  mb-1">
+                      Rendimiento Total
+                    </p>
+                    <p className="text-lg lg:text-2xl font-bold">
                       {formatCurrency(stats.totalRendimiento)}
                     </p>
                   </div>
@@ -170,7 +175,7 @@ export const MyInvestments = () => {
 
               {/* Inversiones Activas */}
               <div
-                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6"
+                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-4 lg:p-6"
                 style={
                   {
                     /* borderRadius: "9.13px",
@@ -183,12 +188,14 @@ export const MyInvestments = () => {
                 }
               >
                 <div className="flex items-center gap-4">
-                  <div className=" bg-fuchsia-200 p-6 rounded-xl">
+                  <div className=" bg-fuchsia-200 p-4 lg:p-6 rounded-xl">
                     <IconGraph />
                   </div>
                   <div>
-                    <p className="text-base  mb-1">Inversiones Activas</p>
-                    <p className="text-2xl font-bold">
+                    <p className="text-sm lg:text-base  mb-1">
+                      Inversiones Activas
+                    </p>
+                    <p className="text-lg lg:text-2xl font-bold">
                       {stats.inversionesActivas}
                     </p>
                   </div>
@@ -199,7 +206,7 @@ export const MyInvestments = () => {
 
           {/* Lista de Inversiones */}
           <div>
-            <h2 className="text-header-body font-bold mb-6">
+            <h2 className="text-2xl lg:text-header-body font-bold mb-6">
               Todas tus Inversiones
             </h2>
 
@@ -213,7 +220,7 @@ export const MyInvestments = () => {
                     {/* Header de la card */}
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <h3 className="text-body font-semibold mb-1">
+                        <h3 className="text-xl lg:text-body font-semibold mb-1">
                           Inversión #{investment.id}
                         </h3>
                       </div>
@@ -229,13 +236,13 @@ export const MyInvestments = () => {
                     {/* Información principal */}
                     <div className="space-y-3 mb-4">
                       <div className="flex justify-between">
-                        <span className=" text-gray">Monto Invertido</span>
+                        <span className="text-sm lg:text-base text-gray">Monto Invertido</span>
                         <span className="text-primary font-semibold">
                           {formatCurrency(investment.montoInvertido)}
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className=" text-white/65">
+                        <span className="text-sm lg:text-base text-white/65">
                           Rendimiento Anual
                         </span>
                         <span className=" font-semibold text-green-600">
@@ -243,13 +250,13 @@ export const MyInvestments = () => {
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray">Plazo</span>
+                        <span className="text-sm lg:text-base text-gray">Plazo</span>
                         <span className="text-primary font-semibold">
                           {investment.plazo} meses
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray">
+                        <span className="text-sm lg:text-base text-gray">
                           Rendimiento a la Fecha
                         </span>
                         <span className=" font-semibold text-green-600">
@@ -257,7 +264,7 @@ export const MyInvestments = () => {
                         </span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray">Tipo de Inversión</span>
+                        <span className="text-sm lg:text-base text-gray">Tipo de Inversión</span>
                         <span className="text-primary font-semibold">
                           {getTypeLabel(investment.tipoInversion)}
                         </span>
@@ -281,7 +288,7 @@ export const MyInvestments = () => {
                       {investment.montoUltimaCuota > 0 && (
                         <div className="flex justify-between text-sm">
                           <span className="text-gray">Última Cuota</span>
-                          <span className="text-white/80">
+                          <span className="text-white/80 text-xs lg:text-sm">
                             {formatCurrency(investment.montoUltimaCuota)} -{" "}
                             {formatDate(investment.fechaUltimaCuota)}
                           </span>
@@ -316,10 +323,13 @@ export const MyInvestments = () => {
             )}
           </div>
           <div className="mt-8">
-            <div className="text-header-body font-bold mb-6">
+            <div className="text-2xl lg:text-header-body font-bold mb-6">
               Haz una nueva inversión
             </div>
-            <Button onClick={() => setIsModalOpen(true)}>
+            <Button
+              size={isMobile ? "sm" : "lg"}
+              onClick={() => setIsModalOpen(true)}
+            >
               Nueva Inversión
             </Button>
           </div>

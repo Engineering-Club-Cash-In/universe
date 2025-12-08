@@ -133,7 +133,7 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
       <div className="">
         <h2 className="text-body lg:text-header-body mb-6">Información Personal</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-end">
           {/* DPI */}
           <div className="text-[#6B7280]">
             <label className="text-sm text-white/65 mb-2 block">

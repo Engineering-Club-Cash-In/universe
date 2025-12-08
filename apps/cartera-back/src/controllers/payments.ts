@@ -545,7 +545,25 @@ export async function insertPagosCreditoInversionistas(
 
   // 4. Insertar todos los registros
   const resolvedInserts = await Promise.all(inserts);
-  await db.insert(pagos_credito_inversionistas).values(resolvedInserts);
+await db
+  .insert(pagos_credito_inversionistas)
+  .values(resolvedInserts)
+  .onConflictDoUpdate({
+    target: [
+      pagos_credito_inversionistas.pago_id,
+      pagos_credito_inversionistas.inversionista_id,
+    ],
+    set: {
+      abono_capital: sql`EXCLUDED.abono_capital`,
+      abono_interes: sql`EXCLUDED.abono_interes`,
+      abono_iva_12: sql`EXCLUDED.abono_iva_12`,
+      porcentaje_participacion: sql`EXCLUDED.porcentaje_participacion`,
+      cuota: sql`EXCLUDED.cuota`,
+      fecha_pago: sql`EXCLUDED.fecha_pago`,
+      estado_liquidacion: sql`EXCLUDED.estado_liquidacion`,
+      credito_id: sql`EXCLUDED.credito_id`,
+    },
+  });
 
   return resolvedInserts;
 }
@@ -1352,7 +1370,6 @@ export async function obtenerCreditosConPagosPendientes(
     const hoy = new Date().toISOString().slice(0, 10);
 
     // 1️⃣ PASO 1: Obtener todos los créditos del inversionista
-    // Solo créditos ACTIVOS o MOROSOS (no cancelados ni liquidados)
     const creditosInversionista = await db
       .select({
         creditoId: creditos_inversionistas.credito_id,

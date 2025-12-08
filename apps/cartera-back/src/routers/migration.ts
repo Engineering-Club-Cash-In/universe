@@ -5,13 +5,95 @@ import { fillPagosInversionistas, fillPagosInversionistasV2, mapPagosPorCreditos
 import path from "path";
 import { leerCreditoPorNumeroSIFCO } from "../services/excel";
 import { authMiddleware } from "./midleware";
-import { listarCreditosConDetalle } from "../migration/migrationCredits";
+import { listarCreditosConDetalle, procesarCreditoIndividual } from "../migration/migrationCredits";
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
 import { liquidarCuotasPorUsuario } from "../controllers/liquidateInvestor";
 // ✅ Schema para sync de pagos desde SIFCO (param opcional)
 const syncCreditPaymentsSchema = z.object({
   numero_credito_sifco: z.string().min(1).optional(),
+});
+const ExcelCreditoRowSchema = t.Object({
+  Fecha: t.String(),
+  CreditoSIFCO: t.String(),
+  Numero: t.Number(),
+  Nombre: t.String(),
+  Capital: t.String(),
+  porcentaje: t.String(),
+  Cuotas: t.String(),
+  DeudaQ: t.String(),
+  IVA12: t.String(),
+  PorcentajeCashIn: t.String(),
+  PorcentajeInversionista: t.String(),
+  CuotaCashIn: t.String(),
+  IVACashIn: t.String(),
+  CuotaInversionista: t.String(),
+  IVAInversionista: t.String(),
+  Seguro10Cuotas: t.String(),
+  GPS: t.String(),
+  AbonoCapital: t.String(),
+  AbonoInteres: t.String(),
+  AbonoIVA12: t.String(),
+  AbonoInteresCI: t.String(),
+  AbonoIVACI: t.String(),
+  AbonoSeguro: t.String(),
+  AbonoGPS: t.String(),
+  PagoDelMes: t.String(),
+  CapitalRestante: t.String(),
+  InteresRestante: t.String(),
+  IVA12Restante: t.String(),
+  SeguroRestante: t.String(),
+  GPSRestante: t.String(),
+  TotalRestante: t.String(),
+  Llamada: t.String(),
+  Pago: t.String(),
+  NIT: t.String(),
+  Categoria: t.String(),
+  Inversionista: t.String(),
+  Observaciones: t.String(),
+  Cuota: t.String(),
+  MontoBoleta: t.String(),
+  FechaFiltro: t.String(),
+  NumeroPoliza: t.String(),
+  ComisionVenta: t.String(),
+  AcumuladoComisionVenta: t.String(),
+  ComisionesMesCashIn: t.String(),
+  ComisionesCobradasMesCashIn: t.String(),
+  AcumuladoComisionesCashIn: t.String(),
+  AcumuladoComisionesCobradasCashIn: t.String(),
+  RenuevoONuevo: t.String(),
+  CapitalNuevosCreditos: t.String(),
+  PorcentajeRoyalty: t.String(),
+  Royalty: t.String(),
+  USRoyalty: t.String(),
+  Membresias: t.String(),
+  MembresiasPago: t.String(),
+  GastosMes: t.String(),
+  UtilidadMes: t.String(),
+  UtilidadAcumulada: t.String(),
+  ComoSeEntero: t.String(),
+  MembresiasDelMes: t.String(),
+  MembresiasDelMesCobradas: t.String(),
+  MembresiasAcumulado: t.String(),
+  Asesor: t.String(),
+  Otros: t.String(),
+  Mora: t.String(),
+  MontoBoletaCuota: t.String(),
+  Plazo: t.String(),
+  Seguro: t.String(),
+  FormatoCredito: t.String(),
+  Pagado: t.String(),
+  Facturacion: t.String(),
+  MesPagado: t.String(),
+  SeguroFacturado: t.String(),
+  GPSFacturado: t.String(),
+  Reserva: t.String(),
+});
+
+const CreditoAgrupadoSchema = t.Object({
+  creditoBase: t.String(),
+  cliente: t.String(),
+  filas: t.Array(ExcelCreditoRowSchema),
 });
 /**
  * 📂 Ruta absoluta del Excel en tu máquina
@@ -358,5 +440,39 @@ export const sifcoRouter = new Elysia()
           })
         ),
       }),
+    }
+  )
+  .post(
+    "/processUniqueCredit",
+    async ({ body, set }) => {
+      try {
+        console.log(`📥 Recibiendo crédito: ${body.credito.creditoBase}`);
+        
+        const resultado = await procesarCreditoIndividual(body.credito);
+        
+        if (!resultado.success) {
+          set.status = 400;
+          return resultado;
+        }
+        
+        return resultado;
+        
+      } catch (error: any) {
+        set.status = 500;
+        return {
+          success: false,
+          error: error.message || "Error interno del servidor",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        credito: CreditoAgrupadoSchema,
+      }),
+      detail: {
+        summary: "Procesar un crédito individual",
+        description: "Recibe un objeto CreditoAgrupado y lo procesa: consulta SIFCO, mapea y guarda en DB",
+        tags: ["Créditos"],
+      },
     }
   );

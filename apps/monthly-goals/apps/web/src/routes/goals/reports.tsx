@@ -50,17 +50,22 @@ function GoalsIndexPage() {
 	);
 
 	const calculatePercentage = (target: number, achieved: number, isInverse: boolean | null): number => {
-		if (target <= 0) return 0;
-
 		if (isInverse) {
-			// Para metas inversas: menor o igual = 100%
+			// Para metas inversas: menor o igual al target = 100%
+			// Ejemplo: meta de 0 errores, si logró 0 errores = 100%
 			if (achieved <= target) {
 				return 100;
 			} else {
+				// Si achieved > target, calcular qué tan lejos está
+				// Ejemplo: meta 0 errores, logró 5 = 0%
+				if (target === 0) {
+					return 0;
+				}
 				return Math.max((target / achieved) * 100, 0);
 			}
 		} else {
 			// Para metas normales: mayor es mejor
+			if (target <= 0) return 0;
 			return (achieved / target) * 100;
 		}
 	};

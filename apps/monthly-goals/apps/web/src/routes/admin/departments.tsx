@@ -22,12 +22,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
+	SearchableSelect,
+	SearchableSelectTrigger,
+	SearchableSelectContent,
+	SearchableSelectValue,
+	SearchableSelectItem,
+} from "@/components/ui/searchable-select";
 import {
 	Table,
 	TableBody,
@@ -197,22 +197,22 @@ function DepartmentsPage() {
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="managerId">Manager del Departamento</Label>
-								<Select name="managerId">
-									<SelectTrigger>
-										<SelectValue placeholder="Selecciona un manager (opcional)" />
-									</SelectTrigger>
-									<SelectContent>
+								<SearchableSelect name="managerId">
+									<SearchableSelectTrigger>
+										<SearchableSelectValue placeholder="Selecciona un manager (opcional)" />
+									</SearchableSelectTrigger>
+									<SearchableSelectContent searchPlaceholder="Buscar manager...">
 										{availableUsers.isLoading ? (
-											<SelectItem value="" disabled>
+											<div className="py-6 text-center text-sm text-muted-foreground">
 												Cargando usuarios...
-											</SelectItem>
+											</div>
 										) : availableUsers.data?.filter((u: User) => u.role === "department_manager" || u.role === "super_admin").map((user: User) => (
-											<SelectItem key={user.id} value={user.id}>
+											<SearchableSelectItem key={user.id} value={user.id} searchValue={`${user.name} ${user.email}`}>
 												{user.name} ({user.email})
-											</SelectItem>
+											</SearchableSelectItem>
 										))}
-									</SelectContent>
-								</Select>
+									</SearchableSelectContent>
+								</SearchableSelect>
 							</div>
 							<Button type="submit" disabled={createMutation.isPending}>
 								{createMutation.isPending ? "Creando..." : "Crear"}
@@ -263,22 +263,22 @@ function DepartmentsPage() {
 						</div>
 						<div className="space-y-2">
 							<Label htmlFor="edit-managerId">Manager del Departamento</Label>
-							<Select name="managerId" defaultValue={editingDepartment?.managerId ?? ""}>
-								<SelectTrigger>
-									<SelectValue placeholder="Selecciona un manager (opcional)" />
-								</SelectTrigger>
-								<SelectContent>
+							<SearchableSelect name="managerId" defaultValue={editingDepartment?.managerId ?? ""}>
+								<SearchableSelectTrigger>
+									<SearchableSelectValue placeholder="Selecciona un manager (opcional)" />
+								</SearchableSelectTrigger>
+								<SearchableSelectContent searchPlaceholder="Buscar manager...">
 									{availableUsers.isLoading ? (
-										<SelectItem value="" disabled>
+										<div className="py-6 text-center text-sm text-muted-foreground">
 											Cargando usuarios...
-										</SelectItem>
+										</div>
 									) : availableUsers.data?.filter((u: User) => u.role === "department_manager" || u.role === "super_admin").map((user: User) => (
-										<SelectItem key={user.id} value={user.id}>
+										<SearchableSelectItem key={user.id} value={user.id} searchValue={`${user.name} ${user.email}`}>
 											{user.name} ({user.email})
-										</SelectItem>
+										</SearchableSelectItem>
 									))}
-								</SelectContent>
-							</Select>
+								</SearchableSelectContent>
+							</SearchableSelect>
 						</div>
 						<Button type="submit" disabled={updateMutation.isPending}>
 							{updateMutation.isPending ? "Actualizando..." : "Actualizar"}

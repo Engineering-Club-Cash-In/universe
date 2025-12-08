@@ -22,12 +22,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
+	SearchableSelect,
+	SearchableSelectTrigger,
+	SearchableSelectContent,
+	SearchableSelectValue,
+	SearchableSelectItem,
+} from "@/components/ui/searchable-select";
 import {
 	Table,
 	TableBody,
@@ -201,41 +201,41 @@ function AreasPage() {
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="departmentId">Departamento</Label>
-								<Select name="departmentId" required>
-									<SelectTrigger>
-										<SelectValue placeholder="Selecciona un departamento" />
-									</SelectTrigger>
-									<SelectContent>
+								<SearchableSelect name="departmentId" required>
+									<SearchableSelectTrigger>
+										<SearchableSelectValue placeholder="Selecciona un departamento" />
+									</SearchableSelectTrigger>
+									<SearchableSelectContent searchPlaceholder="Buscar departamento...">
 										{departments.isLoading ? (
-											<SelectItem value="" disabled>
+											<div className="py-6 text-center text-sm text-muted-foreground">
 												Cargando departamentos...
-											</SelectItem>
+											</div>
 										) : departments.data?.map((department: Department) => (
-											<SelectItem key={department.id} value={department.id}>
+											<SearchableSelectItem key={department.id} value={department.id} searchValue={department.name}>
 												{department.name}
-											</SelectItem>
+											</SearchableSelectItem>
 										))}
-									</SelectContent>
-								</Select>
+									</SearchableSelectContent>
+								</SearchableSelect>
 							</div>
 							<div className="space-y-2">
 								<Label htmlFor="leadId">Líder de Área</Label>
-								<Select name="leadId">
-									<SelectTrigger>
-										<SelectValue placeholder="Selecciona un líder (opcional)" />
-									</SelectTrigger>
-									<SelectContent>
+								<SearchableSelect name="leadId">
+									<SearchableSelectTrigger>
+										<SearchableSelectValue placeholder="Selecciona un líder (opcional)" />
+									</SearchableSelectTrigger>
+									<SearchableSelectContent searchPlaceholder="Buscar líder...">
 										{availableUsers.isLoading ? (
-											<SelectItem value="" disabled>
+											<div className="py-6 text-center text-sm text-muted-foreground">
 												Cargando usuarios...
-											</SelectItem>
+											</div>
 										) : availableUsers.data?.filter((u: User) => ["area_lead", "department_manager", "super_admin"].includes(u.role)).map((user: User) => (
-											<SelectItem key={user.id} value={user.id}>
+											<SearchableSelectItem key={user.id} value={user.id} searchValue={`${user.name} ${user.email}`}>
 												{user.name} ({user.email})
-											</SelectItem>
+											</SearchableSelectItem>
 										))}
-									</SelectContent>
-								</Select>
+									</SearchableSelectContent>
+								</SearchableSelect>
 							</div>
 							<Button type="submit" disabled={createMutation.isPending}>
 								{createMutation.isPending ? "Creando..." : "Crear"}

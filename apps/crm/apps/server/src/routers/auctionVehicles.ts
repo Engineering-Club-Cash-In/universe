@@ -1,6 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
 import z from "zod";
-import { auctionExpenses, auctionVehicles } from "../db/schema/auctionVehicles";
 import { db } from "../db";
 import {
 	auctionExpenses,
@@ -366,7 +365,7 @@ export const auctionRouter = {
 				if (
 					row.inspectionId &&
 					!auction.inspections.find(
-						(i) => i.id === row.inspectionId,
+						(i: { id: string }) => i.id === row.inspectionId,
 					)
 				) {
 					auction.inspections.push({
@@ -396,7 +395,7 @@ export const auctionRouter = {
 				if (
 					row.photoId &&
 					!auction.photos.find(
-						(p) => p.id === row.photoId,
+						(p: { id: string }) => p.id === row.photoId,
 					)
 				) {
 					auction.photos.push({
@@ -414,7 +413,7 @@ export const auctionRouter = {
 				// Agrupar gastos
 				if (
 					row.expenseId &&
-					!auction.expenses.find((e) => e.id === row.expenseId)
+					!auction.expenses.find((e: { id: string }) => e.id === row.expenseId)
 				) {
 					auction.expenses.push({
 						id: row.expenseId,

@@ -3,7 +3,7 @@ FROM nginx:alpine
 
 # Environment variables (will be baked into the static files)
 ENV VITE_SERVER_URL=https://crmapi.s3.devteamatcci.site
-ENV VITE_DEV_MODE=TRUE
+ENV VITE_DEV_MODE=FALSE
 
 # Copy pre-built dist folder
 COPY dist /usr/share/nginx/html

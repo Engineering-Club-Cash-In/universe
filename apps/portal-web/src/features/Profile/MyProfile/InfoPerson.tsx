@@ -81,7 +81,7 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
     <div className="space-y-8">
       {/* Estado del perfil */}
       {!isProfileComplete && (
-        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-6">
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 lg:p-6">
           <div className="flex items-start gap-4">
             <svg
               className="w-6 h-6 text-yellow-400 shrink-0 mt-1"
@@ -109,7 +109,7 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
       )}
 
       {isProfileComplete && (
-        <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-6">
+        <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-4 lg:p-6">
           <div className="flex items-center gap-4">
             <svg
               className="w-6 h-6 text-green-400"
@@ -131,9 +131,9 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
 
       {/* Información Personal */}
       <div className="">
-        <h2 className="text-header-body mb-6">Información Personal</h2>
+        <h2 className="text-body lg:text-header-body mb-6">Información Personal</h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-end">
           {/* DPI */}
           <div className="text-[#6B7280]">
             <label className="text-sm text-white/65 mb-2 block">

@@ -1,6 +1,7 @@
 import { Input, ButtonIcon, CheckBox, Button, Link } from "@components/ui";
 import { IconGoogle } from "@components/icons";
 import { useLogin } from "../hook/useLogin";
+import { useIsMobile } from "@/hooks";
 
 export const FormLogin = () => {
   const {
@@ -12,11 +13,12 @@ export const FormLogin = () => {
     handleResetPassword,
     successMessage,
   } = useLogin();
+  const isMobile = useIsMobile();
 
   return (
     <div className="w-full flex justify-center mb-20 mt-16 items-center">
-      <div className="w-[500px] flex flex-col text-center">
-        <h2 className="text-header-2">Inicia sesión</h2>
+      <div className="w-full lg:w-[500px] flex flex-col text-center">
+        <h2 className="text-4xl  lg:text-header-2">Inicia sesión</h2>
         <form
           className="w-full mt-10 flex flex-col gap-6"
           onSubmit={formik.handleSubmit}
@@ -58,7 +60,7 @@ export const FormLogin = () => {
           <ButtonIcon
             icon={<IconGoogle />}
             onClick={handleGoogleLogin}
-            variant="lg"
+            variant={isMobile ? "md" : "lg"}
             isLoading={isGoogleLoading}
           >
             {isGoogleLoading ? "Redirigiendo a Google..." : "Google"}
@@ -68,8 +70,12 @@ export const FormLogin = () => {
             onChange={(checked) => formik.setFieldValue("rememberMe", checked)}
             label="Recordar usuario"
           />
-          <div className="flex justify-center items-center mt-4 flex-col gap-8">
-            <Button type="submit" isLoading={isLoading}>
+          <div className="flex justify-center items-center mt-4 flex-col gap-8 text-sm lg:text-base">
+            <Button
+              type="submit"
+              isLoading={isLoading}
+              size={isMobile ? "md" : "lg"}
+            >
               Iniciar sesión
             </Button>
             <Link href="#" onClick={handleResetPassword} underline>

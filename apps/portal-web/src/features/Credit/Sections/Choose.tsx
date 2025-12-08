@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { IconCheckList } from "@/components";
-import { useModalOptionsCall } from "@/hooks";
+import { useModalOptionsCall, useIsMobile } from "@/hooks";
 import { ModalChatBot } from "@/components";
 import { motion } from "framer-motion";
 
 export const Choose = () => {
   const [type, setType] = useState<"buy" | "sell">("buy");
   const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
+  const isMobile = useIsMobile();
 
   const features = [
     {
@@ -49,18 +50,29 @@ export const Choose = () => {
     "Dos soluciones diseñadas para diferentes necesidades. Encuentra la que mejor funcione para tu situación.";
 
   return (
-    <section className="relative w-full mt-50 pb-20 px-20">
+    <section className="relative w-full mt-32 lg:mt-50 pb-20 px-8 lg:px-20">
+      {isMobile && (
+        <div
+          className="w-full"
+          style={{
+            height: "10px",
+            opacity: 0.5,
+            background:
+              "linear-gradient(90deg, #0F0F0F 0%, #9A9FF5 50%, #0F0F0F 100%)",
+          }}
+        />
+      )}
       {/* Título y Subtítulo */}
-      <div className="text-center mb-16">
-        <h2 className="text-header-2 font-bold mb-4">{title}</h2>
-        <p className="text-gray text-xl max-w-3xl mx-auto">{subtitle}</p>
+      <div className="text-center mb-10 lg:mb-16 mt-10 lg:mt-0">
+        <h2 className="text-xl lg:text-header-2 font-bold mb-4">{title}</h2>
+        <p className="text-gray lg:text-xl max-w-3xl mx-auto">{subtitle}</p>
       </div>
 
       {/* Container con gradiente de fondo */}
       <div className="relative w-full">
         {/* Barra de gradiente detrás */}
         <div
-          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-[60px]"
+          className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full lg:h-[60px]"
           style={{
             background:
               "linear-gradient(90deg, rgba(15, 15, 15, 0) 0%, rgba(154, 159, 245, 0.7) 50%, rgba(15, 15, 15, 0) 100%)",
@@ -70,15 +82,14 @@ export const Choose = () => {
 
         {/* Contenedor de las dos tarjetas */}
         <div
-          className="relative flex justify-center items-center gap-8  h-[430.4px]"
+          className="relative flex flex-col lg:flex-row justify-center items-center gap-8  lg:h-120 "
           style={{ zIndex: 10 }}
         >
           {features.map((feature, index) => (
             <motion.div
               key={index}
-              className="flex flex-col justify-between w-1/2 lg:w-1/4 gap-6"
+              className="flex flex-col justify-between w-full lg:w-auto lg:min-w-1/4  gap-6 p-8"
               style={{
-                padding: "33.6px 33.2px 40.6px 33.6px",
                 borderRadius: "16px",
                 border: "1px solid rgba(154, 159, 245, 0.50)",
                 background: "#0F0F0F",

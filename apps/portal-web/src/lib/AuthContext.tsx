@@ -10,7 +10,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const { data, isLoading } = useQuery({
     queryKey: ["auth", "session"],
     queryFn: () => authClient.getSession().then((res) => res.data),
-    staleTime: 5 * 60 * 1000, // 5 minutos
+    staleTime: 1 * 60 * 1000, // 1 minuto - refetch más frecuente
+    refetchOnWindowFocus: true, // Refetch cuando la ventana recupera el foco
+    refetchOnMount: true, // Refetch cuando el componente se monta
   });
 
   useEffect(() => {

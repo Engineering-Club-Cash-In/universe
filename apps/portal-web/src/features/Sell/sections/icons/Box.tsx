@@ -1,10 +1,11 @@
-export const IconBox = () => (
+export const IconBox = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="29"
     height="29"
     viewBox="0 0 29 29"
     fill="none"
+    {...props}
   >
     <path
       d="M19.2878 12.056C19.2878 13.3349 18.7797 14.5614 17.8754 15.4657C16.9711 16.37 15.7446 16.878 14.4657 16.878C13.1869 16.878 11.9604 16.37 11.0561 15.4657C10.1518 14.5614 9.64374 13.3349 9.64374 12.056"

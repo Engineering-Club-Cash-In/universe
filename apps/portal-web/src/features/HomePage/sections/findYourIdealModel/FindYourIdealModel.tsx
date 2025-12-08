@@ -6,6 +6,7 @@ import Mercedes from "./assets/Mercedes.svg";
 import Volkswagen from "./assets/Volkswagen.svg";
 import Ford from "./assets/Ford.svg";
 import { IconLeftArrow, IconRightArrow } from "@components/icons";
+import { useIsMobile } from "@/hooks";
 
 const carBrands = [
   { name: "Audi", image: Audi, width: 300, height: 175 },
@@ -77,6 +78,8 @@ export const FindYourIdealModel: React.FC = () => {
     return brands;
   };
 
+  const isMobile = useIsMobile();
+
   // Limpieza al desmontar el componente
   React.useEffect(() => {
     return () => {
@@ -87,12 +90,14 @@ export const FindYourIdealModel: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-26 overflow-hidden py-2 px-20 lg:px-0 lg:max-w-360 lg:mx-auto">
+    <section className="text-center w-full mt-10 lg:mt-26 overflow-hidden py-2 px-6 lg:px-0 lg:max-w-360 lg:mx-auto">
       <div>
-        <h2 className="text-header-2 mb-24">Encuentra la marca ideal</h2>
+        <h2 className="text-2xl lg:text-header-2  lg:mb-24">
+          Encuentra la marca ideal
+        </h2>
       </div>
 
-      <div className="relative w-full mt-16">
+      <div className="relative w-full  lg:mt-16">
         {/* Carousel Container */}
         <div className="relative w-full flex items-center justify-center overflow-visible">
           <div className="grid grid-cols-3 w-full gap-8 ">
@@ -163,7 +168,7 @@ export const FindYourIdealModel: React.FC = () => {
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             aria-label="Previous brand"
           >
-            <IconLeftArrow />
+            <IconLeftArrow {...(isMobile ? { width: 12, height: 16 } : {})} />
           </motion.button>
 
           {/* Right Arrow - Over right image */}
@@ -175,12 +180,10 @@ export const FindYourIdealModel: React.FC = () => {
             transition={{ type: "spring", stiffness: 400, damping: 17 }}
             aria-label="Next brand"
           >
-            <IconRightArrow />
+            <IconRightArrow {...(isMobile ? { width: 12, height: 16 } : {})} />
           </motion.button>
         </div>
       </div>
-
-     
     </section>
   );
 };

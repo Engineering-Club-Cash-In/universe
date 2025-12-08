@@ -1,4 +1,5 @@
 import { IconArrowDown } from "@/components";
+import { useIsMobile } from "@/hooks";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 
@@ -8,6 +9,10 @@ export const FAQ = () => {
   const toggleQuestion = (index: number) => {
     setOpenIndex(openIndex === index ? null : index);
   };
+
+  const isMobile = useIsMobile();
+
+
   const items = [
     {
       question: "¿Cómo invertir?",
@@ -76,17 +81,17 @@ export const FAQ = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-8 pt-26 pb-20 items-center justify-center ">
-      <div className="flex flex-col gap-4 text-center justify-center items-center">
-        <p className="text-header-3">
+    <div className="flex flex-col gap-8  lg:pt-26 pb-20 items-center justify-center px-8 lg:px-0">
+      <div className="flex flex-col gap-8 lg:gap-4 text-center justify-center items-center">
+        <p className="text-2xl font-semibold lg:text-header-3">
           Preguntas <span className="text-secondary">frecuentes</span>
         </p>
-        <p className="text-lg text-gray">
+        <p className="lg:text-lg text-gray">
           Resolvemos tus dudas sobre inversiones y seguridad
         </p>
       </div>
 
-      <div className="w-full max-w-7xl px-6 flex flex-col gap-4">
+      <div className="w-full lg:max-w-7xl lg:px-6 flex flex-col gap-4">
         {items.map((item, index) => (
           <div
             key={index}
@@ -99,14 +104,14 @@ export const FAQ = () => {
             {/* Botón de pregunta */}
             <button
               onClick={() => toggleQuestion(index)}
-              className="w-full flex items-center justify-between p-6 text-left"
+              className="w-full flex items-center justify-between p-4 lg:p-6 text-left"
             >
-              <span className="text-2xl pr-4">{item.question}</span>
+              <span className="lg:text-2xl pr-4">{item.question}</span>
               <motion.div
                 animate={{ rotate: openIndex === index ? 180 : 0 }}
                 transition={{ duration: 0.15, ease: "easeInOut" }}
               >
-                <IconArrowDown width={24} height={24} />
+                <IconArrowDown width={isMobile ? 12 : 24} height={isMobile ? 12 : 24} />
               </motion.div>
             </button>
 
@@ -121,7 +126,7 @@ export const FAQ = () => {
                   className="overflow-hidden"
                 >
                   <div
-                    className="px-6 pb-6 text-gray [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:space-y-2 [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:space-y-2 [&_li]:ml-2"
+                    className="px-4 lg:px-6 pb-6 text-sm lg:text-base text-gray [&_ol]:list-decimal [&_ol]:ml-6 [&_ol]:space-y-2 [&_ul]:list-disc [&_ul]:ml-6 [&_ul]:space-y-2 [&_li]:ml-2"
                     dangerouslySetInnerHTML={{ __html: item.answer }}
                   />
                 </motion.div>

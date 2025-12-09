@@ -62,7 +62,7 @@ export const CalculatorCredit = () => {
   const resultado = calcularCredito();
 
   return (
-    <div className="relative w-full mt-12 lg:mt-56 mb-16 lg:mb-30 flex px-8 lg:px-0">
+    <div className="relative w-full mt-12 lg:mt-56 mb-16 lg:mb-30 flex px-6 lg:px-0">
       {/* Imagen a la izquierda */}
       <div className="relative w-[438px] shrink-0 hidden lg:block">
         <img

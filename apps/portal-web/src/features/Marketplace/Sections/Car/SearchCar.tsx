@@ -86,7 +86,7 @@ export const SearchCar = () => {
             {/* Descripción */}
             <div className="">
               <h2 className="text-sm text-white mb-2">Descripción</h2>
-              <p className="text-xs text-white/70 leading-relaxed">
+              <p className="text-sm text-white/70 leading-relaxed">
                 {vehicle.descripcion}
               </p>
               <motion.button

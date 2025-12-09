@@ -35,7 +35,7 @@ export const InfoGeneral = ({ vehicle }: CarProps) => {
   const { infoGeneral } = vehicle;
   const isMobile = useIsMobile();
 
-  const size = isMobile ? { width: 10, height: 10 } : { width: 16, height: 16 };
+  const size = isMobile ? { width: 14, height: 14 } : { width: 16, height: 16 };
 
   const infoConfig: InfoItem[] = [
     { key: "vin", label: "VIN", icon: <IconVinCar {...size} /> },
@@ -90,10 +90,10 @@ export const InfoGeneral = ({ vehicle }: CarProps) => {
             <IconConditionCar {...size} />
           </div>
           <div className="flex flex-col">
-            <span className="text-white/50 text-mini lg:text-sm">
+            <span className="text-white/50 text-xs lg:text-sm">
               Condición
             </span>
-            <span className="text-white text-xxs lg:text-base font-medium capitalize">
+            <span className="text-white text-sm lg:text-base font-medium capitalize">
               {vehicle.nuevo ? "Nuevo" : "Usado"}
             </span>
           </div>
@@ -107,10 +107,10 @@ export const InfoGeneral = ({ vehicle }: CarProps) => {
 
           return (
             <div key={key} className="flex items-center gap-3">
-              <div className="text-primary w-5 h-5 shrink-0">{icon}</div>
+              <div className="text-primary lg:w-5 lg:h-5 shrink-0">{icon}</div>
               <div className="flex flex-col">
-                <span className="text-white/50  text-mini lg:text-sm">{label}</span>
-                <span className="text-white text-xxs lg:text-base font-medium capitalize">
+                <span className="text-white/50  text-xs lg:text-sm">{label}</span>
+                <span className="text-white text-sm lg:text-base font-medium capitalize line-clamp-1 overflow-hidden text-ellipsis ">
                   {displayValue}
                 </span>
               </div>

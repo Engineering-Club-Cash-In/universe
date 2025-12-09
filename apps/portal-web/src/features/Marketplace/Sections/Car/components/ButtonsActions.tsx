@@ -22,10 +22,9 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
   const isMobile = useIsMobile();
 
   return (
-    <div className=" rounded-3xl lg:pt-2">
-      {!isMobile && (
-        <IconsActionsSocial vehicle={vehicle} printRef={printRef} />
-      )}
+    <div className=" rounded-3xl lg:pt-2 space-y-2 lg:space-y-0">
+      <IconsActionsSocial vehicle={vehicle} printRef={printRef} />
+
       {/* Sección de contacto */}
       <div className="space-y-2">
         <h3 className="text-white text-xxs lg:text-lg ">
@@ -146,8 +145,9 @@ export const IconsActionsSocial = ({
       }
     `,
   });
+
   return (
-    <div className="flex items-center gap-4 lg:gap-6 mb-6 relative">
+    <div className="flex items-center gap-4 lg:gap-6 lg:mb-6 relative">
       {/* Botón Like con animación */}
       <motion.button
         whileTap={{ scale: 0.9 }}

@@ -53,7 +53,7 @@ export default function VehicleInspectionWizard() {
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
-  const [_isSubmitting, setIsSubmitting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
@@ -292,9 +292,9 @@ export default function VehicleInspectionWizard() {
                     setValuationCompleted(true);
                     // Merge valuation data with existing form data
                     const completeData = { ...formData, ...valuationData };
-                    console.log("Fotos guardadas del paso 2:", savedPhotos);
-                    console.log("Cantidad de fotos:", savedPhotos?.length || 0);
-                    handleCompleteInspection(savedPhotos, completeData);
+                    console.log("Fotos guardadas del paso 2:", photos);
+                    console.log("Cantidad de fotos:", photos?.length || 0);
+                    handleCompleteInspection(photos, completeData);
                   }}
                   isWizardMode={true}
                   isSubmitting={isSubmitting}

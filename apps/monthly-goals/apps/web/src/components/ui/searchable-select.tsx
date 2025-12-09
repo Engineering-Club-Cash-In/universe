@@ -6,11 +6,14 @@ import { Input } from "@/components/ui/input"
 
 interface SearchableSelectProps {
   value?: string
+  defaultValue?: string
   onValueChange?: (value: string) => void
   placeholder?: string
   searchPlaceholder?: string
   disabled?: boolean
   className?: string
+  name?: string
+  required?: boolean
 }
 
 interface SearchableSelectContextValue {
@@ -26,7 +29,11 @@ const SearchableSelectContext = React.createContext<SearchableSelectContextValue
 function SearchableSelect({
   children,
   value,
+  defaultValue,
   onValueChange,
+  name,
+  required,
+  disabled,
   ...props
 }: SearchableSelectProps & { children: React.ReactNode }) {
   const [search, setSearch] = React.useState("")
@@ -44,10 +51,13 @@ function SearchableSelect({
     <SearchableSelectContext.Provider value={{ search, setSearch }}>
       <SelectPrimitive.Root
         value={value}
+        defaultValue={defaultValue}
         onValueChange={onValueChange}
         open={open}
         onOpenChange={handleOpenChange}
-        {...props}
+        name={name}
+        required={required}
+        disabled={disabled}
         // Disable native typeahead search
         dir="ltr"
       >

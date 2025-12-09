@@ -23,6 +23,13 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import {
+	SearchableSelect,
+	SearchableSelectTrigger,
+	SearchableSelectContent,
+	SearchableSelectValue,
+	SearchableSelectItem,
+} from "@/components/ui/searchable-select";
+import {
 	Tabs,
 	TabsContent,
 	TabsList,
@@ -274,41 +281,41 @@ function TeamsPage() {
 								<form onSubmit={handleCreateExistingSubmit} className="space-y-6">
 									<div className="space-y-2">
 										<Label htmlFor="userId">Usuario</Label>
-										<Select name="userId" required>
-											<SelectTrigger>
-												<SelectValue placeholder="Selecciona un usuario" />
-											</SelectTrigger>
-											<SelectContent>
+										<SearchableSelect name="userId" required>
+											<SearchableSelectTrigger>
+												<SearchableSelectValue placeholder="Selecciona un usuario" />
+											</SearchableSelectTrigger>
+											<SearchableSelectContent searchPlaceholder="Buscar usuario...">
 												{availableUsers.isLoading ? (
-													<SelectItem value="" disabled>
+													<div className="py-6 text-center text-sm text-muted-foreground">
 														Cargando usuarios...
-													</SelectItem>
+													</div>
 												) : availableUsers.data?.map((user: any) => (
-													<SelectItem key={user.id} value={user.id}>
+													<SearchableSelectItem key={user.id} value={user.id} searchValue={`${user.name} ${user.email}`}>
 														{user.name} ({user.email})
-													</SelectItem>
+													</SearchableSelectItem>
 												))}
-											</SelectContent>
-										</Select>
+											</SearchableSelectContent>
+										</SearchableSelect>
 									</div>
 									<div className="space-y-2">
 										<Label htmlFor="areaId-existing">Área</Label>
-										<Select name="areaId" required>
-											<SelectTrigger>
-												<SelectValue placeholder="Selecciona un área" />
-											</SelectTrigger>
-											<SelectContent>
+										<SearchableSelect name="areaId" required>
+											<SearchableSelectTrigger>
+												<SearchableSelectValue placeholder="Selecciona un área" />
+											</SearchableSelectTrigger>
+											<SearchableSelectContent searchPlaceholder="Buscar área...">
 												{areas.isLoading ? (
-													<SelectItem value="" disabled>
+													<div className="py-6 text-center text-sm text-muted-foreground">
 														Cargando áreas...
-													</SelectItem>
+													</div>
 												) : areas.data?.map((area: any) => (
-													<SelectItem key={area.id} value={area.id}>
+													<SearchableSelectItem key={area.id} value={area.id} searchValue={`${area.name} ${area.departmentName}`}>
 														{area.name} - {area.departmentName}
-													</SelectItem>
+													</SearchableSelectItem>
 												))}
-											</SelectContent>
-										</Select>
+											</SearchableSelectContent>
+										</SearchableSelect>
 									</div>
 									<div className="space-y-2">
 										<Label htmlFor="position-existing">Posición</Label>
@@ -350,22 +357,22 @@ function TeamsPage() {
 									</div>
 									<div className="space-y-2">
 										<Label htmlFor="areaId-new">Área</Label>
-										<Select name="areaId" required>
-											<SelectTrigger>
-												<SelectValue placeholder="Selecciona un área" />
-											</SelectTrigger>
-											<SelectContent>
+										<SearchableSelect name="areaId" required>
+											<SearchableSelectTrigger>
+												<SearchableSelectValue placeholder="Selecciona un área" />
+											</SearchableSelectTrigger>
+											<SearchableSelectContent searchPlaceholder="Buscar área...">
 												{areas.isLoading ? (
-													<SelectItem value="" disabled>
+													<div className="py-6 text-center text-sm text-muted-foreground">
 														Cargando áreas...
-													</SelectItem>
+													</div>
 												) : areas.data?.map((area: any) => (
-													<SelectItem key={area.id} value={area.id}>
+													<SearchableSelectItem key={area.id} value={area.id} searchValue={`${area.name} ${area.departmentName}`}>
 														{area.name} - {area.departmentName}
-													</SelectItem>
+													</SearchableSelectItem>
 												))}
-											</SelectContent>
-										</Select>
+											</SearchableSelectContent>
+										</SearchableSelect>
 									</div>
 									<div className="space-y-2">
 										<Label htmlFor="position-new">Posición</Label>

@@ -66,7 +66,7 @@ export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
           </h3>
 
           {/* Grid de información con iconos */}
-          <div className="flex   gap-1 lg:gap-2 text-[8px] lg:text-xs items-center justify-center">
+          <div className="flex   gap-1 lg:gap-2 text-mini lg:text-xs items-center justify-center">
             {/* Año */}
             <div className="flex items-center gap-1 text-white/70 lg:justify-center">
               <div>
@@ -97,7 +97,7 @@ export const PreLovedCar = ({ vehicle }: PreLovedCarProps) => {
       {/* Badge de nuevo/usado */}
       <div className="absolute top-2 right-2 lg:top-4 lg:right-4">
         <div
-          className={`px-2 lg:px-3 py-1 rounded-full text-[10px] lg:text-xs font-semibold ${
+          className={`px-2 lg:px-3 py-1 rounded-full text-xxs lg:text-xs font-semibold ${
             vehicle.nuevo
               ? "bg-green-500/90 text-white"
               : "bg-blue-500/90 text-white"

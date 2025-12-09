@@ -34,8 +34,6 @@ export const appRouter = {
 	// Admin Import routes
 	setupImportacion: adminImportRouter.setupImportacion,
 	analizarImportacionCreditos: adminImportRouter.analizarImportacionCreditos,
-	importarCreditosCarteraBack: adminImportRouter.importarCreditosCarteraBack,
-	debugCreditData: adminImportRouter.debugCreditData,
 
 	// CRM routes
 	getSalesStages: crmRouter.getSalesStages,

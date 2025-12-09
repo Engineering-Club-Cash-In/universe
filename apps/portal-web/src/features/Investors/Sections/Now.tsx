@@ -34,7 +34,7 @@ export const Now = () => {
               transition={{ duration: 0.5 }}
             >
               <IconStart className="w-5 h-5" />
-              <span className="text-[10px] lg:text-sm font-medium ">
+              <span className="text-xxs lg:text-sm font-medium ">
                 Tu futuro financiero comienza hoy
               </span>
             </motion.div>

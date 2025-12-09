@@ -1,10 +1,11 @@
-export const IconKPGRoad = () => (
+export const IconKPGRoad = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="18"
     height="12"
     viewBox="0 0 18 12"
     fill="none"
+    {...props}
   >
     <path
       opacity="0.99"

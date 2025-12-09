@@ -10,6 +10,9 @@ COPY package.json bun.lock* ./
 # Install dependencies
 RUN bun install --frozen-lockfile
 
+# Add node_modules/.bin to PATH for tsc and other local binaries
+ENV PATH="/app/node_modules/.bin:$PATH"
+
 # Copy source code
 COPY . .
 

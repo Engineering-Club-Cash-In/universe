@@ -56,10 +56,10 @@ export const SimilarCars = ({ currentVehicleId }: SimilarCarsProps) => {
 
               {/* Info del vehículo */}
               <div className="flex flex-col justify-center gap-1">
-                <p className="text-white text-xxs lg:text-base">
+                <p className="text-white text-xs lg:text-base">
                   {vehicle.marca} {vehicle.linea} {vehicle.modelo}
                 </p>
-                <p className="text-xxs lg:text-sm">
+                <p className="text-xs lg:text-sm">
                   {formatPrice(vehicle.precio)}
                 </p>
               </div>

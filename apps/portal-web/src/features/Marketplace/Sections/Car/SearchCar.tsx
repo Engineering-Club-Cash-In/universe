@@ -14,6 +14,9 @@ import {
   ButtonsActions,
   ExtrasCar,
   SimilarCars,
+  VehicleHeader,
+  VehiclePrice,
+  VehicleSpecs,
 } from "./components";
 import { useIsMobile } from "@/hooks";
 
@@ -55,7 +58,7 @@ export const SearchCar = () => {
 
   if (isMobile) {
     return (
-      <div className="w-full px-8 lg:px-10">
+      <div className="w-full px-6 lg:px-10">
         {/* Layout de dos columnas */}
         <div ref={printRef} className="grid grid-cols-1 ">
           {/* COLUMNA 1 - Información principal del vehículo */}
@@ -63,25 +66,21 @@ export const SearchCar = () => {
             {/* Carousel de imágenes */}
             <Carrousel vehicle={vehicle} />
 
-            <div className="space-y-4">
-              {/* Detalles del vehículo */}
-              <DetailCar
-                vehicle={vehicle}
-                // eslint-disable-next-line
-                // @ts-ignore
-                printRef={printRef}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-6 items-center">
-              <CarSeller seller={vehicle.vendedor} />
-              {/* Botones de acción */}
-              <ButtonsActions
-                vehicle={vehicle}
-                // eslint-disable-next-line
-                // @ts-ignore
-                printRef={printRef}
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="flex flex-col gap-4">
+                <VehicleHeader vehicle={vehicle} />
+                <VehiclePrice vehicle={vehicle} />
+                <CarSeller seller={vehicle.vendedor} />
+              </div>
+              <div className="flex flex-col gap-8">
+                <VehicleSpecs vehicle={vehicle} />
+                <ButtonsActions
+                  vehicle={vehicle}
+                  // eslint-disable-next-line
+                  // @ts-ignore
+                  printRef={printRef}
+                />
+              </div>
             </div>
 
             {/* Descripción */}
@@ -93,7 +92,7 @@ export const SearchCar = () => {
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="mt-4 flex items-center gap-2 p-2 text-[10px] bg-white text-black rounded-lg font-medium"
+                className="mt-4 flex items-center gap-2 p-2 text-xs bg-white text-black rounded-lg font-medium"
               >
                 <IconPDF width={14} height={14} />
                 Descargar Diagnóstico

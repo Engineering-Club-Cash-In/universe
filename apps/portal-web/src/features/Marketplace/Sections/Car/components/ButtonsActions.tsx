@@ -22,12 +22,12 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
   const isMobile = useIsMobile();
 
   return (
-    <div className=" rounded-3xl lg:pt-2 space-y-2 lg:space-y-0">
+    <div className=" rounded-3xl lg:pt-2 space-y-4 lg:space-y-0">
       <IconsActionsSocial vehicle={vehicle} printRef={printRef} />
 
       {/* Sección de contacto */}
       <div className="space-y-2">
-        <h3 className="text-white text-xxs lg:text-lg ">
+        <h3 className="text-white text-xs lg:text-lg ">
           Contacta a nuestro asesor
         </h3>
         <div className="flex lg:flex-wrap  gap-2 lg:gap-4">
@@ -58,7 +58,7 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
         </div>
 
         {/* Link reportar */}
-        <button className="flex gap-2 pt-4 items-center cursor-pointer hover:underline">
+        <button className="flex gap-2 pt-2 lg:pt-4 items-center cursor-pointer hover:underline">
           <IconReport width={isMobile ? 10 : 18} height={isMobile ? 10 : 18} />
           <span className="text-xs lg:text-base text-white/70">
             Reporta este auto

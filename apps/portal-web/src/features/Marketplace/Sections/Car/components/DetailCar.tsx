@@ -60,7 +60,7 @@ export const VehicleSpecs = ({ vehicle }: VehicleSpecsProps) => {
         <div className="flex items-center gap-1 lg:gap-3">
           <IconKms {...isMobi} />
           <div>
-            <p className="text-white  text-xs lg:text-xl">
+            <p className="text-white  text-sm lg:text-xl">
               {vehicle.kms.toLocaleString()} km
             </p>
           </div>
@@ -72,7 +72,7 @@ export const VehicleSpecs = ({ vehicle }: VehicleSpecsProps) => {
         <div className="flex items-center gap-1 lg:gap-3 text-primary">
           <IconGear {...isMobi} />
           <div>
-            <p className="text-white  text-xs lg:text-xl capitalize">
+            <p className="text-white  text-sm lg:text-xl capitalize">
               {vehicle.transmision}
             </p>
           </div>
@@ -84,7 +84,7 @@ export const VehicleSpecs = ({ vehicle }: VehicleSpecsProps) => {
         <div className="flex items-center gap-1 lg:gap-3 text-primary">
           <IconGas {...isMobi} />
           <div>
-            <p className="text-white  text-xs lg:text-xl capitalize">
+            <p className="text-white  text-sm lg:text-xl capitalize">
               {vehicle.motorizacion}
             </p>
           </div>

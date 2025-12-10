@@ -60,7 +60,7 @@ export const GetMoney = () => {
 
         {/* Lado derecho - Imagen */}
         <div className=" justify-end items-center lg:hidden">
-          <div className="relative w-full ">
+          <div className="relative w-full h-[40svh] ">
             {/* Borde con blur - Solo en mobile */}
             {isMobile && (
               <div

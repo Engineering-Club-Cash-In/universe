@@ -30,10 +30,10 @@ interface VehicleSpecsProps {
 export const VehicleHeader = ({ vehicle }: VehicleHeaderProps) => {
   return (
     <div>
-      <p className="text-lg lg:text-5xl">
+      <p className="text-lg md:text-2xl lg:text-5xl">
         {vehicle.marca} {vehicle.linea} {vehicle.modelo}
         <span
-          className={`ml-2 px-1 lg:px-2 py-1 rounded-full text-xxs lg:font-semibold ${
+          className={`ml-2 px-1 lg:px-2 py-1 rounded-full text-xxs md:text-xs lg:font-semibold ${
             vehicle.nuevo
               ? "bg-green-500/90 text-white"
               : "bg-blue-500/90 text-white"
@@ -50,17 +50,17 @@ export const VehicleHeader = ({ vehicle }: VehicleHeaderProps) => {
 export const VehicleSpecs = ({ vehicle }: VehicleSpecsProps) => {
   const isMobile = useIsMobile();
   const isMobi = isMobile
-    ? { width: 16, height: 10 }
+    ? { width: 16, height: 12 }
     : { width: 22, height: 16 };
 
   return (
     <div className="flex flex-wrap gap-4 lg:mt-4 ">
       {/* Kilómetros */}
       <div className="">
-        <div className="flex items-center gap-1 lg:gap-3">
+        <div className="flex items-center gap-1 md:gap-2 lg:gap-3">
           <IconKms {...isMobi} />
           <div>
-            <p className="text-white  text-sm lg:text-xl">
+            <p className="text-white  text-sm md:text-base lg:text-xl">
               {vehicle.kms.toLocaleString()} km
             </p>
           </div>
@@ -69,10 +69,10 @@ export const VehicleSpecs = ({ vehicle }: VehicleSpecsProps) => {
 
       {/* Transmisión */}
       <div className="">
-        <div className="flex items-center gap-1 lg:gap-3 text-primary">
+        <div className="flex items-center gap-1 md:gap-2 lg:gap-3 text-primary">
           <IconGear {...isMobi} />
           <div>
-            <p className="text-white  text-sm lg:text-xl capitalize">
+            <p className="text-white  text-sm md:text-base lg:text-xl capitalize">
               {vehicle.transmision}
             </p>
           </div>
@@ -81,10 +81,10 @@ export const VehicleSpecs = ({ vehicle }: VehicleSpecsProps) => {
 
       {/* Motorización */}
       <div className="">
-        <div className="flex items-center gap-1 lg:gap-3 text-primary">
+        <div className="flex items-center gap-1 md:gap-2 lg:gap-3 text-primary">
           <IconGas {...isMobi} />
           <div>
-            <p className="text-white  text-sm lg:text-xl capitalize">
+            <p className="text-white  text-sm md:text-base lg:text-xl capitalize">
               {vehicle.motorizacion}
             </p>
           </div>
@@ -112,11 +112,11 @@ export const VehiclePrice = ({ vehicle }: VehiclePriceProps) => {
       {/* Precio */}
       <div className="lg:mt-6 ">
         <div>
-          <p className="text-primary text-xl lg:text-5xl mb-1 lg:mb-3">
+          <p className="text-primary text-xl md:text-3xl lg:text-5xl mb-1 lg:mb-3">
             {formatPrice(vehicle.precio)}
           </p>
           {vehicle.cuotaMinima && (
-            <p className="text-xs lg:text-xl mb-1">
+            <p className="text-xs md:text-sm lg:text-xl mb-1">
               Cuota mensual desde:{" "}
               <span className="text-primary">
                 {formatPrice(vehicle.cuotaMinima)}
@@ -124,7 +124,7 @@ export const VehiclePrice = ({ vehicle }: VehiclePriceProps) => {
             </p>
           )}
           {vehicle.precioNuevo && (
-            <p className="text-xs lg:text-xl">
+            <p className="text-xs md:text-sm lg:text-xl">
               Precio nuevo:{" "}
               <span className="">{formatPrice(vehicle.precioNuevo)}</span>
             </p>

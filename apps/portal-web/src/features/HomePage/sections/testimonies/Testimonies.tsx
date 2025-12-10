@@ -47,7 +47,7 @@ export const Testimonies = () => {
 
               {/* Overlay negro transparente con contenido */}
               <div className="absolute bottom-0 left-0 right-0 bg-black/70  p-6 transition-all duration-300 group-hover:bg-black/80">
-                <h3 className="text-white text-start text-3xl font-bold mb-2">
+                <h3 className="text-white text-start text-xl lg:text-3xl font-bold mb-2">
                   {testimony.name}
                 </h3>
                 <p className="text-white/90 text-start text-sm leading-7  lg:block">

@@ -27,16 +27,16 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
 
       {/* Sección de contacto */}
       <div className="space-y-2">
-        <h3 className="text-white text-xs lg:text-lg ">
+        <h3 className="text-white text-xs md:text-sm lg:text-lg ">
           Contacta a nuestro asesor
         </h3>
         <div className="flex lg:flex-wrap  gap-2 lg:gap-4">
           {/* Botón llamar */}
           <button
             onClick={makeCall}
-            className="w-full lg:w-auto px-2 py-2 lg:px-6 lg:py-3 text-mini lg:text-base bg-primary hover:bg-primary/90 rounded-2xl lg:rounded-full text-white lg:font-semibold transition-colors flex items-center justify-center gap-1 lg:gap-3"
+            className="w-full lg:w-auto px-2 py-2 lg:px-6 lg:py-3 text-mini md:text-xs lg:text-base bg-primary hover:bg-primary/90 rounded-2xl lg:rounded-full text-white lg:font-semibold transition-colors flex items-center justify-center gap-1 lg:gap-3"
           >
-            <IconCall width={isMobile ? 10 : 18} height={isMobile ? 10 : 18} />
+            <IconCall width={isMobile ? 12 : 18} height={isMobile ? 10 : 18} />
             {isMobile ? "Llamar" : `Llamar al asesor`}
           </button>
 
@@ -47,10 +47,10 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
                 `Hola, estoy interesado en el vehículo ${vehicle.marca} ${vehicle.linea} ${vehicle.modelo}.`
               )
             }
-            className="w-full lg:w-auto px-2 py-2 lg:px-6 lg:py-3 text-mini lg:text-base bg-green-500 hover:bg-green-600 rounded-2xl lg:rounded-full text-white lg:font-semibold transition-colors flex items-center justify-center gap-1 lg:gap-3"
+            className="w-full lg:w-auto px-2 py-2 lg:px-6 lg:py-3 text-mini  md:text-xs lg:text-base bg-green-500 hover:bg-green-600 rounded-2xl lg:rounded-full text-white lg:font-semibold transition-colors flex items-center justify-center gap-1 lg:gap-3"
           >
             <IconWhatsApp
-              width={isMobile ? 10 : 18}
+              width={isMobile ? 12 : 18}
               height={isMobile ? 10 : 18}
             />
             WhatsApp
@@ -58,9 +58,9 @@ export const ButtonsActions = ({ vehicle, printRef }: ButtonsActionsProps) => {
         </div>
 
         {/* Link reportar */}
-        <button className="flex gap-2 pt-2 lg:pt-4 items-center cursor-pointer hover:underline">
-          <IconReport width={isMobile ? 10 : 18} height={isMobile ? 10 : 18} />
-          <span className="text-xs lg:text-base text-white/70">
+        <button className="flex gap-2 pt-2 md:pt-4 items-center cursor-pointer hover:underline">
+          <IconReport width={isMobile ? 12 : 18} height={isMobile ? 12 : 18} />
+          <span className="text-xs md:text-sm lg:text-base text-white/70">
             Reporta este auto
           </span>
         </button>
@@ -162,7 +162,7 @@ export const IconsActionsSocial = ({
           }}
           transition={{ duration: 0.3 }}
         >
-          <IconLike width={isMobile ? 12 : 16} height={isMobile ? 12 : 16} />
+          <IconLike width={isMobile ? 14 : 16} height={isMobile ? 14 : 16} />
         </motion.div>
       </motion.button>
 
@@ -171,7 +171,7 @@ export const IconsActionsSocial = ({
         onClick={handleShare}
         className="flex items-center justify-center p-2 lg:p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-colors relative"
       >
-        <IconShare width={isMobile ? 12 : 16} height={isMobile ? 12 : 16} />
+        <IconShare width={isMobile ? 14 : 16} height={isMobile ? 14 : 16} />
         {showCopyMessage && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -189,7 +189,7 @@ export const IconsActionsSocial = ({
         onClick={handlePrint}
         className="flex items-center justify-center p-2 lg:p-3 border border-white/20 rounded-xl hover:bg-white/10 transition-colors"
       >
-        <IconPrint width={isMobile ? 12 : 16} height={isMobile ? 12 : 16} />
+        <IconPrint width={isMobile ? 14 : 16} height={isMobile ? 14 : 16} />
       </button>
     </div>
   );

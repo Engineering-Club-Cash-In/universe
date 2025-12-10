@@ -48,7 +48,7 @@ export const BuyCar = () => {
       </h2>
       {/* Lado izquierdo - Imagen */}
       <div>
-        <div className="relative w-full lg:w-[35vw] h-full">
+        <div className="relative w-full lg:w-[35vw] h-[40svh] lg:h-full">
           {/* Borde con blur - Solo en mobile (detrás de la imagen) */}
           {isMobile && (
             <div
@@ -64,7 +64,7 @@ export const BuyCar = () => {
           <img
             src={imageUrl}
             alt="Auto"
-            className="w-full h-full object-cover rounded-2xl relative"
+            className="w-full h-full  object-cover rounded-2xl relative"
           />
           {/* Badge en esquina superior derecha */}
           <div className="absolute top-6 right-6 bg-primary px-2  py-1 lg:px-6 lg:py-3 rounded-3xl z-20">
@@ -76,7 +76,7 @@ export const BuyCar = () => {
       </div>
 
       {/* Lado derecho - Contenido */}
-      <div className="flex flex-col justify-center mt-4 lg:mt-0">
+      <div className="flex flex-col justify-center  mt-4 lg:mt-0">
         <h2 className="text-header-2 font-bold mb-4 hidden lg:block">
           Compra el auto que siempre quisiste
         </h2>

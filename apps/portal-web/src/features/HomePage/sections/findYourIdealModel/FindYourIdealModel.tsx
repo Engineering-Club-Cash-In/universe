@@ -8,14 +8,6 @@ import Ford from "./assets/Ford.svg";
 import { IconLeftArrow, IconRightArrow } from "@components/icons";
 import { useIsMobile } from "@/hooks";
 
-const carBrands = [
-  { name: "Audi", image: Audi, width: 300, height: 175 },
-  { name: "BMW", image: BMW, width: 175, height: 175 },
-  { name: "Mercedes", image: Mercedes, width: 275, height: 175 },
-  { name: "Volkswagen", image: Volkswagen, width: 175, height: 175 },
-  { name: "Ford", image: Ford, width: 500, height: 175 },
-];
-
 export const FindYourIdealModel: React.FC = () => {
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = React.useState(true);
@@ -24,6 +16,15 @@ export const FindYourIdealModel: React.FC = () => {
   const pauseTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null
   );
+  const isMobile = useIsMobile();
+
+  const carBrands = [
+    { name: "Audi", image: Audi, width: 300, height: 175 },
+    { name: "BMW", image: BMW, width: 175, height: 175 },
+    { name: "Mercedes", image: Mercedes, width: 275, height: 175 },
+    { name: "Volkswagen", image: Volkswagen, width: 175, height: 175 },
+    { name: "Ford", image: Ford, width: 500, height: 175 },
+  ];
 
   // Función para avanzar automáticamente
   const autoAdvance = React.useCallback(() => {
@@ -77,8 +78,6 @@ export const FindYourIdealModel: React.FC = () => {
     }
     return brands;
   };
-
-  const isMobile = useIsMobile();
 
   // Limpieza al desmontar el componente
   React.useEffect(() => {

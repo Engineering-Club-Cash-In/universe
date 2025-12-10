@@ -1,10 +1,11 @@
-export const IconPlay = () => (
+export const IconPlay = (props: React.SVGProps<SVGSVGElement>)=> (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     width="80"
     height="80"
     viewBox="0 0 80 80"
     fill="none"
+    {...props}
   >
     <path
       d="M67.5 40C67.5 24.8182 55.1818 12.5 40 12.5C24.8182 12.5 12.5 24.8182 12.5 40C12.5 55.1818 24.8182 67.5 40 67.5C55.1818 67.5 67.5 55.1818 67.5 40ZM72.5 40C72.5 57.9432 57.9432 72.5 40 72.5C22.0568 72.5 7.5 57.9432 7.5 40C7.5 22.0568 22.0568 7.5 40 7.5C57.9432 7.5 72.5 22.0568 72.5 40Z"

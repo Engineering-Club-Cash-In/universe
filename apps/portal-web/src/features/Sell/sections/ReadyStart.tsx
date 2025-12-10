@@ -39,7 +39,7 @@ export const ReadyStart = () => {
     <div className="flex flex-col gap-8 mt-16 lg:mt-30 px-8 lg:px-12">
       <h2 className="text-2xl lg:text-header-2 text-center">{title}</h2>
       <p className="text-gray lg:text-4xl text-center">{subtitle}</p>
-      <div className="flex justify-center items-center gap-6 lg:gap-12 flex-col lg:flex-row">
+      <div className="flex justify-center items-center gap-6 lg:gap-12 flex-col md:flex-row">
         {items.map((item, index) => (
           <div
             key={index}

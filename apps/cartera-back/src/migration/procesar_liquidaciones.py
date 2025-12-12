@@ -6,15 +6,20 @@ from datetime import datetime
 # ============================================
 # 🔧 CONFIGURACIÓN
 # ============================================
-API_URL = "http://localhost:7000/liquidar-cuotas"  # 👈 Cambiá por tu endpoint real
-CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos\Liquidaciones"
+API_URL = "http://localhost:7000/liquidar-cuotas"
+CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos\testLiquidaciones"
+
+# 🆕 MODO PRUEBA - Cambiá a False para procesar todo
+MODO_PRUEBA = False
+MAX_ARCHIVOS_PRUEBA = 1  # Cuántos archivos procesar en modo prueba
+MAX_REGISTROS_PRUEBA = 2  # Cuántos registros por archivo en modo prueba
 
 # ============================================
 # 📡 FUNCIÓN PARA LLAMAR A TU API
 # ============================================
-def liquidar_cuotas_api(nombre_usuario, meses_liquidar):
+def liquidar_cuotas_api(nombre_usuario, cuota_mes):
     """
-    Llama a tu API para liquidar cuotas
+    Llama a tu API para liquidar cuotas por mes
     """
     headers = {
         "Content-Type": "application/json",
@@ -22,11 +27,11 @@ def liquidar_cuotas_api(nombre_usuario, meses_liquidar):
     
     payload = {
         "nombre_usuario": nombre_usuario,
-        "meses_liquidar": meses_liquidar,
+        "cuota_mes": cuota_mes,
     }
     
     try:
-        print(f"   📤 Enviando a API: {nombre_usuario} - {meses_liquidar} meses")
+        print(f"   📤 Enviando a API: {nombre_usuario} - {cuota_mes}")
         response = requests.post(API_URL, json=payload, headers=headers, timeout=30)
         response.raise_for_status()
         return response.json()
@@ -34,9 +39,6 @@ def liquidar_cuotas_api(nombre_usuario, meses_liquidar):
         print(f"   ❌ Error llamando a la API: {e}")
         return None
 
-# ============================================
-# 📊 FUNCIÓN PARA PROCESAR UN EXCEL
-# ============================================
 # ============================================
 # 📊 FUNCIÓN PARA PROCESAR UN EXCEL
 # ============================================
@@ -68,8 +70,8 @@ def procesar_excel(archivo_path):
         header_row = None
         for idx, row in df_raw.iterrows():
             row_str = ' '.join(str(cell).lower() for cell in row if pd.notna(cell))
-            # Buscar palabras clave en la fila
-            if 'meses' in row_str and ('cliente' in row_str or 'nombre' in row_str):
+            # 🆕 Buscar "CUOTA DE MES" en lugar de "MESES EN CRÉDITO"
+            if ('cuota de mes' in row_str or 'cuota mes' in row_str) and ('cliente' in row_str or 'nombre' in row_str):
                 header_row = idx
                 print(f"   ✅ Headers encontrados en fila {idx}")
                 break
@@ -85,65 +87,56 @@ def procesar_excel(archivo_path):
         
         print(f"   ✅ Columnas después de ajustar header: {df.columns.tolist()}")
         
-        # 🔍 BUSCAR LAS COLUMNAS CORRECTAS - PRIORIZAR "MESES EN CRÉDITO"
-        col_meses = None
+        # 🔍 BUSCAR LAS COLUMNAS CORRECTAS - "CUOTA DE MES" y "CLIENTE"
+        col_cuota_mes = None
         col_cliente = None
         
-        # 👇 NUEVA LÓGICA: Buscar específicamente "MESES EN CRÉDITO" primero
         for col in df.columns:
             col_str = str(col)
             col_lower = col_str.lower()
             
-            # Prioridad 1: "MESES EN CRÉDITO" (exacto o similar)
-            if col_meses is None and ('meses en crédito' in col_lower or 'meses en credito' in col_lower):
-                col_meses = col
-                print(f"   🎯 Usando columna prioritaria: '{col}'")
+            # 🆕 Buscar "CUOTA DE MES"
+            if col_cuota_mes is None and ('cuota de mes' in col_lower or 'cuota mes' in col_lower):
+                col_cuota_mes = col
+                print(f"   🎯 Columna CUOTA DE MES encontrada: '{col}'")
             
             # Cliente
             if col_cliente is None and ('cliente' in col_lower or 'nombre' in col_lower):
                 col_cliente = col
+                print(f"   🎯 Columna CLIENTE encontrada: '{col}'")
         
-        # Si no encontró "MESES EN CRÉDITO", buscar alternativas
-        if col_meses is None:
-            print(f"   ⚠️ No se encontró 'MESES EN CRÉDITO', buscando alternativas...")
-            for col in df.columns:
-                col_lower = str(col).lower()
-                if 'plazo' in col_lower and 'meses' in col_lower:
-                    col_meses = col
-                    print(f"   🔄 Usando columna alternativa: '{col}'")
-                    break
-        
-        if col_meses is None or col_cliente is None:
+        if col_cuota_mes is None or col_cliente is None:
             print(f"   ⚠️ No se encontraron las columnas necesarias")
             print(f"   📋 Columnas disponibles: {df.columns.tolist()}")
             return []
         
-        print(f"   ✅ Columna meses: '{col_meses}'")
+        print(f"   ✅ Columna cuota_mes: '{col_cuota_mes}'")
         print(f"   ✅ Columna cliente: '{col_cliente}'")
         
-        # 🧹 LIMPIAR DATOS - eliminar filas vacías y no numéricas en meses
-        df_clean = df[[col_meses, col_cliente]].copy()
+        # 🧹 LIMPIAR DATOS - eliminar filas vacías
+        df_clean = df[[col_cuota_mes, col_cliente]].copy()
         
         # Eliminar filas donde ambas columnas estén vacías
         df_clean = df_clean.dropna(how='all')
         
-        # Filtrar solo filas donde meses sea número válido
-        df_clean['meses_numeric'] = pd.to_numeric(df_clean[col_meses], errors='coerce')
-        df_clean = df_clean[df_clean['meses_numeric'].notna()]
-        
+        # Filtrar filas donde cuota_mes tenga formato válido (texto con punto y número)
         registros = []
         for _, row in df_clean.iterrows():
             try:
-                meses = int(row['meses_numeric'])
+                cuota_mes = str(row[col_cuota_mes]).strip()
                 cliente = str(row[col_cliente]).strip()
                 
-                # Validar que no esté vacío y que no sea un total o encabezado
-                if cliente and meses > 0 and not any(x in cliente.lower() for x in ['total', 'suma', 'gran total', 'monto']):
+                # Validar formato básico: debe tener al menos 4 caracteres y contener números
+                if (cliente and cuota_mes and 
+                    len(cuota_mes) >= 4 and 
+                    any(char.isdigit() for char in cuota_mes) and
+                    not any(x in cliente.lower() for x in ['total', 'suma', 'gran total', 'monto', 'nan'])):
+                    
                     registros.append({
                         'nombre_usuario': cliente,
-                        'meses_liquidar': meses
+                        'cuota_mes': cuota_mes
                     })
-                    print(f"      ✅ Registro agregado: {cliente} - {meses} meses")
+                    print(f"      ✅ Registro agregado: {cliente} - {cuota_mes}")
             except (ValueError, TypeError) as e:
                 continue
         
@@ -156,13 +149,21 @@ def procesar_excel(archivo_path):
         traceback.print_exc()
         return []
  
- 
- 
 # ============================================
 # 🚀 FUNCIÓN PRINCIPAL
 # ============================================
 def procesar_liquidaciones():
     print("🔥 ========== INICIANDO PROCESAMIENTO DE LIQUIDACIONES ==========")
+    
+    # 🆕 MOSTRAR SI ESTÁ EN MODO PRUEBA
+    if MODO_PRUEBA:
+        print("🧪 ⚠️  MODO PRUEBA ACTIVADO ⚠️")
+        print(f"   📁 Procesará máximo {MAX_ARCHIVOS_PRUEBA} archivo(s)")
+        print(f"   📋 Procesará máximo {MAX_REGISTROS_PRUEBA} registro(s) por archivo")
+        print("   💡 Para procesar todo, cambiá MODO_PRUEBA = False")
+    else:
+        print("🚀 MODO COMPLETO ACTIVADO")
+    
     print(f"📂 Carpeta: {CARPETA_EXCELS}")
     print(f"🔗 API: {API_URL}")
     print("=" * 70)
@@ -182,7 +183,12 @@ def procesar_liquidaciones():
         print("⚠️ No se encontraron archivos Excel en la carpeta")
         return
     
-    print(f"📁 Encontrados {len(archivos_excel)} archivos Excel\n")
+    # 🆕 LIMITAR ARCHIVOS EN MODO PRUEBA
+    if MODO_PRUEBA and len(archivos_excel) > MAX_ARCHIVOS_PRUEBA:
+        print(f"\n🧪 Limitando a {MAX_ARCHIVOS_PRUEBA} archivo(s) en modo prueba")
+        archivos_excel = archivos_excel[:MAX_ARCHIVOS_PRUEBA]
+    
+    print(f"📁 Archivos a procesar: {len(archivos_excel)}\n")
     
     # Contadores
     total_archivos = len(archivos_excel)
@@ -207,17 +213,22 @@ def procesar_liquidaciones():
             print(f"   ⚠️ No se encontraron registros válidos en este archivo")
             continue
         
+        # 🆕 LIMITAR REGISTROS EN MODO PRUEBA
+        if MODO_PRUEBA and len(registros) > MAX_REGISTROS_PRUEBA:
+            print(f"\n   🧪 Limitando a {MAX_REGISTROS_PRUEBA} registro(s) en modo prueba")
+            registros = registros[:MAX_REGISTROS_PRUEBA]
+        
         # Procesar cada registro
         for i, registro in enumerate(registros, 1):
             total_registros += 1
             print(f"\n   💰 [{i}/{len(registros)}] Procesando liquidación...")
             print(f"      👤 Cliente: {registro['nombre_usuario']}")
-            print(f"      📅 Meses: {registro['meses_liquidar']}")
+            print(f"      📅 Cuota mes: {registro['cuota_mes']}")
             
             # Llamar a la API
             resultado = liquidar_cuotas_api(
                 registro['nombre_usuario'],
-                registro['meses_liquidar']
+                registro['cuota_mes']
             )
             
             if resultado and resultado.get('success'):
@@ -227,7 +238,7 @@ def procesar_liquidaciones():
                 resultados_detallados.append({
                     'archivo': archivo,
                     'cliente': registro['nombre_usuario'],
-                    'meses': registro['meses_liquidar'],
+                    'cuota_mes': registro['cuota_mes'],
                     'estado': 'EXITOSO',
                     'mensaje': resultado.get('message', '')
                 })
@@ -239,7 +250,7 @@ def procesar_liquidaciones():
                 resultados_detallados.append({
                     'archivo': archivo,
                     'cliente': registro['nombre_usuario'],
-                    'meses': registro['meses_liquidar'],
+                    'cuota_mes': registro['cuota_mes'],
                     'estado': 'FALLIDO',
                     'mensaje': error_msg
                 })
@@ -249,6 +260,8 @@ def procesar_liquidaciones():
     # ============================================
     print("\n" + "="*70)
     print("🎉 PROCESAMIENTO COMPLETADO")
+    if MODO_PRUEBA:
+        print("🧪 (MODO PRUEBA)")
     print("="*70)
     print(f"📊 Total archivos procesados: {total_archivos}")
     print(f"📊 Total registros procesados: {total_registros}")
@@ -261,15 +274,18 @@ def procesar_liquidaciones():
         print("\n❌ REGISTROS FALLIDOS:")
         for resultado in resultados_detallados:
             if resultado['estado'] == 'FALLIDO':
-                print(f"   • {resultado['cliente']} ({resultado['meses']} meses) - {resultado['mensaje']}")
+                print(f"   • {resultado['cliente']} ({resultado['cuota_mes']}) - {resultado['mensaje']}")
     
     # Guardar log
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = f"liquidacion_log_{timestamp}.txt"
+    log_filename = f"liquidacion_log_{timestamp}{'_PRUEBA' if MODO_PRUEBA else ''}.txt"
     log_path = os.path.join(CARPETA_EXCELS, log_filename)
     
     with open(log_path, 'w', encoding='utf-8') as f:
-        f.write("RESUMEN DE LIQUIDACIÓN\n")
+        f.write("RESUMEN DE LIQUIDACIÓN")
+        if MODO_PRUEBA:
+            f.write(" - MODO PRUEBA")
+        f.write("\n")
         f.write("="*70 + "\n")
         f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write(f"Total archivos: {total_archivos}\n")
@@ -279,7 +295,7 @@ def procesar_liquidaciones():
         f.write("="*70 + "\n\n")
         f.write("DETALLE POR REGISTRO:\n")
         for resultado in resultados_detallados:
-            f.write(f"\n{resultado['estado']}: {resultado['cliente']} ({resultado['meses']} meses)\n")
+            f.write(f"\n{resultado['estado']}: {resultado['cliente']} ({resultado['cuota_mes']})\n")
             f.write(f"   Archivo: {resultado['archivo']}\n")
             f.write(f"   Mensaje: {resultado['mensaje']}\n")
     

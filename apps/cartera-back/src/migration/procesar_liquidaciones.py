@@ -7,7 +7,7 @@ from datetime import datetime
 # 🔧 CONFIGURACIÓN
 # ============================================
 API_URL = "http://localhost:7000/liquidar-cuotas"
-CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos\testLiquidaciones"
+CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos\Liquidaciones"
 
 # 🆕 MODO PRUEBA - Cambiá a False para procesar todo
 MODO_PRUEBA = False

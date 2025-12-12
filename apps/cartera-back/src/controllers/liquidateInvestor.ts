@@ -8,6 +8,175 @@ interface LiquidarCuotasInput {
   cuota_mes: string;
 }
 
+// 🧹 NORMALIZAR FORMATO DE MES - ULTRA PERMISIVO
+function normalizarCuotaMes(cuota_mes: string): string {
+  console.log(`   🔧 Normalizando mes: "${cuota_mes}"`);
+  
+  let normalizado = cuota_mes.trim();
+  
+  // 1. Remover puntos extras al final
+  normalizado = normalizado.replace(/\.+$/g, '');
+  
+  // 2. Convertir año de 4 dígitos a 2
+  normalizado = normalizado.replace(/\b2025\b/g, '25');
+  normalizado = normalizado.replace(/\b2024\b/g, '24');
+  normalizado = normalizado.replace(/\b2023\b/g, '23');
+  normalizado = normalizado.replace(/\b2022\b/g, '22');
+  normalizado = normalizado.replace(/\b2021\b/g, '21');
+  normalizado = normalizado.replace(/\b2020\b/g, '20');
+  
+  // 3. Casos especiales: múltiples meses (ej: "ago. 25 y sep. 25")
+  if (normalizado.includes(' y ')) {
+    console.log(`   ⚠️ Múltiples meses detectados, tomando el último`);
+    const meses = normalizado.split(' y ').map(m => m.trim());
+    normalizado = meses[meses.length - 1];
+    console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
+  }
+  
+  // 4. Si tiene múltiples meses separados por comas
+  if (normalizado.includes(',')) {
+    console.log(`   ⚠️ Múltiples meses con coma, tomando el último`);
+    const meses = normalizado.split(',').map(m => m.trim());
+    normalizado = meses[meses.length - 1];
+    console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
+  }
+  
+  // 5. Limpiar espacios múltiples
+  normalizado = normalizado.replace(/\s+/g, ' ');
+  
+  // 6. Asegurar que tiene punto después del mes
+  const partes = normalizado.split(/\s+/);
+  if (partes.length === 2) {
+    let mes = partes[0].toLowerCase().replace('.', '');
+    const año = partes[1];
+    
+    // Mapeo de meses en español
+    const mesesValidos = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 
+                          'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    
+    // Si el mes tiene más de 3 letras, tomar solo las primeras 3
+    if (mes.length > 3) {
+      mes = mes.substring(0, 3);
+    }
+    
+    if (mesesValidos.includes(mes)) {
+      normalizado = `${mes}. ${año}`;
+    }
+  }
+  
+  console.log(`   ✅ Resultado normalizado: "${normalizado}"`);
+  return normalizado;
+}
+
+// 🔍 BÚSQUEDA ULTRA PERMISIVA DE USUARIO
+async function buscarUsuarioPermisivo(nombre_usuario: string) {
+  console.log(`\n🔍 ========== BÚSQUEDA PERMISIVA DE USUARIO ==========`);
+  console.log(`   📝 Buscando: "${nombre_usuario}"`);
+  
+  // Limpiar el nombre de entrada
+  const nombreLimpio = nombre_usuario
+    .trim()
+    .replace(/\s+/g, ' ') // espacios múltiples
+    .replace(/[áàäâã]/gi, 'a')
+    .replace(/[éèëê]/gi, 'e')
+    .replace(/[íìïî]/gi, 'i')
+    .replace(/[óòöôõ]/gi, 'o')
+    .replace(/[úùüû]/gi, 'u')
+    .replace(/ñ/gi, 'n');
+  
+  console.log(`   🧹 Nombre limpio: "${nombreLimpio}"`);
+  
+  // ESTRATEGIA 1: Búsqueda exacta (case insensitive)
+  console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
+  let usuarios_encontrados = await db
+    .select()
+    .from(usuarios)
+    .where(sql`LOWER(${usuarios.nombre}) = LOWER(${nombreLimpio})`);
+  
+  if (usuarios_encontrados.length > 0) {
+    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta`);
+    return usuarios_encontrados;
+  }
+  
+  // ESTRATEGIA 2: Búsqueda con LIKE (contiene)
+  console.log(`   🎯 Estrategia 2: Búsqueda con LIKE...`);
+  usuarios_encontrados = await db
+    .select()
+    .from(usuarios)
+    .where(sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + nombreLimpio + '%'})`);
+  
+  if (usuarios_encontrados.length > 0) {
+    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con LIKE`);
+    return usuarios_encontrados;
+  }
+  
+  // ESTRATEGIA 3: Búsqueda por partes del nombre (primer y último apellido)
+  console.log(`   🎯 Estrategia 3: Búsqueda por partes del nombre...`);
+  const palabras = nombreLimpio.split(' ').filter(p => p.length > 2);
+  
+  if (palabras.length >= 2) {
+    const primeraPalabra = palabras[0];
+    const ultimaPalabra = palabras[palabras.length - 1];
+    
+    console.log(`   🔍 Buscando con: "${primeraPalabra}" Y "${ultimaPalabra}"`);
+    
+    usuarios_encontrados = await db
+      .select()
+      .from(usuarios)
+      .where(
+        and(
+          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + primeraPalabra + '%'})`,
+          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + ultimaPalabra + '%'})`
+        )
+      );
+    
+    if (usuarios_encontrados.length > 0) {
+      console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda por partes`);
+      return usuarios_encontrados;
+    }
+  }
+  
+  // ESTRATEGIA 4: Búsqueda con similitud (si PostgreSQL tiene la extensión pg_trgm)
+  console.log(`   🎯 Estrategia 4: Búsqueda con similitud...`);
+  try {
+    usuarios_encontrados = await db
+      .select()
+      .from(usuarios)
+      .where(sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) > 0.3`)
+      .orderBy(sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) DESC`);
+    
+    if (usuarios_encontrados.length > 0) {
+      console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con similitud`);
+      usuarios_encontrados.forEach((u, idx) => {
+        console.log(`      ${idx + 1}. ${u.nombre}`);
+      });
+      return usuarios_encontrados;
+    }
+  } catch (error) {
+    console.log(`   ⚠️ Extensión pg_trgm no disponible, saltando...`);
+  }
+  
+  // ESTRATEGIA 5: Buscar cualquier palabra del nombre
+  console.log(`   🎯 Estrategia 5: Búsqueda con cualquier palabra...`);
+  for (const palabra of palabras) {
+    if (palabra.length < 3) continue;
+    
+    console.log(`   🔍 Probando con: "${palabra}"`);
+    usuarios_encontrados = await db
+      .select()
+      .from(usuarios)
+      .where(sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + palabra + '%'})`);
+    
+    if (usuarios_encontrados.length > 0 && usuarios_encontrados.length < 10) {
+      console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con palabra "${palabra}"`);
+      return usuarios_encontrados;
+    }
+  }
+  
+  console.log(`   ❌ No se encontró ningún usuario`);
+  return [];
+}
+
 // 📅 Función helper para convertir "oct. 25" a rango de fechas
 function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; mesDescriptivo: string } {
   const cleanInput = cuota_mes.trim().toLowerCase().replace(/\./g, '');
@@ -51,44 +220,42 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
 export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
   try {
     console.log("🔥 ========== INICIANDO LIQUIDACIÓN DE CUOTAS ==========");
-    console.log("📝 Input:", JSON.stringify(input, null, 2));
+    console.log("📝 Input original:", JSON.stringify(input, null, 2));
 
-    const { nombre_usuario, cuota_mes } = input;
+    // 🧹 NORMALIZAR INPUT
+    const cuota_mes_normalizada = normalizarCuotaMes(input.cuota_mes);
+    const nombre_usuario = input.nombre_usuario;
 
     // ============================================
-    // 1️⃣ BUSCAR USUARIO CON BÚSQUEDA PERMISIVA
+    // 1️⃣ BUSCAR USUARIO CON BÚSQUEDA ULTRA PERMISIVA
     // ============================================
-    console.log("✅ Paso 1: Buscando usuario...");
-    console.log("🔍 Nombre a buscar:", nombre_usuario);
-
-    const usuariosEncontrados = await db
-      .select()
-      .from(usuarios)
-      .where(
-        sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + nombre_usuario + "%"})`
-      );
-
-    console.log(`✅ ${usuariosEncontrados.length} usuarios encontrados`);
+    const usuariosEncontrados = await buscarUsuarioPermisivo(nombre_usuario);
 
     if (usuariosEncontrados.length === 0) {
       throw new Error(
-        `No se encontró ningún usuario con nombre: ${nombre_usuario}`
+        `❌ No se encontró ningún usuario con nombre: "${nombre_usuario}"`
       );
     }
 
     if (usuariosEncontrados.length > 1) {
       console.log("⚠️ Múltiples usuarios encontrados:");
-      usuariosEncontrados.forEach((u) => {
-        console.log(`   - ${u.nombre} (ID: ${u.usuario_id})`);
+      usuariosEncontrados.forEach((u, idx) => {
+        console.log(`   ${idx + 1}. ${u.nombre} (ID: ${u.usuario_id})`);
       });
-      throw new Error(
-        `Se encontraron ${usuariosEncontrados.length} usuarios. Especificá mejor el nombre.`
-      );
+      
+      // Si son pocos, tomar el primero y continuar con WARNING
+      if (usuariosEncontrados.length <= 3) {
+        console.log(`⚠️ TOMANDO EL PRIMERO: ${usuariosEncontrados[0].nombre}`);
+      } else {
+        throw new Error(
+          `Se encontraron ${usuariosEncontrados.length} usuarios. Especificá mejor el nombre.`
+        );
+      }
     }
 
     const usuario = usuariosEncontrados[0];
     console.log(
-      "✅ Usuario encontrado:",
+      "✅ Usuario seleccionado:",
       usuario.nombre,
       `(ID: ${usuario.usuario_id})`
     );
@@ -137,9 +304,10 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     // ============================================
     // 3️⃣ CALCULAR RANGO DEL MES
     // ============================================
-    const rangoMes = obtenerRangoDelMes(cuota_mes);
+    const rangoMes = obtenerRangoDelMes(cuota_mes_normalizada);
     console.log(`\n📅 ========== RANGO CALCULADO ==========`);
-    console.log(`   Input original: "${cuota_mes}"`);
+    console.log(`   Input original: "${input.cuota_mes}"`);
+    console.log(`   Normalizado: "${cuota_mes_normalizada}"`);
     console.log(`   Mes descriptivo: ${rangoMes.mesDescriptivo}`);
     console.log(`   Rango inicio: ${rangoMes.inicio}`);
     console.log(`   Rango fin: ${rangoMes.fin}`);
@@ -193,7 +361,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       // ============================================
       // 5️⃣ BUSCAR LA CUOTA QUE COINCIDE CON EL MES
       // ============================================
-      console.log(`\n   🔍 BUSCANDO cuota que vence en ${cuota_mes}...`);
+      console.log(`\n   🔍 BUSCANDO cuota que vence en ${cuota_mes_normalizada}...`);
       console.log(`   🔍 Buscando entre ${rangoMes.inicio} y ${rangoMes.fin}`);
 
       const cuotaDelMes = await db
@@ -211,21 +379,21 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       console.log(`   📊 Cuotas encontradas en el rango: ${cuotaDelMes.length}`);
 
       if (cuotaDelMes.length > 0) {
-        console.log(`   🎯 Cuotas que coinciden con ${cuota_mes}:`);
+        console.log(`   🎯 Cuotas que coinciden con ${cuota_mes_normalizada}:`);
         cuotaDelMes.forEach((c) => {
           console.log(`      - Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento}`);
         });
       }
 
       if (cuotaDelMes.length === 0) {
-        console.log(`   ⚠️ NO SE ENCONTRÓ cuota que venza en ${cuota_mes}`);
+        console.log(`   ⚠️ NO SE ENCONTRÓ cuota que venza en ${cuota_mes_normalizada}`);
         console.log(`   ⚠️ Revisá que las fechas de vencimiento estén en el rango correcto`);
         
         resultadosPorCredito.push({
           credito_id: credito.credito_id,
           numero_credito: credito.numero_credito_sifco,
           cuotas_liquidadas: 0,
-          mensaje: `No hay cuota que venza en ${cuota_mes}`,
+          mensaje: `No hay cuota que venza en ${cuota_mes_normalizada}`,
           debug: {
             rango_buscado: `${rangoMes.inicio} - ${rangoMes.fin}`,
             total_cuotas_credito: todasLasCuotas.length,
@@ -248,32 +416,6 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       // ============================================
       // 6️⃣ LIQUIDAR HASTA ESA CUOTA
       // ============================================
-      const cuotasALiquidar = await db
-        .select()
-        .from(cuotas_credito)
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, credito.credito_id),
-            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
-          )
-        );
-
-      console.log(`   🔍 Total cuotas hasta ${numeroCuotaALiquidar}: ${cuotasALiquidar.length}`);
-
-      const cuotasNoLiquidadas = cuotasALiquidar.filter(
-        (c) => c.liquidado_inversionistas === false || c.liquidado_inversionistas === null
-      );
-      
-      console.log(`   🔍 Cuotas NO liquidadas: ${cuotasNoLiquidadas.length}`);
-
-      if (cuotasNoLiquidadas.length > 0) {
-        console.log(`   📝 Cuotas a actualizar:`);
-        cuotasNoLiquidadas.forEach(c => {
-          console.log(`      - Cuota #${c.numero_cuota} (vence: ${c.fecha_vencimiento})`);
-        });
-      }
-
-      // Actualizar cuotas
       const resultado = await db
         .update(cuotas_credito)
         .set({
@@ -283,8 +425,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         .where(
           and(
             eq(cuotas_credito.credito_id, credito.credito_id),
-            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar),
-            eq(cuotas_credito.liquidado_inversionistas, false)
+            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
           )
         )
         .returning();
@@ -327,7 +468,8 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         },
         creditos_procesados: creditosUsuario.length,
         cuotas_reseteadas: totalCuotasReseteadas,
-        cuota_mes_liquidado: cuota_mes,
+        cuota_mes_original: input.cuota_mes,
+        cuota_mes_normalizada: cuota_mes_normalizada,
         rango_liquidado: rangoMes,
         total_cuotas_liquidadas: totalCuotasLiquidadas,
         detalle_por_credito: resultadosPorCredito,

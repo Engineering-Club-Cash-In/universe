@@ -221,78 +221,82 @@ export const inversionistasRouter = new Elysia()
       }),
     }
   )
-    .post(
-    "/generateFalsePayments",
-    async ({ body, set }) => {
-      try {
-        const { inversionistaId, generateFalsePayment } = body;
+  .post(
+  "/generateFalsePayments",
+  async ({ body, set }) => {
+    try {
+      const { inversionistaId, generateFalsePayment } = body;
 
-        console.log(`🔍 Procesando pagos pendientes para inversionista ${inversionistaId}`);
-        console.log(`🎯 Generar pagos: ${generateFalsePayment}`);
+      console.log(`🔍 Procesando pagos pendientes para inversionista ${inversionistaId}`);
+      console.log(`🎯 Generar pagos: ${generateFalsePayment}`);
 
-        // Llamar al servicio
-        const resultado = await obtenerCreditosConPagosPendientes(
-          inversionistaId,
-          generateFalsePayment
-        );
+      // Llamar al servicio
+      const resultado = await obtenerCreditosConPagosPendientes(
+        inversionistaId,
+        generateFalsePayment
+      );
 
-        if (!resultado.success) {
-          set.status = 500;
-          return {
-            success: false,
-            error: resultado.error,
-          };
-        }
-
-        set.status = 200;
-        return {
-          message: generateFalsePayment 
-            ? "✅ Pagos generados correctamente" 
-            : "📄 Datos obtenidos correctamente",
-          ...resultado,
-        };
-
-      } catch (error: any) {
-        console.error("❌ Error en POST /pagos-pendientes/generar:", error);
+      if (!resultado.success) {
         set.status = 500;
         return {
           success: false,
-          error: error.message || "Error al procesar pagos pendientes",
+          error: resultado.error,
         };
       }
-    },
-    {
-      detail: {
-        summary: "Generar pagos pendientes para un inversionista",
-        description: `
-          Obtiene todos los créditos con pagos pendientes de un inversionista.
-          Si generateFalsePayment=true, genera los registros en pagos_credito_inversionistas.
-        `,
-        tags: ["Pagos Pendientes"],
-      },
-      body: t.Object({
-        inversionistaId: t.Number({
-          description: "ID del inversionista",
-          minimum: 1,
-        }),
-        generateFalsePayment: t.Boolean({
-          description: "Si es true, genera los pagos en pagos_credito_inversionistas",
-          default: false,
-        }),
-      }),
-      response: {
-        200: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-          inversionistaId: t.Number(),
-          totalCreditosConPagos: t.Number(),
-          pagosGenerados: t.Boolean(),
-          data: t.Array(t.Any()),
-        }),
-        500: t.Object({
-          success: t.Literal(false),
-          error: t.String(),
-        }),
-      },
+
+      set.status = 200;
+      return {
+        success: true,
+        message: generateFalsePayment 
+          ? "✅ Pagos generados correctamente" 
+          : "📄 Datos obtenidos correctamente",
+        inversionistaId: resultado.inversionistaId,
+        totalCreditosConPagos: resultado.totalCreditosConCuotas ?? 0,
+        pagosGenerados: resultado.pagosGenerados ?? false,
+        data: resultado.data ?? [],
+      };
+
+    } catch (error: any) {
+      console.error("❌ Error en POST /pagos-pendientes/generar:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error.message || "Error al procesar pagos pendientes",
+      };
     }
-  );
+  },
+  {
+    detail: {
+      summary: "Generar pagos pendientes para un inversionista",
+      description: `
+        Obtiene todos los créditos con pagos pendientes de un inversionista.
+        Si generateFalsePayment=true, genera los registros en pagos_credito_inversionistas.
+      `,
+      tags: ["Pagos Pendientes"],
+    },
+    body: t.Object({
+      inversionistaId: t.Number({
+        description: "ID del inversionista",
+        minimum: 1,
+      }),
+      generateFalsePayment: t.Boolean({
+        description: "Si es true, genera los pagos en pagos_credito_inversionistas",
+        default: false,
+      }),
+    }),
+    response: {
+      200: t.Object({
+        success: t.Boolean(),
+        message: t.String(),
+        inversionistaId: t.Number(),
+        totalCreditosConPagos: t.Number(),
+        pagosGenerados: t.Boolean(),
+        data: t.Array(t.Any()),
+      }),
+      500: t.Object({
+        success: t.Literal(false),
+        error: t.String(),
+      }),
+    },
+  }
+);

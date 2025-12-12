@@ -8,18 +8,16 @@ from typing import List, Dict, Any
 # ============================================
 API_ENDPOINT = "http://localhost:7000/pagos-inversionistas/v2"
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
-ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
+ARCHIVO_EXCEL ="Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
-# 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
+# 📅 Hojas a procesar
 HOJAS_A_PROCESAR = [
-    "Noviembre 2025",
-     
-    # Agregá más según necesites
+    "Octubre 2025",
 ]
 
 # 🔥 MODO PRUEBA
-MODO_PRUEBA = False  # 👈 True = solo 1 crédito por hoja, False = todos
-LIMITE_CREDITOS_PRUEBA = 2  # Número de créditos a procesar en modo prueba
+MODO_PRUEBA = False
+LIMITE_CREDITOS_PRUEBA = 6
 
 # ============================================
 # 🧹 FUNCIÓN PARA LIMPIAR VALORES
@@ -31,7 +29,7 @@ def limpiar_valor(valor: Any) -> str:
     
     valor_str = str(valor).strip()
     
-    # Remover prefijo Q (como hace el código TS)
+    # Remover prefijo Q
     if valor_str.upper().startswith('Q'):
         valor_str = valor_str[1:].strip()
     
@@ -47,116 +45,125 @@ def leer_hoja_excel(
     archivo_path: str,
     nombre_hoja: str
 ) -> Dict[str, List[Dict[str, Any]]]:
-    """
-    Lee una hoja específica del Excel y agrupa inversionistas por crédito
-    
-    Returns:
-        Dict con estructura: {
-            'numero_credito_1': [inversionista1, inversionista2, ...],
-            'numero_credito_2': [inversionista3, inversionista4, ...],
-        }
-    """
+    """Lee una hoja específica del Excel y agrupa inversionistas por crédito"""
     print(f"\n{'='*70}")
     print(f"📄 Procesando hoja: {nombre_hoja}")
     print(f"{'='*70}")
     
     try:
-        # Leer Excel sin headers primero para buscarlos
-        df_raw = pd.read_excel(archivo_path, sheet_name=nombre_hoja, header=None)
+        # Leer Excel - fila 1 tiene los headers
+        df = pd.read_excel(archivo_path, sheet_name=nombre_hoja, header=1)
         
-        # Buscar fila de headers
-        header_row = None
-        for idx, row in df_raw.iterrows():
-            if idx > 20:
-                break
-            row_str = ' '.join(str(cell).lower() for cell in row if pd.notna(cell))
-            if 'credito' in row_str or 'inversionista' in row_str:
-                header_row = idx
-                print(f"✅ Headers encontrados en fila {idx}")
-                break
+        # 🧹 Limpiar nombres de columnas
+        df.columns = [str(col).strip().replace('\n', ' ').replace('  ', ' ') for col in df.columns]
         
-        if header_row is None:
-            print(f"⚠️ No se encontraron headers en la hoja {nombre_hoja}")
-            return {}
+        print(f"\n📋 Total columnas: {len(df.columns)}")
+        print(f"📋 Total filas (antes de limpiar): {len(df)}")
         
-        # Leer con headers correctos
-        df = pd.read_excel(archivo_path, sheet_name=nombre_hoja, header=header_row)
+        # 🎯 MAPEO DIRECTO POR ÍNDICE - 100% CORRECTO
+        # Según tu Excel:
+        # [1]  '# crédito SIFCO'    -> 01010214111980
+        # [4]  'Capital'            -> Q269,354.80
+        # [5]  '%'                  -> 1.50% (interés)
+        # [9]  '% Cash-In'          -> 100.00%
+        # [10] '% Inversionista'    -> 0.00%
+        # [13] 'Cuota Inverionista' -> valor o 0
+        # [35] 'Inversionista'      -> Cube Investments S.A.
+        # [37] 'Cuota'              -> Q8,132.48  🎯 ESTA ES LA CORRECTA
         
-        # 🎯 MAPEO CORRECTO según tu Excel real
-        columnas_mapeo = {
-            'credito_sifco': '# crédito SIFCO',
-            'inversionista': 'Inversionista',
-            'capital': 'Capital',
-            'porcentaje_interes': '%',
-            'porcentaje_cashin': '% Cash-In',
-            'porcentaje_inversionista': '% Inversionista',
-            'cuota': 'Cuota',
-            'cuota_inversionista': 'Cuota Inverionista',  # Ojo al typo en tu Excel
+        columnas = {
+            'credito_sifco': df.columns[1],           # '# crédito SIFCO'
+            'capital': df.columns[4],                  # 'Capital' -> Q269,354.80
+            'porcentaje_interes': df.columns[5],       # '%' -> 1.50%
+            'porcentaje_cashin': df.columns[9],        # '% Cash-In' -> 100.00%
+            'porcentaje_inversionista': df.columns[10], # '% Inversionista' -> 0.00%
+            'cuota_inversionista': df.columns[13],     # 'Cuota Inverionista'
+            'inversionista': df.columns[35],           # 'Inversionista' -> Cube Investments S.A.
+            'cuota': df.columns[37],                   # 'Cuota' -> Q8,132.48 🎯
         }
         
-        # Verificar que existen todas las columnas
-        columnas = {}
-        faltantes = []
+        # Verificar columnas
+        print(f"\n✅ Mapeo de columnas:")
+        print(f"   {'KEY':<30} {'ÍNDICE':<8} {'NOMBRE COLUMNA'}")
+        print(f"   {'-'*70}")
+        for key, col in columnas.items():
+            idx = df.columns.get_loc(col)
+            print(f"   {key:<30} [{idx:2d}]      {repr(col)}")
         
-        for key, nombre_excel in columnas_mapeo.items():
-            if nombre_excel in df.columns:
-                columnas[key] = nombre_excel
-            else:
-                faltantes.append(nombre_excel)
-        
-        if faltantes:
-            print(f"❌ Faltan columnas en {nombre_hoja}: {faltantes}")
-            return {}
-        
-        print(f"✅ Todas las columnas encontradas")
-        
-        # Limpiar DataFrame - solo filas con crédito e inversionista válidos
+        # 🧹 Limpiar DataFrame
         df_clean = df.dropna(subset=[columnas['credito_sifco'], columnas['inversionista']])
+        
+        # Filtrar totales/sumas
         df_clean = df_clean[
             ~df_clean[columnas['credito_sifco']].astype(str).str.lower().str.contains('total|suma|promedio', na=False)
         ]
         
-        print(f"✅ Filas válidas encontradas: {len(df_clean)}")
+        # Filtrar donde inversionista sea un número o porcentaje
+        df_clean = df_clean[
+            ~df_clean[columnas['inversionista']].astype(str).str.match(r'^[\d.]+%?$', na=False)
+        ]
+        
+        # Filtrar inversionistas muy cortos
+        df_clean = df_clean[
+            df_clean[columnas['inversionista']].astype(str).str.len() > 3
+        ]
+        
+        print(f"\n✅ Filas válidas encontradas: {len(df_clean)}")
+        
+        # 🔍 DEBUG: Mostrar primera fila COMPLETA
+        if len(df_clean) > 0:
+            print(f"\n🔍 DEBUG - Primera fila válida:")
+            print(f"{'─'*70}")
+            primera = df_clean.iloc[0]
+            
+            for key, col in columnas.items():
+                valor_raw = primera[col]
+                valor_limpio = limpiar_valor(valor_raw)
+                print(f"   {key:<30}: {valor_limpio:<20} (raw: {repr(str(valor_raw)[:30])})")
+            
+            print(f"{'─'*70}")
+        else:
+            print(f"\n⚠️ No hay filas válidas")
+            return {}
         
         # Agrupar por crédito
         creditos_data = {}
         
         for idx, row in df_clean.iterrows():
-            # Extraer número de crédito (sin sufijos _2, _3, etc)
             numero_credito_raw = str(row[columnas['credito_sifco']]).strip()
-            
-            # Remover sufijos tipo _2, _3
             numero_credito = numero_credito_raw.split('_')[0]
             
-            # Si no existe el crédito en el dict, inicializarlo
             if numero_credito not in creditos_data:
                 creditos_data[numero_credito] = []
             
-            # 🎯 Construir data del inversionista usando los NOMBRES EXACTOS de tu Excel
+            # 🎯 Construir data del inversionista - MATCH PERFECTO
             inversionista_data = {
-                "inversionista": str(row[columnas['inversionista']]).strip(),
-                "capital": limpiar_valor(row[columnas['capital']]),
-                "porcentajeCashIn": limpiar_valor(row[columnas['porcentaje_cashin']]),
-                "porcentajeInversionista": limpiar_valor(row[columnas['porcentaje_inversionista']]),
-                "porcentaje": limpiar_valor(row[columnas['porcentaje_interes']]),
-                "cuota": limpiar_valor(row[columnas['cuota']]),
-                "cuotaInversionista": limpiar_valor(row[columnas['cuota_inversionista']]),
+                "inversionista": str(row[columnas['inversionista']]).strip(),  # Cube Investments S.A.
+                "capital": limpiar_valor(row[columnas['capital']]),  # 269354.80
+                "porcentajeCashIn": limpiar_valor(row[columnas['porcentaje_cashin']]),  # 1.00
+                "porcentajeInversionista": limpiar_valor(row[columnas['porcentaje_inversionista']]),  # 0.00
+                "porcentaje": limpiar_valor(row[columnas['porcentaje_interes']]),  # 0.015
+                "cuota": limpiar_valor(row[columnas['cuota']]),  # 8132.48 🎯 LA CORRECTA [37]
+                "cuotaInversionista": limpiar_valor(row[columnas['cuota_inversionista']]),  # valor o 0
             }
             
             creditos_data[numero_credito].append(inversionista_data)
         
-        print(f"✅ Créditos únicos encontrados: {len(creditos_data)}")
+        print(f"\n✅ Créditos únicos encontrados: {len(creditos_data)}")
         
-        # Mostrar resumen de primeros créditos
+        # Mostrar resumen
         for credito, inversionistas in list(creditos_data.items())[:3]:
-            print(f"   📋 {credito}: {len(inversionistas)} inversionistas")
-            # Mostrar primer inversionista de ejemplo
+            print(f"\n   📋 Crédito: {credito}")
+            print(f"      👥 {len(inversionistas)} inversionista(s)")
             if inversionistas:
                 inv = inversionistas[0]
                 print(f"      👤 {inv['inversionista']}")
+                print(f"      💰 Capital: Q{inv['capital']}")
+                print(f"      📊 Interés: {inv['porcentaje']} | CashIn: {inv['porcentajeCashIn']} | Inv: {inv['porcentajeInversionista']}")
+                print(f"      💵 Cuota: Q{inv['cuota']} | Cuota Inv: Q{inv['cuotaInversionista']}")
         
         if len(creditos_data) > 3:
-            print(f"   ... y {len(creditos_data) - 3} créditos más")
+            print(f"\n   ... y {len(creditos_data) - 3} créditos más")
         
         return creditos_data
         
@@ -169,20 +176,25 @@ def leer_hoja_excel(
 # ============================================
 # 📡 FUNCIÓN PARA ENVIAR A API
 # ============================================
-def enviar_a_api(numero_credito: str, inversionistas: List[Dict[str, Any]]) -> Dict:
+def enviar_a_api(
+    numero_credito: str, 
+    hoja_excel: str,
+    inversionistas: List[Dict[str, Any]]
+) -> Dict:
     """Envía la data procesada al endpoint TypeScript"""
     payload = {
         "numeroCredito": numero_credito,
+        "hoja_excel": hoja_excel,
         "inversionistasData": inversionistas
     }
     
     print(f"\n   🚀 Enviando {len(inversionistas)} inversionistas a la API...")
+    print(f"   📅 Hoja: {hoja_excel}")
     
-    # 🔍 MOSTRAR PAYLOAD COMPLETO PARA DEBUG
-    print(f"\n   📦 PAYLOAD:")
+    # 🔍 MOSTRAR PAYLOAD
     import json
-    print(json.dumps(payload, indent=2, ensure_ascii=False)[:500])  # Primeros 500 caracteres
-    print("   ...")
+    print(f"\n   📦 PAYLOAD:")
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
     
     try:
         response = requests.post(
@@ -192,41 +204,44 @@ def enviar_a_api(numero_credito: str, inversionistas: List[Dict[str, Any]]) -> D
             timeout=60
         )
         
-        # 🔍 MOSTRAR STATUS CODE
         print(f"\n   📡 Status Code: {response.status_code}")
         
         if response.status_code != 200:
-            print(f"   ❌ Response Text: {response.text[:500]}")
+            print(f"   ❌ Response: {response.text[:500]}")
         
         response.raise_for_status()
         resultado = response.json()
         
         print(f"   ✅ Respuesta de API:")
+        print(f"      - Success: {resultado.get('success', False)}")
         print(f"      - Exitosos: {resultado.get('exitosos', 0)}")
         print(f"      - Fallidos: {resultado.get('fallidos', 0)}")
         
+        if not resultado.get('success', True):
+            print(f"\n   ⚠️ VALIDACIÓN FALLIDA:")
+            print(f"      - Última cuota liquidada: {resultado.get('ultima_cuota_liquidada', 'N/A')}")
+            print(f"      - Hoja Excel enviada: {resultado.get('hoja_excel', 'N/A')}")
+            print(f"      - Error: {resultado.get('error', 'N/A')}")
+        
         if resultado.get('errores'):
             print(f"\n   ⚠️ Errores reportados:")
-            for error in resultado.get('errores', []):
+            for error in resultado.get('errores', [])[:5]:
                 print(f"      - {error.get('inversionista', 'N/A')}: {error.get('error', 'N/A')}")
         
         return resultado
         
     except requests.exceptions.ConnectionError:
-        print(f"   ❌ API no disponible - ¿Está corriendo el backend?")
-        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": "API no disponible"}]}
+        print(f"   ❌ API no disponible")
+        return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
     except requests.exceptions.Timeout:
-        print(f"   ❌ Timeout - La API tardó mucho en responder")
-        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": "Timeout"}]}
-    except requests.exceptions.HTTPError as e:
-        print(f"   ❌ Error HTTP: {e}")
-        print(f"   Response: {response.text[:500]}")
-        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": str(e)}]}
+        print(f"   ❌ Timeout")
+        return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
     except Exception as e:
-        print(f"   ❌ Error inesperado: {e}")
+        print(f"   ❌ Error: {e}")
         import traceback
         traceback.print_exc()
-        return {"exitosos": 0, "fallidos": len(inversionistas), "errores": [{"inversionista": "N/A", "error": str(e)}]}
+        return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
+
 # ============================================
 # 🚀 FUNCIÓN PRINCIPAL
 # ============================================
@@ -240,9 +255,11 @@ def procesar_multiples_hojas():
     print(f"📄 Archivo: {ARCHIVO_EXCEL}")
     print(f"🔗 API: {API_ENDPOINT}")
     print(f"📅 Hojas a procesar: {len(HOJAS_A_PROCESAR)}")
+    for hoja in HOJAS_A_PROCESAR:
+        print(f"   - {hoja}")
     
     if MODO_PRUEBA:
-        print(f"⚡ Límite por hoja: {LIMITE_CREDITOS_PRUEBA} crédito(s)")
+        print(f"\n⚡ Límite por hoja: {LIMITE_CREDITOS_PRUEBA} crédito(s)")
     
     print(f"{'='*70}\n")
     
@@ -252,35 +269,19 @@ def procesar_multiples_hojas():
         print(f"❌ Archivo no encontrado: {archivo_path}")
         return
     
-    # Verificar hojas disponibles
-    try:
-        xls = pd.ExcelFile(archivo_path)
-        hojas_disponibles = xls.sheet_names
-        print(f"📋 Hojas disponibles en el archivo:")
-        for hoja in hojas_disponibles:
-            print(f"   - {hoja}")
-        print()
-    except Exception as e:
-        print(f"❌ Error leyendo archivo: {e}")
-        return
-    
     # Estadísticas globales
     stats_globales = {
         'hojas_procesadas': 0,
         'creditos_procesados': 0,
         'creditos_exitosos': 0,
         'creditos_fallidos': 0,
+        'creditos_sin_match': 0,
         'inversionistas_exitosos': 0,
         'inversionistas_fallidos': 0,
     }
     
     # Procesar cada hoja
     for nombre_hoja in HOJAS_A_PROCESAR:
-        if nombre_hoja not in hojas_disponibles:
-            print(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
-            continue
-        
-        # Leer hoja
         creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
         
         if not creditos_data:
@@ -299,21 +300,23 @@ def procesar_multiples_hojas():
         for numero_credito, inversionistas in creditos_a_procesar:
             print(f"\n{'─'*70}")
             print(f"📋 Crédito: {numero_credito}")
+            print(f"📅 Hoja: {nombre_hoja}")
             print(f"👥 Inversionistas: {len(inversionistas)}")
             
             # Mostrar inversionistas
-            for inv in inversionistas[:3]:  # Primeros 3
-                print(f"   - {inv['inversionista']}: Capital={inv['capital']}")
-            if len(inversionistas) > 3:
-                print(f"   ... y {len(inversionistas) - 3} más")
+            for inv in inversionistas:
+                print(f"   - {inv['inversionista']}: Capital=Q{inv['capital']}, Cuota=Q{inv['cuota']}")
             
             # Enviar a API
-            resultado = enviar_a_api(numero_credito, inversionistas)
+            resultado = enviar_a_api(numero_credito, nombre_hoja, inversionistas)
             
             # Actualizar estadísticas
             stats_globales['creditos_procesados'] += 1
             
-            if resultado.get('exitosos', 0) > 0:
+            if not resultado.get('success', True):
+                stats_globales['creditos_sin_match'] += 1
+                print(f"\n   ⚠️ Crédito {numero_credito} NO procesado")
+            elif resultado.get('exitosos', 0) > 0:
                 stats_globales['creditos_exitosos'] += 1
                 stats_globales['inversionistas_exitosos'] += resultado['exitosos']
             
@@ -331,6 +334,7 @@ def procesar_multiples_hojas():
     print(f"📋 Créditos procesados: {stats_globales['creditos_procesados']}")
     print(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
     print(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    print(f"   ⚠️  Sin match: {stats_globales['creditos_sin_match']}")
     print(f"\n👥 Inversionistas:")
     print(f"   ✅ Exitosos: {stats_globales['inversionistas_exitosos']}")
     print(f"   ❌ Fallidos: {stats_globales['inversionistas_fallidos']}")

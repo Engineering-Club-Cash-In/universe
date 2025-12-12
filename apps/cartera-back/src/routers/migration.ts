@@ -353,29 +353,31 @@ export const sifcoRouter = new Elysia()
       try {
         console.log("[liquidar-cuotas] Iniciando liquidación...");
 
-        const { nombre_usuario, meses_liquidar } = body;
+        const { nombre_usuario, cuota_mes } = body;
 
         // Validaciones básicas
-        if (!nombre_usuario || !meses_liquidar) {
+        if (!nombre_usuario || !cuota_mes) {
           set.status = 400;
           return {
             success: false,
-            message: "nombre_usuario y meses_liquidar son requeridos",
+            message: "nombre_usuario y cuota_mes son requeridos",
           };
         }
 
-        if (meses_liquidar <= 0) {
+        // Validar formato básico del mes (debe tener algo de texto y números)
+        const cleanMes = cuota_mes.trim();
+        if (cleanMes.length < 4) {
           set.status = 400;
           return {
             success: false,
-            message: "meses_liquidar debe ser mayor a 0",
+            message: "cuota_mes debe tener formato válido (ej: 'oct. 25')",
           };
         }
 
         // Llamar al servicio
         const resultado = await liquidarCuotasPorUsuario({
           nombre_usuario,
-          meses_liquidar,
+          cuota_mes,
         });
 
         if (resultado.success) {
@@ -397,49 +399,92 @@ export const sifcoRouter = new Elysia()
     },
     {
       detail: {
-        summary: "Liquida cuotas de créditos por nombre de usuario",
+        summary: "Liquida cuotas de créditos por nombre de usuario y mes",
         tags: ["Liquidaciones"],
-        description: "Marca las cuotas como liquidadas hasta el mes especificado para todos los créditos del usuario",
+        description: "Busca la cuota que vence en el mes especificado y marca como liquidadas todas las cuotas hasta esa (incluyendo anteriores)",
       },
       body: t.Object({
         nombre_usuario: t.String({
           description: "Nombre del usuario (búsqueda flexible)",
-          examples: ["Christopher Miguel", "Fernando Alfonso"],
+          examples: ["Christopher Miguel", "Fernando Alfonso", "Juan"],
         }),
-        meses_liquidar: t.Number({
-          description: "Hasta qué cuota marcar como liquidada",
-          examples: [2, 5, 10],
-          minimum: 1,
+        cuota_mes: t.String({
+          description: "Mes y año de la cuota a liquidar en formato de 3 letras + año (como viene del Excel)",
+          examples: ["oct. 25", "ago. 25", "sep. 25", "nov. 24"],
+          pattern: "^[a-zA-Z]{3}\\.?\\s*\\d{2}$", // Opcional: validación de patrón
         }),
       }),
     }
   ).post(
     "/pagos-inversionistas/v2",
     async ({ body }) => {
-      const { numeroCredito, inversionistasData } = body;
+      const { numeroCredito, hoja_excel, inversionistasData } = body; // 🆕 hoja_excel
+
+      // 🔧 Transform inversionistasData to match expected type
+      const inversionistasDataTyped = inversionistasData.map((inv) => ({
+        inversionista: inv.inversionista,
+        capital: inv.capital,
+        porcentajeCashIn: inv.porcentajeCashIn,
+        porcentajeInversionista: inv.porcentajeInversionista,
+        porcentaje: inv.porcentaje,
+        cuota: inv.cuota !== undefined ? inv.cuota as string | number : undefined,
+        cuotaInversionista: inv.cuotaInversionista !== undefined ? inv.cuotaInversionista as string | number : undefined,
+      }));
 
       const resultado = await fillPagosInversionistasV2(
         numeroCredito,
-        inversionistasData
+        hoja_excel, // 🆕 Pasar hoja_excel
+        inversionistasDataTyped
       );
 
       return resultado;
     },
     {
       body: t.Object({
-        numeroCredito: t.String(),
+        numeroCredito: t.String({
+          description: "Número del crédito SIFCO",
+          examples: ["01010214116560"]
+        }),
+        hoja_excel: t.String({ // 🆕 Nuevo parámetro
+          description: "Nombre de la hoja del Excel que contiene los datos (debe coincidir con la última cuota liquidada)",
+          examples: ["octubre 2025", "septiembre 2025", "Octubre 2025"]
+        }),
         inversionistasData: t.Array(
           t.Object({
-            inversionista: t.String(),
-            capital: t.Union([t.String(), t.Number()]),
-            porcentajeCashIn: t.Union([t.String(), t.Number()]),
-            porcentajeInversionista: t.Union([t.String(), t.Number()]),
-            porcentaje: t.Union([t.String(), t.Number()]),
-            cuota: t.Optional(t.Union([t.String(), t.Number()])),
-            cuotaInversionista: t.Optional(t.Union([t.String(), t.Number()])),
-          })
+            inversionista: t.String({
+              description: "Nombre del inversionista",
+              examples: ["Pedro Piox Piox"]
+            }),
+            capital: t.Union([t.String(), t.Number()], {
+              description: "Capital aportado"
+            }),
+            porcentajeCashIn: t.Union([t.String(), t.Number()], {
+              description: "Porcentaje de Cash In"
+            }),
+            porcentajeInversionista: t.Union([t.String(), t.Number()], {
+              description: "Porcentaje del inversionista"
+            }),
+            porcentaje: t.Union([t.String(), t.Number()], {
+              description: "Porcentaje de interés"
+            }),
+            cuota: t.Optional(t.Union([t.String(), t.Number()], {
+              description: "Cuota opcional"
+            })),
+            cuotaInversionista: t.Optional(t.Union([t.String(), t.Number()], {
+              description: "Cuota del inversionista opcional"
+            })),
+          }),
+          {
+            description: "Array de inversionistas con sus datos",
+            minItems: 1
+          }
         ),
       }),
+      detail: {
+        summary: "Procesar pagos de inversionistas (v2)",
+        tags: ["Pagos Inversionistas"],
+        description: "Valida que la hoja del Excel coincida con la última cuota liquidada del crédito antes de procesar los inversionistas"
+      }
     }
   )
   .post(

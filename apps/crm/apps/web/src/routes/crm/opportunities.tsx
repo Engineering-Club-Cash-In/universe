@@ -10,6 +10,8 @@ import {
 	Building,
 	Calendar,
 	Clock,
+	ExternalLink,
+	FileSignature,
 	FileText,
 	Filter,
 	History,
@@ -222,11 +224,11 @@ function DroppableStageColumn({
 
 	return (
 		<Card
-			className={`h-fit min-w-80 shrink-0 ${
+			className={`flex max-h-[75vh] min-w-80 shrink-0 flex-col ${
 				isDraggedOver ? "ring-2 ring-blue-500" : ""
 			}`}
 		>
-			<CardHeader className="pb-3">
+			<CardHeader className="shrink-0 pb-3">
 				<div className="flex items-center justify-between">
 					<Badge
 						style={{ backgroundColor: stage.color, color: "white" }}
@@ -251,7 +253,7 @@ function DroppableStageColumn({
 					</CardDescription>
 				</div>
 			</CardHeader>
-			<CardContent className="space-y-3" ref={ref}>
+			<CardContent className="min-h-0 space-y-3 overflow-y-auto" ref={ref}>
 				{opportunities.length === 0 ? (
 					<div className="py-8 text-center text-muted-foreground">
 						<Target className="mx-auto mb-2 h-8 w-8 opacity-50" />
@@ -513,6 +515,22 @@ function RouteComponent() {
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getVehicles", session?.user?.id, userProfile.data?.role],
+	});
+
+	// Query for contracts associated with the selected opportunity
+	const opportunityContractsQuery = useQuery({
+		...orpc.listLegalContractsByOpportunity.queryOptions({
+			input: { opportunityId: selectedOpportunity?.id ?? "" },
+		}),
+		enabled:
+			!!selectedOpportunity?.id &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessJuridico(userProfile.data.role),
+		queryKey: [
+			"listLegalContractsByOpportunity",
+			selectedOpportunity?.id,
+			userProfile.data?.role,
+		],
 	});
 
 	const createOpportunityForm = useForm({
@@ -1126,12 +1144,15 @@ function RouteComponent() {
 						}
 					}}
 				>
-					<DialogTrigger asChild>
-						<Button>
-							<Plus className="mr-2 h-4 w-4" />
-							Agregar Oportunidad
-						</Button>
-					</DialogTrigger>
+					{userProfile.data?.role &&
+						PERMISSIONS.canCreateOpportunities(userProfile.data.role) && (
+							<DialogTrigger asChild>
+								<Button>
+									<Plus className="mr-2 h-4 w-4" />
+									Agregar Oportunidad
+								</Button>
+							</DialogTrigger>
+						)}
 					<DialogContent className="max-w-2xl">
 						<DialogHeader>
 							<DialogTitle>Crear Nueva Oportunidad</DialogTitle>
@@ -1598,7 +1619,93 @@ function RouteComponent() {
 										</div>
 									</div>
 
-										{/* Actions */}
+									{/* Contracts Section */}
+									{userProfile.data?.role &&
+										PERMISSIONS.canAccessJuridico(userProfile.data.role) && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<div className="flex items-center gap-2">
+													<FileSignature className="h-5 w-5 text-muted-foreground" />
+													<Label className="font-semibold text-muted-foreground text-sm">
+														Contratos Legales
+													</Label>
+												</div>
+												{opportunityContractsQuery.isLoading ? (
+													<p className="text-muted-foreground text-sm">
+														Cargando contratos...
+													</p>
+												) : opportunityContractsQuery.data &&
+												  opportunityContractsQuery.data.length > 0 ? (
+													<div className="space-y-2">
+														{opportunityContractsQuery.data.map(
+															({ contract }) => (
+																<div
+																	key={contract.id}
+																	className="flex items-center justify-between rounded-md border bg-background p-3"
+																>
+																	<div className="flex flex-col gap-1">
+																		<span className="font-medium text-sm">
+																			{contract.contractName}
+																		</span>
+																		<span className="text-muted-foreground text-xs">
+																			{contract.contractType} •{" "}
+																			{contract.status === "pending"
+																				? "Pendiente"
+																				: contract.status === "signed"
+																					? "Firmado"
+																					: "Cancelado"}
+																		</span>
+																	</div>
+																	<div className="flex gap-2">
+																		{contract.clientSigningLink && (
+																			<Button
+																				variant="outline"
+																				size="sm"
+																				asChild
+																			>
+																				<a
+																					href={contract.clientSigningLink}
+																					target="_blank"
+																					rel="noopener noreferrer"
+																					className="flex items-center gap-1"
+																				>
+																					<ExternalLink className="h-3 w-3" />
+																					Cliente
+																				</a>
+																			</Button>
+																		)}
+																		{contract.representativeSigningLink && (
+																			<Button
+																				variant="outline"
+																				size="sm"
+																				asChild
+																			>
+																				<a
+																					href={
+																						contract.representativeSigningLink
+																					}
+																					target="_blank"
+																					rel="noopener noreferrer"
+																					className="flex items-center gap-1"
+																				>
+																					<ExternalLink className="h-3 w-3" />
+																					Rep. Legal
+																				</a>
+																			</Button>
+																		)}
+																	</div>
+																</div>
+															),
+														)}
+													</div>
+												) : (
+													<p className="text-muted-foreground text-sm">
+														No hay contratos asociados a esta oportunidad
+													</p>
+												)}
+											</div>
+										)}
+
+									{/* Actions */}
 									<div className="flex gap-3 border-t pt-6">
 										<Button
 											variant="outline"
@@ -2370,7 +2477,7 @@ function RouteComponent() {
 			</div>
 
 			{/* Enhanced Opportunities Kanban View */}
-			<div className="flex gap-6 overflow-x-auto pb-4">
+			<div className="flex items-start gap-6 overflow-x-auto pb-4">
 				{opportunitiesByStage.map(
 					({ stage, opportunities, totalValue, count }) => (
 						<DroppableStageColumn

@@ -42,9 +42,9 @@ export const ROLE_CONFIG = {
 
 // Permission definitions - these match the server-side access control
 export const PERMISSIONS = {
-	// CRM Module Access
+	// CRM Module Access (analyst can view but not create/edit)
 	canAccessCRM: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES,
+		role === ROLES.ADMIN || role === ROLES.SALES || role === ROLES.ANALYST,
 
 	// Analysis Module Access
 	canAccessAnalysis: (role: UserRole | string): boolean =>
@@ -64,6 +64,9 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.SALES,
 
 	canDeleteLeads: (role: UserRole | string): boolean => role === ROLES.ADMIN,
+
+	canCreateOpportunities: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
 
 	canApproveOpportunities: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,

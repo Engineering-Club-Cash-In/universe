@@ -13,6 +13,7 @@ import {
 	Clock,
 	ExternalLink,
 	FileSignature,
+	FileSpreadsheet,
 	FileText,
 	Filter,
 	History,
@@ -2696,11 +2697,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 				"image/webp",
 				"application/msword",
 				"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+				// Excel files for detalle_analisis
+				"application/vnd.ms-excel",
+				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 			];
 
 			if (!allowedTypes.includes(file.type)) {
 				toast.error(
-					"Tipo de archivo no permitido. Solo se permiten PDF, imágenes y documentos Word.",
+					"Tipo de archivo no permitido. Solo se permiten PDF, imágenes, documentos Word y Excel.",
 				);
 				return;
 			}
@@ -2718,6 +2722,11 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	};
 
 	const documentTypeOptions = [
+		// Documento especial de resumen de análisis
+		{
+			value: "detalle_analisis",
+			label: "📊 Detalle de Análisis (Requerido para 50%)",
+		},
 		// Documentos de identificación y personales
 		{ value: "dpi", label: "DPI" },
 		{ value: "licencia", label: "Licencia" },
@@ -2773,11 +2782,96 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		if (mimeType.includes("pdf")) return "📄";
 		if (mimeType.includes("image")) return "🖼️";
 		if (mimeType.includes("word")) return "📝";
+		if (mimeType.includes("spreadsheet") || mimeType.includes("excel"))
+			return "📊";
 		return "📎";
 	};
 
+	// Find the detalle_analisis document if exists
+	const detalleDocument = documentsQuery.data?.find(
+		(doc) => (doc.documentType as string) === "detalle_analisis",
+	);
+	const otherDocuments = documentsQuery.data?.filter(
+		(doc) => (doc.documentType as string) !== "detalle_analisis",
+	);
+
 	return (
 		<div className="space-y-6">
+			{/* Detalle de Análisis Section - Special highlighted section */}
+			<Card
+				className={`border-2 ${detalleDocument ? "border-green-500 bg-green-50/50" : "border-amber-500 bg-amber-50/50"}`}
+			>
+				<CardHeader className="pb-3">
+					<CardTitle className="flex items-center gap-2 text-lg">
+						<FileSpreadsheet className="h-5 w-5" />
+						Detalle de Análisis
+						{detalleDocument ? (
+							<Badge className="bg-green-600">Subido</Badge>
+						) : (
+							<Badge
+								variant="outline"
+								className="border-amber-500 text-amber-700"
+							>
+								Requerido para 50%
+							</Badge>
+						)}
+					</CardTitle>
+					<p className="text-muted-foreground text-sm">
+						Resumen del crédito: vehículo, cliente, emisión de cheques y
+						cotización
+					</p>
+				</CardHeader>
+				<CardContent>
+					{detalleDocument ? (
+						<div className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4">
+							<div className="flex items-center gap-3">
+								<span className="text-3xl">📊</span>
+								<div>
+									<p className="font-medium">{detalleDocument.originalName}</p>
+									<p className="text-muted-foreground text-xs">
+										Subido el{" "}
+										{new Date(detalleDocument.uploadedAt).toLocaleString(
+											"es-GT",
+										)}{" "}
+										• {(detalleDocument.size / 1024 / 1024).toFixed(2)} MB
+									</p>
+								</div>
+							</div>
+							<div className="flex items-center gap-2">
+								<Button
+									size="sm"
+									variant="outline"
+									onClick={() => window.open(detalleDocument.url, "_blank")}
+								>
+									<FileText className="mr-1 h-4 w-4" />
+									Ver
+								</Button>
+								<Button
+									size="sm"
+									variant="ghost"
+									className="text-red-600 hover:bg-red-50 hover:text-red-700"
+									onClick={() => deleteMutation.mutate(detalleDocument.id)}
+									disabled={deleteMutation.isPending}
+								>
+									<Trash2 className="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
+					) : (
+						<div className="rounded-lg border-2 border-amber-300 border-dashed bg-amber-50/50 p-6 text-center">
+							<FileSpreadsheet className="mx-auto mb-2 h-10 w-10 text-amber-500" />
+							<p className="font-medium text-amber-800">
+								No se ha subido el Detalle de Análisis
+							</p>
+							<p className="mt-1 text-amber-600 text-sm">
+								Sube un archivo Excel (.xlsx) para poder avanzar la oportunidad
+								al 50%
+							</p>
+						</div>
+					)}
+				</CardContent>
+			</Card>
+
 			{/* Upload Section */}
 			<Card>
 				<CardHeader>
@@ -2841,11 +2935,11 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 							id="file"
 							type="file"
 							onChange={handleFileSelect}
-							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
 						/>
 						<p className="text-muted-foreground text-xs">
-							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX. Tamaño
-							máximo: 10MB
+							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX, XLS, XLSX.
+							Tamaño máximo: 10MB
 						</p>
 					</div>
 
@@ -2901,13 +2995,13 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 						<p className="py-4 text-center text-muted-foreground">
 							Cargando documentos...
 						</p>
-					) : documentsQuery.data?.length === 0 ? (
+					) : !otherDocuments || otherDocuments.length === 0 ? (
 						<p className="py-4 text-center text-muted-foreground">
-							No hay documentos subidos
+							No hay otros documentos subidos
 						</p>
 					) : (
 						<div className="space-y-3">
-							{documentsQuery.data?.map((doc) => (
+							{otherDocuments.map((doc) => (
 								<div
 									key={doc.id}
 									className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"

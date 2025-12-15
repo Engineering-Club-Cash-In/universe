@@ -133,6 +133,9 @@ export const ALLOWED_DOCUMENT_TYPES = [
 	"image/avif", // Agregado soporte para AVIF
 	"application/msword",
 	"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+	// Excel files for detalle_analisis
+	"application/vnd.ms-excel",
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ];
 
 // Tamaño máximo del archivo (10MB)
@@ -144,7 +147,7 @@ export function validateFile(file: File): { valid: boolean; error?: string } {
 		return {
 			valid: false,
 			error:
-				"Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF) y documentos Word.",
+				"Tipo de archivo no permitido. Solo se permiten PDF, imágenes (JPEG, PNG, WebP, AVIF), documentos Word y Excel.",
 		};
 	}
 

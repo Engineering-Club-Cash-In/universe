@@ -679,12 +679,15 @@ function RouteComponent() {
 								}
 							}}
 						>
-							<DialogTrigger asChild>
-								<Button>
-									<Plus className="mr-2 h-4 w-4" />
-									Agregar Lead
-								</Button>
-							</DialogTrigger>
+							{userProfile.data?.role &&
+								PERMISSIONS.canCreateLeads(userProfile.data.role) && (
+									<DialogTrigger asChild>
+										<Button>
+											<Plus className="mr-2 h-4 w-4" />
+											Agregar Lead
+										</Button>
+									</DialogTrigger>
+								)}
 							<DialogContent className="max-h-[90vh] min-w-[800px] max-w-4xl overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>

@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Plus, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -13,13 +13,22 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { client } from "@/utils/orpc";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { client, orpc } from "@/utils/orpc";
 
 interface CreateContractModalProps {
 	leadId: string;
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	onSuccess?: () => void;
+	/** Pre-select an opportunity when opening the modal */
+	preselectedOpportunityId?: string;
 }
 
 export function CreateContractModal({
@@ -27,6 +36,7 @@ export function CreateContractModal({
 	open,
 	onOpenChange,
 	onSuccess,
+	preselectedOpportunityId,
 }: CreateContractModalProps) {
 	const [formData, setFormData] = useState({
 		contractType: "",
@@ -34,9 +44,16 @@ export function CreateContractModal({
 		clientSigningLink: "",
 		representativeSigningLink: "",
 		additionalSigningLinks: [] as string[],
+		opportunityId: preselectedOpportunityId || "",
 	});
 
 	const [newAdditionalLink, setNewAdditionalLink] = useState("");
+
+	// Query opportunities for this lead
+	const { data: opportunities, isLoading: isLoadingOpportunities } = useQuery({
+		...orpc.getOpportunitiesByLead.queryOptions({ input: { leadId } }),
+		enabled: open && !!leadId,
+	});
 
 	const createMutation = useMutation({
 		mutationFn: async (values: {
@@ -46,6 +63,7 @@ export function CreateContractModal({
 			clientSigningLink?: string;
 			representativeSigningLink?: string;
 			additionalSigningLinks?: string[];
+			opportunityId?: string;
 		}) => {
 			return await client.createLegalContract(values);
 		},
@@ -67,6 +85,7 @@ export function CreateContractModal({
 			clientSigningLink: "",
 			representativeSigningLink: "",
 			additionalSigningLinks: [],
+			opportunityId: preselectedOpportunityId || "",
 		});
 		setNewAdditionalLink("");
 	};
@@ -117,6 +136,7 @@ export function CreateContractModal({
 				formData.additionalSigningLinks.length > 0
 					? formData.additionalSigningLinks
 					: undefined,
+			opportunityId: formData.opportunityId || undefined,
 		});
 	};
 
@@ -168,6 +188,37 @@ export function CreateContractModal({
 								}
 								disabled={createMutation.isPending}
 							/>
+						</div>
+
+						{/* Oportunidad asociada */}
+						<div className="space-y-2">
+							<Label htmlFor="opportunityId">Oportunidad Asociada</Label>
+							<Select
+								value={formData.opportunityId}
+								onValueChange={(value) =>
+									setFormData((prev) => ({
+										...prev,
+										opportunityId: value === "none" ? "" : value,
+									}))
+								}
+								disabled={createMutation.isPending || isLoadingOpportunities}
+							>
+								<SelectTrigger className="w-full">
+									<SelectValue placeholder="Seleccionar oportunidad (opcional)" />
+								</SelectTrigger>
+								<SelectContent>
+									<SelectItem value="none">Sin oportunidad</SelectItem>
+									{opportunities?.map((opp) => (
+										<SelectItem key={opp.id} value={opp.id}>
+											{opp.title} - Q
+											{Number.parseFloat(opp.value || "0").toLocaleString()}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
+							<p className="text-muted-foreground text-xs">
+								Asocia este contrato a una oportunidad específica
+							</p>
 						</div>
 
 						{/* Link del cliente */}

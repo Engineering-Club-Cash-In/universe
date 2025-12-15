@@ -126,6 +126,8 @@ export const appRouter = {
 	getOpportunitiesByLead: legalContractsRouter.getOpportunitiesByLead,
 	getUserPermissions: legalContractsRouter.getUserPermissions,
 	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
+	getOpportunitiesForContracts:
+		legalContractsRouter.getOpportunitiesForContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

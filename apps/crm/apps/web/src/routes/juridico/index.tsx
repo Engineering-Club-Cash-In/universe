@@ -76,7 +76,9 @@ function RouteComponent() {
 	// Filtrar oportunidades por búsqueda
 	const filteredOpportunities = opportunitiesForContracts?.filter(
 		(opp) =>
-			opp.title.toLowerCase().includes(opportunitiesSearchQuery.toLowerCase()) ||
+			opp.title
+				.toLowerCase()
+				.includes(opportunitiesSearchQuery.toLowerCase()) ||
 			opp.lead.firstName
 				.toLowerCase()
 				.includes(opportunitiesSearchQuery.toLowerCase()) ||
@@ -118,9 +120,7 @@ function RouteComponent() {
 						<div className="font-bold text-2xl">
 							{opportunitiesForContracts?.length || 0}
 						</div>
-						<p className="text-muted-foreground text-xs">
-							Al 80%+ de cierre
-						</p>
+						<p className="text-muted-foreground text-xs">Al 80%+ de cierre</p>
 					</CardContent>
 				</Card>
 
@@ -184,7 +184,10 @@ function RouteComponent() {
 			{/* Tabs for different views */}
 			<Tabs defaultValue="opportunities" className="w-full">
 				<TabsList className="grid w-full grid-cols-2">
-					<TabsTrigger value="opportunities" className="flex items-center gap-2">
+					<TabsTrigger
+						value="opportunities"
+						className="flex items-center gap-2"
+					>
 						<Target className="h-4 w-4" />
 						Oportunidades Listas
 					</TabsTrigger>
@@ -274,7 +277,9 @@ function RouteComponent() {
 												<TableCell className="text-right">
 													<div className="flex items-center justify-end gap-1 font-medium text-green-600">
 														<Banknote className="h-4 w-4" />Q
-														{Number.parseFloat(opp.value || "0").toLocaleString()}
+														{Number.parseFloat(
+															opp.value || "0",
+														).toLocaleString()}
 													</div>
 												</TableCell>
 												<TableCell className="text-center">
@@ -322,115 +327,115 @@ function RouteComponent() {
 				{/* Personas con Contratos Tab */}
 				<TabsContent value="contracts">
 					<Card>
-				<CardHeader>
-					<CardTitle>Personas con Contratos</CardTitle>
-					<CardDescription>
-						Lista de personas que tienen contratos legales registrados
-					</CardDescription>
+						<CardHeader>
+							<CardTitle>Personas con Contratos</CardTitle>
+							<CardDescription>
+								Lista de personas que tienen contratos legales registrados
+							</CardDescription>
 
-					{/* Barra de búsqueda */}
-					<div className="relative">
-						<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
-						<Input
-							placeholder="Buscar por nombre, DPI o email..."
-							value={searchQuery}
-							onChange={(e) => setSearchQuery(e.target.value)}
-							className="pl-9"
-						/>
-					</div>
-				</CardHeader>
-				<CardContent>
-					{isLoading ? (
-						<div className="flex items-center justify-center py-8">
-							<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-						</div>
-					) : filteredLeads && filteredLeads.length > 0 ? (
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>Nombre</TableHead>
-									<TableHead>DPI</TableHead>
-									<TableHead>Contacto</TableHead>
-									<TableHead className="text-center">Contratos</TableHead>
-									<TableHead>Último Contrato</TableHead>
-									<TableHead className="text-right">Acciones</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{filteredLeads.map((lead) => (
-									<TableRow
-										key={lead.id}
-										className="cursor-pointer hover:bg-muted/50"
-										onClick={() => navigate({ to: `/juridico/${lead.id}` })}
-									>
-										<TableCell className="font-medium">
-											{lead.firstName} {lead.lastName}
-										</TableCell>
-										<TableCell className="font-mono text-sm">
-											{lead.dpi || "N/A"}
-										</TableCell>
-										<TableCell>
-											<div className="text-sm">
-												<div>{lead.email || "Sin email"}</div>
-												<div className="text-muted-foreground">
-													{lead.phone || "Sin teléfono"}
-												</div>
-											</div>
-										</TableCell>
-										<TableCell className="text-center">
-											<Badge variant="outline">{lead.contractCount}</Badge>
-										</TableCell>
-										<TableCell>
-											{lead.latestContractDate ? (
-												<div className="text-sm">
-													<div>
-														{format(
-															new Date(lead.latestContractDate),
-															"dd MMM yyyy",
-															{ locale: es },
-														)}
-													</div>
-													<div className="text-muted-foreground">
-														{lead.latestContractName}
-													</div>
-												</div>
-											) : (
-												<span className="text-muted-foreground text-sm">
-													N/A
-												</span>
-											)}
-										</TableCell>
-										<TableCell className="text-right">
-											<Link
-												to="/juridico/$leadId"
-												params={{ leadId: lead.id }}
-												className="font-medium text-primary text-sm hover:underline"
-												onClick={(e) => e.stopPropagation()}
+							{/* Barra de búsqueda */}
+							<div className="relative">
+								<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+								<Input
+									placeholder="Buscar por nombre, DPI o email..."
+									value={searchQuery}
+									onChange={(e) => setSearchQuery(e.target.value)}
+									className="pl-9"
+								/>
+							</div>
+						</CardHeader>
+						<CardContent>
+							{isLoading ? (
+								<div className="flex items-center justify-center py-8">
+									<Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+								</div>
+							) : filteredLeads && filteredLeads.length > 0 ? (
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Nombre</TableHead>
+											<TableHead>DPI</TableHead>
+											<TableHead>Contacto</TableHead>
+											<TableHead className="text-center">Contratos</TableHead>
+											<TableHead>Último Contrato</TableHead>
+											<TableHead className="text-right">Acciones</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{filteredLeads.map((lead) => (
+											<TableRow
+												key={lead.id}
+												className="cursor-pointer hover:bg-muted/50"
+												onClick={() => navigate({ to: `/juridico/${lead.id}` })}
 											>
-												Ver detalles →
-											</Link>
-										</TableCell>
-									</TableRow>
-								))}
-							</TableBody>
-						</Table>
-					) : (
-						<div className="flex flex-col items-center justify-center py-12 text-center">
-							<FileText className="mb-3 h-12 w-12 text-gray-400" />
-							<h3 className="mb-1 font-semibold text-gray-900 text-lg">
-								{searchQuery
-									? "No se encontraron resultados"
-									: "No hay contratos registrados"}
-							</h3>
-							<p className="text-gray-500 text-sm">
-								{searchQuery
-									? "Intenta con otros términos de búsqueda"
-									: "Los contratos registrados aparecerán aquí"}
-							</p>
-						</div>
-					)}
-				</CardContent>
-			</Card>
+												<TableCell className="font-medium">
+													{lead.firstName} {lead.lastName}
+												</TableCell>
+												<TableCell className="font-mono text-sm">
+													{lead.dpi || "N/A"}
+												</TableCell>
+												<TableCell>
+													<div className="text-sm">
+														<div>{lead.email || "Sin email"}</div>
+														<div className="text-muted-foreground">
+															{lead.phone || "Sin teléfono"}
+														</div>
+													</div>
+												</TableCell>
+												<TableCell className="text-center">
+													<Badge variant="outline">{lead.contractCount}</Badge>
+												</TableCell>
+												<TableCell>
+													{lead.latestContractDate ? (
+														<div className="text-sm">
+															<div>
+																{format(
+																	new Date(lead.latestContractDate),
+																	"dd MMM yyyy",
+																	{ locale: es },
+																)}
+															</div>
+															<div className="text-muted-foreground">
+																{lead.latestContractName}
+															</div>
+														</div>
+													) : (
+														<span className="text-muted-foreground text-sm">
+															N/A
+														</span>
+													)}
+												</TableCell>
+												<TableCell className="text-right">
+													<Link
+														to="/juridico/$leadId"
+														params={{ leadId: lead.id }}
+														className="font-medium text-primary text-sm hover:underline"
+														onClick={(e) => e.stopPropagation()}
+													>
+														Ver detalles →
+													</Link>
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							) : (
+								<div className="flex flex-col items-center justify-center py-12 text-center">
+									<FileText className="mb-3 h-12 w-12 text-gray-400" />
+									<h3 className="mb-1 font-semibold text-gray-900 text-lg">
+										{searchQuery
+											? "No se encontraron resultados"
+											: "No hay contratos registrados"}
+									</h3>
+									<p className="text-gray-500 text-sm">
+										{searchQuery
+											? "Intenta con otros términos de búsqueda"
+											: "Los contratos registrados aparecerán aquí"}
+									</p>
+								</div>
+							)}
+						</CardContent>
+					</Card>
 				</TabsContent>
 			</Tabs>
 		</div>

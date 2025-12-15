@@ -212,8 +212,18 @@ export async function sincronizarCasosCobros(
 			// Obtener TODOS los créditos (todos los estados)
 			// Cartera-back requiere el parámetro 'estado', así que debemos llamar por cada estado
 			const estados: Array<
-				"ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
-			> = ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION", "MOROSO"];
+				| "ACTIVO"
+				| "CANCELADO"
+				| "INCOBRABLE"
+				| "PENDIENTE_CANCELACION"
+				| "MOROSO"
+			> = [
+				"ACTIVO",
+				"CANCELADO",
+				"INCOBRABLE",
+				"PENDIENTE_CANCELACION",
+				"MOROSO",
+			];
 
 			const allCreditos = [];
 			for (const estado of estados) {
@@ -319,7 +329,10 @@ export async function sincronizarCasosCobros(
 					.select()
 					.from(casosCobros)
 					.where(
-						eq(casosCobros.numeroCreditoSifco, credito.creditos.numero_credito_sifco),
+						eq(
+							casosCobros.numeroCreditoSifco,
+							credito.creditos.numero_credito_sifco,
+						),
 					)
 					.limit(1);
 

@@ -150,6 +150,7 @@ export const appRouter = {
 	getQuotationById: quotationsRouter.getQuotationById,
 	updateQuotation: quotationsRouter.updateQuotation,
 	deleteQuotation: quotationsRouter.deleteQuotation,
+	listQuotationsByOpportunity: quotationsRouter.listQuotationsByOpportunity,
 
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,

@@ -95,7 +95,12 @@ function RouteComponent() {
 			!!userProfile.data?.role &&
 			["admin", "sales"].includes(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getLeads", "dropdown", session?.user?.id, userProfile.data?.role],
+		queryKey: [
+			"getLeads",
+			"dropdown",
+			session?.user?.id,
+			userProfile.data?.role,
+		],
 	});
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions(),

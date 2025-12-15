@@ -738,7 +738,7 @@ export const crmRouter = {
 				throw new Error("Opportunity not found");
 			}
 
-			// Validate credit terms if moving to 100% stage
+			// Validate stage transitions
 			if (input.stageId) {
 				const targetStage = await db
 					.select()
@@ -746,6 +746,38 @@ export const crmRouter = {
 					.where(eq(salesStages.id, input.stageId))
 					.limit(1);
 
+				// Get current stage to check transition
+				const currentStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+
+				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
+				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+
+				// Validate detalle_analisis document when moving from <=40% to >=50%
+				if (fromPercentage <= 40 && toPercentage >= 50) {
+					// Check if detalle_analisis document exists for this opportunity
+					const detalleDocument = await db
+						.select()
+						.from(opportunityDocuments)
+						.where(
+							and(
+								eq(opportunityDocuments.opportunityId, id),
+								eq(opportunityDocuments.documentType, "detalle_analisis"),
+							),
+						)
+						.limit(1);
+
+					if (!detalleDocument[0]) {
+						throw new Error(
+							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), se requiere subir el archivo de Detalle de Análisis (.xlsx) con el resumen del crédito.",
+						);
+					}
+				}
+
+				// Validate credit terms if moving to 100% stage
 				if (targetStage[0]?.closurePercentage === 100) {
 					// Check all required fields for contract creation
 					const opp = currentOpportunity[0];

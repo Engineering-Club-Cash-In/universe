@@ -3,23 +3,25 @@ import buyYourCar from "./assets/buyYourCar.jpg";
 import financing from "./assets/financing.jpg";
 import investWithUs from "./assets/investWithUs.jpg";
 import { IconPlay } from "@/components/icons/IconPlay";
+import { useIsMobile } from "@/hooks";
 
 export const HowItWorks: React.FC = () => {
+  const isMobile = useIsMobile();
   const items = [
     {
       image: financing,
       label: "Financiamiento",
-      icon: <IconPlay />
+      icon: <IconPlay width={isMobile ? 50 : 80} height={isMobile ? 50 : 80} />
     },
     {
       image: buyYourCar,
       label: "Marketplace",
-      icon: <IconPlay />
+      icon: <IconPlay width={isMobile ? 50 : 80} height={isMobile ? 50 : 80}  />
     },
      {
       image: investWithUs,
       label: "Invierte con Nosotros",
-      icon: <IconPlay />
+      icon: <IconPlay width={isMobile ? 50 : 80} height={isMobile ? 50 : 80}  />
     },
   ];
 
@@ -32,20 +34,20 @@ export const HowItWorks: React.FC = () => {
         </h3>
       </div>
 
-      <div className="flex flex-col mt-8 md:flex-row gap-8 lg:gap-20">
+      <div className="flex flex-col mt-8 md:flex-row gap-8 md:gap-6 lg:gap-20">
         {items.map((item, index) => (
           <div
             key={index}
-            className="relative flex-1 lg:h-[335px] overflow-hidden group cursor-pointer"
+            className="relative flex-1  overflow-hidden group cursor-pointer "
           >
             <img
               src={item.image}
               alt={item.label}
-              className="w-full h-full object-cover rounded-4xl"
+              className="w-full h-[30svh] lg:h-full object-cover rounded-4xl"
             />
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/55 rounded-4xl transition-all duration-600 ease-in group-hover:bg-black/0">
               {item.icon}
-              <span className="text-light text-header-body">{item.label}</span>
+              <span className="text-light lg:text-header-body">{item.label}</span>
             </div>
           </div>
         ))}

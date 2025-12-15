@@ -38,11 +38,11 @@ export const Testimonies = () => {
             className="relative overflow-hidden rounded-lg group cursor-pointer flex items-center justify-center"
           >
             {/* Imagen de fondo */}
-            <div className="aspect-4/5 relative w-full">
+            <div className="aspect-4/5 relative w-full h-[40svh] md:h-[60svh]">
               <img
                 src={testimony.imageUrl}
                 alt={testimony.name}
-                className="w-full h-full object-cover object-center"
+                className="w-full  h-full object-cover object-center"
               />
 
               {/* Overlay negro transparente con contenido */}

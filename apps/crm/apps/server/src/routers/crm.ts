@@ -1449,9 +1449,58 @@ export const crmRouter = {
 		}),
 
 	// Clients
-	getClients: crmProcedure.handler(async ({ context }) => {
-		if (context.userRole === "admin") {
-			return await db
+	getClients: crmProcedure
+		.input(
+			z.object({
+				limit: z.number().min(1).max(100).default(20),
+				offset: z.number().min(0).default(0),
+				search: z.string().optional(),
+				status: z.enum(["active", "inactive", "churned"]).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { limit, offset, search, status } = input;
+			const conditions: any[] = [];
+
+			// Filter by user if not admin
+			if (context.userRole !== "admin") {
+				conditions.push(eq(clients.assignedTo, context.userId));
+			}
+
+			// Filter by status
+			if (status) {
+				conditions.push(eq(clients.status, status));
+			}
+
+			// Search filter
+			if (search && search.trim() !== "") {
+				const searchTerms = search.trim().split(/\s+/);
+				const termConditions = searchTerms.map((term) => {
+					const searchPattern = `%${term}%`;
+					return or(
+						ilike(clients.contactPerson, searchPattern),
+						ilike(companies.name, searchPattern),
+					);
+				});
+				if (termConditions.length > 0) {
+					conditions.push(...termConditions);
+				}
+			}
+
+			const whereClause =
+				conditions.length > 0 ? and(...conditions) : undefined;
+
+			// Get total count
+			const countResult = await db
+				.select({ count: sql<number>`count(*)` })
+				.from(clients)
+				.leftJoin(companies, eq(clients.companyId, companies.id))
+				.where(whereClause);
+
+			const total = Number(countResult[0]?.count || 0);
+
+			// Get paginated data
+			const data = await db
 				.select({
 					id: clients.id,
 					contactPerson: clients.contactPerson,
@@ -1470,29 +1519,53 @@ export const crmRouter = {
 				})
 				.from(clients)
 				.leftJoin(companies, eq(clients.companyId, companies.id))
-				.orderBy(clients.createdAt);
+				.where(whereClause)
+				.orderBy(desc(clients.createdAt))
+				.limit(limit)
+				.offset(offset);
+
+			return {
+				data,
+				total,
+				limit,
+				offset,
+			};
+		}),
+
+	getClientsStats: crmProcedure.handler(async ({ context }) => {
+		const conditions: any[] = [];
+
+		// Filter by user if not admin
+		if (context.userRole !== "admin") {
+			conditions.push(eq(clients.assignedTo, context.userId));
 		}
-		return await db
+
+		const whereClause =
+			conditions.length > 0 ? and(...conditions) : undefined;
+
+		const allClients = await db
 			.select({
-				id: clients.id,
-				contactPerson: clients.contactPerson,
-				contractValue: clients.contractValue,
-				startDate: clients.startDate,
-				endDate: clients.endDate,
 				status: clients.status,
-				assignedTo: clients.assignedTo,
-				notes: clients.notes,
-				createdAt: clients.createdAt,
-				updatedAt: clients.updatedAt,
-				company: {
-					id: companies.id,
-					name: companies.name,
-				},
+				contractValue: clients.contractValue,
 			})
 			.from(clients)
-			.leftJoin(companies, eq(clients.companyId, companies.id))
-			.where(eq(clients.assignedTo, context.userId))
-			.orderBy(clients.createdAt);
+			.where(whereClause);
+
+		const total = allClients.length;
+		const active = allClients.filter((c) => c.status === "active").length;
+		const inactive = allClients.filter((c) => c.status === "inactive").length;
+		const churned = allClients.filter((c) => c.status === "churned").length;
+		const totalContractValue = allClients.reduce((sum, c) => {
+			return sum + (Number.parseFloat(c.contractValue || "0") || 0);
+		}, 0);
+
+		return {
+			total,
+			active,
+			inactive,
+			churned,
+			totalContractValue,
+		};
 	}),
 
 	createClient: crmProcedure

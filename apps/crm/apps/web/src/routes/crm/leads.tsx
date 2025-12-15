@@ -148,18 +148,20 @@ function RouteComponent() {
 
 	const leadsQuery = useQuery({
 		...orpc.getLeads.queryOptions({
-			limit: pageSize,
-			offset: page * pageSize,
-			search: debouncedSearch || undefined,
-			status:
-				statusFilter !== "all"
-					? (statusFilter as
-							| "new"
-							| "contacted"
-							| "qualified"
-							| "converted"
-							| "unqualified")
-					: undefined,
+			input: {
+				limit: pageSize,
+				offset: page * pageSize,
+				search: debouncedSearch || undefined,
+				status:
+					statusFilter !== "all"
+						? (statusFilter as
+								| "new"
+								| "contacted"
+								| "qualified"
+								| "converted"
+								| "unqualified")
+						: undefined,
+			},
 		}),
 		enabled:
 			!!userProfile.data?.role &&

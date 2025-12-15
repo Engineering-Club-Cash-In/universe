@@ -474,6 +474,10 @@ export class ContractGeneratorService {
       }
 
       // 12. Integración con Documenso (si se proporcionaron emails y se generó PDF)
+      let signing: {
+        signs: string[];
+        linkDocument: string;
+       } | undefined;
       let signingLinks: string[] | undefined;
       let shouldCleanupFiles = false;
 
@@ -488,12 +492,14 @@ export class ContractGeneratorService {
           }
 
           // Crear documento y obtener links de firma (detección automática de posiciones)
-          signingLinks = await documensoService.createDocumentAndGetSigningLinks(
+          signing = await documensoService.createDocumentAndGetSigningLinks(
             baseFilename,
             pdfBuffer,
             contractType,
             options.emails
           );
+
+          signingLinks = signing.signs ?? [];
 
           console.log(`✓ ${signingLinks.length} link(s) de firma generados`);
 
@@ -562,6 +568,7 @@ export class ContractGeneratorService {
           nameDocument: [{ enum: contractType, label: config.description }],
           data: submissionData,
           signing_links: signingLinks,
+          linkDocument: signing?.linkDocument || '',
           contractType,
           docx_path: docxPath,
           pdf_path: pdfPath,
@@ -596,6 +603,7 @@ export class ContractGeneratorService {
         nameDocument: [{ enum: contractType, label: config.description }],
         data: submissionData,
         signing_links: signingLinks,
+        linkDocument: signing?.linkDocument || '',
         // Campos adicionales para backward compatibility
         contractType,
         docx_path: docxPath,
@@ -612,6 +620,7 @@ export class ContractGeneratorService {
         success: false,
         nameDocument: [{ enum: contractType, label: contractType }],
         data: [],
+        linkDocument: '',
         signing_links: undefined,
         contractType,
         message: 'Error al generar contrato',

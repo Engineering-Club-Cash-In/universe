@@ -686,6 +686,7 @@ export interface ContractGenerationResponse {
   data?: {
     [key: string]: any;
   }[];
+  linkDocument?: string;
   contractType: ContractType;
   docx_path?: string;
   pdf_path?: string;

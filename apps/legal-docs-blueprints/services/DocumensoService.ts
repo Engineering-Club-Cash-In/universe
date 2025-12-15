@@ -254,11 +254,13 @@ function generateFallbackFields(
 export class DocumensoService {
   private client: Documenso;
   private baseUrl: string;
+  private team: string;
 
   constructor(apiUrl?: string, apiToken?: string) {
     // API v2-beta es requerida para el SDK
     const apiV1Url = apiUrl || process.env.DOCUMENSO_API_URL || 'https://documenso.s2.devteamatcci.site/api/v1';
     this.baseUrl = apiV1Url.replace('/api/v1', '/api/v2-beta');
+    this.team = process.env.DOCUMENSO_TEAM || 'engineering';
 
     const token = apiToken || process.env.DOCUMENSO_API_TOKEN || '';
 
@@ -457,7 +459,10 @@ export class DocumensoService {
     pdfBuffer: Buffer,
     contractType: ContractType,
     emails: string[]
-  ): Promise<string[]> {
+  ): Promise<{
+    signs: string[];
+    linkDocument: string;
+  }> {
     try {
       console.log(`\n🔄 Iniciando flujo completo en Documenso para: ${title}`);
 
@@ -513,7 +518,12 @@ export class DocumensoService {
       console.log(`✅ ${signingLinks.length} link(s) de firma generados`);
       console.log(`📋 Links:`, signingLinks);
 
-      return signingLinks;
+      const idDocument = documentResponse?.documentId || documentResponse.id || '';
+
+      return {
+        signs: signingLinks,
+        linkDocument: `${baseUrl}/t/${this.team}/documents/${idDocument}`
+      }
     } catch (error: any) {
       console.error('❌ Error en flujo completo de Documenso:', error.message);
       throw error;

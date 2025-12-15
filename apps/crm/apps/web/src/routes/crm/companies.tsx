@@ -111,12 +111,12 @@ function RouteComponent() {
 		queryKey: ["getOpportunities", session?.user?.id, userProfile.data?.role],
 	});
 	const clientsQuery = useQuery({
-		...orpc.getClients.queryOptions(),
+		...orpc.getClients.queryOptions({ input: { limit: 1000, offset: 0 } }),
 		enabled:
 			!!userProfile.data?.role &&
 			["admin", "sales"].includes(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
+		queryKey: ["getClients", "all", session?.user?.id, userProfile.data?.role],
 	});
 
 	const createCompanyForm = useForm({
@@ -338,7 +338,8 @@ function RouteComponent() {
 			opportunitiesQuery.data?.filter((o) => o.company?.id === companyId)
 				.length || 0;
 		const clients =
-			clientsQuery.data?.filter((c) => c.company?.id === companyId).length || 0;
+			clientsQuery.data?.data?.filter((c) => c.company?.id === companyId)
+				.length || 0;
 
 		return { leads, opportunities, clients };
 	};
@@ -371,7 +372,9 @@ function RouteComponent() {
 	// Companies with active relationships
 	const companiesWithClients =
 		companiesQuery.data?.filter((company) =>
-			clientsQuery.data?.some((client) => client.company?.id === company.id),
+			clientsQuery.data?.data?.some(
+				(client) => client.company?.id === company.id,
+			),
 		).length || 0;
 
 	return (

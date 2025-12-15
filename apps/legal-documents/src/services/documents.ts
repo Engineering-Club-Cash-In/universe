@@ -71,6 +71,7 @@ export interface DocumentResult {
   success: boolean
   nameDocument: DocumentType[]
   data: DocumentSubmissionData[]
+  linkDocument: string
   signing_links?: string[]
 }
 

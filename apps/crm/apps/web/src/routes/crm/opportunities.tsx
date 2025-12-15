@@ -276,6 +276,7 @@ export const Route = createFileRoute("/crm/opportunities")({
 	component: RouteComponent,
 	validateSearch: z.object({
 		companyId: z.string().optional(),
+		opportunityId: z.string().optional(),
 	}).parse,
 });
 
@@ -294,8 +295,20 @@ function RouteComponent() {
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
+	const [leadsSearch, setLeadsSearch] = useState("");
+	const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState("");
 	const processedCompanyIdRef = useRef<string | null>(null);
+	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
+	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+
+	// Debounce leads search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedLeadsSearch(leadsSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [leadsSearch]);
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
@@ -471,12 +484,22 @@ function RouteComponent() {
 		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
 	});
 	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions(),
+		queryKey: [
+			"getLeads",
+			"dropdown",
+			debouncedLeadsSearch,
+			session?.user?.id,
+			userProfile.data?.role,
+		],
+		queryFn: () =>
+			client.getLeads({
+				limit: 50,
+				search: debouncedLeadsSearch || undefined,
+			}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 	});
 
 	const vendorsQuery = useQuery({
@@ -769,9 +792,9 @@ function RouteComponent() {
 			processedCompanyIdRef.current !== search.companyId
 		) {
 			// Find leads from this company
-			const companyLeads = leadsQuery.data.filter(
-				(lead) => lead.company?.id === search.companyId,
-			);
+			const companyLeads = leadsQuery.data?.data?.filter(
+				(lead: any) => lead.company?.id === search.companyId,
+			) || [];
 
 			// If there are leads from this company, pre-select the first one
 			if (companyLeads.length > 0) {
@@ -806,6 +829,37 @@ function RouteComponent() {
 			}
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
+
+	// Handle opening details modal from URL param (opportunityId)
+	useEffect(() => {
+		if (
+			search.opportunityId &&
+			opportunitiesQuery.data &&
+			processedOpportunityIdRef.current !== search.opportunityId
+		) {
+			const opportunity = opportunitiesQuery.data.find(
+				(opp) => opp.id === search.opportunityId,
+			);
+			if (opportunity) {
+				setSelectedOpportunity(opportunity);
+				setIsDetailsDialogOpen(true);
+				processedOpportunityIdRef.current = search.opportunityId;
+			}
+		}
+	}, [search.opportunityId, opportunitiesQuery.data]);
+
+	// Clear search param when details modal closes
+	useEffect(() => {
+		const wasOpen = prevDetailsOpenRef.current;
+		prevDetailsOpenRef.current = isDetailsDialogOpen;
+
+		if (wasOpen && !isDetailsDialogOpen && processedOpportunityIdRef.current) {
+			processedOpportunityIdRef.current = null;
+			if (search.opportunityId) {
+				navigate({ to: "/crm/opportunities", search: {}, replace: true });
+			}
+		}
+	}, [isDetailsDialogOpen, navigate, search.opportunityId]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;
@@ -1172,14 +1226,16 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.map((lead) => ({
+														...(leadsQuery.data?.data?.map((lead: any) => ({
 															value: lead.id,
 															label: `${lead.firstName} ${lead.lastName}`,
 														})) || []),
 													]}
 													value={field.state.value ?? null}
 													onChange={(value) => field.handleChange(value)}
-													placeholder="Seleccionar lead"
+													onSearchChange={setLeadsSearch}
+													isLoading={leadsQuery.isFetching}
+													placeholder="Buscar lead..."
 													width="full"
 												/>
 											</div>
@@ -1238,7 +1294,7 @@ function RouteComponent() {
 									<createOpportunityForm.Field
 										name="stageId"
 										validators={{
-											onChange: ({ value }) => {
+											onSubmit: ({ value }) => {
 												if (!value || value === "") {
 													return "La etapa es requerida";
 												}
@@ -1453,7 +1509,16 @@ function RouteComponent() {
 												</Label>
 												<div className="flex items-center gap-3">
 													<Users className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
+													<span
+														className="cursor-pointer font-medium text-primary hover:underline"
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/crm/leads",
+																search: { leadId: selectedOpportunity.lead?.id },
+															});
+														}}
+													>
 														{selectedOpportunity.lead.firstName}{" "}
 														{selectedOpportunity.lead.lastName}
 													</span>
@@ -1533,21 +1598,7 @@ function RouteComponent() {
 										</div>
 									</div>
 
-									{/* Notes */}
-									{selectedOpportunity.notes && (
-										<div className="space-y-3">
-											<Label className="font-semibold text-base text-muted-foreground">
-												Notas
-											</Label>
-											<div className="rounded-lg border bg-muted/50 p-4">
-												<p className="text-sm leading-relaxed">
-													{selectedOpportunity.notes}
-												</p>
-											</div>
-										</div>
-									)}
-
-									{/* Actions */}
+										{/* Actions */}
 									<div className="flex gap-3 border-t pt-6">
 										<Button
 											variant="outline"
@@ -1726,14 +1777,16 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.map((lead) => ({
+														...(leadsQuery.data?.data?.map((lead: any) => ({
 															value: lead.id,
 															label: `${lead.firstName} ${lead.lastName}`,
 														})) || []),
 													]}
 													value={field.state.value ?? null}
 													onChange={(value) => field.handleChange(value)}
-													placeholder="Seleccionar lead"
+													onSearchChange={setLeadsSearch}
+													isLoading={leadsQuery.isFetching}
+													placeholder="Buscar lead..."
 													width="full"
 												/>
 											</div>
@@ -1891,30 +1944,12 @@ function RouteComponent() {
 														field.handleBlur();
 													}}
 													placeholder="Seleccionar fecha de cierre"
+													className="w-full"
 												/>
 											</div>
 										)}
 									</editOpportunityForm.Field>
 								</div>
-							</div>
-
-							<div>
-								<editOpportunityForm.Field name="notes">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Notas</Label>
-											<Textarea
-												id={field.name}
-												name={field.name}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder="Notas adicionales sobre esta oportunidad..."
-												rows={3}
-											/>
-										</div>
-									)}
-								</editOpportunityForm.Field>
 							</div>
 
 							{/* Términos de Crédito - Mostrar cuando se acerca al 100% */}
@@ -2359,7 +2394,7 @@ function RouteComponent() {
 function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
-	const [documentType, setDocumentType] = useState<string>("identification");
+	const [documentType, setDocumentType] = useState<string>("");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -2485,13 +2520,39 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	};
 
 	const documentTypeOptions = [
-		{ value: "identification", label: "Identificación (DPI/Pasaporte)" },
-		{ value: "income_proof", label: "Comprobante de Ingresos" },
-		{ value: "bank_statement", label: "Estado de Cuenta Bancario" },
-		{ value: "business_license", label: "Patente de Comercio" },
-		{ value: "property_deed", label: "Escrituras de Propiedad" },
-		{ value: "vehicle_title", label: "Tarjeta de Circulación" },
-		{ value: "credit_report", label: "Reporte Crediticio" },
+		// Documentos de identificación y personales
+		{ value: "dpi", label: "DPI" },
+		{ value: "licencia", label: "Licencia" },
+		{ value: "recibo_luz", label: "Recibo de luz" },
+		{ value: "recibo_adicional", label: "Recibo adicional" },
+		{ value: "formularios", label: "Formularios" },
+		// Estados de cuenta
+		{ value: "estados_cuenta_1", label: "Estado de cuenta mes 1" },
+		{ value: "estados_cuenta_2", label: "Estado de cuenta mes 2" },
+		{ value: "estados_cuenta_3", label: "Estado de cuenta mes 3" },
+		// Documentos comerciales
+		{ value: "patente_comercio", label: "Patente de comercio" },
+		{ value: "patente_mercantil", label: "Patente mercantil" },
+		// Documentos empresariales (S.A.)
+		{ value: "representacion_legal", label: "Representación Legal" },
+		{ value: "constitucion_sociedad", label: "Constitución de sociedad" },
+		{ value: "iva_1", label: "Formulario IVA mes 1" },
+		{ value: "iva_2", label: "Formulario IVA mes 2" },
+		{ value: "iva_3", label: "Formulario IVA mes 3" },
+		{ value: "estado_financiero", label: "Estado financiero" },
+		{ value: "clausula_consentimiento", label: "Cláusula de consentimiento" },
+		{ value: "minutas", label: "Minutas" },
+		// Documentos de vehículos
+		{ value: "tarjeta_circulacion", label: "Tarjeta de circulación" },
+		{ value: "titulo_propiedad", label: "Título de propiedad" },
+		{ value: "dpi_dueno", label: "DPI del dueño del vehículo" },
+		{ value: "patente_comercio_vehiculo", label: "Patente comercio (vehículo)" },
+		{ value: "representacion_legal_vehiculo", label: "Representación legal (vehículo)" },
+		{ value: "dpi_representante_legal_vehiculo", label: "DPI representante legal (vehículo)" },
+		{ value: "pago_impuesto_circulacion", label: "Pago impuesto de circulación" },
+		{ value: "consulta_sat", label: "Consulta SAT" },
+		{ value: "consulta_garantias_mobiliarias", label: "Consulta garantías mobiliarias" },
+		// Otro
 		{ value: "other", label: "Otro" },
 	];
 
@@ -2517,7 +2578,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 						<Label htmlFor="documentType">Tipo de Documento</Label>
 						<Select value={documentType} onValueChange={setDocumentType}>
 							<SelectTrigger>
-								<SelectValue />
+								<SelectValue placeholder="Selecciona un tipo de documento" />
 							</SelectTrigger>
 							<SelectContent>
 								{documentTypeOptions.map((type) => (
@@ -2530,13 +2591,34 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 					</div>
 
 					<div className="space-y-2">
-						<Label htmlFor="description">Descripción (opcional)</Label>
+						<Label htmlFor="description">
+							Descripción{" "}
+							{documentType === "other" ? (
+								<span className="text-red-500">*</span>
+							) : (
+								"(opcional)"
+							)}
+						</Label>
 						<Input
 							id="description"
 							value={description}
 							onChange={(e) => setDescription(e.target.value)}
-							placeholder="Descripción del documento..."
+							placeholder={
+								documentType === "other"
+									? "Describe el tipo de documento..."
+									: "Descripción del documento..."
+							}
+							className={
+								documentType === "other" && !description.trim()
+									? "border-red-300"
+									: ""
+							}
 						/>
+						{documentType === "other" && !description.trim() && (
+							<p className="text-red-500 text-xs">
+								La descripción es obligatoria para documentos de tipo "Otro"
+							</p>
+						)}
 					</div>
 
 					<div className="space-y-2">
@@ -2580,7 +2662,12 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 
 					<Button
 						className="w-full"
-						disabled={!selectedFile || uploadMutation.isPending}
+						disabled={
+							!selectedFile ||
+							!documentType ||
+							uploadMutation.isPending ||
+							(documentType === "other" && !description.trim())
+						}
 						onClick={() => uploadMutation.mutate()}
 					>
 						{uploadMutation.isPending ? "Subiendo..." : "Subir Documento"}

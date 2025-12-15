@@ -86,7 +86,7 @@ function VehiclesDashboard() {
 	);
 
 	// Filter vehicles based on search term and filter status
-	const filteredVehicles = vehicles?.filter((vehicle: any) => {
+	const filteredVehicles = vehicles?.data?.filter((vehicle: any) => {
 		const latestInspection = vehicle.inspections?.[0];
 
 		const matchesSearch =

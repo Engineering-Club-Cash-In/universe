@@ -347,7 +347,7 @@ function QuoterPage() {
 
 	// Cuando se selecciona un vehículo, auto-llenar datos
 	const handleVehicleSelect = (vehicleId: string) => {
-		const vehicle = vehiclesQuery.data?.find((v) => v.id === vehicleId);
+		const vehicle = vehiclesQuery.data?.data?.find((v: any) => v.id === vehicleId);
 		if (vehicle) {
 			quoterForm.setFieldValue("vehicleId", vehicleId);
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
@@ -461,7 +461,7 @@ function QuoterPage() {
 												<SelectValue placeholder="Seleccionar vehículo..." />
 											</SelectTrigger>
 											<SelectContent>
-												{vehiclesQuery.data?.map((vehicle) => (
+												{vehiclesQuery.data?.data?.map((vehicle: any) => (
 													<SelectItem key={vehicle.id} value={vehicle.id}>
 														{vehicle.make} {vehicle.model} {vehicle.year}
 													</SelectItem>

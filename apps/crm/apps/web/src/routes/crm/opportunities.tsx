@@ -778,6 +778,14 @@ function RouteComponent() {
 				createOpportunityForm.setFieldValue("leadId", companyLeads[0].id);
 			}
 
+			// Inicializar con la etapa de menor porcentaje (1%)
+			const initialStage = salesStagesQuery.data?.find(
+				(s) => s.closurePercentage === 1,
+			);
+			if (initialStage) {
+				createOpportunityForm.setFieldValue("stageId", initialStage.id);
+			}
+
 			// Open the modal
 			setIsCreateDialogOpen(true);
 			// Mark as processed to prevent re-opening
@@ -1051,7 +1059,15 @@ function RouteComponent() {
 					open={isCreateDialogOpen}
 					onOpenChange={(open) => {
 						setIsCreateDialogOpen(open);
-						if (!open) {
+						if (open) {
+							// Inicializar con la etapa de menor porcentaje (1%)
+							const initialStage = salesStagesQuery.data?.find(
+								(s) => s.closurePercentage === 1,
+							);
+							if (initialStage) {
+								createOpportunityForm.setFieldValue("stageId", initialStage.id);
+							}
+						} else {
 							createOpportunityForm.reset();
 						}
 					}}
@@ -1181,7 +1197,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: any) => ({
+														...(vehiclesQuery.data?.data?.map((vehicle: any) => ({
 															value: vehicle.id,
 															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
 														})) || []),
@@ -1236,13 +1252,7 @@ function RouteComponent() {
 													Etapa Inicial <span className="text-red-500">*</span>
 												</Label>
 												<Select
-													value={
-														field.state.value ||
-														salesStagesQuery.data?.find(
-															(s) => s.closurePercentage === 1,
-														)?.id ||
-														undefined
-													}
+													value={field.state.value || undefined}
 													onValueChange={(value) => field.handleChange(value)}
 												>
 													<SelectTrigger
@@ -1788,7 +1798,7 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: any) => ({
+														...(vehiclesQuery.data?.data?.map((vehicle: any) => ({
 															value: vehicle.id,
 															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
 														})) || []),

@@ -572,11 +572,15 @@ export const crmRouter = {
 			z
 				.object({
 					leadId: z.string().uuid().optional(),
+					search: z.string().optional(),
+					limit: z.number().min(1).max(100).default(50),
 				})
 				.optional(),
 		)
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
+			const searchTerm = input?.search;
+			const limit = input?.limit ?? 50;
 
 			const selectFields = {
 				id: opportunities.id,
@@ -630,6 +634,18 @@ export const crmRouter = {
 				conditions.push(eq(opportunities.leadId, leadIdFilter));
 			}
 
+			// Search filter (by title, company name, or lead name)
+			if (searchTerm) {
+				conditions.push(
+					or(
+						ilike(opportunities.title, `%${searchTerm}%`),
+						ilike(companies.name, `%${searchTerm}%`),
+						ilike(leads.firstName, `%${searchTerm}%`),
+						ilike(leads.lastName, `%${searchTerm}%`),
+					),
+				);
+			}
+
 			// Role-based filter: non-admin can only see their own opportunities
 			if (context.userRole !== "admin") {
 				conditions.push(eq(opportunities.assignedTo, context.userId));
@@ -638,10 +654,13 @@ export const crmRouter = {
 			if (conditions.length > 0) {
 				return await baseQuery
 					.where(and(...conditions))
-					.orderBy(opportunities.createdAt);
+					.orderBy(desc(opportunities.createdAt))
+					.limit(limit);
 			}
 
-			return await baseQuery.orderBy(opportunities.createdAt);
+			return await baseQuery
+				.orderBy(desc(opportunities.createdAt))
+				.limit(limit);
 		}),
 
 	createOpportunity: crmProcedure

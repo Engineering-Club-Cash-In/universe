@@ -12,7 +12,7 @@ import {
 	Target,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -158,6 +159,27 @@ function QuoterPage() {
 		null,
 	);
 	const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+	const [vehiclesSearch, setVehiclesSearch] = useState("");
+	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
+	const [opportunitiesSearch, setOpportunitiesSearch] = useState("");
+	const [debouncedOpportunitiesSearch, setDebouncedOpportunitiesSearch] =
+		useState("");
+
+	// Debounce vehicles search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedVehiclesSearch(vehiclesSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [vehiclesSearch]);
+
+	// Debounce opportunities search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedOpportunitiesSearch(opportunitiesSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [opportunitiesSearch]);
 
 	// Verificar que sea usuario de ventas
 	if (userProfile.data && !["admin", "sales"].includes(userProfile.data.role)) {
@@ -170,11 +192,21 @@ function QuoterPage() {
 		enabled: !!session,
 	});
 	const vehiclesQuery = useQuery({
-		...orpc.getVehicles.queryOptions(),
+		queryKey: ["getVehicles", "quoter", debouncedVehiclesSearch],
+		queryFn: () =>
+			client.getVehicles({
+				limit: 50,
+				query: debouncedVehiclesSearch || undefined,
+			}),
 		enabled: !!session,
 	});
 	const opportunitiesQuery = useQuery({
-		...orpc.getOpportunities.queryOptions(),
+		queryKey: ["getOpportunities", "quoter", debouncedOpportunitiesSearch],
+		queryFn: () =>
+			client.getOpportunities({
+				limit: 50,
+				search: debouncedOpportunitiesSearch || undefined,
+			}),
 		enabled: !!session,
 	});
 
@@ -467,27 +499,23 @@ function QuoterPage() {
 							<CardContent>
 								<quoterForm.Field name="opportunityId">
 									{(field) => (
-										<Select
-											value={field.state.value}
-											onValueChange={(value) =>
+										<Combobox
+											options={[
+												{ value: "none", label: "Sin oportunidad" },
+												...(opportunitiesQuery.data?.map((opp: any) => ({
+													value: opp.id,
+													label: `${opp.title} - ${opp.lead ? `${opp.lead.firstName} ${opp.lead.lastName}` : "Sin lead"}`,
+												})) || []),
+											]}
+											value={field.state.value || "none"}
+											onChange={(value) =>
 												field.handleChange(value === "none" ? "" : value)
 											}
-										>
-											<SelectTrigger className="w-full md:w-[400px]">
-												<SelectValue placeholder="Seleccionar oportunidad..." />
-											</SelectTrigger>
-											<SelectContent>
-												<SelectItem value="none">Sin oportunidad</SelectItem>
-												{opportunitiesQuery.data?.map((opp: any) => (
-													<SelectItem key={opp.id} value={opp.id}>
-														{opp.title} -{" "}
-														{opp.lead
-															? `${opp.lead.firstName} ${opp.lead.lastName}`
-															: "Sin lead"}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
+											onSearchChange={setOpportunitiesSearch}
+											isLoading={opportunitiesQuery.isFetching}
+											placeholder="Buscar oportunidad..."
+											width="full"
+										/>
 									)}
 								</quoterForm.Field>
 							</CardContent>
@@ -502,18 +530,22 @@ function QuoterPage() {
 								<CardContent className="space-y-4">
 									<div className="space-y-2">
 										<Label>Seleccionar Vehículo (Opcional)</Label>
-										<Select onValueChange={handleVehicleSelect}>
-											<SelectTrigger>
-												<SelectValue placeholder="Seleccionar vehículo..." />
-											</SelectTrigger>
-											<SelectContent>
-												{vehiclesQuery.data?.data?.map((vehicle: any) => (
-													<SelectItem key={vehicle.id} value={vehicle.id}>
-														{vehicle.make} {vehicle.model} {vehicle.year}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
+										<Combobox
+											options={
+												vehiclesQuery.data?.data?.map((vehicle: any) => ({
+													value: vehicle.id,
+													label: `${vehicle.make} ${vehicle.model} ${vehicle.year} - ${vehicle.licensePlate}`,
+												})) || []
+											}
+											value={null}
+											onChange={(value) => {
+												if (value) handleVehicleSelect(value);
+											}}
+											onSearchChange={setVehiclesSearch}
+											isLoading={vehiclesQuery.isFetching}
+											placeholder="Buscar vehículo..."
+											width="full"
+										/>
 									</div>
 
 									<quoterForm.Field name="vehicleBrand">

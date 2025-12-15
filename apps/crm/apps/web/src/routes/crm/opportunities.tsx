@@ -301,6 +301,8 @@ function RouteComponent() {
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
 	const [leadsSearch, setLeadsSearch] = useState("");
 	const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState("");
+	const [vehiclesSearch, setVehiclesSearch] = useState("");
+	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -313,6 +315,14 @@ function RouteComponent() {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [leadsSearch]);
+
+	// Debounce vehicles search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedVehiclesSearch(vehiclesSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [vehiclesSearch]);
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
@@ -511,12 +521,22 @@ function RouteComponent() {
 	});
 
 	const vehiclesQuery = useQuery({
-		...orpc.getVehicles.queryOptions(),
+		queryKey: [
+			"getVehicles",
+			"dropdown",
+			debouncedVehiclesSearch,
+			session?.user?.id,
+			userProfile.data?.role,
+		],
+		queryFn: () =>
+			client.getVehicles({
+				limit: 50,
+				query: debouncedVehiclesSearch || undefined,
+			}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getVehicles", session?.user?.id, userProfile.data?.role],
 	});
 
 	// Query for contracts associated with the selected opportunity
@@ -1304,7 +1324,9 @@ function RouteComponent() {
 													onChange={(value) =>
 														field.handleChange(value === "none" ? "" : value)
 													}
-													placeholder="Seleccionar vehículo"
+													onSearchChange={setVehiclesSearch}
+													isLoading={vehiclesQuery.isFetching}
+													placeholder="Buscar vehículo..."
 													width="full"
 												/>
 											</div>
@@ -2059,7 +2081,9 @@ function RouteComponent() {
 													onChange={(value) =>
 														field.handleChange(value === "none" ? "" : value)
 													}
-													placeholder="Seleccionar vehículo"
+													onSearchChange={setVehiclesSearch}
+													isLoading={vehiclesQuery.isFetching}
+													placeholder="Buscar vehículo..."
 													width="full"
 												/>
 											</div>

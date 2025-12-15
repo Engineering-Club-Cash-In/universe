@@ -8,6 +8,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Banknote,
 	Building,
+	Calculator,
 	Calendar,
 	Clock,
 	ExternalLink,
@@ -533,6 +534,22 @@ function RouteComponent() {
 		],
 	});
 
+	// Query for quotations associated with the selected opportunity
+	const opportunityQuotationsQuery = useQuery({
+		...orpc.listQuotationsByOpportunity.queryOptions({
+			input: { opportunityId: selectedOpportunity?.id ?? "" },
+		}),
+		enabled:
+			!!selectedOpportunity?.id &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+		queryKey: [
+			"listQuotationsByOpportunity",
+			selectedOpportunity?.id,
+			userProfile.data?.role,
+		],
+	});
+
 	const createOpportunityForm = useForm({
 		defaultValues: {
 			title: "",
@@ -810,9 +827,10 @@ function RouteComponent() {
 			processedCompanyIdRef.current !== search.companyId
 		) {
 			// Find leads from this company
-			const companyLeads = leadsQuery.data?.data?.filter(
-				(lead: any) => lead.company?.id === search.companyId,
-			) || [];
+			const companyLeads =
+				leadsQuery.data?.data?.filter(
+					(lead: any) => lead.company?.id === search.companyId,
+				) || [];
 
 			// If there are leads from this company, pre-select the first one
 			if (companyLeads.length > 0) {
@@ -1274,10 +1292,12 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data?.map((vehicle: any) => ({
-															value: vehicle.id,
-															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-														})) || []),
+														...(vehiclesQuery.data?.data?.map(
+															(vehicle: any) => ({
+																value: vehicle.id,
+																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+															}),
+														) || []),
 													]}
 													value={field.state.value ?? "none"}
 													onChange={(value) =>
@@ -1536,7 +1556,9 @@ function RouteComponent() {
 															setIsDetailsDialogOpen(false);
 															navigate({
 																to: "/crm/leads",
-																search: { leadId: selectedOpportunity.lead?.id },
+																search: {
+																	leadId: selectedOpportunity.lead?.id,
+																},
 															});
 														}}
 													>
@@ -1634,7 +1656,7 @@ function RouteComponent() {
 														Cargando contratos...
 													</p>
 												) : opportunityContractsQuery.data &&
-												  opportunityContractsQuery.data.length > 0 ? (
+													opportunityContractsQuery.data.length > 0 ? (
 													<div className="space-y-2">
 														{opportunityContractsQuery.data.map(
 															({ contract }) => (
@@ -1700,6 +1722,73 @@ function RouteComponent() {
 												) : (
 													<p className="text-muted-foreground text-sm">
 														No hay contratos asociados a esta oportunidad
+													</p>
+												)}
+											</div>
+										)}
+
+									{/* Quotations Section */}
+									{userProfile.data?.role &&
+										PERMISSIONS.canAccessCRM(userProfile.data.role) && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<div className="flex items-center gap-2">
+													<Calculator className="h-5 w-5 text-muted-foreground" />
+													<Label className="font-semibold text-muted-foreground text-sm">
+														Cotizaciones
+													</Label>
+												</div>
+												{opportunityQuotationsQuery.isLoading ? (
+													<p className="text-muted-foreground text-sm">
+														Cargando cotizaciones...
+													</p>
+												) : opportunityQuotationsQuery.data &&
+													opportunityQuotationsQuery.data.length > 0 ? (
+													<div className="space-y-2">
+														{opportunityQuotationsQuery.data.map(
+															(quotation: any) => (
+																<div
+																	key={quotation.id}
+																	className="flex items-center justify-between rounded-md border bg-background p-3"
+																>
+																	<div className="flex flex-col gap-1">
+																		<span className="font-medium text-sm">
+																			{quotation.vehicleBrand}{" "}
+																			{quotation.vehicleLine}{" "}
+																			{quotation.vehicleModel}
+																		</span>
+																		<span className="text-muted-foreground text-xs">
+																			Q
+																			{Number(
+																				quotation.vehicleValue,
+																			).toLocaleString()}{" "}
+																			• {quotation.termMonths} meses •{" "}
+																			{quotation.status === "draft"
+																				? "Borrador"
+																				: quotation.status === "sent"
+																					? "Enviada"
+																					: quotation.status === "accepted"
+																						? "Aceptada"
+																						: "Rechazada"}
+																		</span>
+																	</div>
+																	<div className="text-right">
+																		<p className="font-bold text-green-600">
+																			Q
+																			{Number(
+																				quotation.monthlyPayment,
+																			).toLocaleString()}
+																		</p>
+																		<p className="text-muted-foreground text-xs">
+																			cuota mensual
+																		</p>
+																	</div>
+																</div>
+															),
+														)}
+													</div>
+												) : (
+													<p className="text-muted-foreground text-sm">
+														No hay cotizaciones asociadas a esta oportunidad
 													</p>
 												)}
 											</div>
@@ -1958,10 +2047,12 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data?.map((vehicle: any) => ({
-															value: vehicle.id,
-															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-														})) || []),
+														...(vehiclesQuery.data?.data?.map(
+															(vehicle: any) => ({
+																value: vehicle.id,
+																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+															}),
+														) || []),
 													]}
 													value={field.state.value || "none"}
 													onChange={(value) =>
@@ -2653,12 +2744,27 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		{ value: "tarjeta_circulacion", label: "Tarjeta de circulación" },
 		{ value: "titulo_propiedad", label: "Título de propiedad" },
 		{ value: "dpi_dueno", label: "DPI del dueño del vehículo" },
-		{ value: "patente_comercio_vehiculo", label: "Patente comercio (vehículo)" },
-		{ value: "representacion_legal_vehiculo", label: "Representación legal (vehículo)" },
-		{ value: "dpi_representante_legal_vehiculo", label: "DPI representante legal (vehículo)" },
-		{ value: "pago_impuesto_circulacion", label: "Pago impuesto de circulación" },
+		{
+			value: "patente_comercio_vehiculo",
+			label: "Patente comercio (vehículo)",
+		},
+		{
+			value: "representacion_legal_vehiculo",
+			label: "Representación legal (vehículo)",
+		},
+		{
+			value: "dpi_representante_legal_vehiculo",
+			label: "DPI representante legal (vehículo)",
+		},
+		{
+			value: "pago_impuesto_circulacion",
+			label: "Pago impuesto de circulación",
+		},
 		{ value: "consulta_sat", label: "Consulta SAT" },
-		{ value: "consulta_garantias_mobiliarias", label: "Consulta garantías mobiliarias" },
+		{
+			value: "consulta_garantias_mobiliarias",
+			label: "Consulta garantías mobiliarias",
+		},
 		// Otro
 		{ value: "other", label: "Otro" },
 	];

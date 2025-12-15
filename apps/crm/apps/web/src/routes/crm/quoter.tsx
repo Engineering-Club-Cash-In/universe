@@ -9,6 +9,7 @@ import {
 	Plus,
 	Save,
 	Send,
+	Target,
 	Trash2,
 } from "lucide-react";
 import { useState } from "react";
@@ -172,6 +173,10 @@ function QuoterPage() {
 		...orpc.getVehicles.queryOptions(),
 		enabled: !!session,
 	});
+	const opportunitiesQuery = useQuery({
+		...orpc.getOpportunities.queryOptions(),
+		enabled: !!session,
+	});
 
 	// Estado del formulario
 	const [calculatedValues, setCalculatedValues] = useState({
@@ -220,6 +225,7 @@ function QuoterPage() {
 	// Form
 	const quoterForm = useForm({
 		defaultValues: {
+			opportunityId: "",
 			vehicleId: "",
 			vehicleBrand: "",
 			vehicleLine: "",
@@ -238,6 +244,7 @@ function QuoterPage() {
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
+				opportunityId: value.opportunityId || undefined,
 				vehicleId: value.vehicleId || undefined,
 				vehicleBrand: value.vehicleBrand,
 				vehicleLine: value.vehicleLine,
@@ -347,7 +354,9 @@ function QuoterPage() {
 
 	// Cuando se selecciona un vehículo, auto-llenar datos
 	const handleVehicleSelect = (vehicleId: string) => {
-		const vehicle = vehiclesQuery.data?.data?.find((v: any) => v.id === vehicleId);
+		const vehicle = vehiclesQuery.data?.data?.find(
+			(v: any) => v.id === vehicleId,
+		);
 		if (vehicle) {
 			quoterForm.setFieldValue("vehicleId", vehicleId);
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
@@ -447,6 +456,43 @@ function QuoterPage() {
 							quoterForm.handleSubmit();
 						}}
 					>
+						{/* Selector de Oportunidad */}
+						<Card className="mb-6">
+							<CardHeader className="pb-3">
+								<CardTitle className="flex items-center gap-2 text-lg">
+									<Target className="h-5 w-5" />
+									Asignar a Oportunidad (Opcional)
+								</CardTitle>
+							</CardHeader>
+							<CardContent>
+								<quoterForm.Field name="opportunityId">
+									{(field) => (
+										<Select
+											value={field.state.value}
+											onValueChange={(value) =>
+												field.handleChange(value === "none" ? "" : value)
+											}
+										>
+											<SelectTrigger className="w-full md:w-[400px]">
+												<SelectValue placeholder="Seleccionar oportunidad..." />
+											</SelectTrigger>
+											<SelectContent>
+												<SelectItem value="none">Sin oportunidad</SelectItem>
+												{opportunitiesQuery.data?.map((opp: any) => (
+													<SelectItem key={opp.id} value={opp.id}>
+														{opp.title} -{" "}
+														{opp.lead
+															? `${opp.lead.firstName} ${opp.lead.lastName}`
+															: "Sin lead"}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									)}
+								</quoterForm.Field>
+							</CardContent>
+						</Card>
+
 						<div className="grid gap-6 md:grid-cols-3">
 							{/* Columna 1: Datos del Vehículo */}
 							<Card>

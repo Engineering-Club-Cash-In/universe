@@ -3,14 +3,14 @@
 import {
 	type ColumnDef,
 	type ColumnFiltersState,
-	type SortingState,
-	type VisibilityState,
 	flexRender,
 	getCoreRowModel,
 	getFilteredRowModel,
 	getPaginationRowModel,
 	getSortedRowModel,
+	type SortingState,
 	useReactTable,
+	type VisibilityState,
 } from "@tanstack/react-table";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -76,7 +76,9 @@ export function DataTable<TData, TValue>({
 					onChange={(event) => setGlobalFilter(event.target.value)}
 					className="max-w-sm"
 				/>
-				{filterContent && <div className="flex flex-wrap gap-2">{filterContent}</div>}
+				{filterContent && (
+					<div className="flex flex-wrap gap-2">{filterContent}</div>
+				)}
 			</div>
 
 			<div className="overflow-hidden rounded-md border">

@@ -17,8 +17,8 @@ import type {
 	CreatePagoInput,
 	CreateUsuarioInput,
 	CreditActionInput,
-	CreditoDirectoResponse,
 	CreditoDetailResponse,
+	CreditoDirectoResponse,
 	GetAllCreditsParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -413,12 +413,13 @@ export class CarteraBackClient {
 		});
 
 		// Este endpoint retorna PaginatedResponse directamente, no envuelto en CarteraBackApiResponse
-		const response =
-			await this.request<PaginatedResponse<CreditoDetailResponse>>(
-				`/getAllCredits?${queryParams}`,
-				{ method: "GET" },
-				true, // use cache
-			);
+		const response = await this.request<
+			PaginatedResponse<CreditoDetailResponse>
+		>(
+			`/getAllCredits?${queryParams}`,
+			{ method: "GET" },
+			true, // use cache
+		);
 
 		// Validar que la respuesta tenga la estructura de PaginatedResponse
 		if (!response.data || !Array.isArray(response.data)) {

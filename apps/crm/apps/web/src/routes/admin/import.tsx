@@ -138,8 +138,8 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent className="space-y-4">
 					<p className="text-muted-foreground text-sm">
-						Este paso crea la empresa "Importados de Cartera-Back" que
-						agrupará todos los clientes importados.
+						Este paso crea la empresa "Importados de Cartera-Back" que agrupará
+						todos los clientes importados.
 					</p>
 					<Button
 						onClick={() => setupMutation.mutate()}
@@ -174,9 +174,7 @@ function RouteComponent() {
 						onClick={() => analysisMutation.mutate()}
 						disabled={analysisMutation.isPending}
 					>
-						{analysisMutation.isPending
-							? "Analizando..."
-							: "Ejecutar Análisis"}
+						{analysisMutation.isPending ? "Analizando..." : "Ejecutar Análisis"}
 					</Button>
 
 					{analysisResult && analysisResult.success && (
@@ -213,16 +211,28 @@ function RouteComponent() {
 								<p className="font-medium text-sm">Breakdown por Estado:</p>
 								<div className="grid grid-cols-2 gap-2 text-sm">
 									<div>
-										ACTIVO: <span className="font-medium">{analysisResult.breakdown.ACTIVO}</span>
+										ACTIVO:{" "}
+										<span className="font-medium">
+											{analysisResult.breakdown.ACTIVO}
+										</span>
 									</div>
 									<div>
-										MOROSO: <span className="font-medium">{analysisResult.breakdown.MOROSO}</span>
+										MOROSO:{" "}
+										<span className="font-medium">
+											{analysisResult.breakdown.MOROSO}
+										</span>
 									</div>
 									<div>
-										CANCELADO: <span className="font-medium">{analysisResult.breakdown.CANCELADO}</span>
+										CANCELADO:{" "}
+										<span className="font-medium">
+											{analysisResult.breakdown.CANCELADO}
+										</span>
 									</div>
 									<div>
-										INCOBRABLE: <span className="font-medium">{analysisResult.breakdown.INCOBRABLE}</span>
+										INCOBRABLE:{" "}
+										<span className="font-medium">
+											{analysisResult.breakdown.INCOBRABLE}
+										</span>
 									</div>
 								</div>
 							</div>
@@ -285,13 +295,13 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent className="space-y-4">
 					<p className="text-muted-foreground text-sm">
-						Este proceso creará todos los leads, clientes, vehículos,
-						contratos y referencias en el CRM.
+						Este proceso creará todos los leads, clientes, vehículos, contratos
+						y referencias en el CRM.
 					</p>
 					<div className="rounded-md border border-orange-200 bg-orange-50 p-3">
 						<p className="font-medium text-orange-800 text-sm">
-							⚠️ Advertencia: Esta operación puede tomar varios minutos y
-							creará cientos de registros.
+							⚠️ Advertencia: Esta operación puede tomar varios minutos y creará
+							cientos de registros.
 						</p>
 					</div>
 					<Button
@@ -339,12 +349,14 @@ function RouteComponent() {
 								</div>
 								<div>
 									<p className="text-muted-foreground">Fallidos</p>
-									<p className="font-semibold text-red-600 text-lg">
+									<p className="font-semibold text-lg text-red-600">
 										{importResult.fallidos}
 									</p>
 								</div>
 								<div>
-									<p className="text-muted-foreground">Omitidos (ya existían)</p>
+									<p className="text-muted-foreground">
+										Omitidos (ya existían)
+									</p>
 									<p className="font-semibold text-lg">
 										{importResult.omitidos}
 									</p>
@@ -415,22 +427,20 @@ function RouteComponent() {
 				</CardHeader>
 				<CardContent className="space-y-4">
 					<p className="text-muted-foreground text-sm">
-						Este debug compara qué datos están disponibles en el listado vs
-						en el detalle de créditos. Útil para entender créditos corruptos.
+						Este debug compara qué datos están disponibles en el listado vs en
+						el detalle de créditos. Útil para entender créditos corruptos.
 					</p>
 					<Button
 						onClick={() => debugMutation.mutate()}
 						disabled={debugMutation.isPending}
 						variant="outline"
 					>
-						{debugMutation.isPending
-							? "Ejecutando Debug..."
-							: "Ejecutar Debug"}
+						{debugMutation.isPending ? "Ejecutando Debug..." : "Ejecutar Debug"}
 					</Button>
 					<div className="rounded-md border border-blue-200 bg-blue-50 p-3">
 						<p className="font-medium text-blue-800 text-sm">
-							ℹ️ Los resultados se mostrarán en los logs del servidor.
-							Abre la consola donde ejecutaste `bun dev` para ver el output.
+							ℹ️ Los resultados se mostrarán en los logs del servidor. Abre la
+							consola donde ejecutaste `bun dev` para ver el output.
 						</p>
 					</div>
 				</CardContent>

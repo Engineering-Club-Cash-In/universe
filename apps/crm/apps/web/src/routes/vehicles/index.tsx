@@ -9,6 +9,7 @@ import {
 	CheckCircle,
 	Eye,
 	FileText,
+	FolderOpen,
 	Search,
 	Wrench,
 	XCircle,
@@ -60,6 +61,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
 import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
 import { client, orpc } from "@/utils/orpc";
 
@@ -380,6 +382,16 @@ function VehiclesDashboard() {
 																		<Camera className="mr-2 h-4 w-4" />
 																		Ver fotografías
 																	</DropdownMenuItem>
+																	<DropdownMenuItem
+																		onClick={() => {
+																			setSelectedVehicle(vehicle);
+																			setActiveTab("documents");
+																			setIsDetailsOpen(true);
+																		}}
+																	>
+																		<FolderOpen className="mr-2 h-4 w-4" />
+																		Ver documentos
+																	</DropdownMenuItem>
 																	{latestInspection?.scannerUsed &&
 																		latestInspection?.scannerResultUrl && (
 																			<DropdownMenuItem
@@ -572,10 +584,14 @@ function VehiclesDashboard() {
 							onValueChange={setActiveTab}
 							className="w-full"
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="grid w-full grid-cols-4">
 								<TabsTrigger value="general">Información General</TabsTrigger>
 								<TabsTrigger value="inspections">Inspecciones</TabsTrigger>
 								<TabsTrigger value="photos">Fotografías</TabsTrigger>
+								<TabsTrigger value="documents">
+									<FolderOpen className="mr-2 h-4 w-4" />
+									Documentos
+								</TabsTrigger>
 							</TabsList>
 
 							<TabsContent value="general" className="mt-4 space-y-4">
@@ -1001,6 +1017,25 @@ function VehiclesDashboard() {
 										</CardContent>
 									</Card>
 								)}
+							</TabsContent>
+
+							<TabsContent value="documents" className="mt-4 space-y-4">
+								<Card>
+									<CardHeader>
+										<CardTitle className="text-lg">
+											Documentos del Vehículo
+										</CardTitle>
+										<CardDescription>
+											Gestiona los documentos legales asociados al vehículo
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<VehicleDocumentUpload
+											vehicleId={selectedVehicle.id}
+											ownerType="individual"
+										/>
+									</CardContent>
+								</Card>
 							</TabsContent>
 						</Tabs>
 					)}

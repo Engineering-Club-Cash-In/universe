@@ -364,7 +364,9 @@ function RouteComponent() {
 			setIsEditingCreditAnalysis(false);
 		},
 		onError: (error: any) => {
-			toast.error(error.message || "Error al actualizar el análisis crediticio");
+			toast.error(
+				error.message || "Error al actualizar el análisis crediticio",
+			);
 		},
 	});
 
@@ -1717,7 +1719,9 @@ function RouteComponent() {
 								<Button
 									variant="outline"
 									size="sm"
-									onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+									onClick={() =>
+										setPage((p) => Math.min(totalPages - 1, p + 1))
+									}
 									disabled={page >= totalPages - 1}
 								>
 									<ChevronRight className="h-4 w-4" />
@@ -2107,15 +2111,22 @@ function RouteComponent() {
 											onClick={() => {
 												const data = creditAnalysisQuery.data;
 												setCreditAnalysisForm({
-													monthlyFixedIncome: data?.monthlyFixedIncome?.toString() || "",
-													monthlyVariableIncome: data?.monthlyVariableIncome?.toString() || "",
-													monthlyFixedExpenses: data?.monthlyFixedExpenses?.toString() || "",
-													monthlyVariableExpenses: data?.monthlyVariableExpenses?.toString() || "",
-													economicAvailability: data?.economicAvailability?.toString() || "",
+													monthlyFixedIncome:
+														data?.monthlyFixedIncome?.toString() || "",
+													monthlyVariableIncome:
+														data?.monthlyVariableIncome?.toString() || "",
+													monthlyFixedExpenses:
+														data?.monthlyFixedExpenses?.toString() || "",
+													monthlyVariableExpenses:
+														data?.monthlyVariableExpenses?.toString() || "",
+													economicAvailability:
+														data?.economicAvailability?.toString() || "",
 													minPayment: data?.minPayment?.toString() || "",
 													maxPayment: data?.maxPayment?.toString() || "",
-													adjustedPayment: data?.adjustedPayment?.toString() || "",
-													maxCreditAmount: data?.maxCreditAmount?.toString() || "",
+													adjustedPayment:
+														data?.adjustedPayment?.toString() || "",
+													maxCreditAmount:
+														data?.maxCreditAmount?.toString() || "",
 												});
 												setIsEditingCreditAnalysis(true);
 											}}
@@ -2142,21 +2153,26 @@ function RouteComponent() {
 											if (!selectedLead) return;
 											upsertCreditAnalysisMutation.mutate({
 												leadId: selectedLead.id,
-												monthlyFixedIncome: creditAnalysisForm.monthlyFixedIncome
-													? Number(creditAnalysisForm.monthlyFixedIncome)
-													: undefined,
-												monthlyVariableIncome: creditAnalysisForm.monthlyVariableIncome
-													? Number(creditAnalysisForm.monthlyVariableIncome)
-													: undefined,
-												monthlyFixedExpenses: creditAnalysisForm.monthlyFixedExpenses
-													? Number(creditAnalysisForm.monthlyFixedExpenses)
-													: undefined,
-												monthlyVariableExpenses: creditAnalysisForm.monthlyVariableExpenses
-													? Number(creditAnalysisForm.monthlyVariableExpenses)
-													: undefined,
-												economicAvailability: creditAnalysisForm.economicAvailability
-													? Number(creditAnalysisForm.economicAvailability)
-													: undefined,
+												monthlyFixedIncome:
+													creditAnalysisForm.monthlyFixedIncome
+														? Number(creditAnalysisForm.monthlyFixedIncome)
+														: undefined,
+												monthlyVariableIncome:
+													creditAnalysisForm.monthlyVariableIncome
+														? Number(creditAnalysisForm.monthlyVariableIncome)
+														: undefined,
+												monthlyFixedExpenses:
+													creditAnalysisForm.monthlyFixedExpenses
+														? Number(creditAnalysisForm.monthlyFixedExpenses)
+														: undefined,
+												monthlyVariableExpenses:
+													creditAnalysisForm.monthlyVariableExpenses
+														? Number(creditAnalysisForm.monthlyVariableExpenses)
+														: undefined,
+												economicAvailability:
+													creditAnalysisForm.economicAvailability
+														? Number(creditAnalysisForm.economicAvailability)
+														: undefined,
 												minPayment: creditAnalysisForm.minPayment
 													? Number(creditAnalysisForm.minPayment)
 													: undefined,
@@ -2176,7 +2192,9 @@ function RouteComponent() {
 										{/* Income and Expenses Form */}
 										<div className="grid grid-cols-2 gap-6">
 											<div className="space-y-4">
-												<h4 className="font-medium text-base">Ingresos Mensuales</h4>
+												<h4 className="font-medium text-base">
+													Ingresos Mensuales
+												</h4>
 												<div className="space-y-3 rounded-lg bg-green-50 p-4">
 													<div className="space-y-2">
 														<Label className="text-sm">Ingresos Fijos</Label>
@@ -2195,7 +2213,9 @@ function RouteComponent() {
 														/>
 													</div>
 													<div className="space-y-2">
-														<Label className="text-sm">Ingresos Variables</Label>
+														<Label className="text-sm">
+															Ingresos Variables
+														</Label>
 														<Input
 															type="number"
 															step="0.01"
@@ -2214,7 +2234,9 @@ function RouteComponent() {
 											</div>
 
 											<div className="space-y-4">
-												<h4 className="font-medium text-base">Gastos Mensuales</h4>
+												<h4 className="font-medium text-base">
+													Gastos Mensuales
+												</h4>
 												<div className="space-y-3 rounded-lg bg-red-50 p-4">
 													<div className="space-y-2">
 														<Label className="text-sm">Gastos Fijos</Label>
@@ -2275,7 +2297,9 @@ function RouteComponent() {
 
 										{/* Payment Capacity Form */}
 										<div className="space-y-4">
-											<h4 className="font-medium text-base">Capacidad de Pago</h4>
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
 											<div className="grid grid-cols-4 gap-4">
 												<div className="space-y-2">
 													<Label className="text-xs">Pago Mínimo</Label>
@@ -2398,7 +2422,9 @@ function RouteComponent() {
 													</div>
 													<div className="border-t pt-2">
 														<div className="flex justify-between">
-															<span className="font-medium">Total Ingresos:</span>
+															<span className="font-medium">
+																Total Ingresos:
+															</span>
 															<span className="font-bold text-green-600">
 																{creditAnalysisQuery.data.monthlyFixedIncome ||
 																creditAnalysisQuery.data.monthlyVariableIncome
@@ -2431,7 +2457,8 @@ function RouteComponent() {
 														<span className="font-medium">
 															{creditAnalysisQuery.data.monthlyFixedExpenses
 																? formatCurrency(
-																		creditAnalysisQuery.data.monthlyFixedExpenses,
+																		creditAnalysisQuery.data
+																			.monthlyFixedExpenses,
 																	)
 																: "-"}
 														</span>
@@ -2453,7 +2480,8 @@ function RouteComponent() {
 														<div className="flex justify-between">
 															<span className="font-medium">Total Gastos:</span>
 															<span className="font-bold text-red-600">
-																{creditAnalysisQuery.data.monthlyFixedExpenses ||
+																{creditAnalysisQuery.data
+																	.monthlyFixedExpenses ||
 																creditAnalysisQuery.data.monthlyVariableExpenses
 																	? formatCurrency(
 																			Number(
@@ -2496,7 +2524,9 @@ function RouteComponent() {
 
 										{/* Payment Capacity */}
 										<div className="space-y-4">
-											<h4 className="font-medium text-base">Capacidad de Pago</h4>
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
 											<div className="grid grid-cols-4 gap-4">
 												<div className="rounded-lg border p-4 text-center">
 													<Label className="text-muted-foreground text-xs">
@@ -2618,7 +2648,7 @@ function RouteComponent() {
 										Cargando oportunidades...
 									</p>
 								) : leadOpportunitiesQuery.data &&
-								  leadOpportunitiesQuery.data.length > 0 ? (
+									leadOpportunitiesQuery.data.length > 0 ? (
 									<div className="space-y-2">
 										{leadOpportunitiesQuery.data.map((opp) => (
 											<div
@@ -2651,9 +2681,7 @@ function RouteComponent() {
 															</Badge>
 														)}
 														{opp.value && (
-															<span>
-																Q{Number(opp.value).toLocaleString()}
-															</span>
+															<span>Q{Number(opp.value).toLocaleString()}</span>
 														)}
 													</div>
 												</div>

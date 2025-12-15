@@ -90,12 +90,12 @@ function RouteComponent() {
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
 	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions(),
+		...orpc.getLeads.queryOptions({ limit: 100 }),
 		enabled:
 			!!userProfile.data?.role &&
 			["admin", "sales"].includes(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+		queryKey: ["getLeads", "dropdown", session?.user?.id, userProfile.data?.role],
 	});
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions(),
@@ -327,7 +327,8 @@ function RouteComponent() {
 	// Get company statistics
 	const getCompanyStats = (companyId: string) => {
 		const leads =
-			leadsQuery.data?.filter((l) => l.company?.id === companyId).length || 0;
+			leadsQuery.data?.data?.filter((l: any) => l.company?.id === companyId)
+				.length || 0;
 		const opportunities =
 			opportunitiesQuery.data?.filter((o) => o.company?.id === companyId)
 				.length || 0;

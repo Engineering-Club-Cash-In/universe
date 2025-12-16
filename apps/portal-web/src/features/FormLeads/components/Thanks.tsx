@@ -16,23 +16,23 @@ export const Thanks = () => {
 
       <div className="text-center flex flex-col justify-center mt-40 items-center w-full relative z-10 ">
         {/* Icono de éxito */}
-        <div className="mb-24">
+        <div className="mb-16 lg:mb-24">
           <IconCashIn />
         </div>
 
         {/* Título */}
-        <h1 className="text-header-3  mb-6">
+        <h1 className="font-bold text-4xl lg:text-header-3  mb-6">
           ¡Gracias por completar nuestro formulario!
         </h1>
 
         {/* Descripción 1 */}
-        <p className=" text-2xl mb-8">
+        <p className="text-lg lg:text-2xl mb-8">
           Pronto nos pondremos en contacto para ayudarte
           <br />a obtener el crédito ideal para tu nuevo auto.
         </p>
 
         {/* Descripción 2 */}
-        <p className=" text-lg mb-4">
+        <p className="lg:text-lg mb-4">
           Mientras tanto, síguenos en nuestras redes sociales
           <br />
           para no perderte ninguna novedad.
@@ -51,7 +51,7 @@ export const Thanks = () => {
                   className="transition-transform hover:scale-110 flex flex-col items-center gap-1"
                 >
                   <IconComponent />
-                  <p>
+                  <p className="hidden lg:block">
                     <span className="text-xs">{contact.label}</span>
                   </p>
                 </a>

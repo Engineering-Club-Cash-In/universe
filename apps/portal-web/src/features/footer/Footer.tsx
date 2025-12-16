@@ -29,7 +29,8 @@ const FOOTER_SECTIONS = [
 ];
 
 // Social media and contact information
-const SOCIAL_CONTACTS = [
+// eslint-disable-next-line react-refresh/only-export-components
+export const SOCIAL_CONTACTS = [
   {
     icon: Instagram,
     label: "@clubcashin",
@@ -37,6 +38,7 @@ const SOCIAL_CONTACTS = [
   },
   {
     icon: Whatsapp,
+    lead: false,
     label: "+502 2234-1368",
     href: "https://wa.me/50222341368",
   },
@@ -52,6 +54,7 @@ const SOCIAL_CONTACTS = [
   },
   {
     icon: Location,
+    lead: false,
     label: '3a avenida "A" 13-78, Colonia Lomas de Pamplona zona 13',
     className: "max-w-[280px] text-center",
     href: "https://www.google.com/maps/place/Club+Cash+In/@14.5992026,-90.5374228,873m/data=!3m2!1e3!4b1!4m6!3m5!1s0x8589a1a13ede014d:0xcc9c190a50d9f749!8m2!3d14.5992026!4d-90.5348479!16s%2Fg%2F11k0wwn0rc!5m1!1e1?entry=ttu&g_ep=EgoyMDI1MTExNi4wIKXMDSoASAFQAw%3D%3D",
@@ -128,7 +131,7 @@ export const Footer: React.FC<FooterProps> = ({ notShowRedirects = false }) => {
           <div
             className={`order-1 lg:order-2 w-full col-span-2 lg:col-span-3 flex  ${notShowRedirects ? "" : "lg:justify-end lg:pr-14"} gap-4 lg:gap-8 `}
           >
-            {SOCIAL_CONTACTS.map((contact) => {
+            {SOCIAL_CONTACTS.filter(contact => notShowRedirects ? contact.lead !== false : true).map((contact) => {
               const IconComponent = contact.icon;
               return (
                 <a

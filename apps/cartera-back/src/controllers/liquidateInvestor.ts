@@ -98,8 +98,30 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
     return usuarios_encontrados;
   }
   
-  // ESTRATEGIA 2: Búsqueda con LIKE (contiene)
-  console.log(`   🎯 Estrategia 2: Búsqueda con LIKE...`);
+  // 🆕 ESTRATEGIA 1.5: Búsqueda exacta con tildes normalizadas
+  console.log(`   🎯 Estrategia 1.5: Búsqueda exacta sin tildes...`);
+  
+  // Normalizar el nombre en la BD también
+  usuarios_encontrados = await db
+    .select()
+    .from(usuarios)
+    .where(
+      sql`LOWER(
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+            ${usuarios.nombre},
+            'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'),
+          'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u')
+      ) = LOWER(${nombreLimpio})`
+    );
+  
+  if (usuarios_encontrados.length > 0) {
+    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta sin tildes`);
+    return usuarios_encontrados;
+  }
+  
+  // ESTRATEGIA 2: Búsqueda CONTAINS - nombre completo
+  console.log(`   🎯 Estrategia 2: Búsqueda con LIKE (contiene)...`);
   usuarios_encontrados = await db
     .select()
     .from(usuarios)
@@ -107,7 +129,62 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
   
   if (usuarios_encontrados.length > 0) {
     console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con LIKE`);
-    return usuarios_encontrados;
+    
+    // 🆕 FILTRAR: Buscar el que más se parezca
+    // Calcular "score" de similitud
+    const usuariosConScore = usuarios_encontrados.map(u => {
+      const nombreBD = u.nombre.toLowerCase();
+      const nombreBuscado = nombreLimpio.toLowerCase();
+      
+      // Score 1: Coincidencia de palabras
+      const palabrasBuscadas = nombreBuscado.split(' ').filter(p => p.length > 2);
+      const palabrasEncontradas = palabrasBuscadas.filter(palabra => 
+        nombreBD.includes(palabra)
+      ).length;
+      const scoreCoincidencia = palabrasEncontradas / palabrasBuscadas.length;
+      
+      // Score 2: Similitud de longitud (nombres muy largos probablemente no son el correcto)
+      const diffLongitud = Math.abs(nombreBD.length - nombreBuscado.length);
+      const scoreLongitud = 1 - (diffLongitud / Math.max(nombreBD.length, nombreBuscado.length));
+      
+      // Score 3: Posición de la primera palabra (nombres que empiezan igual son más probables)
+      const scoreInicio = nombreBD.startsWith(nombreBuscado.split(' ')[0].toLowerCase()) ? 1 : 0;
+      
+      // Score total (ponderado)
+      const scoreTotal = (scoreCoincidencia * 0.5) + (scoreLongitud * 0.3) + (scoreInicio * 0.2);
+      
+      return {
+        ...u,
+        score: scoreTotal,
+        scoreCoincidencia,
+        scoreLongitud,
+        scoreInicio
+      };
+    });
+    
+    // Ordenar por score (de mayor a menor)
+    usuariosConScore.sort((a, b) => b.score - a.score);
+    
+    console.log(`   📊 Usuarios ordenados por score:`);
+    usuariosConScore.forEach((u, idx) => {
+      console.log(`      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`);
+    });
+    
+    // 🎯 Si el mejor tiene score > 0.6, tomarlo solo a él
+    if (usuariosConScore[0].score >= 0.6) {
+      console.log(`   ✅ Usuario con mejor score (${usuariosConScore[0].score.toFixed(2)}): ${usuariosConScore[0].nombre}`);
+      return [usuariosConScore[0]];
+    }
+    
+    // Si no hay uno claramente mejor, devolver los mejores 3
+    return usuariosConScore.slice(0, 3).map(u => ({
+      usuario_id: u.usuario_id,
+      nombre: u.nombre,
+      nit: u.nit,
+      categoria: u.categoria,
+      como_se_entero: u.como_se_entero,
+      saldo_a_favor: u.saldo_a_favor
+    }));
   }
   
   // ESTRATEGIA 3: Búsqueda por partes del nombre (primer y último apellido)
@@ -217,13 +294,51 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
 }
 
 // 🔥 ENDPOINT PRINCIPAL
+// 🔥 ENDPOINT PRINCIPAL
 export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
   try {
     console.log("🔥 ========== INICIANDO LIQUIDACIÓN DE CUOTAS ==========");
     console.log("📝 Input original:", JSON.stringify(input, null, 2));
 
-    // 🧹 NORMALIZAR INPUT
-    const cuota_mes_normalizada = normalizarCuotaMes(input.cuota_mes);
+    // 🆕 VALIDAR INPUT ANTES DE PROCESAR
+    if (!input.nombre_usuario || input.nombre_usuario.trim() === '') {
+      const errorMsg = "❌ El nombre del usuario es requerido";
+      console.error(errorMsg);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: "Nombre de usuario vacío"
+      };
+    }
+
+    if (!input.cuota_mes || input.cuota_mes.trim() === '') {
+      const errorMsg = "❌ La cuota mes es requerida";
+      console.error(errorMsg);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: "Cuota mes vacía"
+      };
+    }
+
+    // 🧹 NORMALIZAR INPUT CON TRY-CATCH
+    let cuota_mes_normalizada: string;
+    try {
+      cuota_mes_normalizada = normalizarCuotaMes(input.cuota_mes);
+    } catch (err) {
+      const errorMsg = `❌ Formato de mes inválido: "${input.cuota_mes}". Use formato "mes. año" (ej: "oct. 25")`;
+      console.error(errorMsg, err);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: err instanceof Error ? err.message : String(err),
+        input_recibido: input.cuota_mes
+      };
+    }
+
     const nombre_usuario = input.nombre_usuario;
 
     // ============================================
@@ -232,10 +347,20 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     const usuariosEncontrados = await buscarUsuarioPermisivo(nombre_usuario);
 
     if (usuariosEncontrados.length === 0) {
-      throw new Error(
-        `❌ No se encontró ningún usuario con nombre: "${nombre_usuario}"`
-      );
+      const errorMsg = `❌ No se encontró ningún usuario con nombre: "${nombre_usuario}"`;
+      console.error(errorMsg);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: "Usuario no encontrado en la base de datos",
+        nombre_buscado: nombre_usuario,
+        sugerencia: "Verificá que el nombre esté escrito correctamente (tildes, mayúsculas, etc.)"
+      };
     }
+
+    // 🆕 DECLARAR VARIABLE USUARIO FUERA DEL IF
+    let usuario;
 
     if (usuariosEncontrados.length > 1) {
       console.log("⚠️ Múltiples usuarios encontrados:");
@@ -243,17 +368,37 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         console.log(`   ${idx + 1}. ${u.nombre} (ID: ${u.usuario_id})`);
       });
       
-      // Si son pocos, tomar el primero y continuar con WARNING
-      if (usuariosEncontrados.length <= 3) {
-        console.log(`⚠️ TOMANDO EL PRIMERO: ${usuariosEncontrados[0].nombre}`);
+      // 🆕 BUSCAR MATCH EXACTO (case insensitive)
+      const matchExacto = usuariosEncontrados.find(
+        u => u.nombre.trim().toLowerCase() === nombre_usuario.trim().toLowerCase()
+      );
+      
+      if (matchExacto) {
+        console.log(`✅ MATCH EXACTO ENCONTRADO: ${matchExacto.nombre}`);
+        usuario = matchExacto;
+      } else if (usuariosEncontrados.length <= 10) {
+        // 🆕 Si no hay match exacto pero son <= 10, tomar el primero
+        console.log(`⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${usuariosEncontrados[0].nombre}`);
+        usuario = usuariosEncontrados[0];
       } else {
-        throw new Error(
-          `Se encontraron ${usuariosEncontrados.length} usuarios. Especificá mejor el nombre.`
-        );
+        // Si son más de 10 y no hay match exacto, rechazar
+        const errorMsg = `❌ Se encontraron ${usuariosEncontrados.length} usuarios con nombres similares y ninguno coincide exactamente`;
+        console.error(errorMsg);
+        return {
+          success: false,
+          data: null,
+          message: errorMsg,
+          error: "Múltiples usuarios encontrados sin match exacto",
+          nombre_buscado: nombre_usuario,
+          usuarios_encontrados: usuariosEncontrados.slice(0, 10).map(u => u.nombre), // Solo mostrar primeros 10
+          sugerencia: "Especificá el nombre COMPLETO Y EXACTO del usuario"
+        };
       }
+    } else {
+      // Solo hay 1 usuario
+      usuario = usuariosEncontrados[0];
     }
 
-    const usuario = usuariosEncontrados[0];
     console.log(
       "✅ Usuario seleccionado:",
       usuario.nombre,
@@ -273,7 +418,19 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     console.log(`✅ ${creditosUsuario.length} créditos encontrados`);
 
     if (creditosUsuario.length === 0) {
-      throw new Error(`El usuario ${usuario.nombre} no tiene créditos`);
+      const errorMsg = `❌ El usuario "${usuario.nombre}" no tiene créditos registrados`;
+      console.error(errorMsg);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: "Usuario sin créditos",
+        usuario: {
+          usuario_id: usuario.usuario_id,
+          nombre: usuario.nombre
+        },
+        sugerencia: "Verificá que los créditos estén cargados en la base de datos"
+      };
     }
 
     // ============================================
@@ -302,21 +459,37 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     console.log("========================================\n");
 
     // ============================================
-    // 3️⃣ CALCULAR RANGO DEL MES
+    // 3️⃣ CALCULAR RANGO DEL MES CON TRY-CATCH
     // ============================================
-    const rangoMes = obtenerRangoDelMes(cuota_mes_normalizada);
-    console.log(`\n📅 ========== RANGO CALCULADO ==========`);
-    console.log(`   Input original: "${input.cuota_mes}"`);
-    console.log(`   Normalizado: "${cuota_mes_normalizada}"`);
-    console.log(`   Mes descriptivo: ${rangoMes.mesDescriptivo}`);
-    console.log(`   Rango inicio: ${rangoMes.inicio}`);
-    console.log(`   Rango fin: ${rangoMes.fin}`);
-    console.log(`========================================\n`);
+    let rangoMes;
+    try {
+      rangoMes = obtenerRangoDelMes(cuota_mes_normalizada);
+      console.log(`\n📅 ========== RANGO CALCULADO ==========`);
+      console.log(`   Input original: "${input.cuota_mes}"`);
+      console.log(`   Normalizado: "${cuota_mes_normalizada}"`);
+      console.log(`   Mes descriptivo: ${rangoMes.mesDescriptivo}`);
+      console.log(`   Rango inicio: ${rangoMes.inicio}`);
+      console.log(`   Rango fin: ${rangoMes.fin}`);
+      console.log(`========================================\n`);
+    } catch (err) {
+      const errorMsg = `❌ Error al procesar el mes: "${input.cuota_mes}"`;
+      console.error(errorMsg, err);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: err instanceof Error ? err.message : String(err),
+        cuota_mes_recibida: input.cuota_mes,
+        cuota_mes_normalizada: cuota_mes_normalizada,
+        sugerencia: "Use formato 'mes. año' (ej: 'oct. 25', 'sep. 2025')"
+      };
+    }
 
     // ============================================
     // 4️⃣ PROCESAR CADA CRÉDITO
     // ============================================
     const resultadosPorCredito = [];
+    let creditosSinCuotas = 0;
 
     for (const credito of creditosUsuario) {
       console.log(`\n💳 ========== CRÉDITO: ${credito.numero_credito_sifco} ==========`);
@@ -389,6 +562,8 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         console.log(`   ⚠️ NO SE ENCONTRÓ cuota que venza en ${cuota_mes_normalizada}`);
         console.log(`   ⚠️ Revisá que las fechas de vencimiento estén en el rango correcto`);
         
+        creditosSinCuotas++;
+        
         resultadosPorCredito.push({
           credito_id: credito.credito_id,
           numero_credito: credito.numero_credito_sifco,
@@ -444,6 +619,27 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       });
     }
 
+    // 🆕 SI NINGÚN CRÉDITO TIENE CUOTAS PARA ESE MES
+    if (creditosSinCuotas === creditosUsuario.length) {
+      const errorMsg = `❌ Ninguno de los ${creditosUsuario.length} crédito(s) de "${usuario.nombre}" tiene cuotas que venzan en ${rangoMes.mesDescriptivo}`;
+      console.error(errorMsg);
+      return {
+        success: false,
+        data: null,
+        message: errorMsg,
+        error: "No hay cuotas para liquidar en ese mes",
+        usuario: {
+          usuario_id: usuario.usuario_id,
+          nombre: usuario.nombre
+        },
+        creditos_revisados: creditosUsuario.length,
+        mes_buscado: rangoMes.mesDescriptivo,
+        rango_fechas: `${rangoMes.inicio} - ${rangoMes.fin}`,
+        detalle_por_credito: resultadosPorCredito,
+        sugerencia: "Verificá que las fechas de vencimiento de las cuotas estén correctas en la BD"
+      };
+    }
+
     // ============================================
     // 7️⃣ RESPUESTA FINAL
     // ============================================
@@ -454,7 +650,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     console.log(`✅ Mes liquidado: ${rangoMes.mesDescriptivo}`);
 
     const totalCuotasLiquidadas = resultadosPorCredito.reduce(
-      (sum, r) => sum + r.cuotas_liquidadas, 0
+      (sum, r) => sum + (r.cuotas_liquidadas || 0), 0
     );
 
     console.log(`✅ Total cuotas liquidadas: ${totalCuotasLiquidadas}`);
@@ -467,6 +663,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
           nombre: usuario.nombre,
         },
         creditos_procesados: creditosUsuario.length,
+        creditos_sin_cuotas: creditosSinCuotas,
         cuotas_reseteadas: totalCuotasReseteadas,
         cuota_mes_original: input.cuota_mes,
         cuota_mes_normalizada: cuota_mes_normalizada,
@@ -481,8 +678,9 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     return {
       success: false,
       data: null,
-      message: error instanceof Error ? error.message : "Error desconocido",
-      error: error,
+      message: `❌ Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
     };
   }
 }

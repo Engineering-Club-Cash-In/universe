@@ -4,6 +4,7 @@ import * as routers from "./routers";
 import { cors } from "@elysiajs/cors";
 import { iniciarTareasProgramadas } from "../schedule";
  
+
 const app = new Elysia()
   .use(cors())
   .use(routers.defaultRouter)
@@ -18,6 +19,7 @@ const app = new Elysia()
   .use(routers.morasRouter)
   .use(routers.bancosRouter)
   .use(routers.cuentasRoutes)
+  .use(routers.dteController)
   .use(routers.paymentAgreementsRouter);
 
 // 🚀 Iniciar tareas programadas ANTES de levantar el servidor

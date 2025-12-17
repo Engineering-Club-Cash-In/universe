@@ -12,6 +12,8 @@ ARCHIVO_EXCEL ="Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
 # 📅 Hojas a procesar
 HOJAS_A_PROCESAR = [
+    "Agosto 2025",
+    "Septiembre 2025",
     "Octubre 2025",
 ]
 
@@ -73,7 +75,7 @@ def leer_hoja_excel(
         
         columnas = {
             'credito_sifco': df.columns[1],           # '# crédito SIFCO'
-            'capital': df.columns[4],                  # 'Capital' -> Q269,354.80
+            'capital': df.columns[25],                  # 'Capital' -> Q269,354.80
             'porcentaje_interes': df.columns[5],       # '%' -> 1.50%
             'porcentaje_cashin': df.columns[9],        # '% Cash-In' -> 100.00%
             'porcentaje_inversionista': df.columns[10], # '% Inversionista' -> 0.00%

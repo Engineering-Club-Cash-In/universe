@@ -162,10 +162,22 @@ export async function mapExcelToCredito(
     0
   );
   const otros = toBigExcel(cleanNumericValue(excelRow?.Otros), 0);
-  const membresias_pago = toBigExcel(
-    cleanNumericValue(excelRow?.MembresiasPago),
-    0
-  );
+const obtenerMembresias = (row: any): string => {
+  const membresias = cleanNumericValue(row?.Membresias);  // 👈 PRIMERO esta
+  const membresiasPago = cleanNumericValue(row?.MembresiasPago);  // 👈 FALLBACK
+  
+  // Si Membresias tiene valor > 0, usala
+  if (membresias !== "0" && Number(membresias) > 0) {
+    return membresias;
+  }
+  
+  // Si no, usar MembresiasPago
+  return membresiasPago;
+};
+
+// Luego en tu código:
+const membresias_pago = toBigExcel(obtenerMembresias(excelRow), 0);
+  
 
   const cuota_interes = capital.times(porcentaje_interes).round(2);
   const iva_12 = cuota_interes.times(0.12).round(2);

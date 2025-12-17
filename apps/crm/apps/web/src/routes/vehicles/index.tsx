@@ -7,13 +7,16 @@ import {
 	Camera,
 	Car,
 	CheckCircle,
+	ChevronLeft,
+	ChevronRight,
 	Eye,
 	FileText,
+	FolderOpen,
 	Search,
 	Wrench,
 	XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,6 +63,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
 import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
 import { client, orpc } from "@/utils/orpc";
 
@@ -72,35 +76,54 @@ export const Route = createFileRoute("/vehicles/")({
 function VehiclesDashboard() {
 	const navigate = useNavigate();
 	const [searchTerm, setSearchTerm] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [filterStatus, setFilterStatus] = useState("all");
 	const [selectedVehicle, setSelectedVehicle] = useState<any>(null);
 	const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 	const [activeTab, setActiveTab] = useState("general");
+	const [page, setPage] = useState(0);
+	const pageSize = 20;
 
-	// Fetch vehicles
-	const { data: vehicles, isLoading } = useQuery(
-		orpc.getVehicles.queryOptions(),
-	);
+	// Debounce search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPage(0);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
+
+	// Reset page when filter changes
+	useEffect(() => {
+		setPage(0);
+	}, [filterStatus]);
+
+	// Fetch vehicles with pagination
+	const { data: vehicles, isLoading } = useQuery({
+		...orpc.getVehicles.queryOptions({
+			input: {
+				limit: pageSize,
+				offset: page * pageSize,
+				query: debouncedSearch || undefined,
+				status: filterStatus !== "all" ? filterStatus : undefined,
+			},
+		}),
+		queryKey: [
+			"getVehicles",
+			page,
+			pageSize,
+			debouncedSearch,
+			filterStatus,
+		],
+	});
 	const { data: statistics } = useQuery(
 		orpc.getVehicleStatistics.queryOptions(),
 	);
 
-	// Filter vehicles based on search term and filter status
-	const filteredVehicles = vehicles?.filter((vehicle: any) => {
-		const latestInspection = vehicle.inspections?.[0];
-
-		const matchesSearch =
-			vehicle.make.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			vehicle.model.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			vehicle.licensePlate.toLowerCase().includes(searchTerm.toLowerCase()) ||
-			vehicle.vinNumber.toLowerCase().includes(searchTerm.toLowerCase());
-
-		const matchesStatus =
-			filterStatus === "all" ||
-			(latestInspection && latestInspection.status === filterStatus);
-
-		return matchesSearch && matchesStatus;
-	});
+	// Get vehicles data from paginated response
+	const vehiclesList = vehicles?.data || [];
+	const totalRecords = vehicles?.total || 0;
+	const totalPages = Math.ceil(totalRecords / pageSize);
 	// auction vehicles
 	const [isAuctionOpen, setIsAuctionOpen] = useState(false);
 	const [auctionVehicle, setAuctionVehicle] = useState<any>(null);
@@ -252,14 +275,14 @@ function VehiclesDashboard() {
 										</TableRow>
 									</TableHeader>
 									<TableBody>
-										{filteredVehicles?.length === 0 ? (
+										{vehiclesList.length === 0 ? (
 											<TableRow>
 												<TableCell colSpan={7} className="h-24 text-center">
 													No se encontraron resultados.
 												</TableCell>
 											</TableRow>
 										) : (
-											filteredVehicles?.map((vehicle: any) => {
+											vehiclesList.map((vehicle: any) => {
 												const latestInspection = vehicle.inspections?.[0];
 												return (
 													<TableRow key={vehicle.id}>
@@ -380,6 +403,16 @@ function VehiclesDashboard() {
 																		<Camera className="mr-2 h-4 w-4" />
 																		Ver fotografías
 																	</DropdownMenuItem>
+																	<DropdownMenuItem
+																		onClick={() => {
+																			setSelectedVehicle(vehicle);
+																			setActiveTab("documents");
+																			setIsDetailsOpen(true);
+																		}}
+																	>
+																		<FolderOpen className="mr-2 h-4 w-4" />
+																		Ver documentos
+																	</DropdownMenuItem>
 																	{latestInspection?.scannerUsed &&
 																		latestInspection?.scannerResultUrl && (
 																			<DropdownMenuItem
@@ -431,6 +464,42 @@ function VehiclesDashboard() {
 									</TableBody>
 								</Table>
 							</div>
+
+							{/* Pagination Controls */}
+							{totalPages > 1 && (
+								<div className="flex items-center justify-between border-t px-4 py-3">
+									<div className="text-muted-foreground text-sm">
+										Mostrando {page * pageSize + 1} -{" "}
+										{Math.min((page + 1) * pageSize, totalRecords)} de{" "}
+										{totalRecords} vehículos
+									</div>
+									<div className="flex items-center gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPage((p) => Math.max(0, p - 1))}
+											disabled={page === 0}
+										>
+											<ChevronLeft className="h-4 w-4" />
+											Anterior
+										</Button>
+										<span className="text-sm">
+											Página {page + 1} de {totalPages}
+										</span>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												setPage((p) => Math.min(totalPages - 1, p + 1))
+											}
+											disabled={page >= totalPages - 1}
+										>
+											Siguiente
+											<ChevronRight className="h-4 w-4" />
+										</Button>
+									</div>
+								</div>
+							)}
 						</CardContent>
 					</Card>
 				</TabsContent>
@@ -572,10 +641,14 @@ function VehiclesDashboard() {
 							onValueChange={setActiveTab}
 							className="w-full"
 						>
-							<TabsList className="grid w-full grid-cols-3">
+							<TabsList className="grid w-full grid-cols-4">
 								<TabsTrigger value="general">Información General</TabsTrigger>
 								<TabsTrigger value="inspections">Inspecciones</TabsTrigger>
 								<TabsTrigger value="photos">Fotografías</TabsTrigger>
+								<TabsTrigger value="documents">
+									<FolderOpen className="mr-2 h-4 w-4" />
+									Documentos
+								</TabsTrigger>
 							</TabsList>
 
 							<TabsContent value="general" className="mt-4 space-y-4">
@@ -1001,6 +1074,25 @@ function VehiclesDashboard() {
 										</CardContent>
 									</Card>
 								)}
+							</TabsContent>
+
+							<TabsContent value="documents" className="mt-4 space-y-4">
+								<Card>
+									<CardHeader>
+										<CardTitle className="text-lg">
+											Documentos del Vehículo
+										</CardTitle>
+										<CardDescription>
+											Gestiona los documentos legales asociados al vehículo
+										</CardDescription>
+									</CardHeader>
+									<CardContent>
+										<VehicleDocumentUpload
+											vehicleId={selectedVehicle.id}
+											ownerType="individual"
+										/>
+									</CardContent>
+								</Card>
 							</TabsContent>
 						</Tabs>
 					)}

@@ -358,49 +358,56 @@ function RouteComponent() {
 							{caso.id ? (
 								<>
 									<Separator />
-							<div className="flex gap-2">
-								<ContactoModal
-									casoCobroId={caso.id}
-									clienteNombre={caso.clienteNombre || ""}
-									telefonoPrincipal={caso.telefonoPrincipal || ""}
-									metodoInicial="llamada"
-								>
-									<Button className="flex items-center gap-2">
-										<Phone className="h-4 w-4" />
-										Registrar Llamada
-									</Button>
-								</ContactoModal>
+									<div className="flex gap-2">
+										<ContactoModal
+											casoCobroId={caso.id}
+											clienteNombre={caso.clienteNombre || ""}
+											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											metodoInicial="llamada"
+										>
+											<Button className="flex items-center gap-2">
+												<Phone className="h-4 w-4" />
+												Registrar Llamada
+											</Button>
+										</ContactoModal>
 
-								<ContactoModal
-									casoCobroId={caso.id}
-									clienteNombre={caso.clienteNombre || ""}
-									telefonoPrincipal={caso.telefonoPrincipal || ""}
-									metodoInicial="whatsapp"
-								>
-									<Button variant="outline" className="flex items-center gap-2">
-										<MessageCircle className="h-4 w-4" />
-										WhatsApp
-									</Button>
-								</ContactoModal>
+										<ContactoModal
+											casoCobroId={caso.id}
+											clienteNombre={caso.clienteNombre || ""}
+											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											metodoInicial="whatsapp"
+										>
+											<Button
+												variant="outline"
+												className="flex items-center gap-2"
+											>
+												<MessageCircle className="h-4 w-4" />
+												WhatsApp
+											</Button>
+										</ContactoModal>
 
-								<ContactoModal
-									casoCobroId={caso.id}
-									clienteNombre={caso.clienteNombre || ""}
-									telefonoPrincipal={caso.telefonoPrincipal || ""}
-									metodoInicial="email"
-								>
-									<Button variant="outline" className="flex items-center gap-2">
-										<Mail className="h-4 w-4" />
-										Email
-									</Button>
-								</ContactoModal>
-							</div>
+										<ContactoModal
+											casoCobroId={caso.id}
+											clienteNombre={caso.clienteNombre || ""}
+											telefonoPrincipal={caso.telefonoPrincipal || ""}
+											metodoInicial="email"
+										>
+											<Button
+												variant="outline"
+												className="flex items-center gap-2"
+											>
+												<Mail className="h-4 w-4" />
+												Email
+											</Button>
+										</ContactoModal>
+									</div>
 								</>
 							) : (
 								<div className="rounded-md border border-yellow-200 bg-yellow-50 p-4">
 									<p className="text-sm text-yellow-800">
 										Este crédito aún no tiene caso de cobros asignado. Se creará
-										automáticamente cuando sea necesario realizar gestión de cobranza.
+										automáticamente cuando sea necesario realizar gestión de
+										cobranza.
 									</p>
 								</div>
 							)}

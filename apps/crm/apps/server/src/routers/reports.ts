@@ -7,12 +7,7 @@ import {
 	contratosFinanciamiento,
 	cuotasPago,
 } from "../db/schema/cobros";
-import {
-	clients,
-	leads,
-	opportunities,
-	salesStages,
-} from "../db/schema/crm";
+import { clients, leads, opportunities, salesStages } from "../db/schema/crm";
 import { vehicleInspections, vehicles } from "../db/schema/vehicles";
 import { protectedProcedure } from "../lib/orpc";
 

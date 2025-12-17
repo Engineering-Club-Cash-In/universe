@@ -3,15 +3,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
 	Building,
+	ChevronLeft,
+	ChevronRight,
+	ChevronsLeft,
+	ChevronsRight,
 	Filter,
 	Mail,
 	MoreHorizontal,
+	Pencil,
 	Phone,
 	Plus,
 	Search,
 	Users,
+	X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -77,13 +83,14 @@ export const Route = createFileRoute("/crm/leads")({
 	component: RouteComponent,
 	validateSearch: z.object({
 		companyId: z.string().optional(),
+		leadId: z.string().optional(),
 	}).parse,
 });
 
 // Type aliases for better type safety
 type CreateLeadInput = Parameters<typeof client.createLead>[0];
 type UpdateLeadInput = Parameters<typeof client.updateLead>[0];
-type Lead = Awaited<ReturnType<typeof client.getLeads>>[0] & {
+type Lead = Awaited<ReturnType<typeof client.getLeads>>["data"][0] & {
 	score?: string | null;
 	fit?: boolean | null;
 	scoredAt?: Date | null;
@@ -102,18 +109,82 @@ function RouteComponent() {
 	const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
 	const [editingLead, setEditingLead] = useState<Lead | null>(null);
 	const [searchTerm, setSearchTerm] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [page, setPage] = useState(0);
+	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
+	const [creditAnalysisForm, setCreditAnalysisForm] = useState({
+		monthlyFixedIncome: "",
+		monthlyVariableIncome: "",
+		monthlyFixedExpenses: "",
+		monthlyVariableExpenses: "",
+		economicAvailability: "",
+		minPayment: "",
+		maxPayment: "",
+		adjustedPayment: "",
+		maxCreditAmount: "",
+	});
+	const pageSize = 20;
 	const processedCompanyIdRef = useRef<string | null>(null);
+	const processedLeadIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
+	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+
+	// Debounce search input
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPage(0); // Reset to first page on search
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
+
+	// Reset page when status filter changes
+	useEffect(() => {
+		setPage(0);
+	}, [statusFilter]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
 	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions(),
+		...orpc.getLeads.queryOptions({
+			input: {
+				limit: pageSize,
+				offset: page * pageSize,
+				search: debouncedSearch || undefined,
+				status:
+					statusFilter !== "all"
+						? (statusFilter as
+								| "new"
+								| "contacted"
+								| "qualified"
+								| "converted"
+								| "unqualified")
+						: undefined,
+			},
+		}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+		queryKey: [
+			"getLeads",
+			session?.user?.id,
+			userProfile.data?.role,
+			page,
+			pageSize,
+			debouncedSearch,
+			statusFilter,
+		],
+	});
+
+	const leadsStatsQuery = useQuery({
+		...orpc.getLeadsStats.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getLeadsStats", session?.user?.id, userProfile.data?.role],
 	});
 	const companiesQuery = useQuery({
 		...orpc.getCompanies.queryOptions(),
@@ -129,6 +200,28 @@ function RouteComponent() {
 			? () => client.getCreditAnalysisByLeadId({ leadId: selectedLead.id })
 			: () => Promise.resolve(null),
 		enabled: !!selectedLead?.id && isDetailsDialogOpen,
+	});
+
+	// Query para obtener las oportunidades del lead
+	const leadOpportunitiesQuery = useQuery({
+		queryKey: ["getOpportunitiesByLeadId", selectedLead?.id],
+		queryFn: selectedLead?.id
+			? () => client.getOpportunities({ leadId: selectedLead.id })
+			: () => Promise.resolve([]),
+		enabled: !!selectedLead?.id && isDetailsDialogOpen,
+	});
+
+	// Query para obtener un lead específico por ID (desde URL)
+	const specificLeadQuery = useQuery({
+		queryKey: ["getLeadById", search.leadId],
+		queryFn: search.leadId
+			? () => client.getLeads({ id: search.leadId })
+			: () => Promise.resolve(null),
+		enabled:
+			!!search.leadId &&
+			!processedLeadIdRef.current &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
 	});
 
 	const createLeadForm = useForm({
@@ -162,6 +255,8 @@ function RouteComponent() {
 				| "other",
 			assignedTo: "",
 			notes: "",
+			score: "",
+			fit: false,
 		},
 		validators: {
 			onSubmit: ({ value }) => {
@@ -217,6 +312,8 @@ function RouteComponent() {
 				assignedTo: value.assignedTo || undefined,
 				jobTitle: value.jobTitle || undefined,
 				notes: value.notes || undefined,
+				score: value.score ? Number.parseFloat(value.score) : undefined,
+				fit: value.fit,
 			};
 
 			if (editingLead) {
@@ -234,7 +331,9 @@ function RouteComponent() {
 		mutationFn: (input: CreateLeadInput) => client.createLead(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
-				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+				predicate: (query) =>
+					query.queryKey[0] === "getLeads" ||
+					query.queryKey[0] === "getLeadsStats",
 			});
 			toast.success("Lead creado exitosamente");
 			setIsCreateDialogOpen(false);
@@ -246,11 +345,40 @@ function RouteComponent() {
 		},
 	});
 
+	const upsertCreditAnalysisMutation = useMutation({
+		mutationFn: (input: {
+			leadId: string;
+			monthlyFixedIncome?: number;
+			monthlyVariableIncome?: number;
+			monthlyFixedExpenses?: number;
+			monthlyVariableExpenses?: number;
+			economicAvailability?: number;
+			minPayment?: number;
+			maxPayment?: number;
+			adjustedPayment?: number;
+			maxCreditAmount?: number;
+		}) => client.upsertCreditAnalysis(input),
+		onSuccess: () => {
+			queryClient.invalidateQueries({
+				queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
+			});
+			toast.success("Análisis crediticio actualizado exitosamente");
+			setIsEditingCreditAnalysis(false);
+		},
+		onError: (error: any) => {
+			toast.error(
+				error.message || "Error al actualizar el análisis crediticio",
+			);
+		},
+	});
+
 	const updateLeadMutation = useMutation({
 		mutationFn: (input: UpdateLeadInput) => client.updateLead(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({
-				queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
+				predicate: (query) =>
+					query.queryKey[0] === "getLeads" ||
+					query.queryKey[0] === "getLeadsStats",
 			});
 			toast.success("Lead actualizado exitosamente");
 			setIsCreateDialogOpen(false);
@@ -296,7 +424,24 @@ function RouteComponent() {
 		}
 	}, [search.companyId, companiesQuery.data]);
 
-	// Clear search param when modal closes (only on transition from open to closed)
+	// Handle opening details modal from URL param (leadId)
+	useEffect(() => {
+		if (
+			search.leadId &&
+			specificLeadQuery.data &&
+			processedLeadIdRef.current !== search.leadId
+		) {
+			const leadsData = specificLeadQuery.data.data as Lead[] | undefined;
+			const lead = leadsData?.find((l) => l.id === search.leadId);
+			if (lead) {
+				setSelectedLead(lead);
+				setIsDetailsDialogOpen(true);
+				processedLeadIdRef.current = search.leadId;
+			}
+		}
+	}, [search.leadId, specificLeadQuery.data]);
+
+	// Clear search param when create modal closes (only on transition from open to closed)
 	useEffect(() => {
 		const wasOpen = prevOpenRef.current;
 		prevOpenRef.current = isCreateDialogOpen;
@@ -309,6 +454,19 @@ function RouteComponent() {
 			}
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
+
+	// Clear search param when details modal closes
+	useEffect(() => {
+		const wasOpen = prevDetailsOpenRef.current;
+		prevDetailsOpenRef.current = isDetailsDialogOpen;
+
+		if (wasOpen && !isDetailsDialogOpen && processedLeadIdRef.current) {
+			processedLeadIdRef.current = null;
+			if (search.leadId) {
+				navigate({ to: "/crm/leads", search: {}, replace: true });
+			}
+		}
+	}, [isDetailsDialogOpen, navigate, search.leadId]);
 
 	// Populate form when editing a lead
 	useEffect(() => {
@@ -368,6 +526,11 @@ function RouteComponent() {
 			createLeadForm.setFieldValue("source", editingLead.source || "website");
 			createLeadForm.setFieldValue("assignedTo", editingLead.assignedTo || "");
 			createLeadForm.setFieldValue("notes", editingLead.notes || "");
+			createLeadForm.setFieldValue(
+				"score",
+				editingLead.score ? String(editingLead.score) : "",
+			);
+			createLeadForm.setFieldValue("fit", editingLead.fit || false);
 		}
 	}, [editingLead]);
 
@@ -435,22 +598,10 @@ function RouteComponent() {
 		setIsDetailsDialogOpen(true);
 	};
 
-	// Filter leads based on search and status
-	const filteredLeads =
-		(leadsQuery.data as Lead[] | undefined)?.filter((lead) => {
-			const matchesSearch =
-				searchTerm === "" ||
-				`${lead.firstName} ${lead.lastName}`
-					.toLowerCase()
-					.includes(searchTerm.toLowerCase()) ||
-				lead.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-				lead.company?.name?.toLowerCase().includes(searchTerm.toLowerCase());
-
-			const matchesStatus =
-				statusFilter === "all" || lead.status === statusFilter;
-
-			return matchesSearch && matchesStatus;
-		}) || [];
+	// Data now comes pre-filtered from server
+	const leads = (leadsQuery.data?.data as Lead[] | undefined) || [];
+	const totalLeads = leadsQuery.data?.total ?? 0;
+	const totalPages = Math.ceil(totalLeads / pageSize);
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -474,7 +625,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.length || 0}
+							{leadsStatsQuery.data?.total || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -485,7 +636,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.filter((l) => l.status === "new").length || 0}
+							{leadsStatsQuery.data?.new || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -496,8 +647,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.filter((l) => l.status === "qualified")
-								.length || 0}
+							{leadsStatsQuery.data?.qualified || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -508,8 +658,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{leadsQuery.data?.filter((l) => l.status === "converted")
-								.length || 0}
+							{leadsStatsQuery.data?.converted || 0}
 						</div>
 					</CardContent>
 				</Card>
@@ -534,12 +683,15 @@ function RouteComponent() {
 								}
 							}}
 						>
-							<DialogTrigger asChild>
-								<Button>
-									<Plus className="mr-2 h-4 w-4" />
-									Agregar Lead
-								</Button>
-							</DialogTrigger>
+							{userProfile.data?.role &&
+								PERMISSIONS.canCreateLeads(userProfile.data.role) && (
+									<DialogTrigger asChild>
+										<Button>
+											<Plus className="mr-2 h-4 w-4" />
+											Agregar Lead
+										</Button>
+									</DialogTrigger>
+								)}
 							<DialogContent className="max-h-[90vh] min-w-[800px] max-w-4xl overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>
@@ -1258,6 +1410,67 @@ function RouteComponent() {
 										</createLeadForm.Field>
 									</div>
 
+									{/* Score y Capacidad de Pago - Solo visible al editar */}
+									{editingLead && (
+										<div className="grid grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-4">
+											<createLeadForm.Field name="score">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>
+															Score Crediticio (0-1)
+														</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															type="number"
+															min="0"
+															max="1"
+															step="0.01"
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+															placeholder="Ej: 0.75"
+														/>
+														<p className="text-muted-foreground text-xs">
+															Puntaje de 0 a 1 (1 = excelente)
+														</p>
+													</div>
+												)}
+											</createLeadForm.Field>
+
+											<createLeadForm.Field name="fit">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>
+															Capacidad de Pago
+														</Label>
+														<div className="flex items-center space-x-2 pt-2">
+															<Checkbox
+																id={field.name}
+																checked={field.state.value}
+																onCheckedChange={(checked) =>
+																	field.handleChange(checked === true)
+																}
+															/>
+															<label
+																htmlFor={field.name}
+																className="cursor-pointer text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+															>
+																Pre-aprobado (tiene capacidad de pago)
+															</label>
+														</div>
+														<p className="text-muted-foreground text-xs">
+															Indica si el lead cumple con la capacidad de pago
+															requerida
+														</p>
+													</div>
+												)}
+											</createLeadForm.Field>
+										</div>
+									)}
+
 									<createLeadForm.Subscribe>
 										{(state) => (
 											<Button
@@ -1320,7 +1533,7 @@ function RouteComponent() {
 						<Table>
 							<TableHeader>
 								<TableRow>
-									<TableHead>Nombre</TableHead>
+									<TableHead className="w-48">Nombre</TableHead>
 									<TableHead>Contacto</TableHead>
 									<TableHead>Empresa</TableHead>
 									<TableHead>Fuente</TableHead>
@@ -1332,7 +1545,7 @@ function RouteComponent() {
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{filteredLeads.map((lead) => (
+								{leads.map((lead) => (
 									<TableRow key={lead.id}>
 										<TableCell>
 											<div>
@@ -1475,6 +1688,56 @@ function RouteComponent() {
 								))}
 							</TableBody>
 						</Table>
+					)}
+
+					{/* Pagination Controls */}
+					{totalPages > 0 && (
+						<div className="flex items-center justify-between border-t pt-4">
+							<div className="text-muted-foreground text-sm">
+								Mostrando {page * pageSize + 1} -{" "}
+								{Math.min((page + 1) * pageSize, totalLeads)} de {totalLeads}{" "}
+								leads
+							</div>
+							<div className="flex items-center gap-2">
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setPage(0)}
+									disabled={page === 0}
+								>
+									<ChevronsLeft className="h-4 w-4" />
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setPage((p) => Math.max(0, p - 1))}
+									disabled={page === 0}
+								>
+									<ChevronLeft className="h-4 w-4" />
+								</Button>
+								<span className="px-2 text-sm">
+									Página {page + 1} de {totalPages}
+								</span>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() =>
+										setPage((p) => Math.min(totalPages - 1, p + 1))
+									}
+									disabled={page >= totalPages - 1}
+								>
+									<ChevronRight className="h-4 w-4" />
+								</Button>
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => setPage(totalPages - 1)}
+									disabled={page >= totalPages - 1}
+								>
+									<ChevronsRight className="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
 					)}
 				</CardContent>
 			</Card>
@@ -1838,204 +2101,519 @@ function RouteComponent() {
 							)}
 
 							{/* Credit Analysis Section - Análisis de Capacidad de Pago */}
-							{creditAnalysisQuery.data && (
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<div className="flex items-center justify-between">
 									<h3 className="font-semibold text-base">
 										Análisis de Capacidad de Pago
 									</h3>
+									{!isEditingCreditAnalysis ? (
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => {
+												const data = creditAnalysisQuery.data;
+												setCreditAnalysisForm({
+													monthlyFixedIncome:
+														data?.monthlyFixedIncome?.toString() || "",
+													monthlyVariableIncome:
+														data?.monthlyVariableIncome?.toString() || "",
+													monthlyFixedExpenses:
+														data?.monthlyFixedExpenses?.toString() || "",
+													monthlyVariableExpenses:
+														data?.monthlyVariableExpenses?.toString() || "",
+													economicAvailability:
+														data?.economicAvailability?.toString() || "",
+													minPayment: data?.minPayment?.toString() || "",
+													maxPayment: data?.maxPayment?.toString() || "",
+													adjustedPayment:
+														data?.adjustedPayment?.toString() || "",
+													maxCreditAmount:
+														data?.maxCreditAmount?.toString() || "",
+												});
+												setIsEditingCreditAnalysis(true);
+											}}
+										>
+											<Pencil className="mr-2 h-4 w-4" />
+											Editar
+										</Button>
+									) : (
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={() => setIsEditingCreditAnalysis(false)}
+										>
+											<X className="mr-2 h-4 w-4" />
+											Cancelar
+										</Button>
+									)}
+								</div>
 
-									{/* Income and Expenses Summary */}
-									<div className="grid grid-cols-2 gap-6">
-										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Ingresos Mensuales
-											</h4>
-											<div className="space-y-3 rounded-lg bg-green-50 p-4">
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Ingresos Fijos:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyFixedIncome
-															? formatCurrency(
-																	creditAnalysisQuery.data.monthlyFixedIncome,
-																)
-															: "-"}
-													</span>
+								{isEditingCreditAnalysis ? (
+									<form
+										onSubmit={(e) => {
+											e.preventDefault();
+											if (!selectedLead) return;
+											upsertCreditAnalysisMutation.mutate({
+												leadId: selectedLead.id,
+												monthlyFixedIncome:
+													creditAnalysisForm.monthlyFixedIncome
+														? Number(creditAnalysisForm.monthlyFixedIncome)
+														: undefined,
+												monthlyVariableIncome:
+													creditAnalysisForm.monthlyVariableIncome
+														? Number(creditAnalysisForm.monthlyVariableIncome)
+														: undefined,
+												monthlyFixedExpenses:
+													creditAnalysisForm.monthlyFixedExpenses
+														? Number(creditAnalysisForm.monthlyFixedExpenses)
+														: undefined,
+												monthlyVariableExpenses:
+													creditAnalysisForm.monthlyVariableExpenses
+														? Number(creditAnalysisForm.monthlyVariableExpenses)
+														: undefined,
+												economicAvailability:
+													creditAnalysisForm.economicAvailability
+														? Number(creditAnalysisForm.economicAvailability)
+														: undefined,
+												minPayment: creditAnalysisForm.minPayment
+													? Number(creditAnalysisForm.minPayment)
+													: undefined,
+												maxPayment: creditAnalysisForm.maxPayment
+													? Number(creditAnalysisForm.maxPayment)
+													: undefined,
+												adjustedPayment: creditAnalysisForm.adjustedPayment
+													? Number(creditAnalysisForm.adjustedPayment)
+													: undefined,
+												maxCreditAmount: creditAnalysisForm.maxCreditAmount
+													? Number(creditAnalysisForm.maxCreditAmount)
+													: undefined,
+											});
+										}}
+										className="space-y-4"
+									>
+										{/* Income and Expenses Form */}
+										<div className="grid grid-cols-2 gap-6">
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Ingresos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-green-50 p-4">
+													<div className="space-y-2">
+														<Label className="text-sm">Ingresos Fijos</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyFixedIncome}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyFixedIncome: e.target.value,
+																}))
+															}
+														/>
+													</div>
+													<div className="space-y-2">
+														<Label className="text-sm">
+															Ingresos Variables
+														</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyVariableIncome}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyVariableIncome: e.target.value,
+																}))
+															}
+														/>
+													</div>
 												</div>
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Ingresos Variables:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyVariableIncome
-															? formatCurrency(
-																	creditAnalysisQuery.data
-																		.monthlyVariableIncome,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="border-t pt-2">
-													<div className="flex justify-between">
-														<span className="font-medium">Total Ingresos:</span>
-														<span className="font-bold text-green-600">
-															{creditAnalysisQuery.data.monthlyFixedIncome &&
-															creditAnalysisQuery.data.monthlyVariableIncome
-																? formatCurrency(
-																		Number(
-																			creditAnalysisQuery.data
-																				.monthlyFixedIncome,
-																		) +
-																			Number(
-																				creditAnalysisQuery.data
-																					.monthlyVariableIncome,
-																			),
-																	)
-																: "-"}
-														</span>
+											</div>
+
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Gastos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-red-50 p-4">
+													<div className="space-y-2">
+														<Label className="text-sm">Gastos Fijos</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyFixedExpenses}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyFixedExpenses: e.target.value,
+																}))
+															}
+														/>
+													</div>
+													<div className="space-y-2">
+														<Label className="text-sm">Gastos Variables</Label>
+														<Input
+															type="number"
+															step="0.01"
+															min="0"
+															placeholder="0.00"
+															value={creditAnalysisForm.monthlyVariableExpenses}
+															onChange={(e) =>
+																setCreditAnalysisForm((prev) => ({
+																	...prev,
+																	monthlyVariableExpenses: e.target.value,
+																}))
+															}
+														/>
 													</div>
 												</div>
 											</div>
 										</div>
 
-										<div className="space-y-4">
-											<h4 className="font-medium text-base">
-												Gastos Mensuales
-											</h4>
-											<div className="space-y-3 rounded-lg bg-red-50 p-4">
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Gastos Fijos:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyFixedExpenses
-															? formatCurrency(
-																	creditAnalysisQuery.data.monthlyFixedExpenses,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="flex justify-between">
-													<span className="text-muted-foreground text-sm">
-														Gastos Variables:
-													</span>
-													<span className="font-medium">
-														{creditAnalysisQuery.data.monthlyVariableExpenses
-															? formatCurrency(
-																	creditAnalysisQuery.data
-																		.monthlyVariableExpenses,
-																)
-															: "-"}
-													</span>
-												</div>
-												<div className="border-t pt-2">
-													<div className="flex justify-between">
-														<span className="font-medium">Total Gastos:</span>
-														<span className="font-bold text-red-600">
-															{creditAnalysisQuery.data.monthlyFixedExpenses &&
-															creditAnalysisQuery.data.monthlyVariableExpenses
-																? formatCurrency(
-																		Number(
-																			creditAnalysisQuery.data
-																				.monthlyFixedExpenses,
-																		) +
-																			Number(
-																				creditAnalysisQuery.data
-																					.monthlyVariableExpenses,
-																			),
-																	)
-																: "-"}
-														</span>
-													</div>
-												</div>
-											</div>
-										</div>
-									</div>
-
-									{/* Economic Availability */}
-									<div className="rounded-lg bg-blue-50 p-4">
-										<div className="flex items-center justify-between">
-											<div>
-												<Label className="font-medium text-muted-foreground text-sm">
+										{/* Economic Availability */}
+										<div className="rounded-lg bg-blue-50 p-4">
+											<div className="space-y-2">
+												<Label className="font-medium text-sm">
 													Disponibilidad Económica
 												</Label>
-												<p className="text-muted-foreground text-sm">
-													Capacidad de ahorro mensual
-												</p>
-											</div>
-											<span className="font-bold text-2xl text-blue-600">
-												{creditAnalysisQuery.data.economicAvailability
-													? formatCurrency(
-															creditAnalysisQuery.data.economicAvailability,
-														)
-													: "-"}
-											</span>
-										</div>
-									</div>
-
-									{/* Payment Capacity */}
-									<div className="space-y-4">
-										<h4 className="font-medium text-base">Capacidad de Pago</h4>
-										<div className="grid grid-cols-4 gap-4">
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Mínimo
-												</Label>
-												<p className="mt-1 font-bold text-lg text-orange-600">
-													{creditAnalysisQuery.data.minPayment
-														? formatCurrency(
-																creditAnalysisQuery.data.minPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Ajustado
-												</Label>
-												<p className="mt-1 font-bold text-blue-600 text-lg">
-													{creditAnalysisQuery.data.adjustedPayment
-														? formatCurrency(
-																creditAnalysisQuery.data.adjustedPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Pago Máximo
-												</Label>
-												<p className="mt-1 font-bold text-green-600 text-lg">
-													{creditAnalysisQuery.data.maxPayment
-														? formatCurrency(
-																creditAnalysisQuery.data.maxPayment,
-															)
-														: "-"}
-												</p>
-											</div>
-											<div className="rounded-lg border bg-primary/5 p-4 text-center">
-												<Label className="text-muted-foreground text-xs">
-													Crédito Máximo
-												</Label>
-												<p className="mt-1 font-bold text-lg text-primary">
-													{creditAnalysisQuery.data.maxCreditAmount
-														? formatCurrency(
-																creditAnalysisQuery.data.maxCreditAmount,
-															)
-														: "-"}
-												</p>
+												<Input
+													type="number"
+													step="0.01"
+													placeholder="0.00"
+													value={creditAnalysisForm.economicAvailability}
+													onChange={(e) =>
+														setCreditAnalysisForm((prev) => ({
+															...prev,
+															economicAvailability: e.target.value,
+														}))
+													}
+												/>
 											</div>
 										</div>
-									</div>
 
-									{/* Analysis Date */}
-									<div className="text-right text-muted-foreground text-sm">
-										Análisis realizado:{" "}
-										{formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
-									</div>
-								</div>
-							)}
+										{/* Payment Capacity Form */}
+										<div className="space-y-4">
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
+											<div className="grid grid-cols-4 gap-4">
+												<div className="space-y-2">
+													<Label className="text-xs">Pago Mínimo</Label>
+													<Input
+														type="number"
+														step="0.01"
+														min="0"
+														placeholder="0.00"
+														value={creditAnalysisForm.minPayment}
+														onChange={(e) =>
+															setCreditAnalysisForm((prev) => ({
+																...prev,
+																minPayment: e.target.value,
+															}))
+														}
+													/>
+												</div>
+												<div className="space-y-2">
+													<Label className="text-xs">Pago Ajustado</Label>
+													<Input
+														type="number"
+														step="0.01"
+														min="0"
+														placeholder="0.00"
+														value={creditAnalysisForm.adjustedPayment}
+														onChange={(e) =>
+															setCreditAnalysisForm((prev) => ({
+																...prev,
+																adjustedPayment: e.target.value,
+															}))
+														}
+													/>
+												</div>
+												<div className="space-y-2">
+													<Label className="text-xs">Pago Máximo</Label>
+													<Input
+														type="number"
+														step="0.01"
+														min="0"
+														placeholder="0.00"
+														value={creditAnalysisForm.maxPayment}
+														onChange={(e) =>
+															setCreditAnalysisForm((prev) => ({
+																...prev,
+																maxPayment: e.target.value,
+															}))
+														}
+													/>
+												</div>
+												<div className="space-y-2">
+													<Label className="text-xs">Crédito Máximo</Label>
+													<Input
+														type="number"
+														step="0.01"
+														min="0"
+														placeholder="0.00"
+														value={creditAnalysisForm.maxCreditAmount}
+														onChange={(e) =>
+															setCreditAnalysisForm((prev) => ({
+																...prev,
+																maxCreditAmount: e.target.value,
+															}))
+														}
+													/>
+												</div>
+											</div>
+										</div>
+
+										<div className="flex justify-end gap-2">
+											<Button
+												type="button"
+												variant="outline"
+												onClick={() => setIsEditingCreditAnalysis(false)}
+											>
+												Cancelar
+											</Button>
+											<Button
+												type="submit"
+												disabled={upsertCreditAnalysisMutation.isPending}
+											>
+												{upsertCreditAnalysisMutation.isPending
+													? "Guardando..."
+													: "Guardar Análisis"}
+											</Button>
+										</div>
+									</form>
+								) : creditAnalysisQuery.data ? (
+									<>
+										{/* Income and Expenses Summary */}
+										<div className="grid grid-cols-2 gap-6">
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Ingresos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-green-50 p-4">
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Ingresos Fijos:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyFixedIncome
+																? formatCurrency(
+																		creditAnalysisQuery.data.monthlyFixedIncome,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Ingresos Variables:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyVariableIncome
+																? formatCurrency(
+																		creditAnalysisQuery.data
+																			.monthlyVariableIncome,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="border-t pt-2">
+														<div className="flex justify-between">
+															<span className="font-medium">
+																Total Ingresos:
+															</span>
+															<span className="font-bold text-green-600">
+																{creditAnalysisQuery.data.monthlyFixedIncome ||
+																creditAnalysisQuery.data.monthlyVariableIncome
+																	? formatCurrency(
+																			Number(
+																				creditAnalysisQuery.data
+																					.monthlyFixedIncome || 0,
+																			) +
+																				Number(
+																					creditAnalysisQuery.data
+																						.monthlyVariableIncome || 0,
+																				),
+																		)
+																	: "-"}
+															</span>
+														</div>
+													</div>
+												</div>
+											</div>
+
+											<div className="space-y-4">
+												<h4 className="font-medium text-base">
+													Gastos Mensuales
+												</h4>
+												<div className="space-y-3 rounded-lg bg-red-50 p-4">
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Gastos Fijos:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyFixedExpenses
+																? formatCurrency(
+																		creditAnalysisQuery.data
+																			.monthlyFixedExpenses,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="flex justify-between">
+														<span className="text-muted-foreground text-sm">
+															Gastos Variables:
+														</span>
+														<span className="font-medium">
+															{creditAnalysisQuery.data.monthlyVariableExpenses
+																? formatCurrency(
+																		creditAnalysisQuery.data
+																			.monthlyVariableExpenses,
+																	)
+																: "-"}
+														</span>
+													</div>
+													<div className="border-t pt-2">
+														<div className="flex justify-between">
+															<span className="font-medium">Total Gastos:</span>
+															<span className="font-bold text-red-600">
+																{creditAnalysisQuery.data
+																	.monthlyFixedExpenses ||
+																creditAnalysisQuery.data.monthlyVariableExpenses
+																	? formatCurrency(
+																			Number(
+																				creditAnalysisQuery.data
+																					.monthlyFixedExpenses || 0,
+																			) +
+																				Number(
+																					creditAnalysisQuery.data
+																						.monthlyVariableExpenses || 0,
+																				),
+																		)
+																	: "-"}
+															</span>
+														</div>
+													</div>
+												</div>
+											</div>
+										</div>
+
+										{/* Economic Availability */}
+										<div className="rounded-lg bg-blue-50 p-4">
+											<div className="flex items-center justify-between">
+												<div>
+													<Label className="font-medium text-muted-foreground text-sm">
+														Disponibilidad Económica
+													</Label>
+													<p className="text-muted-foreground text-sm">
+														Capacidad de ahorro mensual
+													</p>
+												</div>
+												<span className="font-bold text-2xl text-blue-600">
+													{creditAnalysisQuery.data.economicAvailability
+														? formatCurrency(
+																creditAnalysisQuery.data.economicAvailability,
+															)
+														: "-"}
+												</span>
+											</div>
+										</div>
+
+										{/* Payment Capacity */}
+										<div className="space-y-4">
+											<h4 className="font-medium text-base">
+												Capacidad de Pago
+											</h4>
+											<div className="grid grid-cols-4 gap-4">
+												<div className="rounded-lg border p-4 text-center">
+													<Label className="text-muted-foreground text-xs">
+														Pago Mínimo
+													</Label>
+													<p className="mt-1 font-bold text-lg text-orange-600">
+														{creditAnalysisQuery.data.minPayment
+															? formatCurrency(
+																	creditAnalysisQuery.data.minPayment,
+																)
+															: "-"}
+													</p>
+												</div>
+												<div className="rounded-lg border p-4 text-center">
+													<Label className="text-muted-foreground text-xs">
+														Pago Ajustado
+													</Label>
+													<p className="mt-1 font-bold text-blue-600 text-lg">
+														{creditAnalysisQuery.data.adjustedPayment
+															? formatCurrency(
+																	creditAnalysisQuery.data.adjustedPayment,
+																)
+															: "-"}
+													</p>
+												</div>
+												<div className="rounded-lg border p-4 text-center">
+													<Label className="text-muted-foreground text-xs">
+														Pago Máximo
+													</Label>
+													<p className="mt-1 font-bold text-green-600 text-lg">
+														{creditAnalysisQuery.data.maxPayment
+															? formatCurrency(
+																	creditAnalysisQuery.data.maxPayment,
+																)
+															: "-"}
+													</p>
+												</div>
+												<div className="rounded-lg border bg-primary/5 p-4 text-center">
+													<Label className="text-muted-foreground text-xs">
+														Crédito Máximo
+													</Label>
+													<p className="mt-1 font-bold text-lg text-primary">
+														{creditAnalysisQuery.data.maxCreditAmount
+															? formatCurrency(
+																	creditAnalysisQuery.data.maxCreditAmount,
+																)
+															: "-"}
+													</p>
+												</div>
+											</div>
+										</div>
+
+										{/* Analysis Date */}
+										<div className="text-right text-muted-foreground text-sm">
+											Análisis realizado:{" "}
+											{formatGuatemalaDate(creditAnalysisQuery.data.analyzedAt)}
+										</div>
+									</>
+								) : (
+									<p className="py-4 text-center text-muted-foreground">
+										No hay análisis de capacidad de pago registrado.
+										<br />
+										<Button
+											variant="link"
+											className="mt-2"
+											onClick={() => {
+												setCreditAnalysisForm({
+													monthlyFixedIncome: "",
+													monthlyVariableIncome: "",
+													monthlyFixedExpenses: "",
+													monthlyVariableExpenses: "",
+													economicAvailability: "",
+													minPayment: "",
+													maxPayment: "",
+													adjustedPayment: "",
+													maxCreditAmount: "",
+												});
+												setIsEditingCreditAnalysis(true);
+											}}
+										>
+											Agregar análisis
+										</Button>
+									</p>
+								)}
+							</div>
 
 							{/* Acciones */}
 							<div className="flex gap-3 border-t pt-6">
@@ -2063,6 +2641,76 @@ function RouteComponent() {
 									</p>
 								</div>
 							)}
+
+							{/* Oportunidades del Lead */}
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<h3 className="font-semibold text-base">Oportunidades</h3>
+								{leadOpportunitiesQuery.isLoading ? (
+									<p className="text-muted-foreground text-sm">
+										Cargando oportunidades...
+									</p>
+								) : leadOpportunitiesQuery.data &&
+									leadOpportunitiesQuery.data.length > 0 ? (
+									<div className="space-y-2">
+										{leadOpportunitiesQuery.data.map((opp) => (
+											<div
+												key={opp.id}
+												className="flex items-center justify-between rounded-md border bg-background p-3"
+											>
+												<div className="flex flex-col gap-1">
+													<span
+														className="cursor-pointer font-medium text-primary hover:underline"
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/crm/opportunities",
+																search: { opportunityId: opp.id },
+															});
+														}}
+													>
+														{opp.title}
+													</span>
+													<div className="flex items-center gap-2 text-muted-foreground text-xs">
+														{opp.stage && (
+															<Badge
+																variant="outline"
+																style={{
+																	borderColor: opp.stage.color || undefined,
+																	color: opp.stage.color || undefined,
+																}}
+															>
+																{opp.stage.name}
+															</Badge>
+														)}
+														{opp.value && (
+															<span>Q{Number(opp.value).toLocaleString()}</span>
+														)}
+													</div>
+												</div>
+												<Badge
+													variant={
+														opp.status === "won"
+															? "default"
+															: opp.status === "lost"
+																? "destructive"
+																: "secondary"
+													}
+												>
+													{opp.status === "open"
+														? "Abierta"
+														: opp.status === "won"
+															? "Ganada"
+															: "Perdida"}
+												</Badge>
+											</div>
+										))}
+									</div>
+								) : (
+									<p className="text-muted-foreground text-sm">
+										No hay oportunidades asociadas a este lead.
+									</p>
+								)}
+							</div>
 
 							{/* Notes Timeline */}
 							<NotesTimeline

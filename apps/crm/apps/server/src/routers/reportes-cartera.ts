@@ -14,7 +14,9 @@ import { isCarteraBackEnabled } from "../services/cartera-back-integration";
 import type { CarteraCuotaCredito } from "../types/cartera-back";
 
 // Helper para calcular días de mora exactos
-function calcularDiasMoraExactos(cuotasAtrasadas: CarteraCuotaCredito[]): number {
+function calcularDiasMoraExactos(
+	cuotasAtrasadas: CarteraCuotaCredito[],
+): number {
 	if (!cuotasAtrasadas || cuotasAtrasadas.length === 0) {
 		return 0;
 	}
@@ -187,18 +189,20 @@ export const reportesCarteraRouter = {
 								plazo: credito.creditos.plazo,
 								statusCredit: credito.creditos.statusCredit,
 								deudaTotal: credito.creditos.deudatotal,
-								diasMora: calcularDiasMoraExactos(creditoCompleto.cuotasAtrasadas || []),
+								diasMora: calcularDiasMoraExactos(
+									creditoCompleto.cuotasAtrasadas || [],
+								),
 								montoMora: creditoCompleto.moraActual ?? "0",
 								cuotasAtrasadas: creditoCompleto.cuotasAtrasadas?.length || 0,
 								cuotasPagadas: creditoCompleto.cuotasPagadas?.length || 0,
 								cuotasPendientes: creditoCompleto.cuotasPendientes?.length || 0,
-											capitalRestante: "0", // No disponible
-											totalRestante: "0", // No disponible
+								capitalRestante: "0", // No disponible
+								totalRestante: "0", // No disponible
 								// Cliente
 								clienteNombre: creditoCompleto.usuario.nombre,
 								clienteNit: creditoCompleto.usuario.nit,
 								// Asesor
-											asesorNombre: null, // No disponible
+								asesorNombre: null, // No disponible
 								// Datos CRM
 								agenteCobranza: casoCobros[0]?.responsableCobros || null,
 								numeroContactos,
@@ -206,7 +210,7 @@ export const reportesCarteraRouter = {
 								tieneConvenio,
 								tieneRecuperacion,
 								// Inversionistas
-											tieneInversionistas: false,
+								tieneInversionistas: false,
 							};
 						} catch (error) {
 							console.error(

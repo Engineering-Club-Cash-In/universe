@@ -56,6 +56,9 @@ export const documentTypeEnum = pgEnum("document_type", [
 	"vehicle_title", // Tarjeta de circulación
 	"credit_report", // Reporte crediticio
 	"other", // Otros documentos
+
+	// Documento de detalle de análisis (requerido para pasar de 40% a 50%)
+	"detalle_analisis", // Archivo Excel con detalle del crédito
 ]);
 
 export const opportunityDocuments = pgTable("opportunity_documents", {

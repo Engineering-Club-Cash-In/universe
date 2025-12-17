@@ -5,6 +5,8 @@ import {
 	Banknote,
 	Building,
 	Calendar,
+	ChevronLeft,
+	ChevronRight,
 	Filter,
 	HandshakeIcon,
 	MoreHorizontal,
@@ -74,16 +76,60 @@ function RouteComponent() {
 	const queryClient = useQueryClient();
 	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [searchTerm, setSearchTerm] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [statusFilter, setStatusFilter] = useState<string>("all");
+	const [page, setPage] = useState(0);
+	const pageSize = 20;
+
+	// Debounce search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPage(0); // Reset to first page on search
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
+
+	// Reset page when status filter changes
+	useEffect(() => {
+		setPage(0);
+	}, [statusFilter]);
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const clientsQuery = useQuery({
-		...orpc.getClients.queryOptions(),
+		...orpc.getClients.queryOptions({
+			input: {
+				limit: pageSize,
+				offset: page * pageSize,
+				search: debouncedSearch || undefined,
+				status:
+					statusFilter !== "all"
+						? (statusFilter as "active" | "inactive" | "churned")
+						: undefined,
+			},
+		}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
+		queryKey: [
+			"getClients",
+			session?.user?.id,
+			userProfile.data?.role,
+			page,
+			pageSize,
+			debouncedSearch,
+			statusFilter,
+		],
+	});
+
+	const clientsStatsQuery = useQuery({
+		...orpc.getClientsStats.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: ["getClientsStats", session?.user?.id, userProfile.data?.role],
 	});
 	const companiesQuery = useQuery({
 		...orpc.getCompanies.queryOptions(),
@@ -230,38 +276,16 @@ function RouteComponent() {
 		});
 	};
 
-	// Filter clients based on search and status
-	const filteredClients =
-		clientsQuery.data?.filter((clientData) => {
-			const matchesSearch =
-				searchTerm === "" ||
-				clientData.contactPerson
-					.toLowerCase()
-					.includes(searchTerm.toLowerCase()) ||
-				clientData.company?.name
-					?.toLowerCase()
-					.includes(searchTerm.toLowerCase());
+	// Get clients data from paginated response
+	const clients = clientsQuery.data?.data || [];
+	const totalRecords = clientsQuery.data?.total || 0;
+	const totalPages = Math.ceil(totalRecords / pageSize);
 
-			const matchesStatus =
-				statusFilter === "all" || clientData.status === statusFilter;
-
-			return matchesSearch && matchesStatus;
-		}) || [];
-
-	// Calculate client metrics
-	const totalClients = clientsQuery.data?.length || 0;
-	const activeClients =
-		clientsQuery.data?.filter((c) => c.status === "active").length || 0;
-	const inactiveClients =
-		clientsQuery.data?.filter((c) => c.status === "inactive").length || 0;
-	const churnedClients =
-		clientsQuery.data?.filter((c) => c.status === "churned").length || 0;
-
-	// Calculate total contract value
-	const totalContractValue =
-		clientsQuery.data?.reduce((sum, client) => {
-			return sum + (Number.parseFloat(client.contractValue || "0") || 0);
-		}, 0) || 0;
+	// Get metrics from stats query
+	const totalClients = clientsStatsQuery.data?.total || 0;
+	const activeClients = clientsStatsQuery.data?.active || 0;
+	const churnedClients = clientsStatsQuery.data?.churned || 0;
+	const totalContractValue = clientsStatsQuery.data?.totalContractValue || 0;
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
@@ -337,21 +361,22 @@ function RouteComponent() {
 								Gestiona y cultiva tus relaciones con clientes
 							</CardDescription>
 						</div>
-						<Dialog
-							open={isCreateDialogOpen}
-							onOpenChange={(open) => {
-								setIsCreateDialogOpen(open);
-								if (!open) {
-									createClientForm.reset();
-								}
-							}}
-						>
-							<DialogTrigger asChild>
-								<Button>
-									<Plus className="mr-2 h-4 w-4" />
-									Agregar Cliente
-								</Button>
-							</DialogTrigger>
+						{PERMISSIONS.canCreateLeads(userProfile.data.role) && (
+							<Dialog
+								open={isCreateDialogOpen}
+								onOpenChange={(open) => {
+									setIsCreateDialogOpen(open);
+									if (!open) {
+										createClientForm.reset();
+									}
+								}}
+							>
+								<DialogTrigger asChild>
+									<Button>
+										<Plus className="mr-2 h-4 w-4" />
+										Agregar Cliente
+									</Button>
+								</DialogTrigger>
 							<DialogContent className="min-w-2xl max-w-3xl">
 								<DialogHeader>
 									<DialogTitle>Crear Nuevo Cliente</DialogTitle>
@@ -527,7 +552,8 @@ function RouteComponent() {
 									</createClientForm.Subscribe>
 								</form>
 							</DialogContent>
-						</Dialog>
+							</Dialog>
+						)}
 					</div>
 				</CardHeader>
 				<CardContent>
@@ -565,130 +591,168 @@ function RouteComponent() {
 							Error al cargar clientes: {clientsQuery.error.message}
 						</div>
 					) : (
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>Persona de Contacto</TableHead>
-									<TableHead>Empresa</TableHead>
-									<TableHead>Valor del Contrato</TableHead>
-									<TableHead>Período del Contrato</TableHead>
-									<TableHead>Estado</TableHead>
-									<TableHead>Creado</TableHead>
-									<TableHead className="text-right">Acciones</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{filteredClients.map((clientData) => (
-									<TableRow key={clientData.id}>
-										<TableCell>
-											<div className="flex items-center gap-2">
-												<User className="h-4 w-4" />
-												<div className="font-medium">
-													{clientData.contactPerson}
-												</div>
-											</div>
-										</TableCell>
-										<TableCell>
-											{clientData.company ? (
-												<div className="flex items-center gap-1">
-													<Building className="h-3 w-3" />
-													{clientData.company.name}
-												</div>
-											) : (
-												<span className="text-muted-foreground">
-													Sin empresa
-												</span>
-											)}
-										</TableCell>
-										<TableCell>
-											{clientData.contractValue ? (
-												<div className="flex items-center gap-1 font-medium text-green-600">
-													<Banknote className="h-3 w-3" />Q
-													{Number.parseFloat(
-														clientData.contractValue,
-													).toLocaleString()}
-												</div>
-											) : (
-												<span className="text-muted-foreground">Sin valor</span>
-											)}
-										</TableCell>
-										<TableCell>
-											<div className="space-y-1">
-												{clientData.startDate && (
-													<div className="flex items-center gap-1 text-sm">
-														<Calendar className="h-3 w-3" />
-														{formatGuatemalaDate(clientData.startDate)}
+						<>
+							<Table>
+								<TableHeader>
+									<TableRow>
+										<TableHead>Persona de Contacto</TableHead>
+										<TableHead>Empresa</TableHead>
+										<TableHead>Valor del Contrato</TableHead>
+										<TableHead>Período del Contrato</TableHead>
+										<TableHead>Estado</TableHead>
+										<TableHead>Creado</TableHead>
+										<TableHead className="text-right">Acciones</TableHead>
+									</TableRow>
+								</TableHeader>
+								<TableBody>
+									{clients.map((clientData) => (
+										<TableRow key={clientData.id}>
+											<TableCell>
+												<div className="flex items-center gap-2">
+													<User className="h-4 w-4" />
+													<div className="font-medium">
+														{clientData.contactPerson}
 													</div>
-												)}
-												{clientData.endDate && (
-													<div className="flex items-center gap-1 text-muted-foreground text-sm">
-														<Calendar className="h-3 w-3" />
-														{formatGuatemalaDate(clientData.endDate)}
+												</div>
+											</TableCell>
+											<TableCell>
+												{clientData.company ? (
+													<div className="flex items-center gap-1">
+														<Building className="h-3 w-3" />
+														{clientData.company.name}
 													</div>
-												)}
-												{!clientData.startDate && !clientData.endDate && (
-													<span className="text-muted-foreground text-sm">
-														Sin fechas establecidas
+												) : (
+													<span className="text-muted-foreground">
+														Sin empresa
 													</span>
 												)}
-											</div>
-										</TableCell>
-										<TableCell>
-											<Badge
-												className={getStatusBadgeColor(clientData.status)}
-												variant="outline"
-											>
-												{getStatusLabel(clientData.status)}
-											</Badge>
-										</TableCell>
-										<TableCell>
-											<div className="flex items-center gap-1 text-sm">
-												<Calendar className="h-3 w-3" />
-												{formatGuatemalaDate(clientData.createdAt)}
-											</div>
-										</TableCell>
-										<TableCell className="text-right">
-											<DropdownMenu>
-												<DropdownMenuTrigger asChild>
-													<Button variant="ghost" className="h-8 w-8 p-0">
-														<span className="sr-only">Abrir menú</span>
-														<MoreHorizontal className="h-4 w-4" />
-													</Button>
-												</DropdownMenuTrigger>
-												<DropdownMenuContent align="end">
-													<DropdownMenuLabel>Estado</DropdownMenuLabel>
-													<DropdownMenuSeparator />
-													<DropdownMenuItem
-														onClick={() =>
-															handleStatusChange(clientData.id, "active")
-														}
-														disabled={clientData.status === "active"}
-													>
-														Marcar como Activo
-													</DropdownMenuItem>
-													<DropdownMenuItem
-														onClick={() =>
-															handleStatusChange(clientData.id, "inactive")
-														}
-														disabled={clientData.status === "inactive"}
-													>
-														Marcar como Inactivo
-													</DropdownMenuItem>
-													<DropdownMenuItem
-														onClick={() =>
-															handleStatusChange(clientData.id, "churned")
-														}
-														disabled={clientData.status === "churned"}
-													>
-														Marcar como Perdido
-													</DropdownMenuItem>
-												</DropdownMenuContent>
-											</DropdownMenu>
-										</TableCell>
-									</TableRow>
-								))}
-							</TableBody>
-						</Table>
+											</TableCell>
+											<TableCell>
+												{clientData.contractValue ? (
+													<div className="flex items-center gap-1 font-medium text-green-600">
+														<Banknote className="h-3 w-3" />Q
+														{Number.parseFloat(
+															clientData.contractValue,
+														).toLocaleString()}
+													</div>
+												) : (
+													<span className="text-muted-foreground">Sin valor</span>
+												)}
+											</TableCell>
+											<TableCell>
+												<div className="space-y-1">
+													{clientData.startDate && (
+														<div className="flex items-center gap-1 text-sm">
+															<Calendar className="h-3 w-3" />
+															{formatGuatemalaDate(clientData.startDate)}
+														</div>
+													)}
+													{clientData.endDate && (
+														<div className="flex items-center gap-1 text-muted-foreground text-sm">
+															<Calendar className="h-3 w-3" />
+															{formatGuatemalaDate(clientData.endDate)}
+														</div>
+													)}
+													{!clientData.startDate && !clientData.endDate && (
+														<span className="text-muted-foreground text-sm">
+															Sin fechas establecidas
+														</span>
+													)}
+												</div>
+											</TableCell>
+											<TableCell>
+												<Badge
+													className={getStatusBadgeColor(clientData.status)}
+													variant="outline"
+												>
+													{getStatusLabel(clientData.status)}
+												</Badge>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-1 text-sm">
+													<Calendar className="h-3 w-3" />
+													{formatGuatemalaDate(clientData.createdAt)}
+												</div>
+											</TableCell>
+											<TableCell className="text-right">
+												<DropdownMenu>
+													<DropdownMenuTrigger asChild>
+														<Button variant="ghost" className="h-8 w-8 p-0">
+															<span className="sr-only">Abrir menú</span>
+															<MoreHorizontal className="h-4 w-4" />
+														</Button>
+													</DropdownMenuTrigger>
+													<DropdownMenuContent align="end">
+														<DropdownMenuLabel>Estado</DropdownMenuLabel>
+														<DropdownMenuSeparator />
+														<DropdownMenuItem
+															onClick={() =>
+																handleStatusChange(clientData.id, "active")
+															}
+															disabled={clientData.status === "active"}
+														>
+															Marcar como Activo
+														</DropdownMenuItem>
+														<DropdownMenuItem
+															onClick={() =>
+																handleStatusChange(clientData.id, "inactive")
+															}
+															disabled={clientData.status === "inactive"}
+														>
+															Marcar como Inactivo
+														</DropdownMenuItem>
+														<DropdownMenuItem
+															onClick={() =>
+																handleStatusChange(clientData.id, "churned")
+															}
+															disabled={clientData.status === "churned"}
+														>
+															Marcar como Perdido
+														</DropdownMenuItem>
+													</DropdownMenuContent>
+												</DropdownMenu>
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+
+							{/* Pagination Controls */}
+							{totalPages > 1 && (
+								<div className="flex items-center justify-between border-t px-4 py-3">
+									<div className="text-muted-foreground text-sm">
+										Mostrando {page * pageSize + 1} -{" "}
+										{Math.min((page + 1) * pageSize, totalRecords)} de{" "}
+										{totalRecords} clientes
+									</div>
+									<div className="flex items-center gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPage((p) => Math.max(0, p - 1))}
+											disabled={page === 0}
+										>
+											<ChevronLeft className="h-4 w-4" />
+											Anterior
+										</Button>
+										<span className="text-sm">
+											Página {page + 1} de {totalPages}
+										</span>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												setPage((p) => Math.min(totalPages - 1, p + 1))
+											}
+											disabled={page >= totalPages - 1}
+										>
+											Siguiente
+											<ChevronRight className="h-4 w-4" />
+										</Button>
+									</div>
+								</div>
+							)}
+						</>
 					)}
 				</CardContent>
 			</Card>

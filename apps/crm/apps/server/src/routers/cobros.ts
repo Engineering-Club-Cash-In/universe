@@ -114,9 +114,7 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 		page: params.page || 1,
 		perPage: params.perPage || 1000,
 		totalCount: todosLosCreditos.length,
-		totalPages: Math.ceil(
-			todosLosCreditos.length / (params.perPage || 1000),
-		),
+		totalPages: Math.ceil(todosLosCreditos.length / (params.perPage || 1000)),
 	};
 }
 
@@ -197,7 +195,7 @@ export const cobrosRouter = {
 				}
 
 				console.log(
-					`[Cobros] Stats calculadas desde Cartera-Back:`,
+					"[Cobros] Stats calculadas desde Cartera-Back:",
 					embudoStats,
 				);
 
@@ -882,7 +880,8 @@ export const cobrosRouter = {
 					esAdmin: context.userRole === "admin",
 					esCobros: context.userRole === "cobros",
 					usuarioActual: context.userId,
-					tienePermiso: context.userRole === "admin" || context.userRole === "cobros",
+					tienePermiso:
+						context.userRole === "admin" || context.userRole === "cobros",
 				});
 
 				if (context.userRole !== "admin" && context.userRole !== "cobros") {
@@ -896,7 +895,10 @@ export const cobrosRouter = {
 						.select()
 						.from(carteraBackReferences)
 						.where(
-							eq(carteraBackReferences.contratoFinanciamientoId, input.contratoId),
+							eq(
+								carteraBackReferences.contratoFinanciamientoId,
+								input.contratoId,
+							),
 						)
 						.limit(1);
 
@@ -925,7 +927,9 @@ export const cobrosRouter = {
 								fechaVencimiento: cuota.fecha_vencimiento,
 								montoCuota: creditoCompleto.credito.cuota,
 								fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
-								montoPagado: cuota.pagado ? creditoCompleto.credito.cuota : null,
+								montoPagado: cuota.pagado
+									? creditoCompleto.credito.cuota
+									: null,
 								montoMora: "0", // TODO: calcular mora real
 								estadoMora: cuota.pagado ? "pagado" : "mora_30",
 								diasMora: 0,
@@ -1225,12 +1229,12 @@ export const cobrosRouter = {
 							// Obtener datos del listado como fallback
 							// Intentar con todos los estados posibles ya que no sabemos cuál es
 							const now = new Date();
-							const estadosPosibles: ("ACTIVO" | "MOROSO" | "CANCELADO" | "INCOBRABLE")[] = [
-								"ACTIVO",
-								"MOROSO",
-								"CANCELADO",
-								"INCOBRABLE",
-							];
+							const estadosPosibles: (
+								| "ACTIVO"
+								| "MOROSO"
+								| "CANCELADO"
+								| "INCOBRABLE"
+							)[] = ["ACTIVO", "MOROSO", "CANCELADO", "INCOBRABLE"];
 
 							let creditoListado = null;
 							for (const estado of estadosPosibles) {
@@ -1292,7 +1296,10 @@ export const cobrosRouter = {
 						.select()
 						.from(contratosFinanciamiento)
 						.where(
-							eq(contratosFinanciamiento.id, reference[0].contratoFinanciamientoId),
+							eq(
+								contratosFinanciamiento.id,
+								reference[0].contratoFinanciamientoId,
+							),
 						)
 						.limit(1);
 
@@ -1318,7 +1325,10 @@ export const cobrosRouter = {
 						.from(casosCobros)
 						.where(
 							and(
-								eq(casosCobros.contratoId, reference[0].contratoFinanciamientoId),
+								eq(
+									casosCobros.contratoId,
+									reference[0].contratoFinanciamientoId,
+								),
 								eq(casosCobros.activo, true),
 							),
 						)
@@ -1336,13 +1346,14 @@ export const cobrosRouter = {
 						const cuotasAtrasadas =
 							creditoCompleto.cuotasAtrasadas?.length || 0;
 						const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
-					// Calcular días de mora exactos usando la fecha de vencimiento
-					const diasMora = calcularDiasMoraExactos(
-						creditoCompleto.cuotasAtrasadas || [],
-					);
+						// Calcular días de mora exactos usando la fecha de vencimiento
+						const diasMora = calcularDiasMoraExactos(
+							creditoCompleto.cuotasAtrasadas || [],
+						);
 						const montoEnMora = cuotaMensual * cuotasAtrasadas;
 
-						let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
+						let estadoMora: (typeof estadoMoraEnum.enumValues)[number] =
+							"al_dia";
 						if (diasMora > 0 && diasMora <= 30) estadoMora = "mora_30";
 						else if (diasMora > 30 && diasMora <= 60) estadoMora = "mora_60";
 						else if (diasMora > 60 && diasMora <= 90) estadoMora = "mora_90";
@@ -1427,7 +1438,9 @@ export const cobrosRouter = {
 					vehiculoMarca: vehiculo?.make || "-",
 					vehiculoModelo: vehiculo?.model || "-",
 					vehiculoYear: vehiculo?.year || null,
-					vehiculoPlaca: vehiculo?.licensePlate || creditoCompleto.credito.numero_credito_sifco,
+					vehiculoPlaca:
+						vehiculo?.licensePlate ||
+						creditoCompleto.credito.numero_credito_sifco,
 
 					// Datos adicionales de Cartera-Back
 					numeroCreditoSifco: creditoCompleto.credito.numero_credito_sifco,
@@ -1435,10 +1448,7 @@ export const cobrosRouter = {
 					asesor: null, // Cartera-back no devuelve asesor completo en endpoint /credito
 				};
 			} catch (error) {
-				console.error(
-					"[Cobros] Error obteniendo detalles de crédito:",
-					error,
-				);
+				console.error("[Cobros] Error obteniendo detalles de crédito:", error);
 				throw error;
 			}
 		}),
@@ -1568,7 +1578,9 @@ export const cobrosRouter = {
 			}
 
 			try {
-				const creditoData = await carteraBackClient.getCredito(input.numeroSifco);
+				const creditoData = await carteraBackClient.getCredito(
+					input.numeroSifco,
+				);
 
 				// Combinar todas las cuotas
 				const todasCuotas = [
@@ -1615,7 +1627,9 @@ export const cobrosRouter = {
 					capitalRestante: null, // No disponible en endpoint /credito
 					interesRestante: null, // No disponible en endpoint /credito
 					totalRestante: null, // No disponible en endpoint /credito
-					diasMora: creditoData.cuotasAtrasadas?.length ? creditoData.cuotasAtrasadas.length * 30 : 0,
+					diasMora: creditoData.cuotasAtrasadas?.length
+						? creditoData.cuotasAtrasadas.length * 30
+						: 0,
 					montoMora: creditoData.moraActual, // ya es string
 					cuotasAtrasadas: creditoData.cuotasAtrasadas?.length || 0,
 				};
@@ -1818,7 +1832,9 @@ export const cobrosRouter = {
 			}
 
 			try {
-				const creditoData = await carteraBackClient.getCredito(input.numeroSifco);
+				const creditoData = await carteraBackClient.getCredito(
+					input.numeroSifco,
+				);
 
 				return {
 					numeroSifco: creditoData.credito.numero_credito_sifco,

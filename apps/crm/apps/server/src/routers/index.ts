@@ -42,9 +42,11 @@ export const appRouter = {
 	createCompany: crmRouter.createCompany,
 	updateCompany: crmRouter.updateCompany,
 	getLeads: crmRouter.getLeads,
+	getLeadsStats: crmRouter.getLeadsStats,
 	createLead: crmRouter.createLead,
 	updateLead: crmRouter.updateLead,
 	getCreditAnalysisByLeadId: crmRouter.getCreditAnalysisByLeadId,
+	upsertCreditAnalysis: crmRouter.upsertCreditAnalysis,
 	getOpportunities: crmRouter.getOpportunities,
 	createOpportunity: crmRouter.createOpportunity,
 	updateOpportunity: crmRouter.updateOpportunity,
@@ -63,6 +65,7 @@ export const appRouter = {
 	updateAnalysisChecklistVehicleVerification:
 		crmRouter.updateAnalysisChecklistVehicleVerification,
 	getClients: crmRouter.getClients,
+	getClientsStats: crmRouter.getClientsStats,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
@@ -124,6 +127,8 @@ export const appRouter = {
 	getOpportunitiesByLead: legalContractsRouter.getOpportunitiesByLead,
 	getUserPermissions: legalContractsRouter.getUserPermissions,
 	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
+	getOpportunitiesForContracts:
+		legalContractsRouter.getOpportunitiesForContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
@@ -146,6 +151,7 @@ export const appRouter = {
 	getQuotationById: quotationsRouter.getQuotationById,
 	updateQuotation: quotationsRouter.updateQuotation,
 	deleteQuotation: quotationsRouter.deleteQuotation,
+	listQuotationsByOpportunity: quotationsRouter.listQuotationsByOpportunity,
 
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,

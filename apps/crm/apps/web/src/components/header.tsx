@@ -103,7 +103,7 @@ export default function Header() {
 										className="gap-1"
 									>
 										<Briefcase className="h-4 w-4" />
-										CRM
+										Ventas
 										<ChevronDown className="h-3 w-3 opacity-50" />
 									</Button>
 								</DropdownMenuTrigger>

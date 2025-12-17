@@ -9,9 +9,10 @@ import {
 	Plus,
 	Save,
 	Send,
+	Target,
 	Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +23,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -157,6 +159,27 @@ function QuoterPage() {
 		null,
 	);
 	const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+	const [vehiclesSearch, setVehiclesSearch] = useState("");
+	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
+	const [opportunitiesSearch, setOpportunitiesSearch] = useState("");
+	const [debouncedOpportunitiesSearch, setDebouncedOpportunitiesSearch] =
+		useState("");
+
+	// Debounce vehicles search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedVehiclesSearch(vehiclesSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [vehiclesSearch]);
+
+	// Debounce opportunities search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedOpportunitiesSearch(opportunitiesSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [opportunitiesSearch]);
 
 	// Verificar que sea usuario de ventas
 	if (userProfile.data && !["admin", "sales"].includes(userProfile.data.role)) {
@@ -169,7 +192,21 @@ function QuoterPage() {
 		enabled: !!session,
 	});
 	const vehiclesQuery = useQuery({
-		...orpc.getVehicles.queryOptions(),
+		queryKey: ["getVehicles", "quoter", debouncedVehiclesSearch],
+		queryFn: () =>
+			client.getVehicles({
+				limit: 50,
+				query: debouncedVehiclesSearch || undefined,
+			}),
+		enabled: !!session,
+	});
+	const opportunitiesQuery = useQuery({
+		queryKey: ["getOpportunities", "quoter", debouncedOpportunitiesSearch],
+		queryFn: () =>
+			client.getOpportunities({
+				limit: 50,
+				search: debouncedOpportunitiesSearch || undefined,
+			}),
 		enabled: !!session,
 	});
 
@@ -220,6 +257,7 @@ function QuoterPage() {
 	// Form
 	const quoterForm = useForm({
 		defaultValues: {
+			opportunityId: "",
 			vehicleId: "",
 			vehicleBrand: "",
 			vehicleLine: "",
@@ -238,6 +276,7 @@ function QuoterPage() {
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
+				opportunityId: value.opportunityId || undefined,
 				vehicleId: value.vehicleId || undefined,
 				vehicleBrand: value.vehicleBrand,
 				vehicleLine: value.vehicleLine,
@@ -347,7 +386,9 @@ function QuoterPage() {
 
 	// Cuando se selecciona un vehículo, auto-llenar datos
 	const handleVehicleSelect = (vehicleId: string) => {
-		const vehicle = vehiclesQuery.data?.find((v) => v.id === vehicleId);
+		const vehicle = vehiclesQuery.data?.data?.find(
+			(v: any) => v.id === vehicleId,
+		);
 		if (vehicle) {
 			quoterForm.setFieldValue("vehicleId", vehicleId);
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
@@ -447,6 +488,39 @@ function QuoterPage() {
 							quoterForm.handleSubmit();
 						}}
 					>
+						{/* Selector de Oportunidad */}
+						<Card className="mb-6">
+							<CardHeader className="pb-3">
+								<CardTitle className="flex items-center gap-2 text-lg">
+									<Target className="h-5 w-5" />
+									Asignar a Oportunidad (Opcional)
+								</CardTitle>
+							</CardHeader>
+							<CardContent>
+								<quoterForm.Field name="opportunityId">
+									{(field) => (
+										<Combobox
+											options={[
+												{ value: "none", label: "Sin oportunidad" },
+												...(opportunitiesQuery.data?.map((opp: any) => ({
+													value: opp.id,
+													label: `${opp.title} - ${opp.lead ? `${opp.lead.firstName} ${opp.lead.lastName}` : "Sin lead"}`,
+												})) || []),
+											]}
+											value={field.state.value || "none"}
+											onChange={(value) =>
+												field.handleChange(value === "none" ? "" : value)
+											}
+											onSearchChange={setOpportunitiesSearch}
+											isLoading={opportunitiesQuery.isFetching}
+											placeholder="Buscar oportunidad..."
+											width="full"
+										/>
+									)}
+								</quoterForm.Field>
+							</CardContent>
+						</Card>
+
 						<div className="grid gap-6 md:grid-cols-3">
 							{/* Columna 1: Datos del Vehículo */}
 							<Card>
@@ -456,18 +530,22 @@ function QuoterPage() {
 								<CardContent className="space-y-4">
 									<div className="space-y-2">
 										<Label>Seleccionar Vehículo (Opcional)</Label>
-										<Select onValueChange={handleVehicleSelect}>
-											<SelectTrigger>
-												<SelectValue placeholder="Seleccionar vehículo..." />
-											</SelectTrigger>
-											<SelectContent>
-												{vehiclesQuery.data?.map((vehicle) => (
-													<SelectItem key={vehicle.id} value={vehicle.id}>
-														{vehicle.make} {vehicle.model} {vehicle.year}
-													</SelectItem>
-												))}
-											</SelectContent>
-										</Select>
+										<Combobox
+											options={
+												vehiclesQuery.data?.data?.map((vehicle: any) => ({
+													value: vehicle.id,
+													label: `${vehicle.make} ${vehicle.model} ${vehicle.year} - ${vehicle.licensePlate}`,
+												})) || []
+											}
+											value={null}
+											onChange={(value) => {
+												if (value) handleVehicleSelect(value);
+											}}
+											onSearchChange={setVehiclesSearch}
+											isLoading={vehiclesQuery.isFetching}
+											placeholder="Buscar vehículo..."
+											width="full"
+										/>
 									</div>
 
 									<quoterForm.Field name="vehicleBrand">

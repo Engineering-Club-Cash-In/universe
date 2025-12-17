@@ -307,6 +307,19 @@ export const quotationsRouter = {
 			return updated;
 		}),
 
+	// Listar cotizaciones por oportunidad
+	listQuotationsByOpportunity: crmProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const result = await db
+				.select()
+				.from(quotations)
+				.where(eq(quotations.opportunityId, input.opportunityId))
+				.orderBy(desc(quotations.createdAt));
+
+			return result;
+		}),
+
 	// Eliminar cotización
 	deleteQuotation: crmProcedure
 		.input(z.object({ quotationId: z.string().uuid() }))

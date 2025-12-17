@@ -21,7 +21,7 @@ export const BuyCar = () => {
     {
       icon: <IconSearch width={isMobile ? 20 : 34} />,
       title: "Evaluamos",
-      description: "Analizamos tu perfil y el vehículo que",
+      description: "Analizamos tu perfil y el vehículo que deseas",
     },
     {
       icon: <IconKey width={isMobile ? 20 : 34} />,

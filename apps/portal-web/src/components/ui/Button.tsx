@@ -15,7 +15,7 @@ export const Button: React.FC<ButtonProps> = ({
   size = "lg",
   onClick,
   type = "button",
-  className = "",
+  className = "bg-transparent",
   isLoading = false,
 }) => {
   const sizeClasses = {
@@ -45,7 +45,7 @@ export const Button: React.FC<ButtonProps> = ({
       className={`
         ${sizeClasses[size]}
         flex items-center justify-center gap-2
-        border border-white/65 rounded-full bg-transparent
+        border border-white/65 rounded-full 
         font-semibold text-[rgba(255,255,255,0.65)] cursor-pointer
         hover:border-0 hover:bg-[rgba(15,15,15,1)] hover:text-white
         active:border-0 active:bg-[rgba(15,15,15,1)] active:text-white

@@ -5,9 +5,14 @@ import { useIsMobile } from "@/hooks";
 interface PageProps {
   children?: React.ReactNode;
   url?: string;
+  footerNotShowRedirects?: boolean;
 }
 
-export const Page: FC<PageProps> = ({ children, url = "/Layer_1.svg" }) => {
+export const Page: FC<PageProps> = ({
+  children,
+  url = "/Layer_1.svg",
+  footerNotShowRedirects = false,
+}) => {
   const isMobile = useIsMobile();
 
   return (
@@ -15,12 +20,12 @@ export const Page: FC<PageProps> = ({ children, url = "/Layer_1.svg" }) => {
       className="flex flex-col gap-4 bg-dark text-light min-h-screen"
       style={{
         backgroundImage: `url(${url})`,
-         backgroundSize: isMobile ? "300% auto" : "100% auto",
+        backgroundSize: isMobile ? "300% auto" : "100% auto",
         backgroundPosition: "center",
       }}
     >
       {children}
-      <Footer />
+      <Footer notShowRedirects={footerNotShowRedirects} />
     </div>
   );
 };

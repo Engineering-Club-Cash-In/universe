@@ -12,6 +12,7 @@ import {
 } from "./controllers/bot";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
+import { createPublicLead } from "./controllers/public-lead";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
@@ -389,6 +390,10 @@ app.post("/info/liveness-validation", async (c) => {
 		);
 	}
 });
+
+// REST endpoint for public lead creation (for external web forms)
+app.post("/api/public/lead", createPublicLead);
+
 app.get("/webhook/facebook-lead", async (c) => {
 	const challenge = c.req.query("hub.challenge");
 

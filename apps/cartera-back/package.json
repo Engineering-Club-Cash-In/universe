@@ -36,6 +36,7 @@
     "drizzle-orm": "^0.36.4",
     "elysia": "^1.4.13",
     "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.3.3",
     "iconv-lite": "^0.7.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
@@ -46,6 +47,7 @@
     "uuid": "^11.1.0",
     "valibot": "^0.42.1",
     "xlsx": "^0.18.5",
+    "xmlbuilder2": "^4.0.3",
     "zod": "^3.23.8"
   },
   "devDependencies": {

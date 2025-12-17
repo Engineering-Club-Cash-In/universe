@@ -1424,6 +1424,33 @@ export async function obtenerCreditosConPagosPendientes(
     const creditosConPagos = await Promise.all(
       creditosInversionista.map(async (credito) => {
         
+        // 🆕 PASO 0: Verificar si ESTE CRÉDITO tiene pagos pendientes de liquidar
+        console.log(`\n🔍 ========== VERIFICANDO PAGOS PENDIENTES DEL CRÉDITO ${credito.creditoId} ==========`);
+        
+        const pagosPendientesCredito = await db
+          .select()
+          .from(pagos_credito_inversionistas)
+          .where(
+            and(
+              eq(pagos_credito_inversionistas.credito_id, credito.creditoId),
+              eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
+            )
+          );
+
+        if (pagosPendientesCredito.length > 0) {
+          console.log(
+            `⚠️ El crédito ${credito.creditoId} tiene ${pagosPendientesCredito.length} pago(s) pendientes de liquidar`
+          );
+          console.log(`   NO se procesará este crédito hasta que se liquiden`);
+          console.log(`========================================\n`);
+          
+          // 🔥 SALTAR ESTE CRÉDITO
+          return null;
+        }
+
+        console.log(`✅ El crédito ${credito.creditoId} NO tiene pagos pendientes, continuando...`);
+        console.log(`========================================\n`);
+        
         // 📅 Buscar la PRIMERA cuota NO LIQUIDADA con sus PAGOS
         const cuotaConPagos = await db
           .select({
@@ -1457,7 +1484,7 @@ export async function obtenerCreditosConPagosPendientes(
               eq(cuotas_credito.liquidado_inversionistas, false) // 🔥 NO liquidada
             )
           )
-          .orderBy(cuotas_credito.numero_cuota, pagos_credito.fecha_pago); // Primera cuota por número
+          .orderBy(cuotas_credito.numero_cuota, pagos_credito.fecha_pago);
 
         console.log(
           `🔍 Crédito ${credito.creditoId}: Cuotas NO liquidadas encontradas:`,
@@ -1476,7 +1503,7 @@ export async function obtenerCreditosConPagosPendientes(
         const primeraFila = cuotaConPagos[0];
         const numeroCuota = primeraFila.numeroCuota;
         const fechaVencimiento = primeraFila.fechaVencimiento;
-        const cuotaId = primeraFila.cuotaId; // 🆕 Guardar cuotaId
+        const cuotaId = primeraFila.cuotaId;
 
         console.log(
           `📅 Crédito ${credito.creditoId}, Cuota ${numeroCuota}: fecha_vencimiento = ${fechaVencimiento}`
@@ -1524,7 +1551,7 @@ export async function obtenerCreditosConPagosPendientes(
             await insertPagosCreditoInversionistas(
               primerPago.pagoId,
               credito.creditoId,
-              true,
+              false,
               false
             );
 
@@ -1569,7 +1596,7 @@ export async function obtenerCreditosConPagosPendientes(
             porcentajeParticipacion: credito.porcentajeParticipacion,
           },
           cuotaActual: {
-            cuotaId: cuotaId, // 🆕 Usar la variable
+            cuotaId: cuotaId,
             numeroCuota: numeroCuota,
             fechaVencimiento: fechaVencimiento,
             pagado: primeraFila.pagadoCuota,
@@ -1621,3 +1648,4 @@ export async function obtenerCreditosConPagosPendientes(
     };
   }
 }
+ 

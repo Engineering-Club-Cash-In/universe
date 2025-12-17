@@ -621,7 +621,7 @@ export async function resumeInvestor(
               const abono_capital = new Big(pago.abono_capital ?? 0);
               const abono_interes = new Big(pago.abono_interes ?? 0);
               const abono_iva = new Big(pago.abono_iva_12 ?? 0);
-              const isr = abono_interes.times(0.05);
+              const isr = abono_interes.times(0.07).round(2); // 7% de ISR
               const cuota = pago.cuota ?? 0;
               let cuota_inversor;
 

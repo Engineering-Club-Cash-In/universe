@@ -1,5 +1,6 @@
 import { useFormik } from "formik";
 import * as Yup from "yup";
+import { useMutation } from "@tanstack/react-query";
 import { useLead } from "../store/useLead";
 import { sendLead } from "../service/serviceLead";
 
@@ -36,18 +37,22 @@ const initialValues: FormLeadsValues = {
 export const useFormLeads = () => {
   const setSubmitted = useLead((state) => state.setSubmitted);
 
+  const mutation = useMutation({
+    mutationFn: sendLead,
+    onSuccess: (data, variables) => {
+      console.log("Lead enviado exitosamente:", data);
+      setSubmitted(variables);
+    },
+    onError: (error) => {
+      console.error("Error al enviar lead:", error);
+    },
+  });
+
   const formik = useFormik<FormLeadsValues>({
     initialValues,
     validationSchema,
     onSubmit: async (values) => {
-      try {
-        await sendLead(values);
-        setSubmitted(values);
-      } catch (error) {
-        console.error("Error al enviar:", error);
-        // Aunque falle, marcamos como enviado para demo
-        setSubmitted(values);
-      }
+      mutation.mutate(values);
     },
   });
 
@@ -61,6 +66,6 @@ export const useFormLeads = () => {
     handleBlur: formik.handleBlur,
     handleSubmit: formik.handleSubmit,
     isValid: formik.isValid,
-    isSubmitting: formik.isSubmitting,
+    isSubmitting: mutation.isPending,
   };
 };

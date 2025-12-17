@@ -1,6 +1,6 @@
-import { type ColumnDef } from "@tanstack/react-table";
-import { ArrowUpDown, Eye } from "lucide-react";
 import { Link } from "@tanstack/react-router";
+import type { ColumnDef } from "@tanstack/react-table";
+import { ArrowUpDown, Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -149,7 +149,9 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 			}).format(monto);
 
 			return (
-				<div className={`font-medium ${monto > 0 ? "text-right" : "text-center"}`}>
+				<div
+					className={`font-medium ${monto > 0 ? "text-right" : "text-center"}`}
+				>
 					{monto > 0 ? formatted : "-"}
 				</div>
 			);

@@ -1,4 +1,4 @@
-import { and, count, eq, or } from "drizzle-orm";
+import { and, count, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -139,10 +139,76 @@ export const crmRouter = {
 		}),
 
 	// Leads
-	getLeads: crmProcedure.handler(async ({ context }) => {
-		// Admin can see all leads, sales can only see leads assigned to them
-		if (context.userRole === "admin") {
-			return await db
+	getLeads: crmProcedure
+		.input(
+			z
+				.object({
+					limit: z.number().min(1).max(100).default(20),
+					offset: z.number().min(0).default(0),
+					search: z.string().optional(),
+					status: z
+						.enum(["new", "contacted", "qualified", "converted", "unqualified"])
+						.optional(),
+					id: z.string().uuid().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input, context }) => {
+			const limit = input?.limit ?? 20;
+			const offset = input?.offset ?? 0;
+			const search = input?.search;
+			const status = input?.status;
+			const id = input?.id;
+
+			// Build conditions
+			const conditions = [];
+
+			// ID filter (for direct lookup)
+			if (id) {
+				conditions.push(eq(leads.id, id));
+			}
+
+			// Role-based filter: sales can only see their own leads
+			if (context.userRole !== "admin") {
+				conditions.push(eq(leads.assignedTo, context.userId));
+			}
+
+			// Status filter
+			if (status) {
+				conditions.push(eq(leads.status, status));
+			}
+
+			// Search filter (name, email, company name)
+			if (search && search.trim() !== "") {
+				const searchTerms = search.trim().split(/\s+/);
+				// Build conditions for each search term (all terms must match)
+				const termConditions = searchTerms.map((term) => {
+					const searchPattern = `%${term}%`;
+					return or(
+						ilike(leads.firstName, searchPattern),
+						ilike(leads.lastName, searchPattern),
+						ilike(leads.email, searchPattern),
+						ilike(companies.name, searchPattern),
+					);
+				});
+				// All terms must match (AND)
+				if (termConditions.length > 0) {
+					conditions.push(...termConditions);
+				}
+			}
+
+			const whereClause =
+				conditions.length > 0 ? and(...conditions) : undefined;
+
+			// Get total count
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(leads)
+				.leftJoin(companies, eq(leads.companyId, companies.id))
+				.where(whereClause);
+
+			// Get paginated data
+			const data = await db
 				.select({
 					id: leads.id,
 					firstName: leads.firstName,
@@ -183,51 +249,55 @@ export const crmRouter = {
 				.from(leads)
 				.leftJoin(companies, eq(leads.companyId, companies.id))
 				.leftJoin(user, eq(leads.assignedTo, user.id))
-				.orderBy(leads.createdAt);
-		}
-		return await db
+				.where(whereClause)
+				.orderBy(desc(leads.createdAt))
+				.limit(limit)
+				.offset(offset);
+
+			return {
+				data,
+				total,
+				limit,
+				offset,
+			};
+		}),
+
+	getLeadsStats: crmProcedure.handler(async ({ context }) => {
+		// Build role-based condition
+		const roleCondition =
+			context.userRole !== "admin"
+				? eq(leads.assignedTo, context.userId)
+				: undefined;
+
+		// Get counts for each status
+		const statusCounts = await db
 			.select({
-				id: leads.id,
-				firstName: leads.firstName,
-				lastName: leads.lastName,
-				email: leads.email,
-				phone: leads.phone,
-				age: leads.age,
-				dpi: leads.dpi,
-				maritalStatus: leads.maritalStatus,
-				dependents: leads.dependents,
-				monthlyIncome: leads.monthlyIncome,
-				loanAmount: leads.loanAmount,
-				occupation: leads.occupation,
-				workTime: leads.workTime,
-				loanPurpose: leads.loanPurpose,
-				ownsHome: leads.ownsHome,
-				ownsVehicle: leads.ownsVehicle,
-				hasCreditCard: leads.hasCreditCard,
-				jobTitle: leads.jobTitle,
-				source: leads.source,
 				status: leads.status,
-				assignedTo: leads.assignedTo,
-				notes: leads.notes,
-				score: leads.score,
-				fit: leads.fit,
-				scoredAt: leads.scoredAt,
-				createdAt: leads.createdAt,
-				updatedAt: leads.updatedAt,
-				company: {
-					id: companies.id,
-					name: companies.name,
-				},
-				assignedUser: {
-					id: user.id,
-					name: user.name,
-				},
+				count: count(),
 			})
 			.from(leads)
-			.leftJoin(companies, eq(leads.companyId, companies.id))
-			.leftJoin(user, eq(leads.assignedTo, user.id))
-			.where(eq(leads.assignedTo, context.userId))
-			.orderBy(leads.createdAt);
+			.where(roleCondition)
+			.groupBy(leads.status);
+
+		// Transform to object
+		const stats = {
+			total: 0,
+			new: 0,
+			contacted: 0,
+			qualified: 0,
+			converted: 0,
+			lost: 0,
+		};
+
+		for (const row of statusCounts) {
+			const c = Number(row.count);
+			stats.total += c;
+			if (row.status in stats) {
+				stats[row.status as keyof typeof stats] = c;
+			}
+		}
+
+		return stats;
 	}),
 
 	createLead: crmProcedure
@@ -413,54 +483,106 @@ export const crmRouter = {
 			return analysis[0] || null;
 		}),
 
-	// Opportunities
-	getOpportunities: crmProcedure.handler(async ({ context }) => {
-		if (context.userRole === "admin") {
-			return await db
-				.select({
-					id: opportunities.id,
-					title: opportunities.title,
-					vehicleId: opportunities.vehicleId,
-					creditType: opportunities.creditType,
-					value: opportunities.value,
-					probability: opportunities.probability,
-					expectedCloseDate: opportunities.expectedCloseDate,
-					status: opportunities.status,
-					assignedTo: opportunities.assignedTo,
-					notes: opportunities.notes,
-					createdAt: opportunities.createdAt,
-					updatedAt: opportunities.updatedAt,
-					company: {
-						id: companies.id,
-						name: companies.name,
-					},
-					lead: {
-						id: leads.id,
-						firstName: leads.firstName,
-						lastName: leads.lastName,
-						email: leads.email,
-					},
-					stage: {
-						id: salesStages.id,
-						name: salesStages.name,
-						order: salesStages.order,
-						closurePercentage: salesStages.closurePercentage,
-						color: salesStages.color,
-					},
-					assignedUser: {
-						id: user.id,
-						name: user.name,
-					},
+	upsertCreditAnalysis: crmProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+				monthlyFixedIncome: z.number().min(0).optional(),
+				monthlyVariableIncome: z.number().min(0).optional(),
+				monthlyFixedExpenses: z.number().min(0).optional(),
+				monthlyVariableExpenses: z.number().min(0).optional(),
+				economicAvailability: z.number().optional(),
+				minPayment: z.number().min(0).optional(),
+				maxPayment: z.number().min(0).optional(),
+				adjustedPayment: z.number().min(0).optional(),
+				maxCreditAmount: z.number().min(0).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { leadId, ...analysisData } = input;
+
+			// Check if user has access to the lead
+			const lead = await db
+				.select()
+				.from(leads)
+				.where(eq(leads.id, leadId))
+				.limit(1);
+
+			if (lead.length === 0) {
+				throw new Error("Lead not found");
+			}
+
+			// Sales users can only update analysis for their assigned leads
+			if (
+				context.userRole === "sales" &&
+				lead[0].assignedTo !== context.userId
+			) {
+				throw new Error("You don't have permission to update this analysis");
+			}
+
+			// Convert numbers to strings for decimal fields
+			const dataForDb = {
+				monthlyFixedIncome: analysisData.monthlyFixedIncome?.toString(),
+				monthlyVariableIncome: analysisData.monthlyVariableIncome?.toString(),
+				monthlyFixedExpenses: analysisData.monthlyFixedExpenses?.toString(),
+				monthlyVariableExpenses:
+					analysisData.monthlyVariableExpenses?.toString(),
+				economicAvailability: analysisData.economicAvailability?.toString(),
+				minPayment: analysisData.minPayment?.toString(),
+				maxPayment: analysisData.maxPayment?.toString(),
+				adjustedPayment: analysisData.adjustedPayment?.toString(),
+				maxCreditAmount: analysisData.maxCreditAmount?.toString(),
+			};
+
+			// Check if analysis already exists
+			const existing = await db
+				.select()
+				.from(creditAnalysis)
+				.where(eq(creditAnalysis.leadId, leadId))
+				.limit(1);
+
+			if (existing.length > 0) {
+				// Update existing
+				const updated = await db
+					.update(creditAnalysis)
+					.set({
+						...dataForDb,
+						updatedAt: new Date(),
+					})
+					.where(eq(creditAnalysis.leadId, leadId))
+					.returning();
+				return updated[0];
+			}
+			// Create new
+			const created = await db
+				.insert(creditAnalysis)
+				.values({
+					leadId,
+					...dataForDb,
+					createdBy: context.userId,
+					analyzedAt: new Date(),
 				})
-				.from(opportunities)
-				.leftJoin(companies, eq(opportunities.companyId, companies.id))
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
-				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-				.leftJoin(user, eq(opportunities.assignedTo, user.id))
-				.orderBy(opportunities.createdAt);
-		}
-		return await db
-			.select({
+				.returning();
+			return created[0];
+		}),
+
+	// Opportunities
+	getOpportunities: crmProcedure
+		.input(
+			z
+				.object({
+					leadId: z.string().uuid().optional(),
+					search: z.string().optional(),
+					limit: z.number().min(1).max(100).default(50),
+				})
+				.optional(),
+		)
+		.handler(async ({ input, context }) => {
+			const leadIdFilter = input?.leadId;
+			const searchTerm = input?.search;
+			const limit = input?.limit ?? 50;
+
+			const selectFields = {
 				id: opportunities.id,
 				title: opportunities.title,
 				vehicleId: opportunities.vehicleId,
@@ -494,15 +616,52 @@ export const crmRouter = {
 					id: user.id,
 					name: user.name,
 				},
-			})
-			.from(opportunities)
-			.leftJoin(companies, eq(opportunities.companyId, companies.id))
-			.leftJoin(leads, eq(opportunities.leadId, leads.id))
-			.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-			.leftJoin(user, eq(opportunities.assignedTo, user.id))
-			.where(eq(opportunities.assignedTo, context.userId))
-			.orderBy(opportunities.createdAt);
-	}),
+			};
+
+			const baseQuery = db
+				.select(selectFields)
+				.from(opportunities)
+				.leftJoin(companies, eq(opportunities.companyId, companies.id))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.leftJoin(user, eq(opportunities.assignedTo, user.id));
+
+			// Build conditions
+			const conditions = [];
+
+			// Lead filter
+			if (leadIdFilter) {
+				conditions.push(eq(opportunities.leadId, leadIdFilter));
+			}
+
+			// Search filter (by title, company name, or lead name)
+			if (searchTerm) {
+				conditions.push(
+					or(
+						ilike(opportunities.title, `%${searchTerm}%`),
+						ilike(companies.name, `%${searchTerm}%`),
+						ilike(leads.firstName, `%${searchTerm}%`),
+						ilike(leads.lastName, `%${searchTerm}%`),
+					),
+				);
+			}
+
+			// Role-based filter: non-admin can only see their own opportunities
+			if (context.userRole !== "admin") {
+				conditions.push(eq(opportunities.assignedTo, context.userId));
+			}
+
+			if (conditions.length > 0) {
+				return await baseQuery
+					.where(and(...conditions))
+					.orderBy(desc(opportunities.createdAt))
+					.limit(limit);
+			}
+
+			return await baseQuery
+				.orderBy(desc(opportunities.createdAt))
+				.limit(limit);
+		}),
 
 	createOpportunity: crmProcedure
 		.input(
@@ -598,7 +757,7 @@ export const crmRouter = {
 				throw new Error("Opportunity not found");
 			}
 
-			// Validate credit terms if moving to 100% stage
+			// Validate stage transitions
 			if (input.stageId) {
 				const targetStage = await db
 					.select()
@@ -606,6 +765,38 @@ export const crmRouter = {
 					.where(eq(salesStages.id, input.stageId))
 					.limit(1);
 
+				// Get current stage to check transition
+				const currentStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+
+				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
+				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+
+				// Validate detalle_analisis document when moving from <=40% to >=50%
+				if (fromPercentage <= 40 && toPercentage >= 50) {
+					// Check if detalle_analisis document exists for this opportunity
+					const detalleDocument = await db
+						.select()
+						.from(opportunityDocuments)
+						.where(
+							and(
+								eq(opportunityDocuments.opportunityId, id),
+								eq(opportunityDocuments.documentType, "detalle_analisis"),
+							),
+						)
+						.limit(1);
+
+					if (!detalleDocument[0]) {
+						throw new Error(
+							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), se requiere subir el archivo de Detalle de Análisis (.xlsx) con el resumen del crédito.",
+						);
+					}
+				}
+
+				// Validate credit terms if moving to 100% stage
 				if (targetStage[0]?.closurePercentage === 100) {
 					// Check all required fields for contract creation
 					const opp = currentOpportunity[0];
@@ -1277,9 +1468,58 @@ export const crmRouter = {
 		}),
 
 	// Clients
-	getClients: crmProcedure.handler(async ({ context }) => {
-		if (context.userRole === "admin") {
-			return await db
+	getClients: crmProcedure
+		.input(
+			z.object({
+				limit: z.number().min(1).max(100).default(20),
+				offset: z.number().min(0).default(0),
+				search: z.string().optional(),
+				status: z.enum(["active", "inactive", "churned"]).optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { limit, offset, search, status } = input;
+			const conditions: any[] = [];
+
+			// Filter by user if not admin
+			if (context.userRole !== "admin") {
+				conditions.push(eq(clients.assignedTo, context.userId));
+			}
+
+			// Filter by status
+			if (status) {
+				conditions.push(eq(clients.status, status));
+			}
+
+			// Search filter
+			if (search && search.trim() !== "") {
+				const searchTerms = search.trim().split(/\s+/);
+				const termConditions = searchTerms.map((term) => {
+					const searchPattern = `%${term}%`;
+					return or(
+						ilike(clients.contactPerson, searchPattern),
+						ilike(companies.name, searchPattern),
+					);
+				});
+				if (termConditions.length > 0) {
+					conditions.push(...termConditions);
+				}
+			}
+
+			const whereClause =
+				conditions.length > 0 ? and(...conditions) : undefined;
+
+			// Get total count
+			const countResult = await db
+				.select({ count: sql<number>`count(*)` })
+				.from(clients)
+				.leftJoin(companies, eq(clients.companyId, companies.id))
+				.where(whereClause);
+
+			const total = Number(countResult[0]?.count || 0);
+
+			// Get paginated data
+			const data = await db
 				.select({
 					id: clients.id,
 					contactPerson: clients.contactPerson,
@@ -1298,29 +1538,53 @@ export const crmRouter = {
 				})
 				.from(clients)
 				.leftJoin(companies, eq(clients.companyId, companies.id))
-				.orderBy(clients.createdAt);
+				.where(whereClause)
+				.orderBy(desc(clients.createdAt))
+				.limit(limit)
+				.offset(offset);
+
+			return {
+				data,
+				total,
+				limit,
+				offset,
+			};
+		}),
+
+	getClientsStats: crmProcedure.handler(async ({ context }) => {
+		const conditions: any[] = [];
+
+		// Filter by user if not admin
+		if (context.userRole !== "admin") {
+			conditions.push(eq(clients.assignedTo, context.userId));
 		}
-		return await db
+
+		const whereClause =
+			conditions.length > 0 ? and(...conditions) : undefined;
+
+		const allClients = await db
 			.select({
-				id: clients.id,
-				contactPerson: clients.contactPerson,
-				contractValue: clients.contractValue,
-				startDate: clients.startDate,
-				endDate: clients.endDate,
 				status: clients.status,
-				assignedTo: clients.assignedTo,
-				notes: clients.notes,
-				createdAt: clients.createdAt,
-				updatedAt: clients.updatedAt,
-				company: {
-					id: companies.id,
-					name: companies.name,
-				},
+				contractValue: clients.contractValue,
 			})
 			.from(clients)
-			.leftJoin(companies, eq(clients.companyId, companies.id))
-			.where(eq(clients.assignedTo, context.userId))
-			.orderBy(clients.createdAt);
+			.where(whereClause);
+
+		const total = allClients.length;
+		const active = allClients.filter((c) => c.status === "active").length;
+		const inactive = allClients.filter((c) => c.status === "inactive").length;
+		const churned = allClients.filter((c) => c.status === "churned").length;
+		const totalContractValue = allClients.reduce((sum, c) => {
+			return sum + (Number.parseFloat(c.contractValue || "0") || 0);
+		}, 0);
+
+		return {
+			total,
+			active,
+			inactive,
+			churned,
+			totalContractValue,
+		};
 	}),
 
 	createClient: crmProcedure

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
+import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,10 +24,9 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DataTable } from "@/components/data-table";
 import { authClient } from "@/lib/auth-client";
-import { orpc } from "@/utils/orpc";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
+import { orpc } from "@/utils/orpc";
 
 // Función para calcular la próxima fecha de pago y días restantes
 function calcularProximaFechaPago(diaPagoMensual: number | null) {
@@ -73,7 +73,8 @@ export const Route = createFileRoute("/cobros/")({
 
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
-	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("semana");
+	const [filtroTemporal, setFiltroTemporal] =
+		useState<FiltroTemporal>("semana");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
@@ -135,7 +136,9 @@ function RouteComponent() {
 		// Excluir completados e incobrables si el filtro está desactivado
 		if (!mostrarCompletadosIncobrables) {
 			filtrados = filtrados.filter(
-				(c) => c.estadoContrato !== "completado" && c.estadoContrato !== "incobrable",
+				(c) =>
+					c.estadoContrato !== "completado" &&
+					c.estadoContrato !== "incobrable",
 			);
 		}
 
@@ -167,7 +170,12 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c.diasHastaPago <= limite;
 		});
-	}, [contratosConDias, filtroTemporal, mostrarCompletadosIncobrables, filtroEtapa]);
+	}, [
+		contratosConDias,
+		filtroTemporal,
+		mostrarCompletadosIncobrables,
+		filtroEtapa,
+	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -195,8 +203,16 @@ function RouteComponent() {
 
 	const filtrosEtapa = [
 		{ key: "al_dia", label: "Al Día", color: "bg-green-100 text-green-800" },
-		{ key: "mora_30", label: "Mora 30", color: "bg-yellow-100 text-yellow-800" },
-		{ key: "mora_60", label: "Mora 60", color: "bg-orange-100 text-orange-800" },
+		{
+			key: "mora_30",
+			label: "Mora 30",
+			color: "bg-yellow-100 text-yellow-800",
+		},
+		{
+			key: "mora_60",
+			label: "Mora 60",
+			color: "bg-orange-100 text-orange-800",
+		},
 		{ key: "mora_90", label: "Mora 90", color: "bg-red-100 text-red-800" },
 		{
 			key: "mora_120",
@@ -252,7 +268,9 @@ function RouteComponent() {
 						{dashboardStats.isLoading ? (
 							<div className="flex items-center gap-2">
 								<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-								<span className="text-muted-foreground text-sm">Cargando...</span>
+								<span className="text-muted-foreground text-sm">
+									Cargando...
+								</span>
 							</div>
 						) : (
 							<>
@@ -310,11 +328,15 @@ function RouteComponent() {
 					<CardContent>
 						<div className="font-bold text-2xl">
 							{(() => {
-								const totalCasos = stats.reduce((sum, s) => sum + s.totalCases, 0);
+								const totalCasos = stats.reduce(
+									(sum, s) => sum + s.totalCases,
+									0,
+								);
 								const casosRecuperados =
-									(stats.find((s) => s.estadoMora === "pagado")?.totalCases || 0) +
-									(stats.find((s) => s.estadoMora === "completado")?.totalCases ||
-										0);
+									(stats.find((s) => s.estadoMora === "pagado")?.totalCases ||
+										0) +
+									(stats.find((s) => s.estadoMora === "completado")
+										?.totalCases || 0);
 								const efectividad =
 									totalCasos > 0
 										? Math.round((casosRecuperados / totalCasos) * 100)
@@ -379,11 +401,12 @@ function RouteComponent() {
 								color: "bg-blue-100 text-blue-800",
 							},
 						].map((estado) => {
-							const estadoStats =
-								stats.find((s) => s.estadoMora === estado.key) || {
-									totalCases: 0,
-									montoTotal: "0",
-								};
+							const estadoStats = stats.find(
+								(s) => s.estadoMora === estado.key,
+							) || {
+								totalCases: 0,
+								montoTotal: "0",
+							};
 							const maxCasos = Math.max(...stats.map((s) => s.totalCases), 1);
 							const porcentaje = (estadoStats.totalCases / maxCasos) * 100;
 
@@ -393,7 +416,9 @@ function RouteComponent() {
 									className="group flex items-center gap-3 rounded-lg p-3 transition-all hover:bg-muted/50"
 								>
 									<div className="flex w-32 shrink-0 items-center gap-2">
-										<Badge className={`${estado.color} whitespace-nowrap text-xs`}>
+										<Badge
+											className={`${estado.color} whitespace-nowrap text-xs`}
+										>
 											{estado.label}
 										</Badge>
 									</div>
@@ -409,7 +434,7 @@ function RouteComponent() {
 													}}
 												>
 													<span
-														className="font-semibold text-sm whitespace-nowrap"
+														className="whitespace-nowrap font-semibold text-sm"
 														style={{
 															color: porcentaje > 60 ? "white" : "#1f2937",
 														}}
@@ -427,7 +452,7 @@ function RouteComponent() {
 															backgroundColor: `hsl(220, 15%, ${Math.max(30, 90 - porcentaje * 0.5)}%)`,
 														}}
 													/>
-													<span className="ml-2 font-semibold text-sm text-muted-foreground whitespace-nowrap">
+													<span className="ml-2 whitespace-nowrap font-semibold text-muted-foreground text-sm">
 														{estadoStats.totalCases} casos
 													</span>
 												</div>
@@ -490,7 +515,7 @@ function RouteComponent() {
 							/>
 							<label
 								htmlFor="completados-incobrables"
-								className="cursor-pointer text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+								className="cursor-pointer font-medium text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
 							>
 								Mostrar completados e incobrables
 							</label>
@@ -504,7 +529,7 @@ function RouteComponent() {
 						searchPlaceholder="Buscar por cliente, vehículo o placa..."
 						filterContent={
 							<>
-								<span className="text-muted-foreground text-sm font-medium">
+								<span className="font-medium text-muted-foreground text-sm">
 									Filtrar por etapa:
 								</span>
 								<Button

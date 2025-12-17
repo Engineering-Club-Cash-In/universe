@@ -18,6 +18,39 @@ interface DocumentValidationChecklistProps {
 }
 
 const documentTypeLabels: Record<string, string> = {
+	// Documentos de identificación y personales
+	dpi: "DPI",
+	licencia: "Licencia",
+	recibo_luz: "Recibo de luz",
+	recibo_adicional: "Recibo adicional",
+	formularios: "Formularios",
+	// Estados de cuenta
+	estados_cuenta_1: "Estado de cuenta mes 1",
+	estados_cuenta_2: "Estado de cuenta mes 2",
+	estados_cuenta_3: "Estado de cuenta mes 3",
+	// Documentos comerciales
+	patente_comercio: "Patente de comercio",
+	patente_mercantil: "Patente mercantil",
+	// Documentos empresariales (S.A.)
+	representacion_legal: "Representación Legal",
+	constitucion_sociedad: "Constitución de sociedad",
+	iva_1: "Formulario IVA mes 1",
+	iva_2: "Formulario IVA mes 2",
+	iva_3: "Formulario IVA mes 3",
+	estado_financiero: "Estado financiero",
+	clausula_consentimiento: "Cláusula de consentimiento",
+	minutas: "Minutas",
+	// Documentos de vehículos
+	tarjeta_circulacion: "Tarjeta de circulación",
+	titulo_propiedad: "Título de propiedad",
+	dpi_dueno: "DPI del dueño del vehículo",
+	patente_comercio_vehiculo: "Patente comercio (vehículo)",
+	representacion_legal_vehiculo: "Representación legal (vehículo)",
+	dpi_representante_legal_vehiculo: "DPI representante legal (vehículo)",
+	pago_impuesto_circulacion: "Pago impuesto de circulación",
+	consulta_sat: "Consulta SAT",
+	consulta_garantias_mobiliarias: "Consulta garantías mobiliarias",
+	// Legacy (para compatibilidad)
 	identification: "Identificación (DPI/Pasaporte)",
 	income_proof: "Comprobante de Ingresos",
 	bank_statement: "Estado de Cuenta Bancario",
@@ -26,25 +59,6 @@ const documentTypeLabels: Record<string, string> = {
 	vehicle_title: "Tarjeta de Circulación",
 	credit_report: "Reporte Crediticio",
 	other: "Otro",
-	// Documentos específicos por cliente
-	dpi: "DPI",
-	licencia: "Licencia",
-	recibo_luz: "Recibo de luz",
-	recibo_adicional: "Recibo adicional",
-	formularios: "Formularios",
-	estados_cuenta_1: "Estado de cuenta mes 1",
-	estados_cuenta_2: "Estado de cuenta mes 2",
-	estados_cuenta_3: "Estado de cuenta mes 3",
-	patente_comercio: "Patente de comercio",
-	representacion_legal: "Representación Legal",
-	constitucion_sociedad: "Constitución de sociedad",
-	patente_mercantil: "Patente mercantil",
-	iva_1: "Formulario IVA mes 1",
-	iva_2: "Formulario IVA mes 2",
-	iva_3: "Formulario IVA mes 3",
-	estado_financiero: "Estado financiero",
-	clausula_consentimiento: "Cláusula de consentimiento",
-	minutas: "Minutas",
 };
 
 const creditTypeLabels = {

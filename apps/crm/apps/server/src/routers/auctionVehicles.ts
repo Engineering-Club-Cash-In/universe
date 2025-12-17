@@ -312,7 +312,9 @@ export const auctionRouter = {
 
 			// Group rows into nested structure
 			const grouped = auctions.reduce((acc, row) => {
-				let auction = acc.find((a: { auctionId: string }) => a.auctionId === row.auctionId);
+				let auction = acc.find(
+					(a: { auctionId: string }) => a.auctionId === row.auctionId,
+				);
 				if (!auction) {
 					auction = {
 						auctionId: row.auctionId,
@@ -394,9 +396,7 @@ export const auctionRouter = {
 				// Agrupar fotos
 				if (
 					row.photoId &&
-					!auction.photos.find(
-						(p: { id: string }) => p.id === row.photoId,
-					)
+					!auction.photos.find((p: { id: string }) => p.id === row.photoId)
 				) {
 					auction.photos.push({
 						id: row.photoId,

@@ -318,7 +318,8 @@ export function ContactoModal({
 										name="compromisosPago"
 										validators={{
 											onChange: ({ value, fieldApi }) => {
-												const estadoContacto = form.getFieldValue("estadoContacto");
+												const estadoContacto =
+													form.getFieldValue("estadoContacto");
 												const estadosExitosos = [
 													"contactado",
 													"promesa_pago",
@@ -336,13 +337,15 @@ export function ContactoModal({
 											},
 										}}
 										children={(field) => {
-											const estadoContacto = form.getFieldValue("estadoContacto");
+											const estadoContacto =
+												form.getFieldValue("estadoContacto");
 											const estadosExitosos = [
 												"contactado",
 												"promesa_pago",
 												"acuerdo_parcial",
 											];
-											const esRequerido = estadosExitosos.includes(estadoContacto);
+											const esRequerido =
+												estadosExitosos.includes(estadoContacto);
 
 											return (
 												<div className="space-y-2">

@@ -417,7 +417,7 @@ export const updateLeadAndCreateOpportunity = async (
 				.set({
 					updatedAt: new Date(),
 					assignedTo: existingLead.assignedTo,
-					title: `Loan opportunity for ${existingLead.firstName} ${existingLead.lastName}`,
+					title: `Oportunidad de crédito para ${existingLead.firstName} ${existingLead.lastName}`,
 					status: "open",
 				})
 				.where(eq(opportunities.id, existingOpportunity.id));
@@ -438,7 +438,7 @@ export const updateLeadAndCreateOpportunity = async (
 					updatedAt: new Date(),
 					assignedTo: existingLead.assignedTo,
 					createdBy: existingLead.createdBy,
-					title: `Loan opportunity for ${existingLead.firstName} ${existingLead.lastName}`,
+					title: `Oportunidad de crédito para ${existingLead.firstName} ${existingLead.lastName}`,
 					stageId: firstStage.id,
 				})
 				.returning();

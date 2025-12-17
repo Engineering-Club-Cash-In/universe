@@ -11,6 +11,7 @@ export const Formulario = () => {
     handleBlur,
     handleSubmit,
     isSubmitting,
+    serverError,
   } = useFormLeads();
   const isMobile = useIsMobile();
 
@@ -70,6 +71,12 @@ export const Formulario = () => {
         onChange={handleChange("descripcion")}
         onBlur={handleBlur}
       />
+
+      {serverError && (
+        <div className="text-red-500 text-sm text-left bg-red-50 border border-red-200 rounded-lg p-3">
+          {serverError}
+        </div>
+      )}
 
       <Button
         className="mt-4 w-1/2 mx-auto"

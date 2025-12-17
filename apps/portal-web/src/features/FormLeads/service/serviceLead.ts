@@ -1,12 +1,32 @@
 import type { FormLeadsValues } from "../hooks/useForm";
+import { apiCRM } from "@/lib/api/apiCRM";
 
-export const sendLead = async (data: FormLeadsValues): Promise<{ ok: boolean }> => {
-  // Simulamos un delay de red
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  
-  // Simulamos el envío - siempre devuelve ok aunque no haya API
-  console.log("Lead enviado:", data);
-  
-  // Simulamos una respuesta exitosa
-  return { ok: true };
+interface LeadPayload {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  dpi: string;
+  loanPurpose: string;
+  notes: string;
+}
+
+export const sendLead = async (data: FormLeadsValues) => {
+  // Separar nombre completo en firstName y lastName
+  const nameParts = data.nombreCompleto.trim().split(" ");
+  const firstName = nameParts[0] || "";
+  const lastName = nameParts.slice(1).join(" ") || "";
+
+  const payload: LeadPayload = {
+    firstName,
+    lastName,
+    email: data.correo,
+    phone: data.telefono,
+    dpi: data.dpi,
+    loanPurpose: "personal",
+    notes: data.descripcion || "",
+  };
+
+  const response = await apiCRM.post("/api/public/lead", payload);
+  return response.data;
 };

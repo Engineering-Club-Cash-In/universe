@@ -3,14 +3,6 @@ import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import {
-	mapOCRToVehicleForm,
-	vehicleRegistrationOCRSchema,
-} from "../lib/ocr-schema";
-import {
-	prepareValuationContext,
-	vehicleValuationSchema,
-} from "../lib/valuation-schema";
 import { db } from "../db";
 import {
 	casosCobros,
@@ -26,6 +18,10 @@ import {
 	vehiclePhotos,
 	vehicles,
 } from "../db/schema";
+import {
+	mapOCRToVehicleForm,
+	vehicleRegistrationOCRSchema,
+} from "../lib/ocr-schema";
 import { crmProcedure, protectedProcedure, publicProcedure } from "../lib/orpc";
 import {
 	deleteFileFromR2,
@@ -34,18 +30,24 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
+import {
+	prepareValuationContext,
+	vehicleValuationSchema,
+} from "../lib/valuation-schema";
 
 export const vehiclesRouter = {
 	// Get all vehicles with their latest inspection and photos
 	getAll: publicProcedure
 		.input(
-			z.object({
-				limit: z.number().optional().default(10),
-				offset: z.number().optional().default(0),
-				query: z.string().optional(),
-				status: z.string().optional(),
-				category: z.string().optional(),
-			}).optional()
+			z
+				.object({
+					limit: z.number().optional().default(10),
+					offset: z.number().optional().default(0),
+					query: z.string().optional(),
+					status: z.string().optional(),
+					category: z.string().optional(),
+				})
+				.optional(),
 		)
 		.handler(async ({ input }) => {
 			const limit = input?.limit ?? 10;
@@ -63,25 +65,30 @@ export const vehiclesRouter = {
 						ilike(vehicles.model, `%${query}%`),
 						ilike(vehicles.licensePlate, `%${query}%`),
 						ilike(vehicles.vinNumber, `%${query}%`),
-					)
+					),
 				);
 			}
-			if (status && status !== 'all') {
+			if (status && status !== "all") {
 				conditions.push(eq(vehicles.status, status as any));
 			}
 
 			// Category filters
-			if (category === 'commercial') {
-				conditions.push(eq(vehicleInspections.vehicleRating, 'Comercial'));
-			} else if (category === 'non-commercial') {
-				conditions.push(eq(vehicleInspections.vehicleRating, 'No comercial'));
-			} else if (category === 'alerts') {
-				conditions.push(sql`json_array_length(${vehicleInspections.alerts}) > 0`);
+			if (category === "commercial") {
+				conditions.push(eq(vehicleInspections.vehicleRating, "Comercial"));
+			} else if (category === "non-commercial") {
+				conditions.push(eq(vehicleInspections.vehicleRating, "No comercial"));
+			} else if (category === "alerts") {
+				conditions.push(
+					sql`json_array_length(${vehicleInspections.alerts}) > 0`,
+				);
 			}
 
 			// 1. Get total count and paginated IDs
 			// We need to join if we are filtering by inspection properties
-			const needsJoin = category === 'commercial' || category === 'non-commercial' || category === 'alerts';
+			const needsJoin =
+				category === "commercial" ||
+				category === "non-commercial" ||
+				category === "alerts";
 
 			const idsQueryBase = db
 				.selectDistinct({ id: vehicles.id, createdAt: vehicles.createdAt })
@@ -92,14 +99,21 @@ export const vehiclesRouter = {
 				.from(vehicles);
 
 			const idsQuery = needsJoin
-				? idsQueryBase.innerJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				? idsQueryBase.innerJoin(
+						vehicleInspections,
+						eq(vehicles.id, vehicleInspections.vehicleId),
+					)
 				: idsQueryBase;
 
 			const countQuery = needsJoin
-				? countQueryBase.innerJoin(vehicleInspections, eq(vehicles.id, vehicleInspections.vehicleId))
+				? countQueryBase.innerJoin(
+						vehicleInspections,
+						eq(vehicles.id, vehicleInspections.vehicleId),
+					)
 				: countQueryBase;
 
-			const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+			const whereClause =
+				conditions.length > 0 ? and(...conditions) : undefined;
 
 			const [totalResult] = await countQuery.where(whereClause);
 			const total = Number(totalResult?.count || 0);
@@ -110,14 +124,14 @@ export const vehiclesRouter = {
 				.limit(limit)
 				.offset(offset);
 
-			const vehicleIdsArray = paginatedIds.map(r => r.id);
+			const vehicleIdsArray = paginatedIds.map((r) => r.id);
 
 			if (vehicleIdsArray.length === 0) {
 				return {
 					data: [],
 					total,
 					limit,
-					offset
+					offset,
 				};
 			}
 
@@ -129,9 +143,7 @@ export const vehiclesRouter = {
 					vehicleInspections,
 					eq(vehicles.id, vehicleInspections.vehicleId),
 				)
-				.where(
-					or(...vehicleIdsArray.map(id => eq(vehicles.id, id)))
-				)
+				.where(or(...vehicleIdsArray.map((id) => eq(vehicles.id, id))))
 				.orderBy(desc(vehicles.createdAt));
 
 			// Get photos only for these vehicles
@@ -139,7 +151,7 @@ export const vehiclesRouter = {
 				.select()
 				.from(vehiclePhotos)
 				.where(
-					or(...vehicleIdsArray.map(id => eq(vehiclePhotos.vehicleId, id)))
+					or(...vehicleIdsArray.map((id) => eq(vehiclePhotos.vehicleId, id))),
 				)
 				.orderBy(vehiclePhotos.category, vehiclePhotos.photoType);
 
@@ -160,12 +172,16 @@ export const vehiclesRouter = {
 			const allChecklistItems =
 				allInspectionIds.length > 0
 					? await db
-						.select()
-						.from(inspectionChecklistItems)
-						.where(
-							or(...allInspectionIds.map(id => eq(inspectionChecklistItems.inspectionId, id)))
-						)
-						.orderBy(inspectionChecklistItems.category)
+							.select()
+							.from(inspectionChecklistItems)
+							.where(
+								or(
+									...allInspectionIds.map((id) =>
+										eq(inspectionChecklistItems.inspectionId, id),
+									),
+								),
+							)
+							.orderBy(inspectionChecklistItems.category)
 					: [];
 
 			// Group checklist items by inspection ID
@@ -181,7 +197,7 @@ export const vehiclesRouter = {
 			const vehiclesMap = new Map();
 
 			// Initialize map with the order of IDs to preserve sort order
-			vehicleIdsArray.forEach(_id => {
+			vehicleIdsArray.forEach((_id) => {
 				// We'll populate this as we process results
 				// But wait, result might have multiple rows per vehicle.
 				// We need to ensure we return them in the correct order.
@@ -212,34 +228,34 @@ export const vehiclesRouter = {
 			const vehicleConvenios =
 				vehicleIdsArray.length > 0
 					? await db
-						.select({
-							vehicleId: contratosFinanciamiento.vehicleId,
-							hasActiveConvenio: conveniosPago.activo,
-						})
-						.from(contratosFinanciamiento)
-						.leftJoin(
-							casosCobros,
-							eq(contratosFinanciamiento.id, casosCobros.contratoId),
-						)
-						.leftJoin(
-							conveniosPago,
-							eq(casosCobros.id, conveniosPago.casoCobroId),
-						)
-						.where(
-							and(
-								or(
-									...vehicleIdsArray.map((id) =>
-										eq(contratosFinanciamiento.vehicleId, id),
+							.select({
+								vehicleId: contratosFinanciamiento.vehicleId,
+								hasActiveConvenio: conveniosPago.activo,
+							})
+							.from(contratosFinanciamiento)
+							.leftJoin(
+								casosCobros,
+								eq(contratosFinanciamiento.id, casosCobros.contratoId),
+							)
+							.leftJoin(
+								conveniosPago,
+								eq(casosCobros.id, conveniosPago.casoCobroId),
+							)
+							.where(
+								and(
+									or(
+										...vehicleIdsArray.map((id) =>
+											eq(contratosFinanciamiento.vehicleId, id),
+										),
 									),
+									eq(conveniosPago.activo, true),
 								),
-								eq(conveniosPago.activo, true),
-							),
-						)
+							)
 					: [];
 
 			// Add convenio info to vehicles and sort by the original paginated order
 			const vehiclesWithConvenios = vehicleIdsArray
-				.map(id => vehiclesMap.get(id))
+				.map((id) => vehiclesMap.get(id))
 				.filter(Boolean) // Should be all, but just in case
 				.map((vehicle) => ({
 					...vehicle,
@@ -252,7 +268,7 @@ export const vehiclesRouter = {
 				data: vehiclesWithConvenios,
 				total,
 				limit,
-				offset
+				offset,
 			};
 		}),
 
@@ -890,16 +906,16 @@ REGLAS IMPORTANTES:
 								},
 								isPDF
 									? {
-										type: "file",
-										data: fileBuffer,
-										mediaType: "application/pdf",
-										filename: "tarjeta_circulacion.pdf",
-									}
+											type: "file",
+											data: fileBuffer,
+											mediaType: "application/pdf",
+											filename: "tarjeta_circulacion.pdf",
+										}
 									: {
-										type: "image",
-										image: fileBuffer,
-										mediaType: input.mimeType,
-									},
+											type: "image",
+											image: fileBuffer,
+											mediaType: input.mimeType,
+										},
 							],
 						},
 					],
@@ -1047,15 +1063,16 @@ DOCUMENTACIÓN:
 - Fotos del motor: ${context.hasEnginePhotos ? "Sí" : "No"}
 
 OBSERVACIONES DEL VALUADOR EN FOTOS:
-${context.hasPhotoComments
-									? context.photoComments
-										.map(
-											(comment: { category: string; photoType: string; comment: string }) =>
-												`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
-										)
-										.join("\n")
-									: "Sin observaciones especiales en las fotografías"
-								}
+${
+	context.hasPhotoComments
+		? context.photoComments
+				.map(
+					(comment: { category: string; photoType: string; comment: string }) =>
+						`- ${comment.category} (${comment.photoType}): ${comment.comment}`,
+				)
+				.join("\n")
+		: "Sin observaciones especiales en las fotografías"
+}
 
 CONSIDERACIONES ESPECIALES:
 ${context.importantConsiderations}
@@ -1156,8 +1173,8 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				throw new Error("Vehículo no encontrado");
 			}
 
-			// Only admin and sales can upload documents
-			if (!["admin", "sales"].includes(context.userRole)) {
+			// Admin, sales and analyst can upload documents
+			if (!["admin", "sales", "analyst"].includes(context.userRole)) {
 				throw new Error("No tienes permiso para subir documentos");
 			}
 

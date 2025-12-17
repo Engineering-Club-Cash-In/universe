@@ -40,13 +40,16 @@ export const ROLE_CONFIG = {
 
 // Permission checks
 export const PERMISSIONS = {
-	canAccessCRM: (role: string) => role === ROLES.ADMIN || role === ROLES.SALES,
+	canAccessCRM: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.SALES || role === ROLES.ANALYST,
 	canAccessAnalysis: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
 	canAccessAdmin: (role: string) => role === ROLES.ADMIN,
 	canCreateCompanies: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.SALES,
 	canCreateLeads: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.SALES,
+	canCreateOpportunities: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.SALES,
 	canApproveOpportunities: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,

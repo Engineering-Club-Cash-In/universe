@@ -8,8 +8,12 @@ import { createFileRoute } from "@tanstack/react-router";
 import {
 	Banknote,
 	Building,
+	Calculator,
 	Calendar,
 	Clock,
+	ExternalLink,
+	FileSignature,
+	FileSpreadsheet,
 	FileText,
 	Filter,
 	History,
@@ -222,11 +226,11 @@ function DroppableStageColumn({
 
 	return (
 		<Card
-			className={`h-fit min-w-80 shrink-0 ${
+			className={`flex max-h-[75vh] min-w-80 shrink-0 flex-col ${
 				isDraggedOver ? "ring-2 ring-blue-500" : ""
 			}`}
 		>
-			<CardHeader className="pb-3">
+			<CardHeader className="shrink-0 pb-3">
 				<div className="flex items-center justify-between">
 					<Badge
 						style={{ backgroundColor: stage.color, color: "white" }}
@@ -251,7 +255,7 @@ function DroppableStageColumn({
 					</CardDescription>
 				</div>
 			</CardHeader>
-			<CardContent className="space-y-3" ref={ref}>
+			<CardContent className="min-h-0 space-y-3 overflow-y-auto" ref={ref}>
 				{opportunities.length === 0 ? (
 					<div className="py-8 text-center text-muted-foreground">
 						<Target className="mx-auto mb-2 h-8 w-8 opacity-50" />
@@ -276,6 +280,7 @@ export const Route = createFileRoute("/crm/opportunities")({
 	component: RouteComponent,
 	validateSearch: z.object({
 		companyId: z.string().optional(),
+		opportunityId: z.string().optional(),
 	}).parse,
 });
 
@@ -294,8 +299,30 @@ function RouteComponent() {
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
 	const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 	const [stageChangeReason, setStageChangeReason] = useState<string>("");
+	const [leadsSearch, setLeadsSearch] = useState("");
+	const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState("");
+	const [vehiclesSearch, setVehiclesSearch] = useState("");
+	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
 	const processedCompanyIdRef = useRef<string | null>(null);
+	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
+	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+
+	// Debounce leads search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedLeadsSearch(leadsSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [leadsSearch]);
+
+	// Debounce vehicles search
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedVehiclesSearch(vehiclesSearch);
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [vehiclesSearch]);
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
@@ -471,12 +498,22 @@ function RouteComponent() {
 		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
 	});
 	const leadsQuery = useQuery({
-		...orpc.getLeads.queryOptions(),
+		queryKey: [
+			"getLeads",
+			"dropdown",
+			debouncedLeadsSearch,
+			session?.user?.id,
+			userProfile.data?.role,
+		],
+		queryFn: () =>
+			client.getLeads({
+				limit: 50,
+				search: debouncedLeadsSearch || undefined,
+			}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getLeads", session?.user?.id, userProfile.data?.role],
 	});
 
 	const vendorsQuery = useQuery({
@@ -484,12 +521,54 @@ function RouteComponent() {
 	});
 
 	const vehiclesQuery = useQuery({
-		...orpc.getVehicles.queryOptions(),
+		queryKey: [
+			"getVehicles",
+			"dropdown",
+			debouncedVehiclesSearch,
+			session?.user?.id,
+			userProfile.data?.role,
+		],
+		queryFn: () =>
+			client.getVehicles({
+				limit: 50,
+				query: debouncedVehiclesSearch || undefined,
+			}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
-		queryKey: ["getVehicles", session?.user?.id, userProfile.data?.role],
+	});
+
+	// Query for contracts associated with the selected opportunity
+	const opportunityContractsQuery = useQuery({
+		...orpc.listLegalContractsByOpportunity.queryOptions({
+			input: { opportunityId: selectedOpportunity?.id ?? "" },
+		}),
+		enabled:
+			!!selectedOpportunity?.id &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessJuridico(userProfile.data.role),
+		queryKey: [
+			"listLegalContractsByOpportunity",
+			selectedOpportunity?.id,
+			userProfile.data?.role,
+		],
+	});
+
+	// Query for quotations associated with the selected opportunity
+	const opportunityQuotationsQuery = useQuery({
+		...orpc.listQuotationsByOpportunity.queryOptions({
+			input: { opportunityId: selectedOpportunity?.id ?? "" },
+		}),
+		enabled:
+			!!selectedOpportunity?.id &&
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+		queryKey: [
+			"listQuotationsByOpportunity",
+			selectedOpportunity?.id,
+			userProfile.data?.role,
+		],
 	});
 
 	const createOpportunityForm = useForm({
@@ -769,13 +848,22 @@ function RouteComponent() {
 			processedCompanyIdRef.current !== search.companyId
 		) {
 			// Find leads from this company
-			const companyLeads = leadsQuery.data.filter(
-				(lead) => lead.company?.id === search.companyId,
-			);
+			const companyLeads =
+				leadsQuery.data?.data?.filter(
+					(lead: any) => lead.company?.id === search.companyId,
+				) || [];
 
 			// If there are leads from this company, pre-select the first one
 			if (companyLeads.length > 0) {
 				createOpportunityForm.setFieldValue("leadId", companyLeads[0].id);
+			}
+
+			// Inicializar con la etapa de menor porcentaje (1%)
+			const initialStage = salesStagesQuery.data?.find(
+				(s) => s.closurePercentage === 1,
+			);
+			if (initialStage) {
+				createOpportunityForm.setFieldValue("stageId", initialStage.id);
 			}
 
 			// Open the modal
@@ -798,6 +886,37 @@ function RouteComponent() {
 			}
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
+
+	// Handle opening details modal from URL param (opportunityId)
+	useEffect(() => {
+		if (
+			search.opportunityId &&
+			opportunitiesQuery.data &&
+			processedOpportunityIdRef.current !== search.opportunityId
+		) {
+			const opportunity = opportunitiesQuery.data.find(
+				(opp) => opp.id === search.opportunityId,
+			);
+			if (opportunity) {
+				setSelectedOpportunity(opportunity);
+				setIsDetailsDialogOpen(true);
+				processedOpportunityIdRef.current = search.opportunityId;
+			}
+		}
+	}, [search.opportunityId, opportunitiesQuery.data]);
+
+	// Clear search param when details modal closes
+	useEffect(() => {
+		const wasOpen = prevDetailsOpenRef.current;
+		prevDetailsOpenRef.current = isDetailsDialogOpen;
+
+		if (wasOpen && !isDetailsDialogOpen && processedOpportunityIdRef.current) {
+			processedOpportunityIdRef.current = null;
+			if (search.opportunityId) {
+				navigate({ to: "/crm/opportunities", search: {}, replace: true });
+			}
+		}
+	}, [isDetailsDialogOpen, navigate, search.opportunityId]);
 
 	if (isPending || userProfile.isPending) {
 		return <div>Cargando...</div>;
@@ -1051,17 +1170,28 @@ function RouteComponent() {
 					open={isCreateDialogOpen}
 					onOpenChange={(open) => {
 						setIsCreateDialogOpen(open);
-						if (!open) {
+						if (open) {
+							// Inicializar con la etapa de menor porcentaje (1%)
+							const initialStage = salesStagesQuery.data?.find(
+								(s) => s.closurePercentage === 1,
+							);
+							if (initialStage) {
+								createOpportunityForm.setFieldValue("stageId", initialStage.id);
+							}
+						} else {
 							createOpportunityForm.reset();
 						}
 					}}
 				>
-					<DialogTrigger asChild>
-						<Button>
-							<Plus className="mr-2 h-4 w-4" />
-							Agregar Oportunidad
-						</Button>
-					</DialogTrigger>
+					{userProfile.data?.role &&
+						PERMISSIONS.canCreateOpportunities(userProfile.data.role) && (
+							<DialogTrigger asChild>
+								<Button>
+									<Plus className="mr-2 h-4 w-4" />
+									Agregar Oportunidad
+								</Button>
+							</DialogTrigger>
+						)}
 					<DialogContent className="max-w-2xl">
 						<DialogHeader>
 							<DialogTitle>Crear Nueva Oportunidad</DialogTitle>
@@ -1156,14 +1286,16 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.map((lead) => ({
+														...(leadsQuery.data?.data?.map((lead: any) => ({
 															value: lead.id,
 															label: `${lead.firstName} ${lead.lastName}`,
 														})) || []),
 													]}
 													value={field.state.value ?? null}
 													onChange={(value) => field.handleChange(value)}
-													placeholder="Seleccionar lead"
+													onSearchChange={setLeadsSearch}
+													isLoading={leadsQuery.isFetching}
+													placeholder="Buscar lead..."
 													width="full"
 												/>
 											</div>
@@ -1181,16 +1313,20 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: any) => ({
-															value: vehicle.id,
-															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-														})) || []),
+														...(vehiclesQuery.data?.data?.map(
+															(vehicle: any) => ({
+																value: vehicle.id,
+																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+															}),
+														) || []),
 													]}
 													value={field.state.value ?? "none"}
 													onChange={(value) =>
 														field.handleChange(value === "none" ? "" : value)
 													}
-													placeholder="Seleccionar vehículo"
+													onSearchChange={setVehiclesSearch}
+													isLoading={vehiclesQuery.isFetching}
+													placeholder="Buscar vehículo..."
 													width="full"
 												/>
 											</div>
@@ -1222,7 +1358,7 @@ function RouteComponent() {
 									<createOpportunityForm.Field
 										name="stageId"
 										validators={{
-											onChange: ({ value }) => {
+											onSubmit: ({ value }) => {
 												if (!value || value === "") {
 													return "La etapa es requerida";
 												}
@@ -1236,13 +1372,7 @@ function RouteComponent() {
 													Etapa Inicial <span className="text-red-500">*</span>
 												</Label>
 												<Select
-													value={
-														field.state.value ||
-														salesStagesQuery.data?.find(
-															(s) => s.closurePercentage === 1,
-														)?.id ||
-														undefined
-													}
+													value={field.state.value || undefined}
 													onValueChange={(value) => field.handleChange(value)}
 												>
 													<SelectTrigger
@@ -1443,7 +1573,18 @@ function RouteComponent() {
 												</Label>
 												<div className="flex items-center gap-3">
 													<Users className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
+													<span
+														className="cursor-pointer font-medium text-primary hover:underline"
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/crm/leads",
+																search: {
+																	leadId: selectedOpportunity.lead?.id,
+																},
+															});
+														}}
+													>
 														{selectedOpportunity.lead.firstName}{" "}
 														{selectedOpportunity.lead.lastName}
 													</span>
@@ -1523,19 +1664,158 @@ function RouteComponent() {
 										</div>
 									</div>
 
-									{/* Notes */}
-									{selectedOpportunity.notes && (
-										<div className="space-y-3">
-											<Label className="font-semibold text-base text-muted-foreground">
-												Notas
-											</Label>
-											<div className="rounded-lg border bg-muted/50 p-4">
-												<p className="text-sm leading-relaxed">
-													{selectedOpportunity.notes}
-												</p>
+									{/* Contracts Section */}
+									{userProfile.data?.role &&
+										PERMISSIONS.canAccessJuridico(userProfile.data.role) && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<div className="flex items-center gap-2">
+													<FileSignature className="h-5 w-5 text-muted-foreground" />
+													<Label className="font-semibold text-muted-foreground text-sm">
+														Contratos Legales
+													</Label>
+												</div>
+												{opportunityContractsQuery.isLoading ? (
+													<p className="text-muted-foreground text-sm">
+														Cargando contratos...
+													</p>
+												) : opportunityContractsQuery.data &&
+													opportunityContractsQuery.data.length > 0 ? (
+													<div className="space-y-2">
+														{opportunityContractsQuery.data.map(
+															({ contract }) => (
+																<div
+																	key={contract.id}
+																	className="flex items-center justify-between rounded-md border bg-background p-3"
+																>
+																	<div className="flex flex-col gap-1">
+																		<span className="font-medium text-sm">
+																			{contract.contractName}
+																		</span>
+																		<span className="text-muted-foreground text-xs">
+																			{contract.contractType} •{" "}
+																			{contract.status === "pending"
+																				? "Pendiente"
+																				: contract.status === "signed"
+																					? "Firmado"
+																					: "Cancelado"}
+																		</span>
+																	</div>
+																	<div className="flex gap-2">
+																		{contract.clientSigningLink && (
+																			<Button
+																				variant="outline"
+																				size="sm"
+																				asChild
+																			>
+																				<a
+																					href={contract.clientSigningLink}
+																					target="_blank"
+																					rel="noopener noreferrer"
+																					className="flex items-center gap-1"
+																				>
+																					<ExternalLink className="h-3 w-3" />
+																					Cliente
+																				</a>
+																			</Button>
+																		)}
+																		{contract.representativeSigningLink && (
+																			<Button
+																				variant="outline"
+																				size="sm"
+																				asChild
+																			>
+																				<a
+																					href={
+																						contract.representativeSigningLink
+																					}
+																					target="_blank"
+																					rel="noopener noreferrer"
+																					className="flex items-center gap-1"
+																				>
+																					<ExternalLink className="h-3 w-3" />
+																					Rep. Legal
+																				</a>
+																			</Button>
+																		)}
+																	</div>
+																</div>
+															),
+														)}
+													</div>
+												) : (
+													<p className="text-muted-foreground text-sm">
+														No hay contratos asociados a esta oportunidad
+													</p>
+												)}
 											</div>
-										</div>
-									)}
+										)}
+
+									{/* Quotations Section */}
+									{userProfile.data?.role &&
+										PERMISSIONS.canAccessCRM(userProfile.data.role) && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<div className="flex items-center gap-2">
+													<Calculator className="h-5 w-5 text-muted-foreground" />
+													<Label className="font-semibold text-muted-foreground text-sm">
+														Cotizaciones
+													</Label>
+												</div>
+												{opportunityQuotationsQuery.isLoading ? (
+													<p className="text-muted-foreground text-sm">
+														Cargando cotizaciones...
+													</p>
+												) : opportunityQuotationsQuery.data &&
+													opportunityQuotationsQuery.data.length > 0 ? (
+													<div className="space-y-2">
+														{opportunityQuotationsQuery.data.map(
+															(quotation: any) => (
+																<div
+																	key={quotation.id}
+																	className="flex items-center justify-between rounded-md border bg-background p-3"
+																>
+																	<div className="flex flex-col gap-1">
+																		<span className="font-medium text-sm">
+																			{quotation.vehicleBrand}{" "}
+																			{quotation.vehicleLine}{" "}
+																			{quotation.vehicleModel}
+																		</span>
+																		<span className="text-muted-foreground text-xs">
+																			Q
+																			{Number(
+																				quotation.vehicleValue,
+																			).toLocaleString()}{" "}
+																			• {quotation.termMonths} meses •{" "}
+																			{quotation.status === "draft"
+																				? "Borrador"
+																				: quotation.status === "sent"
+																					? "Enviada"
+																					: quotation.status === "accepted"
+																						? "Aceptada"
+																						: "Rechazada"}
+																		</span>
+																	</div>
+																	<div className="text-right">
+																		<p className="font-bold text-green-600">
+																			Q
+																			{Number(
+																				quotation.monthlyPayment,
+																			).toLocaleString()}
+																		</p>
+																		<p className="text-muted-foreground text-xs">
+																			cuota mensual
+																		</p>
+																	</div>
+																</div>
+															),
+														)}
+													</div>
+												) : (
+													<p className="text-muted-foreground text-sm">
+														No hay cotizaciones asociadas a esta oportunidad
+													</p>
+												)}
+											</div>
+										)}
 
 									{/* Actions */}
 									<div className="flex gap-3 border-t pt-6">
@@ -1716,14 +1996,16 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin lead" },
-														...(leadsQuery.data?.map((lead) => ({
+														...(leadsQuery.data?.data?.map((lead: any) => ({
 															value: lead.id,
 															label: `${lead.firstName} ${lead.lastName}`,
 														})) || []),
 													]}
 													value={field.state.value ?? null}
 													onChange={(value) => field.handleChange(value)}
-													placeholder="Seleccionar lead"
+													onSearchChange={setLeadsSearch}
+													isLoading={leadsQuery.isFetching}
+													placeholder="Buscar lead..."
 													width="full"
 												/>
 											</div>
@@ -1788,16 +2070,20 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.map((vehicle: any) => ({
-															value: vehicle.id,
-															label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-														})) || []),
+														...(vehiclesQuery.data?.data?.map(
+															(vehicle: any) => ({
+																value: vehicle.id,
+																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+															}),
+														) || []),
 													]}
 													value={field.state.value || "none"}
 													onChange={(value) =>
 														field.handleChange(value === "none" ? "" : value)
 													}
-													placeholder="Seleccionar vehículo"
+													onSearchChange={setVehiclesSearch}
+													isLoading={vehiclesQuery.isFetching}
+													placeholder="Buscar vehículo..."
 													width="full"
 												/>
 											</div>
@@ -1881,30 +2167,12 @@ function RouteComponent() {
 														field.handleBlur();
 													}}
 													placeholder="Seleccionar fecha de cierre"
+													className="w-full"
 												/>
 											</div>
 										)}
 									</editOpportunityForm.Field>
 								</div>
-							</div>
-
-							<div>
-								<editOpportunityForm.Field name="notes">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Notas</Label>
-											<Textarea
-												id={field.name}
-												name={field.name}
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												placeholder="Notas adicionales sobre esta oportunidad..."
-												rows={3}
-											/>
-										</div>
-									)}
-								</editOpportunityForm.Field>
 							</div>
 
 							{/* Términos de Crédito - Mostrar cuando se acerca al 100% */}
@@ -2325,7 +2593,7 @@ function RouteComponent() {
 			</div>
 
 			{/* Enhanced Opportunities Kanban View */}
-			<div className="flex gap-6 overflow-x-auto pb-4">
+			<div className="flex items-start gap-6 overflow-x-auto pb-4">
 				{opportunitiesByStage.map(
 					({ stage, opportunities, totalValue, count }) => (
 						<DroppableStageColumn
@@ -2349,7 +2617,7 @@ function RouteComponent() {
 function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [description, setDescription] = useState("");
-	const [documentType, setDocumentType] = useState<string>("identification");
+	const [documentType, setDocumentType] = useState<string>("");
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -2453,11 +2721,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 				"image/webp",
 				"application/msword",
 				"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+				// Excel files for detalle_analisis
+				"application/vnd.ms-excel",
+				"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 			];
 
 			if (!allowedTypes.includes(file.type)) {
 				toast.error(
-					"Tipo de archivo no permitido. Solo se permiten PDF, imágenes y documentos Word.",
+					"Tipo de archivo no permitido. Solo se permiten PDF, imágenes, documentos Word y Excel.",
 				);
 				return;
 			}
@@ -2475,13 +2746,59 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 	};
 
 	const documentTypeOptions = [
-		{ value: "identification", label: "Identificación (DPI/Pasaporte)" },
-		{ value: "income_proof", label: "Comprobante de Ingresos" },
-		{ value: "bank_statement", label: "Estado de Cuenta Bancario" },
-		{ value: "business_license", label: "Patente de Comercio" },
-		{ value: "property_deed", label: "Escrituras de Propiedad" },
-		{ value: "vehicle_title", label: "Tarjeta de Circulación" },
-		{ value: "credit_report", label: "Reporte Crediticio" },
+		// Documento especial de resumen de análisis
+		{
+			value: "detalle_analisis",
+			label: "📊 Detalle de Análisis (Requerido para 50%)",
+		},
+		// Documentos de identificación y personales
+		{ value: "dpi", label: "DPI" },
+		{ value: "licencia", label: "Licencia" },
+		{ value: "recibo_luz", label: "Recibo de luz" },
+		{ value: "recibo_adicional", label: "Recibo adicional" },
+		{ value: "formularios", label: "Formularios" },
+		// Estados de cuenta
+		{ value: "estados_cuenta_1", label: "Estado de cuenta mes 1" },
+		{ value: "estados_cuenta_2", label: "Estado de cuenta mes 2" },
+		{ value: "estados_cuenta_3", label: "Estado de cuenta mes 3" },
+		// Documentos comerciales
+		{ value: "patente_comercio", label: "Patente de comercio" },
+		{ value: "patente_mercantil", label: "Patente mercantil" },
+		// Documentos empresariales (S.A.)
+		{ value: "representacion_legal", label: "Representación Legal" },
+		{ value: "constitucion_sociedad", label: "Constitución de sociedad" },
+		{ value: "iva_1", label: "Formulario IVA mes 1" },
+		{ value: "iva_2", label: "Formulario IVA mes 2" },
+		{ value: "iva_3", label: "Formulario IVA mes 3" },
+		{ value: "estado_financiero", label: "Estado financiero" },
+		{ value: "clausula_consentimiento", label: "Cláusula de consentimiento" },
+		{ value: "minutas", label: "Minutas" },
+		// Documentos de vehículos
+		{ value: "tarjeta_circulacion", label: "Tarjeta de circulación" },
+		{ value: "titulo_propiedad", label: "Título de propiedad" },
+		{ value: "dpi_dueno", label: "DPI del dueño del vehículo" },
+		{
+			value: "patente_comercio_vehiculo",
+			label: "Patente comercio (vehículo)",
+		},
+		{
+			value: "representacion_legal_vehiculo",
+			label: "Representación legal (vehículo)",
+		},
+		{
+			value: "dpi_representante_legal_vehiculo",
+			label: "DPI representante legal (vehículo)",
+		},
+		{
+			value: "pago_impuesto_circulacion",
+			label: "Pago impuesto de circulación",
+		},
+		{ value: "consulta_sat", label: "Consulta SAT" },
+		{
+			value: "consulta_garantias_mobiliarias",
+			label: "Consulta garantías mobiliarias",
+		},
+		// Otro
 		{ value: "other", label: "Otro" },
 	];
 
@@ -2489,11 +2806,96 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 		if (mimeType.includes("pdf")) return "📄";
 		if (mimeType.includes("image")) return "🖼️";
 		if (mimeType.includes("word")) return "📝";
+		if (mimeType.includes("spreadsheet") || mimeType.includes("excel"))
+			return "📊";
 		return "📎";
 	};
 
+	// Find the detalle_analisis document if exists
+	const detalleDocument = documentsQuery.data?.find(
+		(doc) => (doc.documentType as string) === "detalle_analisis",
+	);
+	const otherDocuments = documentsQuery.data?.filter(
+		(doc) => (doc.documentType as string) !== "detalle_analisis",
+	);
+
 	return (
 		<div className="space-y-6">
+			{/* Detalle de Análisis Section - Special highlighted section */}
+			<Card
+				className={`border-2 ${detalleDocument ? "border-green-500 bg-green-50/50" : "border-amber-500 bg-amber-50/50"}`}
+			>
+				<CardHeader className="pb-3">
+					<CardTitle className="flex items-center gap-2 text-lg">
+						<FileSpreadsheet className="h-5 w-5" />
+						Detalle de Análisis
+						{detalleDocument ? (
+							<Badge className="bg-green-600">Subido</Badge>
+						) : (
+							<Badge
+								variant="outline"
+								className="border-amber-500 text-amber-700"
+							>
+								Requerido para 50%
+							</Badge>
+						)}
+					</CardTitle>
+					<p className="text-muted-foreground text-sm">
+						Resumen del crédito: vehículo, cliente, emisión de cheques y
+						cotización
+					</p>
+				</CardHeader>
+				<CardContent>
+					{detalleDocument ? (
+						<div className="flex items-center justify-between rounded-lg border border-green-200 bg-white p-4">
+							<div className="flex items-center gap-3">
+								<span className="text-3xl">📊</span>
+								<div>
+									<p className="font-medium">{detalleDocument.originalName}</p>
+									<p className="text-muted-foreground text-xs">
+										Subido el{" "}
+										{new Date(detalleDocument.uploadedAt).toLocaleString(
+											"es-GT",
+										)}{" "}
+										• {(detalleDocument.size / 1024 / 1024).toFixed(2)} MB
+									</p>
+								</div>
+							</div>
+							<div className="flex items-center gap-2">
+								<Button
+									size="sm"
+									variant="outline"
+									onClick={() => window.open(detalleDocument.url, "_blank")}
+								>
+									<FileText className="mr-1 h-4 w-4" />
+									Ver
+								</Button>
+								<Button
+									size="sm"
+									variant="ghost"
+									className="text-red-600 hover:bg-red-50 hover:text-red-700"
+									onClick={() => deleteMutation.mutate(detalleDocument.id)}
+									disabled={deleteMutation.isPending}
+								>
+									<Trash2 className="h-4 w-4" />
+								</Button>
+							</div>
+						</div>
+					) : (
+						<div className="rounded-lg border-2 border-amber-300 border-dashed bg-amber-50/50 p-6 text-center">
+							<FileSpreadsheet className="mx-auto mb-2 h-10 w-10 text-amber-500" />
+							<p className="font-medium text-amber-800">
+								No se ha subido el Detalle de Análisis
+							</p>
+							<p className="mt-1 text-amber-600 text-sm">
+								Sube un archivo Excel (.xlsx) para poder avanzar la oportunidad
+								al 50%
+							</p>
+						</div>
+					)}
+				</CardContent>
+			</Card>
+
 			{/* Upload Section */}
 			<Card>
 				<CardHeader>
@@ -2507,7 +2909,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 						<Label htmlFor="documentType">Tipo de Documento</Label>
 						<Select value={documentType} onValueChange={setDocumentType}>
 							<SelectTrigger>
-								<SelectValue />
+								<SelectValue placeholder="Selecciona un tipo de documento" />
 							</SelectTrigger>
 							<SelectContent>
 								{documentTypeOptions.map((type) => (
@@ -2520,13 +2922,34 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 					</div>
 
 					<div className="space-y-2">
-						<Label htmlFor="description">Descripción (opcional)</Label>
+						<Label htmlFor="description">
+							Descripción{" "}
+							{documentType === "other" ? (
+								<span className="text-red-500">*</span>
+							) : (
+								"(opcional)"
+							)}
+						</Label>
 						<Input
 							id="description"
 							value={description}
 							onChange={(e) => setDescription(e.target.value)}
-							placeholder="Descripción del documento..."
+							placeholder={
+								documentType === "other"
+									? "Describe el tipo de documento..."
+									: "Descripción del documento..."
+							}
+							className={
+								documentType === "other" && !description.trim()
+									? "border-red-300"
+									: ""
+							}
 						/>
+						{documentType === "other" && !description.trim() && (
+							<p className="text-red-500 text-xs">
+								La descripción es obligatoria para documentos de tipo "Otro"
+							</p>
+						)}
 					</div>
 
 					<div className="space-y-2">
@@ -2536,11 +2959,11 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 							id="file"
 							type="file"
 							onChange={handleFileSelect}
-							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx"
+							accept=".pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx"
 						/>
 						<p className="text-muted-foreground text-xs">
-							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX. Tamaño
-							máximo: 10MB
+							Formatos permitidos: PDF, JPG, PNG, WebP, DOC, DOCX, XLS, XLSX.
+							Tamaño máximo: 10MB
 						</p>
 					</div>
 
@@ -2570,7 +2993,12 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 
 					<Button
 						className="w-full"
-						disabled={!selectedFile || uploadMutation.isPending}
+						disabled={
+							!selectedFile ||
+							!documentType ||
+							uploadMutation.isPending ||
+							(documentType === "other" && !description.trim())
+						}
 						onClick={() => uploadMutation.mutate()}
 					>
 						{uploadMutation.isPending ? "Subiendo..." : "Subir Documento"}
@@ -2591,13 +3019,13 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 						<p className="py-4 text-center text-muted-foreground">
 							Cargando documentos...
 						</p>
-					) : documentsQuery.data?.length === 0 ? (
+					) : !otherDocuments || otherDocuments.length === 0 ? (
 						<p className="py-4 text-center text-muted-foreground">
-							No hay documentos subidos
+							No hay otros documentos subidos
 						</p>
 					) : (
 						<div className="space-y-3">
-							{documentsQuery.data?.map((doc) => (
+							{otherDocuments.map((doc) => (
 								<div
 									key={doc.id}
 									className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"

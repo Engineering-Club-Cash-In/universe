@@ -1,11 +1,10 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, eq } from "drizzle-orm";
+import { and, count, eq, gte, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { leads, opportunities } from "../db/schema/crm";
-import {
-	generatedLegalContracts,
-} from "../db/schema/legal-contracts";
+import { user } from "../db/schema/auth";
+import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { adminProcedure, juridicoProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 
@@ -386,4 +385,76 @@ export const legalContractsRouter = {
 
 		return leadsWithCounts;
 	}),
+
+	// Get opportunities ready for contracts (closure percentage >= 80%)
+	getOpportunitiesForContracts: juridicoProcedure
+		.input(
+			z
+				.object({
+					minClosurePercentage: z.number().min(0).max(100).optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input, context: _ }) => {
+			const minPercentage = input?.minClosurePercentage ?? 80;
+
+			const opportunitiesList = await db
+				.select({
+					id: opportunities.id,
+					title: opportunities.title,
+					value: opportunities.value,
+					creditType: opportunities.creditType,
+					status: opportunities.status,
+					expectedCloseDate: opportunities.expectedCloseDate,
+					createdAt: opportunities.createdAt,
+					lead: {
+						id: leads.id,
+						firstName: leads.firstName,
+						lastName: leads.lastName,
+						dpi: leads.dpi,
+						email: leads.email,
+						phone: leads.phone,
+					},
+					stage: {
+						id: salesStages.id,
+						name: salesStages.name,
+						order: salesStages.order,
+						closurePercentage: salesStages.closurePercentage,
+						color: salesStages.color,
+					},
+					assignedUser: {
+						id: user.id,
+						name: user.name,
+					},
+				})
+				.from(opportunities)
+				.innerJoin(leads, eq(opportunities.leadId, leads.id))
+				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.leftJoin(user, eq(opportunities.assignedTo, user.id))
+				.where(
+					and(
+						gte(salesStages.closurePercentage, minPercentage),
+						ne(opportunities.status, "won"),
+						ne(opportunities.status, "lost"),
+					),
+				)
+				.orderBy(salesStages.closurePercentage);
+
+			// For each opportunity, get the contract count
+			const opportunitiesWithContractCount = await Promise.all(
+				opportunitiesList.map(async (opp) => {
+					const [{ count: contractCount }] = await db
+						.select({ count: count() })
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.opportunityId, opp.id));
+
+					return {
+						...opp,
+						contractCount: Number(contractCount),
+					};
+				}),
+			);
+
+			return opportunitiesWithContractCount;
+		}),
 };

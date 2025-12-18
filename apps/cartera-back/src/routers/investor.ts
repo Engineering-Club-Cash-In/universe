@@ -19,7 +19,7 @@ import { obtenerCreditosConPagosPendientes } from "../controllers/payments";
  
 
 export const inversionistasRouter = new Elysia()
-  .use(authMiddleware)
+ 
   .post("/investor", insertInvestor)
   .get("/investor", getInvestors)
   .post("/investor/update", updateInvestor) // 👈 update usando POST

@@ -58,10 +58,21 @@ export const conta_users = customSchema.table("conta_users", {
 });
 
 // 1. Usuarios
+// src/db/schema.ts
+
 export const usuarios = customSchema.table("usuarios", {
   usuario_id: serial("usuario_id").primaryKey(),
   nombre: varchar("nombre", { length: 200 }).notNull(),
   nit: varchar("nit", { length: 30 }),
+  
+  // 🔥 CAMPOS NUEVOS PARA FACTURACIÓN
+  direccion: varchar("direccion", { length: 300 }),
+  municipio: varchar("municipio", { length: 100 }),
+  departamento: varchar("departamento", { length: 100 }),
+  codigo_postal: varchar("codigo_postal", { length: 10 }).default("01001"),
+  pais: varchar("pais", { length: 5 }).default("GT"),
+  
+  // Campos existentes
   categoria: varchar("categoria", { length: 100 }),
   como_se_entero: varchar("como_se_entero", { length: 100 }),
   saldo_a_favor: numeric("saldo_a_favor", { precision: 18, scale: 2 })
@@ -542,4 +553,57 @@ export const convenios_pagos_resume = customSchema.table("convenios_pagos_resume
   fecha_pago: timestamp("fecha_pago"), // NULL si no está pagada, timestamp cuando se paga
   
   created_at: timestamp("created_at").defaultNow(),
+});
+
+
+
+// src/db/schema.ts
+
+// 🔥 ENUM para status de factura
+export const statusFacturaEnum = pgEnum("status_factura", [
+  "ACTIVA",
+  "ANULADA"
+]);
+// src/db/schema.ts
+
+export const facturas_electronicas = customSchema.table("facturas_electronicas", {
+  factura_id: serial("factura_id").primaryKey(),
+  
+  // 🔥 CAMBIO: Ahora enlazamos por PAGO en lugar de CRÉDITO
+  pago_id: integer("pago_id")
+    .notNull() // 👈 OBLIGATORIO
+    .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+  
+  // Datos del DTE
+  serie: varchar("serie", { length: 50 }).notNull(),
+  numero: varchar("numero", { length: 100 }).notNull(),
+  uuid: varchar("uuid", { length: 255 }).notNull().unique(),
+  
+  tipo_documento: varchar("tipo_documento", { length: 10 }).notNull(),
+  
+  // Montos
+  monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull(),
+  monto_iva: numeric("monto_iva", { precision: 18, scale: 2 }).notNull(),
+  
+  // URLs
+  pdf_url: varchar("pdf_url", { length: 500 }).notNull(),
+  xml_url: varchar("xml_url", { length: 500 }),
+  
+  // Receptor
+  receptor_nit: varchar("receptor_nit", { length: 30 }).notNull(),
+  receptor_nombre: varchar("receptor_nombre", { length: 200 }).notNull(),
+  
+  // Fechas
+  fecha_emision: timestamp("fecha_emision").notNull(),
+  fecha_certificacion: timestamp("fecha_certificacion").notNull(),
+  
+  // STATUS Y ANULACIÓN
+  status: statusFacturaEnum("status").notNull().default("ACTIVA"),
+  fecha_anulacion: timestamp("fecha_anulacion"),
+  motivo_anulacion: text("motivo_anulacion"),
+  anulada_por: integer("anulada_por").references(() => platform_users.id),
+  
+  // Metadata
+  created_at: timestamp("created_at").defaultNow().notNull(),
+  created_by: integer("created_by").references(() => platform_users.id),
 });

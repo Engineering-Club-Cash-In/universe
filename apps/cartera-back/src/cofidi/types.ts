@@ -130,3 +130,26 @@ export interface VoidDocumentResponse {
   processor?: string;
   mensaje?: string;
 }
+
+// src/cofidi/nitTypes.ts
+
+export interface ConsultaNITRequest {
+  nit: string;
+  entity: string; // NIT del emisor
+  requestor: string; // Token COFIDI
+}
+
+export interface ConsultaNITResponse {
+  success: boolean;
+  data?: {
+    nit: string;
+    nombre: string;
+    error?: string;
+  };
+  mensaje: string;
+}
+
+export interface NITInfo {
+  nit: string;
+  nombre: string;
+}

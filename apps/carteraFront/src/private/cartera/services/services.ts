@@ -1984,3 +1984,194 @@ export const togglePaymentAgreementStatus = async (
     );
   }
 };
+
+
+
+// 📋 TYPES
+export interface FacturaElectronica {
+  factura_id: number;
+  pago_id: number;
+  serie: string;
+  numero: string;
+  uuid: string;
+  tipo_documento: string;
+  monto_total: string;
+  monto_iva: string;
+  pdf_url: string;
+  xml_url?: string;
+  receptor_nit: string;
+  receptor_nombre: string;
+  fecha_emision: string;
+  fecha_certificacion: string;
+  status: 'ACTIVA' | 'ANULADA';
+  fecha_anulacion?: string;
+  motivo_anulacion?: string;
+  anulada_por?: number;
+  created_at: string;
+  created_by?: number;
+}
+
+export interface CertificarFacturaRequest {
+  pago_id: number;
+  created_by?: number;
+  tipoDocumento: 'FACT' | 'FESP' | 'FCAM' | 'NCRE' | 'NDEB' | 'RECI' | 'RDON' | 'FPEQ';
+  codigoMoneda: string;
+  fechaHoraEmision?: string;
+  emisor: {
+    nit: string;
+    nombreEmisor: string;
+    codigoEstablecimiento: string;
+    nombreComercial: string;
+    afiliacionIVA: string;
+    direccion: {
+      direccion: string;
+      codigoPostal: string;
+      municipio: string;
+      departamento: string;
+      pais: string;
+    };
+  };
+  receptor?: {
+    idReceptor?: string;
+    nombreReceptor?: string;
+    direccion?: {
+      direccion: string;
+      codigoPostal: string;
+      municipio: string;
+      departamento: string;
+      pais: string;
+    };
+  };
+  frases: Array<{
+    tipoFrase: 1 | 2 | 3 | 4;
+    codigoEscenario: string;
+  }>;
+  items: Array<{
+    numeroLinea: number;
+    bienOServicio: 'B' | 'S';
+    cantidad: number;
+    unidadMedida: string;
+    descripcion: string;
+    precioUnitario: number;
+    precio: number;
+    descuento: number;
+    impuestos: Array<{
+      nombreCorto: string;
+      codigoUnidadGravable: number;
+      montoGravable: number;
+      montoImpuesto: number;
+    }>;
+    total: number;
+  }>;
+  exportacion?: 'SI';
+  idInterno?: string;
+  complementos?: Array<{
+    tipo: 'cambiario' | 'exportacion' | 'notaCredito';
+    abonos?: Array<{
+      numeroAbono: number;
+      fechaVencimiento: string;
+      montoAbono: number;
+    }>;
+  }>;
+}
+
+export interface CertificarFacturaResponse {
+  success: boolean;
+  data?: {
+    factura_id: number;
+    idInterno: string;
+    serie: string;
+    numero: number;
+    uuid: string;
+    xmlCertificado: string;
+    fechaEmision: string;
+    pdfUrl: string;
+    pdfFilename: string;
+  };
+  mensaje?: string;
+  error?: string;
+}
+
+export interface AnularFacturaRequest {
+  uuid: string;
+  xmlAnulacion: string;
+  motivo: string;
+  userId: number;
+}
+
+export interface ObtenerFacturaResponse {
+  success: boolean;
+  data?: FacturaElectronica & {
+    xmlCertificado?: string;
+  };
+  mensaje?: string;
+  error?: string;
+}
+
+export interface FacturasPorPagoResponse {
+  success: boolean;
+  data?: {
+    total_facturas: number;
+    facturas_activas: number;
+    facturas_anuladas: number;
+    monto_total_activo: number;
+    facturas: FacturaElectronica[];
+  };
+  mensaje?: string;
+  error?: string;
+}
+
+// 🔥 SERVICIOS API
+
+// 1. Certificar factura
+export const certificarFactura = async (data: CertificarFacturaRequest): Promise<CertificarFacturaResponse> => {
+  const response = await api.post('/api/dte/certificar-factura', data);
+  return response.data;
+};
+
+// 2. Obtener factura por UUID
+export const obtenerFacturaPorUUID = async (uuid: string): Promise<ObtenerFacturaResponse> => {
+  const response = await api.get(`/api/dte/obtener/${uuid}`);
+  return response.data;
+};
+
+// 3. Anular factura
+export const anularFactura = async (data: AnularFacturaRequest) => {
+  const response = await api.post('/api/dte/anular', data);
+  return response.data;
+};
+
+// 4. Obtener facturas por pago
+export const obtenerFacturasPorPago = async (pagoId: number): Promise<FacturasPorPagoResponse> => {
+  const response = await api.get(`/api/dte/credito/${pagoId}`);
+  return response.data;
+};
+
+
+// src/api/facturas.ts - AGREGAR este tipo y servicio
+
+export interface FacturaConPago extends FacturaElectronica {
+  pago_fecha: string;
+  pago_monto_boleta: string;
+  pago_mes_pagado: string;
+}
+
+export interface FacturasPorCreditoResponse {
+  success: boolean;
+  data?: {
+    credito_id: number;
+    total_facturas: number;
+    facturas_activas: number;
+    facturas_anuladas: number;
+    monto_total_activo: number;
+    facturas: FacturaConPago[];
+  };
+  mensaje?: string;
+  error?: string;
+}
+
+// 🔥 Obtener facturas por crédito
+export const obtenerFacturasPorCredito = async (creditoId: number): Promise<FacturasPorCreditoResponse> => {
+  const response = await api.get(`/api/dte/credito/${creditoId}/facturas`);
+  return response.data;
+};

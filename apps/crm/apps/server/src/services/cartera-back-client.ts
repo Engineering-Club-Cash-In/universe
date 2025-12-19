@@ -540,13 +540,20 @@ export class CarteraBackClient {
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
 		});
-
-		const response = await this.request<
-			CarteraBackApiResponse<PaginatedResponse<CarteraInversionista>>
-		>(`/investor?${queryParams}`, { method: "GET" }, true);
-
-		if (!response.data) throw new Error("No data returned from getInvestors");
-		return response.data;
+		// El endpoint /investor retorna directamente un array, no un objeto con { data: [...] }
+		const response = await this.request<CarteraInversionista[]>(
+			`/investor?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+		// Transformar la respuesta al formato PaginatedResponse esperado
+		return {
+			data: response,
+			page: params.page || 1,
+			perPage: params.perPage || 20,
+			total: response.length,
+			totalPages: 1,
+		};
 	}
 
 	async getInvestorReport(

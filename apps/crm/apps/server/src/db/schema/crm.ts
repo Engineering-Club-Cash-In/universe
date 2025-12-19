@@ -49,6 +49,14 @@ export const creditTypeEnum = pgEnum("credit_type", [
 	"autocompra",
 	"sobre_vehiculo",
 ]);
+export const creditCategoryEnum = pgEnum("credit_category", [
+	"Contraseña",
+	"CV vehiculo",
+	"CV vehiculo nuevo",
+	"fiducuario",
+	"hipotecario",
+	"vehiculo",
+]);
 export const opportunityStatusEnum = pgEnum("opportunity_status", [
 	"open",
 	"won",
@@ -245,6 +253,17 @@ export const opportunities = pgTable("opportunities", {
 	cuotaMensual: decimal("cuota_mensual", { precision: 12, scale: 2 }), // Monthly payment amount
 	fechaInicio: timestamp("fecha_inicio"), // Contract start date
 	diaPagoMensual: integer("dia_pago_mensual"), // Payment day of month (1-31)
+
+	// Additional fields
+	seguro: decimal("seguro", { precision: 12, scale: 2 }), // Insurance amount
+	gps: decimal("gps", { precision: 12, scale: 2 }), // GPS amount
+	categoria: creditCategoryEnum("categoria"), // Credit category
+	nit: text("nit"), // Tax identification number
+	royalti: decimal("royalti", { precision: 12, scale: 2 }), // Royalty amount
+	porcentajeRoyalti: decimal("porcentaje_royalti", { precision: 5, scale: 2 }), // Royalty percentage
+	reserva: decimal("reserva", { precision: 12, scale: 2 }), // Reserve amount
+	membresiaPago: decimal("membresia_pago", { precision: 12, scale: 2 }), // Membership payment
+	inversionistas: text("inversionistas"), // JSON string with investors data
 
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),

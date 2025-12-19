@@ -595,6 +595,22 @@ export const crmRouter = {
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
+				// Credit terms fields
+				numeroCuotas: opportunities.numeroCuotas,
+				tasaInteres: opportunities.tasaInteres,
+				cuotaMensual: opportunities.cuotaMensual,
+				fechaInicio: opportunities.fechaInicio,
+				diaPagoMensual: opportunities.diaPagoMensual,
+				// Additional credit fields
+				seguro: opportunities.seguro,
+				gps: opportunities.gps,
+				categoria: opportunities.categoria,
+				nit: opportunities.nit,
+				royalti: opportunities.royalti,
+				porcentajeRoyalti: opportunities.porcentajeRoyalti,
+				reserva: opportunities.reserva,
+				membresiaPago: opportunities.membresiaPago,
+				inversionistas: opportunities.inversionistas,
 				company: {
 					id: companies.id,
 					name: companies.name,
@@ -741,10 +757,20 @@ export const crmRouter = {
 				cuotaMensual: z.string().optional(),
 				fechaInicio: z.string().optional(),
 				diaPagoMensual: z.number().int().min(1).max(31).optional(),
+				// Additional fields
+				seguro: z.number().optional(),
+				gps: z.number().optional(),
+				categoria: z.enum(["Contraseña", "CV vehiculo", "CV vehiculo nuevo", "fiducuario", "hipotecario", "vehiculo"]).optional(),
+				nit: z.string().optional(),
+				royalti: z.number().optional(),
+				porcentajeRoyalti: z.string().optional(),
+				reserva: z.number().optional(),
+				membresiaPago: z.number().optional(),
+				inversionistas: z.string().optional(), // JSON string
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, assignedTo, stageChangeReason, ...updateData } = input;
+			const { id, assignedTo, stageChangeReason, seguro, gps, royalti, porcentajeRoyalti, reserva, membresiaPago, ...updateData } = input;
 
 			// Get current opportunity to check for stage changes
 			const currentOpportunity = await db
@@ -795,6 +821,30 @@ export const crmRouter = {
 						);
 					}
 				}
+				// OPCIONAL: SOLO PARA PRUEBAS
+				/*if (currentStage[0]?.closurePercentage >= 80) {
+					const opp = currentOpportunity[0];
+
+						// Credit terms
+					const numeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
+					const tasaInteres = input.tasaInteres ?? opp.tasaInteres;
+					const cuotaMensual = input.cuotaMensual ?? opp.cuotaMensual;
+					const fechaInicio = input.fechaInicio ?? opp.fechaInicio;
+					const diaPagoMensual = input.diaPagoMensual ?? opp.diaPagoMensual;
+
+					const finalVehicleId = input.vehicleId ?? opp.vehicleId;
+					const finalValue = input.value ?? opp.value;
+					const finalNumeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
+					const finalTasaInteres = input.tasaInteres ?? opp.tasaInteres;
+					const finalCuotaMensual = input.cuotaMensual ?? opp.cuotaMensual;
+					const finalFechaInicio = input.fechaInicio ?? opp.fechaInicio;
+					const finalDiaPagoMensual =
+						input.diaPagoMensual ?? opp.diaPagoMensual;
+					
+
+						
+				}*/
+				
 
 				// Validate credit terms if moving to 100% stage
 				if (targetStage[0]?.closurePercentage === 100) {
@@ -929,59 +979,75 @@ export const crmRouter = {
 							.returning();
 
 						// Generate SIFCO credit number (unique identifier)
+						// Este número se genera UNA VEZ cuando la oportunidad llega al 100%
 						const timestamp = Date.now();
 						const randomSuffix = Math.floor(Math.random() * 1000)
 							.toString()
 							.padStart(3, "0");
 						const numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 
+						console.log(`[CRM] Generating new credit with number: ${numeroSifco}`);
+
 						// Integrate with cartera-back (dual-write)
+						// IMPORTANTE: Si cartera-back está habilitado, es OBLIGATORIO que funcione
+						// Si falla, no se debe continuar con la actualización de la oportunidad
 						let carteraBackSuccess = false;
 						let carteraBackError: string | undefined;
 
+						console.log(`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`);
+
 						if (isCarteraBackEnabled()) {
-							try {
-								// TODO: Get or create usuario_id in cartera-back
-								// For now, we'll use a placeholder (this needs to be implemented)
-								const usuarioId = 1; // PLACEHOLDER - needs proper implementation
+							// TODO: Get or create usuario_id in cartera-back
+							// For now, we'll use a placeholder (this needs to be implemented)
+							const usuarioId = 1; // PLACEHOLDER - needs proper implementation
 
-								const creditoResult = await createCreditoInCarteraBack({
-									opportunityId: opp.id,
-									contratoFinanciamientoId: newContract[0].id,
-									userId: context.userId,
-									usuario_id: usuarioId,
-									numero_credito_sifco: numeroSifco,
-									capital: Number.parseFloat(finalValue as string),
-									porcentaje_interes: Number.parseFloat(
-										finalTasaInteres as string,
-									),
-									plazo: finalNumeroCuotas as number,
-									cuota: Number.parseFloat(finalCuotaMensual as string),
-									tipoCredito: opp.creditType || "autocompra",
-									fecha_creacion: fechaInicioDate.toISOString(),
-									observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
-								});
+							// Create new credit - Si falla, debe detener todo el proceso
+							console.log(`[CRM] Creating credit in cartera-back: ${numeroSifco}`);
 
-								carteraBackSuccess = creditoResult.success;
-								carteraBackError = creditoResult.error;
+							const creditoResult = await createCreditoInCarteraBack({
+								opportunityId: opp.id,
+								contratoFinanciamientoId: newContract[0].id,
+								userId: context.userId,
+								usuario_id: usuarioId,
+								asesor_id: 3, // PLACEHOLDER - needs proper implementation
+								numero_credito_sifco: numeroSifco,
+								capital: Number.parseFloat(finalValue as string),
+								porcentaje_interes: Number.parseFloat(
+									finalTasaInteres as string,
+								),
+								plazo: finalNumeroCuotas as number,
+								cuota: Number.parseFloat(finalCuotaMensual as string),
+								tipoCredito: opp.creditType || "autocompra",
+								fecha_creacion: fechaInicioDate.toISOString(),
+								observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
+								// Nuevos campos adicionales
+								seguro_10_cuotas: opp.seguro ? Number.parseFloat(opp.seguro) : undefined,
+								gps: opp.gps ? Number.parseFloat(opp.gps) : undefined,
+								categoria: opp.categoria || undefined,
+								nit: opp.nit || undefined,
+								royalti: opp.royalti ? Number.parseFloat(opp.royalti) : undefined,
+								porcentaje_royalti: opp.porcentajeRoyalti ? Number.parseFloat(opp.porcentajeRoyalti) : undefined,
+								reserva: opp.reserva ? Number.parseFloat(opp.reserva) : undefined,
+								membresias_pago: opp.membresiaPago ? Number.parseFloat(opp.membresiaPago) : undefined,
+								inversionistas: opp.inversionistas ? JSON.parse(opp.inversionistas) : undefined,
+							});
 
-								if (creditoResult.success) {
-									console.log(
-										`[CRM] Credit synced to cartera-back: ${numeroSifco}`,
-									);
-								} else {
-									console.error(
-										`[CRM] Failed to sync credit to cartera-back: ${carteraBackError}`,
-									);
-								}
-							} catch (error) {
-								carteraBackError =
-									error instanceof Error ? error.message : String(error);
+							carteraBackSuccess = creditoResult.success;
+							carteraBackError = creditoResult.error;
+
+							if (!creditoResult.success) {
+								// Si falla la creación del crédito, lanzar error y detener todo
 								console.error(
-									"[CRM] Error syncing to cartera-back:",
-									carteraBackError,
+									`[CRM] CRITICAL: Failed to create credit in cartera-back: ${carteraBackError}`,
+								);
+								throw new Error(
+									`No se pudo crear el crédito en cartera-back: ${carteraBackError || "Error desconocido"}. La oportunidad no se actualizará hasta que el crédito se cree exitosamente.`,
 								);
 							}
+
+							console.log(
+								`[CRM] ✓ Credit successfully created in cartera-back: ${numeroSifco}`,
+							);
 						}
 
 						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
@@ -1089,6 +1155,13 @@ export const crmRouter = {
 					fechaInicio: updateData.fechaInicio
 						? new Date(updateData.fechaInicio)
 						: undefined,
+					// Convert numeric fields to strings for decimal columns
+					...(seguro !== undefined && { seguro: String(seguro) }),
+					...(gps !== undefined && { gps: String(gps) }),
+					...(royalti !== undefined && { royalti: String(royalti) }),
+					...(porcentajeRoyalti !== undefined && { porcentajeRoyalti }),
+					...(reserva !== undefined && { reserva: String(reserva) }),
+					...(membresiaPago !== undefined && { membresiaPago: String(membresiaPago) }),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
 					updatedAt: new Date(),
 				})
@@ -2050,6 +2123,8 @@ export const crmRouter = {
 				throw new Error("Oportunidad no encontrada");
 			}
 
+			console.log("[getAnalysisChecklist] opportunity:", opportunity);
+
 			// Check if checklist already exists
 			const [existingChecklist] = await db
 				.select()
@@ -2150,6 +2225,8 @@ export const crmRouter = {
 					.where(eq(creditAnalysis.leadId, opportunity.leadId))
 					.limit(1);
 			}
+
+			console.log("[getAnalysisChecklist] creditAnalysisExists:", creditAnalysisExists);
 
 			// Create initial checklist structure
 			const checklistData = {

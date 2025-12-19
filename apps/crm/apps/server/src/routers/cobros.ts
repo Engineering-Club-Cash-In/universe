@@ -1705,10 +1705,12 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
+				console.log("[getInversionistas] Cartera-back integration is NOT enabled");
 				throw new Error("Integración con cartera-back no está habilitada");
 			}
 
 			try {
+
 				const result = await carteraBackClient.getInvestors({
 					page: input.page,
 					perPage: input.perPage,
@@ -1732,6 +1734,8 @@ export const cobrosRouter = {
 					},
 				};
 			} catch (error) {
+				console.error("[getInversionistas] Error occurred:", error);
+				console.error("[getInversionistas] Error stack:", error instanceof Error ? error.stack : "No stack");
 				throw new Error(
 					`Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
 				);

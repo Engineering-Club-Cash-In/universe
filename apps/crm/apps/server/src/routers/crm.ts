@@ -611,6 +611,7 @@ export const crmRouter = {
 				reserva: opportunities.reserva,
 				membresiaPago: opportunities.membresiaPago,
 				inversionistas: opportunities.inversionistas,
+				asesorId: opportunities.asesorId,
 				company: {
 					id: companies.id,
 					name: companies.name,
@@ -760,13 +761,14 @@ export const crmRouter = {
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
-				categoria: z.enum(["Contraseña", "CV vehiculo", "CV vehiculo nuevo", "fiducuario", "hipotecario", "vehiculo"]).optional(),
+				categoria: z.enum(["Contraseña", "CV Vehículo", "CV Vehículo nuevo", "Fiduciario", "Hipotecario", "Vehículo"]).optional(),
 				nit: z.string().optional(),
 				royalti: z.number().optional(),
 				porcentajeRoyalti: z.string().optional(),
 				reserva: z.number().optional(),
 				membresiaPago: z.number().optional(),
 				inversionistas: z.string().optional(), // JSON string
+				asesorId: z.number().optional(), // Advisor ID from cartera-back
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -781,6 +783,17 @@ export const crmRouter = {
 
 			if (!currentOpportunity[0]) {
 				throw new Error("Opportunity not found");
+			}
+
+			// Get lead if leadId exists
+			let lead = null;
+			if (currentOpportunity[0].leadId) {
+				const leadOption = await db
+					.select()
+					.from(leads)
+					.where(eq(leads.id, currentOpportunity[0].leadId))
+					.limit(1);
+				lead = leadOption[0];
 			}
 
 			// Validate stage transitions
@@ -822,8 +835,13 @@ export const crmRouter = {
 					}
 				}
 				// OPCIONAL: SOLO PARA PRUEBAS
-				/*if (currentStage[0]?.closurePercentage >= 80) {
+				if (currentStage[0]?.closurePercentage >= 80) {
 					const opp = currentOpportunity[0];
+						const timestamp = Date.now();
+						const randomSuffix = Math.floor(Math.random() * 1000)
+							.toString()
+							.padStart(3, "0");
+						const numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 
 						// Credit terms
 					const numeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
@@ -840,10 +858,80 @@ export const crmRouter = {
 					const finalFechaInicio = input.fechaInicio ?? opp.fechaInicio;
 					const finalDiaPagoMensual =
 						input.diaPagoMensual ?? opp.diaPagoMensual;
-					
+						const fechaInicioDate = new Date(finalFechaInicio as string);
 
+
+					let carteraBackSuccess = false;
+						let carteraBackError: string | undefined;
+
+					if (isCarteraBackEnabled()) {
+							// TODO: Get or create usuario_id in cartera-back
+							// For now, we'll use a placeholder (this needs to be implemented)
+							const usuarioId = 1; // PLACEHOLDER - needs proper implementation
+
+							// Create new credit - Si falla, debe detener todo el proceso
+							console.log(`[CRM] Creating credit in cartera-back: ${numeroSifco}`);
+
+							// Valores finales: primero intenta del input, si no del opp guardado
+							const finalSeguro = seguro !== undefined ? seguro : (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
+							const finalGps = gps !== undefined ? gps : (opp.gps ? Number.parseFloat(opp.gps) : undefined);
+							const finalCategoria = input.categoria || opp.categoria || undefined;
+							const finalNit = input.nit || opp.nit || undefined;
+							const finalRoyalti = royalti !== undefined ? royalti : (opp.royalti ? Number.parseFloat(opp.royalti) : undefined);
+							const finalPorcentajeRoyalti = porcentajeRoyalti
+								? Number.parseFloat(porcentajeRoyalti)
+								: (opp.porcentajeRoyalti ? Number.parseFloat(opp.porcentajeRoyalti) : undefined);
+							const finalReserva = reserva !== undefined ? reserva : (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
+							const finalMembresiaPago = membresiaPago !== undefined ? membresiaPago : (opp.membresiaPago ? Number.parseFloat(opp.membresiaPago) : undefined);
+							const finalInversionistas = input.inversionistas || opp.inversionistas || undefined;
+
+							const creditoResult = await createCreditoInCarteraBack({
+								opportunityId: opp.id,
+								//contratoFinanciamientoId: newContract[0].id,
+								userId: context.userId,
+								usuario_id: lead ? `${lead.firstName} ${lead.lastName}` : "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
+								asesor_id: usuarioId,
+								numero_credito_sifco: numeroSifco,
+								capital: Number.parseFloat(finalValue as string),
+								porcentaje_interes: Number.parseFloat(
+									finalTasaInteres as string,
+								),
+								plazo: finalNumeroCuotas as number,
+								cuota: Number.parseFloat(finalCuotaMensual as string),
+								tipoCredito: opp.creditType || "autocompra",
+								fecha_creacion: fechaInicioDate.toISOString(),
+								observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
+								// Nuevos campos adicionales (primero del input, luego del opp)
+								seguro_10_cuotas: finalSeguro,
+								gps: finalGps,
+								categoria: finalCategoria,
+								nit: finalNit,
+								royalti: finalRoyalti,
+								porcentaje_royalti: finalPorcentajeRoyalti,
+								reserva: finalReserva,
+								membresias_pago: finalMembresiaPago,
+								inversionistas: finalInversionistas ? JSON.parse(finalInversionistas) : undefined,
+							});
+
+							carteraBackSuccess = creditoResult.success;
+							carteraBackError = creditoResult.error;
+
+							if (!creditoResult.success) {
+								// Si falla la creación del crédito, lanzar error y detener todo
+								console.error(
+									`[CRM] CRITICAL: Failed to create credit in cartera-back: ${carteraBackError}`,
+								);
+								throw new Error(
+									`No se pudo crear el crédito en cartera-back: ${carteraBackError || "Error desconocido"}. La oportunidad no se actualizará hasta que el crédito se cree exitosamente.`,
+								);
+							}
+
+							console.log(
+								`[CRM] ✓ Credit successfully created in cartera-back: ${numeroSifco}`,
+							);
+						}
 						
-				}*/
+				}
 				
 
 				// Validate credit terms if moving to 100% stage
@@ -1004,12 +1092,26 @@ export const crmRouter = {
 							// Create new credit - Si falla, debe detener todo el proceso
 							console.log(`[CRM] Creating credit in cartera-back: ${numeroSifco}`);
 
+							// Valores finales: primero intenta del input, si no del opp guardado
+							const finalSeguro = seguro !== undefined ? seguro : (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
+							const finalGps = gps !== undefined ? gps : (opp.gps ? Number.parseFloat(opp.gps) : undefined);
+							const finalCategoria = input.categoria || opp.categoria || undefined;
+							const finalNit = input.nit || opp.nit || undefined;
+							const finalRoyalti = royalti !== undefined ? royalti : (opp.royalti ? Number.parseFloat(opp.royalti) : undefined);
+							const finalPorcentajeRoyalti = porcentajeRoyalti
+								? Number.parseFloat(porcentajeRoyalti)
+								: (opp.porcentajeRoyalti ? Number.parseFloat(opp.porcentajeRoyalti) : undefined);
+							const finalReserva = reserva !== undefined ? reserva : (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
+							const finalMembresiaPago = membresiaPago !== undefined ? membresiaPago : (opp.membresiaPago ? Number.parseFloat(opp.membresiaPago) : undefined);
+							const finalInversionistas = input.inversionistas || opp.inversionistas || undefined;
+							const finalAsesorId = input.asesorId || opp.asesorId || usuarioId; // Usa el del input, o el guardado, o el placeholder
+
 							const creditoResult = await createCreditoInCarteraBack({
 								opportunityId: opp.id,
 								contratoFinanciamientoId: newContract[0].id,
 								userId: context.userId,
-								usuario_id: usuarioId,
-								asesor_id: 3, // PLACEHOLDER - needs proper implementation
+								usuario_id: lead ? `${lead.firstName} ${lead.lastName}` : "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
+								asesor_id: finalAsesorId,
 								numero_credito_sifco: numeroSifco,
 								capital: Number.parseFloat(finalValue as string),
 								porcentaje_interes: Number.parseFloat(
@@ -1020,16 +1122,16 @@ export const crmRouter = {
 								tipoCredito: opp.creditType || "autocompra",
 								fecha_creacion: fechaInicioDate.toISOString(),
 								observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
-								// Nuevos campos adicionales
-								seguro_10_cuotas: opp.seguro ? Number.parseFloat(opp.seguro) : undefined,
-								gps: opp.gps ? Number.parseFloat(opp.gps) : undefined,
-								categoria: opp.categoria || undefined,
-								nit: opp.nit || undefined,
-								royalti: opp.royalti ? Number.parseFloat(opp.royalti) : undefined,
-								porcentaje_royalti: opp.porcentajeRoyalti ? Number.parseFloat(opp.porcentajeRoyalti) : undefined,
-								reserva: opp.reserva ? Number.parseFloat(opp.reserva) : undefined,
-								membresias_pago: opp.membresiaPago ? Number.parseFloat(opp.membresiaPago) : undefined,
-								inversionistas: opp.inversionistas ? JSON.parse(opp.inversionistas) : undefined,
+								// Nuevos campos adicionales (primero del input, luego del opp)
+								seguro_10_cuotas: finalSeguro,
+								gps: finalGps,
+								categoria: finalCategoria,
+								nit: finalNit,
+								royalti: finalRoyalti,
+								porcentaje_royalti: finalPorcentajeRoyalti,
+								reserva: finalReserva,
+								membresias_pago: finalMembresiaPago,
+								inversionistas: finalInversionistas ? JSON.parse(finalInversionistas) : undefined,
 							});
 
 							carteraBackSuccess = creditoResult.success;
@@ -1159,7 +1261,7 @@ export const crmRouter = {
 					...(seguro !== undefined && { seguro: String(seguro) }),
 					...(gps !== undefined && { gps: String(gps) }),
 					...(royalti !== undefined && { royalti: String(royalti) }),
-					...(porcentajeRoyalti !== undefined && { porcentajeRoyalti }),
+					...(porcentajeRoyalti !== undefined && { porcentajeRoyalti: String(porcentajeRoyalti) }),
 					...(reserva !== undefined && { reserva: String(reserva) }),
 					...(membresiaPago !== undefined && { membresiaPago: String(membresiaPago) }),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),

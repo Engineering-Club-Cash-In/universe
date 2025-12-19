@@ -51,11 +51,11 @@ export const creditTypeEnum = pgEnum("credit_type", [
 ]);
 export const creditCategoryEnum = pgEnum("credit_category", [
 	"Contraseña",
-	"CV vehiculo",
-	"CV vehiculo nuevo",
-	"fiducuario",
-	"hipotecario",
-	"vehiculo",
+	"CV Vehículo",
+	"CV Vehículo nuevo",
+	"Fiduciario",
+	"Hipotecario",
+	"Vehículo",
 ]);
 export const opportunityStatusEnum = pgEnum("opportunity_status", [
 	"open",
@@ -264,6 +264,7 @@ export const opportunities = pgTable("opportunities", {
 	reserva: decimal("reserva", { precision: 12, scale: 2 }), // Reserve amount
 	membresiaPago: decimal("membresia_pago", { precision: 12, scale: 2 }), // Membership payment
 	inversionistas: text("inversionistas"), // JSON string with investors data
+	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
 
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),

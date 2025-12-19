@@ -94,13 +94,15 @@ export interface CarteraCredito {
 }
 
 export interface CreateCreditoInput {
-	usuario_id: number;
+	//usuario_id?: number;
+	usuario?: string;
 	numero_credito_sifco: string;
 	capital: number;
 	porcentaje_interes: number;
 	plazo: number;
 	cuota: number;
-	asesor_id?: number;
+	// asesor_id?: number;
+	asesor?: string;
 	tipoCredito?: string;
 	iva_12?: number;
 	seguro_10_cuotas?: number;
@@ -108,6 +110,22 @@ export interface CreateCreditoInput {
 	fecha_creacion?: string;
 	observaciones?: string;
 	no_poliza?: string;
+	como_se_entero?: string;
+	membresias_pago?: number;
+	categoria?: string;
+	nit?: string;
+	royalti?: number;
+	porcentaje_royalti?: number;
+	otros?: string;
+	reserva?: number;
+	inversionistas?: Array<{
+		inversionista_id: number;
+		porcentaje_participacion: number;
+		cuota_inversionista: number;
+		monto_aportado: number;
+		porcentaje_cash_in: number;
+		porcentaje_inversion: number;
+	}>;
 }
 
 /**

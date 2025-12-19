@@ -102,7 +102,7 @@ export interface CreateCreditoInput {
 	plazo: number;
 	cuota: number;
 	// asesor_id?: number;
-	asesor?: string;
+	asesor?: any;
 	tipoCredito?: string;
 	iva_12?: number;
 	seguro_10_cuotas?: number;

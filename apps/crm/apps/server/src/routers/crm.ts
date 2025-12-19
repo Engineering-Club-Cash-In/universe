@@ -834,8 +834,8 @@ export const crmRouter = {
 						);
 					}
 				}
-				// OPCIONAL: SOLO PARA PRUEBAS
-				if (currentStage[0]?.closurePercentage >= 80) {
+				//?: OPCIONAL: SOLO PARA PRUEBAS
+				/*if (currentStage[0]?.closurePercentage >= 80) {
 					const opp = currentOpportunity[0];
 						const timestamp = Date.now();
 						const randomSuffix = Math.floor(Math.random() * 1000)
@@ -921,9 +921,6 @@ export const crmRouter = {
 								console.error(
 									`[CRM] CRITICAL: Failed to create credit in cartera-back: ${carteraBackError}`,
 								);
-								throw new Error(
-									`No se pudo crear el crédito en cartera-back: ${carteraBackError || "Error desconocido"}. La oportunidad no se actualizará hasta que el crédito se cree exitosamente.`,
-								);
 							}
 
 							console.log(
@@ -931,7 +928,7 @@ export const crmRouter = {
 							);
 						}
 						
-				}
+				}*/
 				
 
 				// Validate credit terms if moving to 100% stage

@@ -363,15 +363,15 @@ export class CarteraBackClient {
 
 	async createCredito(input: CreateCreditoInput): Promise<CarteraCredito> {
 		this.cache.invalidate("creditos");
-		const response = await this.request<CarteraBackApiResponse<CarteraCredito>>(
+		// El endpoint /newCredit retorna directamente el objeto CarteraCredito, no envuelto en { data: ... }
+		const response = await this.request<CarteraCredito>(
 			"/newCredit",
 			{
 				method: "POST",
 				body: JSON.stringify(input),
 			},
 		);
-		if (!response.data) throw new Error("No data returned from createCredito");
-		return response.data;
+		return response;
 	}
 
 	async updateCredito(input: UpdateCreditoInput): Promise<CarteraCredito> {

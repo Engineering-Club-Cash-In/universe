@@ -508,6 +508,11 @@ function RouteComponent() {
 				? JSON.parse(selectedOpportunity.inversionistas)
 				: [];
 			editOpportunityForm.setFieldValue("inversionistas", inversionistas);
+			// Asesor
+			editOpportunityForm.setFieldValue(
+				"asesorId",
+				selectedOpportunity.asesorId || 0,
+			);
 		}
 		setIsDetailsDialogOpen(false);
 		setIsEditDialogOpen(true);
@@ -580,6 +585,17 @@ function RouteComponent() {
 	// Query for inversionistas
 	const inversionistasQuery = useQuery({
 		...orpc.getInversionistas.queryOptions({
+			input: { page: 1, perPage: 100 },
+		}),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+	});
+
+	// Query for asesores
+	const asesoresQuery = useQuery({
+		...orpc.getAsesores.queryOptions({
 			input: { page: 1, perPage: 100 },
 		}),
 		enabled:
@@ -679,7 +695,7 @@ function RouteComponent() {
 			diaPagoMensual: "",
 			seguro: "",
 			gps: "",
-			categoria: "" as "" | "Contraseña" | "CV vehiculo" | "CV vehiculo nuevo" | "fiducuario" | "hipotecario" | "vehiculo",
+			categoria: "" as "" | "Contraseña" | "CV Vehículo" | "CV Vehículo nuevo" | "Fiduciario" | "Hipotecario" | "Vehículo",
 			nit: "",
 			royalti: "",
 			porcentajeRoyalti: "",
@@ -693,6 +709,7 @@ function RouteComponent() {
 				porcentaje_cash_in: number;
 				porcentaje_inversion: number;
 			}>,
+			asesorId: 0,
 		},
 		validators: {
 			onChange: ({ value }) => {
@@ -736,6 +753,7 @@ function RouteComponent() {
 					reserva: value.reserva ? Number.parseFloat(value.reserva) : undefined,
 					membresiaPago: value.membresiaPago ? Number.parseFloat(value.membresiaPago) : undefined,
 					inversionistas: value.inversionistas.length > 0 ? JSON.stringify(value.inversionistas) : undefined,
+					asesorId: value.asesorId > 0 ? value.asesorId : undefined,
 				});
 			}
 		},
@@ -792,13 +810,14 @@ function RouteComponent() {
 			diaPagoMensual?: number;
 			seguro?: number;
 			gps?: number;
-			categoria?: "Contraseña" | "CV vehiculo" | "CV vehiculo nuevo" | "fiducuario" | "hipotecario" | "vehiculo";
+			categoria?: "Contraseña" | "CV Vehículo" | "CV Vehículo nuevo" | "Fiduciario" | "Hipotecario" | "Vehículo";
 			nit?: string;
 			royalti?: number;
 			porcentajeRoyalti?: string;
 			reserva?: number;
 			membresiaPago?: number;
 			inversionistas?: string;
+			asesorId?: number;
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -2285,6 +2304,39 @@ function RouteComponent() {
 												</div>
 											</div>
 
+											{/* Asesor */}
+											<div className="mb-4">
+												<editOpportunityForm.Field name="asesorId">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Asesor{" "}
+																{selectedStageData.closurePercentage === 100 && (
+																	<span className="text-red-500">*</span>
+																)}
+															</Label>
+															<Combobox
+																value={field.state.value > 0 ? field.state.value.toString() : null}
+																onChange={(value) => {
+																	field.handleChange(Number.parseInt(value || "0"));
+																}}
+																options={
+																	asesoresQuery.data?.asesores?.map((asesor) => ({
+																		label: asesor.nombre,
+																		value: asesor.asesorId.toString(),
+																	})) || []
+																}
+																placeholder="Seleccionar asesor"
+																width="full"
+															/>
+															<p className="text-muted-foreground text-xs">
+																Selecciona el asesor responsable del crédito
+															</p>
+														</div>
+													)}
+												</editOpportunityForm.Field>
+											</div>
+
 											<div className="grid grid-cols-2 gap-4">
 												<div>
 													<editOpportunityForm.Field name="numeroCuotas">
@@ -2506,7 +2558,7 @@ function RouteComponent() {
 																<Select
 																	value={field.state.value}
 																	onValueChange={(value) => {
-																		field.handleChange(value as "" | "Contraseña" | "CV vehiculo" | "CV vehiculo nuevo" | "fiducuario" | "hipotecario" | "vehiculo");
+																		field.handleChange(value as "" | "Contraseña" | "CV Vehículo" | "CV Vehículo nuevo" | "Fiduciario" | "Hipotecario" | "Vehículo");
 																	}}
 																>
 																	<SelectTrigger>
@@ -2514,11 +2566,11 @@ function RouteComponent() {
 																	</SelectTrigger>
 																	<SelectContent>
 																		<SelectItem value="Contraseña">Contraseña</SelectItem>
-																		<SelectItem value="CV vehiculo">CV vehiculo</SelectItem>
-																		<SelectItem value="CV vehiculo nuevo">CV vehiculo nuevo</SelectItem>
-																		<SelectItem value="fiducuario">Fiduciario</SelectItem>
-																		<SelectItem value="hipotecario">Hipotecario</SelectItem>
-																		<SelectItem value="vehiculo">Vehiculo</SelectItem>
+																		<SelectItem value="CV Vehículo">CV Vehículo</SelectItem>
+																		<SelectItem value="CV Vehículo nuevo">CV Vehículo nuevo</SelectItem>
+																		<SelectItem value="Fiduciario">Fiduciario</SelectItem>
+																		<SelectItem value="Hipotecario">Hipotecario</SelectItem>
+																		<SelectItem value="Vehículo">Vehículo</SelectItem>
 																	</SelectContent>
 																</Select>
 																<p className="text-muted-foreground text-xs">

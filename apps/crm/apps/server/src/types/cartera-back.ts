@@ -116,7 +116,7 @@ export interface CreateCreditoInput {
 	nit?: string;
 	royalti?: number;
 	porcentaje_royalti?: number;
-	otros?: string;
+	otros?: number;
 	reserva?: number;
 	inversionistas?: Array<{
 		inversionista_id: number;
@@ -397,6 +397,8 @@ export interface CarteraAsesor {
 	asesor_id: number;
 	nombre: string;
 	activo: boolean;
+	email: string;
+	is_active: boolean;
 }
 
 export interface CreateAsesorInput {
@@ -490,6 +492,11 @@ export interface GetPaymentsParams {
 }
 
 export interface GetInvestorsParams {
+	page?: number;
+	perPage?: number;
+}
+
+export interface GetAdvisorsParams {
 	page?: number;
 	perPage?: number;
 }

@@ -4,6 +4,7 @@
  */
 
 import type {
+	CarteraAsesor,
 	CarteraBackApiResponse,
 	CarteraBackAuthError,
 	CarteraBackConnectionError,
@@ -19,6 +20,7 @@ import type {
 	CreditActionInput,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	GetAdvisorsParams,
 	GetAllCreditsParams,
 	GetInvestorReportParams,
 	GetInvestorsParams,
@@ -576,6 +578,42 @@ export class CarteraBackClient {
 		if (!response.data)
 			throw new Error("No data returned from getInvestorReport");
 		return response.data;
+	}
+
+	// ========================================================================
+	// ASESORES (ADVISORS)
+	// ========================================================================
+
+	async getAdvisors(
+		params: GetAdvisorsParams = {},
+	): Promise<PaginatedResponse<CarteraAsesor>> {
+		console.log("[CarteraBackClient.getAdvisors] Called with params:", params);
+
+		const queryParams = new URLSearchParams({
+			...(params.page && { page: params.page.toString() }),
+			...(params.perPage && { perPage: params.perPage.toString() }),
+		});
+
+		console.log("[CarteraBackClient.getAdvisors] Query params:", queryParams.toString());
+		console.log("[CarteraBackClient.getAdvisors] URL:", `/advisor?${queryParams}`);
+
+		// El endpoint /advisor retorna directamente un array, no un objeto con { data: [...] }
+		const response = await this.request<CarteraAsesor[]>(
+			`/advisor?${queryParams}`,
+			{ method: "GET" },
+			true,
+		);
+
+		console.log("[CarteraBackClient.getAdvisors] Response received:", JSON.stringify(response, null, 2));
+
+		// Transformar la respuesta al formato PaginatedResponse esperado
+		return {
+			data: response,
+			page: params.page || 1,
+			perPage: params.perPage || 20,
+			total: response.length,
+			totalPages: 1,
+		};
 	}
 
 	// ========================================================================

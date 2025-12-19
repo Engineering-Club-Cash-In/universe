@@ -121,7 +121,7 @@ export interface CreateCreditoParams {
 	userId: string;
 
 	// Cartera-back data
-	usuario_id: number;
+	usuario_id: string;
 	numero_credito_sifco: string;
 	capital: number;
 	porcentaje_interes: number;
@@ -175,11 +175,8 @@ export async function createCreditoInCarteraBack(
 			plazo: params.plazo,
 			cuota: params.cuota,
 			asesor: String(params.asesor_id),
-			tipoCredito: params.tipoCredito,
-			iva_12: params.iva_12,
 			seguro_10_cuotas: params.seguro_10_cuotas,
 			gps: params.gps,
-			fecha_creacion: params.fecha_creacion,
 			observaciones: params.observaciones,
 			no_poliza: (params.no_poliza || ""),
 			// Nuevos campos adicionales
@@ -190,8 +187,8 @@ export async function createCreditoInCarteraBack(
 			inversionistas: params.inversionistas,
 			membresias_pago: params.membresias_pago,
 			como_se_entero: "",
-			otros: "",
-			//reserva: params.reserva
+			otros: 0,
+			reserva: params.reserva
 		};
 
 		console.log("[CarteraBackSync] Creating credit with data:", JSON.stringify(creditoInput, null, 2));

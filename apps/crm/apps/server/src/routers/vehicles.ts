@@ -1201,7 +1201,6 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				uniqueFilename,
 				input.vehicleId,
 			);
-
 			// Save to database
 			const [newDocument] = await db
 				.insert(vehicleDocuments)
@@ -1212,11 +1211,21 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 					mimeType: input.file.type,
 					size: input.file.size,
 					documentType: input.documentType,
-					description: input.description,
+					description: input.description || undefined,
 					uploadedBy: context.userId,
 					filePath: key,
 				})
 				.returning();
+
+			// Update analysis checklist if it exists
+			const { updateChecklistForVehicleDocument } = await import(
+				"../lib/checklist"
+			);
+			await updateChecklistForVehicleDocument(
+				input.vehicleId,
+				input.documentType,
+				newDocument.id,
+			);
 
 			return newDocument;
 		}),

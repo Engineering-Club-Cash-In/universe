@@ -252,6 +252,17 @@ app.post("/api/upload-opportunity-document", async (c) => {
 			})
 			.returning();
 
+		// Update analysis checklist if it exists
+		const { updateChecklistForClientDocument } = await import(
+			"./lib/checklist"
+		);
+		await updateChecklistForClientDocument(
+			opportunityId,
+			documentType,
+			newDocument.id,
+			!!opportunity[0]?.vehicleId,
+		);
+
 		return c.json(newDocument);
 	} catch (error) {
 		console.error("Error uploading document:", error);

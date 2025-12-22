@@ -235,7 +235,7 @@ export const vehicleDocuments = pgTable("vehicle_documents", {
 	description: text("description"),
 
 	// Audit fields
-	uploadedBy: uuid("uploaded_by").notNull(), // User who uploaded
+	uploadedBy: text("uploaded_by").notNull(), // User who uploaded
 	uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
 });
 

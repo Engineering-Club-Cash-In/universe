@@ -25,10 +25,18 @@ const validationSchema = Yup.object({
     .email("Correo electrónico inválido")
     .required("El correo es requerido"),
   telefono: Yup.string()
-    .matches(/^\d{8}$/, "El número telefónico debe tener 8 dígitos")
+    .matches(/^\d{8}$/, "El número telefónico debe tener 8 dígitos sin espacios")
+    .test("solo-numeros", "Solo se permiten números", (value) => {
+      if (!value) return true;
+      return /^\d+$/.test(value);
+    })
     .required("El número telefónico es requerido"),
   dpi: Yup.string()
-    .matches(/^\d{13}$/, "El DPI debe tener 13 dígitos")
+    .matches(/^\d{13}$/, "El DPI debe tener 13 dígitos sin espacios")
+    .test("solo-numeros", "Solo se permiten números", (value) => {
+      if (!value) return true;
+      return /^\d+$/.test(value);
+    })
     .required("El DPI es requerido"),
   descripcion: Yup.string(),
 });

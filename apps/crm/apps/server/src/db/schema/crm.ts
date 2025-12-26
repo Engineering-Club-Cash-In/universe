@@ -265,6 +265,9 @@ export const opportunities = pgTable("opportunities", {
 	membresiaPago: decimal("membresia_pago", { precision: 12, scale: 2 }), // Membership payment
 	inversionistas: text("inversionistas"), // JSON string with investors data
 	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
+	numeroSifco: text("numero_sifco"), // SIFCO credit number
+	direccion: text("direccion"), // Customer address
+	rubros: text("rubros"), // JSON string with expense items (rubros)
 
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -278,7 +281,6 @@ export const opportunities = pgTable("opportunities", {
 export const clients = pgTable("clients", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	companyId: uuid("company_id")
-		.notNull()
 		.references(() => companies.id),
 	opportunityId: uuid("opportunity_id").references(() => opportunities.id),
 	leadId: uuid("lead_id").references(() => leads.id),

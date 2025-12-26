@@ -308,6 +308,9 @@ function RouteComponent() {
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
 
+	// Constante para el mínimo de reserva
+	const MIN_RESERVA = 600;
+
 	// Debounce leads search
 	useEffect(() => {
 		const timer = setTimeout(() => {
@@ -503,11 +506,20 @@ function RouteComponent() {
 				"membresiaPago",
 				selectedOpportunity.membresiaPago?.toString() || "",
 			);
+			editOpportunityForm.setFieldValue(
+				"direccion",
+				selectedOpportunity.direccion || "",
+			);
 			// Parse inversionistas from JSON string
 			const inversionistas = selectedOpportunity.inversionistas
 				? JSON.parse(selectedOpportunity.inversionistas)
 				: [];
 			editOpportunityForm.setFieldValue("inversionistas", inversionistas);
+			// Parse rubros from JSON string
+			const rubros = selectedOpportunity.rubros
+				? JSON.parse(selectedOpportunity.rubros)
+				: [];
+			editOpportunityForm.setFieldValue("rubros", rubros);
 			// Asesor
 			editOpportunityForm.setFieldValue(
 				"asesorId",
@@ -701,6 +713,7 @@ function RouteComponent() {
 			porcentajeRoyalti: "",
 			reserva: "",
 			membresiaPago: "",
+			direccion: "",
 			inversionistas: [] as Array<{
 				inversionista_id: number;
 				porcentaje_participacion: number;
@@ -708,6 +721,10 @@ function RouteComponent() {
 				monto_aportado: number;
 				porcentaje_cash_in: number;
 				porcentaje_inversion: number;
+			}>,
+			rubros: [] as Array<{
+				nombre_rubro: string;
+				monto: number;
 			}>,
 			asesorId: 0,
 		},
@@ -753,7 +770,9 @@ function RouteComponent() {
 					reserva: value.reserva ? Number.parseFloat(value.reserva) : undefined,
 					membresiaPago: value.membresiaPago ? Number.parseFloat(value.membresiaPago) : undefined,
 					inversionistas: value.inversionistas.length > 0 ? JSON.stringify(value.inversionistas) : undefined,
+					rubros: value.rubros.length > 0 ? JSON.stringify(value.rubros) : undefined,
 					asesorId: value.asesorId > 0 ? value.asesorId : undefined,
+					direccion: value.direccion || undefined,
 				});
 			}
 		},
@@ -817,7 +836,9 @@ function RouteComponent() {
 			reserva?: number;
 			membresiaPago?: number;
 			inversionistas?: string;
+			rubros?: string;
 			asesorId?: number;
+			direccion?: string;
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -2502,31 +2523,35 @@ function RouteComponent() {
 													</editOpportunityForm.Field>
 												</div>
 
-												<div>
-													<editOpportunityForm.Field name="seguro">
-														{(field) => (
-															<div className="space-y-2">
-																<Label htmlFor={field.name}>Seguro (Q)</Label>
-																<Input
-																	id={field.name}
-																	name={field.name}
-																	type="number"
-																	step="0.01"
-																	min="0"
-																	value={field.state.value}
-																	onBlur={field.handleBlur}
-																	onChange={(e) => field.handleChange(e.target.value)}
-																	placeholder="0.00"
-																/>
-																<p className="text-muted-foreground text-xs">
-																	Monto del seguro
-																</p>
-															</div>
-														)}
-													</editOpportunityForm.Field>
-												</div>
-
-												<div>
+											<div>
+												<editOpportunityForm.Field name="seguro">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Seguro (Q)</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="number"
+																step="0.01"
+																min="0"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) => {
+																	const seguroValue = Number.parseFloat(e.target.value) || 0;
+																	field.handleChange(e.target.value);
+																	// Actualizar reserva automáticamente: MIN_RESERVA + seguro
+																	const newReserva = MIN_RESERVA + seguroValue;
+																	editOpportunityForm.setFieldValue("reserva", newReserva.toString());
+																}}
+																placeholder="0.00"
+															/>
+															<p className="text-muted-foreground text-xs">
+																Monto del seguro (actualiza reserva automáticamente)
+															</p>
+														</div>
+													)}
+												</editOpportunityForm.Field>
+											</div>												<div>
 													<editOpportunityForm.Field name="gps">
 														{(field) => (
 															<div className="space-y-2">
@@ -2652,60 +2677,85 @@ function RouteComponent() {
 													</editOpportunityForm.Field>
 												</div>
 
-												<div>
-													<editOpportunityForm.Field name="reserva">
-														{(field) => (
-															<div className="space-y-2">
-																<Label htmlFor={field.name}>Reserva (Q)</Label>
-																<Input
-																	id={field.name}
-																	name={field.name}
-																	type="number"
-																	step="0.01"
-																	min="0"
-																	value={field.state.value}
-																	onBlur={field.handleBlur}
-																	onChange={(e) => field.handleChange(e.target.value)}
-																	placeholder="0.00"
-																/>
-																<p className="text-muted-foreground text-xs">
-																	Monto de reserva
-																</p>
-															</div>
-														)}
-													</editOpportunityForm.Field>
-												</div>
-
-												<div>
-													<editOpportunityForm.Field name="membresiaPago">
-														{(field) => (
-															<div className="space-y-2">
-																<Label htmlFor={field.name}>Membresía Pago (Q)</Label>
-																<Input
-																	id={field.name}
-																	name={field.name}
-																	type="number"
-																	step="0.01"
-																	min="0"
-																	value={field.state.value}
-																	onBlur={field.handleBlur}
-																	onChange={(e) => field.handleChange(e.target.value)}
-																	placeholder="0.00"
-																/>
-																<p className="text-muted-foreground text-xs">
-																	Pago de membresía
-																</p>
-															</div>
-														)}
-													</editOpportunityForm.Field>
-												</div>
+											<div>
+												<editOpportunityForm.Field name="reserva">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Reserva (Q)</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="number"
+																step="0.01"
+																min={MIN_RESERVA}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) => {
+																	const value = Number.parseFloat(e.target.value) || 0;
+																	if (value < MIN_RESERVA) {
+																		field.handleChange(MIN_RESERVA.toString());
+																	} else {
+																		field.handleChange(e.target.value);
+																	}
+																}}
+																placeholder={MIN_RESERVA.toString()}
+															/>
+															<p className="text-muted-foreground text-xs">
+																Monto de reserva (mínimo Q{MIN_RESERVA})
+															</p>
+														</div>
+													)}
+												</editOpportunityForm.Field>
+											</div>												
+											<div>
+												<editOpportunityForm.Field name="membresiaPago">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Membresía Pago (Q)</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="number"
+																step="0.01"
+																min="0"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) => field.handleChange(e.target.value)}
+																placeholder="0.00"
+															/>
+															<p className="text-muted-foreground text-xs">
+																Pago de membresía
+															</p>
+														</div>
+													)}
+												</editOpportunityForm.Field>
+											</div>
+											<div>
+												<editOpportunityForm.Field name="direccion">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Dirección</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="text"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) => field.handleChange(e.target.value)}
+																placeholder="Dirección del cliente"
+															/>
+															<p className="text-muted-foreground text-xs">
+																Dirección completa del cliente
+															</p>
+														</div>
+													)}
+												</editOpportunityForm.Field>
 											</div>
 										</div>
-									) : null;
-								}}
-							</editOpportunityForm.Subscribe>
-
-							{/* Inversionistas Section */}
+									</div>
+								) : null;
+							}}
+						</editOpportunityForm.Subscribe>							{/* Inversionistas Section */}
 							<editOpportunityForm.Subscribe>
 								{(formState) => {
 									const selectedStageData = salesStagesQuery.data?.find(
@@ -2867,6 +2917,116 @@ function RouteComponent() {
 																				const newInv = [...field.state.value];
 																				newInv[index].porcentaje_inversion = Number.parseFloat(e.target.value);
 																				field.handleChange(newInv);
+																			}}
+																			placeholder="0.00"
+																		/>
+																	</div>
+																</div>
+															</div>
+														))}
+													</div>
+												)}
+											</editOpportunityForm.Field>
+										</div>
+									) : null;
+								}}
+							</editOpportunityForm.Subscribe>
+
+							{/* Rubros Section */}
+							<editOpportunityForm.Subscribe>
+								{(formState) => {
+									const selectedStageData = salesStagesQuery.data?.find(
+										(s) => s.id === formState.values.stageId,
+									);
+									const showRubros =
+										selectedStageData &&
+										selectedStageData.closurePercentage >= 80;
+									return showRubros ? (
+										<div className="space-y-4 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900 dark:bg-green-950/20">
+											<div className="flex items-center justify-between">
+												<div className="flex items-center gap-2">
+													<div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500 text-white">
+														<span className="font-bold text-sm">₡</span>
+													</div>
+													<div>
+														<h3 className="font-semibold text-sm">
+															Rubros
+														</h3>
+														<p className="text-muted-foreground text-xs">
+															Agrega los rubros de gastos del crédito
+														</p>
+													</div>
+												</div>
+												<editOpportunityForm.Field name="rubros">
+													{(field) => (
+														<Button
+															type="button"
+															size="sm"
+															onClick={() => {
+																field.handleChange([
+																	...field.state.value,
+																	{
+																		nombre_rubro: "",
+																		monto: 0,
+																	},
+																]);
+															}}
+														>
+															Agregar Rubro
+														</Button>
+													)}
+												</editOpportunityForm.Field>
+											</div>
+
+											<editOpportunityForm.Field name="rubros">
+												{(field) => (
+													<div className="space-y-3">
+														{field.state.value.map((rubro, index) => (
+															<div
+																key={index}
+																className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
+															>
+																<div className="mb-3 flex items-center justify-between">
+																	<h4 className="font-semibold text-sm">
+																		Rubro #{index + 1}
+																	</h4>
+																	<Button
+																		type="button"
+																		variant="destructive"
+																		size="sm"
+																		onClick={() => {
+																			const newRubros = [...field.state.value];
+																			newRubros.splice(index, 1);
+																			field.handleChange(newRubros);
+																		}}
+																	>
+																		Eliminar
+																	</Button>
+																</div>
+																<div className="grid grid-cols-2 gap-3">
+																	<div className="space-y-2">
+																		<Label>Nombre del Rubro</Label>
+																		<Input
+																			type="text"
+																			value={rubro.nombre_rubro}
+																			onChange={(e) => {
+																				const newRubros = [...field.state.value];
+																				newRubros[index].nombre_rubro = e.target.value;
+																				field.handleChange(newRubros);
+																			}}
+																			placeholder="Ej: Comisión administrativa"
+																		/>
+																	</div>
+																	<div className="space-y-2">
+																		<Label>Monto (Q)</Label>
+																		<Input
+																			type="number"
+																			step="0.01"
+																			value={rubro.monto}
+																			onChange={(e) => {
+																				const newRubros = [...field.state.value];
+																				newRubros[index].monto = Number.parseFloat(e.target.value);
+																				field.handleChange(newRubros);
 																			}}
 																			placeholder="0.00"
 																		/>

@@ -121,7 +121,7 @@ export interface CreateCreditoParams {
 	userId: string;
 
 	// Cartera-back data
-	usuario_id: number;
+	usuario_id: string;
 	numero_credito_sifco: string;
 	capital: number;
 	porcentaje_interes: number;
@@ -135,6 +135,21 @@ export interface CreateCreditoParams {
 	fecha_creacion?: string;
 	observaciones?: string;
 	no_poliza?: string;
+	// Nuevos campos adicionales
+	categoria?: string;
+	nit?: string;
+	royalti?: number;
+	porcentaje_royalti?: number;
+	membresias_pago?: number;
+	reserva?: number;
+	inversionistas?: any[];
+	// campos para la facturacion
+	direccion?: string;
+	rubros?: any[];
+	municipio?: string | null;
+	departamento?: string | null;
+	codigo_postal?: string | null;
+	pais?: string | null;
 }
 
 export interface CreateCreditoResult {
@@ -160,23 +175,40 @@ export async function createCreditoInCarteraBack(
 	try {
 		// Create credit in cartera-back
 		const creditoInput: CreateCreditoInput = {
-			usuario_id: params.usuario_id,
+			usuario: String(params.usuario_id),
 			numero_credito_sifco: params.numero_credito_sifco,
 			capital: params.capital,
 			porcentaje_interes: params.porcentaje_interes,
 			plazo: params.plazo,
 			cuota: params.cuota,
-			asesor_id: params.asesor_id,
-			tipoCredito: params.tipoCredito,
-			iva_12: params.iva_12,
+			asesor: params.asesor_id,
 			seguro_10_cuotas: params.seguro_10_cuotas,
 			gps: params.gps,
-			fecha_creacion: params.fecha_creacion,
 			observaciones: params.observaciones,
-			no_poliza: params.no_poliza,
+			no_poliza: (params.no_poliza || ""),
+			direccion: params.direccion || "",
+			// Nuevos campos adicionales
+			categoria: params.categoria,
+			nit: params.nit,
+			royalti: params.royalti,
+			porcentaje_royalti: params.porcentaje_royalti,
+			inversionistas: params.inversionistas,
+			rubros: params.rubros,
+			membresias_pago: params.membresias_pago,
+			como_se_entero: "",
+			otros: 0,
+			reserva: params.reserva,
+			municipio: params.municipio || "",
+			departamento: params.departamento || "",
+			codigo_postal: params.codigo_postal || "",
+			pais: params.pais || "",
 		};
 
+		console.log("[CarteraBackSync] Creating credit with data:", JSON.stringify(creditoInput, null, 2));
+
 		const credito = await carteraBackClient.createCredito(creditoInput);
+
+		console.log("[CarteraBackSync] Credit created successfully:", JSON.stringify(credito, null, 2));
 
 		// Store reference in CRM
 		const referenceData: NewCarteraBackReference = {

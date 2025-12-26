@@ -114,6 +114,7 @@ export const appRouter = {
 	getInversionistas: cobrosRouter.getInversionistas,
 	getDetalleInversionista: cobrosRouter.getDetalleInversionista,
 	getInversionistasDelCredito: cobrosRouter.getInversionistasDelCredito,
+	getAsesores: cobrosRouter.getAsesores,
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,

@@ -49,6 +49,14 @@ export const creditTypeEnum = pgEnum("credit_type", [
 	"autocompra",
 	"sobre_vehiculo",
 ]);
+export const creditCategoryEnum = pgEnum("credit_category", [
+	"Contraseña",
+	"CV Vehículo",
+	"CV Vehículo nuevo",
+	"Fiduciario",
+	"Hipotecario",
+	"Vehículo",
+]);
 export const opportunityStatusEnum = pgEnum("opportunity_status", [
 	"open",
 	"won",
@@ -246,6 +254,21 @@ export const opportunities = pgTable("opportunities", {
 	fechaInicio: timestamp("fecha_inicio"), // Contract start date
 	diaPagoMensual: integer("dia_pago_mensual"), // Payment day of month (1-31)
 
+	// Additional fields
+	seguro: decimal("seguro", { precision: 12, scale: 2 }), // Insurance amount
+	gps: decimal("gps", { precision: 12, scale: 2 }), // GPS amount
+	categoria: creditCategoryEnum("categoria"), // Credit category
+	nit: text("nit"), // Tax identification number
+	royalti: decimal("royalti", { precision: 12, scale: 2 }), // Royalty amount
+	porcentajeRoyalti: decimal("porcentaje_royalti", { precision: 5, scale: 2 }), // Royalty percentage
+	reserva: decimal("reserva", { precision: 12, scale: 2 }), // Reserve amount
+	membresiaPago: decimal("membresia_pago", { precision: 12, scale: 2 }), // Membership payment
+	inversionistas: text("inversionistas"), // JSON string with investors data
+	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
+	numeroSifco: text("numero_sifco"), // SIFCO credit number
+	direccion: text("direccion"), // Customer address
+	rubros: text("rubros"), // JSON string with expense items (rubros)
+
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -258,7 +281,6 @@ export const opportunities = pgTable("opportunities", {
 export const clients = pgTable("clients", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	companyId: uuid("company_id")
-		.notNull()
 		.references(() => companies.id),
 	opportunityId: uuid("opportunity_id").references(() => opportunities.id),
 	leadId: uuid("lead_id").references(() => leads.id),

@@ -118,6 +118,12 @@ export interface CreateCreditoInput {
 	porcentaje_royalti?: number;
 	otros?: number;
 	reserva?: number;
+	// campos para la facturacion
+	direccion?: string;
+	municipio?: string;
+	departamento?: string;
+	codigo_postal?: string;
+	pais?: string;
 	inversionistas?: Array<{
 		inversionista_id: number;
 		porcentaje_participacion: number;
@@ -125,6 +131,10 @@ export interface CreateCreditoInput {
 		monto_aportado: number;
 		porcentaje_cash_in: number;
 		porcentaje_inversion: number;
+	}>;
+	rubros?: Array<{
+		nombre_rubro: string;
+		monto: number;
 	}>;
 }
 

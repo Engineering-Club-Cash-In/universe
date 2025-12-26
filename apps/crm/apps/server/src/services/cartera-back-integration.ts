@@ -143,6 +143,13 @@ export interface CreateCreditoParams {
 	membresias_pago?: number;
 	reserva?: number;
 	inversionistas?: any[];
+	// campos para la facturacion
+	direccion?: string;
+	rubros?: any[];
+	municipio?: string | null;
+	departamento?: string | null;
+	codigo_postal?: string | null;
+	pais?: string | null;
 }
 
 export interface CreateCreditoResult {
@@ -179,16 +186,22 @@ export async function createCreditoInCarteraBack(
 			gps: params.gps,
 			observaciones: params.observaciones,
 			no_poliza: (params.no_poliza || ""),
+			direccion: params.direccion || "",
 			// Nuevos campos adicionales
 			categoria: params.categoria,
 			nit: params.nit,
 			royalti: params.royalti,
 			porcentaje_royalti: params.porcentaje_royalti,
 			inversionistas: params.inversionistas,
+			rubros: params.rubros,
 			membresias_pago: params.membresias_pago,
 			como_se_entero: "",
 			otros: 0,
-			reserva: params.reserva
+			reserva: params.reserva,
+			municipio: params.municipio || "",
+			departamento: params.departamento || "",
+			codigo_postal: params.codigo_postal || "",
+			pais: params.pais || "",
 		};
 
 		console.log("[CarteraBackSync] Creating credit with data:", JSON.stringify(creditoInput, null, 2));

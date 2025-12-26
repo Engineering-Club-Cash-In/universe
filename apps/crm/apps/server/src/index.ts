@@ -261,6 +261,7 @@ app.post("/api/upload-opportunity-document", async (c) => {
 			documentType,
 			newDocument.id,
 			!!opportunity[0]?.vehicleId,
+			opportunity[0]?.vehicleId || undefined,
 		);
 
 		return c.json(newDocument);

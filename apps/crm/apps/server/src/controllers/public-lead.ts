@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db";
 import { leads } from "../db/schema/crm";
 import { user } from "../db/schema/auth";
+import { getRenapInfoController } from "./bot";
 
 export async function createPublicLead(c: Context) {
   try {
@@ -67,9 +68,13 @@ export async function createPublicLead(c: Context) {
       })
       .returning();
 
+    // INSERT RENAP INFO IF DPI AND PHONE ARE PROVIDED
+    const renapInfo = await getRenapInfoController(body.dpi, body.phone);
+
     return c.json({
       success: true,
       data: newLead,
+      renapInfo,
     });
   } catch (error: any) {
     console.error("[ERROR] createPublicLead:", error);

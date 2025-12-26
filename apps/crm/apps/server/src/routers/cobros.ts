@@ -1705,10 +1705,12 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
+				console.log("[getInversionistas] Cartera-back integration is NOT enabled");
 				throw new Error("Integración con cartera-back no está habilitada");
 			}
 
 			try {
+
 				const result = await carteraBackClient.getInvestors({
 					page: input.page,
 					perPage: input.perPage,
@@ -1732,6 +1734,8 @@ export const cobrosRouter = {
 					},
 				};
 			} catch (error) {
+				console.error("[getInversionistas] Error occurred:", error);
+				console.error("[getInversionistas] Error stack:", error instanceof Error ? error.stack : "No stack");
 				throw new Error(
 					`Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
 				);
@@ -1867,6 +1871,65 @@ export const cobrosRouter = {
 			} catch (error) {
 				throw new Error(
 					`Error obteniendo inversionistas del crédito: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			}
+		}),
+
+	// ========================================================================
+	// ASESORES
+	// ========================================================================
+
+	// Listar todos los asesores
+	getAsesores: cobrosProcedure
+		.input(
+			z.object({
+				page: z.number().min(1).optional().default(1),
+				perPage: z.number().min(1).max(100).optional().default(20),
+			}),
+		)
+		.handler(async ({ input, context: _ }) => {
+			console.log("[getAsesores] Handler called with input:", input);
+
+			if (!isCarteraBackPaymentsEnabled()) {
+				console.log("[getAsesores] Cartera-back integration is NOT enabled");
+				throw new Error("Integración con cartera-back no está habilitada");
+			}
+
+			console.log("[getAsesores] Cartera-back integration is enabled");
+
+			try {
+				console.log("[getAsesores] Calling carteraBackClient.getAdvisors with params:", {
+					page: input.page,
+					perPage: input.perPage,
+				});
+
+				const result = await carteraBackClient.getAdvisors({
+					page: input.page,
+					perPage: input.perPage,
+				});
+
+				console.log("[getAsesores] Result received:", JSON.stringify(result, null, 2));
+
+				return {
+					asesores: result.data.map((asesor) => ({
+						asesorId: asesor.asesor_id,
+						nombre: asesor.nombre,
+						activo: asesor.activo,
+						email: asesor.email,
+						isActive: asesor.is_active,
+					})),
+					pagination: {
+						page: result.page,
+						perPage: result.perPage,
+						total: result.total,
+						totalPages: result.totalPages,
+					},
+				};
+			} catch (error) {
+				console.error("[getAsesores] Error occurred:", error);
+				console.error("[getAsesores] Error stack:", error instanceof Error ? error.stack : "No stack");
+				throw new Error(
+					`Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}`,
 				);
 			}
 		}),

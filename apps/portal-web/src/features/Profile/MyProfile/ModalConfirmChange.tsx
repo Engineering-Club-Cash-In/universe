@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { InputIcon, Button, IconAddress, IconPhone, IconUser } from "@/components";
 import { useMutation } from "@tanstack/react-query";
-import { updateDpi, updatePhone, updateAddress } from "../services";
+import { updateLead } from "../services";
+import { useAuth } from "@/lib";
 
 type FieldType = 'dpi' | 'phone' | 'address';
 
@@ -17,69 +18,63 @@ interface ModalConfirmChangeProps {
 export const ModalConfirmChange = ({
   isOpen,
   field,
-  userId,
   initialValue,
   onClose,
   onSuccess,
 }: ModalConfirmChangeProps) => {
   const [tempValue, setTempValue] = useState(initialValue);
+  const [serverError, setServerError] = useState<string>("");
+  const { token, user } = useAuth();
 
   // Actualizar tempValue cuando cambia initialValue
   useEffect(() => {
     setTempValue(initialValue);
+    setServerError("");
   }, [initialValue]);
 
-  // Mutation para actualizar DPI usando el servicio centralizado
-  const updateDpiMutation = useMutation({
-    mutationFn: (newDpi: string) => updateDpi(userId, newDpi),
+  // Mutation unificada para actualizar cualquier campo
+  const updateMutation = useMutation({
+    mutationFn: ({ field, value }: { field: FieldType; value: string }) => {
+      const email = user?.email;
+      if (!email) throw new Error("Email no disponible");
+
+      interface UpdateLeadPayload {
+        email: string;
+        dpi?: string;
+        phone?: string;
+        address?: string;
+      }
+
+      const payload: UpdateLeadPayload = { email };
+      if (field === 'dpi') payload.dpi = value;
+      if (field === 'phone') payload.phone = value;
+      if (field === 'address') payload.address = value;
+
+      return updateLead(payload, token || null);
+    },
     onSuccess: () => {
+      setServerError("");
       onSuccess();
       onClose();
     },
-  });
-
-  // Mutation para actualizar teléfono usando el servicio centralizado
-  const updatePhoneMutation = useMutation({
-    mutationFn: (newPhone: string) => updatePhone(userId, newPhone),
-    onSuccess: () => {
-      onSuccess();
-      onClose();
-    },
-  });
-
-  // Mutation para actualizar dirección usando el servicio centralizado
-  const updateAddressMutation = useMutation({
-    mutationFn: (newAddress: string) => updateAddress(userId, newAddress),
-    onSuccess: () => {
-      onSuccess();
-      onClose();
+    onError: (error) => {
+      const errorMessage = error?.message || "Error al actualizar la información";
+      setServerError(errorMessage);
     },
   });
 
   const handleConfirmChange = async () => {
     if (!field) return;
+    setServerError("");
 
     try {
-      switch (field) {
-        case 'dpi':
-          await updateDpiMutation.mutateAsync(tempValue);
-          break;
-        case 'phone':
-          await updatePhoneMutation.mutateAsync(tempValue);
-          break;
-        case 'address':
-          await updateAddressMutation.mutateAsync(tempValue);
-          break;
-      }
+      await updateMutation.mutateAsync({ field, value: tempValue });
     } catch (error) {
       console.error("Error al actualizar:", error);
     }
   };
 
-  const isSaving =
-    updateDpiMutation.isPending ||
-    updatePhoneMutation.isPending ||
-    updateAddressMutation.isPending;
+  const isSaving = updateMutation.isPending;
 
   const getFieldLabel = () => {
     switch (field) {
@@ -141,10 +136,18 @@ export const ModalConfirmChange = ({
             icon={getFieldIcon()}
             placeholder={getFieldPlaceholder()}
             value={tempValue}
-            onChange={(e) => setTempValue(e.target.value)}
+            onChange={(e) => {
+              setTempValue(e.target.value);
+              if (serverError) setServerError("");
+            }}
             type={field === 'phone' ? 'tel' : 'text'}
             name={field}
           />
+          {serverError && (
+            <div className="text-red-500 text-sm mt-2 bg-red-50 border border-red-200 rounded-lg p-3">
+              {serverError}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end">

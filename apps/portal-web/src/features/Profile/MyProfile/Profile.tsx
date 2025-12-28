@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
 import { InfoPerson } from "./InfoPerson";
 import { ContainerMenu } from "../components/ContainerMenu";
+import { sendLead } from "@/features/FormLeads/service/serviceLead";
+import { getProfile } from "../services/profileService";
 
 interface UserData {
   id: string;
@@ -29,6 +31,37 @@ export const Profile = () => {
 
         if (sessionData?.data?.user) {
           const userData = sessionData.data.user as UserData;
+          
+          // Verificar si el usuario tiene un lead registrado en el CRM
+          try {
+            await getProfile(userData.email, sessionData.data.session.token);
+            console.log("Lead ya existe para este usuario");
+            // eslint-disable-next-line 
+          } catch (error: any) {
+            // Verificar si es error 404 y el mensaje es "Lead no encontrado"
+            const isLeadNotFound = 
+              error?.status === 404 && 
+              error?.data?.error === "Lead no encontrado";
+            
+            if (isLeadNotFound) {
+              console.log("Lead no encontrado, creando nuevo lead para usuario de Google");
+              try {
+                await sendLead({
+                  nombreCompleto: userData.name || userData.email.split("@")[0],
+                  correo: userData.email,
+                  telefono: "",
+                  dpi: "",
+                  descripcion: "Registro mediante Google OAuth",
+                });
+                console.log("Lead creado exitosamente");
+              } catch (leadError) {
+                console.error("Error al crear lead:", leadError);
+                // No bloquear el flujo si falla la creación del lead
+              }
+            } else {
+              console.error("Error al verificar lead:", error);
+            }
+          }
           
           // Verificar si hay imagen cacheada en localStorage
           const cachedImageKey = `user_image_${userData.id}`;

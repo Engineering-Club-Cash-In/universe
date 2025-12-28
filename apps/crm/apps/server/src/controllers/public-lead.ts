@@ -93,7 +93,10 @@ export async function createPublicLead(c: Context) {
       .returning();
 
     // INSERT RENAP INFO IF DPI AND PHONE ARE PROVIDED
-    const renapInfo = await getRenapInfoController(body.dpi, body.phone);
+    let renapInfo = null;
+    if (body.dpi && body.dpi.trim() !== "" && body.phone) {
+      renapInfo = await getRenapInfoController(body.dpi, body.phone);
+    }
 
     return c.json({
       success: true,

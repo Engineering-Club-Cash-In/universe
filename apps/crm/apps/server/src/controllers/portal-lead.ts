@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { eq, ne, or, and } from "drizzle-orm";
 import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
+import { getRenapInfoController } from "./bot";
 
 /**
  * Middleware to validate portal token (Better Auth session token)
@@ -241,9 +242,17 @@ export async function updateLeadByEmail(c: Context) {
         .where(eq(opportunities.leadId, updatedLead.id));
     }
 
+    // If DPI was updated, call RENAP to get information
+    let renapInfo = null;
+    if (dpi !== undefined && dpi.trim() !== "" && updatedLead) {
+      const phoneToUse = phone ?? existingLead.phone ?? "";
+      renapInfo = await getRenapInfoController(dpi, phoneToUse);
+    }
+
     return c.json({
       success: true,
       data: updatedLead,
+      renapInfo,
     });
   } catch (error: any) {
     console.error("[ERROR] updateLeadByEmail:", error);

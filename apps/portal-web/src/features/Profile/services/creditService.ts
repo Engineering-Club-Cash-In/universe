@@ -1,109 +1,142 @@
-const baseURL = import.meta.env.VITE_API_URL;
+const carteraURL = import.meta.env.VITE_CARTERA_API_URL || "http://localhost:5000";
 
 // Tipos
-export type CreditStatus = "activo" | "finalizado" | "pendiente" | "atrasado";
+export type CreditStatus = "ACTIVO" | "FINALIZADO" | "PENDIENTE" | "ATRASADO";
+export type CreditType = "Nuevo" | "Renovacion" | "Ampliacion";
+export type FormatoCredito = "Pool" | "Individual";
+export type CuotaStatus = "no_required" | "required" | "pagado" | "atrasado";
 
-export type VehicleType = "auto" | "moto" | "camioneta" | "pickup";
-
-// Interfaces
-export interface Vehicle {
-  marca: string;
-  tipo: VehicleType;
-  modelo: string;
-  foto: string;
+// Interfaces basadas en la API de cartera
+export interface Credito {
+  credito_id: number;
+  usuario_id: number;
+  fecha_creacion: string;
+  numero_credito_sifco: string;
+  capital: string;
+  porcentaje_interes: string;
+  deudatotal: string;
+  cuota_interes: string;
+  cuota: string;
+  iva_12: string;
+  seguro_10_cuotas: string;
+  gps: string;
+  observaciones: string;
+  no_poliza: string;
+  como_se_entero: string;
+  asesor_id: number;
+  plazo: number;
+  membresias_pago: string;
+  membresias: string;
+  formato_credito: FormatoCredito;
+  porcentaje_royalti: string;
+  tipoCredito: CreditType;
+  royalti: string;
+  statusCredit: CreditStatus;
+  otros: string;
 }
 
-export interface Credit {
-  id: string;
-  vehiculo: Vehicle;
-  montoPrestamo: number;
-  pagoMensual: number;
-  tasaInteres: number;
-  pagosRestantes: number;
-  fechaInicio: string;
-  fechaFin: string;
-  proximoPago: string;
-  estado: CreditStatus;
+export interface Usuario {
+  usuario_id: number;
+  nombre: string;
+  nit: string;
+  direccion: string;
+  municipio: string;
+  departamento: string;
+  codigo_postal: string;
+  pais: string;
+  categoria: string;
+  como_se_entero: string;
+  saldo_a_favor: string;
 }
 
-// Datos mock
-const mockCredits: Credit[] = [
-  {
-    id: "CRE-001",
-    vehiculo: {
-      marca: "Toyota",
-      tipo: "auto",
-      modelo: "Corolla 2023",
-      foto: "https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?w=400",
-    },
-    montoPrestamo: 150000,
-    pagoMensual: 3200,
-    tasaInteres: 8.5,
-    pagosRestantes: 36,
-    fechaInicio: "2024-01-15",
-    fechaFin: "2028-01-15",
-    proximoPago: "2025-12-15",
-    estado: "activo",
-  },
-  {
-    id: "CRE-003",
-    vehiculo: {
-      marca: "Ford",
-      tipo: "pickup",
-      modelo: "Ranger XLT 2022",
-      foto: "https://images.unsplash.com/photo-1533473359331-0135ef1b58bf?w=400",
-    },
-    montoPrestamo: 280000,
-    pagoMensual: 6500,
-    tasaInteres: 9.8,
-    pagosRestantes: 42,
-    fechaInicio: "2023-08-20",
-    fechaFin: "2027-02-20",
-    proximoPago: "2025-12-20",
-    estado: "activo",
-  },
-  {
-    id: "CRE-004",
-    vehiculo: {
-      marca: "Mazda",
-      tipo: "camioneta",
-      modelo: "CX-5 2023",
-      foto: "https://images.unsplash.com/photo-1519641471654-76ce0107ad1b?w=400",
-    },
-    montoPrestamo: 200000,
-    pagoMensual: 4800,
-    tasaInteres: 8.9,
-    pagosRestantes: 0,
-    fechaInicio: "2021-03-10",
-    fechaFin: "2024-11-10",
-    proximoPago: "2024-11-10",
-    estado: "finalizado",
-  },
-];
+export interface Cuota {
+  cuota_id: number;
+  credito_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  pagado: boolean;
+  liquidado_inversionistas?: boolean;
+  fecha_liquidacion_inversionistas?: string | null;
+  createdAt: string;
+  pago_id?: number;
+}
+
+export interface CreditoResponse {
+  credito: Credito;
+  usuario: Usuario;
+  cuotaActual: number;
+  cuotaActualPagada: boolean;
+  cuotaActualStatus: CuotaStatus;
+  cuotasPendientes: Cuota[];
+  cuotasAtrasadas: Cuota[];
+  cuotasPagadas: Cuota[];
+  moraActual: number;
+  convenioActivo: any | null;
+  cuotasEnConvenio: any[];
+  pagosConvenio: any[];
+}
 
 // Servicios
-export const getCredits = async (userId: string): Promise<Credit[]> => {
+
+/**
+ * Obtener créditos por números SIFCO
+ */
+export const getCredits = async (numerosSifco: string[]): Promise<CreditoResponse[]> => {
+  if (!numerosSifco || numerosSifco.length === 0) {
+    return [];
+  }
+
   try {
-    const response = await fetch(`${baseURL}/api/credits/${userId}`, {
-      credentials: "include",
+    // Hacer fetch para cada número SIFCO
+    const promises = numerosSifco.map(async (numeroSifco) => {
+      const response = await fetch(
+        `${carteraURL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+        {
+          credentials: "include",
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`Error al cargar crédito ${numeroSifco}`);
+        return null;
+      }
+
+      const data: CreditoResponse = await response.json();
+      return data;
     });
 
-    if (!response.ok) {
-      throw new Error("Error al cargar los créditos");
-    }
-
-    const result = await response.json();
-    return result.data as Credit[];
+    const results = await Promise.all(promises);
+    
+    // Filtrar resultados nulos (errores)
+    return results.filter((credit): credit is CreditoResponse => credit !== null);
   } catch (error) {
-    console.error("Error al obtener créditos, usando datos mockeados:", error);
-    return mockCredits;
+    console.error("Error al obtener créditos:", error);
+    return [];
   }
 };
 
-export const getCreditById = async (
-  userId: string,
-  creditId: string
-): Promise<Credit | undefined> => {
-  const credits = await getCredits(userId);
-  return credits.find((credit) => credit.id === creditId);
+/**
+ * Obtener un crédito específico por número SIFCO
+ */
+export const getCreditByNumeroSifco = async (
+  numeroSifco: string
+): Promise<CreditoResponse | null> => {
+  try {
+    const response = await fetch(
+      `${carteraURL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+      {
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Error al cargar el crédito");
+    }
+
+    const data: CreditoResponse = await response.json();
+    return data;
+  } catch (error) {
+    console.error("Error al obtener crédito:", error);
+    return null;
+  }
 };

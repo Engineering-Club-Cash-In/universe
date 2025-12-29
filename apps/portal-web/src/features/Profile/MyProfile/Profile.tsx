@@ -1,123 +1,10 @@
 import { NavBar } from "@components/ui";
-import { useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
-import { authClient } from "@/lib/auth";
 import { InfoPerson } from "./InfoPerson";
 import { ContainerMenu } from "../components/ContainerMenu";
-import { sendLead } from "@/features/FormLeads/service/serviceLead";
-import { getProfile } from "../services/profileService";
-
-interface UserData {
-  id: string;
-  email: string;
-  name?: string;
-  phone?: string;
-  image?: string;
-  cachedImage?: string;
-}
+import { useProfile } from "../hooks/useProfile";
 
 export const Profile = () => {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<UserData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const loadUserSession = async () => {
-      try {
-        // Obtener la sesión directamente de better-auth
-        const sessionData = await authClient.getSession();
-
-        console.log("Session data:", sessionData);
-
-        if (sessionData?.data?.user) {
-          const userData = sessionData.data.user as UserData;
-          
-          // Verificar si el usuario tiene un lead registrado en el CRM
-          try {
-            await getProfile(userData.email, sessionData.data.session.token);
-            console.log("Lead ya existe para este usuario");
-            // eslint-disable-next-line 
-          } catch (error: any) {
-            // Verificar si es error 404 y el mensaje es "Lead no encontrado"
-            const isLeadNotFound = 
-              error?.status === 404 && 
-              error?.data?.error === "Lead no encontrado";
-            
-            if (isLeadNotFound) {
-              console.log("Lead no encontrado, creando nuevo lead para usuario de Google");
-              try {
-                await sendLead({
-                  nombreCompleto: userData.name || userData.email.split("@")[0],
-                  correo: userData.email,
-                  telefono: "",
-                  dpi: "",
-                  descripcion: "Registro mediante Google OAuth",
-                });
-                console.log("Lead creado exitosamente");
-              } catch (leadError) {
-                console.error("Error al crear lead:", leadError);
-                // No bloquear el flujo si falla la creación del lead
-              }
-            } else {
-              console.error("Error al verificar lead:", error);
-            }
-          }
-          
-          // Verificar si hay imagen cacheada en localStorage
-          const cachedImageKey = `user_image_${userData.id}`;
-          let cachedImage = localStorage.getItem(cachedImageKey);
-
-          // Si hay imagen de Google y no está cacheada, descargarla y cachearla
-          if (userData.image && !cachedImage) {
-            try {
-              const response = await fetch(userData.image);
-              const blob = await response.blob();
-              
-              // Convertir blob a base64 para guardar en localStorage
-              const reader = new FileReader();
-              reader.onloadend = () => {
-                const base64data = reader.result as string;
-                localStorage.setItem(cachedImageKey, base64data);
-                cachedImage = base64data;
-                
-                setUser({
-                  id: userData.id,
-                  email: userData.email,
-                  name: userData.name,
-                  phone: userData.phone,
-                  image: userData.image,
-                  cachedImage: cachedImage || undefined,
-                });
-              };
-              reader.readAsDataURL(blob);
-            } catch (error) {
-              console.error("Error caching image:", error);
-            }
-          }
-
-          setUser({
-            id: userData.id,
-            email: userData.email,
-            name: userData.name,
-            phone: userData.phone,
-            image: userData.image,
-            cachedImage: cachedImage || undefined,
-          });
-        } else {
-          // Si no hay sesión, redirigir al login
-          navigate({ to: "/login" });
-        }
-      } catch (error) {
-        console.error("Error loading session:", error);
-        navigate({ to: "/login" });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    loadUserSession();
-  }, [navigate]);
-
+  const { user, isLoading } = useProfile();
 
   if (isLoading) {
     return (
@@ -143,7 +30,9 @@ export const Profile = () => {
         <ContainerMenu>
           {/* Header - Mi Perfil */}
           <div className="mb-12">
-            <h1 className="text-2xl font-bold lg:text-header-2 mb-6">Mi Perfil</h1>
+            <h1 className="text-2xl font-bold lg:text-header-2 mb-6">
+              Mi Perfil
+            </h1>
 
             <div className="flex items-center gap-6">
               {/* Imagen de perfil */}
@@ -162,7 +51,9 @@ export const Profile = () => {
 
               {/* Información básica */}
               <div>
-                <p className="text-body lg:text-header-4 mb-2">{user?.name || "Usuario"}</p>
+                <p className="text-body lg:text-header-4 mb-2">
+                  {user?.name || "Usuario"}
+                </p>
                 <p className="text-gray text-lg">{user?.email}</p>
               </div>
             </div>

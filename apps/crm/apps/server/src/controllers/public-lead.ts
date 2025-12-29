@@ -36,11 +36,11 @@ export async function createPublicLead(c: Context) {
     if (existingLead.length > 0) {
       return c.json(
         {
-          success: false,
-          error: "Ya existe un lead con el mismo email, teléfono o DPI",
-          existingLead: existingLead[0],
+          success: true,
+          data: existingLead[0],
+          message: "Lead ya existe con el mismo email, teléfono o DPI",
         },
-        409
+        200
       );
     }
 

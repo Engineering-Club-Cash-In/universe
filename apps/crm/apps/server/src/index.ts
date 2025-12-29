@@ -17,6 +17,9 @@ import {
 	getLeadByEmail,
 	updateLeadByEmail,
 	validatePortalToken,
+	getLeadOpportunityDocuments,
+	getLeadLegalContracts,
+	getSifcoNumbersByDpi,
 } from "./controllers/portal-lead";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
@@ -418,6 +421,9 @@ app.post("/api/public/lead", createPublicLead);
 // Portal endpoints (protected with BETTER_SECRET_PORTAL token)
 app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);
 app.post("/api/portal/lead/update", validatePortalToken, updateLeadByEmail);
+app.get("/api/portal/lead/documents", validatePortalToken, getLeadOpportunityDocuments);
+app.get("/api/portal/lead/contracts", validatePortalToken, getLeadLegalContracts);
+app.get("/api/portal/lead/sifco", validatePortalToken, getSifcoNumbersByDpi);
 
 app.get("/webhook/facebook-lead", async (c) => {
 	const challenge = c.req.query("hub.challenge");

@@ -1,93 +1,122 @@
-const baseURL = import.meta.env.VITE_BETTER_AUTH_URL || "http://localhost:3000";
+const crmURL = import.meta.env.VITE_CRM_API_URL || "http://localhost:4000";
 
 export interface ProfileData {
+  name: string;
+  lastName: string;
+  email: string;
+  idLead: string;
   dpi?: string;
   phone?: string;
-  address?: string;
-  profileCompleted: boolean;
+  direccion?: string;
+}
+
+export interface Opportunity {
+  opportunityId: string;
+  opportunityTitle: string;
+  numeroSifco: string;
 }
 
 export interface UpdateFieldResponse {
   success: boolean;
   message: string;
   data?: ProfileData;
+  error?: string;
+}
+
+export interface UpdateLeadPayload {
+  email: string;
+  dpi?: string;
+  phone?: string;
+  address?: string;
 }
 
 /**
  * Obtener perfil del usuario
  */
-export const getProfile = async (userId: string): Promise<ProfileData> => {
-  const response = await fetch(`${baseURL}/api/profile/${userId}`, {
+export const getProfile = async (
+  email: string,
+  token: string | null
+): Promise<ProfileData> => {
+  const response = await fetch(`${crmURL}/api/portal/lead?email=${email}`, {
     credentials: "include",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
-  
-  if (!response.ok) {
-    throw new Error("Error al cargar el perfil");
-  }
-  
+
   const result = await response.json();
+
+  if (!response.ok) {
+    const error: {
+      message: string;
+      status?: number;
+      //
+      data?: {
+        success: boolean;
+        error?: string;
+      };
+    } = new Error(result.error || "Error al cargar el perfil");
+    error.status = response.status;
+    error.data = result;
+    throw error;
+  }
+
   return result.data as ProfileData;
 };
 
 /**
- * Actualizar DPI del usuario
+ * Actualizar información del lead (DPI, teléfono o dirección)
  */
-export const updateDpi = async (
-  userId: string,
-  dpi: string
+export const updateLead = async (
+  payload: UpdateLeadPayload,
+  token: string | null
 ): Promise<UpdateFieldResponse> => {
-  const response = await fetch(`${baseURL}/api/profile/${userId}/dpi`, {
+  const response = await fetch(`${crmURL}/api/portal/lead/update`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
     credentials: "include",
-    body: JSON.stringify({ dpi }),
+    body: JSON.stringify(payload),
   });
 
-  if (!response.ok) {
-    throw new Error("Error al actualizar DPI");
+  const result = await response.json();
+
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Error al actualizar la información");
   }
 
-  return response.json();
+  return result;
 };
 
-/**
- * Actualizar teléfono del usuario
- */
-export const updatePhone = async (
-  userId: string,
-  phone: string
-): Promise<UpdateFieldResponse> => {
-  const response = await fetch(`${baseURL}/api/profile/${userId}/phone`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+export const getNumbersSifco = async (
+  dpi: string,
+  token: string | null
+): Promise<Opportunity[]> => {
+  const response = await fetch(`${crmURL}/api/portal/lead/sifco?dpi=${dpi}`, {
     credentials: "include",
-    body: JSON.stringify({ phone }),
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
 
-  if (!response.ok) {
-    throw new Error("Error al actualizar teléfono");
-  }
-
-  return response.json();
-};
-
-/**
- * Actualizar dirección del usuario
- */
-export const updateAddress = async (
-  userId: string,
-  address: string
-): Promise<UpdateFieldResponse> => {
-  const response = await fetch(`${baseURL}/api/profile/${userId}/address`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    credentials: "include",
-    body: JSON.stringify({ address }),
-  });
+  const result = await response.json();
 
   if (!response.ok) {
-    throw new Error("Error al actualizar dirección");
+    const error: {
+      message: string;
+      status?: number;
+      //
+      data?: {
+        success: boolean;
+        error?: string;
+      };
+    } = new Error(result.error || "Error al cargar los números Sifco");
+    error.status = response.status;
+    error.data = result;
+    throw error;
   }
 
-  return response.json();
+  return result.data as Opportunity[];
 };

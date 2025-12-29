@@ -3,8 +3,8 @@ import * as Yup from "yup";
 import { useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
-import { updatePhone } from "@/features/Profile/services";
 import { useNavigate } from "@tanstack/react-router";
+import { sendLead } from "@/features/FormLeads/service/serviceLead";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -58,9 +58,15 @@ export const useRegister = () => {
         });
 
         // Si el registro fue exitoso y hay teléfono, actualizarlo
-        if (response?.data?.user?.id && values.phone && values.phone.trim() !== "") {
+        if (response?.data?.user?.id) {
           try {
-            await updatePhone(response.data.user.id, values.phone);
+            await sendLead({
+              nombreCompleto: values.fullName,
+              correo: values.email,
+              telefono: values.phone,
+              dpi: "",
+              descripcion: "",
+            });
           } catch (phoneError) {
             console.error("Error al registrar teléfono:", phoneError);
             // No detener el flujo si falla el teléfono, el usuario ya fue registrado

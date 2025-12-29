@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
 import { db } from "../db";
 import { leads } from "../db/schema/crm";
 import { user } from "../db/schema/auth";
@@ -10,13 +10,37 @@ export async function createPublicLead(c: Context) {
     const body = await c.req.json();
 
     // Validate required fields
-    if (!body.firstName || !body.lastName || !body.email || !body.phone) {
+    if (!body.firstName || !body.lastName || !body.email) {
       return c.json(
         {
           success: false,
-          error: "Faltan campos requeridos: firstName, lastName, email, phone",
+          error: "Faltan campos requeridos: Nombre, Apellido o Email",
         },
         400
+      );
+    }
+
+    // Check if lead already exists with same email or DPI
+    const existingLead = await db
+      .select()
+      .from(leads)
+      .where(
+        or(
+          eq(leads.email, body.email),
+          body.phone ? eq(leads.phone, body.phone) : undefined,
+          body.dpi ? eq(leads.dpi, body.dpi) : undefined
+        )
+      )
+      .limit(1);
+
+    if (existingLead.length > 0) {
+      return c.json(
+        {
+          success: true,
+          data: existingLead[0],
+          message: "Lead ya existe con el mismo email, teléfono o DPI",
+        },
+        200
       );
     }
 
@@ -69,7 +93,10 @@ export async function createPublicLead(c: Context) {
       .returning();
 
     // INSERT RENAP INFO IF DPI AND PHONE ARE PROVIDED
-    const renapInfo = await getRenapInfoController(body.dpi, body.phone);
+    let renapInfo = null;
+    if (body.dpi && body.dpi.trim() !== "" && body.phone) {
+      renapInfo = await getRenapInfoController(body.dpi, body.phone);
+    }
 
     return c.json({
       success: true,

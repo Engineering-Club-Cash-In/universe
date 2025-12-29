@@ -1,29 +1,33 @@
 import { NavBar } from "@/components";
 import { IconCalendarSmall, IconCar2, IconSignDollar } from "@/components";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib";
 import { getCredits } from "../services";
 import { useIsMobile, useModalOptionsCall } from "@/hooks";
 import { ModalChatBot } from "@/components";
 import { ContainerMenu } from "../components/ContainerMenu";
+import { useStoreProfile } from "../store/useStoreProfile";
 
 export const MyLoans = () => {
-  const { user } = useAuth();
   const { optionPayment, isModalOpen, setIsModalOpen } = useModalOptionsCall();
   const isMobile = useIsMobile();
+  const { opportunities } = useStoreProfile();
 
-  // Obtener créditos
+  // Extraer números SIFCO de las oportunidades
+  const numerosSifco = opportunities.map((opp) => opp.numeroSifco);
+
+  // Obtener créditos usando números SIFCO
   const { data: credits, isLoading } = useQuery({
-    queryKey: ["credits", user?.id],
-    queryFn: () => getCredits(user?.id || ""),
-    enabled: !!user?.id,
+    queryKey: ["credits", numerosSifco],
+    queryFn: () => getCredits(numerosSifco),
+    enabled: numerosSifco.length > 0,
   });
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amount: string | number) => {
+    const numAmount = typeof amount === "string" ? parseFloat(amount) : amount;
     return new Intl.NumberFormat("es-GT", {
       style: "currency",
       currency: "GTQ",
-    }).format(amount);
+    }).format(numAmount);
   };
 
   const formatDate = (dateString: string) => {
@@ -36,13 +40,13 @@ export const MyLoans = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "activo":
+      case "ACTIVO":
         return "text-green-400 bg-green-500/10 border-green-500/30";
-      case "finalizado":
+      case "FINALIZADO":
         return "text-gray-400 bg-gray-500/10 border-gray-500/30";
-      case "pendiente":
+      case "PENDIENTE":
         return "text-yellow-400 bg-yellow-500/10 border-yellow-500/30";
-      case "atrasado":
+      case "ATRASADO":
         return "text-red-400 bg-red-500/10 border-red-500/30";
       default:
         return "text-white/70 bg-white/5 border-white/10";
@@ -51,32 +55,24 @@ export const MyLoans = () => {
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case "activo":
+      case "ACTIVO":
         return "Activo";
-      case "finalizado":
+      case "FINALIZADO":
         return "Finalizado";
-      case "pendiente":
+      case "PENDIENTE":
         return "Pendiente";
-      case "atrasado":
+      case "ATRASADO":
         return "Atrasado";
       default:
         return status;
     }
   };
 
-  const getVehicleTypeLabel = (type: string) => {
-    switch (type) {
-      case "auto":
-        return "Auto";
-      case "moto":
-        return "Moto";
-      case "camioneta":
-        return "Camioneta";
-      case "pickup":
-        return "Pickup";
-      default:
-        return type;
-    }
+  // Datos temporales del vehículo (quemados hasta integrar el endpoint del CRM)
+  const vehiculoTemp = {
+    marca: "Toyota",
+    modelo: "Corolla 2023",
+    foto: "https://images.unsplash.com/photo-1621007947382-bb3c3994e3fb?w=400",
   };
 
   if (isLoading) {
@@ -103,33 +99,33 @@ export const MyLoans = () => {
 
           {credits && credits.length > 0 ? (
             <div className="space-y-10">
-              {credits.map((credit) => (
+              {credits.map((creditData) => (
                 <div
-                  key={credit.id}
+                  key={creditData.credito.credito_id}
                   className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden hover:border-primary/30 transition-colors"
                 >
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gpa-4 lg:gap-6">
-                    {/* Imagen del vehículo */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
+                    {/* Imagen del vehículo (temporal) */}
                     <div className="lg:col-span-4">
                       <div className="relative h-full min-h-[250px] lg:min-h-full">
                         <img
-                          src={credit.vehiculo.foto}
-                          alt={`${credit.vehiculo.marca} ${credit.vehiculo.modelo}`}
+                          src={vehiculoTemp.foto}
+                          alt={`${vehiculoTemp.marca} ${vehiculoTemp.modelo}`}
                           className="w-full h-full object-cover"
                         />
-                        <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent"></div>
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
                         <div className="absolute bottom-4 left-4 right-4">
                           <div className="flex items-center gap-2 mb-2">
                             <IconCar2 className="w-6 h-6 text-white" />
                             <span className="text-white/80 text-sm lg:text-base">
-                              {getVehicleTypeLabel(credit.vehiculo.tipo)}
+                              Vehículo Financiado
                             </span>
                           </div>
                           <h3 className="text-white text-xl lg:text-2xl font-bold">
-                            {credit.vehiculo.marca}
+                            {vehiculoTemp.marca}
                           </h3>
                           <p className="text-white/90 lg:text-xl">
-                            {credit.vehiculo.modelo}
+                            {vehiculoTemp.modelo}
                           </p>
                         </div>
                       </div>
@@ -137,109 +133,134 @@ export const MyLoans = () => {
 
                     {/* Información del crédito */}
                     <div className="lg:col-span-8 p-4 lg:p-6">
-                      {/* Header con ID y estado */}
+                      {/* Header con número SIFCO y estado */}
                       <div className="flex justify-between items-start mb-6">
                         <div>
                           <h3 className="lg:text-body font-semibold mb-1">
-                            Crédito #{credit.id}
+                            Crédito {creditData.credito.numero_credito_sifco}
                           </h3>
+                          <p className="text-sm text-white/65">
+                            Cliente: {creditData.usuario.nombre}
+                          </p>
                         </div>
                         <span
                           className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
-                            credit.estado
+                            creditData.credito.statusCredit
                           )}`}
                         >
-                          {getStatusLabel(credit.estado)}
+                          {getStatusLabel(creditData.credito.statusCredit)}
                         </span>
                       </div>
 
                       {/* Grid de información */}
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                        {/* Monto del préstamo */}
+                        {/* Capital */}
                         <div>
                           <p className="text-sm lg:text-base text-white/65 mb-1">
-                            Monto del Préstamo
+                            Capital
                           </p>
                           <p className="lg:text-xl font-bold">
-                            {formatCurrency(credit.montoPrestamo)}
+                            {formatCurrency(creditData.credito.capital)}
                           </p>
                         </div>
 
-                        {/* Pago mensual */}
+                        {/* Deuda Total */}
                         <div>
                           <p className="text-sm lg:text-base text-white/65 mb-1">
-                            Pago Mensual
+                            Deuda Total
                           </p>
                           <p className="lg:text-xl font-bold">
-                            {formatCurrency(credit.pagoMensual)}
+                            {formatCurrency(creditData.credito.deudatotal)}
                           </p>
                         </div>
 
-                        {/* Tasa de interés */}
+                        {/* Cuota Mensual */}
+                        <div>
+                          <p className="text-sm lg:text-base text-white/65 mb-1">
+                            Cuota Mensual
+                          </p>
+                          <p className="lg:text-xl font-bold">
+                            {formatCurrency(creditData.credito.cuota)}
+                          </p>
+                        </div>
+
+                        {/* Tasa de Interés */}
                         <div>
                           <p className="text-sm lg:text-base text-white/65 mb-1">
                             Tasa de Interés
                           </p>
                           <p className="lg:text-xl font-bold">
-                            {credit.tasaInteres}%
+                            {creditData.credito.porcentaje_interes}%
                           </p>
                         </div>
 
-                        {/* Pagos restantes */}
+                        {/* Plazo */}
                         <div>
                           <p className="text-sm lg:text-base text-white/65 mb-1">
-                            Pagos Restantes
+                            Plazo
                           </p>
                           <p className="lg:text-xl font-bold">
-                            {credit.pagosRestantes}
+                            {creditData.credito.plazo} meses
                           </p>
                         </div>
 
-                        {/* Fecha de inicio */}
+                        {/* Pagos Pendientes */}
+                        <div>
+                          <p className="text-sm lg:text-base text-white/65 mb-1">
+                            Cuotas Pendientes
+                          </p>
+                          <p className="lg:text-xl font-bold">
+                            {creditData.cuotasPendientes.length}
+                          </p>
+                        </div>
+
+                        {/* Cuotas Atrasadas */}
+                        {creditData.cuotasAtrasadas.length > 0 && (
+                          <div>
+                            <p className="text-sm lg:text-base text-white/65 mb-1">
+                              Cuotas Atrasadas
+                            </p>
+                            <p className="lg:text-xl font-bold text-red-400">
+                              {creditData.cuotasAtrasadas.length}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Mora Actual */}
+                        {creditData.moraActual > 0 && (
+                          <div>
+                            <p className="text-sm lg:text-base text-white/65 mb-1">
+                              Mora Actual
+                            </p>
+                            <p className="lg:text-xl font-bold text-red-400">
+                              {formatCurrency(creditData.moraActual)}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Fecha de Creación */}
                         <div className="flex items-center gap-4">
-                          <div className=" flex items-center justify-center shrink-0">
-                            <div className=" ">
-                              <IconCalendarSmall
-                                width={isMobile ? 18 : 24}
-                                height={isMobile ? 18 : 24}
-                              />
-                            </div>
+                          <div className="flex items-center justify-center shrink-0">
+                            <IconCalendarSmall
+                              width={isMobile ? 18 : 24}
+                              height={isMobile ? 18 : 24}
+                            />
                           </div>
                           <div>
                             <p className="text-sm lg:text-base text-white/65 mb-1">
-                              Fecha de Inicio
+                              Fecha de Creación
                             </p>
                             <p className="lg:text-xl font-semibold">
-                              {formatDate(credit.fechaInicio)}
+                              {formatDate(creditData.credito.fecha_creacion)}
                             </p>
                           </div>
                         </div>
 
-                        {/* Fecha de fin */}
-                        <div className="flex items-center gap-4">
-                          <div className=" flex items-center justify-center shrink-0">
-                            <div className=" ">
-                              <IconCalendarSmall
-                                width={isMobile ? 18 : 24}
-                                height={isMobile ? 18 : 24}
-                              />
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-sm lg:text-base text-white/65 mb-1">
-                              Fecha de Fin
-                            </p>
-                            <p className="lg:text-xl font-semibold">
-                              {formatDate(credit.fechaFin)}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Próximo pago - solo si no está finalizado */}
-                        {credit.estado !== "finalizado" && (
+                        {/* Próxima Cuota */}
+                        {creditData.cuotasPendientes.length > 0 && (
                           <div className="flex items-center gap-4">
-                            <div className=" flex items-center justify-center shrink-0">
-                              <div className=" text-primary">
+                            <div className="flex items-center justify-center shrink-0">
+                              <div className="text-primary">
                                 <IconSignDollar
                                   width={isMobile ? 18 : 24}
                                   height={isMobile ? 18 : 24}
@@ -248,19 +269,28 @@ export const MyLoans = () => {
                             </div>
                             <div>
                               <p className="text-sm lg:text-base text-white/65 mb-1">
-                                Próximo Pago
+                                Próximo Vencimiento
                               </p>
                               <p className="lg:text-xl font-semibold">
-                                {formatDate(credit.proximoPago)}
+                                {formatDate(creditData.cuotasPendientes[0].fecha_vencimiento)}
                               </p>
                             </div>
                           </div>
                         )}
                       </div>
 
+                      {/* Observaciones */}
+                      {creditData.credito.observaciones && (
+                        <div className="mb-6 p-3 bg-white/5 rounded-lg">
+                          <p className="text-sm text-white/65 mb-1">Observaciones</p>
+                          <p className="text-sm text-white/80">
+                            {creditData.credito.observaciones}
+                          </p>
+                        </div>
+                      )}
+
                       {/* Botón de realizar pago */}
-                      {(credit.estado === "activo" ||
-                        credit.estado === "atrasado") && (
+                      {creditData.credito.statusCredit === "ACTIVO" && (
                         <div className="flex justify-end pt-4 border-t border-white/10">
                           <button
                             className="px-6 py-2 lg:py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"

@@ -3,6 +3,7 @@ import { InputIcon, IconAddress, IconPhone, IconPerson } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { ModalConfirmChange } from "./ModalConfirmChange";
 import { getProfile } from "../services";
+import { useAuth } from "@/lib";
 
 interface InfoPersonProps {
   userId: string;
@@ -13,16 +14,17 @@ interface InfoPersonProps {
 
 type EditField = "dpi" | "phone" | "address" | null;
 
-export const InfoPerson = ({ userId }: InfoPersonProps) => {
+export const InfoPerson = ({ userId, userEmail }: InfoPersonProps) => {
   const [dpi, setDpi] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
+  const { token } = useAuth();
 
   // Obtener perfil usando el servicio centralizado
   const { data: profileData, refetch } = useQuery({
     queryKey: ["profile", userId],
-    queryFn: () => getProfile(userId),
+    queryFn: () => getProfile(userEmail, token),
     enabled: !!userId,
   });
 
@@ -31,7 +33,7 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
     if (profileData) {
       setDpi(profileData.dpi || "");
       setPhone(profileData.phone || "");
-      setAddress(profileData.address || "");
+      setAddress(profileData.direccion || "");
     }
   }, [profileData]);
 
@@ -75,7 +77,7 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
     </svg>
   );
 
-  const isProfileComplete = profileData?.profileCompleted ?? false;
+  const isProfileComplete = !!(profileData?.dpi && profileData?.phone);
 
   return (
     <div className="space-y-8">
@@ -101,7 +103,8 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
                 Perfil Incompleto
               </p>
               <p className="text-yellow-200/80 text-sm">
-                Por favor completa los campos de DPI, Teléfono para ser un usuario verificado.
+                Por favor completa los campos de DPI, Teléfono para ser un
+                usuario verificado.
               </p>
             </div>
           </div>
@@ -131,7 +134,9 @@ export const InfoPerson = ({ userId }: InfoPersonProps) => {
 
       {/* Información Personal */}
       <div className="">
-        <h2 className="text-body lg:text-header-body mb-6">Información Personal</h2>
+        <h2 className="text-body lg:text-header-body mb-6">
+          Información Personal
+        </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-end">
           {/* DPI */}

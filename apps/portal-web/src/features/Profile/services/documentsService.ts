@@ -1,207 +1,221 @@
-const baseURL = import.meta.env.VITE_API_URL;
+const crmURL = import.meta.env.VITE_CRM_API_URL || "http://localhost:4000";
 
-// Tipos
-export type ContractType = "prestamo" | "inversion" | "credito";
-export type PersonalDocumentType = "dpi" | "estado_cuenta";
+// Tipos de documentos según el enum del backend
+export type DocumentType =
+  // Documentos específicos para análisis (Individual y Comerciante)
+  | "dpi" // DPI vigente
+  | "licencia" // Licencia vigente
+  | "recibo_luz" // Recibo de luz (no mayor a 2 meses)
+  | "recibo_adicional" // Recibo adicional con misma dirección
+  | "formularios" // Formularios completamente llenos
+  | "estados_cuenta_1" // Estado de cuenta mes 1
+  | "estados_cuenta_2" // Estado de cuenta mes 2
+  | "estados_cuenta_3" // Estado de cuenta mes 3
+  // Documentos para comerciantes
+  | "patente_comercio" // Patente de comercio
+  // Documentos para empresas (S.A)
+  | "representacion_legal" // Representación Legal
+  | "constitucion_sociedad" // Constitución de sociedad
+  | "patente_mercantil" // Patente de comercio y mercantil
+  | "iva_1" // Formulario IVA mes 1
+  | "iva_2" // Formulario IVA mes 2
+  | "iva_3" // Formulario IVA mes 3
+  | "estado_financiero" // Estado financiero último año
+  | "clausula_consentimiento" // Cláusula de consentimiento de la empresa
+  | "minutas" // Minutas
+  // Documentos específicos de vehículos
+  | "tarjeta_circulacion" // Tarjeta de circulación del vehículo
+  | "titulo_propiedad" // Título de propiedad del vehículo
+  | "dpi_dueno" // DPI del dueño (cuando vehículo a nombre de individual)
+  | "patente_comercio_vehiculo" // Patente de comercio (empresa individual)
+  | "representacion_legal_vehiculo" // Representación legal (S.A)
+  | "dpi_representante_legal_vehiculo" // DPI del representante legal (S.A)
+  | "pago_impuesto_circulacion" // Comprobante de pago de impuesto de circulación
+  | "consulta_sat" // Captura de pantalla de consulta SAT
+  | "consulta_garantias_mobiliarias" // Certificación de garantías mobiliarias (RGM)
+  // Categorías generales (legacy - mantener por compatibilidad)
+  | "identification" // DPI, pasaporte
+  | "income_proof" // Comprobantes de ingresos
+  | "bank_statement" // Estados de cuenta
+  | "business_license" // Patente de comercio
+  | "property_deed" // Escrituras
+  | "vehicle_title" // Tarjeta de circulación
+  | "credit_report" // Reporte crediticio
+  | "other" // Otros documentos
+  // Documento de detalle de análisis
+  | "detalle_analisis"; // Archivo Excel con detalle del crédito
 
-// Interfaces
+export type ContractType =
+  | "cobertura_inrexsa"
+  | "pagare"
+  | "contrato_credito"
+  | "other";
+
+export type ContractStatus = "pending" | "signed" | "completed" | "cancelled";
+
+// Interfaces basadas en la respuesta del API
+export interface Document {
+  id: string;
+  filename: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  documentType: DocumentType;
+  description: string | null;
+  uploadedAt: string;
+  filePath: string;
+  opportunityId: string;
+  uploadedBy: {
+    id: string;
+    name: string;
+  };
+  url: string;
+  opportunity: {
+    id: string;
+    title: string;
+  };
+}
+
 export interface Contract {
-  id: string;
-  nombre: string;
-  fechaRealizado: string;
-  url: string;
-  tipo: ContractType;
+  contract: {
+    id: string;
+    leadId: string;
+    opportunityId: string | null;
+    contractType: ContractType;
+    contractName: string;
+    clientSigningLink: string | null;
+    representativeSigningLink: string | null;
+    additionalSigningLinks: string | null;
+    templateId: number;
+    apiResponse: any;
+    status: ContractStatus;
+    generatedBy: string;
+    generatedAt: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  lead: {
+    id: string;
+    firstName: string;
+    lastName: string;
+    dpi: string;
+    email: string;
+    phone: string;
+  };
+  opportunity: {
+    id: string;
+    title: string;
+  } | null;
 }
 
-export interface PersonalDocument {
-  id: string;
-  tipo: PersonalDocumentType;
-  nombre: string;
-  fechaCarga: string;
-  url: string;
-}
-
-export interface PersonalDocuments {
-  dpi: PersonalDocument | null;
-  estadosCuenta: PersonalDocument[];
-}
-
-export interface UploadDocumentResponse {
+export interface DocumentsResponse {
   success: boolean;
-  message: string;
-  document?: PersonalDocument;
+  data: Document[];
 }
 
-// Datos mock
-const mockContracts: Contract[] = [
-  {
-    id: "CON-001",
-    nombre: "Contrato de Préstamo Vehicular - Toyota Corolla 2023",
-    fechaRealizado: "2024-01-15",
-    url: "https://example.com/contracts/prestamo-001.pdf",
-    tipo: "prestamo",
-  },
-  {
-    id: "CON-002",
-    nombre: "Contrato de Inversión - Plan Premium",
-    fechaRealizado: "2024-03-20",
-    url: "https://example.com/contracts/inversion-001.pdf",
-    tipo: "inversion",
-  },
-  {
-    id: "CON-003",
-    nombre: "Contrato de Préstamo Vehicular - Ford Ranger XLT 2022",
-    fechaRealizado: "2023-08-20",
-    url: "https://example.com/contracts/prestamo-002.pdf",
-    tipo: "prestamo",
-  },
-  {
-    id: "CON-004",
-    nombre: "Contrato de Inversión - Plan Básico",
-    fechaRealizado: "2024-05-10",
-    url: "https://example.com/contracts/inversion-002.pdf",
-    tipo: "credito",
-  },
-];
-
-const mockPersonalDocuments: PersonalDocuments = {
-  dpi: {
-    id: "DPI-001",
-    tipo: "dpi",
-    nombre: "DPI - Juan Pérez",
-    fechaCarga: "2024-01-10",
-    url: "https://example.com/documents/dpi-001.pdf",
-  },
-  estadosCuenta: [
-    {
-      id: "EC-001",
-      tipo: "estado_cuenta",
-      nombre: "Estado de Cuenta - Enero 2024",
-      fechaCarga: "2024-02-05",
-      url: "https://example.com/documents/estado-cuenta-001.pdf",
-    },
-    {
-      id: "EC-002",
-      tipo: "estado_cuenta",
-      nombre: "Estado de Cuenta - Febrero 2024",
-      fechaCarga: "2024-03-05",
-      url: "https://example.com/documents/estado-cuenta-002.pdf",
-    },
-    {
-      id: "EC-003",
-      tipo: "estado_cuenta",
-      nombre: "Estado de Cuenta - Marzo 2024",
-      fechaCarga: "2024-04-05",
-      url: "https://example.com/documents/estado-cuenta-003.pdf",
-    },
-  ],
-};
+export interface ContractsResponse {
+  success: boolean;
+  data: Contract[];
+}
 
 // Servicios
 
 /**
- * Obtiene todos los contratos del usuario (préstamos e inversiones)
- */
-export const getContracts = async (userId: string): Promise<Contract[]> => {
-  try {
-    const response = await fetch(`${baseURL}/api/documents/contracts/${userId}`, {
-      credentials: "include",
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al cargar los contratos");
-    }
-
-    const result = await response.json();
-    return result.data as Contract[];
-  } catch (error) {
-    console.error("Error al obtener contratos, usando datos mockeados:", error);
-    return mockContracts;
-  }
-};
-
-/**
- * Obtiene los documentos personales del usuario (DPI y estados de cuenta)
+ * Obtiene todos los documentos personales del usuario
  */
 export const getPersonalDocuments = async (
-  userId: string
-): Promise<PersonalDocuments> => {
-  try {
-    const response = await fetch(
-      `${baseURL}/api/documents/personal/${userId}`,
-      {
-        credentials: "include",
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error("Error al cargar los documentos personales");
-    }
-
-    const result = await response.json();
-    return result.data as PersonalDocuments;
-  } catch (error) {
-    console.error(
-      "Error al obtener documentos personales, usando datos mockeados:",
-      error
-    );
-    return mockPersonalDocuments;
-  }
-};
-
-/**
- * Carga un documento personal (DPI o estado de cuenta)
- */
-export const uploadPersonalDocument = async (
-  userId: string,
-  tipo: PersonalDocumentType,
-  file: File
-): Promise<UploadDocumentResponse> => {
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("tipo", tipo);
-
-    const response = await fetch(
-      `${baseURL}/api/documents/personal/${userId}/upload`,
-      {
-        method: "POST",
-        credentials: "include",
-        body: formData,
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error("Error al cargar el documento");
-    }
-
-    const result = await response.json();
-    return result as UploadDocumentResponse;
-  } catch (error) {
-    console.error("Error al cargar documento, usando respuesta mockeada:", error);
-    
-    // Mock response
-    return {
-      success: true,
-      message: "Documento cargado exitosamente (mock)",
-      document: {
-        id: `DOC-${Date.now()}`,
-        tipo,
-        nombre: file.name,
-        fechaCarga: new Date().toISOString(),
-        url: URL.createObjectURL(file),
+  email: string,
+  token: string | null
+): Promise<Document[]> => {
+  const response = await fetch(
+    `${crmURL}/api/portal/lead/documents?email=${encodeURIComponent(email)}`,
+    {
+      credentials: "include",
+      headers: {
+        Authorization: `Bearer ${token}`,
       },
-    };
+    }
+  );
+
+  if (!response.ok) {
+    const error: any = new Error("Error al cargar los documentos");
+    error.status = response.status;
+    throw error;
   }
+
+  const result: DocumentsResponse = await response.json();
+  return result.data;
 };
 
 /**
- * Obtiene un contrato específico por ID
+ * Obtiene todos los contratos del usuario
  */
-export const getContractById = async (
-  userId: string,
-  contractId: string
-): Promise<Contract | undefined> => {
-  const contracts = await getContracts(userId);
-  return contracts.find((contract) => contract.id === contractId);
+export const getContracts = async (
+  email: string,
+  token: string | null
+): Promise<Contract[]> => {
+  const response = await fetch(
+    `${crmURL}/api/portal/lead/contracts?email=${encodeURIComponent(email)}`,
+    {
+      credentials: "include",
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error: any = new Error("Error al cargar los contratos");
+    error.status = response.status;
+    throw error;
+  }
+
+  const result: ContractsResponse = await response.json();
+  return result.data;
+};
+
+/**
+ * Función helper para obtener el label en español de un tipo de documento
+ */
+export const getDocumentTypeLabel = (type: DocumentType): string => {
+  const labels: Record<DocumentType, string> = {
+    dpi: "DPI Vigente",
+    licencia: "Licencia Vigente",
+    recibo_luz: "Recibo de Luz",
+    recibo_adicional: "Recibo Adicional",
+    formularios: "Formularios",
+    estados_cuenta_1: "Estado de Cuenta Mes 1",
+    estados_cuenta_2: "Estado de Cuenta Mes 2",
+    estados_cuenta_3: "Estado de Cuenta Mes 3",
+    patente_comercio: "Patente de Comercio",
+    representacion_legal: "Representación Legal",
+    constitucion_sociedad: "Constitución de Sociedad",
+    patente_mercantil: "Patente Mercantil",
+    iva_1: "Formulario IVA Mes 1",
+    iva_2: "Formulario IVA Mes 2",
+    iva_3: "Formulario IVA Mes 3",
+    estado_financiero: "Estado Financiero",
+    clausula_consentimiento: "Cláusula de Consentimiento",
+    minutas: "Minutas",
+    tarjeta_circulacion: "Tarjeta de Circulación",
+    titulo_propiedad: "Título de Propiedad",
+    dpi_dueno: "DPI del Dueño",
+    patente_comercio_vehiculo: "Patente de Comercio (Vehículo)",
+    representacion_legal_vehiculo: "Representación Legal (Vehículo)",
+    dpi_representante_legal_vehiculo: "DPI Representante Legal (Vehículo)",
+    pago_impuesto_circulacion: "Pago Impuesto de Circulación",
+    consulta_sat: "Consulta SAT",
+    consulta_garantias_mobiliarias: "Garantías Mobiliarias (RGM)",
+    identification: "Identificación",
+    income_proof: "Comprobante de Ingresos",
+    bank_statement: "Estado de Cuenta Bancario",
+    business_license: "Licencia de Negocio",
+    property_deed: "Escritura de Propiedad",
+    vehicle_title: "Título de Vehículo",
+    credit_report: "Reporte Crediticio",
+    other: "Otros",
+    detalle_analisis: "Detalle de Análisis",
+  };
+
+  return labels[type] || type;
 };

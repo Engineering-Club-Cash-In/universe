@@ -1,8 +1,12 @@
 import type { Context } from "hono";
-import { eq, ne, or, and } from "drizzle-orm";
+import { eq, ne, or, and, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
+import { opportunityDocuments } from "../db/schema/documents";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import { user } from "../db/schema/auth";
 import { getRenapInfoController } from "./bot";
+import { getFileUrl } from "../lib/storage";
 
 /**
  * Middleware to validate portal token (Better Auth session token)
@@ -260,6 +264,258 @@ export async function updateLeadByEmail(c: Context) {
       {
         success: false,
         error: error.message || "Error al actualizar el lead",
+      },
+      500
+    );
+  }
+}
+
+/**
+ * Get all opportunity documents for a lead by email
+ */
+export async function getLeadOpportunityDocuments(c: Context) {
+  try {
+    const { email } = c.req.query();
+
+    if (!email) {
+      return c.json(
+        {
+          success: false,
+          error: "El correo es requerido",
+        },
+        400
+      );
+    }
+
+    // Get lead by email
+    const [lead] = await db
+      .select({ id: leads.id })
+      .from(leads)
+      .where(eq(leads.email, email))
+      .limit(1);
+
+    if (!lead) {
+      return c.json(
+        {
+          success: false,
+          error: "Lead no encontrado",
+        },
+        404
+      );
+    }
+
+    // Get all opportunities for this lead
+    const leadOpportunities = await db
+      .select({ id: opportunities.id, title: opportunities.title })
+      .from(opportunities)
+      .where(eq(opportunities.leadId, lead.id));
+
+    if (leadOpportunities.length === 0) {
+      return c.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    const opportunityIds = leadOpportunities.map((opp) => opp.id);
+
+    // Get all documents for these opportunities
+    // Using DISTINCT ON to get only one document per documentType (the most recent one)
+    const documents = await db
+      .selectDistinctOn([opportunityDocuments.documentType], {
+        id: opportunityDocuments.id,
+        filename: opportunityDocuments.filename,
+        originalName: opportunityDocuments.originalName,
+        mimeType: opportunityDocuments.mimeType,
+        size: opportunityDocuments.size,
+        documentType: opportunityDocuments.documentType,
+        description: opportunityDocuments.description,
+        uploadedAt: opportunityDocuments.uploadedAt,
+        filePath: opportunityDocuments.filePath,
+        opportunityId: opportunityDocuments.opportunityId,
+        uploadedBy: {
+          id: user.id,
+          name: user.name,
+        },
+      })
+      .from(opportunityDocuments)
+      .leftJoin(user, eq(opportunityDocuments.uploadedBy, user.id))
+      .where(inArray(opportunityDocuments.opportunityId, opportunityIds))
+      .orderBy(opportunityDocuments.documentType, sql`${opportunityDocuments.uploadedAt} DESC`);
+
+    // Generate signed URLs for each document
+    const documentsWithUrls = await Promise.all(
+      documents.map(async (doc) => {
+        const url = await getFileUrl(doc.filePath);
+        const opportunity = leadOpportunities.find(
+          (opp) => opp.id === doc.opportunityId
+        );
+        return {
+          ...doc,
+          url,
+          opportunity: {
+            id: opportunity?.id,
+            title: opportunity?.title,
+          },
+        };
+      })
+    );
+
+    return c.json({
+      success: true,
+      data: documentsWithUrls,
+    });
+  } catch (error: any) {
+    console.error("[ERROR] getLeadOpportunityDocuments:", error);
+    return c.json(
+      {
+        success: false,
+        error: error.message || "Error al obtener los documentos",
+      },
+      500
+    );
+  }
+}
+
+/**
+ * Get all legal contracts for a lead by email
+ */
+export async function getLeadLegalContracts(c: Context) {
+  try {
+    const { email } = c.req.query();
+
+    if (!email) {
+      return c.json(
+        {
+          success: false,
+          error: "El correo es requerido",
+        },
+        400
+      );
+    }
+
+    // Get lead by email
+    const [lead] = await db
+      .select()
+      .from(leads)
+      .where(eq(leads.email, email))
+      .limit(1);
+
+    if (!lead) {
+      return c.json(
+        {
+          success: false,
+          error: "Lead no encontrado",
+        },
+        404
+      );
+    }
+
+    // Get all contracts for this lead
+    const contracts = await db
+      .select({
+        contract: generatedLegalContracts,
+        lead: {
+          id: leads.id,
+          firstName: leads.firstName,
+          lastName: leads.lastName,
+          dpi: leads.dpi,
+          email: leads.email,
+          phone: leads.phone,
+        },
+        opportunity: {
+          id: opportunities.id,
+          title: opportunities.title,
+          value: opportunities.value,
+        },
+      })
+      .from(generatedLegalContracts)
+      .innerJoin(leads, eq(generatedLegalContracts.leadId, leads.id))
+      .leftJoin(
+        opportunities,
+        eq(generatedLegalContracts.opportunityId, opportunities.id),
+      )
+      .where(eq(generatedLegalContracts.leadId, lead.id))
+      .orderBy(generatedLegalContracts.generatedAt);
+
+    return c.json({
+      success: true,
+      data: contracts,
+    });
+  } catch (error: any) {
+    console.error("[ERROR] getLeadLegalContracts:", error);
+    return c.json(
+      {
+        success: false,
+        error: error.message || "Error al obtener los contratos",
+      },
+      500
+    );
+  }
+}
+
+/**
+ * Get SIFCO numbers for a lead by DPI
+ */
+export async function getSifcoNumbersByDpi(c: Context) {
+  try {
+    const { dpi } = c.req.query();
+
+    if (!dpi) {
+      return c.json(
+        {
+          success: false,
+          error: "El DPI es requerido",
+        },
+        400
+      );
+    }
+
+    // Get lead by DPI
+    const [lead] = await db
+      .select({ id: leads.id })
+      .from(leads)
+      .where(eq(leads.dpi, dpi))
+      .limit(1);
+
+    console.log("Lead found for DPI:", lead);
+
+    if (!lead) {
+      return c.json({
+        success: true,
+        data: [],
+      });
+    }
+
+    // Get all opportunities with SIFCO numbers for this lead
+    const opportunitiesWithSifco = await db
+      .select({
+        id: opportunities.id,
+        title: opportunities.title,
+        numeroSifco: opportunities.numeroSifco,
+      })
+      .from(opportunities)
+      .where(eq(opportunities.leadId, lead.id));
+
+    // Filter only opportunities that have SIFCO numbers
+    const sifcoNumbers = opportunitiesWithSifco
+      .filter((opp) => opp.numeroSifco && opp.numeroSifco.trim() !== "")
+      .map((opp) => ({
+        opportunityId: opp.id,
+        opportunityTitle: opp.title,
+        numeroSifco: opp.numeroSifco,
+      }));
+
+    return c.json({
+      success: true,
+      data: sifcoNumbers,
+    });
+  } catch (error: any) {
+    console.error("[ERROR] getSifcoNumbersByDpi:", error);
+    return c.json(
+      {
+        success: false,
+        error: error.message || "Error al obtener los números SIFCO",
       },
       500
     );

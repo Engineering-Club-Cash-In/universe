@@ -10,6 +10,12 @@ export interface ProfileData {
   direccion?: string;
 }
 
+export interface Opportunity {
+  opportunityId: string;
+  opportunityTitle: string;
+  numeroSifco: string;
+}
+
 export interface UpdateFieldResponse {
   success: boolean;
   message: string;
@@ -82,4 +88,35 @@ export const updateLead = async (
   }
 
   return result;
+};
+
+export const getNumbersSifco = async (
+  dpi: string,
+  token: string | null
+): Promise<Opportunity[]> => {
+  const response = await fetch(`${crmURL}/api/portal/lead/sifco?dpi=${dpi}`, {
+    credentials: "include",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const result = await response.json();
+
+  if (!response.ok) {
+    const error: {
+      message: string;
+      status?: number;
+      //
+      data?: {
+        success: boolean;
+        error?: string;
+      };
+    } = new Error(result.error || "Error al cargar los números Sifco");
+    error.status = response.status;
+    error.data = result;
+    throw error;
+  }
+
+  return result.data as Opportunity[];
 };

@@ -13,6 +13,14 @@ import {
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
 import { createPublicLead } from "./controllers/public-lead";
+import {
+	getLeadByEmail,
+	updateLeadByEmail,
+	validatePortalToken,
+	getLeadOpportunityDocuments,
+	getLeadLegalContracts,
+	getSifcoNumbersByDpi,
+} from "./controllers/portal-lead";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
@@ -410,6 +418,13 @@ app.post("/info/liveness-validation", async (c) => {
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 
+// Portal endpoints (protected with BETTER_SECRET_PORTAL token)
+app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);
+app.post("/api/portal/lead/update", validatePortalToken, updateLeadByEmail);
+app.get("/api/portal/lead/documents", validatePortalToken, getLeadOpportunityDocuments);
+app.get("/api/portal/lead/contracts", validatePortalToken, getLeadLegalContracts);
+app.get("/api/portal/lead/sifco", validatePortalToken, getSifcoNumbersByDpi);
+
 app.get("/webhook/facebook-lead", async (c) => {
 	const challenge = c.req.query("hub.challenge");
 
@@ -440,4 +455,7 @@ app.get("/upload-csv", async (c) => {
 	}
 });
 
-export default app;
+export default {
+	port: process.env.PORT || 3000,
+	fetch: app.fetch,
+};

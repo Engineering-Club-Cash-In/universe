@@ -4,6 +4,7 @@ import { db } from "../db";
 import { leads, opportunities } from "../db/schema/crm";
 import { opportunityDocuments } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import { vehicles, vehiclePhotos } from "../db/schema/vehicles";
 import { user } from "../db/schema/auth";
 import { getRenapInfoController } from "./bot";
 import { getFileUrl } from "../lib/storage";
@@ -459,26 +460,26 @@ export async function getLeadLegalContracts(c: Context) {
  */
 export async function getSifcoNumbersByDpi(c: Context) {
   try {
-    const { dpi } = c.req.query();
+    const { email } = c.req.query();
 
-    if (!dpi) {
+    if (!email) {
       return c.json(
         {
           success: false,
-          error: "El DPI es requerido",
+          error: "El correo es requerido",
         },
         400
       );
     }
 
-    // Get lead by DPI
+    // Get lead by email
     const [lead] = await db
       .select({ id: leads.id })
       .from(leads)
-      .where(eq(leads.dpi, dpi))
+      .where(eq(leads.email, email))
       .limit(1);
 
-    console.log("Lead found for DPI:", lead);
+    console.log("Lead found for email:", lead);
 
     if (!lead) {
       return c.json({
@@ -493,18 +494,62 @@ export async function getSifcoNumbersByDpi(c: Context) {
         id: opportunities.id,
         title: opportunities.title,
         numeroSifco: opportunities.numeroSifco,
+        vehicleId: opportunities.vehicleId,
       })
       .from(opportunities)
       .where(eq(opportunities.leadId, lead.id));
 
+    // Get vehicle information and photos for opportunities that have vehicles
+    const opportunitiesWithVehicleData = await Promise.all(
+      opportunitiesWithSifco.map(async (opp) => {
+        let vehicleData = null;
+        
+        if (opp.vehicleId) {
+          // Get vehicle information
+          const [vehicle] = await db
+            .select()
+            .from(vehicles)
+            .where(eq(vehicles.id, opp.vehicleId))
+            .limit(1);
+
+          if (vehicle) {
+            // Get vehicle photos
+            const photos = await db
+              .select()
+              .from(vehiclePhotos)
+              .where(eq(vehiclePhotos.vehicleId, opp.vehicleId));
+
+
+            vehicleData = {
+              id: vehicle.id,
+              make: vehicle.make,
+              model: vehicle.model,
+              year: vehicle.year,
+              licensePlate: vehicle.licensePlate,
+              color: vehicle.color,
+              status: vehicle.status,
+              vin: vehicle.vinNumber,
+              type: vehicle.vehicleType,
+              origin: vehicle.origin,
+              engine: vehicle.engineCC,
+              photos
+            };
+          }
+        }
+
+        return {
+          opportunityId: opp.id,
+          opportunityTitle: opp.title,
+          numeroSifco: opp.numeroSifco,
+          vehicle: vehicleData,
+        };
+      })
+    );
+
     // Filter only opportunities that have SIFCO numbers
-    const sifcoNumbers = opportunitiesWithSifco
-      .filter((opp) => opp.numeroSifco && opp.numeroSifco.trim() !== "")
-      .map((opp) => ({
-        opportunityId: opp.id,
-        opportunityTitle: opp.title,
-        numeroSifco: opp.numeroSifco,
-      }));
+    const sifcoNumbers = opportunitiesWithVehicleData.filter(
+      (opp) => opp.numeroSifco && opp.numeroSifco.trim() !== ""
+    );
 
     return c.json({
       success: true,

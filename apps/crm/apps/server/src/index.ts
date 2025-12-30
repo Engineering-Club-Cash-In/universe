@@ -414,7 +414,47 @@ app.post("/info/liveness-validation", async (c) => {
 		);
 	}
 });
+app.post("/info/validate-otp", async (c) => {
+  const body = await c.req.json();
+  const { token } = body as { token?: string };
 
+  if (!token) {
+    return c.json({ success: false, message: "Token is required" }, 400);
+  }
+
+  try {
+    // Validar si el token es correcto
+    const isValid = token === "1234";
+
+    if (!isValid) {
+      return c.json(
+        {
+          success: false,
+          message: "Invalid token",
+          tokenValidated: false,
+        },
+        401 // Unauthorized
+      );
+    }
+
+    return c.json(
+      {
+        success: true,
+        message: "Token validated successfully",
+        tokenValidated: true,
+      },
+      200
+    );
+  } catch (err: any) {
+    return c.json(
+      {
+        success: false,
+        message: err.message || "Internal server error",
+      },
+      500
+    );
+  }
+});
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 

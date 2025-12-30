@@ -155,12 +155,19 @@ export async function leerCreditoPorNumeroSIFCO(
   return resultados;
 }
 
+const normalizeText = (text: string): string => {
+  return text
+    .normalize("NFD") // Descompone caracteres con tildes
+    .replace(/[\u0300-\u036f]/g, "") // Elimina marcas diacríticas (tildes)
+    .trim();
+};
+
 export async function listarCreditosAgrupados(
   filePath: string
 ): Promise<CreditoAgrupado[]> {
   console.time("⏳ Lectura archivo (stream)");
 
-  const stream = fs.createReadStream(filePath).pipe(iconv.decodeStream("latin1"));
+  const stream = fs.createReadStream(filePath).pipe(iconv.decodeStream("utf8"));
   const rl = readline.createInterface({ input: stream });
 
   let headers: string[] | null = null;
@@ -183,11 +190,21 @@ export async function listarCreditosAgrupados(
     });
 
     let creditoSifco = String(row["CreditoSifco"] ?? "").trim();
-    const cliente = String(row["Cliente"] ?? "").trim();
+    let cliente = String(row["Cliente"] ?? "").trim();
+    
+    // 🔥 NORMALIZAR NOMBRE DEL ASESOR (quitar tildes) - ASEGÚRATE QUE ESTO SE EJECUTE
+    if (row["Asesores Asesores"] && row["Asesores Asesores"].trim() !== "") {
+      const original = row["Asesores Asesores"];
+      row["Asesores Asesores"] = normalizeText(row["Asesores Asesores"]);
+      
+      // 🔥 Log para debug (puedes quitarlo después)
+      if (original !== row["Asesores Asesores"]) {
+        console.log(`📝 Normalizado: "${original}" → "${row["Asesores Asesores"]}"`);
+      }
+    }
 
     if (!creditoSifco) continue;
 
-    // 🔥 Convertir notación científica a número normal
     if (creditoSifco.includes("E+") || creditoSifco.includes("e+")) {
       creditoSifco = Number(creditoSifco).toString();
     }
@@ -195,14 +212,12 @@ export async function listarCreditosAgrupados(
     const base = creditoSifco.split("_")[0];
     const cleanBase = base.replace(/[^0-9]/g, "");
     
-    // 🔥 Permitir 13 o 14 dígitos (algunos pueden tener 13)
     if (cleanBase.length < 13 || cleanBase.length > 14) {
       console.warn(`⚠️ Crédito inválido: "${base}" (${cleanBase.length} dígitos)`);
       saltados++;
       continue;
     }
 
-    // 🔥 Pad con cero si tiene 13 dígitos
     const paddedBase = cleanBase.padStart(14, "0");
 
     if (!mapa[paddedBase]) {
@@ -222,4 +237,4 @@ export async function listarCreditosAgrupados(
   console.log(`⚠️ Créditos saltados: ${saltados}`);
 
   return resultado;
-}
+} 

@@ -50,3 +50,6 @@ export function usePendingCancelCredit() {
     mutationFn: creditAction,
   });
 }
+export function openReportInNewTab(url: string): void {
+  window.open(url, "_blank", "noopener,noreferrer");
+}

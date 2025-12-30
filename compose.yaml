@@ -4,6 +4,13 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /home/lralda/.docker/config.json:/config.json
+      - helper:/go/bin
+    environment:
+      - HOME=/
+      - PATH=$PATH:/go/bin
+      - AWS_REGION=us-east-1
+    env_file:
+      - secrets/watchtower/.env
     command:
       - "--label-enable"
       - "--interval"
@@ -63,19 +70,21 @@ services:
     networks:
       - traefik-network
 
-  investment-calculator:
-    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment-calculator:production
-    container_name: cci-investment-calculator
+  investment:
+    image: 445567109675.dkr.ecr.us-east-1.amazonaws.com/cci/investment:production
+    container_name: cci-investment
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.investment-calculator.rule=Host(`investment.server.devteamatcci.site`)"
-      - "traefik.http.routers.investment-calculator.entrypoints=websecure"
-      - "traefik.http.routers.investment-calculator.tls.certresolver=myresolver"
+      - "traefik.http.routers.investment.rule=Host(`investment.server.devteamatcci.site`)"
+      - "traefik.http.routers.investment.entrypoints=websecure"
+      - "traefik.http.routers.investment.tls.certresolver=myresolver"
       - "com.centurylinklabs.watchtower.enable=true"
     networks:
       - traefik-network
 
 volumes:
+  helper:
+    external: true
   letsencrypt:
 networks:
   traefik-network:

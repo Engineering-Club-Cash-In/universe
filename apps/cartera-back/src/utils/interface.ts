@@ -14,6 +14,7 @@ export interface PagoDetalle {
   cuota_inversionista: string;
   abonoGeneralInteres: number;
   tasaInteresInvesor: number;
+  cuota: number;
 }
 
 export interface CreditoData {
@@ -31,6 +32,7 @@ export interface CreditoData {
   porcentaje_inversionista: string;
   cuota_inversionista: string;
   pagos: PagoDetalle[];
+  plazo: number | null;
   total_abono_capital: number;   // 👈 number
   total_abono_interes: number;   // 👈 number
   total_abono_iva: number;       // 👈 number
@@ -53,11 +55,12 @@ export interface InversionistaReporte {
   inversionista_id: number;
   inversionista: string;
   emite_factura: boolean;
+  nombre_inversionista: string;
   reinversion: boolean;
   banco: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
-  creditosData: CreditoData[];
+  creditos: CreditoData[];
   subtotal: Subtotal;
 }
 

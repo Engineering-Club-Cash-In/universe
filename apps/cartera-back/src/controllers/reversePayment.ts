@@ -1,0 +1,492 @@
+import { z } from "zod";  
+ 
+import { eq, and, or } from "drizzle-orm";
+import Big from "big.js"; 
+import { db } from "../database";
+import { pagos_credito, creditos, usuarios, cuotas_credito, boletas, pagos_credito_inversionistas, convenios_pago } from "../database/db";
+import { processAndReplaceCreditInvestorsReverse } from "./investor";
+import { updateMora } from "./latefee";
+// ============================================================================
+// SCHEMA DE VALIDACIÓN
+// ============================================================================
+export const reversePaymentSchema = z.object({
+  credito_id: z.number().int().positive(),
+  pago_id: z.number().int().positive(),
+    reverseAccounting: z.boolean().optional().default(true), 
+});
+
+// ============================================================================
+// FUNCIÓN PRINCIPAL: REVERSAR PAGO
+// ============================================================================
+/**
+ * Reversa un pago de crédito:
+ * 1. Valida los datos de entrada
+ * 2. Verifica que el pago existe y está marcado como pagado
+ * 3. Recalcula el capital, interés, IVA y deuda total del crédito
+ * 4. Devuelve los abonos a los "restantes" del pago
+ * 5. Resetea todos los valores del pago a cero
+ * 6. Elimina boletas y pagos de inversionistas asociados
+ * 7. Actualiza el saldo a favor del usuario
+ *
+ * @param body - { credito_id, pago_id }
+ * @param set - Handler de respuesta HTTP
+ * @returns Objeto con el resultado de la operación
+ */
+export const reversePayment = async ({ body, set }: any) => {
+  try {
+    console.log("\n🔄 ========== INICIO REVERSIÓN DE PAGO ==========");
+
+    // ========================================================================
+    // 1️⃣ VALIDAR ENTRADA
+    // ========================================================================
+    const parseResult = reversePaymentSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+    const { credito_id, pago_id,reverseAccounting } = parseResult.data;
+    console.log(`📋 Crédito ID: ${credito_id}`);
+    console.log(`🧾 Pago ID: ${pago_id}`);
+
+    // ========================================================================
+    // 2️⃣ OBTENER DATOS DEL PAGO A REVERSAR
+    // ========================================================================
+    const [pago] = await db
+      .select()
+      .from(pagos_credito)
+      .where(
+        and(
+          eq(pagos_credito.credito_id, credito_id),
+          eq(pagos_credito.pago_id, pago_id)
+        )
+      )
+      .limit(1);
+
+    if (!pago) {
+      set.status = 404;
+      return { message: "Payment not found" };
+    }
+
+    if (!pago.pagado) {
+      set.status = 400;
+      return { message: "Payment is not marked as paid" };
+    }
+
+    console.log("✅ Pago encontrado y marcado como pagado");
+
+    // ========================================================================
+    // 3️⃣ OBTENER DATOS DEL CRÉDITO
+    // ========================================================================
+    const [creditData] = await db
+  .select()
+  .from(creditos)
+  .where(
+    and(
+      eq(creditos.credito_id, credito_id),
+      or(
+        eq(creditos.statusCredit, "ACTIVO"),
+        eq(creditos.statusCredit, "MOROSO"), 
+        eq(creditos.statusCredit, "EN_CONVENIO")
+      )
+    )
+  )
+  .limit(1);
+
+    if (!creditData) {
+      set.status = 404;
+      return { message: "Credit not found or not active" };
+    }
+
+    console.log("✅ Crédito encontrado y activo");
+
+    // ========================================================================
+    // 4️⃣ OBTENER DATOS DEL USUARIO
+    // ========================================================================
+    const [user] = await db
+      .select()
+      .from(usuarios)
+      .where(eq(usuarios.usuario_id, creditData.usuario_id))
+      .limit(1);
+
+    if (!user) {
+      set.status = 404;
+      return { message: "User not found" };
+    }
+
+    console.log("✅ Usuario encontrado");
+
+    // ========================================================================
+    // 5️⃣ RECALCULAR VALORES DEL CRÉDITO (devolver capital)
+    // ========================================================================
+    console.log("\n📊 ========== RECALCULANDO VALORES DEL CRÉDITO ==========");
+    
+    const capitalActual = new Big(creditData.capital ?? 0);
+    const abonoCapital = new Big(pago.abono_capital ?? 0);
+    const nuevoCapital = capitalActual.plus(abonoCapital);
+
+    console.log(`💰 Capital actual: ${capitalActual.toString()}`);
+    console.log(`💵 Abono capital a reversar: ${abonoCapital.toString()}`);
+    console.log(`✅ Nuevo capital: ${nuevoCapital.toString()}`);
+
+    // Recalcular interés e IVA basado en el nuevo capital
+    const porcentajeInteres = new Big(creditData.porcentaje_interes ?? 0).div(100);
+    const cuota_interes = nuevoCapital.times(porcentajeInteres).round(2);
+    const iva_12 = cuota_interes.times(0.12).round(2);
+
+    console.log(`🔢 Nuevo interés: ${cuota_interes.toString()}`);
+    console.log(`🔢 Nuevo IVA: ${iva_12.toString()}`);
+
+    // Recalcular deuda total
+    const deudatotal = nuevoCapital
+      .plus(cuota_interes)
+      .plus(iva_12)
+      .plus(creditData.seguro_10_cuotas ?? 0)
+      .plus(creditData.gps ?? 0)
+      .plus(creditData.membresias_pago ?? 0);
+
+    console.log(`💳 Nueva deuda total: ${deudatotal.toString()}`);
+
+    // ========================================================================
+    // 6️⃣ REVERSAR MORA SI EXISTÍA
+    // ========================================================================
+    if (pago.mora && Number(pago.mora) > 0) {
+      console.log(`⚠️ Reversando mora: ${pago.mora}`);
+      await updateMora({
+        credito_id,
+        monto_cambio: Number(pago.mora),
+        tipo: "INCREMENTO",
+        activa: true,
+      });
+    }
+    if (pago.pagoConvenio && Number(pago.pagoConvenio) > 0) {
+      console.log(`⚠️ Reversando pago de convenio: ${pago.pagoConvenio}`);
+      const reverseConvenioResult = await reverseConvenioPayment({credito_id, monto_pago: Number(pago.pagoConvenio)});
+    console.log(`✅ Pago de convenio reversado: ${reverseConvenioResult.message}`);}
+    // ========================================================================
+    // 7️⃣ ACTUALIZAR EL CRÉDITO CON LOS NUEVOS VALORES
+    // ========================================================================
+     if (reverseAccounting) {
+      await db
+        .update(creditos)
+        .set({
+          capital: nuevoCapital.toString(),
+          deudatotal: deudatotal.toString(),
+          cuota_interes: cuota_interes.toString(),
+          iva_12: iva_12.toString(),
+        })
+        .where(eq(creditos.credito_id, credito_id));
+
+      console.log("✅ Crédito actualizado con nuevos valores");
+    } else {
+      console.log("⏭️ Crédito NO actualizado (reverseAccounting = false)");
+    }
+
+    console.log("✅ Crédito actualizado con nuevos valores");
+
+    // ========================================================================
+    // 8️⃣ REVERSAR INVERSIONES ASOCIADAS AL PAGO
+    // ========================================================================
+    console.log("\n💼 ========== REVERSANDO INVERSIONES ==========");
+    await processAndReplaceCreditInvestorsReverse(
+      credito_id,
+      abonoCapital.toNumber(),
+      true,
+      pago_id
+    );
+    console.log("✅ Inversiones reversadas correctamente");
+
+    // ========================================================================
+    // 9️⃣ DEVOLVER ABONOS A LOS "RESTANTES" DEL PAGO
+    // ========================================================================
+    console.log("\n🔙 ========== DEVOLVIENDO ABONOS A RESTANTES ==========");
+
+    const nuevoCapitalRestante = new Big(pago.capital_restante ?? 0)
+      .plus(pago.abono_capital ?? 0);
+    const nuevoInteresRestante = new Big(pago.interes_restante ?? 0)
+      .plus(pago.abono_interes ?? 0);
+    const nuevoIvaRestante = new Big(pago.iva_12_restante ?? 0)
+      .plus(pago.abono_iva_12 ?? 0);
+    const nuevoSeguroRestante = new Big(pago.seguro_restante ?? 0)
+      .plus(pago.abono_seguro ?? 0);
+    const nuevoGpsRestante = new Big(pago.gps_restante ?? 0)
+      .plus(pago.abono_gps ?? 0);
+    const nuevoMembresiasRestante = new Big(pago.membresias ?? 0)
+      .plus(pago.membresias_pago ?? 0);
+
+    console.log(`💵 Capital restante: ${pago.capital_restante} → ${nuevoCapitalRestante.toString()}`);
+    console.log(`💵 Interés restante: ${pago.interes_restante} → ${nuevoInteresRestante.toString()}`);
+    console.log(`💵 IVA restante: ${pago.iva_12_restante} → ${nuevoIvaRestante.toString()}`);
+    console.log(`💵 Seguro restante: ${pago.seguro_restante} → ${nuevoSeguroRestante.toString()}`);
+    console.log(`💵 GPS restante: ${pago.gps_restante} → ${nuevoGpsRestante.toString()}`);
+    console.log(`💵 Membresías restante: ${pago.membresias} → ${nuevoMembresiasRestante.toString()}`);
+
+    // ========================================================================
+    // 🔟 ACTUALIZAR LA CUOTA ASOCIADA (marcar como NO pagada)
+    // ========================================================================
+    await db
+      .update(cuotas_credito)
+      .set({ pagado: false })
+      .where(eq(cuotas_credito.cuota_id, pago.cuota_id));
+
+    console.log("✅ Cuota marcada como NO pagada");
+
+    // ========================================================================
+    // 1️⃣1️⃣ RESETEAR EL PAGO (devolver a estado inicial)
+    // ========================================================================
+    console.log("\n🔄 ========== RESETEANDO VALORES DEL PAGO ==========");
+
+    await db.update(pagos_credito)
+      .set({
+        // Devolver abonos a restantes
+        capital_restante: nuevoCapitalRestante.toString(),
+        interes_restante: nuevoInteresRestante.toString(),
+        iva_12_restante: nuevoIvaRestante.toString(),
+        seguro_restante: nuevoSeguroRestante.toString(),
+        gps_restante: nuevoGpsRestante.toString(),
+        membresias: nuevoMembresiasRestante.toString(),
+        
+        // Resetear todos los abonos a CERO
+        abono_capital: "0",
+        abono_interes: "0",
+        abono_iva_12: "0",
+        abono_interes_ci: "0",
+        abono_iva_ci: "0",
+        abono_seguro: "0",
+        abono_gps: "0",
+        membresias_pago: "0",
+        membresias_mes: "0",
+        
+        // Resetear montos del pago
+        pago_del_mes: "0",
+        monto_boleta: "0",
+        monto_boleta_cuota: "0",
+        mora: "0",
+        otros: "0",
+        
+        // Limpiar metadata
+        fecha_pago: null,
+        mes_pagado: "",
+        pagado: false,
+        observaciones: "",
+        
+        // Resetear facturación
+        seguro_facturado: "0",
+        gps_facturado: "0",
+        reserva: "0",
+        validationStatus:"no_required" as const
+      })
+      .where(eq(pagos_credito.pago_id, pago_id));
+
+    console.log("✅ Pago reseteado correctamente");
+
+    // ========================================================================
+    // 1️⃣2️⃣ ELIMINAR BOLETAS ASOCIADAS
+    // ========================================================================
+    await db.delete(boletas).where(eq(boletas.pago_id, pago_id));
+    console.log("✅ Boletas eliminadas");
+
+    // ========================================================================
+    // 1️⃣3️⃣ ELIMINAR PAGOS DE INVERSIONISTAS ASOCIADOS
+    // ========================================================================
+    await db
+      .delete(pagos_credito_inversionistas)
+      .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
+    console.log("✅ Pagos de inversionistas eliminados");
+
+    // ========================================================================
+    // 1️⃣4️⃣ ACTUALIZAR SALDO A FAVOR DEL USUARIO
+    // ========================================================================
+    console.log("\n💰 ========== ACTUALIZANDO SALDO A FAVOR ==========");
+    
+    const saldoActual = new Big(user.saldo_a_favor ?? 0);
+    const montoBoleta = new Big(pago.monto_boleta ?? 0);
+    let nuevoSaldoAFavor = saldoActual.minus(montoBoleta);
+
+    // Si el saldo queda negativo, ponerlo en cero
+    if (nuevoSaldoAFavor.lt(0)) {
+      nuevoSaldoAFavor = new Big(0);
+    }
+
+    console.log(`💵 Saldo actual: ${saldoActual.toString()}`);
+    console.log(`💵 Monto boleta: ${montoBoleta.toString()}`);
+    console.log(`✅ Nuevo saldo a favor: ${nuevoSaldoAFavor.toString()}`);
+
+    await db
+      .update(usuarios)
+      .set({ saldo_a_favor: nuevoSaldoAFavor.toString() })
+      .where(eq(usuarios.usuario_id, user.usuario_id));
+
+    console.log("✅ Saldo a favor actualizado");
+
+    // ========================================================================
+    // ✅ RETORNAR RESULTADO EXITOSO
+    // ========================================================================
+    console.log("\n✅ ========== REVERSIÓN COMPLETADA EXITOSAMENTE ==========\n");
+
+    set.status = 200;
+    return {
+      message: "Payment reversed successfully",
+      data: {
+        reversedPaymentId: pago_id,
+        updatedCredit: {
+          credito_id: creditData.credito_id,
+          capital: nuevoCapital.toString(),
+          deudatotal: deudatotal.toString(),
+          cuota_interes: cuota_interes.toString(),
+          iva_12: iva_12.toString(),
+        },
+        updatedPayment: {
+          pago_id,
+          capital_restante: nuevoCapitalRestante.toString(),
+          interes_restante: nuevoInteresRestante.toString(),
+          iva_12_restante: nuevoIvaRestante.toString(),
+          pagado: false,
+        },
+        updatedUser: {
+          usuario_id: user.usuario_id,
+          saldo_a_favor: nuevoSaldoAFavor.toString(),
+        },
+      },
+    };
+
+  } catch (error) {
+    console.error("\n❌ ========== ERROR EN REVERSIÓN ==========");
+    console.error("[reversePayment] Error:", error);
+    console.error("========================================\n");
+    
+    set.status = 500;
+    return {
+      message: "Internal server error",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+interface ReverseConvenioPaymentParams {
+  credito_id: number;
+  monto_pago: number;
+}
+
+interface ReverseConvenioPaymentResult {
+  success: boolean;
+  message: string;
+  convenio: {
+    convenio_id: number;
+    monto_total_convenio: string;
+    monto_pagado: string;
+    monto_pendiente: string;
+    cuota_mensual: string;
+    pagos_realizados: number;
+    pagos_pendientes: number;
+    completado: boolean;
+    activo: boolean;
+  };
+  monto_revertido: string;
+}
+
+export async function reverseConvenioPayment(
+  params: ReverseConvenioPaymentParams
+): Promise<ReverseConvenioPaymentResult> {
+  try {
+    const { credito_id, monto_pago } = params;
+
+    console.log("\n🔄 ========== REVIRTIENDO PAGO DE CONVENIO ==========");
+    console.log("🏦 Crédito ID:", credito_id);
+    console.log("💵 Monto a revertir:", monto_pago);
+
+    // 1. Buscar el convenio del crédito (puede estar completado o activo)
+    const [convenio] = await db
+      .select()
+      .from(convenios_pago)
+      .where(eq(convenios_pago.credito_id, credito_id))
+      .limit(1);
+
+    if (!convenio) {
+      throw new Error(`No se encontró un convenio para el crédito ID: ${credito_id}`);
+    }
+
+    console.log("📋 Convenio ID encontrado:", convenio.convenio_id);
+
+    // 2. Convertir valores a Big.js
+    const montoPagoBig = new Big(monto_pago);
+    const cuotaMensualBig = new Big(convenio.cuota_mensual);
+    const montoPagadoActualBig = new Big(convenio.monto_pagado);
+    const montoPendienteActualBig = new Big(convenio.monto_pendiente);
+
+    console.log("💵 Monto a revertir:", montoPagoBig.toString());
+
+    // 3. RESTAR del monto pagado (reversa)
+    const nuevoMontoPagadoBig = montoPagadoActualBig.minus(montoPagoBig);
+    
+    // 4. SUMAR al monto pendiente (reversa)
+    const nuevoMontoPendienteBig = montoPendienteActualBig.plus(montoPagoBig);
+
+    // Validar que no quede negativo
+    if (nuevoMontoPagadoBig.lt(0)) {
+      throw new Error("No se puede revertir más de lo que se ha pagado");
+    }
+
+    console.log("📊 Monto pagado anterior:", montoPagadoActualBig.toString());
+    console.log("📊 Monto pagado nuevo:", nuevoMontoPagadoBig.toString());
+    console.log("📊 Monto pendiente anterior:", montoPendienteActualBig.toString());
+    console.log("📊 Monto pendiente nuevo:", nuevoMontoPendienteBig.toString());
+
+    // 5. Recalcular cuántas cuotas completas se han pagado
+    const cuotasCompletasPagadas = nuevoMontoPagadoBig.div(cuotaMensualBig).round(0, Big.roundDown);
+    const nuevosPagosRealizados = parseInt(cuotasCompletasPagadas.toString());
+    const nuevosPagosPendientes = convenio.numero_meses - nuevosPagosRealizados;
+
+    console.log("✅ Cuotas completas pagadas (después de reversa):", nuevosPagosRealizados);
+    console.log("⬇️ Cuotas pendientes (después de reversa):", nuevosPagosPendientes);
+
+    // 6. El convenio ya NO está completado si se revirtió un pago
+    const convenioCompletado = nuevoMontoPendienteBig.lte(0);
+    const convenioActivo = !convenioCompletado;
+
+    console.log("🔓 Convenio reactivado:", convenioActivo);
+
+    // 7. Actualizar el convenio
+    const [convenioActualizado] = await db
+      .update(convenios_pago)
+      .set({
+        monto_pagado: nuevoMontoPagadoBig.toFixed(2),
+        monto_pendiente: nuevoMontoPendienteBig.toFixed(2),
+        pagos_realizados: nuevosPagosRealizados,
+        pagos_pendientes: nuevosPagosPendientes,
+        completado: convenioCompletado,
+        activo: convenioActivo,
+        updated_at: new Date(),
+      })
+      .where(eq(convenios_pago.convenio_id, convenio.convenio_id))
+      .returning();
+
+    console.log("🔄 ========== FIN REVERSIÓN DE PAGO ==========\n");
+
+    // 8. Retornar resultado
+    return {
+      success: true,
+      message: `Pago de Q${montoPagoBig.toFixed(2)} revertido exitosamente del convenio`,
+      convenio: {
+        convenio_id: convenioActualizado.convenio_id,
+        monto_total_convenio: convenioActualizado.monto_total_convenio,
+        monto_pagado: convenioActualizado.monto_pagado,
+        monto_pendiente: convenioActualizado.monto_pendiente,
+        cuota_mensual: convenioActualizado.cuota_mensual,
+        pagos_realizados: convenioActualizado.pagos_realizados,
+        pagos_pendientes: convenioActualizado.pagos_pendientes,
+        completado: convenioActualizado.completado,
+        activo: convenioActualizado.activo,
+      },
+      monto_revertido: montoPagoBig.toFixed(2),
+    };
+
+  } catch (error) {
+    console.error("Error revirtiendo pago de convenio:", error);
+    throw new Error(
+      `Error al revertir pago de convenio: ${error instanceof Error ? error.message : "Error desconocido"}`
+    );
+  }
+}

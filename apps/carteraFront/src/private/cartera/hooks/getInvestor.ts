@@ -12,40 +12,70 @@ import {
 // 🔑 QUERY KEYS CENTRALIZADAS
 // ============================================
 export const investorsQueryKeys = {
-  all: ["inversionistas"] as const,
-  lists: () => [...investorsQueryKeys.all, "list"] as const,
-  list: (params: UseGetInvestorsParams) => 
-    [...investorsQueryKeys.lists(), params] as const,
-  detail: (id: number) => [...investorsQueryKeys.all, "detail", id] as const,
+  all: ['investors'] as const,
+  lists: () => [...investorsQueryKeys.all, 'list'] as const,
+  list: (params: UseGetInvestorsParams) => [
+    ...investorsQueryKeys.lists(), 
+    params
+  ] as const,
+  detail: (id: number) => [...investorsQueryKeys.all, 'detail', id] as const,
 };
-
 // ============================================
 // 📊 TYPES
 // ============================================
+// 🎣 HOOK
 export interface UseGetInvestorsParams {
   id?: number;
+  dpi?: string; // 🆕
+  page?: number;
+  perPage?: number;
+  numeroCreditoSifco?: string; // 🆕
+  nombreUsuario?: string; // 🆕
+  incluirLiquidados?: boolean; // 🆕
+  numeroCuota?: number; // 🆕
+}
+
+interface DownloadPDFVars {
+  id: number;
   page?: number;
   perPage?: number;
 }
 
-type DownloadPDFVars = { 
-  id: number; 
-  page?: number; 
-  perPage?: number;
-};
-
-// ============================================
-// 🔍 QUERIES
-// ============================================
-
 /**
  * Hook para obtener inversionistas con resumenes y subtotales (paginado).
- * @param params { id, page, perPage }
+ * @param params { id, dpi, page, perPage, numeroCreditoSifco, nombreUsuario, incluirLiquidados, numeroCuota }
  * @returns { data, isLoading, isError, error, refetch, isFetching }
+ * 
+ * @example
+ * // Buscar por ID
+ * useGetInvestors({ id: 9, page: 1, perPage: 10 })
+ * 
+ * @example
+ * // Buscar por DPI
+ * useGetInvestors({ dpi: "1234567890123" })
+ * 
+ * @example
+ * // Incluir pagos liquidados
+ * useGetInvestors({ id: 9, incluirLiquidados: true })
+ * 
+ * @example
+ * // Filtrar por cuota específica
+ * useGetInvestors({ id: 9, numeroCuota: 5 })
+ * 
+ * @example
+ * // Búsqueda con múltiples filtros
+ * useGetInvestors({ 
+ *   id: 9, 
+ *   numeroCreditoSifco: "01010214111160",
+ *   nombreUsuario: "Juan",
+ *   incluirLiquidados: false,
+ *   page: 1,
+ *   perPage: 20
+ * })
  */
 export function useGetInvestors(params: UseGetInvestorsParams = {}) {
   return useQuery({
-    queryKey: investorsQueryKeys.list(params),
+    queryKey: investorsQueryKeys.list(params), // 🆕 Ahora incluye todos los parámetros
     queryFn: () => getInvestorServices(params),
     
     // ⏱️ Configuración de cache
@@ -62,8 +92,13 @@ export function useGetInvestors(params: UseGetInvestorsParams = {}) {
     
     // ✅ Placeholder data
     placeholderData: (previousData) => previousData,
+    
+    // 🆕 Solo hacer query si hay al menos id o dpi
+    enabled: !!(params.id || params.dpi),
   });
 }
+
+ 
 
 // ============================================
 // 💰 MUTATIONS
@@ -100,7 +135,7 @@ export function useLiquidateByInvestor() {
       return { previousData };
     },
     
-    onSuccess: (data, variables) => {
+    onSuccess: (  variables) => {
       console.log("✅ Inversionista liquidado:", variables.inversionista_id);
       
       // 🔄 Invalida todas las listas de inversionistas
@@ -109,15 +144,11 @@ export function useLiquidateByInvestor() {
       });
     },
     
-    onError: (error, variables, context) => {
+    onError: (error, t) => {
       console.error("❌ Error al liquidar inversionista:", error);
       
       // 🔙 Rollback: restaura data anterior si falla
-      if (context?.previousData) {
-        context.previousData.forEach(([key, data]) => {
-          queryClient.setQueryData(key, data);
-        });
-      }
+     
       
       alert("Error al liquidar el inversionista. Por favor intenta de nuevo.");
     },

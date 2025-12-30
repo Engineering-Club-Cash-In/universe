@@ -352,32 +352,92 @@ export const sifcoRouter = new Elysia()
     async ({ body, set }) => {
       try {
         console.log("[liquidar-cuotas] Iniciando liquidación...");
+        console.log("[liquidar-cuotas] Body recibido:", JSON.stringify(body, null, 2));
 
-        const { nombre_usuario, cuota_mes } = body;
+        const { nombre_usuario, cuota_mes, capital, nombre_inversionista } = body;
 
-        // Validaciones básicas
-        if (!nombre_usuario || !cuota_mes) {
+        // 🔥 VALIDACIONES BÁSICAS
+        if (!nombre_usuario || nombre_usuario.trim() === '') {
           set.status = 400;
           return {
             success: false,
-            message: "nombre_usuario y cuota_mes son requeridos",
+            message: "❌ nombre_usuario es requerido",
+            error: "Nombre de usuario vacío"
           };
         }
 
-        // Validar formato básico del mes (debe tener algo de texto y números)
+        if (!cuota_mes || cuota_mes.trim() === '') {
+          set.status = 400;
+          return {
+            success: false,
+            message: "❌ cuota_mes es requerido",
+            error: "Cuota mes vacía"
+          };
+        }
+
+        // 🔥 VALIDAR CAPITAL (CRÍTICO)
+        if (capital === undefined || capital === null) {
+          console.error(`❌ Capital no recibido. Body:`, body);
+          set.status = 400;
+          return {
+            success: false,
+            message: "❌ capital es requerido",
+            error: "Capital no enviado"
+          };
+        }
+
+        // 🔥 CONVERTIR CAPITAL A NÚMERO SI VIENE COMO STRING
+        let capitalNumerico: number;
+        try {
+          capitalNumerico = typeof capital === 'string' ? parseFloat(capital) : capital;
+        } catch (err) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "❌ capital debe ser un número válido",
+            error: "Capital inválido"
+          };
+        }
+
+        // 🔥 VALIDAR QUE CAPITAL SEA > 0
+        if (isNaN(capitalNumerico) || capitalNumerico <= 0) {
+          console.error(`❌ Capital inválido: ${capital} (tipo: ${typeof capital}, parseado: ${capitalNumerico})`);
+          set.status = 400;
+          return {
+            success: false,
+            message: `❌ El capital debe ser mayor a 0 (recibido: ${capital})`,
+            error: "Capital inválido"
+          };
+        }
+
+        console.log(`✅ Capital válido recibido: ${capitalNumerico}`);
+
+        if (!nombre_inversionista || nombre_inversionista.trim() === '') {
+          set.status = 400;
+          return {
+            success: false,
+            message: "❌ nombre_inversionista es requerido",
+            error: "Nombre de inversionista vacío"
+          };
+        }
+
+        // Validar formato básico del mes
         const cleanMes = cuota_mes.trim();
         if (cleanMes.length < 4) {
           set.status = 400;
           return {
             success: false,
-            message: "cuota_mes debe tener formato válido (ej: 'oct. 25')",
+            message: "❌ cuota_mes debe tener formato válido (ej: 'oct. 25')",
+            error: "Formato de mes inválido"
           };
         }
 
-        // Llamar al servicio
+        // 🔥 LLAMAR AL SERVICIO CON LOS 4 PARÁMETROS
         const resultado = await liquidarCuotasPorUsuario({
           nombre_usuario,
           cuota_mes,
+          capital: capitalNumerico, // 🔥 CONVERTIDO A NÚMERO
+          nombre_inversionista,
         });
 
         if (resultado.success) {
@@ -389,29 +449,40 @@ export const sifcoRouter = new Elysia()
         }
       } catch (error: any) {
         console.error("[ERROR] /liquidar-cuotas:", error?.message || error);
+        console.error("[ERROR] Stack:", error?.stack);
         set.status = 500;
         return {
           success: false,
           message: "Error al procesar liquidación de cuotas",
           error: error?.message ?? String(error),
+          stack: error?.stack
         };
       }
     },
     {
       detail: {
-        summary: "Liquida cuotas de créditos por nombre de usuario y mes",
+        summary: "Liquida cuotas de créditos con capital e inversionista",
         tags: ["Liquidaciones"],
-        description: "Busca la cuota que vence en el mes especificado y marca como liquidadas todas las cuotas hasta esa (incluyendo anteriores)",
+        description: "Busca la cuota que vence en el mes especificado, marca como liquidadas todas las cuotas hasta esa, y actualiza el capital del inversionista en ese crédito",
       },
       body: t.Object({
         nombre_usuario: t.String({
           description: "Nombre del usuario (búsqueda flexible)",
-          examples: ["Christopher Miguel", "Fernando Alfonso", "Juan"],
+          examples: ["Christopher Miguel", "Fernando Alfonso", "Juan Pérez"],
         }),
         cuota_mes: t.String({
-          description: "Mes y año de la cuota a liquidar en formato de 3 letras + año (como viene del Excel)",
+          description: "Mes y año de la cuota a liquidar en formato de 3 letras + año",
           examples: ["oct. 25", "ago. 25", "sep. 25", "nov. 24"],
-          pattern: "^[a-zA-Z]{3}\\.?\\s*\\d{2}$", // Opcional: validación de patrón
+          pattern: "^[a-zA-Z]{3}\\.?\\s*\\d{2,4}$",
+        }),
+        capital: t.Number({
+          description: "Capital a aplicar al inversionista (monto aportado)",
+          examples: [55938.46, 42109.69, 103310.43],
+          minimum: 0.01,
+        }),
+        nombre_inversionista: t.String({
+          description: "Nombre del inversionista (búsqueda flexible)",
+          examples: ["Anna Lisseth Lorenzo Rodas", "Alexa Nahomy Caballero Pinto"],
         }),
       }),
     }

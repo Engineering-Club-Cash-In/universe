@@ -25,6 +25,7 @@ import {
   Loader2,
   MoreVertical,
   Undo2,
+  Receipt, // 🆕 NUEVO ICONO
 } from "lucide-react";
 import {
   useAplicarPago,
@@ -53,6 +54,9 @@ import {
   DropdownMenuTrigger,
 } from "@radix-ui/react-dropdown-menu";
 import { useActualizarCuentaPago, useCuentasEmpresa } from "../hooks/account";
+import { useFacturarPagoCompleto, usePagoCompleto } from "../hooks/cofidi";
+import { ModalFacturasPago } from "./modalFacts";
+
 // --- utilidades ---
 const meses = [
   "Enero",
@@ -84,18 +88,17 @@ const formatCurrency = (val?: string | number | null) =>
 const formatDate = (d?: string) => {
   if (!d) return "--";
 
-  // Separar fecha y hora
   const [datePart, timePart] = d.split(" ");
 
   if (!datePart) return "--";
 
   const [year, month, day] = datePart.split("-");
 
-  // Si hay hora, formatearla; si no, poner 00:00:00
   const time = timePart || "00:00:00";
 
   return `${day}/${month}/${year} ${time}`;
 };
+
 // --- hook para detectar pantallas pequeñas ---
 function useIsMobile() {
   const [isMobile, setIsMobile] = React.useState(false);
@@ -111,6 +114,11 @@ function useIsMobile() {
 // --- componente principal ---
 export function PaymentsTable() {
   const { user } = useAuth();
+  // 🆕 Estados para modal de ver facturas
+  const [modalVerFacturasOpen, setModalVerFacturasOpen] = useState(false);
+  const [pagoIdParaVerFacturas, setPagoIdParaVerFacturas] = useState<
+    number | null
+  >(null);
   const { handleReverse, reversePago } = usePagoForm();
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
@@ -121,12 +129,13 @@ export function PaymentsTable() {
     loading: boolean;
   };
   const { mutate: aplicarPago, isPending } = useAplicarPago();
+  const facturarPago = useFacturarPagoCompleto(); // 🆕 NUEVO HOOK
 
   const [mes, setMes] = React.useState(new Date().getMonth() + 1);
   const [anio, setAnio] = React.useState(new Date().getFullYear());
   const [dia, setDia] = React.useState<number | undefined>(
     new Date().getDate()
-  ); // 👈 ¡LISTO!
+  );
   const [sifco, setSifco] = React.useState("");
   const [usuarioNombre, setUsuarioNombre] = React.useState("");
   const [inversionistaId, setInversionistaId] = React.useState<
@@ -142,6 +151,10 @@ export function PaymentsTable() {
   const [modalCuentaOpen, setModalCuentaOpen] = useState(false);
   const [pagoSeleccionado, setPagoSeleccionado] = useState<number | null>(null);
 
+  // 🆕 Estados para modal de facturas generadas
+  const [modalFacturasOpen, setModalFacturasOpen] = useState(false);
+  const [facturasGeneradas, setFacturasGeneradas] = useState<any[]>([]);
+
   // Handler para abrir modal de cuenta
   const handleAbrirModalCuenta = (pagoId: number, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -150,7 +163,6 @@ export function PaymentsTable() {
   };
 
   // Handler para seleccionar cuenta
-  // Handler para seleccionar cuenta - ACTUALIZADO
   const handleSeleccionarCuenta = (cuentaId: number) => {
     if (!pagoSeleccionado || !cuentaId) {
       console.error("❌ Faltan parámetros:", { pagoSeleccionado, cuentaId });
@@ -172,53 +184,86 @@ export function PaymentsTable() {
         onSuccess: () => {
           setModalCuentaOpen(false);
           setPagoSeleccionado(null);
-             refetch();
+          refetch();
         },
       }
     );
   };
-// --- helper para el status de validación con iconos ---
-const getValidationStatusConfig = (status: string) => {
-  const configs: Record<string, { 
-    label: string; 
-    color: string; 
-    bgColor: string;
-    icon: JSX.Element;
-  }> = {
-    no_requiere: {
-      label: "No requiere",
-      color: "text-gray-700",
-      bgColor: "bg-gray-100",
-      icon: <Check className="w-4 h-4" />
-    },
-    no_required: {
-      label: "No requiere",
-      color: "text-gray-700",
-      bgColor: "bg-gray-100",
-      icon: <Check className="w-4 h-4" />
-    },
-    pendiente: {
-      label: "Pendiente",
-      color: "text-yellow-700",
-      bgColor: "bg-yellow-100",
-      icon: <Loader2 className="w-4 h-4" />
-    },
-    pending: {
-      label: "Pendiente",
-      color: "text-yellow-700",
-      bgColor: "bg-yellow-100",
-      icon: <Loader2 className="w-4 h-4" />
-    },
-    validated: {
-      label: "Validado",
-      color: "text-green-700",
-      bgColor: "bg-green-100",
-      icon: <Check className="w-4 h-4" />
-    },
+
+  // 🆕 Handler para facturar pago
+  const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+
+    facturarPago.mutate(
+      {
+        pago_id: pagoId,
+        created_by: user?.id || undefined,
+      },
+      {
+        onSuccess: (data) => {
+          if (data.success && data.data) {
+            setFacturasGeneradas(data.data.facturas);
+            setModalFacturasOpen(true);
+            refetch(); // Refrescar la tabla
+          }
+        },
+      }
+    );
+  };
+  const handleVerFacturas = (pagoId: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPagoIdParaVerFacturas(pagoId);
+    setModalVerFacturasOpen(true);
   };
 
-  return configs[status] || configs.no_required;
-};
+  // 🆕 Usar el hook para saber si tiene facturas
+  const { data: pagoCompletoTemp } = usePagoCompleto(null);
+  // --- helper para el status de validación con iconos ---
+  const getValidationStatusConfig = (status: string) => {
+    const configs: Record<
+      string,
+      {
+        label: string;
+        color: string;
+        bgColor: string;
+        icon: JSX.Element;
+      }
+    > = {
+      no_requiere: {
+        label: "No requiere",
+        color: "text-gray-700",
+        bgColor: "bg-gray-100",
+        icon: <Check className="w-4 h-4" />,
+      },
+      no_required: {
+        label: "No requiere",
+        color: "text-gray-700",
+        bgColor: "bg-gray-100",
+        icon: <Check className="w-4 h-4" />,
+      },
+      pendiente: {
+        label: "Pendiente",
+        color: "text-yellow-700",
+        bgColor: "bg-yellow-100",
+        icon: <Loader2 className="w-4 h-4" />,
+      },
+      pending: {
+        label: "Pendiente",
+        color: "text-yellow-700",
+        bgColor: "bg-yellow-100",
+        icon: <Loader2 className="w-4 h-4" />,
+      },
+      validated: {
+        label: "Validado",
+        color: "text-green-700",
+        bgColor: "bg-green-100",
+        icon: <Check className="w-4 h-4" />,
+      },
+    };
+
+    return configs[status] || configs.no_required;
+  };
+
   // Función para verificar si tiene cuenta asignada
   const tieneCuentaAsignada = (pago: PagoDataInvestor) => {
     return (
@@ -227,7 +272,8 @@ const getValidationStatusConfig = (status: string) => {
       pago.cuentaEmpresaNumero !== null
     );
   };
-  const { data, isLoading,refetch } = usePagosConInversionistas({
+
+  const { data, isLoading, refetch } = usePagosConInversionistas({
     page,
     pageSize,
     numeroCredito: sifco || undefined,
@@ -253,6 +299,7 @@ const getValidationStatusConfig = (status: string) => {
     setSelectedInv(inv);
     setModalOpen(true);
   };
+
   const handleDownloadExcel = async () => {
     try {
       setIsDownloadingExcel(true);
@@ -285,7 +332,7 @@ const getValidationStatusConfig = (status: string) => {
       setIsDownloadingExcel(false);
     }
   };
- 
+
   const handleOpenBoleta = (boleta?: any[] | { urlBoleta?: string } | null) => {
     if (!boleta) {
       alert("⚠️ No hay boleta disponible para este pago.");
@@ -301,7 +348,6 @@ const getValidationStatusConfig = (status: string) => {
       const first = boleta[0];
       url = first.url || first;
     } else {
-      // Handle BoletaPago object
       url = boleta.urlBoleta;
     }
 
@@ -311,8 +357,9 @@ const getValidationStatusConfig = (status: string) => {
     }
     window.open(url, "_blank");
   };
+
   return (
-    <div className="   fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
       <div className="bg-blue-50 rounded-xl shadow-md p-5 w-full max-w-6xl">
         <h2 className="text-2xl font-bold text-blue-900 mb-4 flex items-center gap-2">
           <BadgeDollarSign className="w-6 h-6 text-blue-700" />
@@ -436,6 +483,7 @@ const getValidationStatusConfig = (status: string) => {
             Limpiar filtro
           </button>
         </div>
+
         {data?.totales && (
           <>
             {/* Header del Collapse */}
@@ -446,7 +494,6 @@ const getValidationStatusConfig = (status: string) => {
               <div className="flex items-center gap-3">
                 <FileSpreadsheet className="h-5 w-5 text-blue-700" />
                 <div className="text-left">
-                  {/* 💙 Texto forzado a ser legible */}
                   <h3 className="font-semibold text-lg text-blue-800">
                     Resumen de Totales
                   </h3>
@@ -506,7 +553,10 @@ const getValidationStatusConfig = (status: string) => {
                         },
                         { label: "Mora", value: data.totales.totalMora },
                         { label: "Otros", value: data.totales.totalOtros },
-                        { label: "Convenio", value: data.totales.totalConvenio },
+                        {
+                          label: "Convenio",
+                          value: data.totales.totalConvenio,
+                        },
                         { label: "Reserva", value: data.totales.totalReserva },
                         {
                           label: "Membresías",
@@ -525,8 +575,6 @@ const getValidationStatusConfig = (status: string) => {
                           </p>
                         </div>
                       ))}
-
-                      {/* Total General */}
                     </div>
 
                     {/* Botón Excel */}
@@ -553,7 +601,6 @@ const getValidationStatusConfig = (status: string) => {
         <br></br>
 
         {/* 🔹 Contenido principal */}
-        {/* 🔹 Contenido principal */}
         {isLoading ? (
           <div className="text-blue-700 font-bold p-6 text-center">
             Cargando pagos...
@@ -564,277 +611,333 @@ const getValidationStatusConfig = (status: string) => {
           </div>
         ) : isMobile ? (
           // 📱 Vista móvil
-        // 📱 Vista móvil
-<div className="flex flex-col gap-4">
-  {pagos.map((pago, idx) => {
-    const statusConfig = getValidationStatusConfig(pago.validationStatus); // 👈 NUEVO
-    
-    return (
-      <div
-        key={pago.pagoId}
-        className={`bg-white border border-blue-200 rounded-xl shadow-sm p-4 ${
-          openIdx === idx ? "ring-2 ring-blue-300" : ""
-        }`}
-      >
-        {/* 🧭 Header principal */}
-        <div
-          className="flex justify-between items-center cursor-pointer"
-          onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
-        >
-          <div>
-            <p className="text-blue-800 font-bold text-lg">
-              {pago.credito?.numeroCreditoSifco}
-            </p>
-            <p className="text-blue-700 font-semibold">
-              {formatDate(pago.fechaPago)}
-            </p>
-          </div>
-          {openIdx === idx ? (
-            <ChevronUp className="text-blue-700" />
-          ) : (
-            <ChevronDown className="text-blue-700" />
-          )}
-        </div>
+          <div className="flex flex-col gap-4">
+            {pagos.map((pago, idx) => {
+              const statusConfig = getValidationStatusConfig(
+                pago.validationStatus
+              );
 
-        {/* 💰 Monto + usuario */}
-        <div className="mt-3">
-          <p className="text-green-700 font-bold text-xl">
-            {formatCurrency(pago.montoBoleta)}
-          </p>
-          <p className="text-blue-900 font-semibold">
-            {pago.usuario?.nombre}
-          </p>
-          
-          {/* 👇 NUEVO - Badge de estado en móvil */}
-          <div className="mt-2 flex items-center gap-2">
-            <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm ${statusConfig.bgColor} ${statusConfig.color}`}>
-              {statusConfig.icon}
-              {statusConfig.label}
-            </span>
-          </div>
-        </div>
-
-        {/* 🔘 Acciones */}
-        <div className="flex gap-3 mt-3 flex-wrap">
-          {/* 👁️ Este botón lo ven TODOS */}
-          <button
-            onClick={() => handleOpenBoleta(pago.boleta)}
-            className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
-          >
-            <FileText className="w-4 h-4" /> Ver Boleta
-          </button>
-
-          {/* 🔒 Inversionistas - Deshabilitado si NO es admin */}
-          <button
-            onClick={() =>
-              handleOpenInversionistas(pago.inversionistas)
-            }
-            disabled={user?.role !== "ADMIN"}
-            className={`font-semibold flex items-center gap-1 ${
-              user?.role !== "ADMIN"
-                ? "text-gray-400 cursor-not-allowed opacity-50"
-                : "text-blue-700 hover:text-blue-900"
-            }`}
-            title={user?.role !== "ADMIN" ? "Solo administradores" : ""}
-          >
-            <Users2 className="w-4 h-4" /> Inversionistas
-          </button>
-
-          {/* 🔒 Validar Pago - Deshabilitado si NO es admin O ya está validado */}
-          <button
-            onClick={() => aplicarPago(pago.pagoId)}
-            disabled={
-              user?.role !== "ADMIN" ||
-              isPending ||
-              pago.validationStatus === "validated" ||
-              !tieneCuentaAsignada(pago)
-            }
-            className={`font-semibold flex items-center gap-1 ${
-              pago.validationStatus === "validated"
-                ? "text-gray-400 cursor-not-allowed"
-                : user?.role !== "ADMIN"
-                  ? "text-gray-400 cursor-not-allowed opacity-50"
-                  : "text-green-700 hover:text-green-900"
-            } disabled:opacity-50`}
-            title={
-              user?.role !== "ADMIN"
-                ? "Solo administradores"
-                : !tieneCuentaAsignada(pago)
-                  ? "Debe asignar una cuenta primero"
-                  : pago.validationStatus === "validated"
-                    ? "Ya validado"
-                    : ""
-            }
-          >
-            <Check className="w-4 h-4" />
-            {pago.validationStatus === "validated"
-              ? "Ya Validado"
-              : !tieneCuentaAsignada(pago)
-                ? "Sin Cuenta"
-                : isPending
-                  ? "Validando..."
-                  : "Validar Pago"}
-          </button>
-          
-          <button
-            className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
-            onClick={() =>
-              handleReverse(pago.pagoId, pago.credito?.creditoId || 0, false)
-            }
-            disabled={reversePago.isPending || user?.role !== "ADMIN"}
-          >
-            {reversePago.isPending ? (
-              <>
-                <Loader2 className="animate-spin w-4 h-4" />
-                Revirtiendo...
-              </>
-            ) : (
-              <>
-                <Undo2 className="w-4 h-4" />
-                Revertir
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* 🔽 Colapsable */}
-        <div
-          className={`transition-all duration-500 overflow-hidden ${
-            openIdx === idx
-              ? "max-h-[1000px] opacity-100 mt-4"
-              : "max-h-0 opacity-0"
-          }`}
-        >
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: "Crédito ID", value: pago.credito?.creditoId },
-              {
-                label: "Capital",
-                value: formatCurrency(pago.credito?.capital),
-              },
-              {
-                label: "Deuda Total",
-                value: formatCurrency(pago.credito?.deudaTotal),
-              },
-              {
-                label: "Membresías",
-                value: formatCurrency(pago.membresias),
-                rawValue: pago.membresias,
-              },
-              {
-                label: "Mora",
-                value: formatCurrency(pago.mora),
-                rawValue: pago.mora,
-              },
-              {
-                label: "Convenio",
-                value: formatCurrency(pago.pagoConvenio),
-                rawValue: pago.pagoConvenio,
-              },
-              {
-                label: "Reserva",
-                value: formatCurrency(pago.reserva),
-                rawValue: pago.reserva,
-              },
-              {
-                label: "Otros",
-                value: formatCurrency(pago.otros),
-                rawValue: pago.otros,
-              },
-              {
-                label: "Interés",
-                value: formatCurrency(pago.abono_interes),
-                rawValue: pago.abono_interes,
-              },
-              {
-                label: "IVA 12%",
-                value: formatCurrency(pago.abono_iva_12),
-                rawValue: pago.abono_iva_12,
-              },
-              {
-                label: "Seguro",
-                value: formatCurrency(pago.abono_seguro),
-                rawValue: pago.abono_seguro,
-              },
-              {
-                label: "GPS",
-                value: formatCurrency(pago.abono_gps),
-                rawValue: pago.abono_gps,
-              },
-              {
-                label: "Estado de Validación",
-                value: (
-                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
-                    {statusConfig.icon}
-                    {statusConfig.label}
-                  </span>
-                ),
-              },
-              {
-                label: "Cuenta Destino",
-                value: tieneCuentaAsignada(pago)
-                  ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
-                  : "No asignada",
-              },
-              {
-                label: "Número de Cuenta",
-                value: pago.cuentaEmpresaNumero || "—",
-              },
-              pago.cuota
-                ? {
-                    label: "Número de Cuota",
-                    value: pago.cuota.numeroCuota,
-                  }
-                : null,
-              pago.cuota
-                ? {
-                    label: "Fecha Vencimiento",
-                    value: formatDate(pago.cuota.fechaVencimiento),
-                  }
-                : null,
-              {
-                label: "Observaciones",
-                value: pago.observaciones || "—",
-              },
-              pago.usuario.Categoria
-                ? { label: "Categoria", value: pago.usuario.Categoria }
-                : null,
-              { label: "Banco", value: pago.bancoNombre || "—" },
-              {
-                label: "numeroautorizacion",
-                value: pago.numeroautorizacion || "—",
-              },
-              {
-                label: "Registrado por",
-                value: pago.registerBy || "—",
-              },
-            ]
-              .filter(Boolean)
-              .filter((f: any) => {
-                if (f.rawValue !== undefined) {
-                  return Number(f.rawValue) !== 0;
-                }
-                return true;
-              })
-              .map((f: any, i) => (
+              return (
                 <div
-                  key={i}
-                  className="bg-blue-50 rounded-lg p-2 border border-blue-100"
+                  key={pago.pagoId}
+                  className={`bg-white border border-blue-200 rounded-xl shadow-sm p-4 ${
+                    openIdx === idx ? "ring-2 ring-blue-300" : ""
+                  }`}
                 >
-                  <p className="text-blue-800 text-sm font-bold">
-                    {f.label}
-                  </p>
-                  <p className="text-blue-900 font-semibold text-sm">
-                    {f.value ?? "--"}
-                  </p>
+                  {/* 🧭 Header principal */}
+                  <div
+                    className="flex justify-between items-center cursor-pointer"
+                    onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
+                  >
+                    <div>
+                      <p className="text-blue-800 font-bold text-lg">
+                        {pago.credito?.numeroCreditoSifco}
+                      </p>
+                      <p className="text-blue-700 font-semibold">
+                        {formatDate(pago.fechaPago)}
+                      </p>
+                    </div>
+                    {openIdx === idx ? (
+                      <ChevronUp className="text-blue-700" />
+                    ) : (
+                      <ChevronDown className="text-blue-700" />
+                    )}
+                  </div>
+
+                  {/* 💰 Monto + usuario */}
+                  <div className="mt-3">
+                    <p className="text-green-700 font-bold text-xl">
+                      {formatCurrency(pago.montoBoleta)}
+                    </p>
+                    <p className="text-blue-900 font-semibold">
+                      {pago.usuario?.nombre}
+                    </p>
+
+                    {/* Badge de estado en móvil */}
+                    <div className="mt-2 flex items-center gap-2">
+                      <span
+                        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold text-sm ${statusConfig.bgColor} ${statusConfig.color}`}
+                      >
+                        {statusConfig.icon}
+                        {statusConfig.label}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 🔘 Acciones */}
+                  <div className="flex gap-3 mt-3 flex-wrap">
+                    {/* Ver Boleta */}
+                    <button
+                      onClick={() => handleOpenBoleta(pago.boleta)}
+                      className="text-blue-700 font-semibold flex items-center gap-1 hover:text-blue-900"
+                    >
+                      <FileText className="w-4 h-4" /> Ver Boleta
+                    </button>
+
+                    {/* Inversionistas */}
+                    <button
+                      onClick={() =>
+                        handleOpenInversionistas(pago.inversionistas)
+                      }
+                      disabled={user?.role !== "ADMIN"}
+                      className={`font-semibold flex items-center gap-1 ${
+                        user?.role !== "ADMIN"
+                          ? "text-gray-400 cursor-not-allowed opacity-50"
+                          : "text-blue-700 hover:text-blue-900"
+                      }`}
+                      title={
+                        user?.role !== "ADMIN" ? "Solo administradores" : ""
+                      }
+                    >
+                      <Users2 className="w-4 h-4" /> Inversionistas
+                    </button>
+                    <button
+                      onClick={(e) => handleVerFacturas(pago.pagoId, e)}
+                      className="font-semibold flex items-center gap-1 text-indigo-700 hover:text-indigo-900"
+                    >
+                      <Receipt className="w-4 h-4" />
+                      Ver Facturas
+                    </button>
+                    {/* Validar Pago */}
+                    <button
+                      onClick={() => aplicarPago(pago.pagoId)}
+                      disabled={
+                        user?.role !== "ADMIN" ||
+                        isPending ||
+                        pago.validationStatus === "validated" ||
+                        !tieneCuentaAsignada(pago)
+                      }
+                      className={`font-semibold flex items-center gap-1 ${
+                        pago.validationStatus === "validated"
+                          ? "text-gray-400 cursor-not-allowed"
+                          : user?.role !== "ADMIN"
+                            ? "text-gray-400 cursor-not-allowed opacity-50"
+                            : "text-green-700 hover:text-green-900"
+                      } disabled:opacity-50`}
+                      title={
+                        user?.role !== "ADMIN"
+                          ? "Solo administradores"
+                          : !tieneCuentaAsignada(pago)
+                            ? "Debe asignar una cuenta primero"
+                            : pago.validationStatus === "validated"
+                              ? "Ya validado"
+                              : ""
+                      }
+                    >
+                      <Check className="w-4 h-4" />
+                      {pago.validationStatus === "validated"
+                        ? "Ya Validado"
+                        : !tieneCuentaAsignada(pago)
+                          ? "Sin Cuenta"
+                          : isPending
+                            ? "Validando..."
+                            : "Validar Pago"}
+                    </button>
+
+                    {/* 🆕 GENERAR FACTURA */}
+                    <button
+                      onClick={(e) => handleFacturarPago(pago.pagoId, e)}
+                      disabled={
+                        user?.role !== "ADMIN" ||
+                        pago.validationStatus !== "validated" ||
+                        facturarPago.isPending
+                      }
+                      className={`font-semibold flex items-center gap-1 ${
+                        pago.validationStatus !== "validated" ||
+                        user?.role !== "ADMIN"
+                          ? "text-gray-400 cursor-not-allowed opacity-50"
+                          : "text-purple-700 hover:text-purple-900"
+                      } disabled:opacity-50`}
+                      title={
+                        user?.role !== "ADMIN"
+                          ? "Solo administradores"
+                          : pago.validationStatus !== "validated"
+                            ? "El pago debe estar validado primero"
+                            : ""
+                      }
+                    >
+                      {facturarPago.isPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Facturando...
+                        </>
+                      ) : (
+                        <>
+                          <Receipt className="w-4 h-4" />
+                          Factura
+                        </>
+                      )}
+                    </button>
+
+                    {/* Revertir */}
+                    <button
+                      className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded font-bold shadow flex items-center gap-1"
+                      onClick={() =>
+                        handleReverse(
+                          pago.pagoId,
+                          pago.credito?.creditoId || 0,
+                          false
+                        )
+                      }
+                      disabled={reversePago.isPending || user?.role !== "ADMIN"}
+                    >
+                      {reversePago.isPending ? (
+                        <>
+                          <Loader2 className="animate-spin w-4 h-4" />
+                          Revirtiendo...
+                        </>
+                      ) : (
+                        <>
+                          <Undo2 className="w-4 h-4" />
+                          Revertir
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* 🔽 COLAPSABLE COMPLETO */}
+                  <div
+                    className={`transition-all duration-500 overflow-hidden ${
+                      openIdx === idx
+                        ? "max-h-[1000px] opacity-100 mt-4"
+                        : "max-h-0 opacity-0"
+                    }`}
+                  >
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: "Crédito ID", value: pago.credito?.creditoId },
+                        {
+                          label: "Capital",
+                          value: formatCurrency(pago.credito?.capital),
+                        },
+                        {
+                          label: "Deuda Total",
+                          value: formatCurrency(pago.credito?.deudaTotal),
+                        },
+                        {
+                          label: "Membresías",
+                          value: formatCurrency(pago.membresias),
+                          rawValue: pago.membresias,
+                        },
+                        {
+                          label: "Mora",
+                          value: formatCurrency(pago.mora),
+                          rawValue: pago.mora,
+                        },
+                        {
+                          label: "Convenio",
+                          value: formatCurrency(pago.pagoConvenio),
+                          rawValue: pago.pagoConvenio,
+                        },
+                        {
+                          label: "Reserva",
+                          value: formatCurrency(pago.reserva),
+                          rawValue: pago.reserva,
+                        },
+                        {
+                          label: "Otros",
+                          value: formatCurrency(pago.otros),
+                          rawValue: pago.otros,
+                        },
+                        {
+                          label: "Interés",
+                          value: formatCurrency(pago.abono_interes),
+                          rawValue: pago.abono_interes,
+                        },
+                        {
+                          label: "IVA 12%",
+                          value: formatCurrency(pago.abono_iva_12),
+                          rawValue: pago.abono_iva_12,
+                        },
+                        {
+                          label: "Seguro",
+                          value: formatCurrency(pago.abono_seguro),
+                          rawValue: pago.abono_seguro,
+                        },
+                        {
+                          label: "GPS",
+                          value: formatCurrency(pago.abono_gps),
+                          rawValue: pago.abono_gps,
+                        },
+                        {
+                          label: "Estado de Validación",
+                          value: (
+                            <span
+                              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}
+                            >
+                              {statusConfig.icon}
+                              {statusConfig.label}
+                            </span>
+                          ),
+                        },
+                        {
+                          label: "Cuenta Destino",
+                          value: tieneCuentaAsignada(pago)
+                            ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
+                            : "No asignada",
+                        },
+                        {
+                          label: "Número de Cuenta",
+                          value: pago.cuentaEmpresaNumero || "—",
+                        },
+                        pago.cuota
+                          ? {
+                              label: "Número de Cuota",
+                              value: pago.cuota.numeroCuota,
+                            }
+                          : null,
+                        pago.cuota
+                          ? {
+                              label: "Fecha Vencimiento",
+                              value: formatDate(pago.cuota.fechaVencimiento),
+                            }
+                          : null,
+                        {
+                          label: "Observaciones",
+                          value: pago.observaciones || "—",
+                        },
+                        pago.usuario.Categoria
+                          ? {
+                              label: "Categoria",
+                              value: pago.usuario.Categoria,
+                            }
+                          : null,
+                        { label: "Banco", value: pago.bancoNombre || "—" },
+                        {
+                          label: "Número Autorización",
+                          value: pago.numeroautorizacion || "—",
+                        },
+                        {
+                          label: "Registrado por",
+                          value: pago.registerBy || "—",
+                        },
+                      ]
+                        .filter(Boolean)
+                        .filter((f: any) => {
+                          if (f.rawValue !== undefined) {
+                            return Number(f.rawValue) !== 0;
+                          }
+                          return true;
+                        })
+                        .map((f: any, i) => (
+                          <div
+                            key={i}
+                            className="bg-blue-50 rounded-lg p-2 border border-blue-100"
+                          >
+                            <p className="text-blue-800 text-sm font-bold">
+                              {f.label}
+                            </p>
+                            <p className="text-blue-900 font-semibold text-sm">
+                              {f.value ?? "--"}
+                            </p>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
                 </div>
-              ))}
+              );
+            })}
           </div>
-        </div>
-      </div>
-    );
-  })}
-</div>
         ) : (
           // 💻 Vista escritorio
           <div className="overflow-x-hidden rounded-xl bg-white shadow border border-blue-100 w-full">
@@ -857,7 +960,7 @@ const getValidationStatusConfig = (status: string) => {
                   <TableHead className="text-center font-bold text-blue-800">
                     Categoria
                   </TableHead>
-                   <TableHead className="text-center font-bold text-blue-800">
+                  <TableHead className="text-center font-bold text-blue-800">
                     Status
                   </TableHead>
                   <TableHead className="text-center font-bold text-blue-800">
@@ -866,369 +969,453 @@ const getValidationStatusConfig = (status: string) => {
                 </TableRow>
               </TableHeader>
 
-             <TableBody>
-  {pagos.map((pago, idx) => {
-    const statusConfig = getValidationStatusConfig(pago.validationStatus); // 👈 NUEVO - Obtener config del status
-    
-    return (
-      <React.Fragment key={pago.pagoId}>
-        <TableRow
-          className={`hover:bg-blue-50 cursor-pointer ${
-            openIdx === idx ? "ring-2 ring-blue-300" : ""
-          }`}
-          onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
-        >
-          <TableCell className="text-center">
-            {openIdx === idx ? <ChevronUp /> : <ChevronDown />}
-          </TableCell>
-          <TableCell className="text-center text-blue-700 font-bold">
-            {pago.credito?.numeroCreditoSifco}
-          </TableCell>
-          <TableCell className="text-center text-green-800 font-bold">
-            {formatCurrency(pago.montoBoleta)}
-          </TableCell>
-          <TableCell className="text-center text-blue-700 font-bold">
-            {formatDate(pago.fechaPago)}
-          </TableCell>
-          <TableCell className="text-center text-blue-900 font-semibold">
-            {pago.usuario?.nombre}
-          </TableCell>
-          <TableCell className="text-center text-blue-900 font-semibold">
-            {pago.usuario?.Categoria}
-          </TableCell>
-          {/* 👇 NUEVO - Celda del Status con icono y color */}
-          <TableCell className="text-center">
-            <div className="flex items-center justify-center">
-              <span className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
-                {statusConfig.icon}
-                {statusConfig.label}
-              </span>
-            </div>
-          </TableCell>
-          <TableCell className="text-center">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="p-2 hover:bg-blue-50 rounded-full transition shadow-sm border border-gray-200">
-                  <MoreVertical className="w-5 h-5 text-blue-600" />
-                </button>
-              </DropdownMenuTrigger>
+              <TableBody>
+                {pagos.map((pago, idx) => {
+                  const statusConfig = getValidationStatusConfig(
+                    pago.validationStatus
+                  );
 
-              <DropdownMenuContent
-                align="end"
-                side="top"
-                sideOffset={5}
-                className="w-56 bg-white shadow-lg border border-gray-200"
-              >
-                {/* 👁️ Ver Boleta - TODOS pueden verla */}
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleOpenBoleta(pago.boleta);
-                  }}
-                  className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
-                >
-                  <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
-                  <span className="font-semibold">Ver Boleta</span>
-                </DropdownMenuItem>
+                  return (
+                    <React.Fragment key={pago.pagoId}>
+                      <TableRow
+                        className={`hover:bg-blue-50 cursor-pointer ${
+                          openIdx === idx ? "ring-2 ring-blue-300" : ""
+                        }`}
+                        onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
+                      >
+                        <TableCell className="text-center">
+                          {openIdx === idx ? <ChevronUp /> : <ChevronDown />}
+                        </TableCell>
+                        <TableCell className="text-center text-blue-700 font-bold">
+                          {pago.credito?.numeroCreditoSifco}
+                        </TableCell>
+                        <TableCell className="text-center text-green-800 font-bold">
+                          {formatCurrency(pago.montoBoleta)}
+                        </TableCell>
+                        <TableCell className="text-center text-blue-700 font-bold">
+                          {formatDate(pago.fechaPago)}
+                        </TableCell>
+                        <TableCell className="text-center text-blue-900 font-semibold">
+                          {pago.usuario?.nombre}
+                        </TableCell>
+                        <TableCell className="text-center text-blue-900 font-semibold">
+                          {pago.usuario?.Categoria}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <div className="flex items-center justify-center">
+                            <span
+                              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}
+                            >
+                              {statusConfig.icon}
+                              {statusConfig.label}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <button className="p-2 hover:bg-blue-50 rounded-full transition shadow-sm border border-gray-200">
+                                <MoreVertical className="w-5 h-5 text-blue-600" />
+                              </button>
+                            </DropdownMenuTrigger>
 
-                <DropdownMenuSeparator className="bg-gray-200" />
-                
-                {/* 🏦 Seleccionar Cuenta */}
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleAbrirModalCuenta(pago.pagoId, e);
-                  }}
-                  className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
-                >
-                  <BadgeDollarSign className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
-                  <span className="font-semibold">
-                    {pago.cuentaEmpresaNombre
-                      ? "Cambiar Cuenta"
-                      : "Asignar Cuenta"}
-                  </span>
-                </DropdownMenuItem>
-                
-                <DropdownMenuSeparator className="bg-gray-200" />
-                
-                {/* 🔒 Inversionistas - Solo ADMIN */}
-                <DropdownMenuItem
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (user?.role === "ADMIN") {
-                      handleOpenInversionistas(pago.inversionistas);
-                    }
-                  }}
-                  disabled={user?.role !== "ADMIN"}
-                  className={`cursor-pointer py-2.5 px-3 flex items-center ${
-                    user?.role !== "ADMIN"
-                      ? "opacity-50 text-gray-400 bg-gray-50"
-                      : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
-                  }`}
-                >
-                  <Users2
-                    className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
-                  />
-                  <span className="font-semibold">
-                    Ver Inversionistas
-                  </span>
-                  {user?.role !== "ADMIN" && (
-                    <span className="ml-auto text-xs text-gray-400 font-normal">
-                      Admin
-                    </span>
-                  )}
-                </DropdownMenuItem>
+                            <DropdownMenuContent
+                              align="end"
+                              side="top"
+                              sideOffset={5}
+                              className="w-56 bg-white shadow-lg border border-gray-200"
+                            >
+                              {/* Ver Boleta */}
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenBoleta(pago.boleta);
+                                }}
+                                className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
+                              >
+                                <FileText className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
+                                <span className="font-semibold">
+                                  Ver Boleta
+                                </span>
+                              </DropdownMenuItem>
 
-                <DropdownMenuSeparator className="bg-gray-200" />
+                              <DropdownMenuSeparator className="bg-gray-200" />
 
-                {/* 🔒 Validar Pago - Solo ADMIN Y con cuenta asignada */}
-                <DropdownMenuItem
-                  onClick={() => {
-                    if (
-                      user?.role === "ADMIN" &&
-                      pago.validationStatus !== "validated" &&
-                      tieneCuentaAsignada(pago)
-                    ) {
-                      aplicarPago(pago.pagoId);
-                    }
-                  }}
-                  disabled={
-                    user?.role !== "ADMIN" ||
-                    isPending ||
-                    pago.validationStatus === "validated" ||
-                    !tieneCuentaAsignada(pago)
-                  }
-                  className={`cursor-pointer py-2.5 px-3 flex items-center ${
-                    pago.validationStatus === "validated" ||
-                    user?.role !== "ADMIN" ||
-                    !tieneCuentaAsignada(pago)
-                      ? "opacity-50 text-gray-400 bg-gray-50"
-                      : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
-                  }`}
-                >
-                  <Check
-                    className={`w-4 h-4 mr-2 flex-shrink-0 ${
-                      pago.validationStatus === "validated" ||
-                      user?.role !== "ADMIN" ||
-                      !tieneCuentaAsignada(pago)
-                        ? "text-gray-400"
-                        : "text-blue-600"
-                    }`}
-                  />
-                  <span className="font-semibold">
-                    {pago.validationStatus === "validated"
-                      ? "Ya Validado"
-                      : !tieneCuentaAsignada(pago)
-                        ? "Sin Cuenta"
-                        : isPending
-                          ? "Validando..."
-                          : "Validar Pago"}
-                  </span>
-                  {user?.role !== "ADMIN" && (
-                    <span className="ml-auto text-xs text-gray-400 font-normal">
-                      Admin
-                    </span>
-                  )}
-                </DropdownMenuItem>
+                              {/* Seleccionar Cuenta */}
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAbrirModalCuenta(pago.pagoId, e);
+                                }}
+                                className="cursor-pointer text-blue-700 hover:text-blue-900 hover:bg-blue-50 py-2.5 px-3 flex items-center"
+                              >
+                                <BadgeDollarSign className="w-4 h-4 mr-2 text-blue-600 flex-shrink-0" />
+                                <span className="font-semibold">
+                                  {pago.cuentaEmpresaNombre
+                                    ? "Cambiar Cuenta"
+                                    : "Asignar Cuenta"}
+                                </span>
+                              </DropdownMenuItem>
 
-                <DropdownMenuSeparator className="bg-gray-200" />
+                              <DropdownMenuSeparator className="bg-gray-200" />
 
-                {/* 🔒 Revertir Pago - Solo ADMIN */}
-                <DropdownMenuItem
-                  onClick={() => {
-                    if (user?.role === "ADMIN") {
-                      handleReverse(
-                        pago.pagoId,
-                        pago.credito?.creditoId || 0,
-                        false
-                      );
-                    }
-                  }}
-                  disabled={
-                    reversePago.isPending || user?.role !== "ADMIN"
-                  }
-                  className={`cursor-pointer py-2.5 px-3 flex items-center ${
-                    user?.role !== "ADMIN"
-                      ? "opacity-50 text-gray-400 bg-gray-50"
-                      : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
-                  }`}
-                >
-                  <Undo2
-                    className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
-                  />
-                  <span className="font-semibold">
-                    {reversePago.isPending
-                      ? "Revirtiendo..."
-                      : "Revertir Pago"}
-                  </span>
-                  {user?.role !== "ADMIN" && (
-                    <span className="ml-auto text-xs text-gray-400 font-normal">
-                      Admin
-                    </span>
-                  )}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </TableCell>
-        </TableRow>
+                              {/* Inversionistas */}
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (user?.role === "ADMIN") {
+                                    handleOpenInversionistas(
+                                      pago.inversionistas
+                                    );
+                                  }
+                                }}
+                                disabled={user?.role !== "ADMIN"}
+                                className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                                  user?.role !== "ADMIN"
+                                    ? "opacity-50 text-gray-400 bg-gray-50"
+                                    : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                                }`}
+                              >
+                                <Users2
+                                  className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
+                                />
+                                <span className="font-semibold">
+                                  Ver Inversionistas
+                                </span>
+                                {user?.role !== "ADMIN" && (
+                                  <span className="ml-auto text-xs text-gray-400 font-normal">
+                                    Admin
+                                  </span>
+                                )}
+                              </DropdownMenuItem>
 
-        {/* 🔹 Colapso */}
-        <TableRow>
-          <TableCell colSpan={8} className="p-0"> {/* 👈 CAMBIÉ colSpan de 6 a 8 porque ahora hay más columnas */}
-            <div
-              className={`transition-all duration-500 overflow-hidden ${
-                openIdx === idx
-                  ? "max-h-[1000px] opacity-100"
-                  : "max-h-0 opacity-0"
-              }`}
-            >
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-5 p-4 bg-blue-50 border-t border-blue-200">
-                {[
-                  {
-                    label: "Crédito ID",
-                    value: pago.credito?.creditoId,
-                  },
-                  {
-                    label: "Capital",
-                    value: formatCurrency(pago.credito?.capital),
-                  },
-                  {
-                    label: "Deuda Total",
-                    value: formatCurrency(pago.credito?.deudaTotal),
-                  },
-                  {
-                    label: "Membresías",
-                    value: formatCurrency(pago.membresias),
-                    rawValue: pago.membresias,
-                  },
-                  {
-                    label: "Mora",
-                    value: formatCurrency(pago.mora),
-                    rawValue: pago.mora,
-                  },
-                  {
-                    label: "Convenio",
-                    value: formatCurrency(pago.pagoConvenio),
-                    rawValue: pago.pagoConvenio,
-                  },
-                  {
-                    label: "Reserva",
-                    value: formatCurrency(pago.reserva),
-                    rawValue: pago.reserva,
-                  },
-                  {
-                    label: "Otros",
-                    value: formatCurrency(pago.otros),
-                    rawValue: pago.otros,
-                  },
-                  {
-                    label: "Interés",
-                    value: formatCurrency(pago.abono_interes),
-                    rawValue: pago.abono_interes,
-                  },
-                  {
-                    label: "Abono Capital",
-                    value: formatCurrency(pago.abono_capital),
-                    rawValue: pago.abono_capital,
-                  },
-                  {
-                    label: "IVA 12%",
-                    value: formatCurrency(pago.abono_iva_12),
-                    rawValue: pago.abono_iva_12,
-                  },
-                  {
-                    label: "Seguro",
-                    value: formatCurrency(pago.abono_seguro),
-                    rawValue: pago.abono_seguro,
-                  },
-                  {
-                    label: "GPS",
-                    value: formatCurrency(pago.abono_gps),
-                    rawValue: pago.abono_gps,
-                  },
-                  {
-                    label: "Estado de Validación",
-                    value: (
-                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}>
-                        {statusConfig.icon}
-                        {statusConfig.label}
-                      </span>
-                    ),
-                  },
-                  pago.cuota
-                    ? {
-                        label: "Número de Cuota",
-                        value: pago.cuota.numeroCuota,
-                      }
-                    : null,
-                  pago.cuota
-                    ? {
-                        label: "Fecha Vencimiento",
-                        value: formatDate(
-                          pago.cuota.fechaVencimiento
-                        ),
-                      }
-                    : null,
-                  {
-                    label: "Observaciones",
-                    value: pago.observaciones || "—",
-                  },
-                  {
-                    label: "Banco",
-                    value: pago.bancoNombre || "—",
-                  },
-                  {
-                    label: "numeroautorizacion",
-                    value: pago.numeroautorizacion || "—",
-                  },
-                  {
-                    label: "Registrado por",
-                    value: pago.registerBy || "—",
-                  },
-                  {
-                    label: "Cuenta Destino",
-                    value: tieneCuentaAsignada(pago)
-                      ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
-                      : "No asignada",
-                  },
-                  {
-                    label: "Número de Cuenta",
-                    value: pago.cuentaEmpresaNumero || "—",
-                  },
-                ]
-                  .filter(Boolean)
-                  .filter((f: any) => {
-                    if (f.rawValue !== undefined) {
-                      return Number(f.rawValue) !== 0;
-                    }
-                    return true;
-                  })
-                  .map((f: any, i) => (
-                    <div
-                      key={i}
-                      className="bg-white rounded-lg border border-blue-100 p-3"
-                    >
-                      <p className="text-blue-800 text-sm font-bold">
-                        {f.label}
-                      </p>
-                      <p className="text-blue-900 font-semibold text-sm">
-                        {f.value ?? "--"}
-                      </p>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </TableCell>
-        </TableRow>
-      </React.Fragment>
-    );
-  })}
-</TableBody>
+                              <DropdownMenuSeparator className="bg-gray-200" />
+
+                              {/* Validar Pago */}
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (
+                                    user?.role === "ADMIN" &&
+                                    pago.validationStatus !== "validated" &&
+                                    tieneCuentaAsignada(pago)
+                                  ) {
+                                    aplicarPago(pago.pagoId);
+                                  }
+                                }}
+                                disabled={
+                                  user?.role !== "ADMIN" ||
+                                  isPending ||
+                                  pago.validationStatus === "validated" ||
+                                  !tieneCuentaAsignada(pago)
+                                }
+                                className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                                  pago.validationStatus === "validated" ||
+                                  user?.role !== "ADMIN" ||
+                                  !tieneCuentaAsignada(pago)
+                                    ? "opacity-50 text-gray-400 bg-gray-50"
+                                    : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                                }`}
+                              >
+                                <Check
+                                  className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                                    pago.validationStatus === "validated" ||
+                                    user?.role !== "ADMIN" ||
+                                    !tieneCuentaAsignada(pago)
+                                      ? "text-gray-400"
+                                      : "text-blue-600"
+                                  }`}
+                                />
+                                <span className="font-semibold">
+                                  {pago.validationStatus === "validated"
+                                    ? "Ya Validado"
+                                    : !tieneCuentaAsignada(pago)
+                                      ? "Sin Cuenta"
+                                      : isPending
+                                        ? "Validando..."
+                                        : "Validar Pago"}
+                                </span>
+                                {user?.role !== "ADMIN" && (
+                                  <span className="ml-auto text-xs text-gray-400 font-normal">
+                                    Admin
+                                  </span>
+                                )}
+                              </DropdownMenuItem>
+
+                              <DropdownMenuSeparator className="bg-gray-200" />
+
+                              {/* 🆕 GENERAR FACTURA */}
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (
+                                    user?.role === "ADMIN" &&
+                                    pago.validationStatus === "validated"
+                                  ) {
+                                    handleFacturarPago(pago.pagoId, e);
+                                  }
+                                }}
+                                disabled={
+                                  user?.role !== "ADMIN" ||
+                                  pago.validationStatus !== "validated" ||
+                                  facturarPago.isPending
+                                }
+                                className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                                  pago.validationStatus !== "validated" ||
+                                  user?.role !== "ADMIN"
+                                    ? "opacity-50 text-gray-400 bg-gray-50"
+                                    : "text-purple-700 hover:text-purple-900 hover:bg-purple-50"
+                                }`}
+                              >
+                                {facturarPago.isPending ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 mr-2 flex-shrink-0 animate-spin text-gray-400" />
+                                    <span className="font-semibold">
+                                      Facturando...
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Receipt
+                                      className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                                        pago.validationStatus !== "validated" ||
+                                        user?.role !== "ADMIN"
+                                          ? "text-gray-400"
+                                          : "text-purple-600"
+                                      }`}
+                                    />
+                                    <span className="font-semibold">
+                                      Generar Factura
+                                    </span>
+                                  </>
+                                )}
+                                {user?.role !== "ADMIN" && (
+                                  <span className="ml-auto text-xs text-gray-400 font-normal">
+                                    Admin
+                                  </span>
+                                )}
+                                {pago.validationStatus !== "validated" &&
+                                  user?.role === "ADMIN" && (
+                                    <span className="ml-auto text-xs text-gray-400 font-normal">
+                                      Validar primero
+                                    </span>
+                                  )}
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator className="bg-gray-200" />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleVerFacturas(pago.pagoId, e);
+                                }}
+                                className="cursor-pointer text-indigo-700 hover:text-indigo-900 hover:bg-indigo-50 py-2.5 px-3 flex items-center"
+                              >
+                                <Receipt className="w-4 h-4 mr-2 text-indigo-600 flex-shrink-0" />
+                                <span className="font-semibold">
+                                  Ver Facturas
+                                </span>
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator className="bg-gray-200" />
+
+                              {/* Revertir Pago */}
+                              <DropdownMenuItem
+                                onClick={() => {
+                                  if (user?.role === "ADMIN") {
+                                    handleReverse(
+                                      pago.pagoId,
+                                      pago.credito?.creditoId || 0,
+                                      false
+                                    );
+                                  }
+                                }}
+                                disabled={
+                                  reversePago.isPending ||
+                                  user?.role !== "ADMIN"
+                                }
+                                className={`cursor-pointer py-2.5 px-3 flex items-center ${
+                                  user?.role !== "ADMIN"
+                                    ? "opacity-50 text-gray-400 bg-gray-50"
+                                    : "text-blue-700 hover:text-blue-900 hover:bg-blue-50"
+                                }`}
+                              >
+                                <Undo2
+                                  className={`w-4 h-4 mr-2 flex-shrink-0 ${user?.role !== "ADMIN" ? "text-gray-400" : "text-blue-600"}`}
+                                />
+                                <span className="font-semibold">
+                                  {reversePago.isPending
+                                    ? "Revirtiendo..."
+                                    : "Revertir Pago"}
+                                </span>
+                                {user?.role !== "ADMIN" && (
+                                  <span className="ml-auto text-xs text-gray-400 font-normal">
+                                    Admin
+                                  </span>
+                                )}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+
+                      {/* 🔹 COLAPSABLE COMPLETO */}
+                      <TableRow>
+                        <TableCell colSpan={8} className="p-0">
+                          <div
+                            className={`transition-all duration-500 overflow-hidden ${
+                              openIdx === idx
+                                ? "max-h-[1000px] opacity-100"
+                                : "max-h-0 opacity-0"
+                            }`}
+                          >
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-5 p-4 bg-blue-50 border-t border-blue-200">
+                              {[
+                                {
+                                  label: "Crédito ID",
+                                  value: pago.credito?.creditoId,
+                                },
+                                {
+                                  label: "Capital",
+                                  value: formatCurrency(pago.credito?.capital),
+                                },
+                                {
+                                  label: "Deuda Total",
+                                  value: formatCurrency(
+                                    pago.credito?.deudaTotal
+                                  ),
+                                },
+                                {
+                                  label: "Membresías",
+                                  value: formatCurrency(pago.membresias),
+                                  rawValue: pago.membresias,
+                                },
+                                {
+                                  label: "Mora",
+                                  value: formatCurrency(pago.mora),
+                                  rawValue: pago.mora,
+                                },
+                                {
+                                  label: "Convenio",
+                                  value: formatCurrency(pago.pagoConvenio),
+                                  rawValue: pago.pagoConvenio,
+                                },
+                                {
+                                  label: "Reserva",
+                                  value: formatCurrency(pago.reserva),
+                                  rawValue: pago.reserva,
+                                },
+                                {
+                                  label: "Otros",
+                                  value: formatCurrency(pago.otros),
+                                  rawValue: pago.otros,
+                                },
+                                {
+                                  label: "Interés",
+                                  value: formatCurrency(pago.abono_interes),
+                                  rawValue: pago.abono_interes,
+                                },
+                                {
+                                  label: "Abono Capital",
+                                  value: formatCurrency(pago.abono_capital),
+                                  rawValue: pago.abono_capital,
+                                },
+                                {
+                                  label: "IVA 12%",
+                                  value: formatCurrency(pago.abono_iva_12),
+                                  rawValue: pago.abono_iva_12,
+                                },
+                                {
+                                  label: "Seguro",
+                                  value: formatCurrency(pago.abono_seguro),
+                                  rawValue: pago.abono_seguro,
+                                },
+                                {
+                                  label: "GPS",
+                                  value: formatCurrency(pago.abono_gps),
+                                  rawValue: pago.abono_gps,
+                                },
+                                {
+                                  label: "Estado de Validación",
+                                  value: (
+                                    <span
+                                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${statusConfig.bgColor} ${statusConfig.color}`}
+                                    >
+                                      {statusConfig.icon}
+                                      {statusConfig.label}
+                                    </span>
+                                  ),
+                                },
+                                pago.cuota
+                                  ? {
+                                      label: "Número de Cuota",
+                                      value: pago.cuota.numeroCuota,
+                                    }
+                                  : null,
+                                pago.cuota
+                                  ? {
+                                      label: "Fecha Vencimiento",
+                                      value: formatDate(
+                                        pago.cuota.fechaVencimiento
+                                      ),
+                                    }
+                                  : null,
+                                {
+                                  label: "Observaciones",
+                                  value: pago.observaciones || "—",
+                                },
+                                {
+                                  label: "Banco",
+                                  value: pago.bancoNombre || "—",
+                                },
+                                {
+                                  label: "Número Autorización",
+                                  value: pago.numeroautorizacion || "—",
+                                },
+                                {
+                                  label: "Registrado por",
+                                  value: pago.registerBy || "—",
+                                },
+                                {
+                                  label: "Cuenta Destino",
+                                  value: tieneCuentaAsignada(pago)
+                                    ? `${pago.cuentaEmpresaNombre} - ${pago.cuentaEmpresaBanco}`
+                                    : "No asignada",
+                                },
+                                {
+                                  label: "Número de Cuenta",
+                                  value: pago.cuentaEmpresaNumero || "—",
+                                },
+                              ]
+                                .filter(Boolean)
+                                .filter((f: any) => {
+                                  if (f.rawValue !== undefined) {
+                                    return Number(f.rawValue) !== 0;
+                                  }
+                                  return true;
+                                })
+                                .map((f: any, i) => (
+                                  <div
+                                    key={i}
+                                    className="bg-white rounded-lg border border-blue-100 p-3"
+                                  >
+                                    <p className="text-blue-800 text-sm font-bold">
+                                      {f.label}
+                                    </p>
+                                    <p className="text-blue-900 font-semibold text-sm">
+                                      {f.value ?? "--"}
+                                    </p>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    </React.Fragment>
+                  );
+                })}
+              </TableBody>
             </Table>
           </div>
         )}
 
-        {/* 🔹 Paginación */}
+        {/* Paginación */}
         <div className="flex flex-col sm:flex-row justify-between items-center mt-6 gap-4">
           <div className="flex items-center gap-2">
             <span className="text-blue-900 font-semibold">Ver</span>
@@ -1273,124 +1460,241 @@ const getValidationStatusConfig = (status: string) => {
         </div>
       </div>
 
-      {/* 🔹 Modal de inversionistas */}
+      {/* Modal de inversionistas */}
       <ModalInversionistas
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         inversionistas={selectedInv}
       />
-  {modalCuentaOpen && (
-  <div
-    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
-    onClick={() => {
-      if (!actualizandoCuenta) {
-        setModalCuentaOpen(false);
-        setPagoSeleccionado(null);
-      }
-    }}
-  >
-    <div
-      className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <h3 className="text-xl font-bold text-blue-900 mb-2 flex items-center gap-2">
-        <BadgeDollarSign className="w-6 h-6 text-blue-700" />
-        Seleccionar Cuenta de Empresa
-      </h3>
-      <p className="text-sm text-blue-600 mb-4">
-        Escogé la cuenta donde se recibió este pago
-      </p>
 
-      {/* 👇 NUEVO - Mostrar cuenta actual */}
-      {pagoSeleccionado && (() => {
-        const pagoActual = pagos.find(p => p.pagoId === pagoSeleccionado);
-        return pagoActual && tieneCuentaAsignada(pagoActual) ? (
-          <div className="mb-4 p-3 bg-blue-50 border-2 border-blue-300 rounded-lg">
-            <p className="text-xs text-blue-700 font-semibold mb-1">Cuenta actual:</p>
-            <p className="font-bold text-blue-900">{pagoActual.cuentaEmpresaNombre}</p>
-            <p className="text-sm text-blue-700">{pagoActual.cuentaEmpresaBanco}</p>
-            <p className="text-xs text-gray-600 font-mono">N° {pagoActual.cuentaEmpresaNumero}</p>
-          </div>
-        ) : null;
-      })()}
+      {/* Modal de cuenta */}
+      {modalCuentaOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => {
+            if (!actualizandoCuenta) {
+              setModalCuentaOpen(false);
+              setPagoSeleccionado(null);
+            }
+          }}
+        >
+          <div
+            className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-xl font-bold text-blue-900 mb-2 flex items-center gap-2">
+              <BadgeDollarSign className="w-6 h-6 text-blue-700" />
+              Seleccionar Cuenta de Empresa
+            </h3>
+            <p className="text-sm text-blue-600 mb-4">
+              Escogé la cuenta donde se recibió este pago
+            </p>
 
-      {cargandoCuentas ? (
-        <div className="text-center py-8">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
-          <p className="text-blue-700 font-semibold mt-2">Cargando cuentas...</p>
-        </div>
-      ) : cuentas && cuentas.length > 0 ? (
-        <div className="space-y-2 max-h-96 overflow-y-auto">
-          {cuentas.map((cuenta: CuentaEmpresa) => {
-            // 👇 NUEVO - Destacar cuenta actual
-            const pagoActual = pagos.find(p => p.pagoId === pagoSeleccionado);
-            const esCuentaActual = pagoActual && 
-              pagoActual.cuentaEmpresaNombre === cuenta.nombreCuenta &&
-              pagoActual.cuentaEmpresaNumero === cuenta.numeroCuenta;
-
-            return (
-              <button
-                key={cuenta.cuentaId}
-                onClick={() => handleSeleccionarCuenta(cuenta.cuentaId)}
-                disabled={actualizandoCuenta}
-                className={`w-full text-left p-4 border-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all group ${
-                  esCuentaActual
-                    ? "border-green-400 bg-green-50" // 👈 Resaltar cuenta actual
-                    : "border-blue-200 hover:bg-blue-50 hover:border-blue-400"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={`font-bold text-lg ${
-                      esCuentaActual ? "text-green-900" : "text-blue-900 group-hover:text-blue-700"
-                    }`}>
-                      {cuenta.nombreCuenta}
+            {/* Mostrar cuenta actual */}
+            {pagoSeleccionado &&
+              (() => {
+                const pagoActual = pagos.find(
+                  (p) => p.pagoId === pagoSeleccionado
+                );
+                return pagoActual && tieneCuentaAsignada(pagoActual) ? (
+                  <div className="mb-4 p-3 bg-blue-50 border-2 border-blue-300 rounded-lg">
+                    <p className="text-xs text-blue-700 font-semibold mb-1">
+                      Cuenta actual:
                     </p>
-                    <p className={`text-sm font-semibold ${
-                      esCuentaActual ? "text-green-700" : "text-blue-700"
-                    }`}>
-                      {cuenta.banco}
+                    <p className="font-bold text-blue-900">
+                      {pagoActual.cuentaEmpresaNombre}
+                    </p>
+                    <p className="text-sm text-blue-700">
+                      {pagoActual.cuentaEmpresaBanco}
                     </p>
                     <p className="text-xs text-gray-600 font-mono">
-                      N° {cuenta.numeroCuenta}
+                      N° {pagoActual.cuentaEmpresaNumero}
                     </p>
                   </div>
-                  {esCuentaActual && (
-                    <Check className="w-6 h-6 text-green-600 flex-shrink-0" />
-                  )}
-                </div>
+                ) : null;
+              })()}
+
+            {cargandoCuentas ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
+                <p className="text-blue-700 font-semibold mt-2">
+                  Cargando cuentas...
+                </p>
+              </div>
+            ) : cuentas && cuentas.length > 0 ? (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {cuentas.map((cuenta: CuentaEmpresa) => {
+                  const pagoActual = pagos.find(
+                    (p) => p.pagoId === pagoSeleccionado
+                  );
+                  const esCuentaActual =
+                    pagoActual &&
+                    pagoActual.cuentaEmpresaNombre === cuenta.nombreCuenta &&
+                    pagoActual.cuentaEmpresaNumero === cuenta.numeroCuenta;
+
+                  return (
+                    <button
+                      key={cuenta.cuentaId}
+                      onClick={() => handleSeleccionarCuenta(cuenta.cuentaId)}
+                      disabled={actualizandoCuenta}
+                      className={`w-full text-left p-4 border-2 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-all group ${
+                        esCuentaActual
+                          ? "border-green-400 bg-green-50"
+                          : "border-blue-200 hover:bg-blue-50 hover:border-blue-400"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p
+                            className={`font-bold text-lg ${
+                              esCuentaActual
+                                ? "text-green-900"
+                                : "text-blue-900 group-hover:text-blue-700"
+                            }`}
+                          >
+                            {cuenta.nombreCuenta}
+                          </p>
+                          <p
+                            className={`text-sm font-semibold ${
+                              esCuentaActual
+                                ? "text-green-700"
+                                : "text-blue-700"
+                            }`}
+                          >
+                            {cuenta.banco}
+                          </p>
+                          <p className="text-xs text-gray-600 font-mono">
+                            N° {cuenta.numeroCuenta}
+                          </p>
+                        </div>
+                        {esCuentaActual && (
+                          <Check className="w-6 h-6 text-green-600 flex-shrink-0" />
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-center text-gray-600 py-8">
+                No hay cuentas disponibles
+              </p>
+            )}
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setModalCuentaOpen(false);
+                  setPagoSeleccionado(null);
+                }}
+                disabled={actualizandoCuenta}
+                className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 font-semibold disabled:opacity-50 transition-colors"
+              >
+                Cancelar
               </button>
-            );
-          })}
+            </div>
+
+            {actualizandoCuenta && (
+              <div className="mt-4 flex items-center justify-center gap-2 text-blue-700">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span className="font-semibold">Actualizando cuenta...</span>
+              </div>
+            )}
+          </div>
         </div>
-      ) : (
-        <p className="text-center text-gray-600 py-8">
-          No hay cuentas disponibles
-        </p>
       )}
 
-      <div className="flex gap-3 mt-6">
-        <button
+      {/* 🆕 MODAL DE FACTURAS GENERADAS */}
+      {modalFacturasOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
           onClick={() => {
-            setModalCuentaOpen(false);
-            setPagoSeleccionado(null);
+            setModalFacturasOpen(false);
+            setFacturasGeneradas([]);
           }}
-          disabled={actualizandoCuenta}
-          className="flex-1 px-4 py-2 bg-gray-200 rounded-lg hover:bg-gray-300 font-semibold disabled:opacity-50 transition-colors"
         >
-          Cancelar
-        </button>
-      </div>
+          <div
+            className="bg-white rounded-xl p-6 max-w-2xl w-full shadow-2xl max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-2xl font-bold text-green-900 mb-2 flex items-center gap-2">
+              <Check className="w-7 h-7 text-green-600" />
+              Facturas Generadas Exitosamente
+            </h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Se generaron {facturasGeneradas.length} factura(s) para este pago
+            </p>
 
-      {actualizandoCuenta && (
-        <div className="mt-4 flex items-center justify-center gap-2 text-blue-700">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          <span className="font-semibold">Actualizando cuenta...</span>
+            <div className="space-y-4">
+              {facturasGeneradas.map((factura, index) => (
+                <div
+                  key={index}
+                  className="border-2 border-green-200 bg-green-50 rounded-lg p-4"
+                >
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="text-lg font-bold text-green-900">
+                        {factura.tipo}
+                        {factura.inversionista && ` - ${factura.inversionista}`}
+                      </p>
+                      <p className="text-sm text-gray-700 font-mono">
+                        Serie: {factura.serie} | Número: {factura.numero}
+                      </p>
+                      <p className="text-xs text-gray-600 font-mono mt-1">
+                        UUID: {factura.uuid}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xl font-bold text-green-800">
+                        {formatCurrency(factura.monto_total)}
+                      </p>
+                      <p className="text-xs text-gray-600">
+                        IVA: {formatCurrency(factura.monto_iva)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <a
+                      href={factura.pdfUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors"
+                    >
+                      <Download className="w-4 h-4" />
+                      Descargar PDF
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  setModalFacturasOpen(false);
+                  setFacturasGeneradas([]);
+                }}
+                className="flex-1 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-semibold transition-colors"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
         </div>
       )}
-    </div>
-  </div>
-)}
+      {/* 🆕 MODAL DE VER FACTURAS */}
+      <ModalFacturasPago
+        open={modalVerFacturasOpen}
+        onClose={() => {
+          setModalVerFacturasOpen(false);
+          setPagoIdParaVerFacturas(null);
+        }}
+        pagoId={pagoIdParaVerFacturas}
+        onFacturasActualizadas={() => {
+          refetch(); // Refrescar la tabla cuando se anule una factura
+        }}
+      />
     </div>
   );
 }

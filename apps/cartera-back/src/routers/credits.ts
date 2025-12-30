@@ -73,13 +73,13 @@ export const creditRouter = new Elysia()
  
 //.use(authMiddleware)
   // Crear nuevo crédito
-  .post("/newCredit", async ({ body, set }) => {
-    const result = await insertCredit(body, set);
-    if (result && typeof result === 'object' && 'status' in result) {
-      set.status = result.status as number;
-    }
-    return result;
-  })
+.post("/newCredit", async ({ body, set }) => {
+  const result = await insertCredit({ body, set });
+  if (result && typeof result === 'object' && 'status' in result) {
+    set.status = result.status as number;
+  }
+  return result;
+})
   .post("/updateCredit", updateCredit)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {

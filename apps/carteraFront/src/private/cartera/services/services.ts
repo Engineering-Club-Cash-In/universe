@@ -27,6 +27,7 @@ export interface InvestorPayload {
   emite_factura: boolean;
   reinversion: boolean;
   banco: string | null;
+  dpi:number | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
   numero_cuenta: string | null;
@@ -706,10 +707,12 @@ export interface InversionistaConCreditos {
   tipo_cuenta: string | null;     // 🔹 nuevo
   numero_cuenta: string | null;   // 🔹 nuevo
   re_inversion:string
+  dpi:number | null
 
 }
 
 // La respuesta completa (paginada)
+// 🔧 SERVICIO
 export interface InversionistasCreditosResponse {
   inversionistas: InversionistaConCreditos[];
   page: number;
@@ -717,20 +720,36 @@ export interface InversionistasCreditosResponse {
   totalItems: number;
   totalPages: number;
 }
+
+export interface GetInvestorParams {
+  id?: number;
+  dpi?: string; // 🆕
+  page?: number;
+  perPage?: number;
+  numeroCreditoSifco?: string; // 🆕
+  nombreUsuario?: string; // 🆕
+  incluirLiquidados?: boolean; // 🆕
+  numeroCuota?: number; // 🆕
+}
+
 export async function getInvestorServices(
-  params?: { id?: number; page?: number; perPage?: number }
+  params?: GetInvestorParams
 ): Promise<InversionistasCreditosResponse> {
   const query = new URLSearchParams();
 
   if (params?.id !== undefined) query.append("id", String(params.id));
+  if (params?.dpi) query.append("dpi", params.dpi); // 🆕
   if (params?.page !== undefined) query.append("page", String(params.page));
   if (params?.perPage !== undefined) query.append("perPage", String(params.perPage));
+  if (params?.numeroCreditoSifco) query.append("numeroCreditoSifco", params.numeroCreditoSifco); // 🆕
+  if (params?.nombreUsuario) query.append("nombreUsuario", params.nombreUsuario); // 🆕
+  if (params?.incluirLiquidados !== undefined) query.append("incluirLiquidados", String(params.incluirLiquidados)); // 🆕
+  if (params?.numeroCuota !== undefined) query.append("numeroCuota", String(params.numeroCuota)); // 🆕
 
   const url = `${import.meta.env.VITE_BACK_URL}/getInvestors${query.toString() ? `?${query.toString()}` : ""}`;
   const res = await api.get<InversionistasCreditosResponse>(url);
   return res.data;
 }
-
 
 // Interfaces para los pagos
 export interface PagoResumen {
@@ -785,7 +804,13 @@ export interface LiquidateByInvestorRequest {
 }
 
 // Response body (ajústalo según tu backend, aquí uso lo que mandas arriba)
+export interface LiquidateByInvestorRequest {
+  inversionista_id: number;
+}
+
+// Response body (ajústalo según tu backend, aquí uso lo que mandas arriba)
 export interface LiquidateByInvestorResponse {
+  inversionista_id(arg0: string, inversionista_id: any): unknown;
   message: string;
   updatedCount: number;
 }
@@ -2011,87 +2036,45 @@ export interface FacturaElectronica {
   created_by?: number;
 }
 
-export interface CertificarFacturaRequest {
+export interface FacturarPagoCompletoRequest {
   pago_id: number;
   created_by?: number;
-  tipoDocumento: 'FACT' | 'FESP' | 'FCAM' | 'NCRE' | 'NDEB' | 'RECI' | 'RDON' | 'FPEQ';
-  codigoMoneda: string;
-  fechaHoraEmision?: string;
-  emisor: {
-    nit: string;
-    nombreEmisor: string;
-    codigoEstablecimiento: string;
-    nombreComercial: string;
-    afiliacionIVA: string;
-    direccion: {
-      direccion: string;
-      codigoPostal: string;
-      municipio: string;
-      departamento: string;
-      pais: string;
-    };
-  };
-  receptor?: {
-    idReceptor?: string;
-    nombreReceptor?: string;
-    direccion?: {
-      direccion: string;
-      codigoPostal: string;
-      municipio: string;
-      departamento: string;
-      pais: string;
-    };
-  };
-  frases: Array<{
-    tipoFrase: 1 | 2 | 3 | 4;
-    codigoEscenario: string;
-  }>;
-  items: Array<{
-    numeroLinea: number;
-    bienOServicio: 'B' | 'S';
-    cantidad: number;
-    unidadMedida: string;
-    descripcion: string;
-    precioUnitario: number;
-    precio: number;
-    descuento: number;
-    impuestos: Array<{
-      nombreCorto: string;
-      codigoUnidadGravable: number;
-      montoGravable: number;
-      montoImpuesto: number;
-    }>;
-    total: number;
-  }>;
-  exportacion?: 'SI';
-  idInterno?: string;
-  complementos?: Array<{
-    tipo: 'cambiario' | 'exportacion' | 'notaCredito';
-    abonos?: Array<{
-      numeroAbono: number;
-      fechaVencimiento: string;
-      montoAbono: number;
-    }>;
-  }>;
 }
 
-export interface CertificarFacturaResponse {
+export interface FacturarPagoCompletoResponse {
   success: boolean;
   data?: {
-    factura_id: number;
-    idInterno: string;
-    serie: string;
-    numero: number;
-    uuid: string;
-    xmlCertificado: string;
-    fechaEmision: string;
-    pdfUrl: string;
-    pdfFilename: string;
+    pago_id: number;
+    cliente: {
+      nombre: string;
+      nit: string;
+    };
+    total_facturas: number;
+    facturas: Array<{
+      tipo: 'SERVICIOS' | 'INTERESES';
+      inversionista?: string;
+      inversionista_id?: number;
+      factura_id: number;
+      idInterno: string;
+      serie: string;
+      numero: number;
+      uuid: string;
+      xmlCertificado: string;
+      fechaEmision: string;
+      pdfUrl: string;
+      pdfFilename: string;
+      monto_total: number;
+      monto_iva: number;
+      receptor: {
+        nombre: string;
+        nit: string;
+      };
+    }>;
   };
   mensaje?: string;
   error?: string;
+  stack?: string;
 }
-
 export interface AnularFacturaRequest {
   uuid: string;
   xmlAnulacion: string;
@@ -2124,11 +2107,12 @@ export interface FacturasPorPagoResponse {
 // 🔥 SERVICIOS API
 
 // 1. Certificar factura
-export const certificarFactura = async (data: CertificarFacturaRequest): Promise<CertificarFacturaResponse> => {
-  const response = await api.post('/api/dte/certificar-factura', data);
+export const facturarPagoCompleto = async (
+  data: FacturarPagoCompletoRequest
+): Promise<FacturarPagoCompletoResponse> => {
+  const response = await api.post('/api/dte/facturar-pago-completo', data);
   return response.data;
 };
-
 // 2. Obtener factura por UUID
 export const obtenerFacturaPorUUID = async (uuid: string): Promise<ObtenerFacturaResponse> => {
   const response = await api.get(`/api/dte/obtener/${uuid}`);
@@ -2173,5 +2157,86 @@ export interface FacturasPorCreditoResponse {
 // 🔥 Obtener facturas por crédito
 export const obtenerFacturasPorCredito = async (creditoId: number): Promise<FacturasPorCreditoResponse> => {
   const response = await api.get(`/api/dte/credito/${creditoId}/facturas`);
+  return response.data;
+};
+
+
+// services/dte.service.ts
+
+interface Desglose {
+  abono_capital: string;
+  abono_seguro: string;
+  abono_gps: string;
+  membresias_pago: string;
+  mora: string;
+  abono_interes: string;
+  abono_iva_12: string;
+}
+
+interface Pago {
+  pago_id: number;
+  credito_id: number;
+  mes_pagado: number;
+  fecha_pago: string;
+  fecha_vencimiento: string;
+  monto_boleta: string;
+  validationStatus: string;
+  desglose: Desglose;
+}
+
+interface Cliente {
+  usuario_id: number;
+  nombre: string;
+  nit: string;
+  direccion: string;
+}
+
+ 
+
+interface Factura {
+  factura_id: number;
+  serie: string;
+  numero: string;
+  uuid: string;
+  tipo_documento: string;
+  monto_total: string;
+  monto_iva: string;
+  pdf_url: string;
+  receptor_nit: string;
+  receptor_nombre: string;
+  status: string;
+  fecha_emision: string;
+  fecha_certificacion: string;
+  fecha_anulacion: string | null;
+  motivo_anulacion: string | null;
+  created_at: string;
+  link_pdf: string;
+  link_fel: string;
+}
+
+interface Facturas {
+  total: number;
+  activas: number;
+  anuladas: number;
+  estadisticas: {
+    monto_total_facturado: string;
+    monto_iva_facturado: string;
+  };
+  listado: Factura[];
+}
+
+interface PagoCompletoResponse {
+  success: boolean;
+  data: {
+    pago: Pago;
+    cliente: Cliente;
+    credito: Credito;
+    facturas: Facturas;
+  };
+  mensaje: string;
+}
+
+export const getPagoCompleto = async (pagoId: number): Promise<PagoCompletoResponse> => {
+  const response = await api.get(`/api/dte/pago-completo/${pagoId}`);
   return response.data;
 };

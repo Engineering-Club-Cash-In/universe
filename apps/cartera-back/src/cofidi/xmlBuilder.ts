@@ -111,34 +111,34 @@ construirXML(data: DTERequest, totales: DTETotales): string {
     });
   }
 
-  private agregarItems(parent: any, items: DTERequest['items']): void {
-    const itemsElem = parent.ele('dte:Items');
+private agregarItems(parent: any, items: DTERequest['items']): void {
+  const itemsElem = parent.ele('dte:Items');
 
-    items.forEach(item => {
-      const itemElem = itemsElem.ele('dte:Item');
-      itemElem.att('NumeroLinea', item.numeroLinea.toString());
-      itemElem.att('BienOServicio', item.bienOServicio);
+  items.forEach(item => {
+    const itemElem = itemsElem.ele('dte:Item');
+    itemElem.att('NumeroLinea', item.numeroLinea.toString());
+    itemElem.att('BienOServicio', item.bienOServicio);
 
-      itemElem.ele('dte:Cantidad').txt(item.cantidad.toString());
-      itemElem.ele('dte:UnidadMedida').txt(item.unidadMedida);
-      itemElem.ele('dte:Descripcion').txt(item.descripcion);
-      itemElem.ele('dte:PrecioUnitario').txt(item.precioUnitario.toFixed(6));
-      itemElem.ele('dte:Precio').txt(item.precio.toFixed(6));
-      itemElem.ele('dte:Descuento').txt(item.descuento.toFixed(6));
+    itemElem.ele('dte:Cantidad').txt(item.cantidad.toString());
+    itemElem.ele('dte:UnidadMedida').txt(item.unidadMedida);
+    itemElem.ele('dte:Descripcion').txt(item.descripcion);
+    itemElem.ele('dte:PrecioUnitario').txt(item.precioUnitario.toFixed(2)); // ← 🔥 CAMBIAR A 2
+    itemElem.ele('dte:Precio').txt(item.precio.toFixed(2)); // ← 🔥 CAMBIAR A 2
+    itemElem.ele('dte:Descuento').txt(item.descuento.toFixed(6));
 
-      // Impuestos
-      const impuestosElem = itemElem.ele('dte:Impuestos');
-      item.impuestos.forEach(impuesto => {
-        const impuestoElem = impuestosElem.ele('dte:Impuesto');
-        impuestoElem.ele('dte:NombreCorto').txt(impuesto.nombreCorto);
-        impuestoElem.ele('dte:CodigoUnidadGravable').txt(impuesto.codigoUnidadGravable.toString());
-        impuestoElem.ele('dte:MontoGravable').txt(impuesto.montoGravable.toFixed(6));
-        impuestoElem.ele('dte:MontoImpuesto').txt(impuesto.montoImpuesto.toFixed(6));
-      });
-
-      itemElem.ele('dte:Total').txt(item.total.toFixed(2));
+    // Impuestos
+    const impuestosElem = itemElem.ele('dte:Impuestos');
+    item.impuestos.forEach(impuesto => {
+      const impuestoElem = impuestosElem.ele('dte:Impuesto');
+      impuestoElem.ele('dte:NombreCorto').txt(impuesto.nombreCorto);
+      impuestoElem.ele('dte:CodigoUnidadGravable').txt(impuesto.codigoUnidadGravable.toString());
+      impuestoElem.ele('dte:MontoGravable').txt(impuesto.montoGravable.toFixed(2)); // ← 🔥 CAMBIAR A 2
+      impuestoElem.ele('dte:MontoImpuesto').txt(impuesto.montoImpuesto.toFixed(2)); // ← 🔥 CAMBIAR A 2
     });
-  }
+
+    itemElem.ele('dte:Total').txt(item.total.toFixed(2));
+  });
+}
 
   private agregarTotales(parent: any, totales: DTETotales): void {
     const totalesElem = parent.ele('dte:Totales');

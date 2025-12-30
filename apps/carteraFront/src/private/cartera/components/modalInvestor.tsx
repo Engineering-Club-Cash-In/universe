@@ -19,8 +19,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const { register, handleSubmit, reset } = useForm<InvestorPayload>({
     defaultValues: {
       nombre: "",
+      dpi: undefined, // ← NUEVO CAMPO
       emite_factura: false,
-      tipo_reinversion: "sin_reinversion", // ⭐ Cambiado
       banco: "",
       tipo_cuenta: "",
       numero_cuenta: "",
@@ -35,8 +35,8 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     } else if (mode === "create") {
       reset({
         nombre: "",
+        dpi: undefined, // ← NUEVO CAMPO
         emite_factura: false,
-        tipo_reinversion: "sin_reinversion", // ⭐ Cambiado
         banco: "",
         tipo_cuenta: "",
         numero_cuenta: "",
@@ -45,8 +45,15 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
+    // Convertir dpi a número si viene como string
+    const payload = {
+      ...data,
+      dpi: data.dpi ? Number(data.dpi) : null,
+    };
+    console.log("Submitting payload:", payload);
+
     if (mode === "create") {
-      insertInvestor.mutate(data, {
+      insertInvestor.mutate(payload, {
         onSuccess: () => {
           alert("✅ Inversionista creado correctamente.");
           queryClient.invalidateQueries({ queryKey: ["investors"] });
@@ -59,7 +66,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       });
     } else {
       updateInvestor.mutate(
-        { ...data, inversionista_id: initialData?.inversionista_id },
+        { ...payload, inversionista_id: initialData?.inversionista_id },
         {
           onSuccess: () => {
             alert("✅ Inversionista actualizado correctamente.");
@@ -92,6 +99,18 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
               className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
               placeholder="Ej. Juan Pérez"
               required
+            />
+          </div>
+
+          {/* ⭐ NUEVO: DPI */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">DPI </label>
+            <input
+              {...register("dpi")}
+              type="number"
+              className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              placeholder="1234567890101"
+              maxLength={13}
             />
           </div>
 
@@ -141,11 +160,11 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             />
           </div>
 
-          {/* ⭐ NUEVO: Tipo de Reinversión */}
+          {/* ⭐ Tipo de Reinversión */}
           <div>
             <label className="block text-sm text-blue-800 mb-1">Tipo de Reinversión</label>
             <select
-              {...register("tipo_reinversion")}
+              {...register("re_inversion")}
               className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
             >
               <option value="sin_reinversion">Sin Reinversión</option>

@@ -156,7 +156,7 @@ const creditSchema = z.object({
   observaciones: z.string().max(1000),
   no_poliza: z.string().max(1000),
   como_se_entero: z.string().max(100),
-  asesor: z.string().max(1000),
+  asesor: z.number().max(1000),
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
   membresias_pago: z.number().min(0),
@@ -166,6 +166,14 @@ const creditSchema = z.object({
   nit: z.string().max(1000),
   otros: z.number().min(0),
   reserva: z.number().min(0),
+  
+  // Nuevos campos opcionales para dirección del usuario
+  direccion: z.string().max(300).optional().nullable(),
+  municipio: z.string().max(100).optional().nullable(),
+  departamento: z.string().max(100).optional().nullable(),
+  codigo_postal: z.string().max(10).optional().nullable(),
+  pais: z.string().optional().nullable(),
+  
   inversionistas: z
     .array(
       z.object({
@@ -273,15 +281,21 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
 
   const deudatotalRedondeado = deudatotal.round(2);
 
-  // Buscar o crear usuario y asesor
+  // Buscar o crear usuario con los nuevos campos opcionales
   const user: User = await findOrCreateUserByName(
     creditData.usuario,
     creditData.categoria,
     creditData.nit,
-    creditData.como_se_entero
+    creditData.como_se_entero,
+    // Campos opcionales de dirección
+    creditData.direccion ?? null,
+    creditData.municipio ?? null,
+    creditData.departamento ?? null,
+    creditData.codigo_postal ?? null,
+    creditData.pais ?? null
   );
 
-  const advisor: Advisor = await findOrCreateAdvisorByName(creditData.asesor, true);
+  
 
   const formatCredit = creditData.inversionistas.some(
     (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
@@ -301,7 +315,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     observaciones: creditData.observaciones ?? "0",
     no_poliza: creditData.no_poliza ?? "",
     como_se_entero: creditData.como_se_entero ?? "",
-    asesor_id: advisor.asesor_id,
+    asesor_id: parseInt(creditData.asesor),
     plazo: creditData.plazo,
     iva_12: iva_12.toString(),
     membresias_pago: creditData.membresias_pago.toString(),
@@ -471,6 +485,7 @@ const insertInstallments = async (
 
   return { cuotaInicial, cuotasInsertadas };
 };
+
 // ========================================
 // 5. INSERCIÓN DE PAGOS CON AMORTIZACIÓN
 // ========================================
@@ -625,12 +640,14 @@ const insertPayments = async (
 
   await db.insert(pagos_credito).values(pagosValidosSinUndefined);
 };
+
 // ========================================
 // FUNCIÓN PRINCIPAL
 // ========================================
 
 export const insertCredit = async ({ body, set }: { body: unknown; set: SetContext }) => {
   try {
+    console.log("body received for credit insertion:", body);
     // 1. Validar schema
     const parseResult = creditSchema.safeParse(body);
     if (!parseResult.success) {

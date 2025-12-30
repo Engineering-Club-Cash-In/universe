@@ -13,6 +13,8 @@ import {
   pgEnum,
   uniqueIndex,
   unique,
+  bigint,
+  index,
 } from "drizzle-orm/pg-core";
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
@@ -70,7 +72,7 @@ export const usuarios = customSchema.table("usuarios", {
   municipio: varchar("municipio", { length: 100 }),
   departamento: varchar("departamento", { length: 100 }),
   codigo_postal: varchar("codigo_postal", { length: 10 }).default("01001"),
-  pais: varchar("pais", { length: 5 }).default("GT"),
+  pais: varchar("pais").default("GT"),
   
   // Campos existentes
   categoria: varchar("categoria", { length: 100 }),
@@ -363,13 +365,13 @@ export const pagos_credito_inversionistas = customSchema.table(
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")
       .notNull()
-      .references(() => pagos_credito.pago_id), // Pago específico
+      .references(() => pagos_credito.pago_id),
     inversionista_id: integer("inversionista_id")
       .notNull()
-      .references(() => inversionistas.inversionista_id), // Inversionista
+      .references(() => inversionistas.inversionista_id),
     credito_id: integer("credito_id")
       .notNull()
-      .references(() => creditos.credito_id), // Opcional, pero útil
+      .references(() => creditos.credito_id),
 
     abono_capital: numeric("abono_capital", {
       precision: 18,
@@ -387,7 +389,7 @@ export const pagos_credito_inversionistas = customSchema.table(
     porcentaje_participacion: numeric("porcentaje_participacion", {
       precision: 5,
       scale: 2,
-    }).notNull(), // Del crédito
+    }).notNull(),
 
     fecha_pago: timestamp("fecha_pago", { withTimezone: true })
       .notNull()
@@ -395,14 +397,21 @@ export const pagos_credito_inversionistas = customSchema.table(
     estado_liquidacion: estadoLiquidacionEnum("estado_liquidacion")
       .notNull()
       .default("NO_LIQUIDADO"),
-    cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(), // Cuota del crédito
+    cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
+    
+    // 🆕 ENLACE A LIQUIDACIÓN
+    liquidacion_id: integer("liquidacion_id").references(
+      () => liquidaciones.liquidacion_id,
+      { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
+    ),
   },
   (table) => ({
-    // 🆕 CONSTRAINT ÚNICO: Un inversionista no puede tener múltiples registros para el mismo pago
     uniquePagoInversionista: unique("unique_pago_inversionista").on(
       table.pago_id,
       table.inversionista_id
     ),
+    // 🆕 Índice para búsquedas por liquidación
+    liquidacionIdx: index("idx_pagos_liquidacion").on(table.liquidacion_id),
   })
 );
 export const bancos = customSchema.table('bancos', {
@@ -447,14 +456,15 @@ export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
 
 export const inversionistas = customSchema.table("inversionistas", {
   inversionista_id: serial("inversionista_id").primaryKey(),
-  nombre: varchar("nombre", { length: 200 }).notNull(),
-  emite_factura: boolean("emite_factura").notNull(), 
+  nombre: varchar("nombre", { length: 200 }).notNull().unique(),
+  dpi: bigint("dpi", { mode: "number" }), // ← NUEVO CAMPO (opcional)
+  emite_factura: boolean("emite_factura").notNull(),
   tipo_reinversion: tipoReinversionEnum("tipo_reinversion")
     .notNull()
     .default("sin_reinversion"),
   banco: bancoEnum("banco"),
   tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
-  numero_cuenta: varchar("numero_cuenta", { length: 100 }), 
+  numero_cuenta: varchar("numero_cuenta", { length: 100 }),
 });
 export const asesores = customSchema.table("asesores", {
   asesor_id: serial("asesor_id").primaryKey(),
@@ -607,3 +617,37 @@ export const facturas_electronicas = customSchema.table("facturas_electronicas",
   created_at: timestamp("created_at").defaultNow().notNull(),
   created_by: integer("created_by").references(() => platform_users.id),
 });
+
+
+// 🆕 TABLA: liquidaciones
+export const liquidaciones = customSchema.table(
+  "liquidaciones",
+  {
+    liquidacion_id: serial("liquidacion_id").primaryKey(),
+    
+    // Inversionista (OPCIONAL - null = liquidación masiva)
+    inversionista_id: integer("inversionista_id").references(
+      () => inversionistas.inversionista_id
+    ),
+    
+    // Totales de la liquidación
+    total_pagos_liquidados: integer("total_pagos_liquidados").notNull().default(0),
+    total_capital: numeric("total_capital", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_interes: numeric("total_interes", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_iva: numeric("total_iva", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_isr: numeric("total_isr", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_cuota: numeric("total_cuota", { precision: 18, scale: 2 }).notNull().default("0"),
+    reporte_liquidacion: text("reporte_liquidacion"),
+    // Fecha
+    fecha_liquidacion: timestamp("fecha_liquidacion", { withTimezone: true })
+      .notNull()
+      .$default(() => new Date()),
+  },
+  (table) => ({
+    inversionistaIdx: index("idx_liquidaciones_inversionista").on(
+      table.inversionista_id
+    ),
+    fechaIdx: index("idx_liquidaciones_fecha").on(table.fecha_liquidacion),
+      reporte_liquidacion: text("reporte_liquidacion"),
+  })
+);

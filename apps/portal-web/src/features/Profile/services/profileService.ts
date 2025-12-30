@@ -10,10 +10,40 @@ export interface ProfileData {
   direccion?: string;
 }
 
+export interface VehiclePhoto {
+  id: string;
+  vehicleId: string;
+  inspectionId: string | null;
+  category: string;
+  photoType: string;
+  title: string;
+  description: string;
+  url: string;
+  valuatorComment: string | null;
+  noCommentsChecked: boolean;
+  createdAt: string;
+}
+
+export interface Vehicle {
+  id: string;
+  make: string;
+  model: string;
+  year: number;
+  licensePlate: string;
+  color: string;
+  status: string;
+  vin: string;
+  type: string;
+  origin: string;
+  engine: string;
+  photos: VehiclePhoto[];
+}
+
 export interface Opportunity {
   opportunityId: string;
   opportunityTitle: string;
   numeroSifco: string;
+  vehicle: Vehicle;
 }
 
 export interface UpdateFieldResponse {
@@ -91,10 +121,10 @@ export const updateLead = async (
 };
 
 export const getNumbersSifco = async (
-  dpi: string,
+  email: string,
   token: string | null
 ): Promise<Opportunity[]> => {
-  const response = await fetch(`${crmURL}/api/portal/lead/sifco?dpi=${dpi}`, {
+  const response = await fetch(`${crmURL}/api/portal/lead/sifco?email=${email}`, {
     credentials: "include",
     headers: {
       Authorization: `Bearer ${token}`,

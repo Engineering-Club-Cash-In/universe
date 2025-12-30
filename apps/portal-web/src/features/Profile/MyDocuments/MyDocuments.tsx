@@ -3,6 +3,7 @@ import {
   IconDownload,
   IconTarget,
   IconPerson,
+  Loading,
 } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib";
@@ -15,14 +16,10 @@ import {
 import { motion } from "framer-motion";
 import { ContainerMenu } from "../components/ContainerMenu";
 import { useIsMobile } from "@/hooks";
-import { useProfile } from "../hooks/useProfile";
 
 export const MyDocuments = () => {
   const { user, token } = useAuth();
-
-   useProfile();
   
-
   // Obtener contratos
   const { data: contracts, isLoading: loadingContracts } = useQuery({
     queryKey: ["contracts", user?.email],
@@ -66,9 +63,7 @@ export const MyDocuments = () => {
       <div>
         <NavBar />
         <div className="max-w-7xl mx-auto mt-26 mb-20">
-          <div className="flex justify-center items-center py-20">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
-          </div>
+          <Loading />
         </div>
       </div>
     );

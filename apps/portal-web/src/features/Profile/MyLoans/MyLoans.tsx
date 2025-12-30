@@ -105,9 +105,11 @@ export const MyLoans = () => {
     return (
       <div>
         <NavBar />
-        <div className="max-w-7xl mx-auto mt-26 mb-20">
-          <Loading />
-        </div>
+        <ContainerMenu>
+          <div className="max-w-7xl mx-auto mt-26 mb-20">
+            <Loading />
+          </div>
+        </ContainerMenu>
       </div>
     );
   }

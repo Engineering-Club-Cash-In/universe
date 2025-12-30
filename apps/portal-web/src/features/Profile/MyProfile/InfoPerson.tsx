@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { InputIcon, IconAddress, IconPhone, IconPerson } from "@/components";
+import { InputIcon, IconAddress, IconPhone, IconPerson, Loading } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { ModalConfirmChange } from "./ModalConfirmChange";
 import { getProfile } from "../services";
@@ -22,7 +22,7 @@ export const InfoPerson = ({ userId, userEmail }: InfoPersonProps) => {
   const { token } = useAuth();
 
   // Obtener perfil usando el servicio centralizado
-  const { data: profileData, refetch } = useQuery({
+  const { data: profileData, isLoading, refetch } = useQuery({
     queryKey: ["profile", userId],
     queryFn: () => getProfile(userEmail, token),
     enabled: !!userId,
@@ -78,6 +78,10 @@ export const InfoPerson = ({ userId, userEmail }: InfoPersonProps) => {
   );
 
   const isProfileComplete = !!(profileData?.dpi && profileData?.phone);
+
+  if (isLoading) {
+    return <Loading />;
+  }
 
   return (
     <div className="space-y-8">

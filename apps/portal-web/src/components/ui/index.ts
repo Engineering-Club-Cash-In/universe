@@ -8,3 +8,4 @@ export * from "./BottomSheets";
 export * from "./Select";
 export * from "./InputIcon";
 export * from "./Interval";
+export * from "./Loading";

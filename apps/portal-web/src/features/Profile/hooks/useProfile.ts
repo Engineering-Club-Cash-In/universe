@@ -3,8 +3,7 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { authClient } from "@/lib/auth";
 import { sendLead } from "@/features/FormLeads/service/serviceLead";
-import { getProfile, getNumbersSifco } from "../services/profileService";
-import { useStoreProfile } from "../store/useStoreProfile";
+import { getProfile } from "../services/profileService";
 
 interface UserData {
   id: string;
@@ -22,7 +21,6 @@ export const useProfile = () => {
   const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string>("");
   const [leadVerified, setLeadVerified] = useState(false);
-  const { setOpportunities, opportunities } = useStoreProfile();
 
   // Query para obtener perfil (con cache automático)
   const { data: profileData, error: profileError } = useQuery({
@@ -63,22 +61,6 @@ export const useProfile = () => {
     createLeadIfNeeded();
   }, [profileError, leadVerified, user]);
 
-  // Query para obtener números SIFCO (con cache automático)
-  const { data: sifcoNumbers } = useQuery({
-    queryKey: ["sifco-numbers", profileData?.dpi],
-    queryFn: () => getNumbersSifco(profileData!.dpi!, sessionToken),
-    enabled: !!profileData?.dpi && !!sessionToken && opportunities.length === 0,
-    staleTime: 10 * 60 * 1000, // Cache por 10 minutos
-    retry: false,
-  });
-
-  // Guardar números SIFCO en el store cuando se cargan
-  useEffect(() => {
-    if (sifcoNumbers && sifcoNumbers.length > 0 && opportunities.length === 0) {
-      setOpportunities(sifcoNumbers);
-      console.log("Números SIFCO cargados:", sifcoNumbers);
-    }
-  }, [sifcoNumbers, setOpportunities, opportunities.length]);
 
   // Verificar lead solo cuando profileData cambia y aún no se ha verificado
   useEffect(() => {

@@ -1,10 +1,11 @@
-import { and, eq, gte, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "../database";
 import { asesores, creditos, cuotas_credito, moras_condonaciones, moras_credito, platform_users, usuarios } from "../database/db/schema";
 import Big from "big.js";
 import { toZonedTime } from "date-fns-tz";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
+import { stat } from "fs";
 /**
  * Create a new mora (penalty) for a credit.
  *
@@ -15,55 +16,104 @@ import ExcelJS from "exceljs";
  */
 export async function createMora({
   credito_id,
-  monto_mora = 0,
+  monto_mora,
   cuotas_atrasadas = 0,
 }: {
   credito_id: number;
   monto_mora?: number;
   cuotas_atrasadas?: number;
 }) {
+  // 🔥 Log de entrada
+  const requestId = `${credito_id}-${Date.now()}`;
+  console.log(`
+╔════════════════════════════════════════════════════════════
+║ [CREATE MORA ENTRY] Request ID: ${requestId}
+║ Crédito ID: ${credito_id}
+║ Monto Mora: ${monto_mora}
+║ Cuotas Atrasadas: ${cuotas_atrasadas}
+║ Timestamp: ${new Date().toISOString()}
+╚════════════════════════════════════════════════════════════
+  `);
+
   try {
-    // 1. Insert mora record
-    const [newMora] = await db
-      .insert(moras_credito)
-      .values({
-        credito_id,
-        monto_mora: monto_mora.toString(), // store as string
-        cuotas_atrasadas,
-        activa: true,
-        porcentaje_mora: "1.12", // fixed percentage
-      })
-      .returning();
+    // 1. Eliminar cualquier mora activa anterior del crédito
+    console.log(`[${requestId}] 🗑️  PASO 1: Eliminando moras activas anteriores...`);
+    
+    const deletedRows = await db
+      .delete(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, credito_id),
+          eq(moras_credito.activa, true)
+        )
+      );
+    
+    console.log(`[${requestId}] ✅ Moras eliminadas: ${deletedRows ? 'Sí' : 'No'}`);
 
-    // 2. Update credit status depending on mora amount
-    if (Number(monto_mora) > 0) {
+    if (monto_mora && monto_mora > 0) {
+      console.log(`[${requestId}] 💰 PASO 2: Insertando nueva mora con monto ${monto_mora}...`);
+      
+      // 2. Insertar la nueva mora
+      const [newMora] = await db
+        .insert(moras_credito)
+        .values({
+          credito_id,
+          monto_mora: monto_mora?.toString() ?? "0",
+          cuotas_atrasadas,
+          activa: true,
+          porcentaje_mora: "1.12",
+        })
+        .returning();
+
+      console.log(`[${requestId}] ✅ Mora creada: ID=${newMora.mora_id}`);
+
+      // 3. Actualizar status del crédito según el monto
+      const newStatus = Number(monto_mora) > 0 ? "MOROSO" : "ACTIVO";
+      
+      console.log(`[${requestId}] 🔄 PASO 3: Actualizando status a ${newStatus}...`);
+      
       await db
         .update(creditos)
-        .set({
-          statusCredit: "MOROSO", 
-        })
+        .set({ statusCredit: newStatus })
         .where(eq(creditos.credito_id, credito_id));
 
-      console.log(`[UPDATE] Credit #${credito_id} status changed to MOROSO`);
+      console.log(`[${requestId}] ✅ Status actualizado a ${newStatus}`);
+
+      console.log(`
+╔════════════════════════════════════════════════════════════
+║ [CREATE MORA SUCCESS] Request ID: ${requestId}
+║ Mora ID: ${newMora.mora_id}
+║ Status: ${newStatus}
+║ Timestamp: ${new Date().toISOString()}
+╚════════════════════════════════════════════════════════════
+      `);
+
+      return {
+        success: true,
+        mora: newMora,
+        status: newStatus,
+      };
     } else {
-      await db
-        .update(creditos)
-        .set({
-          statusCredit: "ACTIVO", 
-        })
-        .where(eq(creditos.credito_id, credito_id));
-
-      console.log(`[INFO] Credit #${credito_id} remains in ACTIVO (mora = 0)`);
+      console.log(`[${requestId}] ❌ RECHAZADO: Monto debe ser mayor a 0`);
+      
+      return {
+        success: false,
+        message: "[ERROR] Monto de mora debe ser mayor a 0",
+      };
     }
-
-    return {
-      success: true,
-      mora: newMora,
-    };
   } catch (error) {
+    console.error(`
+╔════════════════════════════════════════════════════════════
+║ [CREATE MORA ERROR] Request ID: ${requestId}
+║ Crédito ID: ${credito_id}
+║ Error: ${String(error)}
+║ Timestamp: ${new Date().toISOString()}
+╚════════════════════════════════════════════════════════════
+    `);
+    
     return {
       success: false,
-      message: "[ERROR] Could not create mora",
+      message: "[ERROR] Could not upsert mora",
       error: String(error),
     };
   }
@@ -208,7 +258,8 @@ export async function procesarMoras() {
   try {
     // Current date in Guatemala timezone
     const hoy = toZonedTime(new Date(), zona);
-    console.log("[INFO] Current Guatemala date:", hoy.toISOString());
+    hoy.setHours(0, 0, 0, 0); // Resetear a medianoche
+    console.log("[INFO] Current Guatemala date (midnight):", hoy.toISOString());
 
     // 1. Get all installments
     const cuotas = await db
@@ -216,13 +267,20 @@ export async function procesarMoras() {
         credito_id: cuotas_credito.credito_id,
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
+        statusCredit: creditos.statusCredit,
       })
       .from(cuotas_credito);
 
-    // 2. Filter overdue installments
+    // 2. Filter overdue installments (comparación por DÍA completo)
     const cuotasVencidas = cuotas.filter((c) => {
       const fechaVenc = toZonedTime(c.fecha_vencimiento, zona);
-      return fechaVenc < hoy && c.pagado === false;
+      fechaVenc.setHours(0, 0, 0, 0); // Resetear a medianoche
+      
+      return (
+        fechaVenc < hoy && 
+        c.pagado === false && 
+        c.statusCredit !== "EN_CONVENIO"
+      );
     });
 
     console.log("[DEBUG] Overdue installments found:", cuotasVencidas);
@@ -261,59 +319,27 @@ export async function procesarMoras() {
       console.log(`[DEBUG] Credit capital: ${capital.toString()}`);
 
       // Calculate mora = capital × percentage × overdue installments
-      const porcentaje = new Big("0.0112");
+      const porcentaje = new Big("0.0112"); // 1.2% monthly penalty
       const moraNueva = capital.times(porcentaje).times(cuotasAtrasadas);
       console.log(`[DEBUG] New mora calculated: ${moraNueva.toString()}`);
 
-      // Check if mora already exists
-      const [moraActual] = await db
-        .select({
-          id: moras_credito.mora_id,
-          monto: moras_credito.monto_mora,
-        })
-        .from(moras_credito)
-        .where(eq(moras_credito.credito_id, creditoId));
+      // 🔥 Usar el upsert en vez del if/else
+      const result = await createMora({
+        credito_id: creditoId,
+        monto_mora: Number(moraNueva.toString()),
+        cuotas_atrasadas: cuotasAtrasadas,
+      });
 
-      if (moraActual) {
-        // Update existing mora
+      if (result.success) {
         console.log(
-          `[INFO] Existing mora found with amount: ${moraActual.monto}`
+          `[SUCCESS] Mora upserted for credit #${creditoId} → Status: ${result.status}`
         );
-        const montoTotal = new Big(moraActual.monto).plus(moraNueva);
-        console.log(`[INFO] New mora total: ${montoTotal.toString()}`);
-
-        await db
-          .update(moras_credito)
-          .set({
-            monto_mora: montoTotal.toString(),
-            cuotas_atrasadas: cuotasAtrasadas,
-            activa: true,
-            updated_at: new Date(),
-          })
-          .where(eq(moras_credito.mora_id, moraActual.id));
-
-        console.log(`[SUCCESS] Mora updated for credit #${creditoId}`);
       } else {
-        // Insert new mora
-        await db.insert(moras_credito).values({
-          credito_id: creditoId,
-          monto_mora: moraNueva.toString(),
-          cuotas_atrasadas: cuotasAtrasadas,
-          activa: true,
-          porcentaje_mora: "1.12",
-        });
-        console.log(`[SUCCESS] Mora created for credit #${creditoId}`);
+        console.error(
+          `[ERROR] Failed to upsert mora for credit #${creditoId}:`,
+          result.message
+        );
       }
-
-      // ✅ Update credit status to MOROSO
-      await db
-        .update(creditos)
-        .set({
-          statusCredit: "MOROSO", 
-        })
-        .where(eq(creditos.credito_id, creditoId));
-
-      console.log(`[UPDATE] Credit #${creditoId} status changed to MOROSO`);
     }
 
     console.log("\n[JOB] Finished mora processing.");
@@ -321,7 +347,7 @@ export async function procesarMoras() {
     console.error("[ERROR] Failed to process moras:", error.message);
     throw error;
   }
-} 
+}
 
 /**
  * Condonar mora de un crédito:
@@ -358,7 +384,10 @@ export async function condonarMora({
       })
       .from(moras_credito)
       .where(eq(moras_credito.credito_id, credito_id));
+    const monto= moraActual?.monto || "0";
 
+     console.log(`[INFO] Current mora amount for credit #${credito_id}: ${monto}`);
+     console.log(`[INFO] Condonation reason: ${motivo}`);
     if (!moraActual) {
       return { success: false, message: "[ERROR] Mora no encontrada para este crédito" };
     }
@@ -390,6 +419,7 @@ export async function condonarMora({
         mora_id: moraActual.id,
         motivo,
         usuario_id: user.id, // 🔑 guardar el ID del usuario
+        montoCondonacion: monto,
       })
       .returning();
 
@@ -442,7 +472,7 @@ export async function getCreditosWithMoras({
   if (cuotas_atrasadas !== undefined) {
     whereClauses.push(gte(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
   }
-
+  whereClauses.push(eq(moras_credito.activa, true)); // Solo moras activas
   const query = db
     .select({
       credito_id: creditos.credito_id,
@@ -459,7 +489,7 @@ export async function getCreditosWithMoras({
       asesor: asesores.nombre,
       monto_mora: moras_credito.monto_mora,
       cuotas_atrasadas: moras_credito.cuotas_atrasadas,
-      mora_activa: moras_credito.activa,
+      mora_activa: moras_credito.activa, 
     })
     .from(creditos)
     .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
@@ -588,6 +618,7 @@ export async function getCondonacionesMora({
       motivo: moras_condonaciones.motivo,
       fecha: moras_condonaciones.fecha,
       usuario_email: platform_users.email,
+      montoCondonacion: moras_condonaciones.montoCondonacion,
     })
     .from(moras_condonaciones)
     .innerJoin(creditos, eq(moras_condonaciones.credito_id, creditos.credito_id))
@@ -595,9 +626,9 @@ export async function getCondonacionesMora({
     .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
     .innerJoin(platform_users, eq(moras_condonaciones.usuario_id, platform_users.id))
     .where(whereClauses.length > 0 ? and(...whereClauses) : undefined);
-
+console.log(query)
   const data = await query;
-
+    console.log("[DEBUG] Condonations found:", data);
   if (!excel) {
     return {
       success: true,
@@ -657,4 +688,101 @@ export async function getCondonacionesMora({
     excelUrl: url,
     count: data.length,
   };
+}
+
+
+export async function condonarTodasLasMoras({
+  motivo,
+  usuario_email,
+}: {
+  motivo: string;
+  usuario_email: string;
+}) {
+  try {
+    // 1. Buscar el usuario por email
+    const [user] = await db
+      .select({ id: platform_users.id })
+      .from(platform_users)
+      .where(eq(platform_users.email, usuario_email));
+
+    if (!user) {
+      return { success: false, message: "[ERROR] Usuario no encontrado" };
+    }
+
+    // 2. Obtener todos los créditos MOROSOS con sus moras activas
+    const creditosMorosos = await db
+      .select({
+        credito_id: creditos.credito_id,
+        mora_id: moras_credito.mora_id,
+        monto_mora: moras_credito.monto_mora,
+      })
+      .from(creditos)
+      .leftJoin(
+        moras_credito,
+        and(
+          eq(creditos.credito_id, moras_credito.credito_id),
+          eq(moras_credito.activa, true)
+        )
+      )
+      .where(eq(creditos.statusCredit, "MOROSO"));
+      console.log(`[INFO] Found ${creditosMorosos.length} morose credits to condone`);
+
+    if (creditosMorosos.length === 0) {
+      return {
+        success: true,
+        message: "[INFO] No hay créditos morosos para condonar",
+        condonados: 0,
+      };
+    }
+
+    // 3. Actualizar todas las moras a 0 y desactivarlas
+    const moraIds = creditosMorosos.map((c) => c.mora_id).filter((id): id is number => id !== null);
+    await db
+      .update(moras_credito)
+      .set({
+        monto_mora: "0",
+        activa: false,
+        updated_at: new Date(),
+      })
+      .where(inArray(moras_credito.mora_id, moraIds));
+
+    // 4. Cambiar estado de todos los créditos -> ACTIVO
+    const creditoIds = creditosMorosos.map((c) => c.credito_id);
+    await db
+      .update(creditos)
+      .set({
+        statusCredit: "ACTIVO",
+      })
+      .where(inArray(creditos.credito_id, creditoIds));
+
+    // 5. Insertar registros masivos en moras_condonaciones
+    const condonacionesData = creditosMorosos
+      .filter((credito) => credito.mora_id !== null)
+      .map((credito) => ({
+        credito_id: credito.credito_id,
+        mora_id: credito.mora_id as number,
+        motivo,
+        usuario_id: user.id,
+        montoCondonacion: credito.monto_mora ??"0",
+      }));
+
+    const condonaciones = await db
+      .insert(moras_condonaciones)
+      .values(condonacionesData)
+      .returning();
+
+    return {
+      success: true,
+      message: `[SUCCESS] Se condonaron ${creditosMorosos.length} moras`,
+      condonados: creditosMorosos.length,
+      creditos_afectados: creditoIds,
+      condonaciones,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: "[ERROR] No se pudieron condonar las moras masivamente",
+      error: String(error),
+    };
+  }
 }

@@ -4,16 +4,25 @@ import { Outlet } from "react-router-dom";
 
 export function MainLayout() {
   return (
-    
-   <SidebarProvider>
-  <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] min-h-screen w-full">
-    <DashBoardCartera />
-   <main className="flex justify-center min-h-screen w-full bg-transparent">
-  <div className="w-full max-w-3xl px-2 sm:px-0">
-    <Outlet />
-  </div>
-</main>
-  </div>
-</SidebarProvider>
+    <SidebarProvider>
+      {/* Container principal con altura completa fija */}
+      <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-blue-50 via-white to-blue-50">
+        {/* Sidebar: Siempre renderizado (maneja mobile internamente) */}
+        <DashBoardCartera />
+
+        {/* Main content area con scroll independiente */}
+   <main className="flex-1 overflow-y-auto overflow-x-hidden lg:ml-[260px]">
+          <div className="min-h-full">
+            {/* Contenedor con padding adaptativo */}
+            <div className="w-full px-4 sm:px-6 lg:px-8 py-6 pt-20 lg:pt-8">
+              {/* Outlet con animación de entrada */}
+              <div className="animate-fadeIn">
+                <Outlet />
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </SidebarProvider>
   );
 }

@@ -1,11 +1,12 @@
 // routes/inversionistas.ts
-import { Elysia } from "elysia";
+import { Elysia, t } from "elysia";
 import {
   actualizarEstadoCredito,
   cancelCredit,
   getCreditoByNumero,
   getCreditosIncobrables,
   getCreditosWithUserByMesAnio, 
+  mergeCreditosAndUpdate, 
   resetCredit, 
 } from "../controllers/credits";
 import { z } from "zod";
@@ -33,12 +34,26 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import { updateCredit } from "../controllers/updateCredit";
+import { ajustarCuotasConSIFCO, updateAllInstallments, updateCredit } from "../controllers/updateCredit";
+import { creditos, cuotas_credito } from "../database/db";
+import { and, desc, eq } from "drizzle-orm";
+import { db } from "../database";
+
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
   monto: z.number({ invalid_type_error: "monto debe ser numérico" }),
 });
 
+const mergeCreditSchema = t.Object({
+  numero_credito_origen: t.String({
+    minLength: 1,
+    description: "Número de crédito SIFCO que será absorbido (se cancela)"
+  }),
+  numero_credito_destino: t.String({
+    minLength: 1,
+    description: "Número de crédito SIFCO que quedará activo"
+  })
+});
 const RouterBodySchema = z.object({
   creditId: z.coerce.number().int().positive(),
   motivo: z.string().optional(),
@@ -49,15 +64,22 @@ const RouterBodySchema = z.object({
     "ACTIVAR",
     "INCOBRABLE",
     "PENDIENTE_CANCELACION",
+    "EN_CONVENIO",
+    "MOROSO"
   ]),
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
 });
 export const creditRouter = new Elysia()
-  .use(authMiddleware)
+ 
+//.use(authMiddleware)
   // Crear nuevo crédito
-  .post("/newCredit", async ({ body, set }) => {
-    return await insertCredit({ body, set });
-  })
+.post("/newCredit", async ({ body, set }) => {
+  const result = await insertCredit({ body, set });
+  if (result && typeof result === 'object' && 'status' in result) {
+    set.status = result.status as number;
+  }
+  return result;
+})
   .post("/updateCredit", updateCredit)
   // Obtener crédito por query param ?numero_credito_sifco=XXXX
   .get("/credito", async ({ query, set }) => {
@@ -91,8 +113,10 @@ export const creditRouter = new Elysia()
     page = "1",
     perPage = "10",
     numero_credito_sifco,
-    estado, // 👈 obligatorio
-    excel,  // 👈 nuevo parámetro
+    estado,           // 👈 obligatorio
+    excel,            // 👈 para generar Excel
+    asesor_id,        // 👈 NUEVO
+    nombre_usuario,   // 👈 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -114,7 +138,15 @@ export const creditRouter = new Elysia()
     | "CANCELADO"
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
+    | "EN_CONVENIO"
     | "MOROSO"
+    |"EN_CONVENIO"
+  
+  // 🆕 Convertir asesor_id a número si existe
+  const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
+  
+  // 🆕 Nombre de usuario (string)
+  const nombreUsuarioParam = nombre_usuario ? String(nombre_usuario) : undefined;
 
   if (
     isNaN(mesNum) ||
@@ -125,6 +157,12 @@ export const creditRouter = new Elysia()
   ) {
     set.status = 400;
     return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
+  }
+
+  // 🆕 Validar asesor_id si se envía
+  if (asesor_id && isNaN(asesorIdNum!)) {
+    set.status = 400;
+    return { message: "Parámetro 'asesor_id' debe ser un número válido." };
   }
 
   // Llamar servicio
@@ -138,6 +176,8 @@ export const creditRouter = new Elysia()
         perPage: perPageNum,
         numero_credito_sifco: numeroCreditoSifco,
         estado: estadoParam,
+        asesor_id: asesorIdNum,           // 👈 NUEVO
+        nombre_usuario: nombreUsuarioParam, // 👈 NUEVO
         excel: true,
       });
       set.status = 200;
@@ -150,7 +190,10 @@ export const creditRouter = new Elysia()
         pageNum,
         perPageNum,
         numeroCreditoSifco,
-        estadoParam
+        estadoParam,  
+        asesorIdNum,           // 👈 NUEVO
+        nombreUsuarioParam,    // 👈 NUEVO
+        
       );
       set.status = 200;
       return result;
@@ -160,7 +203,6 @@ export const creditRouter = new Elysia()
     return { message: "Error obteniendo créditos", error: String(error) };
   }
 })
-
 
   .post("/cancelCredit", async ({ body, set }) => {
     // Validar que venga el creditId en el body
@@ -209,7 +251,10 @@ export const creditRouter = new Elysia()
     const requiereMotivoYMonto =
       accion === "CANCELAR" ||
       accion === "PENDIENTE_CANCELACION" ||
-      accion === "INCOBRABLE";
+      accion === "INCOBRABLE"
+      || accion === "EN_CONVENIO"
+      || accion === "MOROSO"
+        
 
     if (requiereMotivoYMonto && (!motivo || monto_cancelacion == null)) {
       set.status = 400;
@@ -629,4 +674,349 @@ export const creditRouter = new Elysia()
       filename,
       size: fileBuffer.length,
     };
-  });
+  })
+
+/**
+ * POST /api/installments/update-all
+ * Actualiza las cuotas de todos los créditos o uno específico
+ * Body (opcional): { numero_credito_sifco?: string }
+ */
+.post('/update-all', async ({ body, set }) => {
+  try {
+    const { numero_credito_sifco } = body;
+
+    await updateAllInstallments({ numero_credito_sifco });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: numero_credito_sifco 
+        ? `Crédito ${numero_credito_sifco} actualizado correctamente`
+        : 'Todos los créditos actualizados correctamente',
+    };
+  } catch (error) {
+    console.error('Error en update-all:', error);
+    set.status = 500;
+    return {
+      success: false,
+      message: 'Error al actualizar las cuotas',
+      error: error instanceof Error ? error.message : 'Error desconocido',
+    };
+  }
+}, {
+  body: t.Object({
+    numero_credito_sifco: t.Optional(t.String())
+  })
+})
+.post(
+    "/merge",
+    async ({ body, set }) => {
+      try {
+        console.log("📨 Solicitud de fusión recibida:");
+        console.log(`   Origen: ${body.numero_credito_origen}`);
+        console.log(`   Destino: ${body.numero_credito_destino}`);
+        console.log("");
+
+        // Validar que no sean el mismo crédito
+        if (body.numero_credito_origen === body.numero_credito_destino) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "El crédito origen y destino no pueden ser el mismo",
+            error: "SAME_CREDIT"
+          };
+        }
+
+        // Ejecutar la fusión
+        const resultado = await mergeCreditosAndUpdate({
+          numero_credito_origen: body.numero_credito_origen,
+          numero_credito_destino: body.numero_credito_destino
+        });
+
+        set.status = 200;
+        return resultado;
+
+      } catch (error: any) {
+        console.error("❌ Error en el endpoint de fusión:", error);
+
+        // Manejar errores específicos
+        if (error.message?.includes("no encontrado")) {
+          set.status = 404;
+          return {
+            success: false,
+            message: error.message,
+            error: "CREDIT_NOT_FOUND"
+          };
+        }
+
+        // Error genérico
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al fusionar créditos",
+          error: error.message || "Unknown error"
+        };
+      }
+    },
+    {
+      body: mergeCreditSchema,
+      detail: {
+        summary: "Fusionar dos créditos",
+        description: `
+          Fusiona dos créditos Pool en uno solo.
+          
+          **Proceso:**
+          1. Suma los capitales de ambos créditos
+          2. Recalcula intereses, IVA y deuda total
+          3. Traslada inversionistas del crédito origen al destino
+          4. Marca el crédito origen como CANCELADO
+          5. Actualiza las cuotas del crédito destino
+          
+          **Nota:** El crédito DESTINO es el que quedará activo con todos los valores consolidados.
+        `,
+        tags: ["Créditos"]
+      },
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          nueva_cuota: t.Number(),
+          creditoFinal: t.Object({
+            numero_credito: t.String(),
+            credito_id: t.Number(),
+            capital_total: t.String(),
+            cuota: t.String(),
+            deuda_total: t.String(),
+            total_inversionistas: t.Number(),
+            credito_cancelado: t.String()
+          })
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        }),
+        404: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        }),
+        500: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String()
+        })
+      }
+    }
+  )
+  .get("/ultima-cuota-pagada", async ({ query, set }) => {
+  const { numero_credito_sifco } = query;
+  
+  if (!numero_credito_sifco) {
+    set.status = 400;
+    return { message: "Falta el parámetro 'numero_credito_sifco'" };
+  }
+
+  try {
+    // 1️⃣ Buscar el crédito
+    const creditoData = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      .limit(1);
+
+    if (creditoData.length === 0) {
+      set.status = 404;
+      return { 
+        message: "Crédito no encontrado",
+        numero_credito_sifco 
+      };
+    }
+
+    const creditoId = creditoData[0].credito_id;
+
+    // 2️⃣ Buscar la última cuota pagada (pagado = true)
+    const ultimaCuotaPagada = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,  
+      })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditoId),
+          eq(cuotas_credito.pagado, true)
+        )
+      )
+      .orderBy(desc(cuotas_credito.numero_cuota)) // 👈 De mayor a menor
+      .limit(1);
+
+    // 3️⃣ Si no hay cuotas pagadas
+    if (ultimaCuotaPagada.length === 0) {
+      return {
+        numero_credito_sifco,
+        credito_id: creditoId,
+        ultima_cuota_pagada: null,
+        mensaje: "No hay cuotas pagadas aún"
+      };
+    }
+
+    // 4️⃣ Retornar la info
+    return {
+      numero_credito_sifco,
+      credito_id: creditoId,
+      ultima_cuota_pagada: ultimaCuotaPagada[0].numero_cuota,
+      info_cuota: ultimaCuotaPagada[0]
+    };
+
+  } catch (error) {
+    console.error("[ultima-cuota-pagada] Error:", error);
+    set.status = 500;
+    return { 
+      message: "Error consultando crédito", 
+      error: String(error) 
+    };
+  }
+}) .post(
+    "/ajustar-cuotas-sifco",
+    async ({ body, set }) => {
+      try {
+        const { numero_credito_sifco, cuota_real_actual } = body;
+
+        console.log(`📨 Solicitud de ajuste de cuotas:`);
+        console.log(`   Crédito: ${numero_credito_sifco}`);
+        console.log(`   Cuota actual: ${cuota_real_actual}`);
+
+        // Validaciones
+        if (!numero_credito_sifco || !cuota_real_actual) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "Faltan parámetros requeridos: numero_credito_sifco y cuota_real_actual",
+          };
+        }
+
+        if (cuota_real_actual < 1) {
+          set.status = 400;
+          return {
+            success: false,
+            message: "cuota_real_actual debe ser mayor o igual a 1",
+          };
+        }
+
+        // Ejecutar ajuste
+        await ajustarCuotasConSIFCO({
+          numero_credito_sifco,
+          cuota_real_actual,
+        });
+
+        set.status = 200;
+        return {
+          success: true,
+          message: `Cuotas ajustadas correctamente para el crédito ${numero_credito_sifco}`,
+          data: {
+            numero_credito_sifco,
+            cuota_real_actual,
+            cuotas_historicas: cuota_real_actual - 1,
+          },
+        };
+      } catch (error: any) {
+        console.error("❌ Error en ajustar-cuotas-sifco:", error);
+
+        // Manejar errores específicos
+        if (error.message?.includes("no encontrado")) {
+          set.status = 404;
+          return {
+            success: false,
+            message: error.message,
+            error: "CREDIT_NOT_FOUND",
+          };
+        }
+
+        if (error.message?.includes("SIFCO")) {
+          set.status = 502;
+          return {
+            success: false,
+            message: "Error al consultar SIFCO",
+            error: error.message,
+          };
+        }
+
+        // Error genérico
+        set.status = 500;
+        return {
+          success: false,
+          message: "Error al ajustar cuotas",
+          error: error.message || "Unknown error",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String({
+          minLength: 1,
+          description: "Número de crédito SIFCO",
+          examples: ["01010101001040"],
+        }),
+        cuota_real_actual: t.Number({
+          minimum: 1,
+          description: "Número de la cuota actual (la que está por pagar)",
+          examples: [19],
+        }),
+      }),
+      detail: {
+        summary: "Ajustar cuotas históricas con datos de SIFCO",
+        description: `
+          Ajusta las cuotas de un crédito basándose en los datos reales de SIFCO.
+          
+          **Proceso:**
+          1. Consulta el estado de cuenta en SIFCO
+          2. Obtiene el capital inicial del primer pago
+          3. Calcula amortización correcta para todas las cuotas
+          4. Actualiza cuotas PAGADAS con abonos reales
+          5. Actualiza cuotas PENDIENTES solo con restantes
+          6. Renumera las cuotas pendientes
+          
+          **Parámetros:**
+          - \`numero_credito_sifco\`: Número del crédito en SIFCO
+          - \`cuota_real_actual\`: Cuota que está por pagar (ej: 19)
+          
+          **Ejemplo:** Si mandás cuota_real_actual = 19, se marcarán como pagadas las cuotas 1-18.
+        `,
+        tags: ["Créditos", "SIFCO"],
+      },
+      response: {
+        200: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          data: t.Object({
+            numero_credito_sifco: t.String(),
+            cuota_real_actual: t.Number(),
+            cuotas_historicas: t.Number(),
+          }),
+        }),
+        400: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+        }),
+        404: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String(),
+        }),
+        502: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String(),
+        }),
+        500: t.Object({
+          success: t.Boolean(),
+          message: t.String(),
+          error: t.String(),
+        }),
+      },
+    }
+  );
+

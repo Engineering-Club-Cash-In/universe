@@ -36,7 +36,9 @@ export async function listarCreditosConDetalle(filePath: string) {
 
       // 🔥 Si no hay detalle, saltar
       if (!detalle) {
-        console.warn(`⏭️ Saltando ${credito.creditoBase} - no disponible en SIFCO`);
+        console.warn(
+          `⏭️ Saltando ${credito.creditoBase} - no disponible en SIFCO`
+        );
         resumen.push({
           creditoBase: credito.creditoBase,
           cliente: credito.cliente,
@@ -50,11 +52,14 @@ export async function listarCreditosConDetalle(filePath: string) {
       // ✅ Procesar normalmente
       try {
         const dbRow = await mapExcelToCredito(detalle, credito);
-        const status = new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
-          ? "insertado"
-          : "actualizado";
+        const status =
+          new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
+            ? "insertado"
+            : "actualizado";
 
-        console.log(`✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`);
+        console.log(
+          `✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`
+        );
         resumen.push({
           creditoBase: credito.creditoBase,
           cliente: credito.cliente,
@@ -62,7 +67,10 @@ export async function listarCreditosConDetalle(filePath: string) {
         });
         results.push({ ...credito, detalle, dbRow });
       } catch (err: any) {
-        console.error(`❌ Error al insertar ${credito.creditoBase}:`, err.message);
+        console.error(
+          `❌ Error al insertar ${credito.creditoBase}:`,
+          err.message
+        );
         resumen.push({
           creditoBase: credito.creditoBase,
           cliente: credito.cliente,
@@ -72,7 +80,10 @@ export async function listarCreditosConDetalle(filePath: string) {
         results.push({ ...credito, detalle, dbRow: null });
       }
     } catch (err: any) {
-      console.error(`❌ Error general con ${credito.creditoBase}:`, err.message);
+      console.error(
+        `❌ Error general con ${credito.creditoBase}:`,
+        err.message
+      );
       resumen.push({
         creditoBase: credito.creditoBase,
         cliente: credito.cliente,
@@ -85,10 +96,18 @@ export async function listarCreditosConDetalle(filePath: string) {
 
   // Resto del código (logs, CSV, etc.)
   console.log(`\n📊 Créditos procesados: ${results.length}`);
-  console.log(`   ✅ Insertados: ${resumen.filter((r) => r.status === "insertado").length}`);
-  console.log(`   ♻️  Actualizados: ${resumen.filter((r) => r.status === "actualizado").length}`);
-  console.log(`   ⏭️  No encontrados: ${resumen.filter((r) => r.status === "no_encontrado").length}`);
-  console.log(`   ❌ Fallidos: ${resumen.filter((r) => r.status === "fallido").length}`);
+  console.log(
+    `   ✅ Insertados: ${resumen.filter((r) => r.status === "insertado").length}`
+  );
+  console.log(
+    `   ♻️  Actualizados: ${resumen.filter((r) => r.status === "actualizado").length}`
+  );
+  console.log(
+    `   ⏭️  No encontrados: ${resumen.filter((r) => r.status === "no_encontrado").length}`
+  );
+  console.log(
+    `   ❌ Fallidos: ${resumen.filter((r) => r.status === "fallido").length}`
+  );
 
   // Guardar CSV...
   return results;
@@ -117,21 +136,48 @@ export async function mapExcelToCredito(
   // 🧹 Función para limpiar valores numéricos
   const cleanNumericValue = (value: any): string => {
     if (value === null || value === undefined) return "0";
-    
+
     // Convertir a string y limpiar
-    return String(value)
-      .replace(/[Q$,()"\s]/g, "") // Quitar Q, $, comas, paréntesis, comillas y espacios
-      .replace(/^-/, "") // Quitar signo negativo al inicio si existe
-      .trim() || "0"; // Si queda vacío, retornar "0"
+    return (
+      String(value)
+        .replace(/[Q$,()"\s]/g, "") // Quitar Q, $, comas, paréntesis, comillas y espacios
+        .replace(/^-/, "") // Quitar signo negativo al inicio si existe
+        .trim() || "0"
+    ); // Si queda vacío, retornar "0"
   };
 
   // ---- Cálculos base ----
-  const capital = toBigExcel(cleanNumericValue(prestamo.PreSalCapital), "0");
-  const porcentaje_interes = toBigExcel(cleanNumericValue(excelRow?.porcentaje), "0.015");
+  const capitalCredito = agrupado.filas.reduce(
+    (acc, row) => acc + Number(cleanNumericValue(row.Capital)),
+    0
+  );
+  const capital = toBigExcel(capitalCredito, "0");
+  const porcentaje_interes = toBigExcel(
+    cleanNumericValue(excelRow?.porcentaje),
+    "0.015"
+  );
   const gps = toBigExcel(cleanNumericValue(excelRow?.GPS), 0);
-  const seguro_10_cuotas = toBigExcel(cleanNumericValue(excelRow?.Seguro10Cuotas), 0);
+  const seguro_10_cuotas = toBigExcel(
+    cleanNumericValue(excelRow?.Seguro10Cuotas),
+    0
+  );
   const otros = toBigExcel(cleanNumericValue(excelRow?.Otros), 0);
-  const membresias_pago = toBigExcel(cleanNumericValue(excelRow?.MembresiasPago), 0);
+const obtenerMembresias = (row: any): string => {
+  const membresias = cleanNumericValue(row?.Membresias);  // 👈 PRIMERO esta
+  const membresiasPago = cleanNumericValue(row?.MembresiasPago);  // 👈 FALLBACK
+  
+  // Si Membresias tiene valor > 0, usala
+  if (membresias !== "0" && Number(membresias) > 0) {
+    return membresias;
+  }
+  
+  // Si no, usar MembresiasPago
+  return membresiasPago;
+};
+
+// Luego en tu código:
+const membresias_pago = toBigExcel(obtenerMembresias(excelRow), 0);
+  
 
   const cuota_interes = capital.times(porcentaje_interes).round(2);
   const iva_12 = cuota_interes.times(0.12).round(2);
@@ -180,7 +226,10 @@ export async function mapExcelToCredito(
     como_se_entero: excelRow?.ComoSeEntero ?? "",
     asesor_id: advisor.asesor_id,
     plazo: Number(
-      toBigExcel(cleanNumericValue(prestamo.PrePlazo ?? excelRow?.Plazo ?? 0), "0").toString()
+      toBigExcel(
+        cleanNumericValue(prestamo.PrePlazo ?? excelRow?.Plazo ?? 0),
+        "0"
+      ).toString()
     ),
     iva_12: iva_12.toFixed(2),
     membresias_pago: membresias_pago.toFixed(2),
@@ -189,7 +238,10 @@ export async function mapExcelToCredito(
       agrupado.filas.length > 1
         ? "Pool"
         : ((excelRow?.FormatoCredito as "Pool" | "Individual") ?? "Individual"),
-    porcentaje_royalti: toBigExcel(cleanNumericValue(excelRow?.PorcentajeRoyalty), "0").toString(),
+    porcentaje_royalti: toBigExcel(
+      cleanNumericValue(excelRow?.PorcentajeRoyalty),
+      "0"
+    ).toString(),
     royalti: toBigExcel(cleanNumericValue(excelRow?.Royalty), "0").toString(),
     tipoCredito: "Nuevo",
     mora: "0",
@@ -232,8 +284,12 @@ export async function mapExcelToCredito(
     const inversionistas = await mapInversionistas(agrupado.filas);
     const creditosInversionistasData = inversionistas.map((inv: any) => {
       const montoAportado = new Big(cleanNumericValue(inv.monto_aportado));
-      const porcentajeCashIn = new Big(cleanNumericValue(inv.porcentaje_cash_in));
-      const porcentajeInversion = new Big(cleanNumericValue(inv.porcentaje_inversion));
+      const porcentajeCashIn = new Big(
+        cleanNumericValue(inv.porcentaje_cash_in)
+      );
+      const porcentajeInversion = new Big(
+        cleanNumericValue(inv.porcentaje_inversion)
+      );
       const interes = new Big(realPorcentaje ?? 0);
 
       const newCuotaInteres = montoAportado.times(interes.div(100));
@@ -288,5 +344,77 @@ export async function mapExcelToCredito(
   } catch (error) {
     console.error("❌ Error al insertar crédito desde Excel:", error);
     throw error;
+  }
+}
+
+
+// 🎯 NUEVO CONTROLLER - Recibe el objeto CreditoAgrupado directo
+export async function procesarCreditoIndividual(credito: CreditoAgrupado) {
+  try {
+    console.log(`🔎 Procesando crédito ${credito.creditoBase}...`);
+    console.log(`📋 Cliente: ${credito.cliente}`);
+    console.log(`👥 Inversionistas: ${credito.filas.length}`);
+    
+    // 1️⃣ Consultar detalle en SIFCO
+    const detalle = await consultarPrestamoDetalle(credito.creditoBase);
+    
+    // 🔥 Si no hay detalle en SIFCO
+    if (!detalle) {
+      console.warn(`⏭️ ${credito.creditoBase} - no disponible en SIFCO`);
+      return {
+        success: false,
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status: "no_encontrado",
+        error: "No disponible en SIFCO o timeout",
+        detalle: null,
+        dbRow: null
+      };
+    }
+    
+    // 2️⃣ Mapear y guardar en DB
+    try {
+      const dbRow = await mapExcelToCredito(detalle, credito);
+      const status = 
+        new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
+          ? "insertado"
+          : "actualizado";
+      
+      console.log(`✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`);
+      
+      return {
+        success: true,
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status,
+        detalle,
+        dbRow,
+        credito_id: dbRow.credito_id
+      };
+      
+    } catch (err: any) {
+      console.error(`❌ Error al insertar ${credito.creditoBase}:`, err.message);
+      return {
+        success: false,
+        creditoBase: credito.creditoBase,
+        cliente: credito.cliente,
+        status: "fallido",
+        error: String(err?.message || err),
+        detalle,
+        dbRow: null
+      };
+    }
+    
+  } catch (err: any) {
+    console.error(`❌ Error general con ${credito.creditoBase}:`, err.message);
+    return {
+      success: false,
+      creditoBase: credito.creditoBase,
+      cliente: credito.cliente,
+      status: "fallido",
+      error: String(err?.message || err),
+      detalle: null,
+      dbRow: null
+    };
   }
 }

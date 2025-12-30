@@ -1,9 +1,15 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+
+const BACK_URL = import.meta.env.VITE_BACK_URL;
 
 interface User {
   id: number;
   email: string;
   role: "ADMIN" | "ASESOR";
+  asesor_id?: number;
+  admin_id?: number;
 }
 
 interface AuthContextType {
@@ -20,6 +26,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+  const navigate = useNavigate(); // 👈 agregado
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
@@ -32,23 +39,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const savedUser = localStorage.getItem("user");
 
     if (savedAccess && savedRefresh) {
-      fetch(`${import.meta.env.VITE_BACK_URL}/auth/verify?token=${savedAccess}`)
+      fetch(`${BACK_URL}/auth/verify?token=${savedAccess}`)
         .then((res) => {
           if (res.status === 401) throw new Error("Token expirado");
           return res.json();
         })
         .then((data) => {
           if (data.success) {
-            setAccessToken(savedAccess);
-            setRefreshToken(savedRefresh);
+            const newToken = data.accessToken || savedAccess;
+            setAccessToken(newToken);
+            localStorage.setItem("accessToken", newToken);
+
             if (savedUser) setUser(JSON.parse(savedUser));
-            else if (data.data) setUser(data.data);
-          } else {
-            console.warn("Token inválido:", data.error);
-            refreshSession(); // 👈 intenta refrescar sesión
+            else setUser(data.data);
           }
         })
-        .catch(() => refreshSession()) // 👈 si falla la verificación → refresca
+        .catch(() => {
+          // 👇 si falla verify, intentamos refresh
+          refreshSession();
+        })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
@@ -66,7 +75,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.setItem("user", JSON.stringify(user));
   };
 
-  // 🔹 Logout
+  // 🔹 Logout + redirección inmediata
   const logout = () => {
     setUser(null);
     setAccessToken(null);
@@ -74,6 +83,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     localStorage.removeItem("accessToken");
     localStorage.removeItem("refreshToken");
     localStorage.removeItem("user");
+
+    navigate("/login"); // 👈 redirige
   };
 
   // 🔹 Refrescar sesión
@@ -81,7 +92,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (!refreshToken) return logout();
 
     try {
-      const res = await fetch(`${import.meta.env.VITE_BACK_URL}/auth/refresh`, {
+      const res = await fetch(`${BACK_URL}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ refreshToken }),
@@ -96,8 +107,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       } else {
         logout();
       }
-    } catch (err) {
-      console.error("❌ Error refrescando sesión:", err);
+    } catch {
       logout();
     }
   };
@@ -120,9 +130,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth debe usarse dentro de AuthProvider");
-  return ctx;
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error("useAuth debe ser usado dentro de un AuthProvider");
+  }
+  return context;
 };

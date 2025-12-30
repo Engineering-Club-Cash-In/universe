@@ -12,6 +12,9 @@ import {
   pgSchema,
   pgEnum,
   uniqueIndex,
+  unique,
+  bigint,
+  index,
 } from "drizzle-orm/pg-core";
 export enum CategoriaUsuario {
   CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
@@ -57,10 +60,21 @@ export const conta_users = customSchema.table("conta_users", {
 });
 
 // 1. Usuarios
+// src/db/schema.ts
+
 export const usuarios = customSchema.table("usuarios", {
   usuario_id: serial("usuario_id").primaryKey(),
   nombre: varchar("nombre", { length: 200 }).notNull(),
   nit: varchar("nit", { length: 30 }),
+  
+  // 🔥 CAMPOS NUEVOS PARA FACTURACIÓN
+  direccion: varchar("direccion", { length: 300 }),
+  municipio: varchar("municipio", { length: 100 }),
+  departamento: varchar("departamento", { length: 100 }),
+  codigo_postal: varchar("codigo_postal", { length: 10 }).default("01001"),
+  pais: varchar("pais").default("GT"),
+  
+  // Campos existentes
   categoria: varchar("categoria", { length: 100 }),
   como_se_entero: varchar("como_se_entero", { length: 100 }),
   saldo_a_favor: numeric("saldo_a_favor", { precision: 18, scale: 2 })
@@ -72,6 +86,8 @@ export enum StatusCredit {
   CANCELADO = "CANCELADO",
   INCOBRABLE = "INCOBRABLE",
   PENDIENTE_CANCELACION = "PENDIENTE_CANCELACION",
+  MOROSO = "MOROSO",
+  EN_CONVENIO = "EN_CONVENIO",
 }
 // 2. Créditos
 
@@ -99,7 +115,7 @@ export const creditos = customSchema.table("creditos", {
   iva_12: numeric("iva_12", { precision: 18, scale: 2 }).notNull(),
   seguro_10_cuotas: numeric("seguro_10_cuotas", {
     precision: 18,
-    scale: 2,
+    scale: 2, 
   }).notNull(),
   gps: numeric("gps", { precision: 18, scale: 2 }).notNull(),
   observaciones: text("observaciones").notNull(),
@@ -130,7 +146,7 @@ export const creditos = customSchema.table("creditos", {
   }).notNull(),
  
   statusCredit: text("statusCredit", {
-    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO"],
+    enum: ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION","MOROSO", "EN_CONVENIO"],
   })
     .notNull()
     .default(StatusCredit.ACTIVO),
@@ -143,7 +159,12 @@ export const cuotas_credito = customSchema.table("cuotas_credito", {
     .notNull(),
   numero_cuota: integer("numero_cuota").notNull(), // Ej: 1, 2, 3...
   fecha_vencimiento: date("fecha_vencimiento").notNull(),
-  pagado: boolean("pagado").default(false),
+  pagado: boolean("pagado").default(false), // 👈 Si el cliente ya pagó esta cuota
+  
+  // 👇 NUEVO - Para control de liquidación a inversionistas
+  liquidado_inversionistas: boolean("liquidado_inversionistas").default(false).notNull(), // 👈 Si ya se liquidó a TODOS los inversionistas
+  fecha_liquidacion_inversionistas: timestamp("fecha_liquidacion_inversionistas"), // 👈 Cuándo se liquidó
+  
   createdAt: timestamp("createdat").defaultNow(),
 });
 export const moras_credito = customSchema.table("moras_credito", {
@@ -163,7 +184,7 @@ export const moras_credito = customSchema.table("moras_credito", {
   created_at: timestamp("created_at").defaultNow(),
   updated_at: timestamp("updated_at").defaultNow(),
 });
-export const moras_condonaciones = pgTable("moras_condonaciones", {
+export const moras_condonaciones = customSchema.table("moras_condonaciones", {
   condonacion_id: serial("condonacion_id").primaryKey(),
   credito_id: integer("credito_id")
     .notNull()
@@ -172,6 +193,9 @@ export const moras_condonaciones = pgTable("moras_condonaciones", {
     .notNull()
     .references(() => moras_credito.mora_id, { onDelete: "cascade" }),
   motivo: text("motivo").notNull(), // reason for condonation
+  montoCondonacion: numeric("monto_condonacion", { precision: 18, scale: 2 })
+    .notNull()
+    .default("0"),
   usuario_id: integer("usuario_id")
     .notNull()
     .references(() => platform_users.id, { onDelete: "cascade" }),
@@ -191,7 +215,9 @@ export const creditos_rubros_otros = customSchema.table("creditos_rubros_otros",
 export const paymentValidationStatus = pgEnum('payment_validation_status', [
   'no_required',    // No necesita validación (pagos normales/automáticos)
   'pending',        // Pendiente de validación
-  'validated'       // Validado
+  'validated',        // Validado
+  'capital',
+  'reset'
 ]);
 
 export const pagos_credito = customSchema.table("pagos_credito", {
@@ -202,7 +228,7 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   cuota_id: integer("cuota_id")
     .references(() => cuotas_credito.cuota_id)
     .notNull(),
-  fecha_pago: date("fecha_pago").notNull().defaultNow(), //esto viene del credito
+  fecha_pago: timestamp("fecha_pago").defaultNow(), //esto viene del credito 
   abono_capital: numeric("abono_capital", { precision: 18, scale: 2 }), //aca abonamos a capital solo si el monto de la cuota que viene del credito es igual al monto de la boleta y se van a restar todos los abonos
 
   abono_interes: numeric("abono_interes", { precision: 18, scale: 2 }), // aca jala el interes del credito si ? pero solo si  el monto de la boleta  es igual al de la cuota
@@ -215,9 +241,8 @@ export const pagos_credito = customSchema.table("pagos_credito", {
 
   llamada: varchar("llamada", { length: 100 }), // ""
 
-  monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input
-  numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), // input
-  fecha_filtro: date("fecha_filtro").defaultNow(), // viene del credito
+  monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }), // esto si viene del input 
+  fecha_vencimiento: date("fecha_vencimiento").defaultNow(), // viene del credito
 
   renuevo_o_nuevo: varchar("renuevo_o_nuevo", { length: 50 }), //input
 
@@ -255,6 +280,12 @@ export const pagos_credito = customSchema.table("pagos_credito", {
   .notNull()
   .default('no_required'),
   createdAt: timestamp("createdat").defaultNow(),
+    banco_id: integer("banco_id").references(() => bancos.banco_id), // 👈 OPCIONAL
+  numeroAutorizacion: varchar("numeroautorizacion", { length: 100 }), 
+  registerBy:varchar("registerby",{length:150}).notNull(),
+    cuenta_empresa_id: integer("cuenta_empresa_id")
+    .references(() => cuentasEmpresa.cuentaId), // 
+  pagoConvenio :numeric("pago_convenio",{precision:18,scale:2}).notNull(),
 });
 export const boletas = customSchema.table("boletas", {
   id: serial("id").primaryKey(),
@@ -334,13 +365,13 @@ export const pagos_credito_inversionistas = customSchema.table(
     id: serial("id").primaryKey(),
     pago_id: integer("pago_id")
       .notNull()
-      .references(() => pagos_credito.pago_id), // Pago específico
+      .references(() => pagos_credito.pago_id),
     inversionista_id: integer("inversionista_id")
       .notNull()
-      .references(() => inversionistas.inversionista_id), // Inversionista
+      .references(() => inversionistas.inversionista_id),
     credito_id: integer("credito_id")
       .notNull()
-      .references(() => creditos.credito_id), // Opcional, pero útil
+      .references(() => creditos.credito_id),
 
     abono_capital: numeric("abono_capital", {
       precision: 18,
@@ -358,7 +389,7 @@ export const pagos_credito_inversionistas = customSchema.table(
     porcentaje_participacion: numeric("porcentaje_participacion", {
       precision: 5,
       scale: 2,
-    }).notNull(), // Del crédito
+    }).notNull(),
 
     fecha_pago: timestamp("fecha_pago", { withTimezone: true })
       .notNull()
@@ -366,10 +397,29 @@ export const pagos_credito_inversionistas = customSchema.table(
     estado_liquidacion: estadoLiquidacionEnum("estado_liquidacion")
       .notNull()
       .default("NO_LIQUIDADO"),
-    cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(), // Cuota del crédito
-  }
+    cuota: numeric("cuota", { precision: 18, scale: 2 }).notNull(),
+    
+    // 🆕 ENLACE A LIQUIDACIÓN
+    liquidacion_id: integer("liquidacion_id").references(
+      () => liquidaciones.liquidacion_id,
+      { onDelete: "set null" } // Si se borra la liquidación, el campo queda en null
+    ),
+  },
+  (table) => ({
+    uniquePagoInversionista: unique("unique_pago_inversionista").on(
+      table.pago_id,
+      table.inversionista_id
+    ),
+    // 🆕 Índice para búsquedas por liquidación
+    liquidacionIdx: index("idx_pagos_liquidacion").on(table.liquidacion_id),
+  })
 );
-
+export const bancos = customSchema.table('bancos', {
+  banco_id: serial('banco_id').primaryKey(),
+  nombre: varchar('nombre', { length: 100 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
 export const bancoEnum = pgEnum("banco_enum", [
   "GyT",
   "BAM",
@@ -394,20 +444,210 @@ export const tipoCuentaEnum = pgEnum("tipo_cuenta_enum", [
   "MONETARIA",
   "MONETARIA Q",
   "MONETARIA $",
+  "Capital"
 ]);
 
+export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
+  "sin_reinversion",
+  "reinversion_capital",
+  "reinversion_interes",
+  "reinversion_total"
+]);
 
 export const inversionistas = customSchema.table("inversionistas", {
   inversionista_id: serial("inversionista_id").primaryKey(),
-  nombre: varchar("nombre", { length: 200 }).notNull(),
-  emite_factura: boolean("emite_factura").notNull(), 
-  reinversion: boolean("reinversion").notNull().default(false),  
+  nombre: varchar("nombre", { length: 200 }).notNull().unique(),
+  dpi: bigint("dpi", { mode: "number" }), // ← NUEVO CAMPO (opcional)
+  emite_factura: boolean("emite_factura").notNull(),
+  tipo_reinversion: tipoReinversionEnum("tipo_reinversion")
+    .notNull()
+    .default("sin_reinversion"),
   banco: bancoEnum("banco"),
   tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
-  numero_cuenta: varchar("numero_cuenta", { length: 100 }), 
+  numero_cuenta: varchar("numero_cuenta", { length: 100 }),
 });
 export const asesores = customSchema.table("asesores", {
   asesor_id: serial("asesor_id").primaryKey(),
   nombre: varchar("nombre", { length: 100 }).notNull(),
   activo: boolean("activo"), // puedes usar boolean si prefieres
 });
+
+export const cuentasEmpresa = customSchema.table("cuentas_empresa", {
+  cuentaId: serial("cuenta_id").primaryKey(),
+  nombreCuenta: varchar("nombre_cuenta", { length: 100 }).notNull(),
+  banco: varchar("banco", { length: 100 }).notNull(),
+  numeroCuenta: varchar("numero_cuenta", { length: 50 }).notNull().unique(),
+  descripcion: varchar("descripcion", { length: 255 }),
+  activo: boolean("activo").default(true).notNull(),
+  fechaCreacion: timestamp("fecha_creacion").defaultNow().notNull(),
+  fechaActualizacion: timestamp("fecha_actualizacion").defaultNow().notNull(),
+});
+
+
+export const convenios_pago = customSchema.table("convenios_pago", {
+  convenio_id: serial("convenio_id").primaryKey(),
+  
+  // Relación con el crédito
+  credito_id: integer("credito_id")
+    .notNull()
+    .references(() => creditos.credito_id, { onDelete: "cascade" }),
+  
+  // Detalles del convenio
+  monto_total_convenio: numeric("monto_total_convenio", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull(),
+  
+  numero_meses: integer("numero_meses").notNull(),
+  
+  cuota_mensual: numeric("cuota_mensual", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull(),
+  
+  fecha_convenio: timestamp("fecha_convenio").notNull(),
+  
+  // 🎯 CONTROL DEL CONVENIO
+  monto_pagado: numeric("monto_pagado", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull().default("0"), // Cuánto se ha pagado
+  
+  monto_pendiente: numeric("monto_pendiente", { 
+    precision: 18, 
+    scale: 2 
+  }).notNull(), // Cuánto falta (se actualiza con cada pago)
+  
+  pagos_realizados: integer("pagos_realizados").notNull().default(0), // Cuántos pagos se han hecho
+  
+  pagos_pendientes: integer("pagos_pendientes").notNull(), // Cuántos pagos faltan
+  
+  // Estado del convenio
+  activo: boolean("activo").notNull().default(true),
+  
+  completado: boolean("completado").notNull().default(false),
+  
+  // Metadata
+  motivo: text("motivo"),
+  observaciones: text("observaciones"),
+  
+  created_by: integer("created_by")
+    .references(() => platform_users.id),
+  
+  created_at: timestamp("created_at").defaultNow(),
+  updated_at: timestamp("updated_at").defaultNow(),
+});
+
+
+export const convenios_pagos_resume = customSchema.table("convenios_pagos_resume", {
+  id: serial("id").primaryKey(),
+  
+  convenio_id: integer("convenio_id")
+    .notNull()
+    .references(() => convenios_pago.convenio_id, { onDelete: "cascade" }),
+  
+  pago_id: integer("pago_id")
+    .notNull()
+    .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+  
+  created_at: timestamp("created_at").defaultNow(),
+});export const convenio_cuotas = customSchema.table("convenio_cuotas", {
+  cuota_convenio_id: serial("cuota_convenio_id").primaryKey(),
+  convenio_id: integer("convenio_id")
+    .references(() => convenios_pago.convenio_id)
+    .notNull(),
+  
+  // Control mínimo
+  numero_cuota: integer("numero_cuota").notNull(), // 1, 2, 3... hasta numero_meses
+  fecha_vencimiento: date("fecha_vencimiento").notNull(), // Cuándo vence esta cuota
+  fecha_pago: timestamp("fecha_pago"), // NULL si no está pagada, timestamp cuando se paga
+  
+  created_at: timestamp("created_at").defaultNow(),
+});
+
+
+
+// src/db/schema.ts
+
+// 🔥 ENUM para status de factura
+export const statusFacturaEnum = pgEnum("status_factura", [
+  "ACTIVA",
+  "ANULADA"
+]);
+// src/db/schema.ts
+
+export const facturas_electronicas = customSchema.table("facturas_electronicas", {
+  factura_id: serial("factura_id").primaryKey(),
+  
+  // 🔥 CAMBIO: Ahora enlazamos por PAGO en lugar de CRÉDITO
+  pago_id: integer("pago_id")
+    .notNull() // 👈 OBLIGATORIO
+    .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+  
+  // Datos del DTE
+  serie: varchar("serie", { length: 50 }).notNull(),
+  numero: varchar("numero", { length: 100 }).notNull(),
+  uuid: varchar("uuid", { length: 255 }).notNull().unique(),
+  
+  tipo_documento: varchar("tipo_documento", { length: 10 }).notNull(),
+  
+  // Montos
+  monto_total: numeric("monto_total", { precision: 18, scale: 2 }).notNull(),
+  monto_iva: numeric("monto_iva", { precision: 18, scale: 2 }).notNull(),
+  
+  // URLs
+  pdf_url: varchar("pdf_url", { length: 500 }).notNull(),
+  xml_url: varchar("xml_url", { length: 500 }),
+  
+  // Receptor
+  receptor_nit: varchar("receptor_nit", { length: 30 }).notNull(),
+  receptor_nombre: varchar("receptor_nombre", { length: 200 }).notNull(),
+  
+  // Fechas
+  fecha_emision: timestamp("fecha_emision").notNull(),
+  fecha_certificacion: timestamp("fecha_certificacion").notNull(),
+  
+  // STATUS Y ANULACIÓN
+  status: statusFacturaEnum("status").notNull().default("ACTIVA"),
+  fecha_anulacion: timestamp("fecha_anulacion"),
+  motivo_anulacion: text("motivo_anulacion"),
+  anulada_por: integer("anulada_por").references(() => platform_users.id),
+  
+  // Metadata
+  created_at: timestamp("created_at").defaultNow().notNull(),
+  created_by: integer("created_by").references(() => platform_users.id),
+});
+
+
+// 🆕 TABLA: liquidaciones
+export const liquidaciones = customSchema.table(
+  "liquidaciones",
+  {
+    liquidacion_id: serial("liquidacion_id").primaryKey(),
+    
+    // Inversionista (OPCIONAL - null = liquidación masiva)
+    inversionista_id: integer("inversionista_id").references(
+      () => inversionistas.inversionista_id
+    ),
+    
+    // Totales de la liquidación
+    total_pagos_liquidados: integer("total_pagos_liquidados").notNull().default(0),
+    total_capital: numeric("total_capital", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_interes: numeric("total_interes", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_iva: numeric("total_iva", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_isr: numeric("total_isr", { precision: 18, scale: 2 }).notNull().default("0"),
+    total_cuota: numeric("total_cuota", { precision: 18, scale: 2 }).notNull().default("0"),
+    reporte_liquidacion: text("reporte_liquidacion"),
+    // Fecha
+    fecha_liquidacion: timestamp("fecha_liquidacion", { withTimezone: true })
+      .notNull()
+      .$default(() => new Date()),
+  },
+  (table) => ({
+    inversionistaIdx: index("idx_liquidaciones_inversionista").on(
+      table.inversionista_id
+    ),
+    fechaIdx: index("idx_liquidaciones_fecha").on(table.fecha_liquidacion),
+      reporte_liquidacion: text("reporte_liquidacion"),
+  })
+);

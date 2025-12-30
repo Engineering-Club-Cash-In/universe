@@ -9,7 +9,7 @@ interface InvestorModalProps {
   open: boolean;
   onClose: () => void;
   mode: "create" | "update";
-  initialData?: InvestorPayload; // Para edición
+  initialData?: InvestorPayload;
 }
 
 export function InvestorModal({ open, onClose, mode, initialData }: InvestorModalProps) {
@@ -17,27 +17,47 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
   const queryClient = useQueryClient();
 
   const { register, handleSubmit, reset } = useForm<InvestorPayload>({
-    defaultValues: initialData || {
+    defaultValues: {
       nombre: "",
+      dpi: undefined, // ← NUEVO CAMPO
       emite_factura: false,
-      reinversion: false,
       banco: "",
       tipo_cuenta: "",
       numero_cuenta: "",
     },
   });
 
-  // Reset form cuando cambie initialData
+  // ✅ ESTO ES LO CLAVE - Resetea cuando cambie initialData o mode
   useEffect(() => {
-    if (initialData) reset(initialData);
-  }, [initialData, reset]);
+    if (mode === "update" && initialData) {
+      console.log("Reseteando con initialData:", initialData);
+      reset(initialData);
+    } else if (mode === "create") {
+      reset({
+        nombre: "",
+        dpi: undefined, // ← NUEVO CAMPO
+        emite_factura: false,
+        banco: "",
+        tipo_cuenta: "",
+        numero_cuenta: "",
+      });
+    }
+  }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
+    // Convertir dpi a número si viene como string
+    const payload = {
+      ...data,
+      dpi: data.dpi ? Number(data.dpi) : null,
+    };
+    console.log("Submitting payload:", payload);
+
     if (mode === "create") {
-      insertInvestor.mutate(data, {
+      insertInvestor.mutate(payload, {
         onSuccess: () => {
           alert("✅ Inversionista creado correctamente.");
-          queryClient.invalidateQueries({ queryKey: ["investors"] }); // Refetch de la lista
+          queryClient.invalidateQueries({ queryKey: ["investors"] });
+          reset(); // ✅ Limpia el form
           onClose();
         },
         onError: () => {
@@ -46,11 +66,11 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
       });
     } else {
       updateInvestor.mutate(
-        { ...data, inversionista_id: initialData?.inversionista_id },
+        { ...payload, inversionista_id: initialData?.inversionista_id },
         {
           onSuccess: () => {
             alert("✅ Inversionista actualizado correctamente.");
-            queryClient.invalidateQueries({ queryKey: ["investors"] }); // Refetch de la lista
+            queryClient.invalidateQueries({ queryKey: ["investors"] });
             onClose();
           },
           onError: () => {
@@ -82,29 +102,40 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             />
           </div>
 
+          {/* ⭐ NUEVO: DPI */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">DPI </label>
+            <input
+              {...register("dpi")}
+              type="number"
+              className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              placeholder="1234567890101"
+              maxLength={13}
+            />
+          </div>
+
           {/* Banco */}
           <div>
-  <label className="block text-sm text-blue-800 mb-1">Banco</label>
-  <select
-    {...register("banco")}
-    className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-    defaultValue=""
-  >
-    <option value="">Seleccione un banco</option>
-    <option value="GyT">GyT</option>
-    <option value="BAM">BAM</option>
-    <option value="BI">BI</option>
-    <option value="BANRURAL">BANRURAL</option>
-    <option value="PROMERICA">PROMERICA</option>
-    <option value="BANTRAB">BANTRAB</option>
-    <option value="BAC">BAC</option>
-    <option value="NEXA">NEXA</option>
-    <option value="INDUSTRIAL">INDUSTRIAL</option>
-    <option value="INTERBANCO">INTERBANCO</option>
-    <option value="INTERBANCO/RICHARD">INTERBANCO/RICHARD</option>
-    <option value="BI/MENFER S.A.">BI/MENFER S.A.</option>
-  </select>
-</div>
+            <label className="block text-sm text-blue-800 mb-1">Banco</label>
+            <select
+              {...register("banco")}
+              className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            >
+              <option value="">Seleccione un banco</option>
+              <option value="GyT">GyT</option>
+              <option value="BAM">BAM</option>
+              <option value="BI">BI</option>
+              <option value="BANRURAL">BANRURAL</option>
+              <option value="PROMERICA">PROMERICA</option>
+              <option value="BANTRAB">BANTRAB</option>
+              <option value="BAC">BAC</option>
+              <option value="NEXA">NEXA</option>
+              <option value="INDUSTRIAL">INDUSTRIAL</option>
+              <option value="INTERBANCO">INTERBANCO</option>
+              <option value="INTERBANCO/RICHARD">INTERBANCO/RICHARD</option>
+              <option value="BI/MENFER S.A.">BI/MENFER S.A.</option>
+            </select>
+          </div>
 
           {/* Tipo de cuenta */}
           <div>
@@ -112,11 +143,10 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             <select
               {...register("tipo_cuenta")}
               className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
-              defaultValue=""
             >
               <option value="">Seleccione una opción</option>
               <option value="AHORRO">Ahorros</option>
-              <option value="MONTERIA">Monetaria</option>
+              <option value="MONETARIA">Monetaria</option>
             </select>
           </div>
 
@@ -130,7 +160,21 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             />
           </div>
 
-          {/* Checkboxes */}
+          {/* ⭐ Tipo de Reinversión */}
+          <div>
+            <label className="block text-sm text-blue-800 mb-1">Tipo de Reinversión</label>
+            <select
+              {...register("re_inversion")}
+              className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+            >
+              <option value="sin_reinversion">Sin Reinversión</option>
+              <option value="reinversion_capital">Reinversión Capital</option>
+              <option value="reinversion_interes">Reinversión Interés</option>
+              <option value="reinversion_total">Reinversión Total</option>
+            </select>
+          </div>
+
+          {/* Checkbox */}
           <div className="flex items-center gap-4 mt-2">
             <label className="flex items-center gap-2 text-blue-900 text-sm">
               <input
@@ -139,14 +183,6 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
                 className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
               />
               Emite Factura
-            </label>
-            <label className="flex items-center gap-2 text-blue-900 text-sm">
-              <input
-                type="checkbox"
-                {...register("reinversion")}
-                className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-              />
-              Re-inversión
             </label>
           </div>
 

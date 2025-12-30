@@ -3,37 +3,56 @@ import {
   IconSignDollar,
   IconArrow,
   IconGraph,
-  Button,
+  Loading,
+  ModalChatBot,
 } from "@/components";
-import { getInvestmentsStats, getInvestments } from "../services";
+import { getInvestmentsStats, getLiquidaciones } from "../services";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "@/lib";
-import { useIsMobile, useModalOptionsCall } from "@/hooks";
-import { ModalChatBot } from "@/components";
+import { useModalOptionsCall } from "@/hooks";
 import { ContainerMenu } from "../components/ContainerMenu";
+import { useProfile } from "../hooks/useProfile";
+import { useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 export const MyInvestments = () => {
-  const { user } = useAuth();
-  const isMobile = useIsMobile();
+  const { profileData, isLoading } = useProfile();
+  const [expandedLiquidacion, setExpandedLiquidacion] = useState<number | null>(
+    null
+  );
+  const [currentPage, setCurrentPage] = useState(1);
+  const perPage = 10;
 
   const { isModalOpen, modalOptionsInvestors, setIsModalOpen } =
     useModalOptionsCall();
 
-  // Obtener estadísticas
+  // Obtener estadísticas usando DPI del perfil
   const { data: stats, isLoading: loadingStats } = useQuery({
-    queryKey: ["investments-stats", user?.id],
-    queryFn: () => getInvestmentsStats(user?.id || ""),
-    enabled: !!user?.id,
+    queryKey: ["investments-stats", profileData?.dpi],
+    queryFn: () => getInvestmentsStats(profileData?.dpi || ""),
+    enabled: !!profileData?.dpi,
   });
 
-  // Obtener inversiones
-  const { data: investments, isLoading: loadingInvestments } = useQuery({
-    queryKey: ["investments", user?.id],
-    queryFn: () => getInvestments(user?.id || ""),
-    enabled: !!user?.id,
+  // Obtener liquidaciones con paginación
+  const {
+    data: liquidacionesData,
+    isLoading: loadingLiquidaciones,
+    isFetching: fetchingLiquidaciones,
+  } = useQuery({
+    queryKey: ["liquidaciones", profileData?.dpi, currentPage, perPage],
+    queryFn: () =>
+      getLiquidaciones(profileData?.dpi || "", currentPage, perPage),
+    enabled: !!profileData?.dpi,
   });
 
-  const isLoading = loadingStats || loadingInvestments;
+  // Solo mostrar loading de página completa en la carga inicial
+  const isInitialLoading = loadingStats || loadingLiquidaciones || isLoading;
+  const liquidaciones = liquidacionesData?.liquidaciones || [];
+  const totalPages = liquidacionesData?.totalPages || 1;
+  const totalItems = liquidacionesData?.totalItems || 0;
+
+  const toggleExpand = (id: number) => {
+    setExpandedLiquidacion(expandedLiquidacion === id ? null : id);
+  };
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("es-GT", {
@@ -50,54 +69,44 @@ export const MyInvestments = () => {
     });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "activa":
-        return "text-green-400 bg-green-500/10 border-green-500/30";
-      case "finalizada":
-        return "text-gray-400 bg-gray-500/10 border-gray-500/30";
-      case "pendiente":
-        return "text-yellow-400 bg-yellow-500/10 border-yellow-500/30";
-      default:
-        return "text-white/70 bg-white/5 border-white/10";
+  const formatShortDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("es-GT", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+
+  const formatMonthYear = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("es-GT", {
+      year: "numeric",
+      month: "long",
+    });
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+      setExpandedLiquidacion(null);
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case "activa":
-        return "Activa";
-      case "finalizada":
-        return "Finalizada";
-      case "pendiente":
-        return "Pendiente";
-      default:
-        return status;
+  const handleNextPage = () => {
+    if (currentPage < totalPages) {
+      setCurrentPage(currentPage + 1);
+      setExpandedLiquidacion(null);
     }
   };
 
-  const getTypeLabel = (type: string) => {
-    switch (type) {
-      case "interes_compuesto":
-        return "Interés Compuesto";
-      case "tradicional":
-        return "Tradicional";
-      case "al_vencimiento":
-        return "Al Vencimiento";
-      default:
-        return type;
-    }
-  };
-
-  if (isLoading) {
+  if (isInitialLoading) {
     return (
       <div>
         <NavBar />
-        <div className="max-w-7xl mx-auto mt-26 mb-20">
-          <div className="flex justify-center items-center py-20">
-            <div className="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
+        <ContainerMenu>
+          <div className="max-w-7xl mx-auto mt-26 mb-20">
+            <Loading />
           </div>
-        </div>
+        </ContainerMenu>
       </div>
     );
   }
@@ -137,7 +146,7 @@ export const MyInvestments = () => {
                       Total Invertido
                     </p>
                     <p className="text-lg lg:text-2xl font-bold">
-                      {formatCurrency(stats.totalInvertido)}
+                      {formatCurrency(stats.capital_total_aportado)}
                     </p>
                   </div>
                 </div>
@@ -164,10 +173,10 @@ export const MyInvestments = () => {
                   </div>
                   <div>
                     <p className="text-sm lg:text-base  mb-1">
-                      Rendimiento Total
+                      Rendimiento Estimado
                     </p>
                     <p className="text-lg lg:text-2xl font-bold">
-                      {formatCurrency(stats.totalRendimiento)}
+                      {formatCurrency(stats.rendimiento_estimado)}
                     </p>
                   </div>
                 </div>
@@ -193,10 +202,10 @@ export const MyInvestments = () => {
                   </div>
                   <div>
                     <p className="text-sm lg:text-base  mb-1">
-                      Inversiones Activas
+                      Cantidad de Inversiones
                     </p>
                     <p className="text-lg lg:text-2xl font-bold">
-                      {stats.inversionesActivas}
+                      {stats.cantidad_inversiones}
                     </p>
                   </div>
                 </div>
@@ -204,99 +213,270 @@ export const MyInvestments = () => {
             </div>
           )}
 
-          {/* Lista de Inversiones */}
+          {/* Lista de Liquidaciones */}
           <div>
             <h2 className="text-2xl lg:text-header-body font-bold mb-6">
-              Todas tus Inversiones
+              Historial de Liquidaciones
             </h2>
 
-            {investments && investments.length > 0 ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {investments.map((investment) => (
+            {fetchingLiquidaciones ? (
+              <div className="py-12">
+                <Loading />
+              </div>
+            ) : liquidaciones && liquidaciones.length > 0 ? (
+              <div className="space-y-6">
+                {liquidaciones.map((liquidacion) => (
                   <div
-                    key={investment.id}
-                    className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-6 hover:border-primary/30 transition-colors"
+                    key={liquidacion.liquidacion_id}
+                    className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl overflow-hidden hover:border-primary/30 transition-colors"
                   >
                     {/* Header de la card */}
-                    <div className="flex justify-between items-start mb-4">
-                      <div>
-                        <h3 className="text-xl lg:text-body font-semibold mb-1">
-                          Inversión #{investment.id}
-                        </h3>
+                    <div className="p-6">
+                      <div className="flex justify-between items-start mb-4">
+                        <div>
+                          <h3 className="text-xl lg:text-2xl font-bold mb-1 ">
+                            Liquidacion de{" "}
+                            {formatMonthYear(liquidacion.fecha_liquidacion)}
+                          </h3>
+                          <p className="text-sm text-white/65">
+                            {formatDate(liquidacion.fecha_liquidacion)}
+                          </p>
+                        </div>
+                        <span
+                          className={`px-3 py-1 rounded-full text-xs font-semibold border ${
+                            liquidacion.emite_factura
+                              ? "text-blue-400 bg-blue-500/10 border-blue-500/30"
+                              : "text-orange-400 bg-orange-500/10 border-orange-500/30"
+                          }`}
+                        >
+                          {liquidacion.emite_factura
+                            ? "Con Factura"
+                            : "Sin Factura"}
+                        </span>
                       </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(
-                          investment.estado
-                        )}`}
-                      >
-                        {getStatusLabel(investment.estado)}
-                      </span>
-                    </div>
 
-                    {/* Información principal */}
-                    <div className="space-y-3 mb-4">
-                      <div className="flex justify-between">
-                        <span className="text-sm lg:text-base text-gray">Monto Invertido</span>
-                        <span className="text-primary font-semibold">
-                          {formatCurrency(investment.montoInvertido)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm lg:text-base text-white/65">
-                          Rendimiento Anual
-                        </span>
-                        <span className=" font-semibold text-green-600">
-                          {investment.rendimientoAnual}%
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm lg:text-base text-gray">Plazo</span>
-                        <span className="text-primary font-semibold">
-                          {investment.plazo} meses
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm lg:text-base text-gray">
-                          Rendimiento a la Fecha
-                        </span>
-                        <span className=" font-semibold text-green-600">
-                          {formatCurrency(investment.rendimientoALaFecha)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm lg:text-base text-gray">Tipo de Inversión</span>
-                        <span className="text-primary font-semibold">
-                          {getTypeLabel(investment.tipoInversion)}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Fechas */}
-                    <div className="border-t border-white/10 pt-4 space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray">Inicio</span>
-                        <span className="text-white/80">
-                          {formatDate(investment.fechaInicio)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray">Fin</span>
-                        <span className="text-white/80">
-                          {formatDate(investment.fechaFin)}
-                        </span>
-                      </div>
-                      {investment.montoUltimaCuota > 0 && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray">Última Cuota</span>
-                          <span className="text-white/80 text-xs lg:text-sm">
-                            {formatCurrency(investment.montoUltimaCuota)} -{" "}
-                            {formatDate(investment.fechaUltimaCuota)}
+                      {/* Información principal - Totales */}
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+                        <div>
+                          <span className="text-sm text-white/65 block mb-1">
+                            Total Capital
+                          </span>
+                          <span className="text-primary font-semibold">
+                            {formatCurrency(liquidacion.totales.total_capital)}
                           </span>
                         </div>
-                      )}
+                        <div>
+                          <span className="text-sm text-white/65 block mb-1">
+                            Total Interés
+                          </span>
+                          <span className="font-semibold text-green-500">
+                            {formatCurrency(liquidacion.totales.total_interes)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-sm text-white/65 block mb-1">
+                            Total Cuota
+                          </span>
+                          <span className="text-primary font-semibold">
+                            {formatCurrency(liquidacion.totales.total_cuota)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-sm text-white/65 block mb-1">
+                            IVA
+                          </span>
+                          <span className="text-white/80 font-semibold">
+                            {formatCurrency(liquidacion.totales.total_iva)}
+                          </span>
+                        </div>
+                        {liquidacion.totales.total_isr > 0 && (
+                          <div>
+                            <span className="text-sm text-white/65 block mb-1">
+                              ISR
+                            </span>
+                            <span className="text-red-400 font-semibold">
+                              {formatCurrency(liquidacion.totales.total_isr)}
+                            </span>
+                          </div>
+                        )}
+                        <div>
+                          <span className="text-sm text-white/65 block mb-1">
+                            Pagos Liquidados
+                          </span>
+                          <span className="text-white/80 font-semibold">
+                            {liquidacion.totales.total_pagos_liquidados}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Footer con botón expandir y link de reporte */}
+                      <div className="border-t border-white/10 pt-4 flex justify-between items-center">
+                        <button
+                          onClick={() =>
+                            toggleExpand(liquidacion.liquidacion_id)
+                          }
+                          className="flex items-center gap-2 text-primary hover:text-primary/80 transition-colors text-sm font-medium"
+                        >
+                          <motion.svg
+                            animate={{
+                              rotate:
+                                expandedLiquidacion ===
+                                liquidacion.liquidacion_id
+                                  ? 180
+                                  : 0,
+                            }}
+                            transition={{ duration: 0.2 }}
+                            className="w-5 h-5"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2}
+                              d="M19 9l-7 7-7-7"
+                            />
+                          </motion.svg>
+                          {expandedLiquidacion === liquidacion.liquidacion_id
+                            ? "Ocultar pagos"
+                            : `Ver ${liquidacion.pagos.length} pagos`}
+                        </button>
+
+                        {liquidacion.reporte_liquidacion && (
+                          <a
+                            href={liquidacion.reporte_liquidacion}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-primary hover:text-primary/80 hover:underline transition-colors text-sm font-medium"
+                          >
+                            Ver reporte de liquidación →
+                          </a>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Sección expandible de pagos */}
+                    <AnimatePresence>
+                      {expandedLiquidacion === liquidacion.liquidacion_id && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: "auto", opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.3, ease: "easeInOut" }}
+                          className="overflow-hidden"
+                        >
+                          <div className="bg-white/5 border-t border-white/10 p-6">
+                            <h4 className="text-sm font-semibold text-white/80 mb-4">
+                              Detalle de Pagos
+                            </h4>
+                            <div className="space-y-3">
+                              {liquidacion.pagos.map((pago) => (
+                                <div
+                                  key={pago.pago_id}
+                                  className="bg-white/5 rounded-xl p-4 border border-white/5"
+                                >
+                                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
+                                    <div>
+                                      <p className="font-semibold text-white">
+                                        {pago.nombre_cliente}
+                                      </p>
+                                      <p className="text-xs text-white/50">
+                                        Crédito: {pago.numero_credito_sifco}
+                                      </p>
+                                    </div>
+                                    <div className="text-right">
+                                      <p className="text-primary font-bold">
+                                        {formatCurrency(pago.cuota)}
+                                      </p>
+                                      <p className="text-xs text-white/50">
+                                        {formatShortDate(pago.fecha_pago)}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                                    <div>
+                                      <span className="text-white/50 block text-xs">
+                                        Capital
+                                      </span>
+                                      <span className="text-white/80">
+                                        {formatCurrency(pago.abono_capital)}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-white/50 block text-xs">
+                                        Interés
+                                      </span>
+                                      <span className="text-green-400">
+                                        {formatCurrency(pago.abono_interes)}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-white/50 block text-xs">
+                                        IVA
+                                      </span>
+                                      <span className="text-white/80">
+                                        {formatCurrency(pago.abono_iva)}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-white/50 block text-xs">
+                                        Participación
+                                      </span>
+                                      <span className="text-white/80">
+                                        {pago.porcentaje_participacion
+                                          ? pago?.porcentaje_participacion
+                                          : ""}
+                                        %
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 ))}
+
+                {/* Paginación */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-8 pt-6 border-t border-white/10">
+                    <p className="text-sm text-white/65">
+                      Mostrando {liquidaciones.length} de {totalItems}{" "}
+                      liquidaciones
+                    </p>
+                    <div className="flex items-center gap-4">
+                      <button
+                        onClick={handlePreviousPage}
+                        disabled={currentPage === 1}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          currentPage === 1
+                            ? "bg-white/5 text-white/30 cursor-not-allowed"
+                            : "bg-white/10 text-white hover:bg-white/20"
+                        }`}
+                      >
+                        ← Anterior
+                      </button>
+                      <span className="text-sm text-white/80">
+                        Página {currentPage} de {totalPages}
+                      </span>
+                      <button
+                        onClick={handleNextPage}
+                        disabled={currentPage === totalPages}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          currentPage === totalPages
+                            ? "bg-white/5 text-white/30 cursor-not-allowed"
+                            : "bg-white/10 text-white hover:bg-white/20"
+                        }`}
+                      >
+                        Siguiente →
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-2xl p-12 text-center">
@@ -314,24 +494,14 @@ export const MyInvestments = () => {
                   />
                 </svg>
                 <p className="text-white/65 text-lg">
-                  No tienes inversiones aún
+                  No tienes liquidaciones aún
                 </p>
                 <p className="text-white/50 text-sm mt-2">
-                  Comienza a invertir para ver tus inversiones aquí
+                  Las liquidaciones aparecerán aquí cuando se procesen pagos de
+                  tus inversiones
                 </p>
               </div>
             )}
-          </div>
-          <div className="mt-8">
-            <div className="text-2xl lg:text-header-body font-bold mb-6">
-              Haz una nueva inversión
-            </div>
-            <Button
-              size={isMobile ? "sm" : "lg"}
-              onClick={() => setIsModalOpen(true)}
-            >
-              Nueva Inversión
-            </Button>
           </div>
         </div>
       </ContainerMenu>

@@ -1,4 +1,85 @@
-const baseURL = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const carteraURL = import.meta.env.VITE_CARTERA_API_URL || "http://localhost:4000";
+
+// ============================================
+// INTERFACES PARA LIQUIDACIONES
+// ============================================
+
+export interface LiquidacionPago {
+  pago_id: number;
+  pago_credito_id: number;
+  credito_id: number;
+  numero_credito_sifco: string;
+  nombre_cliente: string;
+  nit_cliente: string;
+  abono_capital: number;
+  abono_interes: number;
+  abono_iva: number;
+  isr: number;
+  porcentaje_participacion: number;
+  fecha_pago: string;
+  cuota: number;
+}
+
+export interface LiquidacionTotales {
+  total_pagos_liquidados: number;
+  total_capital: number;
+  total_interes: number;
+  total_iva: number;
+  total_isr: number;
+  total_cuota: number;
+}
+
+export interface Liquidacion {
+  liquidacion_id: number;
+  inversionista_id: number | null;
+  nombre_inversionista: string;
+  emite_factura: boolean;
+  dpi: string;
+  totales: LiquidacionTotales;
+  reporte_liquidacion: string;
+  fecha_liquidacion: string;
+  pagos: LiquidacionPago[];
+}
+
+export interface LiquidacionesResponse {
+  liquidaciones: Liquidacion[];
+  page: number;
+  perPage: number;
+  totalItems: number;
+  totalPages: number;
+}
+
+/**
+ * Obtener liquidaciones del inversionista por DPI con paginación
+ */
+export const getLiquidaciones = async (
+  dpi: string,
+  page: number = 1,
+  perPage: number = 10
+): Promise<LiquidacionesResponse> => {
+  try {
+    const response = await fetch(
+      `${carteraURL}/liquidaciones?dpi=${dpi}&page=${page}&perPage=${perPage}`,
+      {
+        credentials: "include",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("Error al cargar las liquidaciones");
+    }
+
+    const result: LiquidacionesResponse = await response.json();
+    return result;
+  } catch (error) {
+    console.error("Error al obtener liquidaciones:", error);
+    throw error;
+  }
+};
+
+// ============================================
+// INTERFACES PARA ESTADÍSTICAS
+// ============================================
 
 export type InvestmentStatus = "activa" | "finalizada" | "pendiente";
 export type InvestmentType = "tradicional" | "al_vencimiento" | "interes_compuesto";
@@ -27,7 +108,7 @@ export interface GetInvestmentsResponse {
  */
 export const getInvestments = async (userId: string): Promise<Investment[]> => {
   try {
-    const response = await fetch(`${baseURL}/api/investments/${userId}`, {
+    const response = await fetch(`${carteraURL}/api/investments/${userId}`, {
       credentials: "include",
     });
     
@@ -112,34 +193,36 @@ export const getInvestmentById = async (
 };
 
 export interface InvestmentsStats {
-  totalInvertido: number;
-  totalRendimiento: number;
-  inversionesActivas: number;
+  inversionista_id: number;
+  nombre: string;
+  dpi: string;
+  capital_total_aportado: number;
+  cantidad_inversiones: number;
+  rendimiento_estimado: number;
+}
+
+export interface InvestmentsStatsResponse {
+  success: boolean;
+  data: InvestmentsStats;
 }
 
 /**
- * Obtener estadísticas de inversiones
+ * Obtener estadísticas de inversiones desde la API de Cartera
  */
-export const getInvestmentsStats = async (userId: string): Promise<InvestmentsStats> => {
-  const investments = await getInvestments(userId);
+export const getInvestmentsStats = async (dpi: string): Promise<InvestmentsStats> => {
+  try {
+    const response = await fetch(`${carteraURL}/inversionistas/rendimiento?dpi=${dpi}`, {
+      credentials: "include",
+    });
 
-  const totalInvertido = investments.reduce(
-    (sum, inv) => sum + inv.montoInvertido,
-    0
-  );
+    if (!response.ok) {
+      throw new Error("Error al cargar las estadísticas de inversión");
+    }
 
-  const totalRendimiento = investments.reduce(
-    (sum, inv) => sum + inv.rendimientoALaFecha,
-    0
-  );
-
-  const inversionesActivas = investments.filter(
-    (inv) => inv.estado === "activa"
-  ).length;
-
-  return {
-    totalInvertido,
-    totalRendimiento,
-    inversionesActivas,
-  };
+    const result: InvestmentsStatsResponse = await response.json();
+    return result.data;
+  } catch (error) {
+    console.error("Error al obtener estadísticas de inversión:", error);
+    throw error;
+  }
 };

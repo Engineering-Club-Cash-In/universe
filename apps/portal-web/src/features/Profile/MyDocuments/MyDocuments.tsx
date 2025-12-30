@@ -19,7 +19,7 @@ import { useIsMobile } from "@/hooks";
 
 export const MyDocuments = () => {
   const { user, token } = useAuth();
-  
+
   // Obtener contratos
   const { data: contracts, isLoading: loadingContracts } = useQuery({
     queryKey: ["contracts", user?.email],
@@ -50,21 +50,27 @@ export const MyDocuments = () => {
   const isLoading = loadingContracts || loadingDocuments;
 
   // Agrupar documentos por tipo
-  const groupedDocuments = documents?.reduce((acc, doc) => {
-    if (!acc[doc.documentType]) {
-      acc[doc.documentType] = [];
-    }
-    acc[doc.documentType].push(doc);
-    return acc;
-  }, {} as Record<string, Document[]>) || {};
+  const groupedDocuments =
+    documents?.reduce(
+      (acc, doc) => {
+        if (!acc[doc.documentType]) {
+          acc[doc.documentType] = [];
+        }
+        acc[doc.documentType].push(doc);
+        return acc;
+      },
+      {} as Record<string, Document[]>
+    ) || {};
 
   if (isLoading) {
     return (
       <div>
         <NavBar />
-        <div className="max-w-7xl mx-auto mt-26 mb-20">
-          <Loading />
-        </div>
+        <ContainerMenu>
+          <div className="max-w-7xl mx-auto mt-26 mb-20">
+            <Loading />
+          </div>
+        </ContainerMenu>
       </div>
     );
   }
@@ -106,17 +112,17 @@ export const MyDocuments = () => {
                             item.contract.status === "signed"
                               ? "text-green-400 bg-green-500/10 border-green-500/30"
                               : item.contract.status === "pending"
-                              ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/30"
-                              : "text-blue-400 bg-blue-500/10 border-blue-500/30"
+                                ? "text-yellow-400 bg-yellow-500/10 border-yellow-500/30"
+                                : "text-blue-400 bg-blue-500/10 border-blue-500/30"
                           }`}
                         >
                           {item.contract.status === "signed"
                             ? "Firmado"
                             : item.contract.status === "pending"
-                            ? "Pendiente"
-                            : item.contract.status === "completed"
-                            ? "Completado"
-                            : "Cancelado"}
+                              ? "Pendiente"
+                              : item.contract.status === "completed"
+                                ? "Completado"
+                                : "Cancelado"}
                         </span>
                       </div>
 
@@ -133,7 +139,9 @@ export const MyDocuments = () => {
                       {/* Botón de firma o descarga */}
                       {item.contract.clientSigningLink ? (
                         <motion.button
-                          onClick={() => handleDownload(item.contract.clientSigningLink!)}
+                          onClick={() =>
+                            handleDownload(item.contract.clientSigningLink!)
+                          }
                           className="w-full px-4 py-2 text-sm lg:text-base text-primary border border-primary/30 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
                           style={{
                             background:
@@ -142,8 +150,13 @@ export const MyDocuments = () => {
                           whileHover={{ scale: 1.02 }}
                           whileTap={{ scale: 0.98 }}
                         >
-                          <IconDownload width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} />
-                          {item.contract.status === "pending" ? "Firmar Contrato" : "Ver Contrato"}
+                          <IconDownload
+                            width={isMobile ? 18 : 24}
+                            height={isMobile ? 18 : 24}
+                          />
+                          {item.contract.status === "pending"
+                            ? "Firmar Contrato"
+                            : "Ver Contrato"}
                         </motion.button>
                       ) : (
                         <div className="w-full px-4 py-2 text-sm text-white/40 border border-white/10 rounded-lg text-center">
@@ -213,7 +226,10 @@ export const MyDocuments = () => {
                                 whileHover={{ scale: 1.05 }}
                                 whileTap={{ scale: 0.95 }}
                               >
-                                <IconDownload width={isMobile ? 18 : 24} height={isMobile ? 18 : 24} />
+                                <IconDownload
+                                  width={isMobile ? 18 : 24}
+                                  height={isMobile ? 18 : 24}
+                                />
                               </motion.button>
                             </div>
                           </div>
@@ -225,7 +241,9 @@ export const MyDocuments = () => {
               ) : (
                 <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-8 text-center">
                   <IconPerson className="w-12 h-12 text-white/30 mx-auto mb-3" />
-                  <p className="text-white/65">No tienes documentos personales</p>
+                  <p className="text-white/65">
+                    No tienes documentos personales
+                  </p>
                 </div>
               )}
             </div>

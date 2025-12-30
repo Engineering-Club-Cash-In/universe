@@ -1924,3 +1924,89 @@ export async function getLiquidaciones({
     totalPages,
   };
 }
+/**
+ * Obtiene el rendimiento de un inversionista por DPI
+ * @param dpi - DPI del inversionista
+ */
+export async function getInvestorPerformance(dpi: string) {
+  console.log("[getInvestorPerformance] DPI:", dpi);
+
+  // 1️⃣ Buscar inversionista por DPI
+  const [inversionista] = await db
+    .select({
+      inversionista_id: inversionistas.inversionista_id,
+      nombre: inversionistas.nombre,
+      dpi: inversionistas.dpi,
+    })
+    .from(inversionistas)
+    .where(eq(inversionistas.dpi, parseInt(dpi)))
+    .limit(1);
+
+  if (!inversionista) {
+    throw new Error(`No se encontró inversionista con DPI: ${dpi}`);
+  }
+
+  // 2️⃣ Obtener todas las inversiones del inversionista
+  const inversiones = await db
+    .select({
+      credito_id: creditos_inversionistas.credito_id,
+      monto_aportado: creditos_inversionistas.monto_aportado,
+      cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+    })
+    .from(creditos_inversionistas)
+    .where(
+      eq(
+        creditos_inversionistas.inversionista_id,
+        inversionista.inversionista_id
+      )
+    );
+
+  // 3️⃣ Calcular totales
+  let capital_total_aportado = new Big(0);
+  let rendimiento_total = new Big(0);
+
+  for (const inv of inversiones) {
+    // Sumar capital aportado
+    capital_total_aportado = capital_total_aportado.plus(
+      inv.monto_aportado ?? 0
+    );
+
+    // Buscar cuotas LIQUIDADAS de este crédito para este inversionista
+    const pagosLiquidados = await db
+      .select({
+        cuota: pagos_credito_inversionistas.cuota,
+      })
+      .from(pagos_credito_inversionistas)
+      .where(
+        and(
+          eq(
+            pagos_credito_inversionistas.inversionista_id,
+            inversionista.inversionista_id
+          ),
+          eq(pagos_credito_inversionistas.credito_id, inv.credito_id),
+          eq(pagos_credito_inversionistas.estado_liquidacion, "LIQUIDADO")
+        )
+      );
+
+    // Sumar todas las cuotas liquidadas de este crédito
+    const suma_cuotas_liquidadas = pagosLiquidados.reduce(
+      (sum, pago) => sum.plus(pago.cuota ?? 0),
+      new Big(0)
+    );
+
+    // Calcular rendimiento de este crédito
+    const rendimiento_credito = suma_cuotas_liquidadas.times(1.20);
+
+    // Acumular rendimiento total
+    rendimiento_total = rendimiento_total.plus(rendimiento_credito);
+  }
+
+  return {
+    inversionista_id: inversionista.inversionista_id,
+    nombre: inversionista.nombre,
+    dpi: inversionista.dpi?.toString(),
+    capital_total_aportado: Number(capital_total_aportado.toString()),
+    cantidad_inversiones: inversiones.length,
+    rendimiento_estimado: Number(rendimiento_total.toString()),
+  };
+}

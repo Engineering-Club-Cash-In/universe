@@ -11,6 +11,7 @@ import {
   updateInvestor,
   resumenGlobalInversionistas,
   getLiquidaciones,
+  getInvestorPerformance,
 } from "../controllers/investor";
 import { InversionistaReporte, RespuestaReporte } from "../utils/interface";
 import puppeteer from "puppeteer";
@@ -401,6 +402,52 @@ export const inversionistasRouter = new Elysia()
         - perPage: Registros por página (default: 10)
       `,
       tags: ["Liquidaciones"],
+    },
+  }
+).get(
+  "/inversionistas/rendimiento",
+  async ({ query, set }) => {
+    try {
+      const { dpi } = query;
+
+      if (!dpi) {
+        set.status = 400;
+        return {
+          success: false,
+          message: "El parámetro 'dpi' es obligatorio",
+        };
+      }
+
+      const result = await getInvestorPerformance(dpi);
+
+      set.status = 200;
+      return {
+        success: true,
+        data: result,
+      };
+    } catch (error) {
+      console.error("[GET /inversionistas/rendimiento] Error:", error);
+      set.status = 500;
+      return {
+        success: false,
+        message: "Error al obtener rendimiento",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  },
+  {
+    query: t.Object({
+      dpi: t.String(),
+    }),
+    detail: {
+      summary: "Obtener rendimiento de inversionista por DPI",
+      description: `
+        Retorna el capital aportado, cantidad de inversiones y rendimiento estimado.
+        
+        Cálculo de rendimiento:
+        - Suma de cuotas liquidadas * 1.20
+      `,
+      tags: ["Inversionistas"],
     },
   }
 );

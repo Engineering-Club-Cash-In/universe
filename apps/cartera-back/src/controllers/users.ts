@@ -55,7 +55,13 @@ export const findOrCreateUserByName = async (
   nombre: string,
   categoria: string | null,
   nit: string | null,
-  como_se_entero: string | null
+  como_se_entero: string | null,
+  // Nuevos parámetros opcionales para dirección
+  direccion?: string | null,
+  municipio?: string | null,
+  departamento?: string | null,
+  codigo_postal?: string | null,
+  pais?: string | null
 ) => {
   try {
     // Buscar usuario por nombre exacto
@@ -69,7 +75,7 @@ export const findOrCreateUserByName = async (
       return existingUser[0];
     }
 
-    // Si no existe, crear usuario
+    // Si no existe, crear usuario con todos los campos
     const [newUser] = await db
       .insert(usuarios)
       .values({
@@ -78,6 +84,12 @@ export const findOrCreateUserByName = async (
         nit,
         como_se_entero,
         saldo_a_favor: "0",
+        // Campos opcionales de dirección
+        direccion: direccion || null,
+        municipio: municipio || null,
+        departamento: departamento || null,
+        codigo_postal: codigo_postal || "01001", // Default si no viene
+        pais: pais || "GT", // Default si no viene
       })
       .returning();
 
@@ -90,7 +102,6 @@ export const findOrCreateUserByName = async (
     throw error;
   }
 };
-
 export interface UsuarioConCreditosSifco {
   usuario_id: number;
   nombre: string;

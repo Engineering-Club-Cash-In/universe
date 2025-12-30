@@ -4,25 +4,50 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { toast } from 'sonner'; // o tu librería de toast
-import { anularFactura, certificarFactura, obtenerFacturaPorUUID, obtenerFacturasPorCredito, obtenerFacturasPorPago } from '../services/services';
+import { 
+  anularFactura, 
+  facturarPagoCompleto, 
+  obtenerFacturaPorUUID, 
+  obtenerFacturasPorCredito, 
+  obtenerFacturasPorPago,
+  getPagoCompleto // ← 🔥 NUEVO
+} from '../services/services';
 
-// 🔥 Hook para certificar factura
-export const useCertificarFactura = () => {
+export const useFacturarPagoCompleto = () => {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: certificarFactura,
+    mutationFn: facturarPagoCompleto,
     onSuccess: (data) => {
-      if (data.success) {
-        toast.success(data.mensaje || 'Factura certificada exitosamente');
-        // Invalidar cache de facturas del pago
+      if (data.success && data.data) {
+        const totalFacturas = data.data.total_facturas;
+        const cliente = data.data.cliente.nombre;
+        
+        toast.success(
+          `✅ ${totalFacturas} factura(s) generada(s) para ${cliente}`,
+          {
+            duration: 5000,
+          }
+        );
+        
+        // Invalidar cache relevante
         queryClient.invalidateQueries({ queryKey: ['facturas-pago'] });
+        queryClient.invalidateQueries({ queryKey: ['pago-completo'] }); // ← 🔥 NUEVO
+        queryClient.invalidateQueries({ queryKey: ['pagos'] });
+        queryClient.invalidateQueries({ queryKey: ['facturas-electronicas'] });
       } else {
-        toast.error(data.error || 'Error al certificar factura');
+        toast.error(data.error || 'Error al generar facturas');
       }
     },
     onError: (error: any) => {
-      toast.error(error?.response?.data?.error || 'Error al certificar factura');
+      const errorMsg = error?.response?.data?.error 
+        || error?.message 
+        || 'Error al generar facturas';
+      
+      toast.error(errorMsg);
+      
+      // Log para debugging
+      console.error('Error facturando pago completo:', error);
     }
   });
 };
@@ -48,6 +73,7 @@ export const useAnularFactura = () => {
         toast.success(data.mensaje || 'Factura anulada exitosamente');
         // Invalidar cache
         queryClient.invalidateQueries({ queryKey: ['facturas-pago'] });
+        queryClient.invalidateQueries({ queryKey: ['pago-completo'] }); // ← 🔥 NUEVO
         queryClient.invalidateQueries({ queryKey: ['factura'] });
       } else {
         toast.error(data.mensaje || 'Error al anular factura');
@@ -69,14 +95,22 @@ export const useFacturasPorPago = (pagoId: number | null) => {
   });
 };
 
-// src/hooks/useFacturas.ts - AGREGAR este hook
-
 // 🔥 Hook para obtener facturas de un crédito
 export const useFacturasPorCredito = (creditoId: number | null) => {
   return useQuery({
     queryKey: ['facturas-credito', creditoId],
     queryFn: () => obtenerFacturasPorCredito(creditoId!),
     enabled: !!creditoId,
+    staleTime: 1000 * 60 * 5 // 5 minutos
+  });
+};
+
+// 🔥 🔥 🔥 NUEVO - Hook para obtener pago completo con todas sus facturas
+export const usePagoCompleto = (pagoId: number | null) => {
+  return useQuery({
+    queryKey: ['pago-completo', pagoId],
+    queryFn: () => getPagoCompleto(pagoId!),
+    enabled: !!pagoId,
     staleTime: 1000 * 60 * 5 // 5 minutos
   });
 };

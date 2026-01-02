@@ -145,7 +145,7 @@ export const MyLoans = () => {
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
                       {/* Imagen del vehículo */}
                       <div className="lg:col-span-4">
-                        <div className="relative h-full min-h-[250px] lg:min-h-full">
+                        <div className="relative h-[475px] lg:min-h-full">
                           <img
                             src={vehicleImage}
                             alt={`${opportunity.vehicle.make} ${opportunity.vehicle.model}`}
@@ -176,8 +176,11 @@ export const MyLoans = () => {
                         <div className="flex justify-between items-start mb-6">
                           <div>
                             <h3 className="lg:text-body font-semibold mb-1">
-                              Crédito {creditData.credito.numero_credito_sifco}
+                              Crédito {opportunity.vehicle.make} {opportunity.vehicle.model} {opportunity.vehicle.year}
                             </h3>
+                            <p className="text-sm text-white/65 mb-1">
+                              Número SIFCO: {creditData.credito.numero_credito_sifco}
+                            </p>
                             <p className="text-sm text-white/65">
                               Cliente: {creditData.usuario.nombre}
                             </p>
@@ -196,7 +199,7 @@ export const MyLoans = () => {
                           {/* Capital */}
                           <div>
                             <p className="text-sm lg:text-base text-white/65 mb-1">
-                              Capital
+                              Monto del préstamo
                             </p>
                             <p className="lg:text-xl font-bold">
                               {formatCurrency(creditData.credito.capital)}
@@ -204,19 +207,12 @@ export const MyLoans = () => {
                           </div>
 
                           {/* Deuda Total */}
-                          <div>
-                            <p className="text-sm lg:text-base text-white/65 mb-1">
-                              Deuda Total
-                            </p>
-                            <p className="lg:text-xl font-bold">
-                              {formatCurrency(creditData.credito.deudatotal)}
-                            </p>
-                          </div>
+                          
 
                           {/* Cuota Mensual */}
                           <div>
                             <p className="text-sm lg:text-base text-white/65 mb-1">
-                              Cuota Mensual
+                              Pago Mensual
                             </p>
                             <p className="lg:text-xl font-bold">
                               {formatCurrency(creditData.credito.cuota)}
@@ -234,14 +230,7 @@ export const MyLoans = () => {
                           </div>
 
                           {/* Plazo */}
-                          <div>
-                            <p className="text-sm lg:text-base text-white/65 mb-1">
-                              Plazo
-                            </p>
-                            <p className="lg:text-xl font-bold">
-                              {creditData.credito.plazo} meses
-                            </p>
-                          </div>
+                          
 
                           {/* Pagos Pendientes */}
                           <div>
@@ -276,7 +265,10 @@ export const MyLoans = () => {
                               </p>
                             </div>
                           )}
+                        </div>
 
+                        {/* Fecha de Creación y Próximo Vencimiento - Fuera del grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                           {/* Fecha de Creación */}
                           <div className="flex items-center gap-4">
                             <div className="flex items-center justify-center shrink-0">
@@ -289,7 +281,7 @@ export const MyLoans = () => {
                               <p className="text-sm lg:text-base text-white/65 mb-1">
                                 Fecha de Creación
                               </p>
-                              <p className="lg:text-xl font-semibold">
+                              <p className="">
                                 {formatDate(creditData.credito.fecha_creacion)}
                               </p>
                             </div>
@@ -310,7 +302,7 @@ export const MyLoans = () => {
                                 <p className="text-sm lg:text-base text-white/65 mb-1">
                                   Próximo Vencimiento
                                 </p>
-                                <p className="lg:text-xl font-semibold">
+                                <p className="">
                                   {formatDate(
                                     creditData.cuotasPendientes[0]
                                       .fecha_vencimiento
@@ -322,7 +314,7 @@ export const MyLoans = () => {
                         </div>
 
                         {/* Observaciones */}
-                        {creditData.credito.observaciones && (
+                        {/*creditData.credito.observaciones && (
                           <div className="mb-6 p-3 bg-white/5 rounded-lg">
                             <p className="text-sm text-white/65 mb-1">
                               Observaciones
@@ -331,7 +323,7 @@ export const MyLoans = () => {
                               {creditData.credito.observaciones}
                             </p>
                           </div>
-                        )}
+                        )*/}
 
                         {/* Botón de realizar pago */}
                         {creditData.credito.statusCredit === "ACTIVO" && (

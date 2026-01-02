@@ -179,7 +179,7 @@ export const MyLoans = () => {
                               Crédito {opportunity.vehicle.make} {opportunity.vehicle.model} {opportunity.vehicle.year}
                             </h3>
                             <p className="text-sm text-white/65 mb-1">
-                              Número SIFCO: {creditData.credito.numero_credito_sifco}
+                              Número {creditData.credito.numero_credito_sifco}
                             </p>
                             <p className="text-sm text-white/65">
                               Cliente: {creditData.usuario.nombre}

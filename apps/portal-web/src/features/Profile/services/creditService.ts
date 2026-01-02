@@ -1,3 +1,5 @@
+//import { ensureCarteraAuth } from "./loginCartera";
+
 const carteraURL = import.meta.env.VITE_CARTERA_API_URL || "http://localhost:5000";
 
 // Tipos
@@ -87,12 +89,18 @@ export const getCredits = async (numerosSifco: string[]): Promise<CreditoRespons
   }
 
   try {
+    // Asegurar autenticación
+    // const token = await ensureCarteraAuth();
+
     // Hacer fetch para cada número SIFCO
     const promises = numerosSifco.map(async (numeroSifco) => {
       const response = await fetch(
         `${carteraURL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
         {
           credentials: "include",
+          /*headers: {
+            "Authorization": `Bearer ${token}`,
+          },*/
         }
       );
 
@@ -122,10 +130,16 @@ export const getCreditByNumeroSifco = async (
   numeroSifco: string
 ): Promise<CreditoResponse | null> => {
   try {
+    // Asegurar autenticación
+    // const token = await ensureCarteraAuth();
+
     const response = await fetch(
       `${carteraURL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
       {
         credentials: "include",
+        /*headers: {
+          "Authorization": `Bearer ${token}`,
+        },*/
       }
     );
 

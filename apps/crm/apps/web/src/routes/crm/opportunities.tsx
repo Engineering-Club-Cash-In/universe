@@ -430,7 +430,7 @@ function RouteComponent() {
 		}
 	};
 
-	const handleEditOpportunity = () => {
+	const handleEditOpportunity = (openEditModal = true) => {
 		if (selectedOpportunity) {
 			// Populate the edit form with the selected opportunity data
 			editOpportunityForm.setFieldValue(
@@ -551,8 +551,11 @@ function RouteComponent() {
 				selectedOpportunity.asesorId || 0,
 			);
 		}
-		setIsDetailsDialogOpen(false);
-		setIsEditDialogOpen(true);
+		
+		if (openEditModal) {
+			setIsDetailsDialogOpen(false);
+			setIsEditDialogOpen(true);
+		}
 	};
 
 	const handleChangeStage = () => {
@@ -1661,16 +1664,24 @@ function RouteComponent() {
 						<DialogHeader>
 							<DialogTitle>Detalles de la Oportunidad</DialogTitle>
 						</DialogHeader>
-						{selectedOpportunity && (
-							<Tabs defaultValue="details" className="w-full">
-								<TabsList className="grid w-full grid-cols-4">
-									<TabsTrigger value="details">Detalles</TabsTrigger>
-									<TabsTrigger value="documents">Documentos</TabsTrigger>
-									<TabsTrigger value="credit">Credito</TabsTrigger>
-									<TabsTrigger value="history">Historial</TabsTrigger>
-								</TabsList>
-
-								<TabsContent value="details" className="mt-6 space-y-6">
+					{selectedOpportunity && (
+						<Tabs 
+							defaultValue="details" 
+							className="w-full"
+							onValueChange={(value) => {
+								if (value === "credit") {
+									// Populate edit form when switching to credit tab, but don't open edit modal
+									handleEditOpportunity(false);
+								}
+							}}
+						>
+							<TabsList className="grid w-full grid-cols-4">
+								<TabsTrigger value="details">Detalles</TabsTrigger>
+								<TabsTrigger value="documents">Documentos</TabsTrigger>
+								<TabsTrigger value="credit">Credito</TabsTrigger>
+								<TabsTrigger value="history">Historial</TabsTrigger>
+							</TabsList>								
+							<TabsContent value="details" className="mt-6 space-y-6">
 									{/* Header with title and status */}
 									<div className="flex items-start justify-between">
 										<div>
@@ -1972,7 +1983,9 @@ function RouteComponent() {
 											variant="outline"
 											size="default"
 											className="flex-1"
-											onClick={handleEditOpportunity}
+											onClick={() => {
+												handleEditOpportunity(true);
+											}}
 										>
 											Editar
 										</Button>

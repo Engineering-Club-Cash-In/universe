@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { IconCalculator, Select, IconArrow } from "@/components";
 import { motion } from "framer-motion";
+import {
+  calculateCompoundInvestment,
+  calculateTraditionalInvestment,
+  calculateInterestOnlyInvestment,
+} from "../functions/investmentCalculations";
+
+// Constantes de configuración
+const INTEREST_RATE = 1.5; // 1.5% mensual
+const INVESTOR_PERCENTAGE = 70; // 70% para el inversionista
 
 export const Calculator: React.FC = () => {
   const [amount, setAmount] = useState("");
@@ -36,24 +45,41 @@ export const Calculator: React.FC = () => {
     { value: "compuesto", label: "Interés Compuesto" },
   ];
 
-  // Cálculos simulados (por ahora con valores de ejemplo)
+  // Cálculos usando las funciones de investmentCalculations
   const calculateReturns = () => {
     if (!amount || !term || !investmentType) return null;
 
-    const principal = parseFloat(amount);
-    const months = parseInt(term);
-    const annualRate = 0.12; // 12% anual como ejemplo
+    const capital = parseFloat(amount);
+    const termMonths = parseInt(term);
 
-    // Lógica simplificada por ahora
-    const monthlyRate = annualRate / 12;
-    const totalReturn = principal * (1 + monthlyRate * months);
-    const profit = totalReturn - principal;
+    const params = {
+      capital,
+      interestRate: INTEREST_RATE,
+      termMonths,
+      investorPercentage: INVESTOR_PERCENTAGE,
+    };
+
+    let result;
+
+    switch (investmentType) {
+      case "tradicional":
+        result = calculateTraditionalInvestment(params);
+        break;
+      case "vencimiento":
+        result = calculateInterestOnlyInvestment(params);
+        break;
+      case "compuesto":
+        result = calculateCompoundInvestment(params);
+        break;
+      default:
+        result = calculateTraditionalInvestment(params);
+    }
 
     return {
-      principal,
-      totalReturn,
-      profit,
-      months,
+      principal: capital,
+      profit: result.totalInterests || 0,
+      totalReturn: result.totalToReceive,
+      months: termMonths,
     };
   };
 

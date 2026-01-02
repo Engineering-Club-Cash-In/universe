@@ -64,7 +64,7 @@ export const GraphLine = () => {
           xScale={{ type: "linear", min: "auto", max: "auto" }}
           yScale={{
             type: "linear",
-            min: 0,
+            min: 100,
             max: "auto",
             stacked: false,
             reverse: false,

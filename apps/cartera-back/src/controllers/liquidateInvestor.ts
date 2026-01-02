@@ -821,6 +821,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       const relacionInversionista = await db
         .select()
         .from(creditos_inversionistas)
+        .innerJoin(creditos, eq(creditos.credito_id, creditos_inversionistas.credito_id))
         .where(
           and(
             eq(creditos_inversionistas.credito_id, credito.credito_id),
@@ -840,7 +841,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         continue;
       }
 
-      const relacion = relacionInversionista[0];
+      const relacion = relacionInversionista[0].creditos_inversionistas
       
       console.log(`   ✅ INVERSIONISTA ENCONTRADO EN ESTE CRÉDITO`);
       console.log(`      Monto aportado ANTERIOR: ${relacion.monto_aportado}`);
@@ -861,7 +862,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       // Obtener porcentajes de la BD (vienen en formato 0-100)
       const porcentajeCashIn = new Big(relacion.porcentaje_cash_in || 0).div(100);
       const porcentajeInversionista = new Big(relacion.porcentaje_participacion_inversionista || 0).div(100);
-      const interes = new Big(relacion.cuota_inversionista || 0).div(100); // % de interés
+      const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100); // % de interés
       
       console.log(`      📊 % Cash In: ${porcentajeCashIn.times(100).toString()}%`);
       console.log(`      📊 % Inversionista: ${porcentajeInversionista.times(100).toString()}%`);

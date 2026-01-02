@@ -192,6 +192,33 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		leadId = existingLead[0].id;
 	}
 
+	const magicUrlValue = `${MAGIC_URL_BASE}${dpi}`;
+	console.log(`[DEBUG] Checking magic URL for lead ${leadId}`);
+		const [existingMagicUrl] = await db
+			.select()
+			.from(magicUrls)
+			.where(eq(magicUrls.leadId, leadId))
+			.limit(1);
+
+		if (existingMagicUrl) {
+			await db
+				.update(magicUrls)
+				.set({
+					url: magicUrlValue,
+					updatedAt: new Date(),
+					used: false,
+					expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 días
+				})
+				.where(eq(magicUrls.id, existingMagicUrl.id));
+		} else {
+			await db.insert(magicUrls).values({
+				leadId: leadId,
+				url: magicUrlValue,
+				createdAt: new Date(),
+				expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+				used: false,
+			});
+		}
 	// ========================
 	// 4. Response
 	// ========================
@@ -202,6 +229,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		message: "RENAP data processed and synced successfully",
 		data: renapData,
 		leadId,
+		magicUrl: magicUrlValue,
 	};
 };
 
@@ -446,6 +474,8 @@ export const updateLeadAndCreateOpportunity = async (
 			opportunityId = newOpportunity.id;
 		}
 
+	
+	}
 		// 🔹 Crear o actualizar magic_url para este lead
 		console.log(`[DEBUG] Checking magic URL for lead ${existingLead.id}`);
 		const [existingMagicUrl] = await db
@@ -473,7 +503,6 @@ export const updateLeadAndCreateOpportunity = async (
 				used: false,
 			});
 		}
-	}
 
 	console.log(
 		`[DEBUG] Lead updated and opportunity created successfully for DPI: ${dpi}`,

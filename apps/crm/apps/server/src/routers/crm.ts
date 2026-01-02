@@ -876,13 +876,17 @@ export const crmRouter = {
 					// Additional credit fields
 					const direccion = input.direccion ?? opp.direccion;
 					const seguro = input.seguro ?? (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
+					const gps = input.gps ?? (opp.gps ? Number.parseFloat(opp.gps) : undefined);
+					const reserva = input.reserva ?? (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
 					const categoria = input.categoria ?? opp.categoria;
 					const nit = input.nit ?? opp.nit;
 					const asesorId = input.asesorId ?? opp.asesorId;
 					const inversionistas = input.inversionistas ?? opp.inversionistas;
 
 					if (!direccion) missingFields.push("dirección del cliente");
-					if (seguro === undefined || seguro === null) missingFields.push("seguro");
+					if (seguro === undefined || seguro === null || seguro <= 0) missingFields.push("seguro (debe ser mayor a 0)");
+					if (gps === undefined || gps === null || gps <= 0) missingFields.push("GPS (debe ser mayor a 0)");
+					if (reserva === undefined || reserva === null || reserva <= 0) missingFields.push("reserva (debe ser mayor a 0)");
 					if (!categoria) missingFields.push("categoría del crédito");
 					if (!nit) missingFields.push("NIT del cliente");
 					if (!asesorId) missingFields.push("asesor");
@@ -933,67 +937,7 @@ export const crmRouter = {
 						const lead = leadData[0];
 						console.log("Lead data for contract creation:", lead);
 						const companyId = opp?.companyId ?? lead.companyId ?? undefined;
-
-						// Check if client already exists for this lead/company
-						const existingClient = await db
-							.select()
-							.from(clients)
-							.where(
-								and(
-									eq(clients.opportunityId, opp.id),
-								),
-							)
-							.limit(1);
-
-						let clientId: string;
-
-						if (existingClient.length > 0) {
-							clientId = existingClient[0].id;
-						} else {
-							// Create new client
-							const newClient = await db
-								.insert(clients)
-								.values({
-									companyId,
-									opportunityId: opp.id,
-									contactPerson: `${lead.firstName} ${lead.lastName}`,
-									contractValue: finalValue,
-									startDate: new Date(finalFechaInicio as string),
-									status: "active",
-									assignedTo: opp.assignedTo,
-									notes: `Cliente generado automáticamente desde oportunidad: ${opp.title}`,
-									createdBy: context.userId,
-								})
-								.returning();
-
-							clientId = newClient[0].id;
-						}
-
-						// Calculate contract end date
-						const fechaInicioDate = new Date(finalFechaInicio as string);
-						const fechaVencimiento = new Date(fechaInicioDate);
-						fechaVencimiento.setMonth(
-							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
-						);
-
-						// Create financing contract (local CRM)
-						const newContract = await db
-							.insert(contratosFinanciamiento)
-							.values({
-								clientId,
-								vehicleId: finalVehicleId as string,
-								montoFinanciado: finalValue as string,
-								cuotaMensual: finalCuotaMensual as string,
-								numeroCuotas: finalNumeroCuotas as number,
-								tasaInteres: finalTasaInteres as string,
-								fechaInicio: fechaInicioDate,
-								fechaVencimiento,
-								diaPagoMensual: finalDiaPagoMensual as number,
-								estado: "activo",
-								notes: `Contrato generado desde oportunidad: ${opp.title}`,
-								createdBy: context.userId,
-							})
-							.returning();
+						console.log(`[CRM] dpi for renap lookup: ${lead?.dpi ?? "N/A"}`);
 
 						// Generate SIFCO credit number (unique identifier)
 						// Este número se genera UNA VEZ cuando la oportunidad llega al 100%
@@ -1002,7 +946,8 @@ export const crmRouter = {
 							.toString()
 							.padStart(3, "0");
 						numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
-
+						// Calculate contract end date
+						const fechaInicioDate = new Date(finalFechaInicio as string);
 						console.log(`[CRM] Generating new credit with number: ${numeroSifco}`);
 
 						// Integrate with cartera-back (dual-write)
@@ -1011,9 +956,20 @@ export const crmRouter = {
 						let carteraBackSuccess = false;
 						let carteraBackError: string | undefined;
 
+
 						console.log(`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`);
 
 						if (isCarteraBackEnabled()) {
+
+							const [renapInfoOpp] = await db
+									.select()
+									.from(renapInfo)
+									.where(eq(renapInfo.dpi, lead.dpi ?? ""))
+									.limit(1);
+
+
+							console.log(`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`);
+							
 							// TODO: Get or create usuario_id in cartera-back
 							// For now, we'll use a placeholder (this needs to be implemented)
 							const usuarioId = 1; // PLACEHOLDER - needs proper implementation
@@ -1038,28 +994,16 @@ export const crmRouter = {
 							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
 							const finalDireccion = direccion || opp.direccion || undefined;
 
-							console.log(`[CRM] dpi for renap lookup: ${lead?.dpi ?? "N/A"}`);
-
-							const [renapInfoOpp] = await db
-									.select()
-									.from(renapInfo)
-									.where(eq(renapInfo.dpi, lead.dpi ?? ""))
-									.limit(1);
-
-							console.log(`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`);
-
 							const creditoResult = await createCreditoInCarteraBack({
 								opportunityId: opp.id,
-								contratoFinanciamientoId: newContract[0].id,
+								// contratoFinanciamientoId: newContract[0].id,
 								userId: context.userId,
 								usuario_id: lead ? `${lead.firstName} ${lead.lastName}` : "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
 								asesor_id: finalAsesorId,
 								numero_credito_sifco: finalNumeroSifco,
 								direccion: finalDireccion,
 								capital: Number.parseFloat(finalValue as string),
-								porcentaje_interes: Number.parseFloat(
-									finalTasaInteres as string,
-								),
+								porcentaje_interes: Number.parseFloat(finalTasaInteres as string),
 								plazo: finalNumeroCuotas as number,
 								cuota: Number.parseFloat(finalCuotaMensual as string),
 								tipoCredito: opp.creditType || "autocompra",
@@ -1100,6 +1044,70 @@ export const crmRouter = {
 							);
 						}
 
+
+
+						// Check if client already exists for this lead/company
+						const existingClient = await db
+							.select()
+							.from(clients)
+							.where(
+								and(
+									eq(clients.opportunityId, opp.id),
+								),
+							)
+							.limit(1);
+
+						let clientId: string;
+
+						if (existingClient.length > 0) {
+							clientId = existingClient[0].id;
+						} else {
+							// Create new client
+							const newClient = await db
+								.insert(clients)
+								.values({
+									companyId,
+									opportunityId: opp.id,
+									contactPerson: `${lead.firstName} ${lead.lastName}`,
+									contractValue: finalValue,
+									startDate: new Date(finalFechaInicio as string),
+									status: "active",
+									assignedTo: opp.assignedTo,
+									notes: `Cliente generado automáticamente desde oportunidad: ${opp.title}`,
+									createdBy: context.userId,
+								})
+								.returning();
+
+							clientId = newClient[0].id;
+						}
+
+						
+						const fechaVencimiento = new Date(fechaInicioDate);
+						fechaVencimiento.setMonth(
+							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
+						);
+
+						// Create financing contract (local CRM)
+						const newContract = await db
+							.insert(contratosFinanciamiento)
+							.values({
+								clientId,
+								vehicleId: finalVehicleId as string,
+								montoFinanciado: finalValue as string,
+								cuotaMensual: finalCuotaMensual as string,
+								numeroCuotas: finalNumeroCuotas as number,
+								tasaInteres: finalTasaInteres as string,
+								fechaInicio: fechaInicioDate,
+								fechaVencimiento,
+								diaPagoMensual: finalDiaPagoMensual as number,
+								estado: "activo",
+								notes: `Contrato generado desde oportunidad: ${opp.title}`,
+								createdBy: context.userId,
+							})
+							.returning();
+
+						
+						
 						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
 						// When cartera-back is enabled, installments are managed there
 						if (!isCarteraBackEnabled()) {

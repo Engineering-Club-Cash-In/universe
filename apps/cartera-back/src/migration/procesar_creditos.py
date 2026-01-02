@@ -12,8 +12,7 @@ CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
-HOJAS_A_PROCESAR = [ 
-                     "Diciembre 2025", 
+HOJAS_A_PROCESAR = [  
     "Noviembre 2025", 
     # Agregá más según necesites
 ]

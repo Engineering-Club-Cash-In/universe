@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" 
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <RequestTransaction xmlns="http://www.fact.com.mx/schema/ws">
+      <Requestor>8A454E3F-CEA1-41D8-A13A-A748A4891BBE</Requestor>
+      <Transaction>SYSTEM_REQUEST</Transaction>
+      <Country>GT</Country>
+      <Entity>800000001026</Entity>
+      <User>8A454E3F-CEA1-41D8-A13A-A748A4891BBE</User>
+      <UserName>TEST</UserName>
+      <Data1>VOID_DOCUMENT</Data1>
+      <Data2></Data2>
+      <Data3></Data3>
+    </RequestTransaction>
+  </soap:Body>
+</soap:Envelope>

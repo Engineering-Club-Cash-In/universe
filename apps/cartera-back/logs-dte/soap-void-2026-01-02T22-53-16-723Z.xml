@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" 
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <RequestTransaction xmlns="http://www.fact.com.mx/schema/ws">
+      <Requestor>8A454E3F-CEA1-41D8-A13A-A748A4891BBE</Requestor>
+      <Transaction>SYSTEM_REQUEST</Transaction>
+      <Country>GT</Country>
+      <Entity>800000001026</Entity>
+      <User>8A454E3F-CEA1-41D8-A13A-A748A4891BBE</User>
+      <UserName>TEST</UserName>
+      <Data1>VOID_DOCUMENT</Data1>
+      <Data2>PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPGR0ZTpHVEFudWxhY2lvbkRvY3VtZW50byB4bWxuczpkdGU9Imh0dHA6Ly93d3cuc2F0LmdvYi5ndC9kdGUvZmVsLzAuMS4wIiB4bWxuczp4c2k9Imh0dHA6Ly93d3cudzMub3JnLzIwMDEvWE1MU2NoZW1hLWluc3RhbmNlIiBWZXJzaW9uPSIwLjEiIHhzaTpzY2hlbWFMb2NhdGlvbj0iaHR0cDovL3d3dy5zYXQuZ29iLmd0L2R0ZS9mZWwvMC4xLjAgR1RfQW51bGFjaW9uRG9jdW1lbnRvLTAuMS4wLnhzZCI+CiAgPGR0ZTpTQVQ+CiAgICA8ZHRlOkFudWxhY2lvbkRURSBJRD0iRGF0b3NDZXJ0aWZpY2Fkb3MiPgogICAgICA8ZHRlOkRhdG9zR2VuZXJhbGVzIAogICAgICAgIElEPSJEYXRvc0FudWxhY2lvbiIgCiAgICAgICAgTnVtZXJvRG9jdW1lbnRvQUFudWxhcj0iMTdGRkMyMjMtQTdGMS00RjIwLUExNkYtQzU4QkNGMUFERTY2IiAKICAgICAgICBOSVRFbWlzb3I9IjgwMDAwMDAwMTAyNiIgCiAgICAgICAgSURSZWNlcHRvcj0iNjY1NTMzMTgiIAogICAgICAgIEZlY2hhRW1pc2lvbkRvY3VtZW50b0FudWxhcj0iMjAyNi0wMS0wMlQxODo0NDo1My4wMDBaIiAKICAgICAgICBGZWNoYUhvcmFBbnVsYWNpb249IjIwMjYtMDEtMDJUMjI6NTM6MTYuNzIyWiIgCiAgICAgICAgTW90aXZvQW51bGFjaW9uPSJhc2Rhc2Rhc2RzYWRzYSIvPgogICAgPC9kdGU6QW51bGFjaW9uRFRFPgogIDwvZHRlOlNBVD4KPC9kdGU6R1RBbnVsYWNpb25Eb2N1bWVudG8+</Data2>
+      <Data3></Data3>
+    </RequestTransaction>
+  </soap:Body>
+</soap:Envelope>

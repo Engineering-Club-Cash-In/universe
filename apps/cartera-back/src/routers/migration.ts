@@ -346,7 +346,6 @@ export const sifcoRouter = new Elysia()
     },
   }
 )
-
 .post(
     "/liquidar-cuotas",
     async ({ body, set }) => {
@@ -354,7 +353,7 @@ export const sifcoRouter = new Elysia()
         console.log("[liquidar-cuotas] Iniciando liquidación...");
         console.log("[liquidar-cuotas] Body recibido:", JSON.stringify(body, null, 2));
 
-        const { nombre_usuario, cuota_mes, capital, nombre_inversionista } = body;
+        let { nombre_usuario, cuota_mes, capital, nombre_inversionista } = body;
 
         // 🔥 VALIDACIONES BÁSICAS
         if (!nombre_usuario || nombre_usuario.trim() === '') {
@@ -399,18 +398,23 @@ export const sifcoRouter = new Elysia()
           };
         }
 
-        // 🔥 VALIDAR QUE CAPITAL SEA > 0
-        if (isNaN(capitalNumerico) || capitalNumerico <= 0) {
+        // 🆕 VALIDAR QUE CAPITAL SEA >= 0 (AHORA ACEPTA 0)
+        if (isNaN(capitalNumerico) || capitalNumerico < 0) {
           console.error(`❌ Capital inválido: ${capital} (tipo: ${typeof capital}, parseado: ${capitalNumerico})`);
           set.status = 400;
           return {
             success: false,
-            message: `❌ El capital debe ser mayor a 0 (recibido: ${capital})`,
+            message: `❌ El capital debe ser mayor o igual a 0 (recibido: ${capital})`,
             error: "Capital inválido"
           };
         }
 
-        console.log(`✅ Capital válido recibido: ${capitalNumerico}`);
+        // 🆕 LOG SI EL CAPITAL ES 0
+        if (capitalNumerico === 0) {
+          console.log(`⚠️ Capital en 0 para ${nombre_usuario} - Se procesará con valores en 0`);
+        } else {
+          console.log(`✅ Capital válido recibido: ${capitalNumerico}`);
+        }
 
         if (!nombre_inversionista || nombre_inversionista.trim() === '') {
           set.status = 400;
@@ -421,9 +425,21 @@ export const sifcoRouter = new Elysia()
           };
         }
 
+        // 🆕 NORMALIZAR FORMATO DE MES
+        cuota_mes = cuota_mes.trim();
+        
+        // Si tiene formato "nov.25" o "nov25" (sin espacio), agregar espacio
+        if (/^[a-zA-Z]{3}\.?\d{2,4}$/.test(cuota_mes)) {
+          const match = cuota_mes.match(/^([a-zA-Z]{3})\.?(\d{2,4})$/);
+          if (match) {
+            const mesOriginal = cuota_mes;
+            cuota_mes = `${match[1]}. ${match[2]}`;
+            console.log(`🔧 Formato de mes corregido: "${mesOriginal}" → "${cuota_mes}"`);
+          }
+        }
+
         // Validar formato básico del mes
-        const cleanMes = cuota_mes.trim();
-        if (cleanMes.length < 4) {
+        if (cuota_mes.length < 4) {
           set.status = 400;
           return {
             success: false,
@@ -463,7 +479,7 @@ export const sifcoRouter = new Elysia()
       detail: {
         summary: "Liquida cuotas de créditos con capital e inversionista",
         tags: ["Liquidaciones"],
-        description: "Busca la cuota que vence en el mes especificado, marca como liquidadas todas las cuotas hasta esa, y actualiza el capital del inversionista en ese crédito",
+        description: "Busca la cuota que vence en el mes especificado, marca como liquidadas todas las cuotas hasta esa, y actualiza el capital del inversionista en ese crédito. Acepta capital = 0.",
       },
       body: t.Object({
         nombre_usuario: t.String({
@@ -471,18 +487,18 @@ export const sifcoRouter = new Elysia()
           examples: ["Christopher Miguel", "Fernando Alfonso", "Juan Pérez"],
         }),
         cuota_mes: t.String({
-          description: "Mes y año de la cuota a liquidar en formato de 3 letras + año",
-          examples: ["oct. 25", "ago. 25", "sep. 25", "nov. 24"],
+          description: "Mes y año de la cuota a liquidar. Acepta formatos: 'oct. 25', 'oct.25', 'oct 25'",
+          examples: ["oct. 25", "ago. 25", "sep. 25", "nov. 24", "nov.25"],
           pattern: "^[a-zA-Z]{3}\\.?\\s*\\d{2,4}$",
         }),
         capital: t.Number({
-          description: "Capital a aplicar al inversionista (monto aportado)",
-          examples: [55938.46, 42109.69, 103310.43],
-          minimum: 0.01,
+          description: "Capital a aplicar al inversionista (puede ser 0 para actualizar con valores en 0)",
+          examples: [55938.46, 42109.69, 103310.43, 0],
+          minimum: 0, // 🆕 CAMBIO: Ahora acepta desde 0
         }),
         nombre_inversionista: t.String({
           description: "Nombre del inversionista (búsqueda flexible)",
-          examples: ["Anna Lisseth Lorenzo Rodas", "Alexa Nahomy Caballero Pinto"],
+          examples: ["Anna Lisseth Lorenzo Rodas", "Alexa Nahomy Caballero Pinto", "Alexander Kachler"],
         }),
       }),
     }

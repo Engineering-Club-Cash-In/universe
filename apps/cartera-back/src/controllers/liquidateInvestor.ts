@@ -17,10 +17,19 @@ function normalizarCuotaMes(cuota_mes: string): string {
   
   let normalizado = cuota_mes.trim();
   
-  // 1. Remover puntos extras al final
+  // 🆕 1. Si tiene formato "nov.25" o "nov25" sin espacio, agregar espacio
+  if (/^[a-zA-Z]{3}\.?\d{2,4}$/.test(normalizado)) {
+    const match = normalizado.match(/^([a-zA-Z]{3})\.?(\d{2,4})$/);
+    if (match) {
+      normalizado = `${match[1]}. ${match[2]}`;
+      console.log(`   🔧 Agregado espacio: "${normalizado}"`);
+    }
+  }
+  
+  // 2. Remover puntos extras al final
   normalizado = normalizado.replace(/\.+$/g, '');
   
-  // 2. Convertir año de 4 dígitos a 2
+  // 3. Convertir año de 4 dígitos a 2
   normalizado = normalizado.replace(/\b2025\b/g, '25');
   normalizado = normalizado.replace(/\b2024\b/g, '24');
   normalizado = normalizado.replace(/\b2023\b/g, '23');
@@ -28,7 +37,7 @@ function normalizarCuotaMes(cuota_mes: string): string {
   normalizado = normalizado.replace(/\b2021\b/g, '21');
   normalizado = normalizado.replace(/\b2020\b/g, '20');
   
-  // 3. Casos especiales: múltiples meses (ej: "ago. 25 y sep. 25")
+  // 4. Casos especiales: múltiples meses (ej: "ago. 25 y sep. 25")
   if (normalizado.includes(' y ')) {
     console.log(`   ⚠️ Múltiples meses detectados, tomando el último`);
     const meses = normalizado.split(' y ').map(m => m.trim());
@@ -36,7 +45,7 @@ function normalizarCuotaMes(cuota_mes: string): string {
     console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
   }
   
-  // 4. Si tiene múltiples meses separados por comas
+  // 5. Si tiene múltiples meses separados por comas
   if (normalizado.includes(',')) {
     console.log(`   ⚠️ Múltiples meses con coma, tomando el último`);
     const meses = normalizado.split(',').map(m => m.trim());
@@ -44,10 +53,10 @@ function normalizarCuotaMes(cuota_mes: string): string {
     console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
   }
   
-  // 5. Limpiar espacios múltiples
+  // 6. Limpiar espacios múltiples
   normalizado = normalizado.replace(/\s+/g, ' ');
   
-  // 6. Asegurar que tiene punto después del mes
+  // 7. Asegurar que tiene punto después del mes
   const partes = normalizado.split(/\s+/);
   if (partes.length === 2) {
     let mes = partes[0].toLowerCase().replace('.', '');
@@ -415,7 +424,7 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
   };
 }
 
-// 🔥 ENDPOINT PRINCIPAL (MODIFICADO CON CAPITAL E INVERSIONISTA)
+// 🔥 ENDPOINT PRINCIPAL (MODIFICADO - SIEMPRE ACTUALIZA INVERSIONISTA)
 export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
   try {
     console.log("🔥 ========== INICIANDO LIQUIDACIÓN DE CUOTAS ==========");
@@ -694,7 +703,8 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     // ============================================
     const resultadosPorCredito = [];
     let creditosSinCuotas = 0;
-    let totalInversionistasActualizados = 0; // 🆕 CONTADOR
+    let totalInversionistasActualizados = 0;
+    const advertencias: string[] = []; // 🆕 ARRAY PARA ADVERTENCIAS
 
     for (const credito of creditosUsuario) {
       console.log(`\n💳 ========== CRÉDITO: ${credito.numero_credito_sifco} ==========`);
@@ -756,65 +766,56 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
 
       console.log(`   📊 Cuotas encontradas en el rango: ${cuotaDelMes.length}`);
 
-      if (cuotaDelMes.length > 0) {
+      // 🆕 NUEVA LÓGICA: LIQUIDAR CUOTAS SI EXISTEN, SINO SOLO ADVERTIR
+      let numeroCuotaALiquidar = 0;
+      let cuotasLiquidadas = 0;
+
+      if (cuotaDelMes.length === 0) {
+        // ⚠️ NO HAY CUOTA PARA ESTE MES - SOLO ADVERTIR
+        const advertencia = `⚠️ Crédito ${credito.numero_credito_sifco}: No hay cuota que venza en ${cuota_mes_normalizada}`;
+        console.log(`   ${advertencia}`);
+        advertencias.push(advertencia);
+        
+        creditosSinCuotas++;
+      } else {
+        // ✅ SÍ HAY CUOTA - LIQUIDAR
         console.log(`   🎯 Cuotas que coinciden con ${cuota_mes_normalizada}:`);
         cuotaDelMes.forEach((c) => {
           console.log(`      - Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento}`);
         });
-      }
 
-      if (cuotaDelMes.length === 0) {
-        console.log(`   ⚠️ NO SE ENCONTRÓ cuota que venza en ${cuota_mes_normalizada}`);
-        console.log(`   ⚠️ Revisá que las fechas de vencimiento estén en el rango correcto`);
-        
-        creditosSinCuotas++;
-        
-        resultadosPorCredito.push({
-          credito_id: credito.credito_id,
-          numero_credito: credito.numero_credito_sifco,
-          cuotas_liquidadas: 0,
-          inversionistas_actualizados: 0,
-          mensaje: `No hay cuota que venza en ${cuota_mes_normalizada}`,
-          debug: {
-            rango_buscado: `${rangoMes.inicio} - ${rangoMes.fin}`,
-            total_cuotas_credito: todasLasCuotas.length,
-            primeras_fechas: todasLasCuotas.slice(0, 5).map(c => c.fecha_vencimiento),
-            ultimas_fechas: todasLasCuotas.slice(-5).map(c => c.fecha_vencimiento)
-          }
-        });
-        continue;
-      }
+        // Tomar la PRIMERA cuota del rango
+        const cuotaEncontrada = cuotaDelMes[0];
+        numeroCuotaALiquidar = cuotaEncontrada.numero_cuota;
 
-      // Tomar la PRIMERA cuota del rango
-      const cuotaEncontrada = cuotaDelMes[0];
-      const numeroCuotaALiquidar = cuotaEncontrada.numero_cuota;
+        console.log(`\n   ✅ CUOTA SELECCIONADA: #${numeroCuotaALiquidar}`);
+        console.log(`      Vence: ${cuotaEncontrada.fecha_vencimiento}`);
+        console.log(`      Liquidado: ${cuotaEncontrada.liquidado_inversionistas ? 'SÍ' : 'NO'}`);
+        console.log(`\n   📊 LIQUIDANDO cuotas desde 1 hasta ${numeroCuotaALiquidar}...`);
 
-      console.log(`\n   ✅ CUOTA SELECCIONADA: #${numeroCuotaALiquidar}`);
-      console.log(`      Vence: ${cuotaEncontrada.fecha_vencimiento}`);
-      console.log(`      Liquidado: ${cuotaEncontrada.liquidado_inversionistas ? 'SÍ' : 'NO'}`);
-      console.log(`\n   📊 LIQUIDANDO cuotas desde 1 hasta ${numeroCuotaALiquidar}...`);
-
-      // ============================================
-      // 8️⃣ LIQUIDAR HASTA ESA CUOTA
-      // ============================================
-      const resultado = await db
-        .update(cuotas_credito)
-        .set({
-          liquidado_inversionistas: true,
-          fecha_liquidacion_inversionistas: new Date(),
-        })
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, credito.credito_id),
-            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
+        // ============================================
+        // 8️⃣ LIQUIDAR HASTA ESA CUOTA
+        // ============================================
+        const resultado = await db
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: true,
+            fecha_liquidacion_inversionistas: new Date(),
+          })
+          .where(
+            and(
+              eq(cuotas_credito.credito_id, credito.credito_id),
+              lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
+            )
           )
-        )
-        .returning();
+          .returning();
 
-      console.log(`   ✅ ${resultado.length} cuotas ACTUALIZADAS\n`);
+        cuotasLiquidadas = resultado.length;
+        console.log(`   ✅ ${cuotasLiquidadas} cuotas ACTUALIZADAS\n`);
+      }
 
       // ============================================
-      // 🆕 9️⃣ BUSCAR SI ESTE CRÉDITO TIENE AL INVERSIONISTA
+      // 🆕 9️⃣ BUSCAR Y ACTUALIZAR INVERSIONISTA (SIEMPRE)
       // ============================================
       console.log(`\n   👥 ========== BUSCANDO INVERSIONISTA EN ESTE CRÉDITO ==========`);
       
@@ -830,18 +831,28 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         );
 
       if (relacionInversionista.length === 0) {
-        console.log(`   ⚠️ El inversionista "${inversionista.nombre}" NO participa en este crédito`);
+        const advertencia = `⚠️ Crédito ${credito.numero_credito_sifco}: El inversionista "${inversionista.nombre}" NO participa`;
+        console.log(`   ${advertencia}`);
+        advertencias.push(advertencia);
+        
         resultadosPorCredito.push({
           credito_id: credito.credito_id,
           numero_credito: credito.numero_credito_sifco,
-          cuotas_liquidadas: resultado.length,
+          cuota_encontrada: numeroCuotaALiquidar || null,
+          cuotas_liquidadas: cuotasLiquidadas,
           inversionistas_actualizados: 0,
-          mensaje: `Inversionista no participa en este crédito`
+          advertencia: "Inversionista no participa en este crédito",
+          cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
+            .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
+            .map(c => ({
+              numero_cuota: c.numero_cuota,
+              fecha_vencimiento: c.fecha_vencimiento
+            })) : []
         });
         continue;
       }
 
-      const relacion = relacionInversionista[0].creditos_inversionistas
+      const relacion = relacionInversionista[0].creditos_inversionistas;
       
       console.log(`   ✅ INVERSIONISTA ENCONTRADO EN ESTE CRÉDITO`);
       console.log(`      Monto aportado ANTERIOR: ${relacion.monto_aportado}`);
@@ -850,37 +861,32 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       console.log(`      Cuota inversionista: ${relacion.cuota_inversionista}%`);
 
       // ============================================
-      // 🆕 🔟 RECALCULAR TODO CON EL NUEVO CAPITAL
+      // 🆕 🔟 RECALCULAR TODO CON EL NUEVO CAPITAL (SIEMPRE)
       // ============================================
       console.log(`\n   🧮 ========== RECALCULANDO MONTOS ==========`);
       
-      // 💰 EL CAPITAL ES EL NUEVO MONTO APORTADO
       const nuevoMontoAportado = capitalTotal;
       
       console.log(`      💰 NUEVO Monto aportado: ${nuevoMontoAportado.toFixed(2)}`);
       
-      // Obtener porcentajes de la BD (vienen en formato 0-100)
       const porcentajeCashIn = new Big(relacion.porcentaje_cash_in || 0).div(100);
       const porcentajeInversionista = new Big(relacion.porcentaje_participacion_inversionista || 0).div(100);
-      const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100); // % de interés
+      const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100);
       
       console.log(`      📊 % Cash In: ${porcentajeCashIn.times(100).toString()}%`);
       console.log(`      📊 % Inversionista: ${porcentajeInversionista.times(100).toString()}%`);
       console.log(`      📊 % Interés: ${interes.times(100).toString()}%`);
       
-      // 🧮 CALCULAR CUOTA DE INTERÉS BASE
       const cuotaInteres = nuevoMontoAportado.times(interes);
       
       console.log(`      💵 Cuota interés total: ${cuotaInteres.toFixed(2)}`);
       
-      // 💸 DIVIDIR ENTRE INVERSIONISTA Y CASH_IN
       const nuevoMontoInversionista = cuotaInteres.times(porcentajeInversionista).toFixed(2);
       const nuevoMontoCashIn = cuotaInteres.times(porcentajeCashIn).toFixed(2);
       
       console.log(`      💵 Monto inversionista: ${nuevoMontoInversionista}`);
       console.log(`      💵 Monto cash_in: ${nuevoMontoCashIn}`);
       
-      // 📄 CALCULAR IVAs (12%)
       const nuevoIvaInversionista = Number(nuevoMontoInversionista) > 0
         ? new Big(nuevoMontoInversionista).times(0.12).toFixed(2)
         : "0.00";
@@ -892,7 +898,6 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       console.log(`      📄 IVA inversionista: ${nuevoIvaInversionista}`);
       console.log(`      📄 IVA cash_in: ${nuevoIvaCashIn}`);
       
-      // 💾 ACTUALIZAR EN LA BASE DE DATOS
       console.log(`\n      💾 ACTUALIZANDO EN BD...`);
       
       await db
@@ -918,35 +923,17 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       resultadosPorCredito.push({
         credito_id: credito.credito_id,
         numero_credito: credito.numero_credito_sifco,
-        cuota_encontrada: numeroCuotaALiquidar,
-        cuotas_liquidadas: resultado.length,
+        cuota_encontrada: numeroCuotaALiquidar || null,
+        cuotas_liquidadas: cuotasLiquidadas,
         inversionistas_actualizados: 1,
-        cuotas_actualizadas: resultado.map(c => ({
-          numero_cuota: c.numero_cuota,
-          fecha_vencimiento: c.fecha_vencimiento
-        }))
+        advertencia: cuotasLiquidadas === 0 ? "No había cuota para liquidar en este mes, pero el inversionista fue actualizado" : null,
+        cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
+          .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
+          .map(c => ({
+            numero_cuota: c.numero_cuota,
+            fecha_vencimiento: c.fecha_vencimiento
+          })) : []
       });
-    }
-
-    // 🆕 SI NINGÚN CRÉDITO TIENE CUOTAS PARA ESE MES
-    if (creditosSinCuotas === creditosUsuario.length) {
-      const errorMsg = `❌ Ninguno de los ${creditosUsuario.length} crédito(s) de "${usuario.nombre}" tiene cuotas que venzan en ${rangoMes.mesDescriptivo}`;
-      console.error(errorMsg);
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "No hay cuotas para liquidar en ese mes",
-        usuario: {
-          usuario_id: usuario.usuario_id,
-          nombre: usuario.nombre
-        },
-        creditos_revisados: creditosUsuario.length,
-        mes_buscado: rangoMes.mesDescriptivo,
-        rango_fechas: `${rangoMes.inicio} - ${rangoMes.fin}`,
-        detalle_por_credito: resultadosPorCredito,
-        sugerencia: "Verificá que las fechas de vencimiento de las cuotas estén correctas en la BD"
-      };
     }
 
     // ============================================
@@ -957,9 +944,16 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     console.log(`✅ Inversionista: ${inversionista.nombre}`);
     console.log(`✅ Créditos procesados: ${creditosUsuario.length}`);
     console.log(`✅ Cuotas reseteadas inicialmente: ${totalCuotasReseteadas}`);
-    console.log(`✅ Mes liquidado: ${rangoMes.mesDescriptivo}`);
+    console.log(`✅ Mes buscado: ${rangoMes.mesDescriptivo}`);
     console.log(`💰 Capital aplicado: ${capitalTotal.toString()}`);
     console.log(`👥 Inversionistas actualizados: ${totalInversionistasActualizados}`);
+    console.log(`⚠️ Créditos sin cuotas para este mes: ${creditosSinCuotas}`);
+
+    if (advertencias.length > 0) {
+      console.log(`\n⚠️ ========== ADVERTENCIAS ==========`);
+      advertencias.forEach(adv => console.log(`   ${adv}`));
+      console.log(`======================================`);
+    }
 
     const totalCuotasLiquidadas = resultadosPorCredito.reduce(
       (sum, r) => sum + (r.cuotas_liquidadas || 0), 0
@@ -987,9 +981,10 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         cuota_mes_normalizada: cuota_mes_normalizada,
         rango_liquidado: rangoMes,
         total_cuotas_liquidadas: totalCuotasLiquidadas,
+        advertencias: advertencias, // 🆕 ADVERTENCIAS EN LA RESPUESTA
         detalle_por_credito: resultadosPorCredito,
       },
-      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}`,
+      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}${advertencias.length > 0 ? ` (${advertencias.length} advertencia${advertencias.length > 1 ? 's' : ''})` : ''}`,
     };
   } catch (error) {
     console.error("❌ Error en liquidación de cuotas:", error);

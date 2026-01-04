@@ -321,7 +321,7 @@ export const updateLeadAndCreateOpportunity = async (
 		return {
 			success: false,
 			message: "Lead not found with the provided DPI and status 'new'",
-		};
+		}; 
 	}
 
 	// Normalizar enums

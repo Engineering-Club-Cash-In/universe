@@ -23,14 +23,14 @@ export const MyDocuments = () => {
   // Obtener contratos
   const { data: contracts, isLoading: loadingContracts } = useQuery({
     queryKey: ["contracts", user?.email],
-    queryFn: () => getContracts(user?.email || "", token || null),
+    queryFn: () => getContracts(user?.email || "", user?.dpi || "", token || null),
     enabled: !!user?.email,
   });
 
   // Obtener documentos personales
   const { data: documents, isLoading: loadingDocuments } = useQuery({
     queryKey: ["personal-documents", user?.email],
-    queryFn: () => getPersonalDocuments(user?.email || "", token || null),
+    queryFn: () => getPersonalDocuments(user?.email || "", user?.dpi || "", token || null),
     enabled: !!user?.email,
   });
 

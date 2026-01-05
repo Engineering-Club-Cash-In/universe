@@ -10,6 +10,39 @@ import { getRenapInfoController } from "./bot";
 import { getFileUrl } from "../lib/storage";
 
 /**
+ * Función auxiliar para encontrar un lead por email o DPI
+ * Retorna el lead completo si lo encuentra, null si no
+ */
+async function findLeadByEmailOrDpi(email?: string, dpi?: string) {
+	// Validar que se proporcione al menos uno
+	if (!email && !dpi) {
+		return { error: "Se debe proporcionar email o DPI", status: 400 as const };
+	}
+
+	// Construir condiciones de búsqueda
+	const conditions = [];
+	if (email && email.trim() !== "") {
+		conditions.push(eq(leads.email, email));
+	}
+	if (dpi && dpi.trim() !== "") {
+		conditions.push(eq(leads.dpi, dpi));
+	}
+
+	// Buscar el lead
+	const [lead] = await db
+		.select()
+		.from(leads)
+		.where(or(...conditions))
+		.limit(1);
+
+	if (!lead) {
+		return { error: "Lead no encontrado", status: 404 as const };
+	}
+
+	return { lead };
+}
+
+/**
  * Middleware to validate portal token (Better Auth session token)
  */
 export async function validatePortalToken(c: Context, next: () => Promise<void>) {
@@ -54,62 +87,53 @@ export async function validatePortalToken(c: Context, next: () => Promise<void>)
 }
 
 /**
- * Get lead information by email
+ * Get lead information by email or DPI
  */
 export async function getLeadByEmail(c: Context) {
   try {
-    const { email } = c.req.query();
+    const { email, dpi } = c.req.query();
 
-    if (!email) {
+    // Buscar el lead usando la función auxiliar
+    const result = await findLeadByEmailOrDpi(email, dpi);
+
+    // Si hay error, retornar
+    if ("error" in result) {
       return c.json(
         {
           success: false,
-          error: "El correo es requerido",
+          error: result.error,
         },
-        400
+        result.status
       );
     }
 
-    const [lead] = await db
-      .select({
-        id: leads.id,
-        firstName: leads.firstName,
-        lastName: leads.lastName,
-        email: leads.email,
-        phone: leads.phone,
-        dpi: leads.dpi,
-        direccion: leads.direccion,
-        age: leads.age,
-        clientType: leads.clientType,
-        maritalStatus: leads.maritalStatus,
-        dependents: leads.dependents,
-        monthlyIncome: leads.monthlyIncome,
-        loanAmount: leads.loanAmount,
-        occupation: leads.occupation,
-        workTime: leads.workTime,
-        loanPurpose: leads.loanPurpose,
-        ownsHome: leads.ownsHome,
-        ownsVehicle: leads.ownsVehicle,
-        hasCreditCard: leads.hasCreditCard,
-        jobTitle: leads.jobTitle,
-        status: leads.status,
-        source: leads.source,
-        createdAt: leads.createdAt,
-        updatedAt: leads.updatedAt,
-      })
-      .from(leads)
-      .where(eq(leads.email, email))
-      .limit(1);
-
-    if (!lead) {
-      return c.json(
-        {
-          success: false,
-          error: "Lead no encontrado",
-        },
-        404
-      );
-    }
+    // Seleccionar solo los campos necesarios
+    const lead = {
+      id: result.lead.id,
+      firstName: result.lead.firstName,
+      lastName: result.lead.lastName,
+      email: result.lead.email,
+      phone: result.lead.phone,
+      dpi: result.lead.dpi,
+      direccion: result.lead.direccion,
+      age: result.lead.age,
+      clientType: result.lead.clientType,
+      maritalStatus: result.lead.maritalStatus,
+      dependents: result.lead.dependents,
+      monthlyIncome: result.lead.monthlyIncome,
+      loanAmount: result.lead.loanAmount,
+      occupation: result.lead.occupation,
+      workTime: result.lead.workTime,
+      loanPurpose: result.lead.loanPurpose,
+      ownsHome: result.lead.ownsHome,
+      ownsVehicle: result.lead.ownsVehicle,
+      hasCreditCard: result.lead.hasCreditCard,
+      jobTitle: result.lead.jobTitle,
+      status: result.lead.status,
+      source: result.lead.source,
+      createdAt: result.lead.createdAt,
+      updatedAt: result.lead.updatedAt,
+    };
 
     return c.json({
       success: true,
@@ -128,43 +152,32 @@ export async function getLeadByEmail(c: Context) {
 }
 
 /**
- * Update lead information by email
+ * Update lead information by email or DPI
  */
 export async function updateLeadByEmail(c: Context) {
   try {
     const body = await c.req.json();
-    const { email, address, dpi, phone } = body;
+    const { email, dpi, address, phone } = body;
 
-    if (!email) {
+    // Buscar el lead usando la función auxiliar (email o dpi como identificadores)
+    const result = await findLeadByEmailOrDpi(email);
+
+    // Si hay error, retornar
+    if ("error" in result) {
       return c.json(
         {
           success: false,
-          error: "El correo es requerido",
+          error: result.error,
         },
-        400
+        result.status
       );
     }
 
-    // Check if lead exists
-    const [existingLead] = await db
-      .select()
-      .from(leads)
-      .where(eq(leads.email, email))
-      .limit(1);
-
-    if (!existingLead) {
-      return c.json(
-        {
-          success: false,
-          error: "Lead no encontrado",
-        },
-        404
-      );
-    }
+    const existingLead = result.lead;
 
     // Check if new DPI or phone already exists in another lead
     if (dpi !== undefined || phone !== undefined) {
-      const conditions = [ne(leads.email, email)];
+      const conditions = [ne(leads.id, existingLead.id)];
       const orConditions = [];
 
       if (dpi !== undefined) {
@@ -224,7 +237,7 @@ export async function updateLeadByEmail(c: Context) {
     const [updatedLead] = await db
       .update(leads)
       .set(updateData)
-      .where(eq(leads.email, email))
+      .where(eq(leads.id, existingLead.id))
       .returning({
         id: leads.id,
         firstName: leads.firstName,
@@ -240,7 +253,7 @@ export async function updateLeadByEmail(c: Context) {
     if (address !== undefined && updatedLead) {
       await db
         .update(opportunities)
-        .set({ 
+        .set({
           direccion: address,
           updatedAt: new Date(),
         })
@@ -272,38 +285,27 @@ export async function updateLeadByEmail(c: Context) {
 }
 
 /**
- * Get all opportunity documents for a lead by email
+ * Get all opportunity documents for a lead by email or DPI
  */
 export async function getLeadOpportunityDocuments(c: Context) {
   try {
-    const { email } = c.req.query();
+    const { email, dpi } = c.req.query();
 
-    if (!email) {
+    // Buscar el lead usando la función auxiliar
+    const result = await findLeadByEmailOrDpi(email, dpi);
+
+    // Si hay error, retornar
+    if ("error" in result) {
       return c.json(
         {
           success: false,
-          error: "El correo es requerido",
+          error: result.error,
         },
-        400
+        result.status
       );
     }
 
-    // Get lead by email
-    const [lead] = await db
-      .select({ id: leads.id })
-      .from(leads)
-      .where(eq(leads.email, email))
-      .limit(1);
-
-    if (!lead) {
-      return c.json(
-        {
-          success: false,
-          error: "Lead no encontrado",
-        },
-        404
-      );
-    }
+    const lead = result.lead;
 
     // Get all opportunities for this lead
     const leadOpportunities = await db
@@ -379,38 +381,27 @@ export async function getLeadOpportunityDocuments(c: Context) {
 }
 
 /**
- * Get all legal contracts for a lead by email
+ * Get all legal contracts for a lead by email or DPI
  */
 export async function getLeadLegalContracts(c: Context) {
   try {
-    const { email } = c.req.query();
+    const { email, dpi } = c.req.query();
 
-    if (!email) {
+    // Buscar el lead usando la función auxiliar
+    const result = await findLeadByEmailOrDpi(email, dpi);
+
+    // Si hay error, retornar
+    if ("error" in result) {
       return c.json(
         {
           success: false,
-          error: "El correo es requerido",
+          error: result.error,
         },
-        400
+        result.status
       );
     }
 
-    // Get lead by email
-    const [lead] = await db
-      .select()
-      .from(leads)
-      .where(eq(leads.email, email))
-      .limit(1);
-
-    if (!lead) {
-      return c.json(
-        {
-          success: false,
-          error: "Lead no encontrado",
-        },
-        404
-      );
-    }
+    const lead = result.lead;
 
     // Get all contracts for this lead
     const contracts = await db
@@ -456,37 +447,35 @@ export async function getLeadLegalContracts(c: Context) {
 }
 
 /**
- * Get SIFCO numbers for a lead by DPI
+ * Get SIFCO numbers for a lead by email or DPI
  */
 export async function getSifcoNumbersByDpi(c: Context) {
   try {
-    const { email } = c.req.query();
+    const { email, dpi } = c.req.query();
 
-    if (!email) {
+    // Buscar el lead usando la función auxiliar
+    const result = await findLeadByEmailOrDpi(email, dpi);
+
+    // Si hay error y es 404, retornar array vacío (comportamiento original)
+    if ("error" in result) {
+      if (result.status === 404) {
+        return c.json({
+          success: true,
+          data: [],
+        });
+      }
       return c.json(
         {
           success: false,
-          error: "El correo es requerido",
+          error: result.error,
         },
-        400
+        result.status
       );
     }
 
-    // Get lead by email
-    const [lead] = await db
-      .select({ id: leads.id })
-      .from(leads)
-      .where(eq(leads.email, email))
-      .limit(1);
+    const lead = result.lead;
 
-    console.log("Lead found for email:", lead);
-
-    if (!lead) {
-      return c.json({
-        success: true,
-        data: [],
-      });
-    }
+    console.log("Lead found:", lead.id);
 
     // Get all opportunities with SIFCO numbers for this lead
     const opportunitiesWithSifco = await db

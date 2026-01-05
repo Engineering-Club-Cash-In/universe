@@ -23,7 +23,7 @@ export const MyLoans = () => {
   // Query para obtener números SIFCO (con cache automático)
   const { data: sifcoNumbers, isLoading: isLoadingSifcoNumbers } = useQuery({
     queryKey: ["sifco-numbers", user?.email],
-    queryFn: () => getNumbersSifco(user?.email ?? "", sessionToken),
+    queryFn: () => getNumbersSifco(user?.email ?? "", user?.dpi ?? "", sessionToken),
     enabled: !!user?.email && !!sessionToken && opportunities.length === 0,
   });
 

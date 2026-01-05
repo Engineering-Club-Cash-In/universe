@@ -65,9 +65,10 @@ export interface UpdateLeadPayload {
  */
 export const getProfile = async (
   email: string,
+  dpi: string,
   token: string | null
 ): Promise<ProfileData> => {
-  const response = await fetch(`${crmURL}/api/portal/lead?email=${email}`, {
+  const response = await fetch(`${crmURL}/api/portal/lead?email=${email}&dpi=${dpi}`, {
     credentials: "include",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -122,9 +123,10 @@ export const updateLead = async (
 
 export const getNumbersSifco = async (
   email: string,
+  dpi: string,
   token: string | null
 ): Promise<Opportunity[]> => {
-  const response = await fetch(`${crmURL}/api/portal/lead/sifco?email=${email}`, {
+  const response = await fetch(`${crmURL}/api/portal/lead/sifco?email=${email}&dpi=${dpi}`, {
     credentials: "include",
     headers: {
       Authorization: `Bearer ${token}`,

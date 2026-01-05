@@ -10,11 +10,11 @@ export async function createPublicLead(c: Context) {
     const body = await c.req.json();
 
     // Validate required fields
-    if (!body.firstName || !body.lastName || !body.email) {
+    if (!body.firstName || !body.lastName || !body.email || !body.dpi || body.dpi.trim() === "") {
       return c.json(
         {
           success: false,
-          error: "Faltan campos requeridos: Nombre, Apellido o Email",
+          error: "Faltan campos requeridos: Nombre, Apellido o Email o DPI",
         },
         400
       );
@@ -27,18 +27,42 @@ export async function createPublicLead(c: Context) {
       .where(
         or(
           eq(leads.email, body.email),
-          body.phone ? eq(leads.phone, body.phone) : undefined,
-          body.dpi ? eq(leads.dpi, body.dpi) : undefined
+          eq(leads.dpi, body.dpi)
         )
       )
       .limit(1);
 
     if (existingLead.length > 0) {
+      const lead = existingLead[0];
+
+      // Si encontró el lead por DPI y no tiene email (o tiene un email diferente al enviado)
+      if (lead.dpi === body.dpi && lead.email !== body.email) {
+        // Actualizar el email del lead existente
+        const [updatedLead] = await db
+          .update(leads)
+          .set({
+            email: body.email,
+            updatedAt: new Date(),
+          })
+          .where(eq(leads.id, lead.id))
+          .returning();
+
+        return c.json(
+          {
+            success: true,
+            data: updatedLead,
+            message: "Lead encontrado por DPI, email actualizado",
+          },
+          200
+        );
+      }
+
+      // Si encontró el lead por email (o por DPI con el mismo email), solo retornar
       return c.json(
         {
           success: true,
-          data: existingLead[0],
-          message: "Lead ya existe con el mismo email, teléfono o DPI",
+          data: lead,
+          message: "Lead ya existe con el mismo email o DPI",
         },
         200
       );

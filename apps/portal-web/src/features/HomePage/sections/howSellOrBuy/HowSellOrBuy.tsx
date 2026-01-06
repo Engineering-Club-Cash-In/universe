@@ -29,7 +29,7 @@ export const HowSellOrBuy = () => {
       ),
       title: "Encuentra tu auto",
       description:
-        "Puedes buscar dentro de todas las opciones de autos nuevos y usados a ti te interesa.",
+        "Puedes buscar entre todas las opciones de autos nuevos y usados que te interesan.",
     },
     {
       icon: (
@@ -37,29 +37,29 @@ export const HowSellOrBuy = () => {
       ),
       title: "Configura tu compra",
       description:
-        "Puedes realizar todo tu proceso en linea o contactar a un asesor para que acompañe en todo el proceso",
+        "Puedes realizar todo tu proceso en línea o contactar a un asesor para que te acompañe en todo el proceso.",
     },
     {
       icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
-      title: "Llevatelo",
-      description: "¡Todo listo! puedes disfrutar de tu auto.",
+      title: "Llévatelo",
+      description: "¡Todo listo! Puedes disfrutar de tu auto.",
     },
   ];
 
   const sales: items[] = [
     {
       icon: <IconCar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />,
-      title: "Cuentanos sobre tu auto",
+      title: "Cuéntanos sobre tu auto",
       description:
-        "Realiza unos pocos pasos y dejanos sabe toda la información importante sobre tu auto.",
+        "Realiza unos pocos pasos y déjanos saber toda la información importante sobre tu auto.",
     },
     {
       icon: (
         <IconCalendar width={isMobile ? 24 : 48} height={isMobile ? 24 : 48} />
       ),
-      title: "Agendar tu cita",
+      title: "Agenda tu cita",
       description:
-        "Vamos a realizar una inspeccion mecanica de tu auto para poder darte el mejor precio posible para reventa.",
+        "Vamos a realizar una inspección mecánica de tu auto para poder darte el mejor precio posible para reventa.",
     },
     {
       icon: (
@@ -67,7 +67,7 @@ export const HowSellOrBuy = () => {
       ),
       title: "Cerramos la venta y realizamos el pago",
       description:
-        "Una vez todo este listo, cerramos la venta y realizamos el pago de manera segura.",
+        "Una vez todo esté listo, cerramos la venta y realizamos el pago de manera segura.",
     },
   ];
 

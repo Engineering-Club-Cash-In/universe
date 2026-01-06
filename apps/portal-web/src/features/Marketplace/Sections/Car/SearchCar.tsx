@@ -51,7 +51,7 @@ export const SearchCar = () => {
   if (!vehicle) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-white text-xl">Vehiculo no encontrado</div>
+        <div className="text-white text-xl">Vehículo no encontrado</div>
       </div>
     );
   }

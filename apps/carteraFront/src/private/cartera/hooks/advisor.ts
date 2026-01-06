@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   type Advisor,
   getAdvisors,
@@ -24,121 +25,226 @@ import {
   // Pagos
   createPago,
   getPagosByMesAnio,
-  
   type PagosPorMesAnioResponse,
 } from "../services/services";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { PagoFormValues } from "./registerPayment";
+import { toast } from "sonner"; // 🔥 O tu librería de toast preferida
 
 // ========== Hook ==========
 // 🚀 Administración de asesores, contadores, inversionistas, créditos y pagos
 export const useAdminData = () => {
   const queryClient = useQueryClient();
 
-  // ====== ASESORS ======
-  const { data: advisors = [], isLoading: loadingAdvisors } = useQuery<Advisor[]>({
+  // ====== ASESORES ======
+  const { 
+    data: advisors = [], 
+    isLoading: loadingAdvisors,
+    error: advisorsError,
+    refetch: refetchAdvisors 
+  } = useQuery<Advisor[]>({
     queryKey: ["advisors"],
     queryFn: getAdvisors,
+    staleTime: 5 * 60 * 1000, // 5 minutos
   });
 
   const addAdvisorMutation = useMutation({
     mutationFn: (advisor: Partial<Advisor> & { password?: string }) => createAdvisor(advisor),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["advisors"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["advisors"] });
+      toast.success("✅ Asesor creado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error creando asesor:", error);
+      toast.error(`❌ Error al crear asesor: ${error.message || "Error desconocido"}`);
+    },
   });
 
   const editAdvisorMutation = useMutation({
-  mutationFn: ({ id, advisor }: { id: number; advisor: Partial<Advisor> & { password?: string } }) =>
-    updateAdvisor(id, advisor),
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ["advisors"] });
-    queryClient.invalidateQueries({ queryKey: ["platformUsers"] }); // 👈 refresca la tabla
-  },
-});
-
+    mutationFn: ({ id, advisor }: { id: number; advisor: Partial<Advisor> & { password?: string } }) =>
+      updateAdvisor(id, advisor),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["advisors"] });
+      queryClient.invalidateQueries({ queryKey: ["platformUsers"] });
+      toast.success("✅ Asesor actualizado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error actualizando asesor:", error);
+      toast.error(`❌ Error al actualizar asesor: ${error.message || "Error desconocido"}`);
+    },
+  });
 
   // ====== CONTA USERS ======
-  const { data: platformUsers = [], isLoading: loadingPlatformUsers } = useQuery<PlatformUser[]>({
+  const { 
+    data: platformUsers = [], 
+    isLoading: loadingPlatformUsers,
+    error: platformUsersError,
+    refetch: refetchPlatformUsers 
+  } = useQuery<PlatformUser[]>({
     queryKey: ["platformUsers"],
     queryFn: getPlatformUsersServiceFrontend,
+    staleTime: 5 * 60 * 1000,
   });
 
   const addContaMutation = useMutation({
     mutationFn: (data: ContaPayload) => createContaServiceFrontend(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["platformUsers"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["platformUsers"] });
+      toast.success("✅ Contador creado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error creando contador:", error);
+      toast.error(`❌ Error al crear contador: ${error.message || "Error desconocido"}`);
+    },
   });
 
   const editContaMutation = useMutation({
     mutationFn: ({ contaId, updates }: { contaId: number; updates: ContaUpdatePayload }) =>
       updateContaServiceFrontend(contaId, updates),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["platformUsers"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["platformUsers"] });
+      toast.success("✅ Contador actualizado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error actualizando contador:", error);
+      toast.error(`❌ Error al actualizar contador: ${error.message || "Error desconocido"}`);
+    },
   });
 
   // ====== INVERSIONISTAS ======
-  const { data: investors = [], isLoading: loadingInvestors } = useQuery<InvestorResponse[]>({
+  const { 
+    data: investors = [], 
+    isLoading: loadingInvestors,
+    error: investorsError,
+    refetch: refetchInvestors 
+  } = useQuery<InvestorResponse[]>({
     queryKey: ["investors"],
     queryFn: getInvestors,
+    staleTime: 5 * 60 * 1000,
   });
 
   const addInvestorMutation = useMutation({
     mutationFn: (investor: InvestorPayload | InvestorPayload[]) => insertInvestorService(investor),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["investors"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["investors"] });
+      toast.success("✅ Inversionista creado/actualizado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error con inversionista:", error);
+      toast.error(`❌ Error al procesar inversionista: ${error.message || "Error desconocido"}`);
+    },
   });
 
   const editInvestorMutation = useMutation({
     mutationFn: (investor: InvestorPayload | InvestorPayload[]) => updateInvestorService(investor),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["investors"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["investors"] });
+      toast.success("✅ Inversionista actualizado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error actualizando inversionista:", error);
+      toast.error(`❌ Error al actualizar inversionista: ${error.message || "Error desconocido"}`);
+    },
   });
 
   // ====== CRÉDITOS ======
   const addCreditMutation = useMutation({
     mutationFn: (credit: CreditFormValues) => createCredit(credit),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["credits"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["credits"] });
+      toast.success("✅ Crédito creado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error creando crédito:", error);
+      toast.error(`❌ Error al crear crédito: ${error.message || "Error desconocido"}`);
+    },
   });
 
   const editCreditMutation = useMutation({
     mutationFn: (body: UpdateCreditBody) => updateCreditService(body),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["credits"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["credits"] });
+      toast.success("✅ Crédito actualizado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error actualizando crédito:", error);
+      toast.error(`❌ Error al actualizar crédito: ${error.message || "Error desconocido"}`);
+    },
   });
 
   // ====== PAGOS ======
-  const addPagoMutation = useMutation({
-    mutationFn: (pago: PagoFormValues) => createPago(pago),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["pagos"] }),
+  const { 
+    data: pagosPorMesAnio, 
+    isLoading: loadingPagos,
+    error: pagosError,
+    refetch: refetchPagos 
+  } = useQuery<PagosPorMesAnioResponse>({
+    queryKey: ["pagosPorMesAnio", new Date().getMonth() + 1, new Date().getFullYear()],
+    queryFn: () => getPagosByMesAnio({ 
+      mes: new Date().getMonth() + 1, 
+      anio: new Date().getFullYear() 
+    }),
+    staleTime: 2 * 60 * 1000, // 2 minutos para pagos (más reciente)
   });
 
-  const { data: pagosPorMesAnio, isLoading: loadingPagos } = useQuery<PagosPorMesAnioResponse>({
-    queryKey: ["pagosPorMesAnio"],
-    queryFn: () => getPagosByMesAnio({ mes: new Date().getMonth() + 1, anio: new Date().getFullYear() }),
+  const addPagoMutation = useMutation({
+    mutationFn: (pago: PagoFormValues) => createPago(pago),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pagos"] });
+      queryClient.invalidateQueries({ queryKey: ["pagosPorMesAnio"] });
+      toast.success("✅ Pago registrado exitosamente");
+    },
+    onError: (error: any) => {
+      console.error("Error registrando pago:", error);
+      toast.error(`❌ Error al registrar pago: ${error.message || "Error desconocido"}`);
+    },
   });
 
   // ====== MÉTODOS ======
   return {
-    // asesores
+    // Asesores
     advisors,
     loadingAdvisors,
+    advisorsError,
+    refetchAdvisors,
     addAdvisor: addAdvisorMutation.mutateAsync,
+    addAdvisorMutation, // 🔥 Exponer mutación completa para acceder a isPending, etc.
     editAdvisor: editAdvisorMutation.mutateAsync,
+    editAdvisorMutation,
 
-    // conta
+    // Conta
     platformUsers,
     loadingPlatformUsers,
+    platformUsersError,
+    refetchPlatformUsers,
     addConta: addContaMutation.mutateAsync,
+    addContaMutation,
     editConta: editContaMutation.mutateAsync,
+    editContaMutation,
 
-    // inversionistas
+    // Inversionistas
     investors,
     loadingInvestors,
+    investorsError,
+    refetchInvestors,
     addInvestor: addInvestorMutation.mutateAsync,
+    addInvestorMutation,
     editInvestor: editInvestorMutation.mutateAsync,
+    editInvestorMutation,
 
-    // créditos
+    // Créditos
     addCredit: addCreditMutation.mutateAsync,
+    addCreditMutation,
     editCredit: editCreditMutation.mutateAsync,
+    editCreditMutation,
 
-    // pagos
+    // Pagos
     pagosPorMesAnio,
     loadingPagos,
+    pagosError,
+    refetchPagos,
     addPago: addPagoMutation.mutateAsync,
+    addPagoMutation,
   };
 };

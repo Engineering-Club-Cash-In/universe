@@ -26,7 +26,7 @@ export interface InvestorPayload {
   nombre: string;
   emite_factura: boolean;
   reinversion: boolean;
-  banco: string | null;
+  banco: number | null;
   dpi:number | null;
   tipo_cuenta: string | null;
   re_inversion: string | null;
@@ -1103,6 +1103,7 @@ export async function getResumenInversionistas(params?: {
   asesor_id: number;
   nombre: string;
   activo: boolean;
+  telefono?: string | null;
   email?: string;
 }
 

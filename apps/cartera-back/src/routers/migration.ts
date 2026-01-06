@@ -503,77 +503,90 @@ export const sifcoRouter = new Elysia()
       }),
     }
   ).post(
-    "/pagos-inversionistas/v2",
-    async ({ body }) => {
-      const { numeroCredito, hoja_excel, inversionistasData } = body; // 🆕 hoja_excel
+  "/pagos-inversionistas/v2",
+  async ({ body }) => {
+    const { numeroCredito, inversionistasData } = body;
 
-      // 🔧 Transform inversionistasData to match expected type
-      const inversionistasDataTyped = inversionistasData.map((inv) => ({
-        inversionista: inv.inversionista,
-        capital: inv.capital,
-        porcentajeCashIn: inv.porcentajeCashIn,
-        porcentajeInversionista: inv.porcentajeInversionista,
-        porcentaje: inv.porcentaje,
-        cuota: inv.cuota !== undefined ? inv.cuota as string | number : undefined,
-        cuotaInversionista: inv.cuotaInversionista !== undefined ? inv.cuotaInversionista as string | number : undefined,
-      }));
+    // Transform inversionistasData to match expected type
+    const inversionistasDataTyped = inversionistasData.map((inv) => ({
+      inversionista: inv.inversionista,
+      capital: inv.capital,
+      porcentajeCashIn: inv.porcentajeCashIn,
+      porcentajeInversionista: inv.porcentajeInversionista,
+      porcentaje: inv.porcentaje,
+      cuota: inv.cuota !== undefined ? inv.cuota as string | number : undefined,
+      cuotaInversionista: inv.cuotaInversionista !== undefined ? inv.cuotaInversionista as string | number : undefined,
+    }));
 
-      const resultado = await fillPagosInversionistasV2(
-        numeroCredito,
-        hoja_excel, // 🆕 Pasar hoja_excel
-        inversionistasDataTyped
-      );
+    const resultado = await fillPagosInversionistasV2(
+      numeroCredito,
+      inversionistasDataTyped
+    );
 
-      return resultado;
-    },
-    {
-      body: t.Object({
-        numeroCredito: t.String({
-          description: "Número del crédito SIFCO",
-          examples: ["01010214116560"]
-        }),
-        hoja_excel: t.String({ // 🆕 Nuevo parámetro
-          description: "Nombre de la hoja del Excel que contiene los datos (debe coincidir con la última cuota liquidada)",
-          examples: ["octubre 2025", "septiembre 2025", "Octubre 2025"]
-        }),
-        inversionistasData: t.Array(
-          t.Object({
-            inversionista: t.String({
-              description: "Nombre del inversionista",
-              examples: ["Pedro Piox Piox"]
-            }),
-            capital: t.Union([t.String(), t.Number()], {
-              description: "Capital aportado"
-            }),
-            porcentajeCashIn: t.Union([t.String(), t.Number()], {
-              description: "Porcentaje de Cash In"
-            }),
-            porcentajeInversionista: t.Union([t.String(), t.Number()], {
-              description: "Porcentaje del inversionista"
-            }),
-            porcentaje: t.Union([t.String(), t.Number()], {
-              description: "Porcentaje de interés"
-            }),
-            cuota: t.Optional(t.Union([t.String(), t.Number()], {
-              description: "Cuota opcional"
-            })),
-            cuotaInversionista: t.Optional(t.Union([t.String(), t.Number()], {
-              description: "Cuota del inversionista opcional"
-            })),
-          }),
-          {
-            description: "Array de inversionistas con sus datos",
-            minItems: 1
-          }
-        ),
+    return resultado;
+  },
+  {
+    body: t.Object({
+      numeroCredito: t.String({
+        description: "Número del crédito SIFCO",
+        examples: ["01010214116560"]
       }),
-      detail: {
-        summary: "Procesar pagos de inversionistas (v2)",
-        tags: ["Pagos Inversionistas"],
-        description: "Valida que la hoja del Excel coincida con la última cuota liquidada del crédito antes de procesar los inversionistas"
-      }
+      inversionistasData: t.Array(
+        t.Object({
+          inversionista: t.String({
+            description: "Nombre del inversionista",
+            examples: ["Pedro Piox Piox", "Cube Investments S.A.", "Adriana Bahaia"]
+          }),
+          capital: t.Union([t.String(), t.Number()], {
+            description: "Capital aportado por el inversionista",
+            examples: ["269354.80", 269354.80]
+          }),
+          porcentajeCashIn: t.Union([t.String(), t.Number()], {
+            description: "Porcentaje de participación de Cash-In (0.0 a 1.0)",
+            examples: ["1.00", 1.0, "0.30", 0.3]
+          }),
+          porcentajeInversionista: t.Union([t.String(), t.Number()], {
+            description: "Porcentaje de participación del inversionista (0.0 a 1.0)",
+            examples: ["0.00", 0.0, "0.70", 0.7]
+          }),
+          porcentaje: t.Union([t.String(), t.Number()], {
+            description: "Porcentaje de interés (tasa) aplicable",
+            examples: ["0.015", 0.015, "1.50%"]
+          }),
+          cuota: t.Optional(t.Union([t.String(), t.Number()], {
+            description: "Cuota total calculada (opcional)",
+            examples: ["8132.48", 8132.48]
+          })),
+          cuotaInversionista: t.Optional(t.Union([t.String(), t.Number()], {
+            description: "Cuota específica del inversionista (opcional)",
+            examples: ["0", 0, "5692.74"]
+          })),
+        }),
+        {
+          description: "Array de inversionistas con sus datos de participación",
+          minItems: 1
+        }
+      ),
+    }),
+    detail: {
+      summary: "Procesar pagos de inversionistas",
+      tags: ["Pagos Inversionistas"],
+      description: `
+        Procesa y registra los pagos/participaciones de inversionistas para un crédito específico.
+        
+        **Características:**
+        - Búsqueda permisiva de inversionistas (normaliza nombres, quita acentos, ignora mayúsculas)
+        - Cálculo automático de montos e IVA
+        - Upsert: actualiza si ya existe, crea si es nuevo
+        - Logs detallados para debugging
+        
+        **Notas:**
+        - Los porcentajes deben sumar 1.0 (100%) entre porcentajeCashIn y porcentajeInversionista
+        - El sistema normalizará automáticamente nombres como "S.A.", "C.A.", espacios, acentos, etc.
+      `
     }
-  )
+  }
+)
   .post(
     "/processUniqueCredit",
     async ({ body, set }) => {

@@ -1,29 +1,39 @@
+import os
 import pandas as pd
 import requests
 import json
 from typing import List, Dict, Any, Optional
 from difflib import SequenceMatcher
+from datetime import datetime
 
-# Configuración
+# ============================================
+# 🔧 CONFIGURACIÓN
+# ============================================
+CARPETA_EXCELS_LIQUIDACIONES = r"C:\Users\Kelvin Palacios\Documents\analis de datos\Liquidaciones"
+
+# EXCEL CON DPIs
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
-
-# EXCEL 1: Datos bancarios y facturación
-EXCEL_DATOS_BANCARIOS = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
-HOJA_DATOS_BANCARIOS = "Facturacion inversionistas"
-
-# EXCEL 2: DPIs
 EXCEL_DPIS = "mapeo_investor.xlsx"
 HOJA_DPIS = "DPI"
 
-# URL de tu API
-API_URL = "http://localhost:7000/investor"
+# API
+API_BASE_URL = "http://localhost:7000"
+API_INVERSIONISTAS_URL = f"{API_BASE_URL}/investor"
+API_BANCOS_URL = f"{API_BASE_URL}/bancos"
 
+# MODO PRUEBA
+MODO_PRUEBA = False
+MAX_ARCHIVOS_PRUEBA = 3
+
+# ============================================
+# 🔧 FUNCIONES DE UTILIDAD
+# ============================================
 def similar(a: str, b: str) -> float:
     """Calcula similitud entre dos strings (0.0 a 1.0)"""
     return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
 
 def normalizar_nombre_para_match(nombre: str) -> str:
-    """Normaliza nombre para comparación (quita acentos, mayúsculas, etc.)"""
+    """Normaliza nombre para comparación"""
     replacements = {
         'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
         'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U',
@@ -34,23 +44,11 @@ def normalizar_nombre_para_match(nombre: str) -> str:
     for old, new in replacements.items():
         nombre_normalizado = nombre_normalizado.replace(old, new)
     
-    # Remover múltiples espacios
     nombre_normalizado = ' '.join(nombre_normalizado.split())
-    
     return nombre_normalizado
 
-def buscar_dpi_por_nombre(nombre: str, df_dpis: pd.DataFrame, umbral: float = 0.85) -> Optional[str]:
-    """
-    Busca el DPI en el dataframe usando matching fuzzy de nombres
-    
-    Args:
-        nombre: Nombre del inversionista a buscar
-        df_dpis: DataFrame con DPIs (columnas: 'Inversionista', 'Dpi')
-        umbral: Similitud mínima requerida (0.0 a 1.0)
-    
-    Returns:
-        DPI encontrado o None
-    """
+def buscar_dpi_por_nombre(nombre: str, df_dpis: pd.DataFrame, umbral: float = 0.85) -> Optional[int]:
+    """Busca el DPI en el dataframe usando matching fuzzy"""
     mejor_match = None
     mejor_similitud = 0.0
     mejor_dpi = None
@@ -72,34 +70,42 @@ def buscar_dpi_por_nombre(nombre: str, df_dpis: pd.DataFrame, umbral: float = 0.
             mejor_dpi = row.get('Dpi')
     
     if mejor_similitud >= umbral:
-        return limpiar_dpi(mejor_dpi)
+        dpi_limpio = limpiar_dpi(mejor_dpi)
+        if dpi_limpio:
+            print(f"      🎯 DPI: {dpi_limpio}")
+        return dpi_limpio
     else:
+        print(f"      ⚠️ Sin DPI (match: {mejor_similitud:.0%})")
         return None
 
-def convertir_si_no_a_boolean(valor: Any) -> bool:
-    """Convierte 'Si'/'No' a True/False"""
+def limpiar_dpi(valor: Any) -> int | None:
+    """Limpia el DPI y lo valida"""
     if pd.isna(valor) or valor == "":
-        return False
-    valor_str = str(valor).strip().upper()
-    return valor_str == "SI"
-
-def normalizar_tipo_reinversion(valor: Any) -> str:
-    """Normaliza el tipo de reinversión según el enum"""
-    if pd.isna(valor) or valor == "":
-        return "sin_reinversion"
+        return None
     
-    valor_str = str(valor).strip().upper()
+    dpi_str = str(valor).strip()
     
-    mapeo = {
-        "SI": "capital",
-        "NO": "sin_reinversion",
-        "CAPITAL": "capital",
-        "COMPLETA": "completa",
-        "TRADICIONAL": "sin_reinversion",
-        "ESPECIAL": "especial",
-    }
+    if dpi_str.upper() in ['N/E', 'NE', 'N/A', 'NA', 'SIN DPI', '']:
+        return None
     
-    return mapeo.get(valor_str, "sin_reinversion")
+    dpi_limpio = dpi_str.replace(' ', '').replace('-', '').replace('_', '').replace('.', '')
+    
+    try:
+        if 'E+' in dpi_str.upper() or 'e+' in dpi_str:
+            dpi_numero = float(dpi_str)
+            dpi_limpio = str(int(dpi_numero))
+    except:
+        pass
+    
+    if not dpi_limpio.isdigit():
+        return None
+    
+    if len(dpi_limpio) < 13:
+        dpi_limpio = dpi_limpio.zfill(13)
+    elif len(dpi_limpio) > 13:
+        return None
+    
+    return int(dpi_limpio)
 
 def normalizar_tipo_cuenta(valor: Any) -> str | None:
     """Normaliza el tipo de cuenta según el enum de la BD"""
@@ -108,137 +114,351 @@ def normalizar_tipo_cuenta(valor: Any) -> str | None:
     
     tipo = str(valor).strip().upper()
     
+    # Ignorar palabras que NO son tipo de cuenta
+    palabras_ignorar = [
+        'AMORTIZACIÓN', 'AMORTIZACION', 'RESTANTE', 'CAPITAL RESTANTE', 
+        'NETO', 'TOTAL', 'GRAN TOTAL', 'INVERSOR', 'INVERSIONISTA',
+        'CAPITAL', 'MONTO', 'SUMA', 'SUBTOTAL'
+    ]
+    
+    if any(palabra in tipo for palabra in palabras_ignorar):
+        return None
+    
+    # Solo estos son válidos
     mapeo = {
         "AHORRO": "AHORRO",
         "AHORROS": "AHORRO",
         "AHORRO Q": "AHORRO Q",
         "AHORRO $": "AHORRO $",
         "MONETARIA": "MONETARIA",
+        "MONETARIÁ": "MONETARIA",
         "MONETARIA Q": "MONETARIA Q",
         "MONETARIO Q": "MONETARIA Q",
         "MONETARIA $": "MONETARIA $",
         "MONETARIO $": "MONETARIA $",
-        "CAPITAL": "CAPITAL",
     }
     
     tipo_normalizado = mapeo.get(tipo)
-    
     if tipo_normalizado:
         return tipo_normalizado
     
-    if "MONETARI" in tipo:
-        if "$" in tipo:
+    # Intentar normalizar variantes
+    if "MONETARI" in tipo and len(tipo) < 20:
+        if "$" in tipo or "DOLAR" in tipo:
             return "MONETARIA $"
-        elif "Q" in tipo:
+        elif "Q" in tipo or "QUETZAL" in tipo:
             return "MONETARIA Q"
         else:
             return "MONETARIA"
     
-    if "AHORR" in tipo:
-        if "$" in tipo:
+    if "AHORR" in tipo and len(tipo) < 20:
+        if "$" in tipo or "DOLAR" in tipo:
             return "AHORRO $"
-        elif "Q" in tipo:
+        elif "Q" in tipo or "QUETZAL" in tipo:
             return "AHORRO Q"
         else:
             return "AHORRO"
     
-    print(f"⚠️  Tipo de cuenta desconocido: '{valor}'")
     return None
 
-def normalizar_banco(valor: Any) -> str | None:
-    """Normaliza el nombre del banco"""
-    if pd.isna(valor) or valor == "":
+# ============================================
+# 🔥 NUEVAS FUNCIONES PARA BANCO CON API
+# ============================================
+def obtener_bancos_desde_api() -> List[Dict]:
+    """
+    Obtiene todos los bancos desde el API.
+    Retorna lista de bancos con su ID y nombre.
+    """
+    try:
+        print("   📥 Obteniendo bancos desde API...")
+        response = requests.get(API_BANCOS_URL, timeout=10)
+        response.raise_for_status()
+        
+        data = response.json()
+        if data.get("success"):
+            bancos = data.get("data", [])
+            print(f"   ✅ {len(bancos)} bancos obtenidos")
+            return bancos
+        else:
+            print(f"   ⚠️ Error al obtener bancos: {data.get('message')}")
+            return []
+    except Exception as e:
+        print(f"   ❌ Error conectando al API de bancos: {e}")
+        return []
+
+def normalizar_banco(valor: Any, bancos_cache: List[Dict]) -> int | None:
+    """
+    Normaliza el valor del banco y retorna el banco_id correspondiente.
+    Acepta: ID (int), nombre (str) con coincidencias parciales e insensible a mayúsculas.
+    
+    Args:
+        valor: El valor a normalizar (puede ser ID o nombre)
+        bancos_cache: Lista de bancos obtenida del API
+    
+    Retorna: banco_id o None si no encuentra coincidencia.
+    """
+    if pd.isna(valor) or valor == "" or not bancos_cache:
         return None
     
-    banco = str(valor).strip().upper()
+    # Si ya es un número, verificar que el banco existe
+    if isinstance(valor, (int, float)):
+        banco_id = int(valor)
+        banco_encontrado = next((b for b in bancos_cache if b['banco_id'] == banco_id), None)
+        if banco_encontrado:
+            return banco_id
+        return None
     
-    mapeo = {
-        "BI": "BI",
-        "BAM": "BAM",
-        "GYT": "GyT",
-        "G&T": "GyT",
-        "BANTRAB": "BANTRAB",
-        "BANRURAL": "BANRURAL",
-        "BAC": "BAC",
-        "PROMERICA": "PROMERICA",
-        "INDUSTRIAL": "INDUSTRIAL",
-        "INTERBANCO": "INTERBANCO",
-        "NEXA": "NEXA",
-    }
+    # Si es string, buscar por nombre (PERMISIVO)
+    if isinstance(valor, str):
+        nombre_banco = valor.strip().lower()
+        
+        if not nombre_banco:
+            return None
+        
+        # 🔥 Búsqueda permisiva con diferentes niveles de coincidencia
+        coincidencias = []
+        
+        for banco in bancos_cache:
+            nombre_db = banco['nombre'].lower()
+            
+            # Match exacto (mayor prioridad)
+            if nombre_db == nombre_banco:
+                coincidencias.append((banco, 1))
+            # Empieza con (prioridad media)
+            elif nombre_db.startswith(nombre_banco) or nombre_banco.startswith(nombre_db):
+                coincidencias.append((banco, 2))
+            # Contiene (menor prioridad)
+            elif nombre_banco in nombre_db or nombre_db in nombre_banco:
+                coincidencias.append((banco, 3))
+        
+        if not coincidencias:
+            return None
+        
+        # Ordenar por prioridad
+        coincidencias.sort(key=lambda x: x[1])
+        
+        # Usar el mejor match
+        banco_seleccionado = coincidencias[0][0]
+        return banco_seleccionado['banco_id']
     
-    banco_normalizado = mapeo.get(banco)
-    
-    if banco_normalizado:
-        return banco_normalizado
-    
-    if "GYT" in banco or "G&T" in banco:
-        return "GyT"
-    
-    print(f"⚠️  Banco desconocido: '{valor}'")
     return None
 
 def limpiar_numero_cuenta(valor: Any) -> str | None:
-    """Limpia y formatea el número de cuenta"""
+    """
+    Limpia y formatea el número de cuenta
+    🔥 FIX: No rechazar números de cuenta válidos
+    """
     if pd.isna(valor) or valor == "":
         return None
     
     cuenta_str = str(valor).strip()
     
-    # Remover caracteres especiales pero MANTENER números y guiones
+    # Remover caracteres especiales pero MANTENER guiones
     cuenta_str = (cuenta_str
                   .replace('´', '')
                   .replace('`', '')
                   .replace('"', '')
                   .replace('*', '')
+                  .replace(',', '')
+                  .replace(' ', '')
                   .strip())
     
-    if not cuenta_str or cuenta_str.lower() in ['nan', 'null', 'none']:
+    if not cuenta_str or cuenta_str.lower() in ['nan', 'null', 'none', '']:
+        return None
+    
+    # 🔥 Debe tener al menos 6 caracteres
+    if len(cuenta_str) < 6:
+        return None
+    
+    # Debe contener dígitos
+    if not any(char.isdigit() for char in cuenta_str):
+        return None
+    
+    # 🔥 Si tiene guiones, es cuenta bancaria (formato: 014-012783-7)
+    if '-' in cuenta_str:
+        digitos = ''.join(c for c in cuenta_str if c.isdigit())
+        if len(digitos) >= 6:
+            return cuenta_str
+    
+    # 🔥 Si es solo números, aplicar lógica diferente
+    if cuenta_str.replace('-', '').replace('.', '').isdigit():
+        try:
+            num_float = float(cuenta_str.replace('-', ''))
+            
+            digitos = ''.join(c for c in cuenta_str if c.isdigit())
+            
+            if len(digitos) >= 15:
+                return None
+            
+            if num_float < 10000000000:
+                return cuenta_str
+            else:
+                return None
+                
+        except:
+            pass
+    
+    # Validar que tenga al menos 6 dígitos
+    digitos = ''.join(c for c in cuenta_str if c.isdigit())
+    if len(digitos) < 6:
         return None
     
     return cuenta_str
 
-def limpiar_dpi(valor: Any) -> str | None:
-    """Limpia el DPI y lo valida"""
-    if pd.isna(valor) or valor == "":
-        return None
+def extraer_nombre_inversionista(nombre_archivo: str) -> str:
+    """Extrae el nombre del inversionista del nombre del archivo"""
+    nombre_limpio = nombre_archivo
+    extensiones_conocidas = ['.xlsx', '.xls', '.xlsm', '.xlsb', '.csv']
     
-    dpi_str = str(valor).strip()
+    while True:
+        nombre_sin_ext, extension = os.path.splitext(nombre_limpio)
+        if extension.lower() in extensiones_conocidas:
+            nombre_limpio = nombre_sin_ext
+        else:
+            break
     
-    # Si es "N/E" o similar, retornar None
-    if dpi_str.upper() in ['N/E', 'NE', 'N/A', 'NA', 'SIN DPI', '']:
-        return None
-    
-    # Remover espacios, guiones y otros caracteres
-    dpi_limpio = dpi_str.replace(' ', '').replace('-', '').replace('_', '').replace('.', '')
-    
-    # Si es notación científica (ej: 2.99805E+12), convertir
-    try:
-        if 'E+' in dpi_str.upper() or 'e+' in dpi_str:
-            dpi_numero = float(dpi_str)
-            dpi_limpio = str(int(dpi_numero))
-    except:
-        pass
-    
-    # Verificar que solo contenga dígitos
-    if not dpi_limpio.isdigit():
-        return None
-    
-    # Validar longitud (13 dígitos en Guatemala)
-    # Si tiene menos de 13, rellenar con ceros a la izquierda
-    if len(dpi_limpio) < 13:
-        dpi_limpio = dpi_limpio.zfill(13)
-        print(f"⚠️  DPI rellenado con ceros: '{valor}' → '{dpi_limpio}'")
-    elif len(dpi_limpio) > 13:
-        print(f"⚠️  DPI con longitud incorrecta ({len(dpi_limpio)} dígitos): '{dpi_limpio}' - Se ignora")
-        return None
-    
-    return dpi_limpio
+    return nombre_limpio.strip()
 
+# ============================================
+# 🔥 FUNCIÓN MEJORADA PARA EXTRAER DATOS
+# ============================================
+def extraer_datos_inversionista_del_excel(
+    archivo_path: str, 
+    df_dpis: pd.DataFrame,
+    bancos_cache: List[Dict]
+) -> Dict[str, Any]:
+    """
+    Extrae los datos del inversionista del encabezado del Excel
+    🔥 CON LOGGING DETALLADO Y USANDO API DE BANCOS
+    """
+    nombre_archivo = os.path.basename(archivo_path)
+    nombre_inversionista = extraer_nombre_inversionista(nombre_archivo)
+    
+    print(f"\n   📄 {nombre_archivo}")
+    
+    try:
+        xls = pd.ExcelFile(archivo_path, engine='openpyxl')
+        primera_hoja = xls.sheet_names[0]
+        df_header = pd.read_excel(archivo_path, sheet_name=primera_hoja, engine='openpyxl', header=None, nrows=10)
+        
+        datos_inversionista = {
+            "nombre": nombre_inversionista,
+            "dpi": None,
+            "emite_factura": False,
+            "tipo_reinversion": "sin_reinversion",
+            "banco": None,  # 🔥 Ahora será banco_id (int)
+            "tipo_cuenta": None,
+            "numero_cuenta": None
+        }
+        
+        # 🔥 BUSCAR EN CADA FILA DEL HEADER
+        for row_idx in range(min(10, len(df_header))):
+            row = df_header.iloc[row_idx]
+            
+            # FACTURACIÓN
+            for col_idx in range(len(row)):
+                cell = row.iloc[col_idx]
+                if pd.notna(cell):
+                    cell_str = str(cell).strip().upper()
+                    if 'PROPIA' in cell_str:
+                        datos_inversionista["emite_factura"] = True
+                        print(f"      ✅ Facturación: PROPIA")
+                        break
+                    elif 'AJENA' in cell_str:
+                        datos_inversionista["emite_factura"] = False
+                        print(f"      ✅ Facturación: AJENA")
+                        break
+            
+            # 🔥 BUSCAR BANCO, TIPO CUENTA y NÚMERO en la MISMA FILA
+            for col_idx in range(len(row)):
+                cell = row.iloc[col_idx]
+                if pd.notna(cell):
+                    cell_str = str(cell).strip()
+                    
+                    # 1. ¿Es un BANCO?
+                    if not datos_inversionista["banco"]:
+                        banco_id = normalizar_banco(cell_str, bancos_cache)
+                        if banco_id:
+                            # Obtener nombre del banco para mostrar
+                            banco_info = next((b for b in bancos_cache if b['banco_id'] == banco_id), None)
+                            banco_nombre = banco_info['nombre'] if banco_info else f"ID {banco_id}"
+                            
+                            datos_inversionista["banco"] = banco_id
+                            print(f"      🏦 Banco: {banco_nombre} (ID: {banco_id})")
+                            
+                            # 🔥 BUSCAR TIPO CUENTA y NÚMERO en las SIGUIENTES columnas
+                            print(f"         🔍 Buscando tipo cuenta y número en siguientes columnas...")
+                            
+                            for offset in range(1, 5):
+                                if col_idx + offset >= len(row):
+                                    break
+                                
+                                siguiente_cell = row.iloc[col_idx + offset]
+                                if pd.notna(siguiente_cell):
+                                    siguiente_str = str(siguiente_cell).strip()
+                                    print(f"         📍 Col +{offset}: '{siguiente_str}'")
+                                    
+                                    # ¿Es TIPO CUENTA?
+                                    if not datos_inversionista["tipo_cuenta"]:
+                                        tipo_normalizado = normalizar_tipo_cuenta(siguiente_str)
+                                        if tipo_normalizado:
+                                            datos_inversionista["tipo_cuenta"] = tipo_normalizado
+                                            print(f"         ✅ Tipo cuenta: {tipo_normalizado}")
+                                            
+                                            # 🔥 BUSCAR NÚMERO en la SIGUIENTE columna
+                                            if col_idx + offset + 1 < len(row):
+                                                cuenta_cell = row.iloc[col_idx + offset + 1]
+                                                if pd.notna(cuenta_cell):
+                                                    cuenta_str_raw = str(cuenta_cell).strip()
+                                                    print(f"         🔍 Intentando número: '{cuenta_str_raw}'")
+                                                    
+                                                    numero_limpio = limpiar_numero_cuenta(cuenta_str_raw)
+                                                    if numero_limpio:
+                                                        datos_inversionista["numero_cuenta"] = numero_limpio
+                                                        print(f"         ✅ Cuenta: {numero_limpio}")
+                                                    else:
+                                                        print(f"         ❌ Rechazado: '{cuenta_str_raw}'")
+                                            
+                                            break
+                            
+                            break
+        
+        # 🔥 BUSCAR DPI
+        if not df_dpis.empty:
+            dpi = buscar_dpi_por_nombre(nombre_inversionista, df_dpis, umbral=0.85)
+            datos_inversionista["dpi"] = dpi
+        
+        # Log final
+        if not datos_inversionista["banco"]:
+            print(f"      ⚠️ Sin banco")
+        if not datos_inversionista["tipo_cuenta"]:
+            print(f"      ⚠️ Sin tipo cuenta")
+        if not datos_inversionista["numero_cuenta"]:
+            print(f"      ⚠️ Sin número cuenta")
+        
+        return datos_inversionista
+        
+    except Exception as e:
+        print(f"   ⚠️ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "nombre": nombre_inversionista,
+            "dpi": None,
+            "emite_factura": False,
+            "tipo_reinversion": "sin_reinversion",
+            "banco": None,
+            "tipo_cuenta": None,
+            "numero_cuenta": None
+        }
+
+# ============================================
+# 📖 LEER EXCEL CON DPIs
+# ============================================
 def leer_dpis_desde_excel() -> pd.DataFrame:
     """Lee el Excel con los DPIs"""
-    print(f"\n📖 PASO 1: Leyendo DPIs desde segundo Excel")
-    print(f"   Archivo: {EXCEL_DPIS}")
-    print(f"   Hoja: {HOJA_DPIS}")
+    print(f"\n📖 PASO 1: Leyendo DPIs")
+    print(f"   📁 {EXCEL_DPIS} → {HOJA_DPIS}")
     
     try:
         df_dpis = pd.read_excel(
@@ -247,263 +467,264 @@ def leer_dpis_desde_excel() -> pd.DataFrame:
             header=0
         )
         
-        print(f"   ✅ Archivo leído. Total de filas: {len(df_dpis)}")
-        print(f"   📊 Columnas: {list(df_dpis.columns)}")
+        print(f"   ✅ {len(df_dpis)} registros")
         
-        # Verificar que tenga las columnas necesarias
         if 'Inversionista' not in df_dpis.columns or 'Dpi' not in df_dpis.columns:
-            print(f"   ❌ ERROR: Faltan columnas 'Inversionista' o 'Dpi'")
+            print(f"   ❌ ERROR: Faltan columnas")
             return pd.DataFrame()
         
-        # Contar cuántos tienen DPI válido
         dpis_validos = sum(1 for _, row in df_dpis.iterrows() if limpiar_dpi(row.get('Dpi')))
-        print(f"   ✅ DPIs válidos encontrados: {dpis_validos}/{len(df_dpis)}\n")
+        print(f"   ✅ {dpis_validos} DPIs válidos\n")
         
         return df_dpis
     
-    except FileNotFoundError:
-        print(f"   ❌ No se encontró el archivo: {EXCEL_DPIS}")
-        print(f"   💡 Asegúrate de cambiar el nombre del archivo en la configuración")
-        return pd.DataFrame()
     except Exception as e:
-        print(f"   ❌ Error leyendo DPIs: {e}")
+        print(f"   ❌ Error: {e}")
         return pd.DataFrame()
 
-def leer_inversionistas_desde_excel(df_dpis: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Lee los inversionistas del Excel principal y les asigna DPI"""
+# ============================================
+# 💾 GUARDAR REPORTE DE FALLIDOS
+# ============================================
+def guardar_reporte_fallidos(inversionistas: List[Dict], carpeta: str, bancos_cache: List[Dict]) -> str:
+    """Guarda un reporte de inversionistas sin DPI o datos incompletos"""
     
-    print(f"📖 PASO 2: Leyendo datos bancarios desde primer Excel")
-    print(f"   Archivo: {EXCEL_DATOS_BANCARIOS}")
-    print(f"   Hoja: {HOJA_DATOS_BANCARIOS}")
+    sin_dpi = [inv for inv in inversionistas if not inv['dpi']]
+    sin_cuenta = [inv for inv in inversionistas if not inv['numero_cuenta']]
+    sin_banco = [inv for inv in inversionistas if not inv['banco']]
+    sin_tipo_cuenta = [inv for inv in inversionistas if not inv['tipo_cuenta']]
     
-    df = pd.read_excel(
-        f"{CARPETA_EXCELS}\\{EXCEL_DATOS_BANCARIOS}",
-        sheet_name=HOJA_DATOS_BANCARIOS,
-        header=0
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"inversionistas_fallidos_{timestamp}.txt"
+    filepath = os.path.join(carpeta, filename)
     
-    print(f"   ✅ Archivo leído. Total de filas: {len(df)}")
-    print(f"   📊 Columnas: {list(df.columns)}")  # ← FIX: Aquí estaba el error
+    def obtener_nombre_banco(banco_id):
+        """Helper para obtener nombre del banco por ID"""
+        if not banco_id:
+            return 'N/A'
+        banco = next((b for b in bancos_cache if b['banco_id'] == banco_id), None)
+        return banco['nombre'] if banco else f'ID {banco_id}'
     
-    print(f"\n🔄 PASO 3: Haciendo matching de nombres con DPIs...")
-    print("=" * 80)
-    
-    inversionistas = []
-    sin_dpi = []
-    sin_cuenta = []
-    
-    for idx, row in df.iterrows():
-        # Saltar filas vacías
-        if pd.isna(row.get('Nombre inversionista')):
-            continue
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write("=" * 100 + "\n")
+        f.write("📋 REPORTE DE INVERSIONISTAS CON DATOS FALTANTES\n")
+        f.write("=" * 100 + "\n")
+        f.write(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Total procesados: {len(inversionistas)}\n")
+        f.write(f"Sin DPI: {len(sin_dpi)}\n")
+        f.write(f"Sin cuenta: {len(sin_cuenta)}\n")
+        f.write(f"Sin banco: {len(sin_banco)}\n")
+        f.write(f"Sin tipo cuenta: {len(sin_tipo_cuenta)}\n")
+        f.write("=" * 100 + "\n\n")
         
-        nombre = str(row['Nombre inversionista']).strip()
+        # SIN DPI
+        if sin_dpi:
+            f.write("❌ INVERSIONISTAS SIN DPI\n")
+            f.write("=" * 100 + "\n")
+            for idx, inv in enumerate(sin_dpi, 1):
+                f.write(f"\n{idx}. {inv['nombre']}\n")
+                f.write(f"   Banco: {obtener_nombre_banco(inv['banco'])}\n")
+                f.write(f"   Tipo cuenta: {inv['tipo_cuenta'] or 'N/A'}\n")
+                f.write(f"   Número cuenta: {inv['numero_cuenta'] or 'N/A'}\n")
+                f.write(f"   Factura: {'SÍ' if inv['emite_factura'] else 'NO'}\n")
+                f.write("-" * 100 + "\n")
         
-        if not nombre:
-            continue
+        # SIN CUENTA
+        if sin_cuenta:
+            f.write("\n\n❌ INVERSIONISTAS SIN CUENTA BANCARIA\n")
+            f.write("=" * 100 + "\n")
+            for idx, inv in enumerate(sin_cuenta, 1):
+                f.write(f"\n{idx}. {inv['nombre']}\n")
+                f.write(f"   DPI: {inv['dpi'] or 'N/A'}\n")
+                f.write(f"   Banco: {obtener_nombre_banco(inv['banco'])}\n")
+                f.write(f"   Tipo cuenta: {inv['tipo_cuenta'] or 'N/A'}\n")
+                f.write("-" * 100 + "\n")
         
-        # Buscar DPI en el otro Excel
-        dpi = None
-        if not df_dpis.empty:
-            dpi = buscar_dpi_por_nombre(nombre, df_dpis, umbral=0.85)
-            if not dpi:
-                sin_dpi.append(nombre)
+        # SIN BANCO
+        if sin_banco:
+            f.write("\n\n❌ INVERSIONISTAS SIN BANCO\n")
+            f.write("=" * 100 + "\n")
+            for idx, inv in enumerate(sin_banco, 1):
+                f.write(f"\n{idx}. {inv['nombre']}\n")
+                f.write(f"   DPI: {inv['dpi'] or 'N/A'}\n")
+                f.write(f"   Tipo cuenta: {inv['tipo_cuenta'] or 'N/A'}\n")
+                f.write(f"   Cuenta: {inv['numero_cuenta'] or 'N/A'}\n")
+                f.write("-" * 100 + "\n")
         
-        tipo_cuenta = normalizar_tipo_cuenta(row.get('Tipo cuenta'))
-        banco = normalizar_banco(row.get('Banco'))
-        numero_cuenta = limpiar_numero_cuenta(row.get('Numero de cuenta'))
-        
-        if not numero_cuenta:
-            sin_cuenta.append(nombre)
-        
-        # Determinar tipo de reinversión
-        tipo_reinversion = normalizar_tipo_reinversion(row.get('Reinversion'))
-        
-        inversionista = {
-            "nombre": nombre,
-            "dpi": dpi,
-            "emite_factura": convertir_si_no_a_boolean(row.get('Emite factura')),
-            "tipo_reinversion": tipo_reinversion,
-            "banco": banco,
-            "tipo_cuenta": tipo_cuenta,
-            "numero_cuenta": numero_cuenta
-        }
-        
-        inversionistas.append(inversionista)
-        
-        # Log con más detalle
-        dpi_display = f"{dpi if dpi else '❌ SIN DPI':<15}"
-        cuenta_display = f"{numero_cuenta[:25] if numero_cuenta else '❌ SIN CUENTA':<25}"
-        print(f"✓ {idx+1:>3}. {nombre[:30]:<30} | DPI: {dpi_display} | Cuenta: {cuenta_display}")
+        # SIN TIPO CUENTA
+        if sin_tipo_cuenta:
+            f.write("\n\n❌ INVERSIONISTAS SIN TIPO DE CUENTA\n")
+            f.write("=" * 100 + "\n")
+            for idx, inv in enumerate(sin_tipo_cuenta, 1):
+                f.write(f"\n{idx}. {inv['nombre']}\n")
+                f.write(f"   DPI: {inv['dpi'] or 'N/A'}\n")
+                f.write(f"   Banco: {obtener_nombre_banco(inv['banco'])}\n")
+                f.write(f"   Cuenta: {inv['numero_cuenta'] or 'N/A'}\n")
+                f.write("-" * 100 + "\n")
     
-    print("=" * 80)
-    print(f"\n📦 Total de inversionistas procesados: {len(inversionistas)}")
-    
-    if sin_dpi:
-        print(f"\n⚠️  {len(sin_dpi)} inversionistas SIN DPI (no se encontró match):")
-        for i, nombre in enumerate(sin_dpi[:20], 1):
-            print(f"   {i}. {nombre}")
-        if len(sin_dpi) > 20:
-            print(f"   ... y {len(sin_dpi) - 20} más")
-    
-    if sin_cuenta:
-        print(f"\n⚠️  {len(sin_cuenta)} inversionistas SIN CUENTA:")
-        for i, nombre in enumerate(sin_cuenta[:10], 1):
-            print(f"   {i}. {nombre}")
-        if len(sin_cuenta) > 10:
-            print(f"   ... y {len(sin_cuenta) - 10} más")
-    
-    return inversionistas
+    print(f"\n📄 Reporte guardado: {filename}")
+    return filepath
 
-def verificar_datos(inversionistas: List[Dict]) -> None:
-    """Muestra un resumen detallado antes de enviar"""
-    print("\n" + "=" * 80)
-    print("🔍 VERIFICACIÓN DE DATOS")
+# ============================================
+# 🚀 FUNCIÓN PRINCIPAL
+# ============================================
+def procesar_inversionistas():
+    print("=" * 80)
+    print("🏦 IMPORTADOR DE INVERSIONISTAS DESDE EXCELS DE LIQUIDACIÓN")
     print("=" * 80)
     
-    con_dpi = [inv for inv in inversionistas if inv['dpi']]
-    con_cuenta = [inv for inv in inversionistas if inv['numero_cuenta']]
-    con_factura = [inv for inv in inversionistas if inv['emite_factura']]
-    con_reinversion = [inv for inv in inversionistas if inv['tipo_reinversion'] != 'sin_reinversion']
-    
-    print(f"\n📊 Estadísticas:")
-    print(f"   Total inversionistas: {len(inversionistas)}")
-    print(f"   ✅ Con DPI: {len(con_dpi)} ({len(con_dpi)/len(inversionistas)*100:.1f}%)")
-    print(f"   ✅ Con cuenta bancaria: {len(con_cuenta)} ({len(con_cuenta)/len(inversionistas)*100:.1f}%)")
-    print(f"   ✅ Emiten factura: {len(con_factura)} ({len(con_factura)/len(inversionistas)*100:.1f}%)")
-    print(f"   ✅ Con reinversión: {len(con_reinversion)} ({len(con_reinversion)/len(inversionistas)*100:.1f}%)")
-    
-    print(f"\n📋 Muestra de datos (primeros 5 con cuenta y DPI):")
-    muestra = [inv for inv in inversionistas if inv['dpi'] and inv['numero_cuenta']][:5]
-    for inv in muestra:
-        print(f"\n   {inv['nombre']}")
-        print(f"      DPI: {inv['dpi']}")
-        print(f"      Banco: {inv['banco'] or 'N/A'}")
-        print(f"      Tipo cuenta: {inv['tipo_cuenta'] or 'N/A'}")
-        print(f"      Número cuenta: {inv['numero_cuenta']}")
-        print(f"      Reinversión: {inv['tipo_reinversion']}")
-        print(f"      Emite factura: {'Sí' if inv['emite_factura'] else 'No'}")
-
-def enviar_a_api(inversionistas: List[Dict[str, Any]], dry_run: bool = False) -> None:
-    """Envía los inversionistas a la API en lotes"""
-    
-    if dry_run:
-        print("\n" + "=" * 80)
-        print("🧪 MODO DRY-RUN - SIMULACIÓN (NO SE ENVIARÁ NADA)")
-        print("=" * 80)
-        print("\nJSON que se enviaría (primeros 3 registros):\n")
-        for inv in inversionistas[:3]:
-            print(json.dumps(inv, indent=2, ensure_ascii=False))
-            print()
-        return
-    
-    print(f"\n🚀 Enviando {len(inversionistas)} inversionistas a la API...")
-    print(f"📡 URL: {API_URL}\n")
-    
-    TAMAÑO_LOTE = 50
-    total = len(inversionistas)
-    exitosos = 0
-    errores = []
-    
-    for i in range(0, total, TAMAÑO_LOTE):
-        lote = inversionistas[i:i + TAMAÑO_LOTE]
-        lote_num = i // TAMAÑO_LOTE + 1
-        total_lotes = (total + TAMAÑO_LOTE - 1) // TAMAÑO_LOTE
-        
-        print(f"📤 Lote {lote_num}/{total_lotes}: enviando registros {i+1}-{min(i+TAMAÑO_LOTE, total)}")
-        
-        try:
-            response = requests.post(
-                API_URL,
-                json=lote,
-                headers={"Content-Type": "application/json"},
-                timeout=30
-            )
-            
-            if response.status_code in [200, 201]:
-                exitosos += len(lote)
-                print(f"   ✅ Lote procesado exitosamente\n")
-            else:
-                print(f"   ❌ Error (Status {response.status_code})")
-                error_msg = response.text[:300]
-                print(f"   {error_msg}\n")
-                errores.append(f"Lote {lote_num}: {error_msg}")
-        
-        except Exception as e:
-            error_msg = str(e)
-            print(f"   ❌ Error de conexión: {error_msg}\n")
-            errores.append(f"Lote {lote_num}: {error_msg}")
-    
-    print("=" * 80)
-    print(f"✅ Procesamiento completado: {exitosos}/{total} registros exitosos")
-    print("=" * 80)
-    
-    if errores:
-        print(f"\n⚠️  Se encontraron {len(errores)} errores:")
-        for error in errores:
-            print(f"   - {error}")
-
-def main():
-    """Función principal"""
-    print("=" * 80)
-    print("🏦 IMPORTADOR DE INVERSIONISTAS CON MATCHING DE DPI - CASH-IN")
-    print("=" * 80)
+    if MODO_PRUEBA:
+        print(f"🧪 MODO PRUEBA: Max {MAX_ARCHIVOS_PRUEBA} archivos")
     
     try:
-        # Paso 1: Leer DPIs del segundo Excel
+        # PASO 0: Obtener bancos desde API
+        print(f"\n📡 PASO 0: Obteniendo bancos desde API")
+        bancos_cache = obtener_bancos_desde_api()
+        
+        if not bancos_cache:
+            print("❌ No se pudieron obtener bancos del API")
+            continuar = input("⚠️ ¿Continuar sin validación de bancos? (si/no): ").strip().lower()
+            if continuar not in ['si', 's']:
+                return
+        else:
+            print(f"\n📋 Bancos disponibles:")
+            for banco in bancos_cache:
+                print(f"   - ID {banco['banco_id']}: {banco['nombre']}")
+        
+        # PASO 1: Leer DPIs
         df_dpis = leer_dpis_desde_excel()
         
         if df_dpis.empty:
-            print("\n⚠️  ADVERTENCIA: No se cargaron DPIs. ¿Continuar sin DPIs?")
-            continuar = input("Escribe 'si' para continuar: ").strip().lower()
+            continuar = input("⚠️ Sin DPIs. ¿Continuar? (si/no): ").strip().lower()
             if continuar not in ['si', 's']:
-                print("❌ Operación cancelada")
                 return
         
-        # Paso 2 y 3: Leer datos bancarios y hacer matching
-        inversionistas = leer_inversionistas_desde_excel(df_dpis)
+        # PASO 2: Leer archivos
+        print(f"\n📂 PASO 2: Leyendo archivos")
+        print(f"   📁 {CARPETA_EXCELS_LIQUIDACIONES}")
         
-        if not inversionistas:
-            print("⚠️  No se encontraron inversionistas para procesar")
+        if not os.path.exists(CARPETA_EXCELS_LIQUIDACIONES):
+            print(f"❌ Carpeta no existe")
             return
         
-        # Verificar datos
-        verificar_datos(inversionistas)
+        archivos_excel = [
+            f for f in os.listdir(CARPETA_EXCELS_LIQUIDACIONES) 
+            if f.endswith(('.xlsx', '.xls')) and not f.startswith('~$')
+        ]
         
-        # Preguntar qué hacer
+        if not archivos_excel:
+            print("⚠️ Sin archivos Excel")
+            return
+        
+        if MODO_PRUEBA:
+            archivos_excel = archivos_excel[:MAX_ARCHIVOS_PRUEBA]
+        
+        print(f"📁 {len(archivos_excel)} archivos\n")
+        
+        # PASO 3: Procesar
+        inversionistas = []
+        
+        print(f"{'='*80}")
+        print(f"🔄 PASO 3: PROCESANDO ARCHIVOS...")
+        print(f"{'='*80}")
+        
+        for idx, archivo in enumerate(archivos_excel, 1):
+            print(f"\n[{idx}/{len(archivos_excel)}]", end=" ")
+            
+            ruta_completa = os.path.join(CARPETA_EXCELS_LIQUIDACIONES, archivo)
+            datos = extraer_datos_inversionista_del_excel(ruta_completa, df_dpis, bancos_cache)
+            inversionistas.append(datos)
+        
+        # PASO 4: Resumen
         print("\n" + "=" * 80)
-        print("¿Qué deseas hacer?")
+        print("📊 PASO 4: RESUMEN")
         print("=" * 80)
-        print("1. 🚀 Enviar a la API")
-        print("2. 🧪 Dry-run (solo mostrar JSON)")
-        print("3. 💾 Guardar JSON a archivo (sin enviar)")
-        print("4. ❌ Cancelar")
         
-        opcion = input("\nOpción (1/2/3/4): ").strip()
+        con_dpi = [inv for inv in inversionistas if inv['dpi']]
+        con_cuenta = [inv for inv in inversionistas if inv['numero_cuenta']]
+        con_factura = [inv for inv in inversionistas if inv['emite_factura']]
+        con_banco = [inv for inv in inversionistas if inv['banco']]
+        con_tipo_cuenta = [inv for inv in inversionistas if inv['tipo_cuenta']]
+        
+        print(f"\n   Total: {len(inversionistas)}")
+        print(f"   ✅ Con DPI: {len(con_dpi)} ({len(con_dpi)/len(inversionistas)*100:.1f}%)")
+        print(f"   ✅ Con banco: {len(con_banco)} ({len(con_banco)/len(inversionistas)*100:.1f}%)")
+        print(f"   ✅ Con tipo cuenta: {len(con_tipo_cuenta)} ({len(con_tipo_cuenta)/len(inversionistas)*100:.1f}%)")
+        print(f"   ✅ Con número cuenta: {len(con_cuenta)} ({len(con_cuenta)/len(inversionistas)*100:.1f}%)")
+        print(f"   ✅ Facturan: {len(con_factura)} ({len(con_factura)/len(inversionistas)*100:.1f}%)")
+        
+        # PASO 5: Guardar reporte de fallidos
+        reporte_path = guardar_reporte_fallidos(inversionistas, CARPETA_EXCELS_LIQUIDACIONES, bancos_cache)
+        
+        # PASO 6: Opciones
+        print("\n" + "=" * 80)
+        print("PASO 5: ¿Qué hacer?")
+        print("=" * 80)
+        print("1. 🚀 Enviar a API")
+        print("2. 🧪 Dry-run (ver JSON)")
+        print("3. 💾 Guardar JSON completo")
+        print("4. 📄 Ver reporte de fallidos")
+        print("5. ❌ Cancelar")
+        
+        opcion = input("\nOpción (1/2/3/4/5): ").strip()
         
         if opcion == "1":
-            confirmacion = input("\n⚠️  ¿Estás seguro de enviar los datos? (si/no): ").strip().lower()
-            if confirmacion in ['si', 's', 'yes', 'y']:
-                enviar_a_api(inversionistas, dry_run=False)
-            else:
-                print("❌ Envío cancelado")
+            confirmacion = input("\n⚠️ ¿Enviar a API? (si/no): ").strip().lower()
+            if confirmacion in ['si', 's']:
+                enviar_a_api_batch(inversionistas)
         elif opcion == "2":
-            enviar_a_api(inversionistas, dry_run=True)
+            print("\n🧪 Muestra (primeros 5):\n")
+            for inv in inversionistas[:5]:
+                # Mostrar nombre del banco en lugar de ID
+                inv_display = inv.copy()
+                if inv_display['banco']:
+                    banco = next((b for b in bancos_cache if b['banco_id'] == inv_display['banco']), None)
+                    if banco:
+                        inv_display['banco_nombre'] = banco['nombre']
+                print(json.dumps(inv_display, indent=2, ensure_ascii=False))
+                print()
         elif opcion == "3":
-            filename = f"inversionistas_backup_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.json"
-            with open(filename, 'w', encoding='utf-8') as f:
+            filename = f"inversionistas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            filepath = os.path.join(CARPETA_EXCELS_LIQUIDACIONES, filename)
+            with open(filepath, 'w', encoding='utf-8') as f:
                 json.dump(inversionistas, f, indent=2, ensure_ascii=False)
-            print(f"💾 Datos guardados en: {filename}")
+            print(f"💾 Guardado: {filename}")
+        elif opcion == "4":
+            if os.path.exists(reporte_path):
+                os.startfile(reporte_path)
+            print(f"📄 Abriendo: {os.path.basename(reporte_path)}")
         else:
-            print("❌ Operación cancelada")
+            print("❌ Cancelado")
     
-    except FileNotFoundError as e:
-        print(f"❌ Error: No se encontró un archivo Excel")
-        print(f"📂 Verifica las rutas en la configuración del script")
     except Exception as e:
-        print(f"❌ Error inesperado: {str(e)}")
+        print(f"❌ Error: {str(e)}")
         import traceback
         traceback.print_exc()
 
+def enviar_a_api_batch(inversionistas: List[Dict]) -> None:
+    """Envía a la API en batch"""
+    print(f"\n🚀 Enviando {len(inversionistas)} inversionistas...")
+    print(f"📡 {API_INVERSIONISTAS_URL}\n")
+    
+    try:
+        response = requests.post(
+            API_INVERSIONISTAS_URL,
+            json=inversionistas,
+            headers={"Content-Type": "application/json"},
+            timeout=60
+        )
+        
+        if response.status_code in [200, 201]:
+            print(f"✅ Procesados exitosamente")
+            resultado = response.json()
+            print(f"📄 Mensaje: {resultado.get('message', 'OK')}")
+            if 'data' in resultado:
+                print(f"📊 Registros procesados: {len(resultado['data'])}")
+        else:
+            print(f"❌ Error ({response.status_code})")
+            print(f"📄 {response.text}")
+    
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+
 if __name__ == "__main__":
-    main()
+    procesar_inversionistas()

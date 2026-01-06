@@ -235,7 +235,7 @@ export const MyInvestments = () => {
                       <div className="flex justify-between items-start mb-4">
                         <div>
                           <h3 className="text-xl lg:text-2xl font-bold mb-1 ">
-                            Liquidacion de{" "}
+                            Liquidación de{" "}
                             {formatMonthYear(liquidacion.fecha_liquidacion)}
                           </h3>
                           <p className="text-sm text-white/65">

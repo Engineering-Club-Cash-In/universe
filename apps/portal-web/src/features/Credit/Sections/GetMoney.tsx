@@ -135,7 +135,7 @@ export const GetMoney = () => {
           {/* Badge en esquina superior derecha */}
           <div className="absolute top-6 right-6 bg-primary px-6 py-3 rounded-2xl">
             <span className="text-black font-semibold">
-              Préstamo con Garantia
+              Préstamo con Garantía
             </span>
           </div>
         </div>

@@ -64,6 +64,7 @@ export const useRegister = () => {
           password: values.password,
           name: values.fullName,
           callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile`,
+          dpi: values.dpi,
           role: values.userType, // Enviar el role al backend
         } as any);
 
@@ -86,9 +87,9 @@ export const useRegister = () => {
                 dpi: parseInt(values.dpi),
                 email: values.email,
                 emite_factura: false,
-                reinversion: false,
-                banco: "",
-                tipo_cuenta: "",
+                tipo_reinversion: "sin_reinversion",
+                banco: null,
+                tipo_cuenta: null,
                 numero_cuenta: "",
               });
             }
@@ -136,7 +137,7 @@ export const useRegister = () => {
       // Pasar userType, DPI y phone en la URL para procesarlos en useProfile
       await authClient.signIn.social({
         provider: "google",
-        callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile?userType=${formik.values.userType}&dpi=${formik.values.dpi}&phone=${formik.values.phone}`,
+        callbackURL: `${import.meta.env.VITE_FRONTEND_URL}/profile?userType=${formik.values.userType}&dpi=${formik.values.dpi}`,
       });
     } catch (error) {
       console.error("Error during Google register:", error);

@@ -1,7 +1,7 @@
 import type { Context } from "hono";
-import { eq, or } from "drizzle-orm";
+import { asc, eq, or } from "drizzle-orm";
 import { db } from "../db";
-import { leads } from "../db/schema/crm";
+import { leads, opportunities, salesStages } from "../db/schema/crm";
 import { user } from "../db/schema/auth";
 import { getRenapInfoController } from "./bot";
 
@@ -10,7 +10,13 @@ export async function createPublicLead(c: Context) {
     const body = await c.req.json();
 
     // Validate required fields
-    if (!body.firstName || !body.lastName || !body.email || !body.dpi || body.dpi.trim() === "") {
+    if (
+      !body.firstName ||
+      !body.lastName ||
+      !body.email ||
+      !body.dpi ||
+      body.dpi.trim() === ""
+    ) {
       return c.json(
         {
           success: false,
@@ -24,12 +30,7 @@ export async function createPublicLead(c: Context) {
     const existingLead = await db
       .select()
       .from(leads)
-      .where(
-        or(
-          eq(leads.email, body.email),
-          eq(leads.dpi, body.dpi)
-        )
-      )
+      .where(or(eq(leads.email, body.email), eq(leads.dpi, body.dpi)))
       .limit(1);
 
     if (existingLead.length > 0) {
@@ -122,10 +123,38 @@ export async function createPublicLead(c: Context) {
       renapInfo = await getRenapInfoController(body.dpi, body.phone);
     }
 
+    // 2. Crear oportunidad vinculada al lead
+    const [firstStage] = await db
+      .select()
+      .from(salesStages)
+      .orderBy(asc(salesStages.order))
+      .limit(1);
+
+    if (!firstStage) {
+      throw new Error("[ERROR] No sales stage found");
+    }
+
+    const [newOpportunity] = await db
+      .insert(opportunities)
+      .values({
+        leadId: newLead.id,
+        status: "open",
+        probability: 0,
+        stageId: firstStage.id, // Etapa inicial
+        title: `Oportunidad de crédito para  ${newLead.firstName} ${newLead.lastName}`,
+        companyId: undefined,
+        assignedTo: systemUser.id,
+        createdBy: systemUser.id,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .returning();
+
     return c.json({
       success: true,
       data: newLead,
       renapInfo,
+      opportunity: newOpportunity,
     });
   } catch (error: any) {
     console.error("[ERROR] createPublicLead:", error);

@@ -60,6 +60,11 @@ export const Menu = () => {
     item.roles.includes(user?.role || "CLIENT")
   );
 
+  // Si no tiene DPI, solo mostrar "Mi Perfil"
+  const displayItems = !user?.dpi
+    ? menuItems.filter((item) => item.id === "/profile")
+    : menuItems;
+
   return (
     <div
       className="fixed left-0 top-1/2 -translate-y-1/2 z-50 "
@@ -71,7 +76,7 @@ export const Menu = () => {
     >
       <div className="py-12 px-4 space-y-6">
         {/* Items del menú */}
-        {menuItems.map((item) => {
+        {displayItems.map((item) => {
           const isActive = location.pathname === item.id;
 
           return (

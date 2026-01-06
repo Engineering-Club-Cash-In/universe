@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { sendLead } from "@/features/FormLeads/service/serviceLead";
 import { createInvestor } from "../services/investorService";
 import { useAuth } from "@/lib";
+import { authClient } from "@/lib/auth";
 
 interface UserData {
   id: string;
@@ -24,9 +25,7 @@ export const useProfile = () => {
     const createUserFromURLParams = async () => {
       if (!user) return;
 
-
       if (user) await cacheProfileImage(user);
-
 
       // Leer parámetros de la URL
       const urlParams = new URLSearchParams(window.location.search);
@@ -40,6 +39,7 @@ export const useProfile = () => {
       // Si hay parámetros de registro, crear el usuario correspondiente
       if (userType && dpi) {
         console.log(`Creando usuario tipo ${userType} desde OAuth`);
+        // Mantener isLoading en true mientras se procesa y recarga
         try {
           if (userType === "CLIENT") {
             // Para clientes, enviar como lead
@@ -50,36 +50,50 @@ export const useProfile = () => {
               dpi: dpi,
               descripcion: `Tipo de usuario: ${userType}`,
             });
+            await authClient.updateUser({
+              dpi: dpi,
+            } as any);
             console.log("Lead creado exitosamente");
           } else if (userType === "INVESTOR") {
+            await authClient.updateUser({
+              dpi: dpi,
+              role: "INVESTOR",
+            } as any);
             // Para inversionistas, crear en cartera
             await createInvestor({
               nombre: user.name || user.email.split("@")[0],
               dpi: parseInt(dpi),
               email: user.email,
               emite_factura: false,
-              reinversion: false,
-              banco: "",
-              tipo_cuenta: "",
+              tipo_reinversion: "sin_reinversion",
+              banco: null,
+              tipo_cuenta: null,
               numero_cuenta: "",
             });
+
             console.log("Investor creado exitosamente");
           }
 
-          // Limpiar parámetros de la URL
+          // Limpiar parámetros de la URL y recargar
           const newUrl = window.location.pathname;
           window.history.replaceState({}, "", newUrl);
+          // NO quitar isLoading aquí porque vamos a recargar
+          window.location.reload();
+          return; // Salir antes de setIsLoading(false)
         } catch (error) {
           console.error(`Error al crear ${userType}:`, error);
+          setIsLoading(false);
         }
+      } else {
+        // Solo limpiar URL si no hay parámetros de registro
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, "", newUrl);
+        setIsLoading(false);
       }
-
-      setIsLoading(false);
     };
 
     createUserFromURLParams();
   }, [user]);
-
 
   // Función para cachear imagen de perfil
   const cacheProfileImage = async (userData: UserData) => {
@@ -107,6 +121,6 @@ export const useProfile = () => {
 
   return {
     user,
-    isLoading
+    isLoading,
   };
 };

@@ -1,36 +1,91 @@
 import { useState, useEffect } from "react";
-import { InputIcon, IconAddress, IconPhone, IconPerson, Loading } from "@/components";
+import {
+  InputIcon,
+  IconAddress,
+  IconPhone,
+  IconPerson,
+  Loading,
+  Select,
+} from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { ModalConfirmChange } from "./ModalConfirmChange";
 import { getProfile } from "../services";
+import { getInvestorProfile, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
 
-
-
-type EditField = "dpi" | "phone" | "address" | null;
+type EditField =
+  | "dpi"
+  | "phone"
+  | "address"
+  | "banco"
+  | "tipo_cuenta"
+  | "numero_cuenta"
+  | null;
 
 export const InfoPerson = () => {
   const [dpi, setDpi] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  const [banco, setBanco] = useState("");
+  const [tipoCuenta, setTipoCuenta] = useState("");
+  const [numeroCuenta, setNumeroCuenta] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
   const { token, user } = useAuth();
 
-  // Obtener perfil usando el servicio centralizado
-  const { data: profileData, isLoading, refetch } = useQuery({
+  const isInvestor = user?.role === "INVESTOR";
+
+  // Obtener perfil del cliente (CRM) - solo si es CLIENT
+  const {
+    data: clientProfile,
+    isLoading: isLoadingClient,
+    refetch: refetchClient,
+  } = useQuery({
     queryKey: ["profile", user?.id],
-    queryFn: () => getProfile(user?.email || "", user?.dpi || "", token || null),
-    enabled: !!user?.id,
+    queryFn: () =>
+      getProfile(user?.email || "", user?.dpi || "", token || null),
+    enabled: !!user?.id && !isInvestor,
   });
+
+  // Obtener perfil del inversionista (Cartera) - solo si es INVESTOR
+  const {
+    data: investorProfile,
+    isLoading: isLoadingInvestor,
+    refetch: refetchInvestor,
+  } = useQuery({
+    queryKey: ["investor-profile", user?.dpi],
+    queryFn: () => getInvestorProfile(user?.dpi || ""),
+    enabled: !!user?.dpi && isInvestor,
+  });
+
+  // Obtener catálogo de bancos - solo si es INVESTOR
+  const { data: bancos } = useQuery({
+    queryKey: ["bancos"],
+    queryFn: getBancos,
+    enabled: isInvestor,
+  });
+
+
+  const profileData: any = isInvestor ? investorProfile : clientProfile;
+  const isLoading = isInvestor ? isLoadingInvestor : isLoadingClient;
+  const refetch = isInvestor ? refetchInvestor : refetchClient;
 
   // Actualizar campos cuando se carga el perfil
   useEffect(() => {
     if (profileData) {
-      setDpi(profileData.dpi || "");
-      setPhone(profileData.phone || "");
-      setAddress(profileData.direccion || "");
+      if (isInvestor) {
+        // Datos de inversionista
+        setDpi(profileData.dpi?.toString() || "");
+        setBanco(profileData.banco || "");
+        setTipoCuenta(profileData.tipo_cuenta || "");
+        setNumeroCuenta(profileData.numero_cuenta || "");
+      } else {
+        // Datos de cliente
+        setDpi(profileData.dpi || "");
+        setPhone(profileData.phone || "");
+        setAddress(profileData.direccion || "");
+      }
     }
-  }, [profileData]);
+  }, [profileData, isInvestor]);
 
   const handleOpenModal = (field: EditField) => {
     setEditingField(field);
@@ -52,6 +107,12 @@ export const InfoPerson = () => {
         return phone;
       case "address":
         return address;
+      case "banco":
+        return banco;
+      case "tipo_cuenta":
+        return tipoCuenta;
+      case "numero_cuenta":
+        return numeroCuenta;
       default:
         return "";
     }
@@ -72,7 +133,14 @@ export const InfoPerson = () => {
     </svg>
   );
 
-  const isProfileComplete = !!(profileData?.dpi && profileData?.phone);
+  const isProfileComplete = isInvestor
+    ? !!(
+        profileData?.dpi &&
+        profileData?.banco &&
+        profileData?.tipo_cuenta &&
+        profileData?.numero_cuenta
+      )
+    : !!(profileData?.dpi && profileData?.phone);
 
   if (isLoading) {
     return <Loading />;
@@ -102,8 +170,9 @@ export const InfoPerson = () => {
                 Perfil Incompleto
               </p>
               <p className="text-yellow-200/80 text-sm">
-                Por favor completa los campos de DPI, Teléfono para ser un
-                usuario verificado.
+                {isInvestor
+                  ? "Por favor completa los campos de DPI, Banco, Tipo de Cuenta y Número de Cuenta para ser un usuario verificado."
+                  : "Por favor completa los campos de DPI y Teléfono para ser un usuario verificado."}
               </p>
             </div>
           </div>
@@ -138,7 +207,7 @@ export const InfoPerson = () => {
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-end">
-          {/* DPI */}
+          {/* DPI - Siempre visible */}
           <div className="text-[#6B7280]">
             <label className="text-sm text-white/65 mb-2 block">
               DPI (Documento Personal de Identificación)
@@ -160,47 +229,131 @@ export const InfoPerson = () => {
             </button>
           </div>
 
-          {/* Teléfono */}
-          <div>
-            <label className="text-sm text-white/65 mb-2 block">Teléfono</label>
-            <InputIcon
-              icon={<IconPhone className="w-6 h-6" />}
-              placeholder="Ingresa tu teléfono"
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              type="tel"
-              name="phone"
-            />
-            <button
-              onClick={() => handleOpenModal("phone")}
-              className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
-            >
-              <IconEdit />
-              Editar Teléfono
-            </button>
-          </div>
+          {/* Campos para CLIENTE */}
+          {!isInvestor && (
+            <>
+              {/* Teléfono */}
+              <div>
+                <label className="text-sm text-white/65 mb-2 block">
+                  Teléfono
+                </label>
+                <InputIcon
+                  icon={<IconPhone className="w-6 h-6" />}
+                  placeholder="Ingresa tu teléfono"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  type="tel"
+                  name="phone"
+                />
+                <button
+                  onClick={() => handleOpenModal("phone")}
+                  className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
+                >
+                  <IconEdit />
+                  Editar Teléfono
+                </button>
+              </div>
 
-          {/* Dirección */}
-          <div>
-            <label className="text-sm text-white/65 mb-2 block">
-              Dirección
-            </label>
-            <InputIcon
-              icon={<IconAddress className="w-6 h-6" />}
-              placeholder="Ingresa tu dirección completa"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              type="text"
-              name="address"
-            />
-            <button
-              onClick={() => handleOpenModal("address")}
-              className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
-            >
-              <IconEdit />
-              Editar Dirección
-            </button>
-          </div>
+              {/* Dirección */}
+              <div>
+                <label className="text-sm text-white/65 mb-2 block">
+                  Dirección
+                </label>
+                <InputIcon
+                  icon={<IconAddress className="w-6 h-6" />}
+                  placeholder="Ingresa tu dirección completa"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  type="text"
+                  name="address"
+                />
+                <button
+                  onClick={() => handleOpenModal("address")}
+                  className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
+                >
+                  <IconEdit />
+                  Editar Dirección
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Campos para INVERSIONISTA */}
+          {isInvestor && (
+            <>
+              {/* Banco */}
+              <div>
+                <label className="text-sm text-white/65 mb-2 block">
+                  Banco
+                </label>
+                <Select
+                  variant="light"
+                  value={banco}
+                  onChange={(value) => setBanco(value)}
+                  options={
+                    bancos?.map((b) => ({
+                      value: b.codigo,
+                      label: b.nombre,
+                    })) || []
+                  }
+                  placeholder="Selecciona tu banco"
+                />
+                <button
+                  onClick={() => handleOpenModal("banco")}
+                  className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
+                >
+                  <IconEdit />
+                  Editar Banco
+                </button>
+              </div>
+
+              {/* Tipo de Cuenta */}
+              <div>
+                <label className="text-sm text-white/65 mb-2 block">
+                  Tipo de Cuenta
+                </label>
+                <Select
+                  variant="light"
+                  value={tipoCuenta}
+                  onChange={(value) => setTipoCuenta(value)}
+                  options={[
+                    { value: "MONETARIA", label: "Monetaria" },
+                    { value: "AHORRO", label: "Ahorro" },
+                  ]}
+                  placeholder="Selecciona tipo de cuenta"
+                />
+                <button
+                  onClick={() => handleOpenModal("tipo_cuenta")}
+                  className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
+                >
+                  <IconEdit />
+                  Editar Tipo de Cuenta
+                </button>
+              </div>
+
+              {/* Número de Cuenta */}
+              <div>
+                <label className="text-sm text-white/65 mb-2 block">
+                  Número de Cuenta
+                </label>
+                <InputIcon
+                  icon={<IconPerson />}
+                  placeholder="Ingresa tu número de cuenta"
+                  value={numeroCuenta}
+                  onChange={(e) => setNumeroCuenta(e.target.value)}
+                  type="text"
+                  name="numero_cuenta"
+                />
+                <button
+                  onClick={() => handleOpenModal("numero_cuenta")}
+                  className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
+                >
+                  <IconEdit />
+                  Editar Número de Cuenta
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -211,6 +364,7 @@ export const InfoPerson = () => {
         initialValue={getCurrentValue()}
         onClose={handleCloseModal}
         onSuccess={handleSuccess}
+        profileData={profileData}
       />
     </div>
   );

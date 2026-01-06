@@ -13,6 +13,7 @@ interface SelectProps {
   onChange: (value: string) => void;
   placeholder?: string;
   color?: string;
+  variant?: "dark" | "light";
 }
 
 export const Select = ({
@@ -21,12 +22,44 @@ export const Select = ({
   onChange,
   placeholder = "Seleccionar...",
   color = "secondary",
+  variant = "dark",
 }: SelectProps) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef<HTMLDivElement>(null);
   const isMobile = useIsMobile();
 
   const selectedOption = options.find((option) => option.value === value);
+
+  // Estilos según variante
+  const isLight = variant === "light";
+  
+  const buttonStyles = isLight
+    ? {
+        background: "#F9FAFB",
+        color: selectedOption ? "#6B7280" : "#9CA3AF",
+        border: "0 solid #E5E7EB",
+      }
+    : {
+        background: "rgba(0, 0, 0, 0.00)",
+        color: selectedOption ? "#FFFFFF" : "#9CA3AF",
+        border: "0.86px solid #374151",
+      };
+
+  const dropdownStyles = isLight
+    ? {
+        background: "#FFFFFF",
+        border: "1px solid #E5E7EB",
+        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+      }
+    : {
+        background: "#0F0F0F",
+        border: "1px solid #364050",
+        boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
+      };
+
+  const optionTextColor = isLight ? "#6B7280" : "#FFFFFF";
+  const optionHoverBg = isLight ? "#F3F4F6" : "#1F2937";
+  const optionSelectedBg = isLight ? "#E5E7EB" : "#1F2937";
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -53,12 +86,9 @@ export const Select = ({
         onClick={() => setIsOpen(!isOpen)}
         style={{
           width: "100%",
-          height: "50px",
-          borderRadius: "6.882px",
-          border: "0.86px solid #374151",
-          background: "rgba(0, 0, 0, 0.00)",
-          color: selectedOption ? "#FFFFFF" : "#9CA3AF",
-          padding: "0 16px",
+          height: isLight ? "58px" : "50px",
+          borderRadius: isLight ? "8px" : "6.882px",
+          padding: isLight ? "16px" : "0 16px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -66,12 +96,17 @@ export const Select = ({
           fontSize: isMobile ? "14px" : "16px",
           fontFamily: "inherit",
           transition: "border-color 0.2s",
+          ...buttonStyles,
         }}
         onMouseEnter={(e) => {
-          e.currentTarget.style.borderColor = "#4B5563";
+          if (!isLight) {
+            e.currentTarget.style.borderColor = "#4B5563";
+          }
         }}
         onMouseLeave={(e) => {
-          e.currentTarget.style.borderColor = "#374151";
+          if (!isLight) {
+            e.currentTarget.style.borderColor = "#374151";
+          }
         }}
       >
         <span>{selectedOption ? selectedOption.label : placeholder}</span>
@@ -95,14 +130,12 @@ export const Select = ({
             top: "calc(100% + 4px)",
             left: 0,
             right: 0,
-            borderRadius: "6.88px",
-            border: "1px solid #364050",
+            borderRadius: isLight ? "8px" : "6.88px",
             opacity: 0.99,
-            background: "#0F0F0F",
             zIndex: 1000,
             maxHeight: "300px",
             overflowY: "auto",
-            boxShadow: "0 4px 6px rgba(0, 0, 0, 0.3)",
+            ...dropdownStyles,
           }}
         >
           {options.map((option) => (
@@ -111,19 +144,19 @@ export const Select = ({
               onClick={() => handleSelect(option.value)}
               style={{
                 padding: "12px 16px",
-                color: "#FFFFFF",
+                color: optionTextColor,
                 cursor: "pointer",
                 fontSize: "16px",
                 transition: "background-color 0.2s",
                 backgroundColor:
-                  option.value === value ? "#1F2937" : "transparent",
+                  option.value === value ? optionSelectedBg : "transparent",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = "#1F2937";
+                e.currentTarget.style.backgroundColor = optionHoverBg;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.backgroundColor =
-                  option.value === value ? "#1F2937" : "transparent";
+                  option.value === value ? optionSelectedBg : "transparent";
               }}
             >
               {option.label}

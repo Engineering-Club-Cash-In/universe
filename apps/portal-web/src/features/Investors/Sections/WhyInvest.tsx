@@ -62,7 +62,7 @@ export const WhyInvest = () => {
         </p>
         <p className="text-sm lg:text-2xl lg:w-2/3 leading-8">
           Ofrecemos una experiencia de inversión superior, diseñada para
-          maximizartu rentabilidad con total seguridad.
+          maximizar tu rentabilidad con total seguridad.
         </p>
       </div>
 

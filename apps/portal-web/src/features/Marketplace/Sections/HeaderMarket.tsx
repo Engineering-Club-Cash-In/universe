@@ -1,7 +1,7 @@
 export const HeaderMarket = () => {
   const imageUrl = import.meta.env.VITE_IMAGE_URL + "/marketplace.jpg";
 
-  const title = "Compra tu carro ideal";
+  const title = "Compra tu auto ideal";
 
   const subtitle =
     "Todos nuestros vehículos han sido evaluados y certificados por expertos. Garantizamos calidad, seguridad y la mejor experiencia de compra.";

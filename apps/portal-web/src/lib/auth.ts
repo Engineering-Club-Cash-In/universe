@@ -37,13 +37,17 @@ export interface LoginCredentials {
   rememberMe?: boolean;
 }
 
+export type UserType = "CLIENT" | "INVESTOR";
+
 export interface RegisterCredentials {
   fullName: string;
   phone: string;
+  dpi: string;
   email: string;
   password: string;
   confirmPassword: string;
   acceptTerms: boolean;
+  userType: UserType;
 }
 
 export interface User {
@@ -51,6 +55,9 @@ export interface User {
   email: string;
   name?: string;
   phone?: string;
+  dpi?: string;
+  image?: string;
+  role: UserType;
 }
 
 export interface AuthResponse {

@@ -58,7 +58,12 @@ export const auth = betterAuth({
         type: "string",
         required: false,
         defaultValue: "CLIENT",
-        input: false, // No permitir que el usuario lo establezca directamente
+        input: true, // Permitir que se envíe desde el cliente
+      },
+      dpi: {
+        type: "string",
+        required: false,
+        input: true, // Permitir que se envíe desde el cliente
       },
     },
   },
@@ -86,7 +91,7 @@ export const auth = betterAuth({
     },
     useSecureCookies: env.NODE_ENV === "production",
     cookies: {
-      sameSite: env.NODE_ENV === "production" ? "strict" : "lax",
+      sameSite: env.NODE_ENV === "production" ? "strict" : "lax" as const,
     },
   },
   secret: env.BETTER_AUTH_SECRET,

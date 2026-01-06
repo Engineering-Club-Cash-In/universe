@@ -17,6 +17,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     if (data) {
+      // eslint-disable-next-line 
+      // @ts-ignore
       setUser(data.user);
     } else {
       setUser(null);

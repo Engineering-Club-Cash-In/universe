@@ -10,12 +10,12 @@ import { getInvestmentsStats, getLiquidaciones } from "../services";
 import { useQuery } from "@tanstack/react-query";
 import { useModalOptionsCall } from "@/hooks";
 import { ContainerMenu } from "../components/ContainerMenu";
-import { useProfile } from "../hooks/useProfile";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/lib";
 
 export const MyInvestments = () => {
-  const { profileData, isLoading } = useProfile();
+  const {user} = useAuth();
   const [expandedLiquidacion, setExpandedLiquidacion] = useState<number | null>(
     null
   );
@@ -27,9 +27,9 @@ export const MyInvestments = () => {
 
   // Obtener estadísticas usando DPI del perfil
   const { data: stats, isLoading: loadingStats } = useQuery({
-    queryKey: ["investments-stats", profileData?.dpi],
-    queryFn: () => getInvestmentsStats(profileData?.dpi || ""),
-    enabled: !!profileData?.dpi,
+    queryKey: ["investments-stats", user?.dpi],
+    queryFn: () => getInvestmentsStats(user?.dpi || ""),
+    enabled: !!user?.dpi,
   });
 
   // Obtener liquidaciones con paginación
@@ -38,14 +38,14 @@ export const MyInvestments = () => {
     isLoading: loadingLiquidaciones,
     isFetching: fetchingLiquidaciones,
   } = useQuery({
-    queryKey: ["liquidaciones", profileData?.dpi, currentPage, perPage],
+    queryKey: ["liquidaciones", user?.dpi, currentPage, perPage],
     queryFn: () =>
-      getLiquidaciones(profileData?.dpi || "", currentPage, perPage),
-    enabled: !!profileData?.dpi,
+      getLiquidaciones(user?.dpi || "", currentPage, perPage),
+    enabled: !!user?.dpi,
   });
 
   // Solo mostrar loading de página completa en la carga inicial
-  const isInitialLoading = loadingStats || loadingLiquidaciones || isLoading;
+  const isInitialLoading = loadingStats || loadingLiquidaciones;
   const liquidaciones = liquidacionesData?.liquidaciones || [];
   const totalPages = liquidacionesData?.totalPages || 1;
   const totalItems = liquidacionesData?.totalItems || 0;

@@ -3,13 +3,13 @@ import { InputIcon, Button, IconAddress, IconPhone, IconUser } from "@/component
 import { useMutation } from "@tanstack/react-query";
 import { updateLead } from "../services";
 import { useAuth } from "@/lib";
+import { authClient } from "@/lib/auth";
 
 type FieldType = 'dpi' | 'phone' | 'address';
 
 interface ModalConfirmChangeProps {
   isOpen: boolean;
   field: FieldType | null;
-  userId: string;
   initialValue: string;
   onClose: () => void;
   onSuccess: () => void;
@@ -34,7 +34,7 @@ export const ModalConfirmChange = ({
 
   // Mutation unificada para actualizar cualquier campo
   const updateMutation = useMutation({
-    mutationFn: ({ field, value }: { field: FieldType; value: string }) => {
+    mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
       if (!email) throw new Error("Email no disponible");
 
@@ -46,7 +46,12 @@ export const ModalConfirmChange = ({
       }
 
       const payload: UpdateLeadPayload = { email };
-      if (field === 'dpi') payload.dpi = value;
+      if (field === 'dpi') {
+        // eslint-disable-next-line
+        // @ts-ignore
+        await authClient.updateUser({ dpi: value });
+        payload.dpi = value;
+      }
       if (field === 'phone') payload.phone = value;
       if (field === 'address') payload.address = value;
 

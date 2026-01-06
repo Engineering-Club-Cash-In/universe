@@ -8,10 +8,12 @@ import {
 import { motion } from "framer-motion";
 import { useNavigate, useLocation } from "@tanstack/react-router";
 import { authClient } from "@/lib/auth";
+import { useAuth } from "@/lib";
 
 export const Menu = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
 
   const handleLogout = async () => {
     try {
@@ -25,24 +27,38 @@ export const Menu = () => {
     }
   };
 
-  const menuItems = [
+  // Definir todos los items del menú
+  const allMenuItems = [
     {
       id: "/profile",
       label: "Mi Perfil",
       icon: <IconPerson width="24" height="24" />,
+      roles: ["CLIENT", "INVESTOR"], // Visible para ambos
     },
     {
       id: "/investments",
       label: "Mis Inversiones",
       icon: <IconArrow width="24" height="24" />,
+      roles: ["INVESTOR"], // Solo para inversionistas
     },
     {
       id: "/loans",
       label: "Mis Préstamos",
       icon: <IconCar2 width="24" height="24" />,
+      roles: ["CLIENT"], // Solo para clientes
     },
-    { id: "/documents", label: "Documentos", icon: <IconDocument /> },
+    {
+      id: "/documents",
+      label: "Documentos",
+      icon: <IconDocument />,
+      roles: ["CLIENT"], // Solo para clientes
+    },
   ];
+
+  // Filtrar items según el rol del usuario
+  const menuItems = allMenuItems.filter((item) =>
+    item.roles.includes(user?.role || "CLIENT")
+  );
 
   return (
     <div

@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { InputIcon, Button, IconAddress, IconPhone, IconUser } from "@/components";
-import { useMutation } from "@tanstack/react-query";
+import { InputIcon, Button, IconAddress, IconPhone, IconUser, Select } from "@/components";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { updateLead } from "../services";
+import { createInvestor, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
 import { authClient } from "@/lib/auth";
 
-type FieldType = 'dpi' | 'phone' | 'address';
+type FieldType = 'dpi' | 'phone' | 'address' | 'banco' | 'tipo_cuenta' | 'numero_cuenta';
 
 interface ModalConfirmChangeProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ interface ModalConfirmChangeProps {
   initialValue: string;
   onClose: () => void;
   onSuccess: () => void;
+  profileData?: any;
 }
 
 export const ModalConfirmChange = ({
@@ -21,10 +23,20 @@ export const ModalConfirmChange = ({
   initialValue,
   onClose,
   onSuccess,
+  profileData
 }: ModalConfirmChangeProps) => {
   const [tempValue, setTempValue] = useState(initialValue);
   const [serverError, setServerError] = useState<string>("");
   const { token, user } = useAuth();
+
+  const isInvestorField = field && ['banco', 'tipo_cuenta', 'numero_cuenta'].includes(field);
+
+  // Obtener catálogo de bancos solo si el campo es banco
+  const { data: bancos } = useQuery({
+    queryKey: ["bancos"],
+    queryFn: getBancos,
+    enabled: isOpen && field === 'banco',
+  });
 
   // Actualizar tempValue cuando cambia initialValue
   useEffect(() => {
@@ -36,6 +48,25 @@ export const ModalConfirmChange = ({
   const updateMutation = useMutation({
     mutationFn: async ({ field, value }: { field: FieldType; value: string }) => {
       const email = user?.email;
+      const dpi = user?.dpi;
+
+      // Si es campo de inversionista, actualizar en Cartera
+      if (isInvestorField) {
+        if (!dpi) throw new Error("DPI no disponible");
+
+        const payload: any = {
+          dpi: parseInt(dpi),
+        };
+
+        // Solo enviar el campo que se está actualizando
+        if (field === 'banco') payload.banco = value;
+        if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
+        if (field === 'numero_cuenta') payload.numero_cuenta = value;
+
+        return createInvestor({...profileData, ...payload });
+      }
+
+      // Si es campo de cliente, actualizar en CRM
       if (!email) throw new Error("Email no disponible");
 
       interface UpdateLeadPayload {
@@ -89,6 +120,12 @@ export const ModalConfirmChange = ({
         return 'Teléfono';
       case 'address':
         return 'Dirección';
+      case 'banco':
+        return 'Banco';
+      case 'tipo_cuenta':
+        return 'Tipo de Cuenta';
+      case 'numero_cuenta':
+        return 'Número de Cuenta';
       default:
         return '';
     }
@@ -115,6 +152,12 @@ export const ModalConfirmChange = ({
         return 'Ingresa tu teléfono';
       case 'address':
         return 'Ingresa tu dirección completa';
+      case 'banco':
+        return 'Selecciona tu banco';
+      case 'tipo_cuenta':
+        return 'Selecciona tipo de cuenta';
+      case 'numero_cuenta':
+        return 'Ingresa tu número de cuenta';
       default:
         return '';
     }
@@ -137,17 +180,57 @@ export const ModalConfirmChange = ({
         <h3 className="text-lg font-semibold mb-6">Editar {getFieldLabel()}</h3>
 
         <div className="mb-6">
-          <InputIcon
-            icon={getFieldIcon()}
-            placeholder={getFieldPlaceholder()}
-            value={tempValue}
-            onChange={(e) => {
-              setTempValue(e.target.value);
-              if (serverError) setServerError("");
-            }}
-            type={field === 'phone' ? 'tel' : 'text'}
-            name={field}
-          />
+          {/* Campo Select para Banco */}
+          {field === 'banco' && (
+            <Select
+              variant="light"
+              value={tempValue}
+              onChange={(value) => {
+                setTempValue(value);
+                if (serverError) setServerError("");
+              }}
+              options={
+                bancos?.map((b) => ({
+                  value: b.codigo,
+                  label: b.nombre,
+                })) || []
+              }
+              placeholder={getFieldPlaceholder()}
+            />
+          )}
+
+          {/* Campo Select para Tipo de Cuenta */}
+          {field === 'tipo_cuenta' && (
+            <Select
+              variant="light"
+              value={tempValue}
+              onChange={(value) => {
+                setTempValue(value);
+                if (serverError) setServerError("");
+              }}
+              options={[
+                { value: "MONETARIA", label: "Monetaria" },
+                { value: "AHORRO", label: "Ahorro" },
+              ]}
+              placeholder={getFieldPlaceholder()}
+            />
+          )}
+
+          {/* Campo Input para otros campos */}
+          {field !== 'banco' && field !== 'tipo_cuenta' && (
+            <InputIcon
+              icon={getFieldIcon()}
+              placeholder={getFieldPlaceholder()}
+              value={tempValue}
+              onChange={(e) => {
+                setTempValue(e.target.value);
+                if (serverError) setServerError("");
+              }}
+              type={field === 'phone' ? 'tel' : 'text'}
+              name={field || ''}
+            />
+          )}
+
           {serverError && (
             <div className="text-red-500 text-sm mt-2 bg-red-50 border border-red-200 rounded-lg p-3">
               {serverError}

@@ -5,7 +5,7 @@ export const InfoLead = () => {
   const isMobile = useIsMobile();
   const title = "Compra el auto que siempre quisiste";
   const description =
-    "Te ayudamos a hacer realidad tu sueño de tener un vehículo nuevo. Realizamos un análisis completo de tu  perfil y del vehículo que deseas. Si cumples con nuestros requisitos, ¡el auto es tuyo!";
+    "Te ayudamos a hacer realidad tu sueño de tener un vehículo nuevo. Realizamos un análisis completo de tu perfil y del vehículo que deseas. Si cumples con nuestros requisitos, ¡el auto es tuyo!";
 
   const items = [
     {

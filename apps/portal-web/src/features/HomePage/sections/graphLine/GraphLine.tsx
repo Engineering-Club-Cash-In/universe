@@ -289,7 +289,7 @@ export const GraphLine = () => {
         <h2 className="text-xl lg:text-4xl px-6 lg:px-20">
           {isMobile
             ? "Queremos darte soluciones pensadas para cada etapa de tu camino financiero."
-            : " Compara y descubre porque nuestras oportunidades superan otras opciones del mercado. Usa la calculadora de rendimiento y comprueba cuanto podrias generar con nosotros."}
+            : "Compara y descubre por qué nuestras oportunidades superan otras opciones del mercado. Usa la calculadora de rendimiento y comprueba cuánto podrías generar con nosotros."}
         </h2>
       </div>
       <div className="mt-6 flex justify-center">

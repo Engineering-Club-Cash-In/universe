@@ -1,115 +1,85 @@
-import { useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { authClient } from "@/lib/auth";
+import { useEffect, useState } from "react";
 import { sendLead } from "@/features/FormLeads/service/serviceLead";
-import { getProfile } from "../services/profileService";
+import { createInvestor } from "../services/investorService";
+import { useAuth } from "@/lib";
 
 interface UserData {
   id: string;
   email: string;
   name?: string;
   phone?: string;
+  dpi?: string;
+  role: "CLIENT" | "INVESTOR";
   image?: string;
   cachedImage?: string;
 }
 
 export const useProfile = () => {
-  const navigate = useNavigate();
-  const [user, setUser] = useState<UserData | null>(null);
+  const { user } = useAuth();
+
   const [isLoading, setIsLoading] = useState(true);
-  const [sessionToken, setSessionToken] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string>("");
-  const [leadVerified, setLeadVerified] = useState(false);
 
-  // Query para obtener perfil (con cache automático)
-  const { data: profileData, error: profileError } = useQuery({
-    queryKey: ["profile", userEmail],
-    queryFn: () => getProfile(userEmail, sessionToken),
-    enabled: !!userEmail && !!sessionToken,
-    staleTime: 5 * 60 * 1000, // Cache por 5 minutos
-    retry: false,
-  });
-
-  // Crear lead si no existe (solo cuando hay error 404)
+  // Crear lead o investor según parámetros de URL (para registro con Google)
   useEffect(() => {
-    const createLeadIfNeeded = async () => {
-      if (!profileError || leadVerified || !user) return;
+    const createUserFromURLParams = async () => {
+      if (!user) return;
 
-      const error = profileError as any;
-      const isLeadNotFound =
-        error?.status === 404 && error?.data?.error === "Lead no encontrado";
 
-      if (isLeadNotFound) {
-        console.log("Lead no encontrado, creando nuevo lead");
+      if (user) await cacheProfileImage(user);
+
+
+      // Leer parámetros de la URL
+      const urlParams = new URLSearchParams(window.location.search);
+      const userType = urlParams.get("userType") as
+        | "CLIENT"
+        | "INVESTOR"
+        | null;
+      const dpi = urlParams.get("dpi");
+      const phone = urlParams.get("phone") || "";
+
+      // Si hay parámetros de registro, crear el usuario correspondiente
+      if (userType && dpi) {
+        console.log(`Creando usuario tipo ${userType} desde OAuth`);
         try {
-          await sendLead({
-            nombreCompleto: user.name || user.email.split("@")[0],
-            correo: user.email,
-            telefono: "",
-            dpi: "",
-            descripcion: "Registro mediante Google OAuth",
-          });
-          console.log("Lead creado exitosamente");
-          setLeadVerified(true);
-        } catch (leadError) {
-          console.error("Error al crear lead:", leadError);
+          if (userType === "CLIENT") {
+            // Para clientes, enviar como lead
+            await sendLead({
+              nombreCompleto: user.name || user.email.split("@")[0],
+              correo: user.email,
+              telefono: phone,
+              dpi: dpi,
+              descripcion: `Tipo de usuario: ${userType}`,
+            });
+            console.log("Lead creado exitosamente");
+          } else if (userType === "INVESTOR") {
+            // Para inversionistas, crear en cartera
+            await createInvestor({
+              nombre: user.name || user.email.split("@")[0],
+              dpi: parseInt(dpi),
+              email: user.email,
+              emite_factura: false,
+              reinversion: false,
+              banco: "",
+              tipo_cuenta: "",
+              numero_cuenta: "",
+            });
+            console.log("Investor creado exitosamente");
+          }
+
+          // Limpiar parámetros de la URL
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, "", newUrl);
+        } catch (error) {
+          console.error(`Error al crear ${userType}:`, error);
         }
       }
+
+      setIsLoading(false);
     };
 
-    createLeadIfNeeded();
-  }, [profileError, leadVerified, user]);
+    createUserFromURLParams();
+  }, [user]);
 
-
-  // Verificar lead solo cuando profileData cambia y aún no se ha verificado
-  useEffect(() => {
-    if (profileData && !leadVerified && userEmail && sessionToken) {
-      console.log("Lead ya existe para este usuario");
-      setLeadVerified(true);
-    }
-  }, [profileData, leadVerified, userEmail, sessionToken]);
-
-  useEffect(() => {
-    const loadUserSession = async () => {
-      try {
-        const sessionData = await authClient.getSession();
-
-        if (!sessionData?.data?.user) {
-          navigate({ to: "/login" });
-          return;
-        }
-
-        const userData = sessionData.data.user as UserData;
-        const token = sessionData.data.session.token;
-
-        // Establecer email y token para activar las queries
-        setUserEmail(userData.email);
-        setSessionToken(token);
-
-        // Cachear imagen de perfil si existe
-        await cacheProfileImage(userData);
-
-        // Establecer datos del usuario
-        setUser({
-          id: userData.id,
-          email: userData.email,
-          name: userData.name,
-          phone: userData.phone,
-          image: userData.image,
-          cachedImage: localStorage.getItem(`user_image_${userData.id}`) || undefined,
-        });
-
-        setIsLoading(false);
-      } catch (error) {
-        console.error("Error loading session:", error);
-        navigate({ to: "/login" });
-        setIsLoading(false);
-      }
-    };
-
-    loadUserSession();
-  }, [navigate]);
 
   // Función para cachear imagen de perfil
   const cacheProfileImage = async (userData: UserData) => {
@@ -137,7 +107,6 @@ export const useProfile = () => {
 
   return {
     user,
-    isLoading,
-    profileData,
+    isLoading
   };
 };

@@ -37,9 +37,9 @@ export const Profile = () => {
             <div className="flex items-center gap-6">
               {/* Imagen de perfil */}
               <div className="w-24 h-24 rounded-full bg-primary/20 flex items-center justify-center text-primary text-3xl font-bold">
-                {user?.cachedImage || user?.image ? (
+                {user?.image ? (
                   <img
-                    src={user.cachedImage || user.image}
+                    src={user.image}
                     alt="Imagen de perfil"
                     className="w-full h-full object-cover rounded-full"
                   />
@@ -60,12 +60,7 @@ export const Profile = () => {
           </div>
           {user && (
             <div className="space-y-6">
-              <InfoPerson
-                userId={user.id}
-                userName={user.name}
-                userEmail={user.email}
-                userImage={user.image}
-              />
+              <InfoPerson />
             </div>
           )}
         </ContainerMenu>

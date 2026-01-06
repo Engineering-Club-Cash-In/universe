@@ -5,27 +5,22 @@ import { ModalConfirmChange } from "./ModalConfirmChange";
 import { getProfile } from "../services";
 import { useAuth } from "@/lib";
 
-interface InfoPersonProps {
-  userId: string;
-  userName?: string;
-  userEmail: string;
-  userImage?: string;
-}
+
 
 type EditField = "dpi" | "phone" | "address" | null;
 
-export const InfoPerson = ({ userId, userEmail }: InfoPersonProps) => {
+export const InfoPerson = () => {
   const [dpi, setDpi] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
-  const { token } = useAuth();
+  const { token, user } = useAuth();
 
   // Obtener perfil usando el servicio centralizado
   const { data: profileData, isLoading, refetch } = useQuery({
-    queryKey: ["profile", userId],
-    queryFn: () => getProfile(userEmail, token),
-    enabled: !!userId,
+    queryKey: ["profile", user?.id],
+    queryFn: () => getProfile(user?.email || "", user?.dpi || "", token || null),
+    enabled: !!user?.id,
   });
 
   // Actualizar campos cuando se carga el perfil
@@ -213,7 +208,6 @@ export const InfoPerson = ({ userId, userEmail }: InfoPersonProps) => {
       <ModalConfirmChange
         isOpen={!!editingField}
         field={editingField}
-        userId={userId}
         initialValue={getCurrentValue()}
         onClose={handleCloseModal}
         onSuccess={handleSuccess}

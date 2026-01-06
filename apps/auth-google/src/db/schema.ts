@@ -28,6 +28,7 @@ export const users = customSchema.table("users", {
   image: text("image"),
   password: text("password"),
   role: userRoleEnum("role").default("CLIENT").notNull(),
+  dpi: text("dpi").unique(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

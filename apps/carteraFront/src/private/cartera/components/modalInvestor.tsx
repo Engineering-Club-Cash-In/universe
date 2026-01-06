@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useInvestor } from "../hooks/investor";
+import { useBancos } from "../hooks/bancos";
 import { useQueryClient } from "@tanstack/react-query";
 import type { InvestorPayload } from "../services/services";
 
@@ -13,21 +14,30 @@ interface InvestorModalProps {
 }
 
 export function InvestorModal({ open, onClose, mode, initialData }: InvestorModalProps) {
-  const { insertInvestor, updateInvestor } = useInvestor();
+  const { insertInvestor } = useInvestor(); // 🔥 Solo usamos insertInvestor (hace upsert)
+  const { bancos, loading: loadingBancos, loadBancos } = useBancos();
   const queryClient = useQueryClient();
 
   const { register, handleSubmit, reset } = useForm<InvestorPayload>({
     defaultValues: {
       nombre: "",
-      dpi: undefined, // ← NUEVO CAMPO
+      dpi: undefined,
       emite_factura: false,
-      banco: "",
+      banco: null,
       tipo_cuenta: "",
       numero_cuenta: "",
+      re_inversion: "sin_reinversion",
     },
   });
 
-  // ✅ ESTO ES LO CLAVE - Resetea cuando cambie initialData o mode
+  // 🔥 Cargar bancos cuando se abre el modal
+  useEffect(() => {
+    if (open && bancos.length === 0) {
+      loadBancos();
+    }
+  }, [open, bancos.length, loadBancos]);
+
+  // ✅ Resetea cuando cambie initialData o mode
   useEffect(() => {
     if (mode === "update" && initialData) {
       console.log("Reseteando con initialData:", initialData);
@@ -35,50 +45,44 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
     } else if (mode === "create") {
       reset({
         nombre: "",
-        dpi: undefined, // ← NUEVO CAMPO
+        dpi: undefined,
         emite_factura: false,
-        banco: "",
+        banco: null,
         tipo_cuenta: "",
         numero_cuenta: "",
+        re_inversion: "sin_reinversion",
       });
     }
   }, [initialData, mode, reset]);
 
   const onSubmit = (data: InvestorPayload) => {
-    // Convertir dpi a número si viene como string
+    // Convertir dpi y banco a número si vienen como string
     const payload = {
       ...data,
       dpi: data.dpi ? Number(data.dpi) : null,
+      banco: data.banco ? Number(data.banco) : null,
     };
     console.log("Submitting payload:", payload);
 
-    if (mode === "create") {
-      insertInvestor.mutate(payload, {
-        onSuccess: () => {
-          alert("✅ Inversionista creado correctamente.");
-          queryClient.invalidateQueries({ queryKey: ["investors"] });
-          reset(); // ✅ Limpia el form
-          onClose();
-        },
-        onError: () => {
-          alert("❌ Error al crear el inversionista.");
-        },
-      });
-    } else {
-      updateInvestor.mutate(
-        { ...payload, inversionista_id: initialData?.inversionista_id },
-        {
-          onSuccess: () => {
-            alert("✅ Inversionista actualizado correctamente.");
-            queryClient.invalidateQueries({ queryKey: ["investors"] });
-            onClose();
-          },
-          onError: () => {
-            alert("❌ Error al actualizar el inversionista.");
-          },
-        }
-      );
-    }
+    // 🔥 SIMPLIFICADO: Siempre usa insertInvestor (hace upsert automático)
+    insertInvestor.mutate(payload, {
+      onSuccess: () => {
+        const mensaje = mode === "create" 
+          ? "✅ Inversionista creado correctamente." 
+          : "✅ Inversionista actualizado correctamente.";
+        alert(mensaje);
+        queryClient.invalidateQueries({ queryKey: ["investors"] });
+        reset();
+        onClose();
+      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      onError: (error: any) => {
+        const mensaje = mode === "create"
+          ? "❌ Error al crear el inversionista."
+          : "❌ Error al actualizar el inversionista.";
+        alert(`${mensaje}\n${error.message || ""}`);
+      },
+    });
   };
 
   if (!open) return null;
@@ -98,13 +102,12 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
               {...register("nombre")}
               className="bg-white text-blue-900 placeholder-gray-400 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
               placeholder="Ej. Juan Pérez"
-              required
             />
           </div>
 
-          {/* ⭐ NUEVO: DPI */}
+          {/* DPI */}
           <div>
-            <label className="block text-sm text-blue-800 mb-1">DPI </label>
+            <label className="block text-sm text-blue-800 mb-1">DPI</label>
             <input
               {...register("dpi")}
               type="number"
@@ -114,27 +117,26 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             />
           </div>
 
-          {/* Banco */}
+          {/* 🔥 Banco - Dinámico desde API */}
           <div>
             <label className="block text-sm text-blue-800 mb-1">Banco</label>
             <select
               {...register("banco")}
               className="bg-white text-blue-900 border border-gray-300 rounded-lg px-4 py-2 w-full focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition"
+              disabled={loadingBancos}
             >
-              <option value="">Seleccione un banco</option>
-              <option value="GyT">GyT</option>
-              <option value="BAM">BAM</option>
-              <option value="BI">BI</option>
-              <option value="BANRURAL">BANRURAL</option>
-              <option value="PROMERICA">PROMERICA</option>
-              <option value="BANTRAB">BANTRAB</option>
-              <option value="BAC">BAC</option>
-              <option value="NEXA">NEXA</option>
-              <option value="INDUSTRIAL">INDUSTRIAL</option>
-              <option value="INTERBANCO">INTERBANCO</option>
-              <option value="INTERBANCO/RICHARD">INTERBANCO/RICHARD</option>
-              <option value="BI/MENFER S.A.">BI/MENFER S.A.</option>
+              <option value="">
+                {loadingBancos ? "Cargando bancos..." : "Seleccione un banco"}
+              </option>
+              {bancos.map((banco) => (
+                <option key={banco.banco_id} value={banco.banco_id}>
+                  {banco.nombre}
+                </option>
+              ))}
             </select>
+            {loadingBancos && (
+              <p className="text-xs text-gray-500 mt-1">Cargando bancos...</p>
+            )}
           </div>
 
           {/* Tipo de cuenta */}
@@ -146,7 +148,11 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             >
               <option value="">Seleccione una opción</option>
               <option value="AHORRO">Ahorros</option>
+              <option value="AHORRO Q">Ahorros Q</option>
+              <option value="AHORRO $">Ahorros $</option>
               <option value="MONETARIA">Monetaria</option>
+              <option value="MONETARIA Q">Monetaria Q</option>
+              <option value="MONETARIA $">Monetaria $</option>
             </select>
           </div>
 
@@ -160,7 +166,7 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             />
           </div>
 
-          {/* ⭐ Tipo de Reinversión */}
+          {/* Tipo de Reinversión */}
           <div>
             <label className="block text-sm text-blue-800 mb-1">Tipo de Reinversión</label>
             <select
@@ -198,14 +204,14 @@ export function InvestorModal({ open, onClose, mode, initialData }: InvestorModa
             <button
               type="submit"
               className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold transition disabled:opacity-50"
-              disabled={insertInvestor.isPending || updateInvestor.isPending}
+              disabled={insertInvestor.isPending}
             >
-              {mode === "create"
-                ? insertInvestor.isPending
-                  ? "Creando..."
-                  : "Crear"
-                : updateInvestor.isPending
-                ? "Actualizando..."
+              {insertInvestor.isPending
+                ? mode === "create" 
+                  ? "Creando..." 
+                  : "Actualizando..."
+                : mode === "create"
+                ? "Crear"
                 : "Actualizar"}
             </button>
           </div>

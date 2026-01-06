@@ -12,9 +12,9 @@ ARCHIVO_EXCEL ="Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
 # 📅 Hojas a procesar
 HOJAS_A_PROCESAR = [
-    "Agosto 2025",
-    "Septiembre 2025",
-    "Octubre 2025",
+    "Noviembre 2025",   # 🔥 Se procesa PRIMERO
+    "Diciembre 2025",   # 🔥 Se procesa SEGUNDO
+    "Enero 2026",       # 🔥 Se procesa TERCERO
 ]
 
 # 🔥 MODO PRUEBA
@@ -175,28 +175,15 @@ def leer_hoja_excel(
         traceback.print_exc()
         return {}
 
-# ============================================
-# 📡 FUNCIÓN PARA ENVIAR A API
-# ============================================
 def enviar_a_api(
-    numero_credito: str, 
-    hoja_excel: str,
+    numero_credito: str,
     inversionistas: List[Dict[str, Any]]
 ) -> Dict:
-    """Envía la data procesada al endpoint TypeScript"""
+    """Envía la data procesada al endpoint"""
     payload = {
         "numeroCredito": numero_credito,
-        "hoja_excel": hoja_excel,
         "inversionistasData": inversionistas
     }
-    
-    print(f"\n   🚀 Enviando {len(inversionistas)} inversionistas a la API...")
-    print(f"   📅 Hoja: {hoja_excel}")
-    
-    # 🔍 MOSTRAR PAYLOAD
-    import json
-    print(f"\n   📦 PAYLOAD:")
-    print(json.dumps(payload, indent=2, ensure_ascii=False))
     
     try:
         response = requests.post(
@@ -206,42 +193,24 @@ def enviar_a_api(
             timeout=60
         )
         
-        print(f"\n   📡 Status Code: {response.status_code}")
-        
         if response.status_code != 200:
-            print(f"   ❌ Response: {response.text[:500]}")
+            print(f"   ❌ Error {response.status_code}: {response.text[:200]}")
+            return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
         
-        response.raise_for_status()
         resultado = response.json()
         
-        print(f"   ✅ Respuesta de API:")
-        print(f"      - Success: {resultado.get('success', False)}")
-        print(f"      - Exitosos: {resultado.get('exitosos', 0)}")
-        print(f"      - Fallidos: {resultado.get('fallidos', 0)}")
+        if resultado.get('success'):
+            print(f"   ✅ {resultado.get('exitosos', 0)} exitosos")
+        else:
+            print(f"   ⚠️ {resultado.get('error', 'Error desconocido')}")
         
-        if not resultado.get('success', True):
-            print(f"\n   ⚠️ VALIDACIÓN FALLIDA:")
-            print(f"      - Última cuota liquidada: {resultado.get('ultima_cuota_liquidada', 'N/A')}")
-            print(f"      - Hoja Excel enviada: {resultado.get('hoja_excel', 'N/A')}")
-            print(f"      - Error: {resultado.get('error', 'N/A')}")
-        
-        if resultado.get('errores'):
-            print(f"\n   ⚠️ Errores reportados:")
-            for error in resultado.get('errores', [])[:5]:
-                print(f"      - {error.get('inversionista', 'N/A')}: {error.get('error', 'N/A')}")
+        if resultado.get('fallidos', 0) > 0:
+            print(f"   ❌ {resultado['fallidos']} fallidos")
         
         return resultado
         
-    except requests.exceptions.ConnectionError:
-        print(f"   ❌ API no disponible")
-        return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
-    except requests.exceptions.Timeout:
-        print(f"   ❌ Timeout")
-        return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
     except Exception as e:
         print(f"   ❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
         return {"success": False, "exitosos": 0, "fallidos": len(inversionistas)}
 
 # ============================================
@@ -309,8 +278,8 @@ def procesar_multiples_hojas():
             for inv in inversionistas:
                 print(f"   - {inv['inversionista']}: Capital=Q{inv['capital']}, Cuota=Q{inv['cuota']}")
             
-            # Enviar a API
-            resultado = enviar_a_api(numero_credito, nombre_hoja, inversionistas)
+            # 🔥 Enviar a API (sin hoja_excel)
+            resultado = enviar_a_api(numero_credito, inversionistas)
             
             # Actualizar estadísticas
             stats_globales['creditos_procesados'] += 1
@@ -341,7 +310,6 @@ def procesar_multiples_hojas():
     print(f"   ✅ Exitosos: {stats_globales['inversionistas_exitosos']}")
     print(f"   ❌ Fallidos: {stats_globales['inversionistas_fallidos']}")
     print(f"{'='*70}\n")
-
 # ============================================
 # 🎯 EJECUTAR
 # ============================================

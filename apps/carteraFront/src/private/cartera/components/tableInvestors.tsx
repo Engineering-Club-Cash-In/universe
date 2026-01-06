@@ -15,22 +15,8 @@ import {
   DropdownMenuSeparator, 
   DropdownMenuTrigger, 
 } from "@/components/ui/dropdown-menu";
-import { 
-  Command,  // 👈 AQUÍ está Command como componente
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Button } from "@/components/ui/button"; 
-import { cn } from "@/lib/utils";
-import { useEffect, useState } from "react"; 
+import { Combobox, Transition } from '@headlessui/react'
+import { Fragment, useEffect, useState } from "react"; 
  
 const PER_PAGE_OPTIONS = [5, 10, 20, 50];
 
@@ -136,6 +122,13 @@ const {
 
   const liquidateMutation = useLiquidateByInvestor();
   const downloadPDF = useDownloadInvestorPDF();
+const [query, setQuery] = useState('')
+
+const filteredInvestors = query === ''
+  ? investors
+  : investors.filter((inv) =>
+      inv.nombre.toLowerCase().includes(query.toLowerCase())
+    )
 
   const tienePagosPendientes =
     data?.inversionistas.some((inv) =>
@@ -157,8 +150,7 @@ const {
     setModalMode("create");
     setSelectedInvestorData(undefined);
     setModalOpen(true);
-  };
- const [openCombobox, setOpenCombobox] = useState(false);
+  }; 
   const handleDescargarExcel = async () => {
     try {
       const result = await inversionistasService.getResumenGlobal({
@@ -182,22 +174,22 @@ const {
     }
   }, [investors, selectedInvestor]);
 
-  const handleEditInvestor = (inv: any) => {
-    setModalMode("update");
-    console.log(inv)
-    setSelectedInvestorData({
-      inversionista_id: inv.inversionista_id,
-      nombre: inv.nombre_inversionista,
-      emite_factura: inv.emite_factura,
-      reinversion: inv.reinversion ?? false,
-      banco: inv.banco ?? "",
-      tipo_cuenta: inv.tipo_cuenta ?? "",
-      numero_cuenta: inv.numero_cuenta ?? "",
-      re_inversion: inv.re_inversion ?? "",
-      dpi: inv.dpi ?? "",
-    });
-    setModalOpen(true);
-  };
+ const handleEditInvestor = (inv: any) => {
+  setModalMode("update");
+  console.log(inv)
+  setSelectedInvestorData({
+    inversionista_id: inv.inversionista_id,
+    nombre: inv.nombre_inversionista,
+    emite_factura: inv.emite_factura,
+    reinversion: inv.reinversion ?? false,
+    banco: inv.banco_id ?? "", // 🔥 CAMBIO: Ahora usa banco_id en lugar de banco
+    tipo_cuenta: inv.tipo_cuenta ?? "",
+    numero_cuenta: inv.numero_cuenta ?? "",
+    re_inversion: inv.re_inversion ?? "sin_reinversion",
+    dpi: inv.dpi ?? "",
+  });
+  setModalOpen(true);
+};
 
   const handleCloseModal = () => {
     setModalOpen(false);
@@ -216,102 +208,126 @@ const {
         {/* Fila 1: Filtros EXISTENTES - CENTRADOS */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-3">
           {/* Combobox inversionista - YA EXISTENTE */}
-          <div className="flex items-center gap-2">
-            <label className="text-blue-900 font-bold whitespace-nowrap">
-              Filtrar inversionista:
-            </label>
-       <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
-        <PopoverTrigger asChild>
-          <Button
-            variant="outline"
-            role="combobox"
-            aria-expanded={openCombobox}
-            className="w-[200px] sm:w-[280px] justify-between border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100 hover:text-blue-900 font-medium"
-            disabled={loadingCatalogs}
-          >
-            <span className="truncate">
-              {selectedInvestor !== ""
-                ? investors.find((inv) => inv.inversionista_id === selectedInvestor)?.nombre
-                : "Todos los inversionistas"}
-            </span>
-            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
+  <div className="flex items-center gap-2">
+  <label className="text-blue-900 font-bold whitespace-nowrap">
+    Filtrar inversionista:
+  </label>
+  
+  <Combobox
+    value={selectedInvestor}
+    onChange={(value) => {
+      setSelectedInvestor(value);
+      setPage(1);
+      setExpandedRow(null);
+      setExpandedCredit(null);
+      setQuery('');
+    }}
+    disabled={loadingCatalogs}
+  >
+    <div className="relative">
+      <div className="relative w-[200px] sm:w-[280px]">
+        <Combobox.Input
+          className="w-full border-2 border-blue-300 rounded-lg pl-3 pr-10 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900 font-medium focus:ring-2 focus:ring-blue-400 focus:border-blue-500 focus:outline-none placeholder:text-blue-400 transition-all shadow-sm hover:from-blue-100 hover:to-indigo-100"
+          displayValue={(id) => 
+            id === "" 
+              ? "Todos los inversionistas" 
+              : investors.find(inv => inv.inversionista_id === id)?.nombre || ""
+          }
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar inversionista..."
+        />
         
-        <PopoverContent className="w-[200px] sm:w-[280px] p-0 bg-white border-2 border-blue-200 shadow-lg">
-          <Command className="bg-white">
-            <CommandInput 
-              placeholder="Buscar inversionista..." 
-              className="h-10 border-b border-gray-200 text-gray-900 placeholder:text-gray-500"
-            />
-            <CommandList className="max-h-[300px] overflow-y-auto">
-              <CommandEmpty className="py-6 text-center text-sm text-gray-500">
+        <Combobox.Button className="absolute inset-y-0 right-0 flex items-center pr-3">
+          <ChevronsUpDown className="h-5 w-5 text-blue-600 hover:text-blue-800 transition-colors" />
+        </Combobox.Button>
+      </div>
+
+      <Transition
+        as={Fragment}
+        leave="transition ease-in duration-100"
+        leaveFrom="opacity-100"
+        leaveTo="opacity-0"
+        afterLeave={() => setQuery('')}
+      >
+        <Combobox.Options className="absolute z-50 mt-2 w-[200px] sm:w-[280px] max-h-60 overflow-auto rounded-xl bg-white py-2 shadow-2xl border-2 border-blue-200 focus:outline-none">
+          {/* Opción "Todos" */}
+          <Combobox.Option
+            value=""
+            className={({ active, selected }) =>
+              `relative cursor-pointer select-none py-3 pl-10 pr-4 transition-colors ${
+                active 
+                  ? 'bg-gradient-to-r from-blue-100 to-indigo-100 text-blue-900' 
+                  : selected
+                  ? 'bg-blue-50 text-blue-900'
+                  : 'bg-white text-gray-900'
+              }`
+            }
+          >
+            {({ selected }) => (
+              <>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">📋</span>
+                  <span className={selected ? 'font-bold' : 'font-semibold'}>
+                    Todos los inversionistas
+                  </span>
+                </div>
+                {selected && (
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                    <Check className="h-5 w-5" aria-hidden="true" />
+                  </span>
+                )}
+              </>
+            )}
+          </Combobox.Option>
+
+          {/* Separador */}
+          <div className="h-px bg-gradient-to-r from-transparent via-blue-300 to-transparent my-1" />
+
+          {/* Lista de inversionistas */}
+          {filteredInvestors.length === 0 && query !== '' ? (
+            <div className="relative cursor-default select-none py-4 px-4 text-center">
+              <div className="text-gray-500 text-sm">
                 No se encontró inversionista 🔍
-              </CommandEmpty>
-              <CommandGroup>
-                <CommandItem
-                  value="todos-inversionistas-opcion"
-                  onSelect={() => {
-                    setSelectedInvestor("");
-                    setPage(1);
-                    setExpandedRow(null);
-                    setExpandedCredit(null);
-                    setOpenCombobox(false);
-                  }}
-                  className="px-3 py-3 cursor-pointer hover:bg-blue-100 aria-selected:bg-blue-100 data-[selected=true]:bg-blue-100"
-                >
-                  <Check
-                    className={cn(
-                      "mr-2 h-5 w-5 transition-opacity",
-                      selectedInvestor === "" ? "opacity-100 text-green-600" : "opacity-0"
-                    )}
-                  />
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">📋</span>
-                    <span className={cn(
-                      "font-semibold",
-                      selectedInvestor === "" ? "text-blue-900" : "text-gray-700"
-                    )}>
-                      Todos los inversionistas
-                    </span>
-                  </div>
-                </CommandItem>
-                
-                <div className="h-px bg-gray-200 my-1" />
-                
-                {investors.map((inv) => (
-                  <CommandItem
-                    key={inv.inversionista_id}
-                    value={inv.nombre}
-                    onSelect={() => {
-                      setSelectedInvestor(inv.inversionista_id);
-                      setPage(1);
-                      setExpandedRow(null);
-                      setExpandedCredit(null);
-                      setOpenCombobox(false);
-                    }}
-                    className="px-3 py-2.5 cursor-pointer hover:bg-blue-50 aria-selected:bg-blue-100 data-[selected=true]:bg-blue-100"
-                  >
-                    <Check
-                      className={cn(
-                        "mr-2 h-5 w-5 transition-opacity",
-                        selectedInvestor === inv.inversionista_id ? "opacity-100 text-green-600" : "opacity-0"
-                      )}
-                    />
-                    <span className={cn(
-                      "text-sm",
-                      selectedInvestor === inv.inversionista_id ? "font-bold text-blue-900" : "font-medium text-gray-700"
-                    )}>
+              </div>
+              <div className="text-gray-400 text-xs mt-1">
+                Intentá con otro nombre
+              </div>
+            </div>
+          ) : (
+            filteredInvestors.map((inv) => (
+              <Combobox.Option
+                key={inv.inversionista_id}
+                value={inv.inversionista_id}
+                className={({ active, selected }) =>
+                  `relative cursor-pointer select-none py-2.5 pl-10 pr-4 transition-colors ${
+                    active 
+                      ? 'bg-gradient-to-r from-blue-50 to-indigo-50 text-blue-900' 
+                      : selected
+                      ? 'bg-blue-50 text-blue-900'
+                      : 'bg-white text-gray-700 hover:bg-gray-50'
+                  }`
+                }
+              >
+                {({ selected, active }) => (
+                  <>
+                    <span className={`block truncate ${selected ? 'font-bold' : 'font-medium'} ${active ? 'text-blue-900' : ''}`}>
                       {inv.nombre}
                     </span>
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
-          </div>
+                    {selected && (
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-green-600">
+                        <Check className="h-5 w-5" aria-hidden="true" />
+                      </span>
+                    )}
+                  </>
+                )}
+              </Combobox.Option>
+            ))
+          )}
+        </Combobox.Options>
+      </Transition>
+    </div>
+  </Combobox>
+</div>
 
           {/* Select por página - YA EXISTENTE */}
           <div className="flex items-center gap-2">

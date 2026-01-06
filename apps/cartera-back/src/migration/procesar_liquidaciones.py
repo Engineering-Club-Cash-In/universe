@@ -8,7 +8,6 @@ import json
 # 🔧 CONFIGURACIÓN
 # ============================================
 API_URL = "http://localhost:7000/liquidar-cuotas"
-API_INVERSIONISTA_URL = "http://localhost:7000/investor"
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos\Liquidaciones"
 
 # MODO PRUEBA
@@ -48,130 +47,6 @@ def extraer_nombre_inversionista(nombre_archivo):
     print(f"   👤 Inversionista final: '{nombre_limpio}'")
     
     return nombre_limpio
-
-# ============================================
-# 🧹 NORMALIZAR TIPO DE CUENTA
-# ============================================
-def normalizar_tipo_cuenta(valor):
-    """Normaliza el tipo de cuenta según el enum de la BD"""
-    if pd.isna(valor) or valor == "":
-        return None
-    
-    # Convertir a string y limpiar
-    tipo = str(valor).strip().upper()
-    
-    # 🔥 IGNORAR si contiene palabras que NO son tipo de cuenta
-    palabras_ignorar = ['AMORTIZACIÓN', 'AMORTIZACION', 'RESTANTE', 'CAPITAL RESTANTE', 
-                        'NETO', 'TOTAL', 'GRAN TOTAL', 'INVERSOR', 'INVERSIONISTA']
-    
-    if any(palabra in tipo for palabra in palabras_ignorar):
-        return None
-    
-    # Mapeo de variaciones a valores válidos del enum
-    mapeo = {
-        "AHORRO": "AHORRO",
-        "AHORROS": "AHORROS",
-        "AHORRO Q": "AHORRO Q",
-        "AHORRO $": "AHORRO $",
-        "MONETARIA": "MONETARIA",
-        "MONETARIÁ": "MONETARIA",  # Por si tiene tilde
-        "MONETARIA Q": "MONETARIA Q",
-        "MONETARIO Q": "MONETARIA Q",  # ← FIX
-        "MONETARIA $": "MONETARIA $",
-        "MONETARIO $": "MONETARIA $",  # ← FIX
-        "CAPITAL": "Capital",  # 🔥 OJO: "Capital" con mayúscula inicial
-    }
-    
-    tipo_normalizado = mapeo.get(tipo)
-    
-    if tipo_normalizado:
-        return tipo_normalizado
-    
-    # Intentar normalizar común
-    if "MONETARI" in tipo and len(tipo) < 20:  # Evitar textos largos
-        if "$" in tipo:
-            return "MONETARIA $"
-        elif "Q" in tipo or "QUETZAL" in tipo:
-            return "MONETARIA Q"
-        else:
-            return "MONETARIA"
-    
-    if "AHORR" in tipo and len(tipo) < 20:
-        if "$" in tipo:
-            return "AHORRO $"
-        elif "Q" in tipo or "QUETZAL" in tipo:
-            return "AHORRO Q"
-        elif tipo.endswith("S"):
-            return "AHORROS"
-        else:
-            return "AHORRO"
-    
-    # 🔥 Si dice solo "CAPITAL" y no tiene otras palabras
-    if tipo == "CAPITAL":
-        return "Capital"
-    
-    # Si no se puede normalizar, retornar None
-    return None
-# ============================================
-# 🧹 NORMALIZAR BANCO
-# ============================================
-def normalizar_banco(valor):
-    """Normaliza el nombre del banco según el enum de la BD"""
-    if pd.isna(valor) or valor == "":
-        return None
-    
-    # Convertir a string y limpiar
-    banco = str(valor).strip().upper()
-    
-    # Mapeo de variaciones comunes
-    mapeo = {
-        "BI": "BI",
-        "BAM": "BAM",
-        "GYT": "GyT",
-        "G&T": "GyT",
-        "BANTRAB": "BANTRAB",
-        "BANRURAL": "BANRURAL",
-        "BAC": "BAC",
-        "PROMERICA": "PROMERICA",
-        "INDUSTRIAL": "INDUSTRIAL",
-        "INTERBANCO": "INTERBANCO",
-        "NEXA": "NEXA",
-    }
-    
-    banco_normalizado = mapeo.get(banco)
-    
-    if banco_normalizado:
-        return banco_normalizado
-    
-    # Si contiene "GYT" o "G&T"
-    if "GYT" in banco or "G&T" in banco:
-        return "GyT"
-    
-    print(f"⚠️  Banco desconocido: '{valor}' - se enviará como None")
-    return None
-
-# ============================================
-# 🧹 LIMPIAR NÚMERO DE CUENTA
-# ============================================
-def limpiar_numero_cuenta(valor):
-    """Limpia y formatea el número de cuenta"""
-    if pd.isna(valor) or valor == "":
-        return None
-    
-    # Convertir a string y limpiar
-    cuenta_str = str(valor).strip()
-    
-    # Remover comillas invertidas, backticks y espacios extras
-    cuenta_str = cuenta_str.replace('´', '').replace('`', '').replace('"', '').strip()
-    
-    # Remover asteriscos y otros caracteres especiales si existen
-    cuenta_str = cuenta_str.replace('*', '').strip()
-    
-    # Si está vacío después de limpiar, retornar None
-    if not cuenta_str or cuenta_str.lower() in ['nan', 'null', 'none']:
-        return None
-    
-    return cuenta_str
 
 # ============================================
 # 🧹 NORMALIZAR MES ANTES DE ENVIAR A LA API
@@ -223,172 +98,6 @@ def normalizar_mes_antes_enviar(cuota_mes: str) -> str:
         mes_limpio = f"{mes}. {año}"
     
     return mes_limpio
-
-# ============================================
-# 🆕 FUNCIÓN PARA EXTRAER DATOS DEL INVERSIONISTA DEL EXCEL
-# ============================================
-# 🆕 FUNCIÓN MEJORADA PARA EXTRAER DATOS DEL INVERSIONISTA
-# ============================================
-def extraer_datos_inversionista_del_excel(archivo_path):
-    """
-    Extrae los datos del inversionista del encabezado del Excel
-    🔥 BUSCA EN COLUMNAS ESPECÍFICAS (B, C, D para INVERSIONISTA/FACTURACIÓN)
-    🔥 BUSCA EN COLUMNAS ESPECÍFICAS (G, H, I para BANCO/TIPO CUENTA/NÚMERO)
-    """
-    nombre_inversionista = extraer_nombre_inversionista(os.path.basename(archivo_path))
-    
-    try:
-        # Leer la primera hoja para buscar los datos bancarios en el header
-        xls = pd.ExcelFile(archivo_path, engine='openpyxl')
-        ultima_hoja = xls.sheet_names[-1]
-        
-        # Leer las primeras 10 filas sin header para buscar los datos
-        df_header = pd.read_excel(archivo_path, sheet_name=ultima_hoja, engine='openpyxl', header=None, nrows=10)
-        
-        datos_inversionista = {
-            "nombre": nombre_inversionista,
-            "emite_factura": False,  # Default
-            "reinversion": False,     # Default
-            "banco": None,
-            "tipo_cuenta": None,
-            "numero_cuenta": None
-        }
-        
-        print(f"\n   🔍 BUSCANDO DATOS EN EL HEADER...")
-        
-        # ============================================
-        # 🔥 BUSCAR EN LA PRIMERA FILA (row 0)
-        # ============================================
-        # La estructura típica es:
-        # Columna B (idx 1): INVERSIONISTA:
-        # Columna C (idx 2): Nombre del inversionista
-        # Columna D (idx 3): FACTURACIÓN:
-        # Columna E (idx 4): Propia/Ajena
-        # Columna G (idx 6): Banco
-        # Columna H (idx 7): Tipo cuenta
-        # Columna I (idx 8): Número de cuenta
-        
-        primera_fila = df_header.iloc[0] if len(df_header) > 0 else None
-        
-        if primera_fila is not None:
-            # FACTURACIÓN (columnas D o E típicamente)
-            for idx in range(min(6, len(primera_fila))):  # Buscar en las primeras 6 columnas
-                cell = primera_fila.iloc[idx] if idx < len(primera_fila) else None
-                if pd.notna(cell):
-                    cell_str = str(cell).strip().upper()
-                    if 'PROPIA' in cell_str:
-                        datos_inversionista["emite_factura"] = True
-                        print(f"      ✅ Facturación: PROPIA (col {idx}, emite_factura = true)")
-                        break
-                    elif 'AJENA' in cell_str:
-                        datos_inversionista["emite_factura"] = False
-                        print(f"      ✅ Facturación: AJENA (col {idx}, emite_factura = false)")
-                        break
-            
-            # BANCO (columna G = índice 6)
-            if len(primera_fila) > 6:
-                banco_cell = primera_fila.iloc[6]
-                if pd.notna(banco_cell):
-                    banco_normalizado = normalizar_banco(str(banco_cell).strip())
-                    if banco_normalizado:
-                        datos_inversionista["banco"] = banco_normalizado
-                        print(f"      🏦 Banco encontrado (col G): {banco_normalizado}")
-            
-            # TIPO DE CUENTA (columna H = índice 7)
-            if len(primera_fila) > 7:
-                tipo_cuenta_cell = primera_fila.iloc[7]
-                if pd.notna(tipo_cuenta_cell):
-                    tipo_cuenta_str = str(tipo_cuenta_cell).strip()
-                    # 🔥 VALIDAR que sea un tipo válido y no sea un header
-                    if tipo_cuenta_str.upper() not in ['MONETARIA', 'MONETARIÁ', 'AHORRO', 'AHORROS', 'CAPITAL']:
-                        # Intentar normalizar
-                        tipo_normalizado = normalizar_tipo_cuenta(tipo_cuenta_str)
-                        if tipo_normalizado:
-                            datos_inversionista["tipo_cuenta"] = tipo_normalizado
-                            print(f"      💳 Tipo cuenta encontrado (col H): {tipo_normalizado}")
-                    else:
-                        # Es una palabra clave válida
-                        tipo_normalizado = normalizar_tipo_cuenta(tipo_cuenta_str)
-                        if tipo_normalizado:
-                            datos_inversionista["tipo_cuenta"] = tipo_normalizado
-                            print(f"      💳 Tipo cuenta encontrado (col H): {tipo_normalizado}")
-            
-            # NÚMERO DE CUENTA (columna I = índice 8)
-            if len(primera_fila) > 8:
-                numero_cuenta_cell = primera_fila.iloc[8]
-                if pd.notna(numero_cuenta_cell):
-                    numero_str = str(numero_cuenta_cell).strip()
-                    # 🔥 VALIDAR que sea un número de cuenta válido (no un texto)
-                    # Debe tener al menos 8 caracteres y contener dígitos
-                    if len(numero_str) >= 8 and any(char.isdigit() for char in numero_str):
-                        # 🔥 NO debe ser un número decimal grande (montos)
-                        try:
-                            num_float = float(numero_str.replace(',', ''))
-                            # Si es mayor a 1,000,000 probablemente es un monto, no una cuenta
-                            if num_float < 1000000:
-                                numero_limpio = limpiar_numero_cuenta(numero_str)
-                                if numero_limpio:
-                                    datos_inversionista["numero_cuenta"] = numero_limpio
-                                    print(f"      🔢 Número cuenta encontrado (col I): {numero_limpio}")
-                        except:
-                            # No es un número, intentar limpiar como string
-                            numero_limpio = limpiar_numero_cuenta(numero_str)
-                            if numero_limpio:
-                                datos_inversionista["numero_cuenta"] = numero_limpio
-                                print(f"      🔢 Número cuenta encontrado (col I): {numero_limpio}")
-        
-        return datos_inversionista
-        
-    except Exception as e:
-        print(f"   ⚠️ Error extrayendo datos del inversionista: {e}")
-        import traceback
-        traceback.print_exc()
-        # Retornar datos mínimos
-        return {
-            "nombre": nombre_inversionista,
-            "emite_factura": False,
-            "reinversion": False,
-            "banco": None,
-            "tipo_cuenta": None,
-            "numero_cuenta": None
-        }
-
-# ============================================
-# 🆕 FUNCIÓN PARA HACER UPSERT DEL INVERSIONISTA
-# ============================================
-def upsert_inversionista_api(datos_inversionista):
-    """
-    Hace UPSERT del inversionista en la API antes de procesar liquidaciones
-    """
-    headers = {
-        "Content-Type": "application/json",
-    }
-    
-    try:
-        print(f"\n   📤 Haciendo UPSERT del inversionista: {datos_inversionista['nombre']}")
-        print(f"      📄 Emite factura: {datos_inversionista['emite_factura']}")
-        print(f"      🏦 Banco: {datos_inversionista['banco'] or 'N/A'}")
-        print(f"      💳 Tipo cuenta: {datos_inversionista['tipo_cuenta'] or 'N/A'}")
-        print(f"      🔢 Número cuenta: {datos_inversionista['numero_cuenta'] or 'N/A'}")
-        
-        response = requests.post(
-            API_INVERSIONISTA_URL, 
-            json=datos_inversionista, 
-            headers=headers, 
-            timeout=30
-        )
-        
-        if response.status_code in [200, 201]:
-            print(f"      ✅ Inversionista upserted correctamente")
-            return {"success": True, "data": response.json()}
-        else:
-            print(f"      ⚠️ Error en upsert del inversionista (Status {response.status_code})")
-            print(f"      📄 Response: {response.text}")
-            return {"success": False, "message": response.text}
-            
-    except requests.exceptions.RequestException as e:
-        print(f"      ❌ Error llamando a la API de inversionistas: {e}")
-        return {"success": False, "message": str(e)}
 
 # ============================================
 # 📡 FUNCIÓN PARA LLAMAR A TU API DE LIQUIDACIÓN
@@ -472,33 +181,16 @@ def liquidar_cuotas_api(nombre_usuario, cuota_mes, capital, nombre_inversionista
 def procesar_excel(archivo_path):
     """
     Lee un archivo Excel y extrae los datos de liquidación
-    🔥 PRIMERO hace UPSERT del inversionista
     """
     print(f"\n📄 Procesando: {os.path.basename(archivo_path)}")
     
     # ============================================
-    # 🔥 PASO 1: EXTRAER Y UPSERT INVERSIONISTA
+    # 🔥 EXTRAER NOMBRE DEL INVERSIONISTA DEL ARCHIVO
     # ============================================
-    datos_inversionista = extraer_datos_inversionista_del_excel(archivo_path)
+    nombre_inversionista = extraer_nombre_inversionista(os.path.basename(archivo_path))
     
-    print(f"\n   👤 DATOS DEL INVERSIONISTA:")
-    print(f"      Nombre: {datos_inversionista['nombre']}")
-    print(f"      Emite factura: {datos_inversionista['emite_factura']}")
-    print(f"      Banco: {datos_inversionista['banco'] or 'N/A'}")
-    print(f"      Tipo cuenta: {datos_inversionista['tipo_cuenta'] or 'N/A'}")
-    print(f"      Número cuenta: {datos_inversionista['numero_cuenta'] or 'N/A'}")
-    
-    # HACER UPSERT DEL INVERSIONISTA
-    resultado_upsert = upsert_inversionista_api(datos_inversionista)
-    
-    if not resultado_upsert.get('success'):
-        print(f"\n   ⚠️ No se pudo hacer upsert del inversionista")
-        print(f"   ⚠️ Se continuará con el procesamiento pero puede fallar")
-    
-    # ============================================
-    # 🔥 PASO 2: PROCESAR LIQUIDACIONES
-    # ============================================
-    nombre_inversionista = datos_inversionista['nombre']
+    print(f"\n   👤 Inversionista: {nombre_inversionista}")
+    print(f"   ℹ️  Asegurate que este inversionista exista en la BD")
     
     try:
         # LEER TODAS LAS HOJAS PARA ENCONTRAR LA ÚLTIMA
@@ -656,8 +348,7 @@ def procesar_liquidaciones():
         print("🚀 MODO COMPLETO ACTIVADO")
     
     print(f"📂 Carpeta: {CARPETA_EXCELS}")
-    print(f"🔗 API Liquidación: {API_URL}")
-    print(f"🔗 API Inversionistas: {API_INVERSIONISTA_URL}")
+    print(f"🔗 API: {API_URL}")
     print("=" * 70)
     
     if not os.path.exists(CARPETA_EXCELS):

@@ -66,7 +66,7 @@ export const Formulario = () => {
       <Input
         name="descripcion"
         type="area"
-        placeholder="Descrìbenos el auto de tus sueños para que nuestros agentes puedan ayudarte de la mejor manera."
+        placeholder="Descríbenos el auto de tus sueños para que nuestros agentes puedan ayudarte de la mejor manera."
         value={values.descripcion}
         onChange={handleChange("descripcion")}
         onBlur={handleBlur}

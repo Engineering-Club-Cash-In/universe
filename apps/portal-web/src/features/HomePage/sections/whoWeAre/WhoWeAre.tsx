@@ -6,8 +6,8 @@ export const WhoWeAre = () => {
       <div>
         <h2 className="text-2xl lg:text-header-2 mb-6">¿Quiénes somos?</h2>
         <h3 className="text-sm lg:text-header-body lg:px-50">
-          Descubre en este video quiénes somos, que hacemos y cómo te ayudamos a
-          financia el auto de tus sueños y a invertir con seguridad y
+          Descubre en este video quiénes somos, qué hacemos y cómo te ayudamos a
+          financiar el auto de tus sueños e invertir con seguridad y
           transparencia.
         </h3>
         <div className="flex justify-center mt-8">

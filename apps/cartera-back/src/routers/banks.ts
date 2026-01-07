@@ -6,7 +6,7 @@ import { bancos } from '../database/db';
 import { authMiddleware } from "./midleware";
 
 export const bancosRouter = new Elysia()
-  .use(authMiddleware)
+ 
   
   // 📋 GET - Obtener todos los bancos
   .get("/bancos", async () => {

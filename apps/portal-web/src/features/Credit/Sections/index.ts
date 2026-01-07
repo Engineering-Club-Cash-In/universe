@@ -1,4 +1,4 @@
-export * from "./Headet";
+export * from "./Header";
 export * from "./BuyCar";
 export * from "./GetMoney"
 export * from "./Choose"

@@ -18,6 +18,7 @@ export type ContratoCobranza = {
 	estadoContrato: string;
 	diaPagoMensual: number | null;
 	diasHastaPago: number; // Calculado: días hasta el próximo pago
+	numeroCredito: string | null;
 };
 
 function getEstadoBadge(estado: string) {
@@ -175,7 +176,7 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 	{
 		id: "acciones",
 		cell: ({ row }) => {
-			const linkId = row.original.casoCobroId || row.original.contratoId;
+			const linkId = row.original.numeroCredito || row.original.contratoId;
 			const tipoLink = row.original.casoCobroId ? "caso" : "contrato";
 
 			return (

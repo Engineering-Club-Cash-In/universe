@@ -416,7 +416,7 @@ export const pagos_credito_inversionistas = customSchema.table(
 );
 export const bancos = customSchema.table('bancos', {
   banco_id: serial('banco_id').primaryKey(),
-  nombre: varchar('nombre', { length: 100 }).notNull(),
+  nombre: varchar('nombre', { length: 100 }).notNull().unique(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -447,29 +447,33 @@ export const tipoCuentaEnum = pgEnum("tipo_cuenta_enum", [
   "Capital"
 ]);
 
-export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
-  "sin_reinversion",
-  "reinversion_capital",
-  "reinversion_interes",
-  "reinversion_total"
-]);
+  export const tipoReinversionEnum = customSchema.enum("tipo_reinversion", [
+    "sin_reinversion",
+    "reinversion_capital",
+    "reinversion_interes",
+    "reinversion_total"
+  ]);
+
 
 export const inversionistas = customSchema.table("inversionistas", {
   inversionista_id: serial("inversionista_id").primaryKey(),
   nombre: varchar("nombre", { length: 200 }).notNull().unique(),
-  dpi: bigint("dpi", { mode: "number" }), // ← NUEVO CAMPO (opcional)
+  dpi: bigint("dpi", { mode: "number" }).unique(),
+  email: varchar("email", { length: 255 }),
   emite_factura: boolean("emite_factura").notNull(),
   tipo_reinversion: tipoReinversionEnum("tipo_reinversion")
     .notNull()
     .default("sin_reinversion"),
-  banco: bancoEnum("banco"),
+  // 🔥 CAMBIO: ahora es FK a la tabla bancos
+  banco_id: integer("banco_id").references(() => bancos.banco_id),
   tipo_cuenta: tipoCuentaEnum("tipo_cuenta"),
   numero_cuenta: varchar("numero_cuenta", { length: 100 }),
 });
 export const asesores = customSchema.table("asesores", {
   asesor_id: serial("asesor_id").primaryKey(),
   nombre: varchar("nombre", { length: 100 }).notNull(),
-  activo: boolean("activo"), // puedes usar boolean si prefieres
+  telefono: varchar("telefono", { length: 20 }), // 🔥 NUEVO CAMPO OPCIONAL
+  activo: boolean("activo"),
 });
 
 export const cuentasEmpresa = customSchema.table("cuentas_empresa", {

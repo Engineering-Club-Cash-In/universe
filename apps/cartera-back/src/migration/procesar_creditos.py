@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import requests
 from typing import List, Dict, Any
-import json
+from collections import defaultdict
 
 # ============================================
 # 🔧 CONFIGURACIÓN
@@ -12,17 +12,16 @@ CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
-HOJAS_A_PROCESAR = [  
-    "Noviembre 2025", 
-    # Agregá más según necesites
+HOJAS_A_PROCESAR = [   
+    "Enero 2026", 
 ]
 
 # 🔥 MODO PRUEBA
-MODO_PRUEBA = False  # 👈 True = solo 1 crédito por hoja, False = todos
-LIMITE_CREDITOS_PRUEBA = 2  # Número de créditos a procesar en modo prueba
+MODO_PRUEBA = False
+LIMITE_CREDITOS_PRUEBA = 2
 
 # ============================================
-# 🗺️ MAPEO DE COLUMNAS EXCEL → API (SIN ESPACIOS)
+# 🗺️ MAPEO DE COLUMNAS EXCEL → API
 # ============================================
 MAPEO_COLUMNAS = {
     'Fecha': 'Fecha',
@@ -47,23 +46,23 @@ MAPEO_COLUMNAS = {
     'Abono IVA 12%': 'AbonoIVA12',
     'Abono interés CI': 'AbonoInteresCI',
     'Abono IVA CI': 'AbonoIVACI',
-    'Abono Seguro': 'AbonoSeguro',  # 👈 SIN espacios
-    'Abono GPS': 'AbonoGPS',  # 👈 SIN espacios
+    'Abono Seguro': 'AbonoSeguro',
+    'Abono GPS': 'AbonoGPS',
     'Pago del mes': 'PagoDelMes',
-    'Capital restante': 'CapitalRestante',  # 👈 SIN espacios
-    'Interés restante': 'InteresRestante',  # 👈 SIN espacios
-    'IVA 12% restante': 'IVA12Restante',  # 👈 SIN espacios
-    'Seguro Restante': 'SeguroRestante',  # 👈 SIN espacios
-    'GPS Restante': 'GPSRestante',  # 👈 SIN espacios
-    'Total restante': 'TotalRestante',  # 👈 SIN espacios
+    'Capital restante': 'CapitalRestante',
+    'Interés restante': 'InteresRestante',
+    'IVA 12% restante': 'IVA12Restante',
+    'Seguro Restante': 'SeguroRestante',
+    'GPS Restante': 'GPSRestante',
+    'Total restante': 'TotalRestante',
     'Llamada': 'Llamada',
     'Pago': 'Pago',
     'NIT': 'NIT',
     'Categoría': 'Categoria',
     'Inversionista': 'Inversionista',
     'Observaciones': 'Observaciones',
-    'Cuota': 'Cuota',  # 👈 SIN espacios
-    'Monto boleta': 'MontoBoleta',  # 👈 SIN espacios
+    'Cuota': 'Cuota',
+    'Monto boleta': 'MontoBoleta',
     'Fecha filtro': 'FechaFiltro',
     'No. Póliza': 'NumeroPoliza',
     'Comisión de venta': 'ComisionVenta',
@@ -75,10 +74,10 @@ MAPEO_COLUMNAS = {
     'Renuevo ó Nuevo': 'RenuevoONuevo',
     'Capital Nuevos créditos': 'CapitalNuevosCreditos',
     '% Royalty': 'PorcentajeRoyalty',
-    'Royalty': 'Royalty',  # 👈 SIN espacios
-    'U$ Royalty': 'USRoyalty',  # 👈 SIN espacios
-    'Membresías': 'Membresias',  # 👈 SIN espacios
-    'Membresías pago': 'MembresiasPago',  # 👈 SIN espacios
+    'Royalty': 'Royalty',
+    'U$ Royalty': 'USRoyalty',
+    'Membresías': 'Membresias',
+    'Membresías pago': 'MembresiasPago',
     'Gastos del mes': 'GastosMes',
     'Utilidad del mes': 'UtilidadMes',
     'Utilidad acumulada': 'UtilidadAcumulada',
@@ -87,59 +86,98 @@ MAPEO_COLUMNAS = {
     'Membresías del mes cobradas': 'MembresiasDelMesCobradas',
     'Membresías acumulado': 'MembresiasAcumulado',
     'Asesor': 'Asesor',
-    'Otros': 'Otros',  # 👈 SIN espacios
-    'Mora': 'Mora',  # 👈 SIN espacios
-    'Monto boleta - cuota': 'MontoBoletaCuota',  # 👈 SIN espacios
-    'Plazo': 'Plazo',  # 👈 SIN espacios
-    'Seguro': 'Seguro',  # 👈 SIN espacios
-    'Formato crédito': 'FormatoCredito',  # 👈 SIN espacios
+    'Otros': 'Otros',
+    'Mora': 'Mora',
+    'Monto boleta - cuota': 'MontoBoletaCuota',
+    'Plazo': 'Plazo',
+    'Seguro': 'Seguro',
+    'Formato crédito': 'FormatoCredito',
     'Pagado': 'Pagado',
     'Facturacion': 'Facturacion',
     'Mes pagado': 'MesPagado',
-    'Seguro Facturado': 'SeguroFacturado',  # 👈 SIN espacios
-    'GPS Facturado': 'GPSFacturado',  # 👈 SIN espacios
-    'Reserva': 'Reserva',  # 👈 SIN espacios
+    'Seguro Facturado': 'SeguroFacturado',
+    'GPS Facturado': 'GPSFacturado',
+    'Reserva': 'Reserva',
 }
 
-# ============================================
-# 🔢 CAMPOS QUE DEBEN SER NÚMEROS
-# ============================================
-CAMPOS_NUMERICOS = {
-    'Numero',
-}
+CAMPOS_NUMERICOS = {'Numero'}
 
-# ============================================
-# 🧹 FUNCIÓN PARA CONVERTIR VALOR
-# ============================================
 def convertir_valor(nombre_campo: str, valor: Any) -> Any:
-    """
-    Convierte el valor según el tipo esperado por la API
-    """
-    # Si es NaN o vacío
     if pd.isna(valor) or valor == '':
-        # Si es campo numérico, devolver 0
-        if nombre_campo in CAMPOS_NUMERICOS:
-            return 0
-        # Si no, devolver string vacío
-        return ''
+        return 0 if nombre_campo in CAMPOS_NUMERICOS else ''
     
-    # Si debe ser número
     if nombre_campo in CAMPOS_NUMERICOS:
         try:
-            # Intentar convertir a float primero
             num = float(valor)
-            # Si es entero, devolverlo como int
-            if num.is_integer():
-                return int(num)
-            return num
+            return int(num) if num.is_integer() else num
         except (ValueError, TypeError):
             return 0
     
-    # Para el resto, devolver como string
-    if isinstance(valor, (int, float)):
-        return str(valor)
+    return str(valor).strip() if isinstance(valor, (int, float)) else str(valor).strip()
+
+# ============================================
+# 🎯 DETECTAR POOLS RAROS
+# ============================================
+def detectar_pools_raros(df: pd.DataFrame, col_credito: str, col_nombre: str, col_formato: str) -> List[str]:
+    """
+    Retorna lista de números de crédito que son POOLS RAROS
+    """
+    print(f"\n🔍 Detectando pools raros...")
+    
+    # Filtrar solo pools
+    df_pools = df[
+        df[col_formato].astype(str).str.lower().str.strip().str.contains('pool', na=False)
+    ]
+    
+    if len(df_pools) == 0:
+        print(f"   ℹ️  No hay pools marcados como 'pool' en esta hoja")
+        return []
+    
+    # Agrupar por cliente
+    clientes_agrupados = defaultdict(list)
+    
+    for idx, row in df_pools.iterrows():
+        credito_raw = str(row[col_credito]).strip()
+        if not credito_raw or credito_raw == 'nan':
+            continue
+        
+        nombre_cliente = str(row[col_nombre]).strip()
+        clientes_agrupados[nombre_cliente].append(credito_raw)
+    
+    # Detectar pools raros
+    creditos_pool_raro = []
+    
+    for cliente, creditos in clientes_agrupados.items():
+        # Separar base y variaciones
+        creditos_base = [c for c in creditos if '_' not in c]
+        creditos_variaciones = [c for c in creditos if '_' in c]
+        
+        if len(creditos_base) < 2:
+            continue
+        
+        # Verificar que ningún base tenga variación
+        bases_con_variacion = []
+        for base in creditos_base:
+            tiene_variacion = any(
+                var.startswith(base + '_')
+                for var in creditos_variaciones
+            )
+            if tiene_variacion:
+                bases_con_variacion.append(base)
+        
+        # Si NO tiene variaciones = POOL RARO
+        if len(bases_con_variacion) == 0:
+            print(f"   ✅ POOL RARO detectado: {cliente} → {len(creditos_base)} créditos sin variaciones")
+            for cred in creditos_base:
+                print(f"      - {cred}")
+            creditos_pool_raro.extend(creditos_base)
+    
+    if len(creditos_pool_raro) == 0:
+        print(f"   ✅ No se encontraron pools raros")
     else:
-        return str(valor).strip()
+        print(f"   🔥 Total pools raros: {len(creditos_pool_raro)} créditos")
+    
+    return creditos_pool_raro
 
 # ============================================
 # 📖 FUNCIÓN PARA LEER UNA HOJA Y AGRUPAR
@@ -149,7 +187,8 @@ def leer_hoja_excel(
     nombre_hoja: str
 ) -> Dict[str, Dict[str, Any]]:
     """
-    Lee una hoja específica del Excel y agrupa filas por crédito
+    Lee una hoja específica del Excel y agrupa filas por crédito.
+    Detecta pools raros y los convierte automáticamente.
     """
     print(f"\n{'='*70}")
     print(f"📄 Procesando hoja: {nombre_hoja}")
@@ -165,7 +204,7 @@ def leer_hoja_excel(
             if idx > 20:
                 break
             row_str = ' '.join(str(cell).lower() for cell in row if pd.notna(cell))
-            if 'credito' in row_str or 'sifco' in row_str or 'fecha' in row_str:
+            if 'credito' in row_str or 'sifco' in row_str:
                 header_row = idx
                 print(f"✅ Headers encontrados en fila {idx}")
                 break
@@ -176,8 +215,6 @@ def leer_hoja_excel(
         
         # Leer con headers correctos
         df = pd.read_excel(archivo_path, sheet_name=nombre_hoja, header=header_row)
-        
-        # 🎯 NORMALIZAR nombres de columnas (quitar espacios extra de AMBOS lados)
         df.columns = df.columns.str.strip()
         
         print(f"✅ Columnas encontradas: {len(df.columns)}")
@@ -185,19 +222,22 @@ def leer_hoja_excel(
         # Buscar columnas clave
         col_credito = None
         col_nombre = None
+        col_formato = None
         
         for col in df.columns:
             col_normalizado = str(col).lower().replace('#', '').replace('crédito', 'credito').strip()
             
-            if not col_credito:
-                if 'credito' in col_normalizado and 'sifco' in col_normalizado:
-                    col_credito = col
-                    print(f"✅ Columna crédito: '{col}'")
+            if not col_credito and 'credito' in col_normalizado and 'sifco' in col_normalizado:
+                col_credito = col
+                print(f"✅ Columna crédito: '{col}'")
             
-            if not col_nombre:
-                if 'nombre' in col_normalizado:
-                    col_nombre = col
-                    print(f"✅ Columna nombre: '{col}'")
+            if not col_nombre and 'nombre' in col_normalizado and 'formato' not in col_normalizado:
+                col_nombre = col
+                print(f"✅ Columna nombre: '{col}'")
+            
+            if not col_formato and 'formato' in col_normalizado and 'credito' in col_normalizado:
+                col_formato = col
+                print(f"✅ Columna formato: '{col}'")
         
         if not col_credito:
             print(f"❌ No se encontró columna de CréditoSIFCO")
@@ -205,6 +245,9 @@ def leer_hoja_excel(
         
         if not col_nombre:
             print(f"⚠️ No se encontró columna de Nombre/Cliente")
+        
+        if not col_formato:
+            print(f"⚠️ No se encontró columna de Formato crédito")
         
         # Limpiar DataFrame
         df_clean = df.dropna(subset=[col_credito])
@@ -215,7 +258,49 @@ def leer_hoja_excel(
         
         print(f"✅ Filas válidas encontradas: {len(df_clean)}")
         
-        # Agrupar por crédito
+        # 🔥 DETECTAR POOLS RAROS (si existe columna formato)
+        creditos_pool_raro = []
+        if col_formato:
+            creditos_pool_raro = detectar_pools_raros(df_clean, col_credito, col_nombre, col_formato)
+        
+        # 🆕 MAPEAR CRÉDITOS POR CLIENTE (para pools raros)
+        clientes_creditos = defaultdict(list)
+        mapeo_variaciones = {}
+        
+        if creditos_pool_raro:
+            print(f"\n🔧 Creando mapeo de variaciones para pools raros...")
+            
+            for idx, row in df_clean.iterrows():
+                numero_credito_raw = str(row[col_credito]).strip()
+                
+                if numero_credito_raw not in creditos_pool_raro:
+                    continue
+                
+                cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
+                if numero_credito_raw not in clientes_creditos[cliente]:
+                    clientes_creditos[cliente].append(numero_credito_raw)
+            
+            # Crear mapeo de variaciones
+            for cliente, creditos in clientes_creditos.items():
+                creditos_ordenados = sorted(set(creditos))
+                
+                print(f"\n   🔧 Cliente: {cliente}")
+                print(f"      Créditos pool raro: {creditos_ordenados}")
+                
+                # El primero es la base
+                base = creditos_ordenados[0]
+                mapeo_variaciones[base] = base
+                print(f"      ✅ Base: {base}")
+                
+                # Los demás se convierten en variaciones
+                for idx, credito in enumerate(creditos_ordenados[1:], start=1):
+                    variacion = f"{base}_{idx}"
+                    mapeo_variaciones[credito] = variacion
+                    print(f"      🔄 {credito} → {variacion}")
+            
+            print(f"\n{'─'*70}\n")
+        
+        # 🎯 AGRUPAR FILAS
         creditos_data = {}
         
         for idx, row in df_clean.iterrows():
@@ -224,33 +309,78 @@ def leer_hoja_excel(
             if not numero_credito_raw or numero_credito_raw == '':
                 continue
             
-            numero_credito = numero_credito_raw.split('_')[0]
             cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
             
-            if numero_credito not in creditos_data:
-                creditos_data[numero_credito] = {
-                    'creditoBase': numero_credito,
+            # 🔥 DETERMINAR EL CRÉDITO FINAL
+            if numero_credito_raw in mapeo_variaciones:
+                # Es un pool raro, usar el mapeo
+                numero_credito_final = mapeo_variaciones[numero_credito_raw]
+                # La base es el crédito sin variación
+                numero_credito_base = numero_credito_final.split('_')[0]
+            else:
+                # No es pool raro, usar lógica normal
+                numero_credito_final = numero_credito_raw
+                numero_credito_base = numero_credito_raw.split('_')[0]
+            
+            # Agrupar por base
+            if numero_credito_base not in creditos_data:
+                creditos_data[numero_credito_base] = {
+                    'creditoBase': numero_credito_base,
                     'cliente': cliente,
                     'filas': []
                 }
             
-            # 🎯 Convertir fila con mapeo (las columnas ya están normalizadas)
+            # Convertir fila con mapeo
             fila_dict = {}
             for col in df.columns:
                 valor = row[col]
-                
-                # Buscar en mapeo usando columna normalizada
                 nombre_campo = MAPEO_COLUMNAS.get(col, col)
-                
-                # Convertir valor
                 fila_dict[nombre_campo] = convertir_valor(nombre_campo, valor)
             
-            creditos_data[numero_credito]['filas'].append(fila_dict)
+            # 🔥 SOBRESCRIBIR el CreditoSIFCO con el número final (puede tener variación)
+            fila_dict['CreditoSIFCO'] = numero_credito_final
+            
+            creditos_data[numero_credito_base]['filas'].append(fila_dict)
         
-        print(f"✅ Créditos únicos encontrados: {len(creditos_data)}")
+        print(f"✅ Créditos únicos agrupados: {len(creditos_data)}")
         
+        # Mostrar estadísticas
+        pools_normales = 0
+        pools_raros_convertidos = 0
+        individuales = 0
+        
+        for credito_key, credito_data in creditos_data.items():
+            num_filas = len(credito_data['filas'])
+            
+            # Contar cuántas filas tienen variaciones
+            filas_con_variacion = sum(1 for f in credito_data['filas'] if '_' in str(f.get('CreditoSIFCO', '')))
+            
+            if num_filas > 1:
+                # Ver si alguna fila era pool raro
+                es_pool_raro_convertido = any(
+                    str(f.get('CreditoSIFCO', '')).split('_')[0] in creditos_pool_raro
+                    for f in credito_data['filas']
+                )
+                
+                if es_pool_raro_convertido:
+                    pools_raros_convertidos += 1
+                else:
+                    pools_normales += 1
+            else:
+                individuales += 1
+        
+        print(f"\n📊 Estadísticas:")
+        print(f"   🔵 Créditos individuales: {individuales}")
+        print(f"   🟢 Pools normales (con _1, _2): {pools_normales}")
+        print(f"   🟡 Pools raros convertidos: {pools_raros_convertidos}")
+        
+        # Mostrar ejemplos
+        print(f"\n📋 Primeros 3 créditos:")
         for credito_key, credito_data in list(creditos_data.items())[:3]:
-            print(f"   📋 {credito_data['creditoBase']}: {credito_data['cliente']} - {len(credito_data['filas'])} filas")
+            creditos_en_pool = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
+            print(f"   📋 {credito_data['creditoBase']}: {credito_data['cliente']}")
+            print(f"      Filas: {len(credito_data['filas'])}")
+            print(f"      Créditos: {', '.join(sorted(creditos_en_pool))}")
         
         if len(creditos_data) > 3:
             print(f"   ... y {len(creditos_data) - 3} créditos más")
@@ -273,6 +403,11 @@ def enviar_credito_a_api(credito_data: Dict[str, Any]) -> Dict:
     print(f"      - Crédito: {credito_data['creditoBase']}")
     print(f"      - Cliente: {credito_data['cliente']}")
     print(f"      - Filas: {len(credito_data['filas'])}")
+    
+    # Mostrar si tiene variaciones
+    creditos_en_pool = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
+    if len(creditos_en_pool) > 1:
+        print(f"      - Pool con: {', '.join(sorted(creditos_en_pool))}")
     
     payload = {
         "credito": credito_data
@@ -413,7 +548,7 @@ def procesar_multiples_hojas():
 # 🎯 EJECUTAR
 # ============================================
 if __name__ == "__main__":
-    print("🔥 Iniciando procesamiento de múltiples hojas...")
+    print("🔥 Procesador Unificado - Pools Normales y Raros")
     print("⚠️  Asegurate que tu backend Elysia esté corriendo en el puerto 7000\n")
     
     if MODO_PRUEBA:

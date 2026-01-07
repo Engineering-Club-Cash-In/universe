@@ -30,8 +30,9 @@ export const insertAdvisor = async ({ body, set }: any) => {
     const insertedAdvisors = await db
       .insert(asesores)
       .values(
-        asesoresToInsert.map(({ nombre, activo }) => ({
+        asesoresToInsert.map(({ nombre, activo, telefono }) => ({ // 🔥 Agregado telefono
           nombre,
+          telefono: telefono?.trim() || null, // 🔥 NUEVO: Limpia o pone null
           activo: typeof activo !== "undefined" ? activo : true,
         }))
       )
@@ -59,7 +60,6 @@ export const insertAdvisor = async ({ body, set }: any) => {
     return { message: "Error inserting advisors", error: String(error) };
   }
 };
-
 /**
  * Busca un asesor por nombre. Si no existe, lo crea.
  * @param nombre Nombre del asesor
@@ -139,9 +139,10 @@ export const getAdvisors = async ({ query, set }: any) => {
         .select({
           asesor_id: asesores.asesor_id,
           nombre: asesores.nombre,
+          telefono: asesores.telefono, // 🔥 NUEVO
           activo: asesores.activo,
-          email: platform_users.email,     // 👈 solo correo
-          is_active: platform_users.is_active, // 👈 solo estado activo
+          email: platform_users.email,
+          is_active: platform_users.is_active,
         })
         .from(asesores)
         .leftJoin(
@@ -160,6 +161,7 @@ export const getAdvisors = async ({ query, set }: any) => {
         .select({
           asesor_id: asesores.asesor_id,
           nombre: asesores.nombre,
+          telefono: asesores.telefono, // 🔥 NUEVO
           activo: asesores.activo,
           email: platform_users.email,
           is_active: platform_users.is_active,
@@ -180,6 +182,7 @@ export const getAdvisors = async ({ query, set }: any) => {
       .select({
         asesor_id: asesores.asesor_id,
         nombre: asesores.nombre,
+        telefono: asesores.telefono, // 🔥 NUEVO
         activo: asesores.activo,
         email: platform_users.email,
         is_active: platform_users.is_active,
@@ -199,7 +202,7 @@ export const getAdvisors = async ({ query, set }: any) => {
 };
 export const updateAdvisor = async ({ query, body, set }: any) => {
   try {
-    const { id } = query; // id de platform_users
+    const { id } = query;
 
     if (!id) {
       set.status = 400;
@@ -211,7 +214,7 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       return { message: "Debe proporcionar campos para actualizar." };
     }
 
-    const { nombre, apellido, telefono, activo, email, password } = body;
+    const { nombre, telefono, activo, email, password } = body; // ✅ Ya tiene telefono
 
     // 1. Buscar el usuario en platform_users
     const [user] = await db
@@ -234,7 +237,7 @@ export const updateAdvisor = async ({ query, body, set }: any) => {
       .update(asesores)
       .set({
         ...(nombre !== undefined ? { nombre } : {}), 
-        ...(telefono !== undefined ? { telefono } : {}),
+        ...(telefono !== undefined ? { telefono } : {}), // ✅ Ya tiene telefono
         ...(activo !== undefined ? { activo } : {}),
       })
       .where(eq(asesores.asesor_id, user.asesor_id))

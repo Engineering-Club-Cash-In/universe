@@ -2,13 +2,42 @@ import { eq, and, lte, gte, sql } from "drizzle-orm";
 import { db } from "../database";
 import { usuarios, creditos, cuotas_credito, inversionistas, creditos_inversionistas } from "../database/db";
 import Big from "big.js";
+import fs from "fs"; // 🆕 Para escribir logs
 
 // 📊 INTERFACE PARA EL INPUT
 interface LiquidarCuotasInput {
   nombre_usuario: string;
   cuota_mes: string;
-  capital: number; // 🆕 NUEVO CAPITAL A APLICAR
-  nombre_inversionista: string; // 🆕 NOMBRE DEL INVERSIONISTA
+  capital: number;
+  nombre_inversionista: string;
+}
+
+// 🆕 FUNCIÓN PARA ESCRIBIR LOG DE ADVERTENCIAS
+function escribirLogAdvertencias(tipo: 'ADVERTENCIA' | 'ERROR' | 'RELACION_CREADA', mensaje: string, data?: any) {
+  const timestamp = new Date().toISOString();
+  const logEntry = {
+    timestamp,
+    tipo,
+    mensaje,
+    data: data || null
+  };
+  
+  const logLine = `[${timestamp}] ${tipo}: ${mensaje}\n${data ? JSON.stringify(data, null, 2) : ''}\n${'='.repeat(80)}\n`;
+  
+  // 🔥 Escribir en archivo de log
+  const logPath = './logs/liquidacion_advertencias.log';
+  
+  try {
+    // Crear carpeta logs si no existe
+    if (!fs.existsSync('./logs')) {
+      fs.mkdirSync('./logs', { recursive: true });
+    }
+    
+    fs.appendFileSync(logPath, logLine);
+    console.log(`   📝 Log escrito en: ${logPath}`);
+  } catch (err) {
+    console.error(`   ❌ Error escribiendo log:`, err);
+  }
 }
 
 // 🧹 NORMALIZAR FORMATO DE MES - ULTRA PERMISIVO
@@ -17,10 +46,19 @@ function normalizarCuotaMes(cuota_mes: string): string {
   
   let normalizado = cuota_mes.trim();
   
-  // 1. Remover puntos extras al final
+  // 🆕 1. Si tiene formato "nov.25" o "nov25" sin espacio, agregar espacio
+  if (/^[a-zA-Z]{3}\.?\d{2,4}$/.test(normalizado)) {
+    const match = normalizado.match(/^([a-zA-Z]{3})\.?(\d{2,4})$/);
+    if (match) {
+      normalizado = `${match[1]}. ${match[2]}`;
+      console.log(`   🔧 Agregado espacio: "${normalizado}"`);
+    }
+  }
+  
+  // 2. Remover puntos extras al final
   normalizado = normalizado.replace(/\.+$/g, '');
   
-  // 2. Convertir año de 4 dígitos a 2
+  // 3. Convertir año de 4 dígitos a 2
   normalizado = normalizado.replace(/\b2025\b/g, '25');
   normalizado = normalizado.replace(/\b2024\b/g, '24');
   normalizado = normalizado.replace(/\b2023\b/g, '23');
@@ -28,7 +66,7 @@ function normalizarCuotaMes(cuota_mes: string): string {
   normalizado = normalizado.replace(/\b2021\b/g, '21');
   normalizado = normalizado.replace(/\b2020\b/g, '20');
   
-  // 3. Casos especiales: múltiples meses (ej: "ago. 25 y sep. 25")
+  // 4. Casos especiales: múltiples meses (ej: "ago. 25 y sep. 25")
   if (normalizado.includes(' y ')) {
     console.log(`   ⚠️ Múltiples meses detectados, tomando el último`);
     const meses = normalizado.split(' y ').map(m => m.trim());
@@ -36,7 +74,7 @@ function normalizarCuotaMes(cuota_mes: string): string {
     console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
   }
   
-  // 4. Si tiene múltiples meses separados por comas
+  // 5. Si tiene múltiples meses separados por comas
   if (normalizado.includes(',')) {
     console.log(`   ⚠️ Múltiples meses con coma, tomando el último`);
     const meses = normalizado.split(',').map(m => m.trim());
@@ -44,10 +82,10 @@ function normalizarCuotaMes(cuota_mes: string): string {
     console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
   }
   
-  // 5. Limpiar espacios múltiples
+  // 6. Limpiar espacios múltiples
   normalizado = normalizado.replace(/\s+/g, ' ');
   
-  // 6. Asegurar que tiene punto después del mes
+  // 7. Asegurar que tiene punto después del mes
   const partes = normalizado.split(/\s+/);
   if (partes.length === 2) {
     let mes = partes[0].toLowerCase().replace('.', '');
@@ -79,7 +117,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
   // Limpiar el nombre de entrada
   const nombreLimpio = nombre_usuario
     .trim()
-    .replace(/\s+/g, ' ') // espacios múltiples
+    .replace(/\s+/g, ' ')
     .replace(/[áàäâã]/gi, 'a')
     .replace(/[éèëê]/gi, 'e')
     .replace(/[íìïî]/gi, 'i')
@@ -247,7 +285,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
   return [];
 }
 
-// 🔍 BÚSQUEDA ULTRA PERMISIVA DE INVERSIONISTA (🆕 NUEVA FUNCIÓN)
+// 🔍 BÚSQUEDA ULTRA PERMISIVA DE INVERSIONISTA
 async function buscarInversionistaPermisivo(nombre_inversionista: string) {
   console.log(`\n🔍 ========== BÚSQUEDA PERMISIVA DE INVERSIONISTA ==========`);
   console.log(`   📝 Buscando: "${nombre_inversionista}"`);
@@ -415,7 +453,7 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
   };
 }
 
-// 🔥 ENDPOINT PRINCIPAL (MODIFICADO CON CAPITAL E INVERSIONISTA)
+// 🔥 ENDPOINT PRINCIPAL (MODO AGRESIVO - CREA RELACIONES AUTOMÁTICAMENTE)
 export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
   try {
     console.log("🔥 ========== INICIANDO LIQUIDACIÓN DE CUOTAS ==========");
@@ -425,6 +463,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     if (!input.nombre_usuario || input.nombre_usuario.trim() === '') {
       const errorMsg = "❌ El nombre del usuario es requerido";
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, { input });
       return {
         success: false,
         data: null,
@@ -436,6 +475,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     if (!input.cuota_mes || input.cuota_mes.trim() === '') {
       const errorMsg = "❌ La cuota mes es requerida";
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, { input });
       return {
         success: false,
         data: null,
@@ -447,6 +487,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     if (!input.capital || input.capital <= 0) {
       const errorMsg = "❌ El capital debe ser mayor a 0";
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, { input });
       return {
         success: false,
         data: null,
@@ -458,6 +499,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     if (!input.nombre_inversionista || input.nombre_inversionista.trim() === '') {
       const errorMsg = "❌ El nombre del inversionista es requerido";
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, { input });
       return {
         success: false,
         data: null,
@@ -473,6 +515,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     } catch (err) {
       const errorMsg = `❌ Formato de mes inválido: "${input.cuota_mes}". Use formato "mes. año" (ej: "oct. 25")`;
       console.error(errorMsg, err);
+      escribirLogAdvertencias('ERROR', errorMsg, { input_recibido: input.cuota_mes, error: err });
       return {
         success: false,
         data: null,
@@ -497,6 +540,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     if (usuariosEncontrados.length === 0) {
       const errorMsg = `❌ No se encontró ningún usuario con nombre: "${nombre_usuario}"`;
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, { nombre_buscado: nombre_usuario });
       return {
         success: false,
         data: null,
@@ -507,7 +551,6 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       };
     }
 
-    // DECLARAR VARIABLE USUARIO FUERA DEL IF
     let usuario;
 
     if (usuariosEncontrados.length > 1) {
@@ -516,7 +559,6 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         console.log(`   ${idx + 1}. ${u.nombre} (ID: ${u.usuario_id})`);
       });
       
-      // BUSCAR MATCH EXACTO (case insensitive)
       const matchExacto = usuariosEncontrados.find(
         u => u.nombre.trim().toLowerCase() === nombre_usuario.trim().toLowerCase()
       );
@@ -527,9 +569,19 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       } else if (usuariosEncontrados.length <= 10) {
         console.log(`⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${usuariosEncontrados[0].nombre}`);
         usuario = usuariosEncontrados[0];
+        
+        escribirLogAdvertencias('ADVERTENCIA', 'Múltiples usuarios encontrados, se tomó el primero', {
+          nombre_buscado: nombre_usuario,
+          usuario_seleccionado: usuariosEncontrados[0].nombre,
+          otros_encontrados: usuariosEncontrados.slice(1, 5).map(u => u.nombre)
+        });
       } else {
         const errorMsg = `❌ Se encontraron ${usuariosEncontrados.length} usuarios con nombres similares y ninguno coincide exactamente`;
         console.error(errorMsg);
+        escribirLogAdvertencias('ERROR', errorMsg, {
+          nombre_buscado: nombre_usuario,
+          usuarios_encontrados: usuariosEncontrados.slice(0, 10).map(u => u.nombre)
+        });
         return {
           success: false,
           data: null,
@@ -551,13 +603,14 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     );
 
     // ============================================
-    // 2️⃣ BUSCAR INVERSIONISTA CON BÚSQUEDA ULTRA PERMISIVA (🆕 NUEVO)
+    // 2️⃣ BUSCAR INVERSIONISTA CON BÚSQUEDA ULTRA PERMISIVA
     // ============================================
     const inversionistasEncontrados = await buscarInversionistaPermisivo(nombre_inversionista);
 
     if (inversionistasEncontrados.length === 0) {
       const errorMsg = `❌ No se encontró ningún inversionista con nombre: "${nombre_inversionista}"`;
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, { nombre_buscado: nombre_inversionista });
       return {
         success: false,
         data: null,
@@ -586,9 +639,19 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       } else if (inversionistasEncontrados.length <= 10) {
         console.log(`⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${inversionistasEncontrados[0].nombre}`);
         inversionista = inversionistasEncontrados[0];
+        
+        escribirLogAdvertencias('ADVERTENCIA', 'Múltiples inversionistas encontrados, se tomó el primero', {
+          nombre_buscado: nombre_inversionista,
+          inversionista_seleccionado: inversionistasEncontrados[0].nombre,
+          otros_encontrados: inversionistasEncontrados.slice(1, 5).map(inv => inv.nombre)
+        });
       } else {
         const errorMsg = `❌ Se encontraron ${inversionistasEncontrados.length} inversionistas con nombres similares`;
         console.error(errorMsg);
+        escribirLogAdvertencias('ERROR', errorMsg, {
+          nombre_buscado: nombre_inversionista,
+          inversionistas_encontrados: inversionistasEncontrados.slice(0, 10).map(inv => inv.nombre)
+        });
         return {
           success: false,
           data: null,
@@ -624,6 +687,10 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     if (creditosUsuario.length === 0) {
       const errorMsg = `❌ El usuario "${usuario.nombre}" no tiene créditos registrados`;
       console.error(errorMsg);
+      escribirLogAdvertencias('ERROR', errorMsg, {
+        usuario_id: usuario.usuario_id,
+        nombre: usuario.nombre
+      });
       return {
         success: false,
         data: null,
@@ -678,6 +745,11 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     } catch (err) {
       const errorMsg = `❌ Error al procesar el mes: "${input.cuota_mes}"`;
       console.error(errorMsg, err);
+      escribirLogAdvertencias('ERROR', errorMsg, {
+        cuota_mes_recibida: input.cuota_mes,
+        cuota_mes_normalizada: cuota_mes_normalizada,
+        error: err
+      });
       return {
         success: false,
         data: null,
@@ -694,7 +766,9 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     // ============================================
     const resultadosPorCredito = [];
     let creditosSinCuotas = 0;
-    let totalInversionistasActualizados = 0; // 🆕 CONTADOR
+    let totalInversionistasActualizados = 0;
+    let totalRelacionesCreadas = 0; // 🆕 CONTADOR
+    const advertencias: string[] = [];
 
     for (const credito of creditosUsuario) {
       console.log(`\n💳 ========== CRÉDITO: ${credito.numero_credito_sifco} ==========`);
@@ -711,7 +785,6 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
 
       console.log(`   Total cuotas en BD: ${todasLasCuotas.length}`);
       
-      // Mostrar solo las primeras 10 y las últimas 5 para no saturar logs
       if (todasLasCuotas.length > 15) {
         todasLasCuotas.slice(0, 10).forEach((c, idx) => {
           const liquidado = c.liquidado_inversionistas ? '✅ LIQ' : '❌ NO LIQ';
@@ -756,65 +829,59 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
 
       console.log(`   📊 Cuotas encontradas en el rango: ${cuotaDelMes.length}`);
 
-      if (cuotaDelMes.length > 0) {
+      let numeroCuotaALiquidar = 0;
+      let cuotasLiquidadas = 0;
+
+      if (cuotaDelMes.length === 0) {
+        const advertencia = `⚠️ Crédito ${credito.numero_credito_sifco}: No hay cuota que venza en ${cuota_mes_normalizada}`;
+        console.log(`   ${advertencia}`);
+        advertencias.push(advertencia);
+        
+        escribirLogAdvertencias('ADVERTENCIA', advertencia, {
+          credito_id: credito.credito_id,
+          numero_credito: credito.numero_credito_sifco,
+          mes_buscado: cuota_mes_normalizada,
+          rango_busqueda: `${rangoMes.inicio} - ${rangoMes.fin}`
+        });
+        
+        creditosSinCuotas++;
+      } else {
         console.log(`   🎯 Cuotas que coinciden con ${cuota_mes_normalizada}:`);
         cuotaDelMes.forEach((c) => {
           console.log(`      - Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento}`);
         });
-      }
 
-      if (cuotaDelMes.length === 0) {
-        console.log(`   ⚠️ NO SE ENCONTRÓ cuota que venza en ${cuota_mes_normalizada}`);
-        console.log(`   ⚠️ Revisá que las fechas de vencimiento estén en el rango correcto`);
-        
-        creditosSinCuotas++;
-        
-        resultadosPorCredito.push({
-          credito_id: credito.credito_id,
-          numero_credito: credito.numero_credito_sifco,
-          cuotas_liquidadas: 0,
-          inversionistas_actualizados: 0,
-          mensaje: `No hay cuota que venza en ${cuota_mes_normalizada}`,
-          debug: {
-            rango_buscado: `${rangoMes.inicio} - ${rangoMes.fin}`,
-            total_cuotas_credito: todasLasCuotas.length,
-            primeras_fechas: todasLasCuotas.slice(0, 5).map(c => c.fecha_vencimiento),
-            ultimas_fechas: todasLasCuotas.slice(-5).map(c => c.fecha_vencimiento)
-          }
-        });
-        continue;
-      }
+        const cuotaEncontrada = cuotaDelMes[0];
+        numeroCuotaALiquidar = cuotaEncontrada.numero_cuota;
 
-      // Tomar la PRIMERA cuota del rango
-      const cuotaEncontrada = cuotaDelMes[0];
-      const numeroCuotaALiquidar = cuotaEncontrada.numero_cuota;
+        console.log(`\n   ✅ CUOTA SELECCIONADA: #${numeroCuotaALiquidar}`);
+        console.log(`      Vence: ${cuotaEncontrada.fecha_vencimiento}`);
+        console.log(`      Liquidado: ${cuotaEncontrada.liquidado_inversionistas ? 'SÍ' : 'NO'}`);
+        console.log(`\n   📊 LIQUIDANDO cuotas desde 1 hasta ${numeroCuotaALiquidar}...`);
 
-      console.log(`\n   ✅ CUOTA SELECCIONADA: #${numeroCuotaALiquidar}`);
-      console.log(`      Vence: ${cuotaEncontrada.fecha_vencimiento}`);
-      console.log(`      Liquidado: ${cuotaEncontrada.liquidado_inversionistas ? 'SÍ' : 'NO'}`);
-      console.log(`\n   📊 LIQUIDANDO cuotas desde 1 hasta ${numeroCuotaALiquidar}...`);
-
-      // ============================================
-      // 8️⃣ LIQUIDAR HASTA ESA CUOTA
-      // ============================================
-      const resultado = await db
-        .update(cuotas_credito)
-        .set({
-          liquidado_inversionistas: true,
-          fecha_liquidacion_inversionistas: new Date(),
-        })
-        .where(
-          and(
-            eq(cuotas_credito.credito_id, credito.credito_id),
-            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
+        // ============================================
+        // 8️⃣ LIQUIDAR HASTA ESA CUOTA
+        // ============================================
+        const resultado = await db
+          .update(cuotas_credito)
+          .set({
+            liquidado_inversionistas: true,
+            fecha_liquidacion_inversionistas: new Date(),
+          })
+          .where(
+            and(
+              eq(cuotas_credito.credito_id, credito.credito_id),
+              lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
+            )
           )
-        )
-        .returning();
+          .returning();
 
-      console.log(`   ✅ ${resultado.length} cuotas ACTUALIZADAS\n`);
+        cuotasLiquidadas = resultado.length;
+        console.log(`   ✅ ${cuotasLiquidadas} cuotas ACTUALIZADAS\n`);
+      }
 
       // ============================================
-      // 🆕 9️⃣ BUSCAR SI ESTE CRÉDITO TIENE AL INVERSIONISTA
+      // 🆕 9️⃣ BUSCAR Y ACTUALIZAR INVERSIONISTA (MODO AGRESIVO)
       // ============================================
       console.log(`\n   👥 ========== BUSCANDO INVERSIONISTA EN ESTE CRÉDITO ==========`);
       
@@ -830,18 +897,98 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         );
 
       if (relacionInversionista.length === 0) {
-        console.log(`   ⚠️ El inversionista "${inversionista.nombre}" NO participa en este crédito`);
+        // 🔥 MODO AGRESIVO: CREAR LA RELACIÓN AUTOMÁTICAMENTE
+        const advertencia = `🔥 Crédito ${credito.numero_credito_sifco}: El inversionista "${inversionista.nombre}" NO participaba - CREANDO RELACIÓN AUTOMÁTICAMENTE`;
+        console.log(`   ${advertencia}`);
+        advertencias.push(advertencia);
+        
+        console.log(`\n   🔧 ========== CREANDO RELACIÓN AUTOMÁTICA ==========`);
+        
+        // Calcular valores
+        const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(100);
+        const cuotaInteres = capitalTotal.times(porcentajeInteres);
+        
+        // 🔥 Valores por defecto (50/50)
+        const porcentajeCashIn = 50;
+        const porcentajeInversionista = 50;
+        
+        const montoInversionista = cuotaInteres.times(0.5).toFixed(2);
+        const montoCashIn = cuotaInteres.times(0.5).toFixed(2);
+        const ivaInversionista = new Big(montoInversionista).times(0.12).toFixed(2);
+        const ivaCashIn = new Big(montoCashIn).times(0.12).toFixed(2);
+        
+        console.log(`      💰 Capital: ${capitalTotal.toFixed(2)}`);
+        console.log(`      📊 % Interés crédito: ${porcentajeInteres.times(100).toString()}%`);
+        console.log(`      💵 Cuota interés: ${cuotaInteres.toFixed(2)}`);
+        console.log(`      📊 % Cash In: ${porcentajeCashIn}% (por defecto)`);
+        console.log(`      📊 % Inversionista: ${porcentajeInversionista}% (por defecto)`);
+        console.log(`      💵 Monto inversionista: ${montoInversionista}`);
+        console.log(`      💵 Monto cash_in: ${montoCashIn}`);
+        console.log(`      📄 IVA inversionista: ${ivaInversionista}`);
+        console.log(`      📄 IVA cash_in: ${ivaCashIn}`);
+        
+        // 🔥 INSERTAR EN BD
+        await db
+          .insert(creditos_inversionistas)
+          .values({
+            credito_id: credito.credito_id,
+            inversionista_id: inversionista.inversionista_id,
+            monto_aportado: capitalTotal.toFixed(2),
+            porcentaje_cash_in: porcentajeCashIn.toString(),
+            porcentaje_participacion_inversionista: porcentajeInversionista.toString(),
+            cuota_inversionista: "0",
+            monto_inversionista: montoInversionista,
+            monto_cash_in: montoCashIn,
+            iva_inversionista: ivaInversionista,
+            iva_cash_in: ivaCashIn
+          });
+        
+        console.log(`      ✅ RELACIÓN CREADA CON ÉXITO`);
+        totalInversionistasActualizados++;
+        totalRelacionesCreadas++; // 🆕
+        
+        // 🆕 ESCRIBIR LOG DE RELACIÓN CREADA
+        escribirLogAdvertencias('RELACION_CREADA', 
+          `Se creó automáticamente la relación inversionista-crédito`, 
+          {
+            usuario: usuario.nombre,
+            usuario_id: usuario.usuario_id,
+            inversionista: inversionista.nombre,
+            inversionista_id: inversionista.inversionista_id,
+            credito: credito.numero_credito_sifco,
+            credito_id: credito.credito_id,
+            capital: capitalTotal.toString(),
+            porcentaje_cash_in: porcentajeCashIn,
+            porcentaje_inversionista: porcentajeInversionista,
+            monto_inversionista: montoInversionista,
+            monto_cash_in: montoCashIn,
+            iva_inversionista: ivaInversionista,
+            iva_cash_in: ivaCashIn,
+            mes: rangoMes.mesDescriptivo
+          }
+        );
+        
         resultadosPorCredito.push({
           credito_id: credito.credito_id,
           numero_credito: credito.numero_credito_sifco,
-          cuotas_liquidadas: resultado.length,
-          inversionistas_actualizados: 0,
-          mensaje: `Inversionista no participa en este crédito`
+          cuota_encontrada: numeroCuotaALiquidar || null,
+          cuotas_liquidadas: cuotasLiquidadas,
+          inversionistas_actualizados: 1,
+          relacion_creada: true, // 🆕
+          advertencia: "Relación inversionista-crédito creada automáticamente (50/50)",
+          cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
+            .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
+            .map(c => ({
+              numero_cuota: c.numero_cuota,
+              fecha_vencimiento: c.fecha_vencimiento
+            })) : []
         });
+        
         continue;
       }
 
-      const relacion = relacionInversionista[0].creditos_inversionistas
+      // ✅ SI SÍ EXISTE LA RELACIÓN - ACTUALIZAR
+      const relacion = relacionInversionista[0].creditos_inversionistas;
       
       console.log(`   ✅ INVERSIONISTA ENCONTRADO EN ESTE CRÉDITO`);
       console.log(`      Monto aportado ANTERIOR: ${relacion.monto_aportado}`);
@@ -854,33 +1001,28 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       // ============================================
       console.log(`\n   🧮 ========== RECALCULANDO MONTOS ==========`);
       
-      // 💰 EL CAPITAL ES EL NUEVO MONTO APORTADO
       const nuevoMontoAportado = capitalTotal;
       
       console.log(`      💰 NUEVO Monto aportado: ${nuevoMontoAportado.toFixed(2)}`);
       
-      // Obtener porcentajes de la BD (vienen en formato 0-100)
       const porcentajeCashIn = new Big(relacion.porcentaje_cash_in || 0).div(100);
       const porcentajeInversionista = new Big(relacion.porcentaje_participacion_inversionista || 0).div(100);
-      const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100); // % de interés
+      const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100);
       
       console.log(`      📊 % Cash In: ${porcentajeCashIn.times(100).toString()}%`);
       console.log(`      📊 % Inversionista: ${porcentajeInversionista.times(100).toString()}%`);
       console.log(`      📊 % Interés: ${interes.times(100).toString()}%`);
       
-      // 🧮 CALCULAR CUOTA DE INTERÉS BASE
       const cuotaInteres = nuevoMontoAportado.times(interes);
       
       console.log(`      💵 Cuota interés total: ${cuotaInteres.toFixed(2)}`);
       
-      // 💸 DIVIDIR ENTRE INVERSIONISTA Y CASH_IN
       const nuevoMontoInversionista = cuotaInteres.times(porcentajeInversionista).toFixed(2);
       const nuevoMontoCashIn = cuotaInteres.times(porcentajeCashIn).toFixed(2);
       
       console.log(`      💵 Monto inversionista: ${nuevoMontoInversionista}`);
       console.log(`      💵 Monto cash_in: ${nuevoMontoCashIn}`);
       
-      // 📄 CALCULAR IVAs (12%)
       const nuevoIvaInversionista = Number(nuevoMontoInversionista) > 0
         ? new Big(nuevoMontoInversionista).times(0.12).toFixed(2)
         : "0.00";
@@ -892,7 +1034,6 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       console.log(`      📄 IVA inversionista: ${nuevoIvaInversionista}`);
       console.log(`      📄 IVA cash_in: ${nuevoIvaCashIn}`);
       
-      // 💾 ACTUALIZAR EN LA BASE DE DATOS
       console.log(`\n      💾 ACTUALIZANDO EN BD...`);
       
       await db
@@ -918,35 +1059,18 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       resultadosPorCredito.push({
         credito_id: credito.credito_id,
         numero_credito: credito.numero_credito_sifco,
-        cuota_encontrada: numeroCuotaALiquidar,
-        cuotas_liquidadas: resultado.length,
+        cuota_encontrada: numeroCuotaALiquidar || null,
+        cuotas_liquidadas: cuotasLiquidadas,
         inversionistas_actualizados: 1,
-        cuotas_actualizadas: resultado.map(c => ({
-          numero_cuota: c.numero_cuota,
-          fecha_vencimiento: c.fecha_vencimiento
-        }))
+        relacion_creada: false,
+        advertencia: cuotasLiquidadas === 0 ? "No había cuota para liquidar en este mes, pero el inversionista fue actualizado" : null,
+        cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
+          .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
+          .map(c => ({
+            numero_cuota: c.numero_cuota,
+            fecha_vencimiento: c.fecha_vencimiento
+          })) : []
       });
-    }
-
-    // 🆕 SI NINGÚN CRÉDITO TIENE CUOTAS PARA ESE MES
-    if (creditosSinCuotas === creditosUsuario.length) {
-      const errorMsg = `❌ Ninguno de los ${creditosUsuario.length} crédito(s) de "${usuario.nombre}" tiene cuotas que venzan en ${rangoMes.mesDescriptivo}`;
-      console.error(errorMsg);
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "No hay cuotas para liquidar en ese mes",
-        usuario: {
-          usuario_id: usuario.usuario_id,
-          nombre: usuario.nombre
-        },
-        creditos_revisados: creditosUsuario.length,
-        mes_buscado: rangoMes.mesDescriptivo,
-        rango_fechas: `${rangoMes.inicio} - ${rangoMes.fin}`,
-        detalle_por_credito: resultadosPorCredito,
-        sugerencia: "Verificá que las fechas de vencimiento de las cuotas estén correctas en la BD"
-      };
     }
 
     // ============================================
@@ -957,9 +1081,17 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     console.log(`✅ Inversionista: ${inversionista.nombre}`);
     console.log(`✅ Créditos procesados: ${creditosUsuario.length}`);
     console.log(`✅ Cuotas reseteadas inicialmente: ${totalCuotasReseteadas}`);
-    console.log(`✅ Mes liquidado: ${rangoMes.mesDescriptivo}`);
+    console.log(`✅ Mes buscado: ${rangoMes.mesDescriptivo}`);
     console.log(`💰 Capital aplicado: ${capitalTotal.toString()}`);
     console.log(`👥 Inversionistas actualizados: ${totalInversionistasActualizados}`);
+    console.log(`🔥 Relaciones creadas: ${totalRelacionesCreadas}`); // 🆕
+    console.log(`⚠️ Créditos sin cuotas para este mes: ${creditosSinCuotas}`);
+
+    if (advertencias.length > 0) {
+      console.log(`\n⚠️ ========== ADVERTENCIAS ==========`);
+      advertencias.forEach(adv => console.log(`   ${adv}`));
+      console.log(`======================================`);
+    }
 
     const totalCuotasLiquidadas = resultadosPorCredito.reduce(
       (sum, r) => sum + (r.cuotas_liquidadas || 0), 0
@@ -983,16 +1115,22 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         creditos_sin_cuotas: creditosSinCuotas,
         cuotas_reseteadas: totalCuotasReseteadas,
         inversionistas_actualizados: totalInversionistasActualizados,
+        relaciones_creadas: totalRelacionesCreadas, // 🆕
         cuota_mes_original: input.cuota_mes,
         cuota_mes_normalizada: cuota_mes_normalizada,
         rango_liquidado: rangoMes,
         total_cuotas_liquidadas: totalCuotasLiquidadas,
+        advertencias: advertencias,
         detalle_por_credito: resultadosPorCredito,
       },
-      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}`,
+      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}${totalRelacionesCreadas > 0 ? ` (${totalRelacionesCreadas} relación${totalRelacionesCreadas > 1 ? 'es' : ''} creada${totalRelacionesCreadas > 1 ? 's' : ''})` : ''}${advertencias.length > 0 ? ` (${advertencias.length} advertencia${advertencias.length > 1 ? 's' : ''})` : ''}`,
     };
   } catch (error) {
     console.error("❌ Error en liquidación de cuotas:", error);
+    escribirLogAdvertencias('ERROR', 'Error fatal en liquidación', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
     return {
       success: false,
       data: null,

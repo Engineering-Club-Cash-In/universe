@@ -1,10 +1,11 @@
 // src/components/payments/ModalFacturasPago.tsx
 
 import React from "react";
-import { X, Download, Trash2, Loader2, Receipt, CheckCircle, XCircle, ExternalLink } from "lucide-react";
+import { X, Download, Trash2, Loader2, Receipt, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useAnularFactura, usePagoCompleto } from "../hooks/cofidi";
-import { useQueryClient } from "@tanstack/react-query"; // 🆕 NUEVO
+import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/Provider/authProvider"; // 🆕 NUEVO
 
 interface ModalFacturasPagoProps {
   open: boolean;
@@ -40,7 +41,8 @@ export function ModalFacturasPago({
   pagoId,
   onFacturasActualizadas,
 }: ModalFacturasPagoProps) {
-  const queryClient = useQueryClient(); // 🆕 NUEVO
+  const { user } = useAuth(); // 🆕 NUEVO - Jalamos el user del context
+  const queryClient = useQueryClient();
   const { data: pagoCompleto, isLoading } = usePagoCompleto(pagoId);
   const anularFactura = useAnularFactura();
 
@@ -50,31 +52,178 @@ export function ModalFacturasPago({
   if (!open) return null;
 
   const handleAnular = async () => {
-    if (!facturaParaAnular || !motivoAnulacion.trim()) {
-      toast.error("Debes escribir un motivo de anulación");
+    // 🔥 VALIDACIÓN: Motivo de anulación
+    if (!motivoAnulacion.trim()) {
+      toast.error("❌ Debes escribir un motivo de anulación", {
+        description: "El motivo es obligatorio para anular una factura",
+        duration: 4000,
+      });
       return;
     }
+
+    // 🔥 VALIDACIÓN: UUID de factura
+    if (!facturaParaAnular) {
+      toast.error("❌ Error interno", {
+        description: "No se pudo identificar la factura a anular",
+        duration: 4000,
+      });
+      return;
+    }
+
+    // 🔥 VALIDACIÓN: Usuario autenticado
+    if (!user?.id) {
+      toast.error("❌ Error de autenticación", {
+        description: "No se pudo identificar tu usuario. Por favor recargá la página.",
+        duration: 5000,
+      });
+      return;
+    }
+
+    console.log("🚫 Iniciando anulación:", {
+      uuid: facturaParaAnular,
+      motivo: motivoAnulacion,
+      userId: user.id, 
+    });
+
+    toast.loading("Anulando factura en COFIDI...", { id: "anulando-factura" });
 
     anularFactura.mutate(
       {
         uuid: facturaParaAnular,
         motivo: motivoAnulacion,
-        xmlAnulacion: "",
-        userId: 0
+        userId: user.id,
+        xmlAnulacion: ""
       },
       {
-        onSuccess: () => {
-          // 🆕 REFETCH de las facturas del pago
-          queryClient.invalidateQueries({ queryKey: ['pago-completo', pagoId] });
+        onSuccess: (data) => {
+          console.log("✅ Respuesta de anulación:", data);
+
+          if (data.success) {
+            // ✅ ÉXITO TOTAL
+            toast.success("✅ Factura anulada exitosamente", {
+              id: "anulando-factura",
+              description: `UUID: ${facturaParaAnular.substring(0, 8)}... anulada en COFIDI y BD`,
+              duration: 5000,
+            });
+
+            // Refrescar datos
+            queryClient.invalidateQueries({ queryKey: ['pago-completo', pagoId] });
+            
+            // Limpiar y cerrar
+            setFacturaParaAnular(null);
+            setMotivoAnulacion("");
+            onFacturasActualizadas?.();
+          } else {
+            // ❌ ERROR CONTROLADO
+            handleAnulacionError(data);
+          }
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onError: (error: any) => {
+          // ❌ ERROR DE RED O SERVIDOR
+          console.error("❌ Error al anular factura:", error);
           
-          setFacturaParaAnular(null);
-          setMotivoAnulacion("");
-          onFacturasActualizadas?.();
-          
-          toast.success("✅ Factura anulada exitosamente");
+          toast.error("❌ Error al anular factura", {
+            id: "anulando-factura",
+            description: error.message || "Ocurrió un error inesperado",
+            duration: 6000,
+          });
         },
       }
     );
+  };
+
+  // 🔥 FUNCIÓN PARA MANEJAR ERRORES DETALLADOS
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleAnulacionError = (data: any) => {
+    const errorType = data.error;
+    const mensaje = data.mensaje;
+
+    console.error("❌ Error de anulación:", {
+      tipo: errorType,
+      mensaje: mensaje,
+      data: data.data,
+    });
+
+    switch (errorType) {
+      case "NOT_FOUND":
+        toast.error("❌ Factura no encontrada", {
+          id: "anulando-factura",
+          description: "La factura no existe en la base de datos",
+          duration: 5000,
+        });
+        break;
+
+      case "ALREADY_VOIDED":
+        toast.warning("⚠️ Factura ya anulada", {
+          id: "anulando-factura",
+          description: `Anulada el ${formatDate(data.data?.fecha_anulacion)}`,
+          duration: 5000,
+        });
+        // Refrescar para mostrar el estado actualizado
+        queryClient.invalidateQueries({ queryKey: ['pago-completo', pagoId] });
+        setFacturaParaAnular(null);
+        setMotivoAnulacion("");
+        break;
+
+      case "COFIDI_ERROR":
+        toast.error("❌ Error en COFIDI", {
+          id: "anulando-factura",
+          description: data.data?.descripcion || mensaje,
+          duration: 7000,
+        });
+        break;
+
+      case "INVALID_USER_ID":
+        toast.error("❌ Usuario inválido", {
+          id: "anulando-factura",
+          description: "El usuario especificado no existe. Recargá la página e intentá de nuevo.",
+          duration: 6000,
+        });
+        break;
+
+      case "DATABASE_ERROR":
+        if (data.warning) {
+          // ⚠️ CASO ESPECIAL: Anulada en COFIDI pero error en BD
+          toast.warning("⚠️ Anulada en COFIDI, error en BD", {
+            id: "anulando-factura",
+            description: "La factura SÍ se anuló en COFIDI pero hubo un problema al actualizar la base de datos. Contactá al administrador.",
+            duration: 10000,
+          });
+        } else {
+          toast.error("❌ Error de base de datos", {
+            id: "anulando-factura",
+            description: data.data?.error_detalle || mensaje,
+            duration: 6000,
+          });
+        }
+        break;
+
+      case "DATABASE_CONNECTION_ERROR":
+        toast.error("❌ Error de conexión a BD", {
+          id: "anulando-factura",
+          description: "No se pudo conectar a la base de datos. Verificá tu conexión.",
+          duration: 6000,
+        });
+        break;
+
+      case "COFIDI_CONNECTION_ERROR":
+        toast.error("❌ Error de conexión a COFIDI", {
+          id: "anulando-factura",
+          description: "No se pudo conectar con el servicio de COFIDI. Intentá de nuevo más tarde.",
+          duration: 6000,
+        });
+        break;
+
+      case "INTERNAL_SERVER_ERROR":
+      default:
+        toast.error("❌ Error inesperado", {
+          id: "anulando-factura",
+          description: mensaje || "Ocurrió un error al procesar la anulación",
+          duration: 6000,
+        });
+        break;
+    }
   };
 
   const facturas = pagoCompleto?.data?.facturas?.listado || [];
@@ -86,7 +235,7 @@ export function ModalFacturasPago({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden" // 🔥 FONDO BLANCO
+        className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 🔹 HEADER */}
@@ -113,7 +262,7 @@ export function ModalFacturasPago({
         </div>
 
         {/* 🔹 CONTENIDO */}
-        <div className="p-6 overflow-y-auto max-h-[calc(90vh-100px)] bg-gray-50"> {/* 🔥 FONDO GRIS CLARO */}
+        <div className="p-6 overflow-y-auto max-h-[calc(90vh-100px)] bg-gray-50">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center py-16">
               <Loader2 className="w-12 h-12 animate-spin text-blue-600 mb-4" />
@@ -280,17 +429,6 @@ export function ModalFacturasPago({
                         Descargar PDF
                       </a>
 
-                      {/* Ver en Portal FEL */}
-                      <a
-                        href={factura.link_fel}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
-                      >
-                        <ExternalLink className="w-4 h-4" />
-                        Ver en Portal FEL
-                      </a>
-
                       {/* Anular Factura */}
                       {factura.status === "ACTIVA" && (
                         <button
@@ -337,7 +475,7 @@ export function ModalFacturasPago({
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-              <Trash2 className="w-7 h-7 text-red-600" />
+              <AlertTriangle className="w-7 h-7 text-red-600" />
               Anular Factura
             </h3>
             <p className="text-gray-700 mb-4">
@@ -351,6 +489,7 @@ export function ModalFacturasPago({
               placeholder="Ej: Error en datos del cliente, Factura duplicada, etc."
               className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-300 rounded-lg text-gray-900 placeholder-gray-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 mb-4"
               rows={4}
+              disabled={anularFactura.isPending}
             />
 
             <div className="flex gap-3">

@@ -321,7 +321,7 @@ export const updateLeadAndCreateOpportunity = async (
 		return {
 			success: false,
 			message: "Lead not found with the provided DPI and status 'new'",
-		};
+		}; 
 	}
 
 	// Normalizar enums
@@ -639,7 +639,7 @@ export async function hasPassedLiveness(dpi: string): Promise<boolean> {
 	const result = await db
 		.select({ livenessValidated: leads.livenessValidated })
 		.from(leads)
-		.where(eq(leads.dpi, dpi))
+		.where(and(eq(leads.dpi, dpi), eq(leads.livenessValidated, true)))
 		.limit(1);
 
 	if (result.length === 0) {

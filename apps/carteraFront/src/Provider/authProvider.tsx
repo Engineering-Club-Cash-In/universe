@@ -7,7 +7,7 @@ const BACK_URL = import.meta.env.VITE_BACK_URL;
 interface User {
   id: number;
   email: string;
-  role: "ADMIN" | "ASESOR";
+  role: "ADMIN" | "ASESOR" | "CONTA";
   asesor_id?: number;
   admin_id?: number;
 }
@@ -26,7 +26,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const navigate = useNavigate(); // 👈 agregado
+  const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
@@ -38,7 +38,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const savedRefresh = localStorage.getItem("refreshToken");
     const savedUser = localStorage.getItem("user");
 
-    if (savedAccess && savedRefresh) {
+    if (savedAccess && savedRefresh && savedUser) {
+      // Primero cargamos el refresh token al estado
+      setRefreshToken(savedRefresh);
+
       fetch(`${BACK_URL}/auth/verify?token=${savedAccess}`)
         .then((res) => {
           if (res.status === 401) throw new Error("Token expirado");
@@ -48,21 +51,54 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           if (data.success) {
             const newToken = data.accessToken || savedAccess;
             setAccessToken(newToken);
+            setUser(JSON.parse(savedUser));
             localStorage.setItem("accessToken", newToken);
-
-            if (savedUser) setUser(JSON.parse(savedUser));
-            else setUser(data.data);
+          } else {
+            throw new Error("Token inválido");
           }
         })
-        .catch(() => {
-          // 👇 si falla verify, intentamos refresh
-          refreshSession();
+        .catch(async () => {
+          // Si falla verify, intentamos refresh
+          try {
+            const res = await fetch(`${BACK_URL}/auth/refresh`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ refreshToken: savedRefresh }),
+            });
+
+            if (!res.ok) throw new Error("Refresh falló");
+
+            const data = await res.json();
+
+            if (data.success) {
+              setAccessToken(data.accessToken);
+              setRefreshToken(data.refreshToken);
+              setUser(JSON.parse(savedUser));
+              localStorage.setItem("accessToken", data.accessToken);
+              localStorage.setItem("refreshToken", data.refreshToken);
+            } else {
+              throw new Error("Refresh inválido");
+            }
+          } catch {
+            // Si el refresh también falla, logout
+            clearSession();
+          }
         })
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
   }, []);
+
+  // 🔹 Función auxiliar para limpiar sesión
+  const clearSession = () => {
+    setUser(null);
+    setAccessToken(null);
+    setRefreshToken(null);
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+  };
 
   // 🔹 Login
   const login = (user: User, access: string, refresh: string) => {
@@ -77,37 +113,40 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   // 🔹 Logout + redirección inmediata
   const logout = () => {
-    setUser(null);
-    setAccessToken(null);
-    setRefreshToken(null);
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
-    localStorage.removeItem("user");
-
-    navigate("/login"); // 👈 redirige
+    clearSession();
+    navigate("/login", { replace: true });
   };
 
   // 🔹 Refrescar sesión
   const refreshSession = async () => {
-    if (!refreshToken) return logout();
+    const currentRefreshToken = refreshToken || localStorage.getItem("refreshToken");
+
+    if (!currentRefreshToken) {
+      logout();
+      return;
+    }
 
     try {
       const res = await fetch(`${BACK_URL}/auth/refresh`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({ refreshToken: currentRefreshToken }),
       });
 
       if (!res.ok) throw new Error("No se pudo refrescar sesión");
+
       const data = await res.json();
 
       if (data.success) {
         setAccessToken(data.accessToken);
+        setRefreshToken(data.refreshToken);
         localStorage.setItem("accessToken", data.accessToken);
+        localStorage.setItem("refreshToken", data.refreshToken);
       } else {
         logout();
       }
-    } catch {
+    } catch (error) {
+      console.error("Error al refrescar sesión:", error);
       logout();
     }
   };

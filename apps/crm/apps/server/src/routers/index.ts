@@ -102,7 +102,7 @@ export const appRouter = {
 	getUsuariosCobros: cobrosRouter.getUsuariosCobros,
 	getHistorialPagos: cobrosRouter.getHistorialPagos,
 	getRecuperacionVehiculo: cobrosRouter.getRecuperacionVehiculo,
-	getTodosLosContratos: cobrosRouter.getTodosLosContratos,
+	getTodosLosCreditos: cobrosRouter.getTodosLosCreditos,
 	getDetallesContrato: cobrosRouter.getDetallesContrato,
 	getDetallesCreditoCarteraBack: cobrosRouter.getDetallesCreditoCarteraBack,
 	// Cartera-back integration endpoints

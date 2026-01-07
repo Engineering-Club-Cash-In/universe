@@ -1,5 +1,5 @@
 # Imagen base de Bun
-FROM oven/bun:1 AS base
+FROM docker.io/oven/bun:1 AS base
 WORKDIR /usr/src/app
 
 # =========================

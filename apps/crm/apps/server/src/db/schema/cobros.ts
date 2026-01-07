@@ -123,7 +123,6 @@ export const cuotasPago = pgTable("cuotas_pago", {
 export const casosCobros = pgTable("casos_cobros", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	contratoId: uuid("contrato_id")
-		.notNull()
 		.references(() => contratosFinanciamiento.id),
 
 	// Referencia a cartera-back (nullable para compatibilidad con datos legacy)

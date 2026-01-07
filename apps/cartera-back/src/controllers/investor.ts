@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { db } from "../database/index";
 import {
+  bancos,
   creditos,
   creditos_inversionistas,
   cuotas_credito,
@@ -15,87 +16,198 @@ import { eq, and, sql, inArray, ilike, like, desc, count } from "drizzle-orm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 export const insertInvestor = async ({ body, set }: any) => {
   try {
-    let inversionistasToUpsert = [];
+    const inversionistasToUpsert = Array.isArray(body) ? body : [body];
 
-    // Permitir un solo objeto o un arreglo
-    if (Array.isArray(body)) {
-      inversionistasToUpsert = body;
-    } else if (typeof body === "object") {
-      inversionistasToUpsert = [body];
-    }
-
-    // Validación mínima: nombre y emite_factura son obligatorios
-    const isValid = inversionistasToUpsert.every(
-      (inv) => inv.nombre && typeof inv.emite_factura !== "undefined"
-    );
-    if (!isValid || inversionistasToUpsert.length === 0) {
+    if (inversionistasToUpsert.length === 0) {
       set.status = 400;
-      return {
-        message: "Todos los inversionistas deben tener nombre y emite_factura.",
-      };
+      return { message: "No se proporcionaron inversionistas para procesar." };
     }
 
-    // Mapear reinversion (boolean) a tipo_reinversion (enum)
-    const mapearTipoReinversion = (
-      reinversion: boolean
-    ): "reinversion_capital" | "sin_reinversion" => {
-      return reinversion ? "reinversion_capital" : "sin_reinversion";
-    };
+    // 🔥 Validación flexible
+    const errores: string[] = [];
+    
+    for (let index = 0; index < inversionistasToUpsert.length; index++) {
+      const inv = inversionistasToUpsert[index];
+      
+      // 🔥 Debe venir DPI o nombre (al menos uno)
+      if (!inv.dpi && !inv.nombre?.trim()) {
+        errores.push(`Inversionista #${index + 1}: debe proporcionar DPI o nombre`);
+      }
+      // 🔥 Validar DPI si viene
+      if (inv.dpi && (typeof inv.dpi !== "number" || inv.dpi < 0)) {
+        errores.push(`Inversionista #${index + 1}: DPI inválido`);
+      }
+      // 🔥 Validar email si viene
+      if (inv.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(inv.email)) {
+        errores.push(`Inversionista #${index + 1}: email inválido`);
+      }
+      // 🔥 Validar emite_factura si viene
+      if (inv.emite_factura !== undefined && typeof inv.emite_factura !== "boolean") {
+        errores.push(`Inversionista #${index + 1}: emite_factura debe ser boolean`);
+      }
+      
+      // 🔥 Si viene banco (nombre o id), resolverlo
+      if (inv.banco) {
+        let banco_id = null;
+        
+        if (typeof inv.banco === "number") {
+          const bancoExiste = await db
+            .select()
+            .from(bancos)
+            .where(eq(bancos.banco_id, inv.banco))
+            .limit(1);
+          
+          if (bancoExiste.length === 0) {
+            errores.push(`Inversionista #${index + 1}: banco con ID ${inv.banco} no existe`);
+          } else {
+            banco_id = inv.banco;
+          }
+        } 
+        else if (typeof inv.banco === "string") {
+          const nombreBanco = inv.banco.trim();
+          
+          const bancosCoincidentes = await db
+            .select()
+            .from(bancos)
+            .where(ilike(bancos.nombre, `%${nombreBanco}%`))
+            .limit(5);
+          
+          if (bancosCoincidentes.length === 0) {
+            errores.push(`Inversionista #${index + 1}: no se encontró banco que coincida con "${nombreBanco}"`);
+          } else if (bancosCoincidentes.length === 1) {
+            banco_id = bancosCoincidentes[0].banco_id;
+          } else {
+            const matchExacto = bancosCoincidentes.find(
+              b => b.nombre.toLowerCase() === nombreBanco.toLowerCase()
+            );
+            
+            banco_id = matchExacto ? matchExacto.banco_id : bancosCoincidentes[0].banco_id;
+          }
+        } else {
+          errores.push(`Inversionista #${index + 1}: banco debe ser ID (number) o nombre (string)`);
+        }
+        
+        inv._banco_id = banco_id;
+      }
+    }
 
-    // UPSERT: Insert con onConflictDoUpdate
-    const upserted = await db
-      .insert(inversionistas)
-      .values(
-        inversionistasToUpsert.map(
-          ({
-            nombre,
-            dpi = null, // ← AGREGAMOS dpi
-            emite_factura,
-            reinversion = false,
-            banco = null,
-            tipo_cuenta = null,
-            numero_cuenta = null,
-          }) => ({
-            nombre,
-            dpi, // ← INCLUIMOS en el insert
-            emite_factura,
-            tipo_reinversion: mapearTipoReinversion(reinversion),
-            banco,
-            tipo_cuenta,
-            numero_cuenta,
-          })
-        )
-      )
-      .onConflictDoUpdate({
-        target: inversionistas.nombre,
-        set: {
-          dpi: sql`EXCLUDED.dpi`, // ← ACTUALIZAMOS en conflicto
-          emite_factura: sql`EXCLUDED.emite_factura`,
-          tipo_reinversion: sql`EXCLUDED.tipo_reinversion`,
-          banco: sql`EXCLUDED.banco`,
-          tipo_cuenta: sql`EXCLUDED.tipo_cuenta`,
-          numero_cuenta: sql`EXCLUDED.numero_cuenta`,
-        },
-      })
-      .returning();
+    if (errores.length > 0) {
+      set.status = 400;
+      return { message: "Errores de validación", errores };
+    }
+
+    const resultados: any[] = [];
+
+    // 🔥 PROCESAR UNO POR UNO para manejar INSERT vs UPDATE
+    for (const inv of inversionistasToUpsert) {
+      // 🔥 Verificar si ya existe
+      let existente = null;
+      
+      if (inv.dpi) {
+        // Buscar por DPI
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.dpi, inv.dpi))
+          .limit(1);
+        existente = result[0] || null;
+      } else if (inv.nombre?.trim()) {
+        // Buscar por nombre
+        const result = await db
+          .select()
+          .from(inversionistas)
+          .where(eq(inversionistas.nombre, inv.nombre.trim()))
+          .limit(1);
+        existente = result[0] || null;
+      }
+
+      if (existente) {
+        // 🔥 YA EXISTE → UPDATE solo los campos que vienen
+        const updateData: any = {};
+        
+        if (inv.nombre?.trim()) updateData.nombre = inv.nombre.trim();
+        if (inv.email?.trim()) updateData.email = inv.email.trim().toLowerCase();
+        if (inv.emite_factura !== undefined) updateData.emite_factura = inv.emite_factura;
+        if (inv.tipo_reinversion?.trim()) updateData.tipo_reinversion = inv.tipo_reinversion.trim();
+        if (inv._banco_id) updateData.banco_id = inv._banco_id;
+        if (inv.tipo_cuenta?.trim()) updateData.tipo_cuenta = inv.tipo_cuenta.trim();
+        if (inv.numero_cuenta?.trim()) updateData.numero_cuenta = inv.numero_cuenta.trim();
+        if (inv.dpi) updateData.dpi = inv.dpi;
+
+        const [updated] = await db
+          .update(inversionistas)
+          .set(updateData)
+          .where(eq(inversionistas.inversionista_id, existente.inversionista_id))
+          .returning();
+        
+        resultados.push(updated);
+      } else {
+        // 🔥 NO EXISTE → INSERT (requiere nombre obligatorio)
+        const nombre = inv.nombre?.trim();
+        
+        if (!nombre) {
+          // Si no hay nombre, saltamos este registro
+          console.warn(`⚠️ Inversionista sin nombre para INSERT:`, inv);
+          continue;
+        }
+
+        const insertData = {
+          nombre,
+          dpi: inv.dpi || null,
+          email: inv.email?.trim().toLowerCase() || null,
+          emite_factura: inv.emite_factura ?? false,
+          tipo_reinversion: inv.tipo_reinversion?.trim() || "sin_reinversion",
+          banco_id: inv._banco_id || null,
+          tipo_cuenta: inv.tipo_cuenta?.trim() || null,
+          numero_cuenta: inv.numero_cuenta?.trim() || null,
+        };
+
+        const [inserted] = await db
+          .insert(inversionistas)
+          .values(insertData)
+          .returning();
+        
+        resultados.push(inserted);
+      }
+    }
 
     set.status = 201;
     return {
-      message: `Successfully upserted ${upserted.length} investors`,
-      inserted: upserted.filter((inv: any) => inv.inversionista_id).length,
-      updated: upserted.length,
-      data: upserted,
+      message: `Procesados exitosamente ${resultados.length} inversionista(s)`,
+      data: resultados,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error upserting investors:", error);
+
+    if (error.code === "23505") {
+      const detalle = error.detail || "";
+      if (detalle.includes("dpi")) {
+        set.status = 409;
+        return {
+          message: "Ya existe un inversionista con ese DPI",
+          error: "duplicate_dpi",
+        };
+      }
+      if (detalle.includes("nombre")) {
+        set.status = 409;
+        return {
+          message: "Ya existe un inversionista con ese nombre",
+          error: "duplicate_nombre",
+        };
+      }
+    }
+
     set.status = 500;
-    return { message: "Error upserting investors", error: String(error) };
+    return {
+      message: "Error al procesar inversionistas",
+      error: error.message || String(error),
+    };
   }
 };
 // GET: Obtener inversionistas (uno o todos)
 export const getInvestors = async ({ query, set }: any) => {
   try {
-    // Si quieres buscar por ID
+    // Buscar por ID
     if (query.id) {
       const result = await db
         .select()
@@ -107,7 +219,25 @@ export const getInvestors = async ({ query, set }: any) => {
         : { message: "Inversionista no encontrado" };
     }
 
-    // Si quieres buscar por nombre
+    // Buscar por DPI
+    if (query.dpi) {
+      const dpiNumber = parseInt(query.dpi);
+      if (isNaN(dpiNumber)) {
+        set.status = 400;
+        return { message: "DPI debe ser un número válido" };
+      }
+      
+      const result = await db
+        .select()
+        .from(inversionistas)
+        .where(eq(inversionistas.dpi, dpiNumber));
+      set.status = result.length ? 200 : 404;
+      return result.length
+        ? result[0]
+        : { message: "Inversionista no encontrado con ese DPI" };
+    }
+
+    // Buscar por nombre
     if (query.nombre) {
       const result = await db
         .select()
@@ -124,6 +254,7 @@ export const getInvestors = async ({ query, set }: any) => {
     set.status = 200;
     return all;
   } catch (error) {
+    console.error("Error al consultar inversionistas:", error);
     set.status = 500;
     return {
       message: "Error al consultar inversionistas",
@@ -131,7 +262,6 @@ export const getInvestors = async ({ query, set }: any) => {
     };
   }
 };
-
 import Big from "big.js";
 
 export const getInvestorsWithCredits = async () => {
@@ -433,14 +563,14 @@ export async function processAndReplaceCreditInvestorsReverse(
  * y cada resumen individual incluye su subtotal global.
  */
 export async function resumeInvestor(
-  investorId?: number, // ← Ahora OPCIONAL
+  investorId?: number,
   page = 1,
   perPage = 10,
   numeroCreditoSifco?: string,
   nombreUsuario?: string,
-  dpi?: string, // 🆕 Filtrar por DPI
-  incluirLiquidados = false, // 🆕 true = TODOS los pagos, false = solo NO_LIQUIDADO
-  numeroCuota?: number // 🆕 Filtrar por número de cuota
+  dpi?: string,
+  incluirLiquidados = false,
+  numeroCuota?: number
 ) {
   console.log(
     "resumeInvestor for",
@@ -467,18 +597,21 @@ export async function resumeInvestor(
     return { inversionistas: [], page, perPage, totalItems: 0, totalPages: 0 };
   }
 
+  // 🔥 CAMBIO: Ahora hacemos JOIN con la tabla bancos
   const listaInversionistas = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
-      banco: inversionistas.banco,
+      banco_id: inversionistas.banco_id, // 🔥 ID del banco
+      banco_nombre: bancos.nombre, // 🔥 Nombre del banco desde la tabla
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
       dpi: inversionistas.dpi,
     })
     .from(inversionistas)
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id)) // 🔥 JOIN con bancos
     .where(and(...queryConditions))
     .limit(1);
 
@@ -568,8 +701,8 @@ export async function resumeInvestor(
         total_cuota: new Big(0),
         total_monto_aportado: new Big(0),
         totalAbonoGeneralInteres: new Big(0),
-        total_capital_creditos: new Big(0), // 🆕 Total del capital de los créditos
-        total_capital_actual: new Big(0), // 🆕 Capital restante (capital - abonos)
+        total_capital_creditos: new Big(0),
+        total_capital_actual: new Big(0),
       };
 
       // Procesar créditos del inversionista
@@ -628,7 +761,7 @@ export async function resumeInvestor(
               abonoGeneralInteres: pagos_credito.abono_interes,
               cuota: cuotas_credito.numero_cuota,
               estado_liquidacion:
-                pagos_credito_inversionistas.estado_liquidacion, // 🆕 Para mostrar el estado
+                pagos_credito_inversionistas.estado_liquidacion,
             })
             .from(pagos_credito_inversionistas)
             .innerJoin(
@@ -662,7 +795,6 @@ export async function resumeInvestor(
           }
 
           // 🧮 Detalle de pagos
-          // 🧮 Detalle de pagos
           const pagos_detalle = pagos
             .sort((a, b) => {
               if (!a.fecha_pago) return 1;
@@ -682,10 +814,8 @@ export async function resumeInvestor(
 
               // 🆕 CORRECCIÓN: Cálculo según emite_factura
               if (inv.emite_factura) {
-                // SI emite factura: intereses + IVA, ISR = 0
                 abonoGeneralInteres = abono_interes.plus(abono_iva);
               } else {
-                // NO emite factura: intereses - ISR, pero IVA se mantiene en su valor
                 abonoGeneralInteres = abono_interes.minus(isr);
               }
 
@@ -723,13 +853,10 @@ export async function resumeInvestor(
                 totalAbonoGeneralInteres.plus(abonoGeneralInteres);
               total_abono_capital = total_abono_capital.plus(abono_capital);
               total_abono_interes = total_abono_interes.plus(abono_interes);
-
-              // 🆕 SIEMPRE acumular IVA (mostrar la cantidad)
               total_abono_iva = total_abono_iva.plus(abono_iva);
 
-              // 🆕 ISR: si emite factura = 0, si no emite = acumular
               if (inv.emite_factura) {
-                // ISR se queda en 0, no se suma nada
+                // ISR se queda en 0
               } else {
                 total_isr = total_isr.plus(isr);
               }
@@ -742,8 +869,8 @@ export async function resumeInvestor(
                   : null,
                 abono_capital: Number(abono_capital.toString()),
                 abono_interes: Number(abono_interes.toString()),
-                abono_iva: Number(abono_iva.toString()), // 🆕 SIEMPRE mostrar IVA
-                isr: inv.emite_factura ? 0 : Number(isr.toString()), // 🆕 ISR = 0 si emite factura
+                abono_iva: Number(abono_iva.toString()),
+                isr: inv.emite_factura ? 0 : Number(isr.toString()),
                 porcentaje_inversor: pago.porcentaje_participacion,
                 cuota_inversor: Number(cuota_inversor.toString()),
                 cuota: cuota,
@@ -776,9 +903,9 @@ export async function resumeInvestor(
           subtotal.totalAbonoGeneralInteres =
             subtotal.totalAbonoGeneralInteres.plus(totalAbonoGeneralInteres);
           subtotal.total_capital_creditos =
-            subtotal.total_capital_creditos.plus(capital_credito); // 🆕
+            subtotal.total_capital_creditos.plus(capital_credito);
           subtotal.total_capital_actual =
-            subtotal.total_capital_actual.plus(capital_actual); // 🆕
+            subtotal.total_capital_actual.plus(capital_actual);
 
           return {
             credito_id: c.credito_id,
@@ -786,7 +913,7 @@ export async function resumeInvestor(
             nombre_usuario: credito?.nombre_usuario,
             nit_usuario: credito?.nit_usuario,
             capital: credito?.capital,
-            capital_actual: Number(capital_actual.toString()), // 🆕 Capital restante
+            capital_actual: Number(capital_actual.toString()),
             porcentaje_interes: credito?.porcentaje_interes,
             cuota_interes: credito?.cuota_interes,
             iva12: credito?.iva12,
@@ -811,11 +938,12 @@ export async function resumeInvestor(
         inversionista_id: inv.inversionista_id,
         nombre_inversionista: inv.inversionista,
         emite_factura: inv.emite_factura,
-        banco: inv.banco,
+        banco_id: inv.banco_id, // 🔥 ID del banco
+        banco: inv.banco_nombre, // 🔥 Nombre del banco
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
         re_inversion: inv.reinversion,
-        dpi: inv.dpi, // 🆕
+        dpi: inv.dpi,
         creditos: creditosData,
         subtotal: {
           total_abono_capital: Number(subtotal.total_abono_capital.toString()),
@@ -831,10 +959,10 @@ export async function resumeInvestor(
           ),
           total_capital_creditos: Number(
             subtotal.total_capital_creditos.toString()
-          ), // 🆕
+          ),
           total_capital_actual: Number(
             subtotal.total_capital_actual.toString()
-          ), // 🆕
+          ),
         },
       };
     })
@@ -1458,7 +1586,7 @@ export const findOrCreateInvestor = async (
     .values({
       nombre, // Usar el nombre como está definido en el schema
       emite_factura, // Usar emite_factura como está definido en el schema
-      banco: null,
+      banco_id: null,
       tipo_cuenta: null,
       numero_cuenta: null,
     })
@@ -1559,7 +1687,7 @@ interface InversionistaResumen {
   total_a_recibir: number;
 }
 
- export async function resumenGlobalInversionistas(
+export async function resumenGlobalInversionistas(
   inversionistaId?: number,
   mes?: number,
   anio?: number,
@@ -1588,14 +1716,15 @@ interface InversionistaResumen {
     );
   }
 
-  // 📊 Query agregada con la NUEVA LÓGICA
+  // 📊 Query agregada con la NUEVA LÓGICA + JOIN con bancos
   const result = await db
     .select({
       inversionista_id: inversionistas.inversionista_id,
       nombre: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
-      banco: inversionistas.banco,
+      banco_id: inversionistas.banco_id, // 🔥 ID del banco
+      banco_nombre: bancos.nombre, // 🔥 Nombre del banco desde la tabla
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
 
@@ -1627,6 +1756,10 @@ interface InversionistaResumen {
     })
     .from(inversionistas)
     .leftJoin(
+      bancos, 
+      eq(inversionistas.banco_id, bancos.banco_id) // 🔥 JOIN con tabla bancos
+    )
+    .leftJoin(
       pagos_credito_inversionistas,
       eq(
         inversionistas.inversionista_id,
@@ -1639,7 +1772,8 @@ interface InversionistaResumen {
       inversionistas.nombre,
       inversionistas.emite_factura,
       inversionistas.tipo_reinversion,
-      inversionistas.banco,
+      inversionistas.banco_id, // 🔥 Ahora agrupamos por banco_id
+      bancos.nombre, // 🔥 Y también por banco.nombre
       inversionistas.tipo_cuenta,
       inversionistas.numero_cuenta
     );
@@ -1681,7 +1815,7 @@ interface InversionistaResumen {
         inv.nombre,
         inv.emite_factura ? "Sí" : "No",
         inv.reinversion || "sin_reinversion",
-        inv.banco ?? "",
+        inv.banco_nombre ?? "", // 🔥 Ahora usamos banco_nombre
         inv.tipo_cuenta ?? "",
         inv.numero_cuenta ?? "",
         Number(inv.total_abono_capital).toFixed(2),
@@ -1753,7 +1887,21 @@ interface InversionistaResumen {
     };
   }
 
-  return result;
+  // Map result to match InversionistaResumen interface
+  return result.map((inv) => ({
+    inversionista_id: inv.inversionista_id,
+    nombre: inv.nombre,
+    emite_factura: inv.emite_factura,
+    reinversion: inv.reinversion,
+    banco: inv.banco_nombre,
+    tipo_cuenta: inv.tipo_cuenta,
+    numero_cuenta: inv.numero_cuenta,
+    total_abono_capital: inv.total_abono_capital,
+    total_abono_interes: inv.total_abono_interes,
+    total_abono_iva: inv.total_abono_iva,
+    total_isr: inv.total_isr,
+    total_a_recibir: inv.total_a_recibir,
+  }));
 }
 /**
  * Obtiene liquidaciones con sus pagos

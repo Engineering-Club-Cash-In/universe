@@ -129,7 +129,7 @@ export const getPersonalDocuments = async (
   token: string | null
 ): Promise<Document[]> => {
   const response = await fetch(
-    `${crmURL}/api/portal/lead/documents?email=${encodeURIComponent(email)}`,
+    `${crmURL}/api/portal/lead/documents?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       credentials: "include",
       headers: {
@@ -157,7 +157,7 @@ export const getContracts = async (
   token: string | null
 ): Promise<Contract[]> => {
   const response = await fetch(
-    `${crmURL}/api/portal/lead/contracts?email=${encodeURIComponent(email)}`,
+    `${crmURL}/api/portal/lead/contracts?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
     {
       credentials: "include",
       headers: {

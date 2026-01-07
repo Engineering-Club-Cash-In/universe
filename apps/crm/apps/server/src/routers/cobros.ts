@@ -14,7 +14,7 @@ import {
 	metodoContactoEnum,
 	recuperacionesVehiculo,
 } from "../db/schema/cobros";
-import { clients } from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { adminProcedure, cobrosProcedure } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
@@ -71,50 +71,52 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	anio: number;
 	page?: number;
 	perPage?: number;
+	cuotasAtrasadas?: number;
+	estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
+	nombre_usuario?:string;
+	numero_credito_sifco?:string;
 }) {
-	const estados: Array<
-		"ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO"
-	> = ["ACTIVO", "CANCELADO", "INCOBRABLE", "PENDIENTE_CANCELACION", "MOROSO"];
+	const estado = params.estado || "ACTIVO";
 
-	console.log(
-		`[Cobros] Obteniendo créditos de todos los estados: ${estados.join(", ")}`,
-	);
+	console.log(`[Cobros] Obteniendo créditos del estado: ${estado}`, {
+		cuotasAtrasadas: params.cuotasAtrasadas,
+	});
 
-	// Hacer llamadas en paralelo para todos los estados
-	const responses = await Promise.all(
-		estados.map((estado) =>
-			carteraBackClient
-				.getAllCreditos({
-					...params,
-					estado,
-				})
-				.catch((error) => {
-					console.error(`[Cobros] Error obteniendo créditos ${estado}:`, error);
-					// Retornar respuesta vacía si falla
-					return {
-						data: [],
-						page: params.page || 1,
-						perPage: params.perPage || 1000,
-						totalCount: 0,
-						totalPages: 0,
-					};
-				}),
-		),
-	);
-
-	// Combinar todos los resultados
-	const todosLosCreditos = responses.flatMap((response) => response.data);
-
-	console.log(
-		`[Cobros] Total de créditos obtenidos: ${todosLosCreditos.length}`,
-	);
+	const response = await carteraBackClient
+		.getAllCreditos({
+			mes: params.mes,
+			anio: params.anio,
+			page: params.page,
+			perPage: params.perPage,
+			estado: estado,
+			...(params.cuotasAtrasadas !== undefined && {
+				cuotas_atrasadas: params.cuotasAtrasadas,
+			}),
+			...(params.nombre_usuario !== undefined && params.nombre_usuario !== "" && {
+				nombre_usuario: params.nombre_usuario,
+			}),
+			...(params.numero_credito_sifco !== undefined && params.numero_credito_sifco !== "" && {
+				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+		})
+		.catch((error) => {
+			console.error(`[Cobros] Error obteniendo créditos:`, error);
+			// Retornar respuesta vacía si falla
+			return {
+				data: [],
+				page: params.page || 1,
+				perPage: params.perPage || 1000,
+				totalCount: 0,
+				totalPages: 0,
+			};
+		});
 
 	return {
-		data: todosLosCreditos,
-		page: params.page || 1,
-		perPage: params.perPage || 1000,
-		totalCount: todosLosCreditos.length,
-		totalPages: Math.ceil(todosLosCreditos.length / (params.perPage || 1000)),
+		data: response.data,
+		page: response.page,
+		perPage: response.perPage,
+		totalCount: response.totalCount,
+		totalPages: response.totalPages,
 	};
 }
 
@@ -311,34 +313,82 @@ export const cobrosRouter = {
 	}),
 
 	// Obtener todos los contratos con sus estados (incluyendo al día e incobrables)
-	getTodosLosContratos: cobrosProcedure
+	getTodosLosCreditos: cobrosProcedure
 		.input(
 			z.object({
-				limit: z.number().default(50),
-				offset: z.number().default(0),
+				limit: z.number().optional(),
+				offset: z.number().optional(),
+				estadoMora: z.string().optional(),
+				nombreUsuario: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
 			// Si la integración con Cartera-Back está habilitada, obtener datos directamente
 			if (isCarteraBackEnabled()) {
-				try {
-					// Usar mes=0 para obtener TODOS los créditos sin filtrar por mes
-					const mes = 0;
-					const anio = new Date().getFullYear();
+			try {
+				// Usar mes=0 para obtener TODOS los créditos sin filtrar por mes
+				const mes = 0;
+				const anio = new Date().getFullYear();
 
-					console.log(
-						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}`,
-					);
+				// Mapear filtro de estadoMora a parámetros de cartera-back
+				let cuotasAtrasadas: number | undefined;
+				let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
+				let nombre_usuario: string | undefined = input.nombreUsuario ?? undefined;
 
-					// Obtener todos los créditos de Cartera-Back de todos los estados
-					const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-						mes,
-						anio,
-						page: Math.floor(input.offset / input.limit) + 1,
-						perPage: input.limit,
-					});
+				if (input.estadoMora) {
+					switch (input.estadoMora) {
+						case "al_dia":
+							cuotasAtrasadas = 0;
+							estadoCartera = "ACTIVO";
+							break;
+						case "mora_30":
+							cuotasAtrasadas = 1;
+							estadoCartera = "ACTIVO";
+							break;
+						case "mora_60":
+							cuotasAtrasadas = 2;
+							estadoCartera = "ACTIVO";
+							break;
+						case "mora_90":
+							cuotasAtrasadas = 3;
+							estadoCartera = "ACTIVO";
+							break;
+						case "mora_120":
+							// Más de 3 cuotas atrasadas (120+ días)
+							cuotasAtrasadas = 4;
+							estadoCartera = "ACTIVO";
+							break;
+						case "incobrable":
+							// Solo cambiar el estado, sin filtrar por cuotas
+							estadoCartera = "INCOBRABLE";
+							break;
+						case "completado":
+							// Solo cambiar el estado, sin filtrar por cuotas
+							estadoCartera = "CANCELADO";
+							break;
+						default:
+							// Sin filtro, mantener ACTIVO como predeterminado
+							estadoCartera = "ACTIVO";
+					}
+				} else {
+					// Si no hay filtro, usar ACTIVO por defecto
+					estadoCartera = "ACTIVO";
+				}
 
-					// Validar que la respuesta tenga la estructura esperada
+				console.log(
+					`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}`,
+				);
+
+				// Obtener todos los créditos de Cartera-Back con los filtros
+				const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+					mes,
+					anio,
+					page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
+					perPage: input.limit || 50,
+					cuotasAtrasadas,
+					estado: estadoCartera,
+					nombre_usuario
+				});					// Validar que la respuesta tenga la estructura esperada
 					if (!creditosResponse || !creditosResponse.data) {
 						console.error(
 							"[Cobros] Respuesta inválida de Cartera-Back:",
@@ -382,13 +432,42 @@ export const cobrosRouter = {
 							else if (statusCredit === "INCOBRABLE")
 								estadoContrato = "incobrable";
 
+							// Buscar la oportunidad por número SIFCO para obtener datos del vehículo
+							const numeroSifco = credito.creditos.numero_credito_sifco;
+							let vehiculoMarca = "-";
+							let vehiculoModelo = "-";
+							let vehiculoYear: number | null = null;
+							let vehiculoPlaca = numeroSifco;
+
+							if (numeroSifco) {
+								const [oportunidad] = await db
+									.select({
+										vehicleId: opportunities.vehicleId,
+										marca: vehicles.make,
+										modelo: vehicles.model,
+										year: vehicles.year,
+										placa: vehicles.licensePlate,
+									})
+									.from(opportunities)
+									.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+									.where(eq(opportunities.numeroSifco, numeroSifco))
+									.limit(1);
+
+								if (oportunidad?.vehicleId) {
+									vehiculoMarca = oportunidad.marca || "-";
+									vehiculoModelo = oportunidad.modelo || "-";
+									vehiculoYear = oportunidad.year;
+									vehiculoPlaca = oportunidad.placa || numeroSifco;
+								}
+							}
+
 							return {
 								contratoId: credito.creditos.credito_id.toString(),
 								clienteNombre: credito.usuarios.nombre,
-								vehiculoMarca: "-",
-								vehiculoModelo: "-",
-								vehiculoYear: null,
-								vehiculoPlaca: credito.creditos.numero_credito_sifco,
+								vehiculoMarca,
+								vehiculoModelo,
+								vehiculoYear,
+								vehiculoPlaca,
 								estadoContrato,
 								montoFinanciado: credito.creditos.capital.toString(),
 								cuotaMensual: credito.creditos.cuota.toString(),
@@ -402,11 +481,22 @@ export const cobrosRouter = {
 								telefonoPrincipal: null,
 								proximoContacto: null,
 								responsableNombre: null,
+								numeroCredito: numeroSifco || null,
 							};
 						}),
 					);
 
-					return contratos;
+					console.log(
+						`[Cobros] Mapeados ${contratos.length} contratos para el frontend`,
+					)
+
+					return {
+						data: contratos,
+						total: creditosResponse.totalCount,
+						page: creditosResponse.page,
+						perPage: creditosResponse.perPage,
+						totalPages: creditosResponse.totalPages,
+					};
 				} catch (error) {
 					console.error(
 						"[Cobros] Error obteniendo datos de Cartera-Back:",
@@ -416,42 +506,14 @@ export const cobrosRouter = {
 				}
 			}
 
-			// Fallback: Obtener datos de la base de datos local
-			const contratos = await db
-				.select({
-					contratoId: contratosFinanciamiento.id,
-					clienteNombre: clients.contactPerson,
-					vehiculoMarca: vehicles.make,
-					vehiculoModelo: vehicles.model,
-					vehiculoYear: vehicles.year,
-					vehiculoPlaca: vehicles.licensePlate,
-					estadoContrato: contratosFinanciamiento.estado,
-					montoFinanciado: contratosFinanciamiento.montoFinanciado,
-					cuotaMensual: contratosFinanciamiento.cuotaMensual,
-					diaPagoMensual: contratosFinanciamiento.diaPagoMensual,
-					responsableCobros: contratosFinanciamiento.responsableCobros,
-					// Datos del caso de cobros (si existe)
-					casoCobroId: casosCobros.id,
-					estadoMora: casosCobros.estadoMora,
-					montoEnMora: casosCobros.montoEnMora,
-					diasMoraMaximo: casosCobros.diasMoraMaximo,
-					cuotasVencidas: casosCobros.cuotasVencidas,
-					telefonoPrincipal: casosCobros.telefonoPrincipal,
-					proximoContacto: casosCobros.proximoContacto,
-					responsableNombre: user.name,
-				})
-				.from(contratosFinanciamiento)
-				.leftJoin(clients, eq(contratosFinanciamiento.clientId, clients.id))
-				.leftJoin(vehicles, eq(contratosFinanciamiento.vehicleId, vehicles.id))
-				.leftJoin(
-					casosCobros,
-					eq(contratosFinanciamiento.id, casosCobros.contratoId),
-				)
-				.leftJoin(user, eq(contratosFinanciamiento.responsableCobros, user.id))
-				.limit(input.limit)
-				.offset(input.offset);
 
-			return contratos;
+			return {
+				data: [],
+				total: 0,
+				page: 0,
+				perPage: 0,
+				totalPages: 0
+			};
 		}),
 
 	// Obtener casos de cobros con filtros (solo casos activos con mora)
@@ -664,6 +726,8 @@ export const cobrosRouter = {
 					throw new Error("No tienes permiso para acceder a este caso");
 				}
 			}
+			console.log("Obteniendo historial de contactos para el caso:", input.casoCobroId);
+			console.log("userRole:", context.userRole, "userId:", context.userId); 
 
 			const contactos = await db
 				.select({
@@ -834,39 +898,12 @@ export const cobrosRouter = {
 
 	// Obtener historial de cuotas de pago de un contrato
 	getHistorialPagos: cobrosProcedure
-		.input(z.object({ contratoId: z.string().uuid() }))
+		.input(z.object({ numeroSifco: z.string() }))
 		.handler(async ({ input, context }) => {
 			try {
-				console.log("📋 getHistorialPagos - Inicio", {
-					contratoId: input.contratoId,
-					userId: context.userId,
-					userRole: context.userRole,
-				});
 
-				// Verificar que el contrato existe
-				console.log(
-					"🔍 Verificando existencia del contrato:",
-					input.contratoId,
-				);
-				const contrato = await db
-					.select({
-						id: contratosFinanciamiento.id,
-						responsableCobros: contratosFinanciamiento.responsableCobros,
-						estado: contratosFinanciamiento.estado,
-					})
-					.from(contratosFinanciamiento)
-					.where(eq(contratosFinanciamiento.id, input.contratoId))
-					.limit(1);
-
-				console.log("✅ Resultado búsqueda contrato:", {
-					encontrado: contrato.length > 0,
-					estado: contrato[0]?.estado,
-					responsable: contrato[0]?.responsableCobros,
-				});
-
-				if (!contrato.length) {
-					console.error("❌ Contrato no encontrado");
-					throw new Error("Contrato no encontrado");
+				if (!input.numeroSifco) {
+					throw new Error("El número SIFCO es requerido");
 				}
 
 				// TODO: Cambiar a verificación por caso de cobros cuando ya no haya datos importados sin responsable
@@ -891,18 +928,7 @@ export const cobrosRouter = {
 
 				// Verificar si el contrato tiene referencia a cartera-back
 				if (isCarteraBackEnabled()) {
-					const reference = await db
-						.select()
-						.from(carteraBackReferences)
-						.where(
-							eq(
-								carteraBackReferences.contratoFinanciamientoId,
-								input.contratoId,
-							),
-						)
-						.limit(1);
-
-					if (reference.length > 0) {
+					
 						console.log(
 							"🔗 Contrato vinculado a cartera-back, obteniendo cuotas de allá",
 						);
@@ -910,7 +936,7 @@ export const cobrosRouter = {
 						try {
 							// Obtener crédito completo de cartera-back
 							const creditoCompleto = await carteraBackClient.getCredito(
-								reference[0].numeroCreditoSifco,
+								input.numeroSifco,
 							);
 
 							// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
@@ -931,12 +957,12 @@ export const cobrosRouter = {
 									? creditoCompleto.credito.cuota
 									: null,
 								montoMora: "0", // TODO: calcular mora real
-								estadoMora: cuota.pagado ? "pagado" : "mora_30",
+								estadoMora: cuota.pagado ? "pagado" : "pendiente",
 								diasMora: 0,
 							}));
 						} catch (error) {
 							console.warn(
-								`⚠️ No se pudieron obtener cuotas de cartera-back para ${reference[0].numeroCreditoSifco}:`,
+								`⚠️ No se pudieron obtener cuotas de cartera-back para el contrato ${input.numeroSifco}:`,
 								error instanceof Error ? error.message : error,
 							);
 							console.log(
@@ -944,37 +970,14 @@ export const cobrosRouter = {
 							);
 							// Continuar con DB local más abajo
 						}
-					}
+					
 				}
 
-				// Si no hay referencia o cartera-back no está habilitado, usar DB local
-				console.log("📊 Obteniendo cuotas de pago desde DB local...");
-				const cuotas = await db
-					.select({
-						id: cuotasPago.id,
-						numeroCuota: cuotasPago.numeroCuota,
-						fechaVencimiento: cuotasPago.fechaVencimiento,
-						montoCuota: cuotasPago.montoCuota,
-						fechaPago: cuotasPago.fechaPago,
-						montoPagado: cuotasPago.montoPagado,
-						montoMora: cuotasPago.montoMora,
-						estadoMora: cuotasPago.estadoMora,
-						diasMora: cuotasPago.diasMora,
-					})
-					.from(cuotasPago)
-					.where(eq(cuotasPago.contratoId, input.contratoId))
-					.orderBy(asc(cuotasPago.numeroCuota));
-
-				console.log("✅ Cuotas obtenidas:", {
-					cantidad: cuotas.length,
-				});
-
-				return cuotas;
+				return []
 			} catch (error) {
 				console.error("💥 Error en getHistorialPagos:", {
 					error: error instanceof Error ? error.message : error,
 					stack: error instanceof Error ? error.stack : undefined,
-					contratoId: input.contratoId,
 				});
 				throw error;
 			}
@@ -1147,44 +1150,27 @@ export const cobrosRouter = {
 			}
 
 			try {
-				const creditoIdNum = Number.parseInt(input.creditoId);
+				let numeroSifco: string = input.creditoId ?? ""
 
-				// 1. Buscar referencia por credito_id numérico
+
+				// 1. Buscar referencia por sifco número de crédito
 				let reference = await db
 					.select()
 					.from(carteraBackReferences)
-					.where(eq(carteraBackReferences.carteraCreditoId, creditoIdNum))
+					.where(eq(carteraBackReferences.numeroCreditoSifco, numeroSifco))
 					.limit(1);
 
-				let numeroSifco: string;
+				let creditoCompleto: CreditoDirectoResponse | null = null;
+
 
 				if (reference.length === 0) {
 					// Si no hay referencia, buscar el crédito en cartera-back
 					// usando getAllCredits para encontrar el número SIFCO
-					const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-						mes: 0,
-						anio: new Date().getFullYear(),
-						page: 1,
-						perPage: 10000,
-					});
+					creditoCompleto  = await carteraBackClient.getCredito(numeroSifco);
 
-					const creditoEncontrado = creditosResponse.data.find(
-						(c) => c.creditos.credito_id === creditoIdNum,
-					);
-
-					if (!creditoEncontrado) {
-						return null; // Crédito no existe
-					}
-
-					numeroSifco = creditoEncontrado.creditos.numero_credito_sifco;
-
-					// Crear referencia nueva
-					if (!context.user?.id) {
-						throw new Error("Usuario no autenticado");
-					}
 
 					await db.insert(carteraBackReferences).values({
-						carteraCreditoId: creditoIdNum,
+						carteraCreditoId: creditoCompleto.credito.credito_id,
 						numeroCreditoSifco: numeroSifco,
 						syncedAt: new Date(),
 						lastSyncStatus: "success",
@@ -1195,145 +1181,161 @@ export const cobrosRouter = {
 					reference = await db
 						.select()
 						.from(carteraBackReferences)
-						.where(eq(carteraBackReferences.carteraCreditoId, creditoIdNum))
+						.where(eq(carteraBackReferences.carteraCreditoId, creditoCompleto.credito.credito_id))
 						.limit(1);
 				} else {
 					numeroSifco = reference[0].numeroCreditoSifco;
 				}
 
 				// 2. Obtener detalles completos del crédito de cartera-back
-				let creditoCompleto: CreditoDirectoResponse | null = null;
-
-				try {
-					creditoCompleto = await carteraBackClient.getCredito(numeroSifco);
-				} catch (error) {
-					console.error(
-						`[Cobros] Error obteniendo detalles de crédito ${numeroSifco}:`,
-						error,
-					);
-
-					// Si el crédito tiene datos corruptos o circuit breaker está abierto,
-					// intentar usar datos del listado como fallback
-					if (
-						error instanceof Error &&
-						(error.message.includes("destructure") ||
-							error.message.includes("HTTP 500") ||
-							error.message.includes("Circuit breaker is OPEN") ||
-							error.message.includes("HTTP 404"))
-					) {
-						console.warn(
-							`[Cobros] Intentando fallback con datos del listado para ${numeroSifco}...`,
+				if (creditoCompleto === null) {
+					try {
+						creditoCompleto = await carteraBackClient.getCredito(numeroSifco);
+					} catch (error) {
+						console.error(
+							`[Cobros] Error obteniendo detalles de crédito ${numeroSifco}:`,
+							error,
 						);
 
-						try {
-							// Obtener datos del listado como fallback
-							// Intentar con todos los estados posibles ya que no sabemos cuál es
-							const now = new Date();
-							const estadosPosibles: (
-								| "ACTIVO"
-								| "MOROSO"
-								| "CANCELADO"
-								| "INCOBRABLE"
-							)[] = ["ACTIVO", "MOROSO", "CANCELADO", "INCOBRABLE"];
+						// Si el crédito tiene datos corruptos o circuit breaker está abierto,
+						// intentar usar datos del listado como fallback
+						if (
+							error instanceof Error &&
+							(error.message.includes("destructure") ||
+								error.message.includes("HTTP 500") ||
+								error.message.includes("Circuit breaker is OPEN") ||
+								error.message.includes("HTTP 404"))
+						) {
+							console.warn(
+								`[Cobros] Intentando fallback con datos del listado para ${numeroSifco}...`,
+							);
 
-							let creditoListado = null;
-							for (const estado of estadosPosibles) {
-								const listado = await carteraBackClient.getAllCreditos({
-									mes: 0,
-									anio: now.getFullYear(),
-									estado,
-									numero_credito_sifco: numeroSifco,
-									page: 1,
-									perPage: 1,
-								});
+							try {
+								// Obtener datos del listado como fallback
+								// Intentar con todos los estados posibles ya que no sabemos cuál es
+								const now = new Date();
+								const estadosPosibles: (
+									| "ACTIVO"
+									| "MOROSO"
+									| "CANCELADO"
+									| "INCOBRABLE"
+								)[] = ["ACTIVO", "MOROSO", "CANCELADO", "INCOBRABLE"];
 
-								if (listado.data.length > 0) {
-									creditoListado = listado.data[0];
-									break;
+								let creditoListado = null;
+								for (const estado of estadosPosibles) {
+									const listado = await carteraBackClient.getAllCreditos({
+										mes: 0,
+										anio: now.getFullYear(),
+										estado,
+										numero_credito_sifco: numeroSifco,
+										page: 1,
+										perPage: 1,
+									});
+
+									if (listado.data.length > 0) {
+										creditoListado = listado.data[0];
+										break;
+									}
 								}
-							}
 
-							if (creditoListado) {
-								// Convertir estructura del listado a estructura de detalle
-								creditoCompleto = {
-									credito: creditoListado.creditos,
-									usuario: creditoListado.usuarios,
-									cuotasPagadas: [],
-									cuotasPendientes: [],
-									cuotasAtrasadas: [],
-									moraActual: creditoListado.mora?.monto_mora || "0.00",
-								};
-								console.log(
-									`[Cobros] ✓ Usando datos del listado (fallback) para ${numeroSifco}`,
-								);
-							} else {
-								console.warn(
-									`[Cobros] No se encontró el crédito ${numeroSifco} en ningún estado`,
+								if (creditoListado) {
+									// Convertir estructura del listado a estructura de detalle
+									creditoCompleto = {
+										credito: creditoListado.creditos,
+										usuario: creditoListado.usuarios,
+										cuotasPagadas: [],
+										cuotasPendientes: [],
+										cuotasAtrasadas: [],
+										moraActual: creditoListado.mora?.monto_mora || "0.00",
+									};
+									console.log(
+										`[Cobros] ✓ Usando datos del listado (fallback) para ${numeroSifco}`,
+									);
+								} else {
+									console.warn(
+										`[Cobros] No se encontró el crédito ${numeroSifco} en ningún estado`,
+									);
+									return null;
+								}
+							} catch (fallbackError) {
+								console.error(
+									`[Cobros] Error en fallback para ${numeroSifco}:`,
+									fallbackError,
 								);
 								return null;
 							}
-						} catch (fallbackError) {
-							console.error(
-								`[Cobros] Error en fallback para ${numeroSifco}:`,
-								fallbackError,
-							);
-							return null;
+						} else {
+							// Re-throw otros errores que no sean de datos corruptos
+							throw error;
 						}
-					} else {
-						// Re-throw otros errores que no sean de datos corruptos
-						throw error;
 					}
 				}
 
 				if (!creditoCompleto) {
 					return null;
-				}
+			}
 
-				// 3. Obtener datos del vehículo del CRM (si existe referencia a contrato)
-				let vehiculo = null;
-				if (reference[0]?.contratoFinanciamientoId) {
-					const contrato = await db
-						.select()
-						.from(contratosFinanciamiento)
-						.where(
-							eq(
-								contratosFinanciamiento.id,
-								reference[0].contratoFinanciamientoId,
-							),
-						)
-						.limit(1);
+			// 3. Buscar oportunidad por número SIFCO para obtener vehículo, lead y dirección
+			let vehiculo = null;
+			let leadInfo = null;
+			let direccion = null;
+			let contratoId = reference[0]?.contratoFinanciamientoId || null;
 
-					if (contrato.length > 0) {
-						// Obtener vehículo
-						const vehiculoResult = await db
-							.select()
-							.from(vehicles)
-							.where(eq(vehicles.id, contrato[0].vehicleId))
-							.limit(1);
+			const oportunidadResult = await db
+				.select({
+					oportunidadId: opportunities.id,
+					vehicleId: opportunities.vehicleId,
+					leadId: opportunities.leadId,
+					direccion: opportunities.direccion,
+					// Datos del vehículo
+					vehiculoMarca: vehicles.make,
+					vehiculoModelo: vehicles.model,
+					vehiculoYear: vehicles.year,
+					vehiculoPlaca: vehicles.licensePlate,
+					// Datos del lead
+					leadFirstName: leads.firstName,
+					leadLastName: leads.lastName,
+					leadEmail: leads.email,
+					leadTelefono: leads.phone,
+				})
+				.from(opportunities)
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.leftJoin(clients, eq(opportunities.id, clients.opportunityId))
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.where(eq(opportunities.numeroSifco, numeroSifco))
+				.limit(1);
 
-						vehiculo = vehiculoResult[0] || null;
-					}
-				}
+			if (oportunidadResult.length > 0) {
+				const opp = oportunidadResult[0];
+				vehiculo = {
+					make: opp.vehiculoMarca,
+					model: opp.vehiculoModelo,
+					year: opp.vehiculoYear,
+					licensePlate: opp.vehiculoPlaca,
+				};
+				leadInfo = {
+					nombre: `${opp.leadFirstName || ""} ${opp.leadLastName || ""}`.trim(),
+					email: opp.leadEmail,
+					telefono: opp.leadTelefono,
+				};
+				direccion = opp.direccion;
+			}
 
-				// 4. Buscar o crear caso de cobros automáticamente
-				let casoCobro = null;
+			// 4. Buscar o crear caso de cobros automáticamente
+			let casoCobro = null;
 
-				if (reference[0]?.contratoFinanciamientoId) {
-					// Buscar caso activo
-					const casosResult = await db
-						.select()
-						.from(casosCobros)
-						.where(
-							and(
-								eq(
-									casosCobros.contratoId,
-									reference[0].contratoFinanciamientoId,
-								),
-								eq(casosCobros.activo, true),
-							),
-						)
-						.limit(1);
-
+		
+				// Buscar caso activo
+				const casosResult = await db
+					.select()
+					.from(casosCobros)
+					.where(
+						and(
+						    contratoId ? eq(casosCobros.contratoId, contratoId) : eq(casosCobros.numeroCreditoSifco, numeroSifco),
+							eq(casosCobros.activo, true),
+						),
+					)
+					.limit(1);					
 					if (
 						casosResult.length === 0 &&
 						creditoCompleto.credito.statusCredit !== "CANCELADO"
@@ -1359,27 +1361,29 @@ export const cobrosRouter = {
 						else if (diasMora > 60 && diasMora <= 90) estadoMora = "mora_90";
 						else if (diasMora > 90) estadoMora = "mora_120";
 
-						const nuevosCasos = await db
-							.insert(casosCobros)
-							.values({
-								contratoId: reference[0].contratoFinanciamientoId,
-								activo: true,
-								montoEnMora: montoEnMora.toFixed(2),
-								diasMoraMaximo: diasMora,
-								cuotasVencidas: cuotasAtrasadas,
-								estadoMora,
-								responsableCobros: context.user.id,
-								telefonoPrincipal: "00000000", // TODO: Obtener de datos reales
-								emailContacto: "sin-email@example.com", // TODO: Obtener de datos reales
-								direccionContacto: "Sin dirección", // TODO: Obtener de datos reales
-							})
-							.returning();
-
+					const nuevosCasos = await db
+						.insert(casosCobros)
+						.values({
+							contratoId: contratoId,
+							activo: true,
+							montoEnMora: montoEnMora.toFixed(2),
+							diasMoraMaximo: diasMora,
+							cuotasVencidas: cuotasAtrasadas,
+							estadoMora,
+							responsableCobros: context.user.id,
+							telefonoPrincipal: leadInfo?.telefono || "00000000",
+							emailContacto: leadInfo?.email || "sin-email@example.com",
+							direccionContacto: direccion || "Sin dirección",
+							numeroCreditoSifco: numeroSifco,
+						})
+						.returning();						
 						casoCobro = nuevosCasos[0];
 					} else {
 						casoCobro = casosResult[0] || null;
 					}
-				}
+				
+
+				console.log(`COBROSCREDITOSDETALLES ${JSON.stringify(casoCobro)}`);
 
 				// 5. Mapear datos correctamente
 				const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
@@ -1403,46 +1407,44 @@ export const cobrosRouter = {
 				if (statusCredit === "CANCELADO") estadoContrato = "completado";
 				else if (statusCredit === "INCOBRABLE") estadoContrato = "incobrable";
 
-				return {
-					// ID del caso de cobros (si existe)
-					id: casoCobro?.id || null,
-					contratoId: reference[0]?.contratoFinanciamientoId || null,
+			return {
+				// ID del caso de cobros (si existe)
+				id: casoCobro?.id || null,
+				contratoId: contratoId,
 
-					// Datos de mora
-					estadoMora,
-					montoEnMora: montoEnMora.toFixed(2),
-					diasMoraMaximo: diasMora,
-					cuotasVencidas: cuotasAtrasadas,
+				// Datos de mora
+				estadoMora,
+				montoEnMora: montoEnMora.toFixed(2),
+				diasMoraMaximo: diasMora,
+				cuotasVencidas: cuotasAtrasadas,
 
-					// Datos de contacto (no disponibles en CRM ni Cartera-Back actualmente)
-					telefonoPrincipal: null,
-					telefonoAlternativo: null,
-					emailContacto: null,
-					direccionContacto: null,
-					proximoContacto: casoCobro?.proximoContacto || null,
-					metodoContactoProximo: null,
+				// Datos de contacto (del lead y oportunidad)
+				telefonoPrincipal: leadInfo?.telefono || null,
+				telefonoAlternativo: null,
+				emailContacto: leadInfo?.email || null,
+				direccionContacto: direccion || null,
+				proximoContacto: casoCobro?.proximoContacto || null,
+				metodoContactoProximo: null,
 
-					// Datos del contrato (de cartera-back)
-					montoFinanciado: creditoCompleto.credito.capital,
-					cuotaMensual: creditoCompleto.credito.cuota,
-					numeroCuotas: creditoCompleto.credito.plazo,
-					fechaInicio: creditoCompleto.credito.fecha_creacion,
-					diaPagoMensual: null, // Cartera-back no tiene día de pago específico
-					estadoContrato,
+				// Datos del contrato (de cartera-back)
+				montoFinanciado: creditoCompleto.credito.capital,
+				cuotaMensual: creditoCompleto.credito.cuota,
+				numeroCuotas: creditoCompleto.credito.plazo,
+				fechaInicio: creditoCompleto.credito.fecha_creacion,
+				diaPagoMensual: null, // Cartera-back no tiene día de pago específico
+				estadoContrato,
 
-					// Datos del cliente (de cartera-back)
-					clienteNombre: creditoCompleto.usuario.nombre,
-					clienteNit: creditoCompleto.usuario.nit,
+				// Datos del cliente (de cartera-back o lead)
+				clienteNombre: leadInfo?.nombre || creditoCompleto.usuario.nombre,
+				clienteNit: creditoCompleto.usuario.nit,
 
-					// Datos del vehículo (del CRM si existe)
-					vehiculoMarca: vehiculo?.make || "-",
-					vehiculoModelo: vehiculo?.model || "-",
-					vehiculoYear: vehiculo?.year || null,
-					vehiculoPlaca:
-						vehiculo?.licensePlate ||
-						creditoCompleto.credito.numero_credito_sifco,
-
-					// Datos adicionales de Cartera-Back
+				// Datos del vehículo (de la oportunidad)
+				vehiculoMarca: vehiculo?.make || "-",
+				vehiculoModelo: vehiculo?.model || "-",
+				vehiculoYear: vehiculo?.year || null,
+				vehiculoPlaca:
+					vehiculo?.licensePlate ||
+					creditoCompleto.credito.numero_credito_sifco,					// Datos adicionales de Cartera-Back
 					numeroCreditoSifco: creditoCompleto.credito.numero_credito_sifco,
 					deudaTotal: creditoCompleto.credito.deudatotal,
 					asesor: null, // Cartera-back no devuelve asesor completo en endpoint /credito

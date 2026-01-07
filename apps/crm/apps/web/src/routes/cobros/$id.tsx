@@ -103,45 +103,37 @@ function RouteComponent() {
 	const [cuotasPage, setCuotasPage] = useState(1);
 	const ITEMS_PER_PAGE = 5; // Reducido a 5 para testing, cambia a 10 en producción
 
-	// Determinar si es un crédito de Cartera-Back (ID numérico) o del CRM (UUID)
-	const esCarteraBack = !isUUID(id);
-
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
-	// @ts-expect-error - TypeScript no puede inferir correctamente el tipo de query options condicionales
-	const casoDetails: any = useQuery({
-		...(esCarteraBack
-			? orpc.getDetallesCreditoCarteraBack.queryOptions({
+	const casoDetails = useQuery({
+		...orpc.getDetallesCreditoCarteraBack.queryOptions({
 					input: { creditoId: id },
-				})
-			: orpc.getDetallesContrato.queryOptions({
-					input: { id, tipo },
-				})),
+				}),
 		enabled: !!session && !!id,
 	});
 
 	// Obtener historial de contactos (solo para casos)
 	const historialContactos = useQuery({
 		...orpc.getHistorialContactos.queryOptions({
-			input: { casoCobroId: id },
+			input: { casoCobroId: casoDetails.data?.id || ""  },
 		}),
-		enabled: !!session && !!id && tipo === "caso",
+		enabled: !!session&& !!casoDetails.data?.id,
 	});
 
 	// Obtener convenios de pago (solo para casos)
 	const conveniosPago = useQuery({
 		...orpc.getConveniosPago.queryOptions({
-			input: { casoCobroId: id },
+			input: { casoCobroId: casoDetails.data?.id || ""  },
 		}),
-		enabled: !!session && !!id && tipo === "caso",
+		enabled: !!session && !!casoDetails.data?.id,
 	});
 
 	// Obtener historial de pagos del contrato
 	const historialPagos = useQuery({
 		...orpc.getHistorialPagos.queryOptions({
-			input: { contratoId: casoDetails.data?.contratoId || "" },
+			input: { numeroSifco: id || "" },
 		}),
-		enabled: !!session && !!casoDetails.data?.contratoId,
+		enabled: !!session && !!id
 	});
 
 	// Obtener información de recuperación si es caso incobrable
@@ -195,7 +187,7 @@ function RouteComponent() {
 	const cuotas = historialPagos.data || [];
 	const recuperacion = recuperacionInfo.data;
 
-	const getEstadoBadge = (estado: string) => {
+	const getEstadoBadge = (estado: string | null | undefined) => {
 		const colors: Record<string, string> = {
 			mora_30: "bg-yellow-100 text-yellow-800",
 			mora_60: "bg-orange-100 text-orange-800",
@@ -204,7 +196,7 @@ function RouteComponent() {
 			pagado: "bg-green-100 text-green-800",
 			incobrable: "bg-gray-100 text-gray-800",
 		};
-		return colors[estado] || "bg-gray-100 text-gray-800";
+		return estado ?  (colors[estado] ?? "bg-gray-100 text-gray-800") : "bg-gray-100 text-gray-800";
 	};
 
 	const getMetodoIcon = (metodo: string) => {
@@ -672,13 +664,6 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="space-y-2">
-									<div className="flex items-center gap-2">
-										{getMetodoIcon(caso.metodoContactoProximo || "")}
-										<span className="font-medium">
-											{caso.metodoContactoProximo?.charAt(0).toUpperCase() +
-												(caso.metodoContactoProximo?.slice(1) || "")}
-										</span>
-									</div>
 									<p className="text-muted-foreground text-sm">
 										{caso.proximoContacto
 											? new Date(caso.proximoContacto).toLocaleDateString(

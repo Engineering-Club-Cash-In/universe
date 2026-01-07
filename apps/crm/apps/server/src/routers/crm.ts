@@ -2,11 +2,13 @@ import { and, count, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
+	carteraBackReferences,
 	renapInfo,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
 	vehicles,
+	type NewCarteraBackReference,
 } from "../db/schema";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
@@ -36,6 +38,7 @@ import {
 import {
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
+	type CreateCreditoResult,
 } from "../services/cartera-back-integration";
 
 export const crmRouter = {
@@ -955,7 +958,7 @@ export const crmRouter = {
 						// Si falla, no se debe continuar con la actualización de la oportunidad
 						let carteraBackSuccess = false;
 						let carteraBackError: string | undefined;
-
+						let creditoResult: CreateCreditoResult | undefined;
 
 						console.log(`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`);
 
@@ -994,7 +997,7 @@ export const crmRouter = {
 							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
 							const finalDireccion = direccion || opp.direccion || undefined;
 
-							const creditoResult = await createCreditoInCarteraBack({
+							creditoResult = await createCreditoInCarteraBack({
 								opportunityId: opp.id,
 								// contratoFinanciamientoId: newContract[0].id,
 								userId: context.userId,
@@ -1105,6 +1108,20 @@ export const crmRouter = {
 								createdBy: context.userId,
 							})
 							.returning();
+
+
+						// Store reference in CRM
+						const referenceData: NewCarteraBackReference = {
+							opportunityId: opp.id,
+							contratoFinanciamientoId: newContract[0].id,
+							carteraCreditoId: creditoResult?.credito_id as number,
+							numeroCreditoSifco: creditoResult?.numero_credito_sifco as string,
+							syncedAt: new Date(),
+							lastSyncStatus: "success",
+							createdBy: context.userId,
+						};
+
+						await db.insert(carteraBackReferences).values(referenceData);
 
 						
 						

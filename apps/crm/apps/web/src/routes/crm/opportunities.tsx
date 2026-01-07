@@ -152,7 +152,7 @@ function DraggableOpportunityCard({
 				if (needsCreditInfo) {
 					return (
 						<Badge variant="secondary" className="text-xs">
-							⚠️ Falta info del crédito
+							⚠️ Falta información del crédito
 						</Badge>
 					);
 				}

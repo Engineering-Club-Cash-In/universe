@@ -11,7 +11,7 @@ import {
 	TrendingUp,
 	Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
 import { DataTable } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
@@ -78,17 +78,33 @@ function RouteComponent() {
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
+	const [page, setPage] = useState(1);
+	const [filterValue, setFilterValue] = useState("");
+	const [debouncedFilterValue, setDebouncedFilterValue] = useState("");
+	const [pageSize, setPageSize] = useState(10);
+
+	// Debounce para el filtro de búsqueda (1 segundos)
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedFilterValue(filterValue);
+			setPage(1); // Reset a la primera página cuando cambia el filtro
+		}, 1000);
+
+		return () => clearTimeout(timer);
+	}, [filterValue]);
 
 	const dashboardStats = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions(),
 		enabled: !!session,
 	});
 
-	const todosLosContratos = useQuery({
-		...orpc.getTodosLosContratos.queryOptions({
+	const todosLosCreditos = useQuery({
+		...orpc.getTodosLosCreditos.queryOptions({
 			input: {
-				limit: 1000, // Aumentar límite para ver todos
-				offset: 0,
+				limit: pageSize,
+				offset: (page - 1) * pageSize,
+				estadoMora: filtroEtapa || undefined,
+				nombreUsuario: debouncedFilterValue || undefined,
 			},
 		}),
 		enabled: !!session,
@@ -101,11 +117,14 @@ function RouteComponent() {
 
 	const userRole = userProfile.data?.role;
 	const stats = dashboardStats.data?.estatusStats || [];
-	const contratos = todosLosContratos.data || [];
+	const creditosData = todosLosCreditos.data;
+	const creditos = creditosData?.data || [];
+	const totalCreditos = creditosData?.total || 0;
+	const totalPages = creditosData?.totalPages || 1;
 
-	// Procesar contratos y calcular días hasta pago
-	const contratosConDias = useMemo(() => {
-		return contratos
+	// Procesar creditos y calcular días hasta pago
+	const creditosConDias = useMemo(() => {
+		return creditos
 			.map((contrato) => {
 				const infoPago = calcularProximaFechaPago(contrato.diaPagoMensual);
 				// Si no hay día de pago, usar días de mora negativos para priorizar
@@ -127,30 +146,20 @@ function RouteComponent() {
 				} as ContratoCobranza;
 			})
 			.sort((a, b) => a.diasHastaPago - b.diasHastaPago);
-	}, [contratos]);
+	}, [creditos]);
 
 	// Filtrar según el rango temporal seleccionado
-	const contratosFiltrados = useMemo(() => {
-		let filtrados = contratosConDias;
+	const creditosFiltrados = useMemo(() => {
+		let filtrados = creditosConDias;
 
 		// Excluir completados e incobrables si el filtro está desactivado
-		if (!mostrarCompletadosIncobrables) {
+		// NOTA: El filtro por etapa ahora se hace en el servidor mediante estadoMora
+		if (!mostrarCompletadosIncobrables && !filtroEtapa) {
 			filtrados = filtrados.filter(
 				(c) =>
 					c.estadoContrato !== "completado" &&
 					c.estadoContrato !== "incobrable",
 			);
-		}
-
-		// Filtrar por etapa de mora si hay filtro activo
-		if (filtroEtapa) {
-			filtrados = filtrados.filter((c) => {
-				const estadoVisual =
-					c.estadoContrato === "activo"
-						? c.estadoMora || "al_dia"
-						: c.estadoContrato;
-				return estadoVisual === filtroEtapa;
-			});
 		}
 
 		// Filtrar por rango temporal
@@ -171,18 +180,17 @@ function RouteComponent() {
 			return c.diasHastaPago <= limite;
 		});
 	}, [
-		contratosConDias,
+		creditosConDias,
 		filtroTemporal,
 		mostrarCompletadosIncobrables,
-		filtroEtapa,
 	]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
 		return (
-			<div className="container mx-auto p-6">
+			<div className="flex min-h-screen items-center justify-center">
 				<div className="text-center">
-					<h1 className="mb-4 font-bold text-2xl text-gray-900">
+					<h1 className="mb-4 font-bold text-2xl text-gray-800">
 						Acceso Denegado
 					</h1>
 					<p className="text-gray-600">
@@ -231,6 +239,30 @@ function RouteComponent() {
 		},
 	];
 
+	if (dashboardStats.isLoading) {
+		return (
+			<div className="container mx-auto space-y-6 p-6">
+			<div>
+				<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
+				<p className="text-muted-foreground">
+					Gestión y seguimiento de cobranza - Enfoque preventivo
+				</p>
+			</div>
+		<Card className="border-blue-200 bg-blue-50">
+			<CardContent className="flex items-center gap-3 py-4">
+			<Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+			<div>
+				<p className="font-medium text-blue-900">
+				Cargando información de cobros...
+				</p>
+				<p className="text-blue-700 text-sm">Cartera</p>
+			</div>
+			</CardContent>
+		</Card>
+		</div>
+		);
+	}
+
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
@@ -239,21 +271,6 @@ function RouteComponent() {
 					Gestión y seguimiento de cobranza - Enfoque preventivo
 				</p>
 			</div>
-
-			{/* Loading indicator */}
-			{(dashboardStats.isLoading || todosLosContratos.isLoading) && (
-				<Card className="border-blue-200 bg-blue-50">
-					<CardContent className="flex items-center gap-3 py-4">
-						<Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-						<div>
-							<p className="font-medium text-blue-900">
-								Cargando información de cobros...
-							</p>
-							<p className="text-blue-700 text-sm">Cartera</p>
-						</div>
-					</CardContent>
-				</Card>
-			)}
 
 			{/* Estadísticas Generales */}
 			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
@@ -480,7 +497,7 @@ function RouteComponent() {
 							</CardDescription>
 						</div>
 						<Badge variant="outline" className="text-sm">
-							{contratosFiltrados.length} casos mostrados
+							{creditosFiltrados.length} casos mostrados
 						</Badge>
 					</div>
 				</CardHeader>
@@ -525,8 +542,10 @@ function RouteComponent() {
 					{/* Data Table */}
 					<DataTable
 						columns={columns}
-						data={contratosFiltrados}
-						searchPlaceholder="Buscar por cliente, vehículo o placa..."
+						data={creditosFiltrados}
+						isLoading={todosLosCreditos.isLoading}
+						setGlobalFilterParam={setFilterValue}
+						searchPlaceholder="Buscar por cliente"
 						filterContent={
 							<>
 								<span className="font-medium text-muted-foreground text-sm">
@@ -535,7 +554,10 @@ function RouteComponent() {
 								<Button
 									variant={filtroEtapa === null ? "default" : "outline"}
 									size="sm"
-									onClick={() => setFiltroEtapa(null)}
+									onClick={() => {
+										setFiltroEtapa(null);
+										setPage(1);
+									}}
 								>
 									Todas
 								</Button>
@@ -543,17 +565,25 @@ function RouteComponent() {
 									<Badge
 										key={filtro.key}
 										className={`cursor-pointer ${filtroEtapa === filtro.key ? filtro.color : "bg-gray-50 text-gray-600 hover:bg-gray-100"}`}
-										onClick={() =>
+										onClick={() => {
 											setFiltroEtapa(
 												filtroEtapa === filtro.key ? null : filtro.key,
-											)
-										}
+											);
+											setPage(1);
+										}}
 									>
 										{filtro.label}
 									</Badge>
 								))}
 							</>
 						}
+						serverPagination={{
+							page: page,
+							pageSize: pageSize,
+							totalPages: totalPages,
+							totalItems: totalCreditos,
+							onPageChange: (newPage) => setPage(newPage),
+						}}
 					/>
 				</CardContent>
 			</Card>

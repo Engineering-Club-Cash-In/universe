@@ -210,19 +210,6 @@ export async function createCreditoInCarteraBack(
 
 		console.log("[CarteraBackSync] Credit created successfully:", JSON.stringify(credito, null, 2));
 
-		// Store reference in CRM
-		const referenceData: NewCarteraBackReference = {
-			opportunityId: params.opportunityId,
-			contratoFinanciamientoId: params.contratoFinanciamientoId || null,
-			carteraCreditoId: credito.credito_id,
-			numeroCreditoSifco: credito.numero_credito_sifco,
-			syncedAt: new Date(),
-			lastSyncStatus: "success",
-			createdBy: params.userId,
-		};
-
-		await db.insert(carteraBackReferences).values(referenceData);
-
 		// Log success
 		await logSyncOperation({
 			operation: "create_credit",

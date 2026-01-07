@@ -37,7 +37,8 @@ export const useProfile = () => {
       const phone = urlParams.get("phone") || "";
 
       // Si hay parámetros de registro, crear el usuario correspondiente
-      if (userType && dpi) {
+      // PERO solo si el usuario NO tiene DPI todavía (es decir, es un registro nuevo)
+      if (userType && dpi && !user.dpi) {
         console.log(`Creando usuario tipo ${userType} desde OAuth`);
         // Mantener isLoading en true mientras se procesa y recarga
         try {

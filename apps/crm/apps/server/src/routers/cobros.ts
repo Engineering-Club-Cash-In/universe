@@ -16,7 +16,7 @@ import {
 } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { adminProcedure, cobrosProcedure } from "../lib/orpc";
+import { adminProcedure, cobrosProcedure, o } from "../lib/orpc";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
@@ -75,12 +75,10 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
 	nombre_usuario?:string;
 	numero_credito_sifco?:string;
+	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
+	email_cobrador?: string;
 }) {
 	const estado = params.estado || "ACTIVO";
-
-	console.log(`[Cobros] Obteniendo créditos del estado: ${estado}`, {
-		cuotasAtrasadas: params.cuotasAtrasadas,
-	});
 
 	const response = await carteraBackClient
 		.getAllCreditos({
@@ -97,6 +95,10 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			}),
 			...(params.numero_credito_sifco !== undefined && params.numero_credito_sifco !== "" && {
 				numero_credito_sifco: params.numero_credito_sifco,
+			}),
+			...(params.time !== undefined && { time: params.time }),
+			...(params.email_cobrador !== undefined && params.email_cobrador !== "" && {
+				email_cobrador: params.email_cobrador,
 			}),
 		})
 		.catch((error) => {
@@ -320,6 +322,8 @@ export const cobrosRouter = {
 				offset: z.number().optional(),
 				estadoMora: z.string().optional(),
 				nombreUsuario: z.string().optional(),
+				time: z.enum(["WEEK", "MONTH", "DUEMONTH", "TODAY"]).optional(),
+				emailCobrador: z.string().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -376,7 +380,7 @@ export const cobrosRouter = {
 				}
 
 				console.log(
-					`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}`,
+					`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}`,
 				);
 
 				// Obtener todos los créditos de Cartera-Back con los filtros
@@ -387,7 +391,9 @@ export const cobrosRouter = {
 					perPage: input.limit || 50,
 					cuotasAtrasadas,
 					estado: estadoCartera,
-					nombre_usuario
+					nombre_usuario,
+					time: input.time,
+					email_cobrador: input.emailCobrador
 				});					// Validar que la respuesta tenga la estructura esperada
 					if (!creditosResponse || !creditosResponse.data) {
 						console.error(
@@ -471,8 +477,8 @@ export const cobrosRouter = {
 								estadoContrato,
 								montoFinanciado: credito.creditos.capital.toString(),
 								cuotaMensual: credito.creditos.cuota.toString(),
-								diaPagoMensual: null,
-								responsableCobros: null,
+								fechaProximoPago: credito.proxima_cuota?.fecha_vencimiento || null,
+								responsableCobros: credito.asesores?.nombre || null,
 								casoCobroId: null,
 								estadoMora,
 								montoEnMora: montoEnMora.toFixed(2),
@@ -947,19 +953,37 @@ export const cobrosRouter = {
 							].sort((a, b) => a.numero_cuota - b.numero_cuota);
 
 							// Mapear a estructura esperada por frontend
-							return todasLasCuotas.map((cuota) => ({
-								id: cuota.cuota_id.toString(),
-								numeroCuota: cuota.numero_cuota,
-								fechaVencimiento: cuota.fecha_vencimiento,
-								montoCuota: creditoCompleto.credito.cuota,
-								fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
-								montoPagado: cuota.pagado
-									? creditoCompleto.credito.cuota
-									: null,
-								montoMora: "0", // TODO: calcular mora real
-								estadoMora: cuota.pagado ? "pagado" : "pendiente",
-								diasMora: 0,
-							}));
+							return todasLasCuotas.map((cuota) => {
+								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+								const montoPagadoReal = cuota.pagado && cuota.monto_boleta 
+									? Number(cuota.monto_boleta)
+									: cuota.pagado ? Number(creditoCompleto.credito.cuota) : null;
+
+								return {
+									...cuota,
+									id: cuota.cuota_id.toString(),
+									numeroCuota: cuota.numero_cuota,
+									fechaVencimiento: cuota.fecha_vencimiento,
+									montoCuota: creditoCompleto.credito.cuota,
+									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
+									montoPagado: montoPagadoReal,
+									montoMora: montoMora.toString(),
+									estadoMora: cuota.pagado ? "pagado" : "pendiente",
+									diasMora: 0,
+									detallesPago: cuota.pagado ? {
+										abonoCapital: cuota.abono_capital || "0",
+										abonoInteres: cuota.abono_interes || "0",
+										abonoIva: cuota.abono_iva_12 || "0",
+										abonoSeguro: cuota.abono_seguro || "0",
+										abonoGps: cuota.abono_gps || "0",
+										abonoMembresias: cuota.abono_membresias || "0",
+										pagoMora: cuota.pago_mora || "0",
+										pagoOtros: cuota.pago_otros || "0",
+										capitalRestante: cuota.capital_restante || "0",
+										interesRestante: cuota.interes_restante || "0",
+									} : undefined,
+								};
+							});
 						} catch (error) {
 							console.warn(
 								`⚠️ No se pudieron obtener cuotas de cartera-back para el contrato ${input.numeroSifco}:`,

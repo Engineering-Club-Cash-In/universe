@@ -409,13 +409,18 @@ export class CarteraBackClient {
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
 			...(params.cuotas_atrasadas !== undefined && { cuotas_atrasadas: params.cuotas_atrasadas.toString() }),
-			...(params.time && { time: params.time }),
+			...(params.time && { proximidad_pago: params.time }),
 			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
 			...(params.numero_credito_sifco && {
 				numero_credito_sifco: params.numero_credito_sifco,
 			}),
+			...(params.email_cobrador && { email_asesor: params.email_cobrador }),
 			excel: "false",
 		});
+
+		console.log(
+			`[CarteraBackClient] getAllCreditos query: ${queryParams.toString()}`,
+		);
 		// Este endpoint retorna PaginatedResponse directamente, no envuelto en CarteraBackApiResponse
 		const response = await this.request<
 			PaginatedResponse<CreditoDetailResponse>

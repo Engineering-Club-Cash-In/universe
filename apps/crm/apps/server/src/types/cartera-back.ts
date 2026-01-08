@@ -169,6 +169,7 @@ export interface CreditoDetailResponse {
 	rubros: unknown[];
 	mora: CarteraMoraCredito | null;
 	deuda_total_con_mora: string;
+	proxima_cuota?: CarteraCuotaCredito | null;
 }
 
 /**
@@ -247,6 +248,25 @@ export interface CarteraCuotaCredito {
 	pagado: boolean;
 	createdAt: string; // timestamp
 	pago?: CarteraPagoCredito;
+	// Campos adicionales de pago (opcionales)
+	pago_id?: number;
+	monto_boleta?: string; // decimal
+	abono_capital?: string; // decimal
+	abono_interes?: string; // decimal
+	abono_iva_12?: string; // decimal
+	abono_interes_ci?: string; // decimal
+	abono_iva_ci?: string; // decimal
+	abono_seguro?: string; // decimal
+	abono_gps?: string; // decimal
+	abono_membresias?: string; // decimal
+	capital_restante?: string; // decimal
+	interes_restante?: string; // decimal
+	iva_12_restante?: string; // decimal
+	seguro_restante?: string; // decimal
+	gps_restante?: string; // decimal
+	membresias_restante?: string; // decimal
+	pago_mora?: string; // decimal
+	pago_otros?: string; // decimal
 }
 
 // ============================================================================
@@ -495,6 +515,7 @@ export interface GetAllCreditsParams {
 	cuotas_atrasadas?:number;
 	nombre_usuario?:string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
+	email_cobrador?:string;
 }
 
 export interface GetPaymentsParams {

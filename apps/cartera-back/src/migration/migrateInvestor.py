@@ -13,8 +13,7 @@ ARCHIVO_EXCEL ="Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 # 📅 Hojas a procesar
 HOJAS_A_PROCESAR = [
     "Noviembre 2025",   # 🔥 Se procesa PRIMERO
-    "Diciembre 2025",   # 🔥 Se procesa SEGUNDO
-    "Enero 2026",       # 🔥 Se procesa TERCERO
+    "Diciembre 2025",   # 🔥 Se procesa SEGUNDO 
 ]
 
 # 🔥 MODO PRUEBA

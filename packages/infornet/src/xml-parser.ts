@@ -49,10 +49,23 @@ const xmlParser = new XMLParser({
       'INMUEBLE',
       'EMPLEO',
       'CONSULTA',
+      'CONSULTA_EFECTUADA',
     ];
     return arrayTags.includes(name);
   },
 });
+
+/**
+ * 🔥 Decodifica entidades HTML del XML
+ */
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
 
 /**
  * Extrae el body de una respuesta SOAP
@@ -124,11 +137,43 @@ export function extractInnerXml(body: unknown, methodName: string): unknown {
   const responseObj = response as Record<string, unknown>;
   let returnValue = responseObj[returnKey] || responseObj['return'] || responseObj['#text'];
 
-  // Si el return es un string XML, parsearlo
-  if (typeof returnValue === 'string' && returnValue.trim().startsWith('<?xml')) {
-    returnValue = xmlParser.parse(returnValue);
-  } else if (typeof returnValue === 'string' && returnValue.trim().startsWith('<')) {
-    returnValue = xmlParser.parse(returnValue);
+  console.log('🔍 returnValue type:', typeof returnValue);
+  console.log('🔍 returnValue preview:', typeof returnValue === 'string' ? returnValue.substring(0, 100) : returnValue);
+
+  // 🔥 FIX: Si es un objeto con #text, extraer el texto
+  if (typeof returnValue === 'object' && returnValue !== null) {
+    const objValue = returnValue as Record<string, unknown>;
+    if (objValue['#text']) {
+      console.log('📝 Encontrado #text en objeto, extrayendo...');
+      returnValue = objValue['#text'];
+    }
+  }
+
+  // Si es string y parece XML, parsearlo
+  if (typeof returnValue === 'string') {
+    const trimmed = returnValue.trim();
+    console.log('📝 Es string, verificando si es XML...');
+    console.log('📝 Primeros 100 chars:', trimmed.substring(0, 100));
+    
+    // Si está escapado, decodificar
+    if (trimmed.includes('&lt;') || trimmed.includes('&gt;')) {
+      console.log('🔧 XML escapado detectado, decodificando...');
+      returnValue = decodeHtmlEntities(trimmed);
+    } else {
+      returnValue = trimmed;
+    }
+    
+    // Parsear como XML
+    if ((returnValue as string).startsWith('<?xml') || (returnValue as string).startsWith('<')) {
+      console.log('🎯 Parseando como XML...');
+      try {
+        returnValue = xmlParser.parse(returnValue as string);
+        console.log('✅ XML parseado exitosamente');
+      } catch (err) {
+        console.error('❌ Error parseando XML:', err);
+        throw new XmlParseError(`Error parseando XML interno: ${err}`);
+      }
+    }
   }
 
   return returnValue;
@@ -180,6 +225,8 @@ export function parseAboutResponse(xmlResponse: string): AboutResponse {
  * Parsea la respuesta de busqueda_persona()
  */
 export function parseBusquedaPersonaResponse(xmlResponse: string): PersonaResult[] {
+  console.log('🔍 Parseando respuesta de búsqueda persona...');
+  
   const body = extractSoapBody(xmlResponse);
   checkSoapFault(body);
   const data = extractInnerXml(body, 'busqueda_persona');
@@ -190,9 +237,11 @@ export function parseBusquedaPersonaResponse(xmlResponse: string): PersonaResult
   const personasObj = personas as Record<string, unknown>;
   const personaList = personasObj['PERSONA'] || personasObj['persona'] || [];
 
+  console.log('👥 PersonaList:', personaList);
+
   const personaArray = Array.isArray(personaList) ? personaList : [personaList];
 
-  return personaArray
+  const result = personaArray
     .filter((p) => p != null)
     .map((p: Record<string, unknown>) => ({
       codigoPersona: Number(p['CODIGO_PERSONA'] || p['codigo_persona'] || 0),
@@ -205,6 +254,9 @@ export function parseBusquedaPersonaResponse(xmlResponse: string): PersonaResult
       codigoMunicipio: String(p['ACODIGO_MUNICIPIO'] || p['acodigo_municipio'] || ''),
       codigoPais: String(p['ACODIGO_PAIS'] || p['acodigo_pais'] || ''),
     }));
+
+  console.log(`✅ ${result.length} persona(s) parseada(s)`);
+  return result;
 }
 
 /**
@@ -304,7 +356,7 @@ function parseFichaPrincipalPersona(data: unknown): FichaPrincipalPersona {
   }
   const d = data as Record<string, unknown>;
   return {
-    codigo: Number(d['CODIGO'] || d['codigo'] || 0),
+    codigo: Number(d['CODIGO_PERSONA'] || d['CODIGO'] || d['codigo'] || 0), // ✅ CORREGIDO
     nombres: String(d['NOMBRES'] || d['nombres'] || ''),
     apellidos: String(d['APELLIDOS'] || d['apellidos'] || ''),
     sexo: String(d['SEXO'] || d['sexo'] || ''),
@@ -312,6 +364,8 @@ function parseFichaPrincipalPersona(data: unknown): FichaPrincipalPersona {
     estadoCivil: d['ESTADO_CIVIL'] ? String(d['ESTADO_CIVIL']) : undefined,
     profesion: d['PROFESION'] ? String(d['PROFESION']) : undefined,
     nacionalidad: d['NACIONALIDAD'] ? String(d['NACIONALIDAD']) : undefined,
+    lugarNacimiento: d['LUGAR_NACIMIENTO'] ? String(d['LUGAR_NACIMIENTO']) : undefined, // 🆕
+    pais: d['PAIS'] ? String(d['PAIS']) : undefined, // 🆕
   };
 }
 
@@ -338,8 +392,11 @@ function parseDocumentos(data: unknown): DocumentoIdentidad[] {
   const list = d['DOCUMENTO'] || d['documento'] || [];
   const arr = Array.isArray(list) ? list : [list];
   return arr.filter(Boolean).map((doc: Record<string, unknown>) => ({
-    tipo: String(doc['TIPO'] || doc['tipo'] || ''),
-    numero: String(doc['NUMERO'] || doc['numero'] || ''),
+    tipo: String(doc['CLASE_DOCUMENTO'] || doc['clase_documento'] || doc['TIPO'] || doc['tipo'] || ''), // ✅ CORREGIDO
+    numero: String(doc['NUMERO_DOCUMENTO'] || doc['numero_documento'] || doc['NUMERO'] || doc['numero'] || ''), // ✅ CORREGIDO
+    nombreDocumento: doc['NOMBRE_DOCUMENTO'] ? String(doc['NOMBRE_DOCUMENTO']) : undefined, // 🆕
+    extension: doc['EXTENSION_DOCUMENTO'] ? String(doc['EXTENSION_DOCUMENTO']) : undefined, // 🆕
+    paisDocumento: doc['PAIS_DOCUMENTO'] ? String(doc['PAIS_DOCUMENTO']) : undefined, // 🆕
     fechaEmision: doc['FECHA_EMISION'] ? String(doc['FECHA_EMISION']) : undefined,
     fechaVencimiento: doc['FECHA_VENCIMIENTO'] ? String(doc['FECHA_VENCIMIENTO']) : undefined,
   }));
@@ -352,8 +409,8 @@ function parseDirecciones(data: unknown): Direccion[] {
   const arr = Array.isArray(list) ? list : [list];
   return arr.filter(Boolean).map((dir: Record<string, unknown>) => ({
     tipo: String(dir['TIPO'] || dir['tipo'] || ''),
-    direccion: String(dir['DIRECCION'] || dir['direccion'] || ''),
-    municipio: dir['MUNICIPIO'] ? String(dir['MUNICIPIO']) : undefined,
+    direccion: String(dir['DIRECCION'] || dir['direccion'] || dir['UBICACION'] || ''), // ✅ CORREGIDO
+    municipio: dir['MUNICIPIO'] || dir['MUNICIPIO_RESIDENCIA'] ? String(dir['MUNICIPIO'] || dir['MUNICIPIO_RESIDENCIA']) : undefined, // ✅ CORREGIDO
     departamento: dir['DEPARTAMENTO'] ? String(dir['DEPARTAMENTO']) : undefined,
     pais: dir['PAIS'] ? String(dir['PAIS']) : undefined,
     telefono: dir['TELEFONO'] ? String(dir['TELEFONO']) : undefined,
@@ -501,10 +558,13 @@ function parseEmpleos(data: unknown): Empleo[] {
   const list = d['EMPLEO'] || d['empleo'] || [];
   const arr = Array.isArray(list) ? list : [list];
   return arr.filter(Boolean).map((emp: Record<string, unknown>) => ({
-    empresa: String(emp['EMPRESA'] || emp['empresa'] || ''),
+    empresa: String(emp['PATRONO'] || emp['EMPRESA'] || emp['empresa'] || ''), // ✅ CORREGIDO
     cargo: String(emp['CARGO'] || emp['cargo'] || ''),
+    tipoPatrono: emp['TIPO_PATRONO'] ? String(emp['TIPO_PATRONO']) : undefined, // 🆕
+    codigoPatrono: emp['CODIGO_PATRONO'] ? Number(emp['CODIGO_PATRONO']) : undefined, // 🆕
     fechaInicio: emp['FECHA_INICIO'] ? String(emp['FECHA_INICIO']) : undefined,
     fechaFin: emp['FECHA_FIN'] ? String(emp['FECHA_FIN']) : undefined,
+    fechaRegistro: emp['FECHA_REGISTRO'] ? String(emp['FECHA_REGISTRO']) : undefined, // 🆕
     salario: emp['SALARIO'] ? Number(emp['SALARIO']) : undefined,
   }));
 }
@@ -540,11 +600,12 @@ function parseInmuebles(data: unknown): Inmueble[] {
 function parseConsultasEfectuadas(data: unknown): ConsultaEfectuada[] {
   if (!data) return [];
   const d = data as Record<string, unknown>;
-  const list = d['CONSULTA'] || d['consulta'] || [];
+  const list = d['CONSULTA_EFECTUADA'] || d['CONSULTA'] || d['consulta'] || []; // ✅ CORREGIDO
   const arr = Array.isArray(list) ? list : [list];
   return arr.filter(Boolean).map((c: Record<string, unknown>) => ({
     fecha: String(c['FECHA'] || c['fecha'] || ''),
-    empresa: String(c['EMPRESA'] || c['empresa'] || ''),
+    empresa: String(c['NOMBRE_CLIENTE'] || c['EMPRESA'] || c['empresa'] || ''), // ✅ CORREGIDO
+    usuario: c['USUARIO'] ? String(c['USUARIO']) : undefined, // 🆕
     motivo: c['MOTIVO'] ? String(c['MOTIVO']) : undefined,
   }));
 }

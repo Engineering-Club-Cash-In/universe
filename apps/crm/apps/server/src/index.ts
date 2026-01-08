@@ -25,6 +25,7 @@ import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
 import externalContractsRouter from "./routes/external-contracts";
+import   { infornetController } from "./controllers/buro";
 
 const app = new Hono();
 
@@ -416,10 +417,26 @@ app.post("/info/liveness-validation", async (c) => {
 });
 app.post("/info/validate-otp", async (c) => {
   const body = await c.req.json();
-  const { token } = body as { token?: string };
+  const { token, dpi } = body as { token?: string; dpi?: string };
 
+  // Validaciones
   if (!token) {
     return c.json({ success: false, message: "Token is required" }, 400);
+  }
+
+  if (!dpi) {
+    return c.json({ success: false, message: "DPI is required" }, 400);
+  }
+
+  // Validar formato DPI guatemalteco (13 dígitos)
+  if (!/^\d{13}$/.test(dpi)) {
+    return c.json(
+      { 
+        success: false, 
+        message: "DPI debe tener 13 dígitos" 
+      }, 
+      400
+    );
   }
 
   try {
@@ -433,8 +450,47 @@ app.post("/info/validate-otp", async (c) => {
           message: "Invalid token",
           tokenValidated: false,
         },
-        401 // Unauthorized
+        401
       );
+    }
+
+    // ✅ Token válido, ahora obtener info de Infornet
+    console.log(`🔍 OTP válido, consultando Infornet para DPI: ${dpi}`);
+    
+    const estudioResult = await infornetController.obtenerEstudioPorDPI(dpi);
+
+    if (!estudioResult.success) {
+      return c.json(
+        {
+          success: false,
+          message: estudioResult.error || "Error al obtener información de Infornet",
+          tokenValidated: true,
+          infornetError: true,
+        },
+        404
+      );
+    }
+
+    // Análisis de riesgo
+    const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
+
+    // 🔥 Determinar si pasó el buró
+    const pasoBuro = !analisisRiesgo?.detalles.tieneDelitosPenales && 
+                     !analisisRiesgo?.detalles.tieneMorosidad;
+
+    // 🔥 Mensaje descriptivo del resultado
+    let mensajeBuro = "Aprobado";
+    const motivosRechazo: string[] = [];
+
+    if (analisisRiesgo?.detalles.tieneDelitosPenales) {
+      motivosRechazo.push("Tiene antecedentes penales");
+    }
+    if (analisisRiesgo?.detalles.tieneMorosidad) {
+      motivosRechazo.push("Tiene historial de morosidad");
+    }
+
+    if (!pasoBuro) {
+      mensajeBuro = `Rechazado: ${motivosRechazo.join(", ")}`;
     }
 
     return c.json(
@@ -442,14 +498,23 @@ app.post("/info/validate-otp", async (c) => {
         success: true,
         message: "Token validated successfully",
         tokenValidated: true,
+        pasoBuro: pasoBuro, // 🔥 TRUE = Aprobado, FALSE = Rechazado
+        mensajeBuro: mensajeBuro, // 🔥 Mensaje descriptivo
+        data: {
+          estudio: estudioResult.data,
+          fromCache: estudioResult.fromCache,
+          analisisRiesgo: analisisRiesgo,
+        },
       },
       200
     );
   } catch (err: any) {
+    console.error("Error en validate-otp:", err);
     return c.json(
       {
         success: false,
         message: err.message || "Internal server error",
+        tokenValidated: false,
       },
       500
     );

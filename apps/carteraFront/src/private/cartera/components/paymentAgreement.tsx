@@ -1,6 +1,6 @@
 // src/components/PaymentAgreements/CreatePaymentAgreementForm.tsx
 
-import { useState, useMemo } from "react";
+import { useState, useMemo } from "react"; 
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,20 +37,16 @@ import { BuscadorUsuarioSifco } from "./searchByNameSifco";
 export function CreatePaymentAgreementForm() {
   const [sifcoSeleccionado, setSifcoSeleccionado] = useState<string>("");
   const [resetBuscador, setResetBuscador] = useState(false);
-
   const [convenioExpanded, setConvenioExpanded] = useState(true);
+  
   // Form state
-  const [selectedInstallments, setSelectedInstallments] = useState<number[]>(
-    []
-  ); // 👈 Ahora son pago_ids
+  const [selectedInstallments, setSelectedInstallments] = useState<number[]>([]);
   const [numberOfMonths, setNumberOfMonths] = useState<number>(1);
   const [reason, setReason] = useState<string>("");
   const [observations, setObservations] = useState<string>("");
-
-  // Estado para expandir/colapsar cuotas
   const [showAllInstallments, setShowAllInstallments] = useState(false);
 
-  // Get credit data usando tu hook
+  // Get credit data
   const {
     data: creditData,
     isLoading: loadingCredit,
@@ -60,27 +56,21 @@ export function CreatePaymentAgreementForm() {
   // Create mutation
   const { mutate: createAgreement, isPending } = useCreatePaymentAgreement();
 
-  // Check if credit is cancelled
-  const isCancelled = useMemo(() => {
-    if (!creditData) return false;
-    return creditData.credito?.statusCredit === "CANCELADO";
-  }, [creditData]);
+  // 🔥 TYPE NARROWING: Separar data según flujo
+  const activoData = creditData?.flujo === "ACTIVO" ? creditData : null;
+  const canceladoData = creditData?.flujo === "CANCELADO" ? creditData : null;
+ 
+  const hasActiveAgreement = activoData?.credito?.statusCredit === "EN_CONVENIO";
 
-  // Check if credit has an active agreement
-  const hasActiveAgreement = useMemo(() => {
-    if (!creditData) return false;
-    return creditData.credito?.statusCredit === "EN_CONVENIO";
-  }, [creditData]);
-
-  // 👇 NUEVO: Get cuotas CON sus pago_ids
+  // 🔥 ACTUALIZADO: Ahora usa activoData que TypeScript sabe que es GetCreditoByNumeroActivoResponse
   const cuotasParaConvenio = useMemo(() => {
-    if (!creditData) return [];
+    if (!activoData) return [];
 
-    const atrasadas = (creditData.cuotasAtrasadas || []).map((c) => ({
+    const atrasadas = (activoData.cuotasAtrasadas || []).map((c) => ({
       ...c,
       estado: "atrasada" as const,
     }));
-    const pendientes = (creditData.cuotasPendientes || []).map((c) => ({
+    const pendientes = (activoData.cuotasPendientes || []).map((c) => ({
       ...c,
       estado: "pendiente" as const,
     }));
@@ -99,7 +89,7 @@ export function CreatePaymentAgreementForm() {
     return Array.from(cuotasMap.values()).sort(
       (a, b) => a.numero_cuota - b.numero_cuota
     );
-  }, [creditData]);
+  }, [activoData]);
 
   // Cuotas a mostrar (solo primeras 10 o todas si está expandido)
   const cuotasVisibles = useMemo(() => {
@@ -109,15 +99,13 @@ export function CreatePaymentAgreementForm() {
 
   // Calculate total amount based on selected installments
   const totalAmount = useMemo(() => {
-    if (!creditData || selectedInstallments.length === 0) return 0;
+    if (!activoData || selectedInstallments.length === 0) return 0;
 
-    // 👇 Parsea bien el número
-    const cuotaMensual = parseFloat(creditData.credito?.cuota || "0");
-    const mora = parseFloat(creditData.moraActual || "0");
+    const cuotaMensual = parseFloat(activoData.credito?.cuota || "0");
+    const mora = parseFloat(activoData.moraActual?.toString() || "0");
 
-    // Total = (cuota mensual * número de cuotas) + mora
     return cuotaMensual * selectedInstallments.length + mora;
-  }, [creditData, selectedInstallments]);
+  }, [activoData, selectedInstallments]);
 
   // Calculate monthly installment of the agreement
   const monthlyInstallment = useMemo(() => {
@@ -135,7 +123,6 @@ export function CreatePaymentAgreementForm() {
     setShowAllInstallments(false);
   };
 
-  // 👇 ACTUALIZADO: Ahora usa pago_id
   const handleInstallmentToggle = (pagoId: number) => {
     setSelectedInstallments((prev) =>
       prev.includes(pagoId)
@@ -144,32 +131,30 @@ export function CreatePaymentAgreementForm() {
     );
   };
 
-  // 👇 ACTUALIZADO: Ahora usa pago_id
   const handleSelectAllInstallments = () => {
     if (selectedInstallments.length === cuotasParaConvenio.length) {
       setSelectedInstallments([]);
     } else {
-      setSelectedInstallments(cuotasParaConvenio.map((c) => c.pago_id));
+      setSelectedInstallments(cuotasParaConvenio.map((c) => c.pago_id!));
     }
   };
 
-  // 👇 ACTUALIZADO: Ahora usa pago_id
   const handleSelectRange = (type: "atrasadas" | "primeras10" | "todas") => {
     switch (type) {
       case "atrasadas": {
         const atrasadas = cuotasParaConvenio.filter(
           (c) => c.estado === "atrasada"
         );
-        setSelectedInstallments(atrasadas.map((c) => c.pago_id));
+        setSelectedInstallments(atrasadas.map((c) => c.pago_id!));
         break;
       }
       case "primeras10": {
         const primeras = cuotasParaConvenio.slice(0, 10);
-        setSelectedInstallments(primeras.map((c) => c.pago_id));
+        setSelectedInstallments(primeras.map((c) => c.pago_id!));
         break;
       }
       case "todas":
-        setSelectedInstallments(cuotasParaConvenio.map((c) => c.pago_id));
+        setSelectedInstallments(cuotasParaConvenio.map((c) => c.pago_id!));
         break;
     }
   };
@@ -177,7 +162,7 @@ export function CreatePaymentAgreementForm() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!creditData) return;
+    if (!activoData) return;
 
     if (selectedInstallments.length === 0) {
       alert("Debes seleccionar al menos una cuota");
@@ -189,11 +174,10 @@ export function CreatePaymentAgreementForm() {
       return;
     }
 
-    // 👇 payment_ids ahora son pago_ids
     createAgreement(
       {
-        credit_id: creditData.credito.credito_id,
-        payment_ids: selectedInstallments, // 👈 Ya son pago_ids
+        credit_id: activoData.credito.credito_id,
+        payment_ids: selectedInstallments,
         total_agreement_amount: totalAmount,
         number_of_months: numberOfMonths,
         reason,
@@ -220,7 +204,14 @@ export function CreatePaymentAgreementForm() {
       }
     );
   };
-
+// Después de las líneas de type narrowing
+console.log("🔍 DEBUG:", {
+  creditData,
+  flujo: creditData?.flujo,
+  activoData: !!activoData,
+  canceladoData: !!canceladoData,
+  hasActiveAgreement,
+});
   return (
     <div className="fixed inset-0 flex justify-center bg-gradient-to-br from-blue-50 to-white overflow-auto px-4 py-8">
       <div className="w-full max-w-4xl">
@@ -253,7 +244,7 @@ export function CreatePaymentAgreementForm() {
         )}
 
         {/* Alert if credit is cancelled */}
-        {creditData && isCancelled && (
+        {canceladoData && (
           <Alert className="mb-6 border-red-500 bg-red-50">
             <AlertCircle className="h-4 w-4 text-red-600" />
             <AlertDescription className="text-red-800">
@@ -263,8 +254,8 @@ export function CreatePaymentAgreementForm() {
           </Alert>
         )}
 
-        {/* Credit info and form - solo si NO está cancelado */}
-        {creditData && !isCancelled && (
+        {/* Credit info and form - solo si es ACTIVO */}
+        {activoData && (
           <>
             {/* Alert if credit already has active agreement */}
             {hasActiveAgreement && (
@@ -294,10 +285,10 @@ export function CreatePaymentAgreementForm() {
                     </span>
                   </div>
                   <span className="text-gray-900 font-semibold">
-                    {creditData.usuario.nombre}
+                    {activoData.usuario.nombre}
                   </span>
                   <span className="text-gray-600 text-sm mt-1">
-                    NIT: {creditData.usuario.nit || "N/A"}
+                    NIT: {activoData.usuario.nit || "N/A"}
                   </span>
                 </div>
 
@@ -307,7 +298,7 @@ export function CreatePaymentAgreementForm() {
                     Crédito SIFCO
                   </span>
                   <span className="text-gray-900 text-lg font-bold tracking-wider">
-                    {creditData.credito.numero_credito_sifco}
+                    {activoData.credito.numero_credito_sifco}
                   </span>
                 </div>
 
@@ -318,7 +309,7 @@ export function CreatePaymentAgreementForm() {
                   </span>
                   <span className="text-green-700 font-bold text-xl">
                     Q
-                    {Number(creditData.credito.deudatotal).toLocaleString(
+                    {Number(activoData.credito.deudatotal).toLocaleString(
                       "es-GT",
                       {
                         minimumFractionDigits: 2,
@@ -334,60 +325,55 @@ export function CreatePaymentAgreementForm() {
                   </span>
                   <span className="text-indigo-700 font-bold text-xl">
                     Q
-                    {Number(creditData.credito.cuota).toLocaleString("es-GT", {
+                    {Number(activoData.credito.cuota).toLocaleString("es-GT", {
                       minimumFractionDigits: 2,
                     })}
                   </span>
                 </div>
 
                 {/* Cuota Actual */}
-                {creditData.flujo === "ACTIVO" && (
-                  <div className="flex flex-col bg-white rounded-lg p-4 shadow-sm">
-                    <span className="font-bold text-blue-700 text-sm mb-2">
-                      Cuota Actual
+                <div className="flex flex-col bg-white rounded-lg p-4 shadow-sm">
+                  <span className="font-bold text-blue-700 text-sm mb-2">
+                    Cuota Actual
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-900 text-xl font-bold">
+                      #{activoData.cuotaActual ?? "N/A"}
                     </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-900 text-xl font-bold">
-                        #{creditData.cuotaActual ?? "N/A"}
-                      </span>
-                      {creditData.cuotaActualPagada ? (
-                        <CheckCircle className="w-5 h-5 text-green-600" />
-                      ) : (
-                        <AlertCircle className="w-5 h-5 text-orange-600" />
-                      )}
-                    </div>
+                    {activoData.cuotaActualPagada ? (
+                      <CheckCircle className="w-5 h-5 text-green-600" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-orange-600" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Mora */}
+                {Number(activoData.moraActual) > 0 && (
+                  <div className="flex flex-col bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 shadow-sm border border-red-200">
+                    <span className="font-bold text-red-700 text-sm mb-2">
+                      Mora Actual
+                    </span>
+                    <span className="text-red-700 font-bold text-xl">
+                      Q
+                      {Number(activoData.moraActual).toLocaleString("es-GT", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </span>
                   </div>
                 )}
 
-                {/* Mora */}
-                {creditData.flujo === "ACTIVO" &&
-                  Number(creditData.moraActual) > 0 && (
-                    <div className="flex flex-col bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 shadow-sm border border-red-200">
-                      <span className="font-bold text-red-700 text-sm mb-2">
-                        Mora Actual
-                      </span>
-                      <span className="text-red-700 font-bold text-xl">
-                        Q
-                        {Number(creditData.moraActual).toLocaleString("es-GT", {
-                          minimumFractionDigits: 2,
-                        })}
-                      </span>
-                    </div>
-                  )}
-
                 {/* Cuotas Atrasadas */}
-                {creditData.flujo === "ACTIVO" &&
-                  creditData.cuotasAtrasadas &&
-                  creditData.cuotasAtrasadas.length > 0 && (
-                    <div className="flex flex-col bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 shadow-sm border border-red-200">
-                      <span className="font-bold text-red-700 text-sm mb-2">
-                        Cuotas Atrasadas
-                      </span>
-                      <span className="text-red-700 font-bold text-xl">
-                        {creditData.cuotasAtrasadas.length}
-                      </span>
-                    </div>
-                  )}
+                {activoData.cuotasAtrasadas && activoData.cuotasAtrasadas.length > 0 && (
+                  <div className="flex flex-col bg-gradient-to-br from-red-50 to-pink-50 rounded-lg p-4 shadow-sm border border-red-200">
+                    <span className="font-bold text-red-700 text-sm mb-2">
+                      Cuotas Atrasadas
+                    </span>
+                    <span className="text-red-700 font-bold text-xl">
+                      {activoData.cuotasAtrasadas.length}
+                    </span>
+                  </div>
+                )}
 
                 {/* Cuotas Pendientes + Atrasadas */}
                 <div className="flex flex-col bg-white rounded-lg p-4 shadow-sm">
@@ -407,7 +393,7 @@ export function CreatePaymentAgreementForm() {
                   <span className="text-green-700 font-bold text-xl">
                     Q
                     {Number(
-                      creditData.usuario.saldo_a_favor || 0
+                      activoData.usuario.saldo_a_favor || 0
                     ).toLocaleString("es-GT", {
                       minimumFractionDigits: 2,
                     })}
@@ -417,7 +403,7 @@ export function CreatePaymentAgreementForm() {
             </Card>
 
             {/* Card de Convenio Activo - si existe */}
-            {creditData.convenioActivo && (
+            {activoData.convenioActivo && (
               <Card className="p-6 mb-6 bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-300 rounded-2xl shadow-xl">
                 {/* Header Clickeable */}
                 <div
@@ -434,12 +420,12 @@ export function CreatePaymentAgreementForm() {
                           </h2>
                           <span
                             className={`px-2 py-0.5 rounded-full font-bold text-xs ${
-                              creditData.convenioActivo.activo
+                              activoData.convenioActivo.activo
                                 ? "bg-green-500 text-white"
                                 : "bg-gray-400 text-white"
                             }`}
                           >
-                            {creditData.convenioActivo.activo
+                            {activoData.convenioActivo.activo
                               ? "Activo"
                               : "Inactivo"}
                           </span>
@@ -461,8 +447,8 @@ export function CreatePaymentAgreementForm() {
                               Progreso
                             </p>
                             <p className="font-bold text-purple-900">
-                              {creditData.convenioActivo.pagos_realizados}/
-                              {creditData.convenioActivo.numero_meses}
+                              {activoData.convenioActivo.pagos_realizados}/
+                              {activoData.convenioActivo.numero_meses}
                             </p>
                           </div>
                           <div className="text-right bg-white rounded-lg px-3 py-2 border border-orange-200">
@@ -472,7 +458,7 @@ export function CreatePaymentAgreementForm() {
                             <p className="font-bold text-orange-700">
                               Q
                               {Number(
-                                creditData.convenioActivo.monto_pendiente
+                                activoData.convenioActivo.monto_pendiente
                               ).toLocaleString("es-GT", {
                                 minimumFractionDigits: 2,
                               })}
@@ -512,7 +498,7 @@ export function CreatePaymentAgreementForm() {
                       <span className="text-xl font-bold text-purple-900">
                         Q
                         {Number(
-                          creditData.convenioActivo.monto_total_convenio
+                          activoData.convenioActivo.monto_total_convenio
                         ).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -525,7 +511,7 @@ export function CreatePaymentAgreementForm() {
                       <span className="text-xl font-bold text-indigo-700">
                         Q
                         {Number(
-                          creditData.convenioActivo.cuota_mensual
+                          activoData.convenioActivo.cuota_mensual
                         ).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -536,15 +522,15 @@ export function CreatePaymentAgreementForm() {
                         Progreso
                       </span>
                       <span className="text-xl font-bold text-purple-900 block mb-2">
-                        {creditData.convenioActivo.pagos_realizados} /{" "}
-                        {creditData.convenioActivo.numero_meses}
+                        {activoData.convenioActivo.pagos_realizados} /{" "}
+                        {activoData.convenioActivo.numero_meses}
                       </span>
                       {/* Barra de progreso */}
                       <div className="bg-gray-200 rounded-full h-2 overflow-hidden">
                         <div
                           className="bg-gradient-to-r from-purple-500 to-indigo-500 h-full rounded-full transition-all duration-500"
                           style={{
-                            width: `${(creditData.convenioActivo.pagos_realizados / creditData.convenioActivo.numero_meses) * 100}%`,
+                            width: `${(activoData.convenioActivo.pagos_realizados / activoData.convenioActivo.numero_meses) * 100}%`,
                           }}
                         />
                       </div>
@@ -558,7 +544,7 @@ export function CreatePaymentAgreementForm() {
                       <span className="text-xl font-bold text-green-700">
                         Q
                         {Number(
-                          creditData.convenioActivo.monto_pagado
+                          activoData.convenioActivo.monto_pagado
                         ).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -571,7 +557,7 @@ export function CreatePaymentAgreementForm() {
                       <span className="text-xl font-bold text-orange-700">
                         Q
                         {Number(
-                          creditData.convenioActivo.monto_pendiente
+                          activoData.convenioActivo.monto_pendiente
                         ).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -582,31 +568,31 @@ export function CreatePaymentAgreementForm() {
                         Cuotas en Convenio
                       </span>
                       <span className="text-xl font-bold text-purple-900">
-                        {creditData.cuotasEnConvenio?.length || 0}
+                        {activoData.cuotasEnConvenio?.length || 0}
                       </span>
                     </div>
                   </div>
 
                   {/* Motivo */}
-                  {creditData.convenioActivo.motivo && (
+                  {activoData.convenioActivo.motivo && (
                     <div className="mt-6 bg-white rounded-lg p-4 shadow-sm border border-purple-100">
                       <span className="text-sm font-bold text-purple-700 block mb-1">
                         Motivo
                       </span>
                       <p className="text-gray-700">
-                        {creditData.convenioActivo.motivo}
+                        {activoData.convenioActivo.motivo}
                       </p>
                     </div>
                   )}
 
                   {/* Observaciones */}
-                  {creditData.convenioActivo.observaciones && (
+                  {activoData.convenioActivo.observaciones && (
                     <div className="mt-4 bg-white rounded-lg p-4 shadow-sm border border-purple-100">
                       <span className="text-sm font-bold text-purple-700 block mb-1">
                         Observaciones
                       </span>
                       <p className="text-gray-700">
-                        {creditData.convenioActivo.observaciones}
+                        {activoData.convenioActivo.observaciones}
                       </p>
                     </div>
                   )}
@@ -618,7 +604,7 @@ export function CreatePaymentAgreementForm() {
                     </span>
                     <p className="text-gray-700">
                       {new Date(
-                        creditData.convenioActivo.fecha_convenio
+                        activoData.convenioActivo.fecha_convenio
                       ).toLocaleDateString("es-GT", {
                         year: "numeric",
                         month: "long",
@@ -629,6 +615,7 @@ export function CreatePaymentAgreementForm() {
                 </div>
               </Card>
             )}
+
             {/* Form - Only show if no active agreement */}
             {!hasActiveAgreement && (
               <form onSubmit={handleSubmit} className="space-y-6">
@@ -656,14 +643,11 @@ export function CreatePaymentAgreementForm() {
                             <SelectValue placeholder="Selección rápida..." />
                           </SelectTrigger>
                           <SelectContent>
-                            {creditData.flujo === "ACTIVO" &&
-                              creditData.cuotasAtrasadas &&
-                              creditData.cuotasAtrasadas.length > 0 && (
-                                <SelectItem value="atrasadas">
-                                  Solo Atrasadas (
-                                  {creditData.cuotasAtrasadas.length})
-                                </SelectItem>
-                              )}
+                            {activoData.cuotasAtrasadas && activoData.cuotasAtrasadas.length > 0 && (
+                              <SelectItem value="atrasadas">
+                                Solo Atrasadas ({activoData.cuotasAtrasadas.length})
+                              </SelectItem>
+                            )}
                             <SelectItem value="primeras10">
                               Primeras 10 cuotas
                             </SelectItem>
@@ -705,13 +689,12 @@ export function CreatePaymentAgreementForm() {
                     </p>
                   ) : (
                     <>
-                      {/* Lista de cuotas - Solo muestra las visibles */}
+                      {/* Lista de cuotas */}
                       <div className="space-y-2 max-h-[400px] overflow-y-auto p-2">
                         {cuotasVisibles.map((installment) => {
                           const isAtrasada = installment.estado === "atrasada";
-                          // 👇 CAMBIO: Ahora usa pago_id
                           const isSelected = selectedInstallments.includes(
-                            installment.pago_id
+                            installment.pago_id!
                           );
 
                           return (
@@ -724,18 +707,16 @@ export function CreatePaymentAgreementForm() {
                                     ? "border-red-200 bg-red-50 hover:border-red-400"
                                     : "border-gray-200 bg-white hover:border-blue-300"
                               }`}
-                              // 👇 CAMBIO: Ahora usa pago_id
                               onClick={() =>
-                                handleInstallmentToggle(installment.pago_id)
+                                handleInstallmentToggle(installment.pago_id!)
                               }
                             >
                               <div className="flex items-center gap-3">
                                 <input
                                   type="checkbox"
                                   checked={isSelected}
-                                  // 👇 CAMBIO: Ahora usa pago_id
                                   onChange={() =>
-                                    handleInstallmentToggle(installment.pago_id)
+                                    handleInstallmentToggle(installment.pago_id!)
                                   }
                                   className="w-5 h-5 cursor-pointer"
                                 />
@@ -788,8 +769,7 @@ export function CreatePaymentAgreementForm() {
                             ) : (
                               <>
                                 <ChevronDown className="w-4 h-4 mr-2" />
-                                Mostrar todas ({cuotasParaConvenio.length -
-                                  10}{" "}
+                                Mostrar todas ({cuotasParaConvenio.length - 10}{" "}
                                 más)
                               </>
                             )}
@@ -866,21 +846,20 @@ export function CreatePaymentAgreementForm() {
                     </div>
 
                     {/* Included mora */}
-                    {  
-                      Number(creditData.moraActual) > 0 && (
-                        <div>
-                          <Label className="text-blue-900 font-bold text-base mb-2 block">
-                            Mora Incluida
-                          </Label>
-                          <div className="p-3 bg-gradient-to-br from-red-50 to-pink-50 rounded-lg font-bold text-lg text-red-700 border-2 border-red-200">
-                            Q
-                            {Number(creditData.moraActual).toLocaleString(
-                              "es-GT",
-                              { minimumFractionDigits: 2 }
-                            )}
-                          </div>
+                    {Number(activoData.moraActual) > 0 && (
+                      <div>
+                        <Label className="text-blue-900 font-bold text-base mb-2 block">
+                          Mora Incluida
+                        </Label>
+                        <div className="p-3 bg-gradient-to-br from-red-50 to-pink-50 rounded-lg font-bold text-lg text-red-700 border-2 border-red-200">
+                          Q
+                          {Number(activoData.moraActual).toLocaleString(
+                            "es-GT",
+                            { minimumFractionDigits: 2 }
+                          )}
                         </div>
-                      )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Reason */}

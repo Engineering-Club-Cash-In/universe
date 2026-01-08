@@ -107,7 +107,9 @@ export class InfornetClient {
   async busquedaPersona(params: BusquedaPersonaParams): Promise<PersonaResult[]> {
     validateBusquedaPersonaParams(params);
     const soapRequest = buildBusquedaPersonaRequest(this.credentials, params);
+    console.log('SOAP Request:', soapRequest);
     const response = await this.sendRequest(soapRequest);
+    console.log('SOAP Response:', response);
     return parseBusquedaPersonaResponse(response);
   }
 
@@ -157,6 +159,7 @@ export class InfornetClient {
     }
     const soapRequest = buildEstudioPersonaRequest(this.credentials, codigoPersona);
     const response = await this.sendRequest(soapRequest);
+    console.log('SOAP Response Estudio Persona:', response);
     return parseEstudioPersonaResponse(response);
   }
 
@@ -196,6 +199,7 @@ export class InfornetClient {
         body: soapRequest,
         signal: AbortSignal.timeout(this.timeout),
       });
+      console.log('HTTP Response Status:', response.status);
 
       const responseText = await response.text();
 

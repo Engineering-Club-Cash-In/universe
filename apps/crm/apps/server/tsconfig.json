@@ -16,6 +16,10 @@
 		"jsx": "react-jsx",
 		"jsxImportSource": "hono/jsx"
 	},
+	"include": [
+    "src/**/*",
+    "../../../../../../packages/infornet/**/*"
+  ],
 	"tsc-alias": {
 		"resolveFullPaths": true
 	}

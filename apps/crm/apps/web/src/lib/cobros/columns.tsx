@@ -16,8 +16,8 @@ export type ContratoCobranza = {
 	diasMoraMaximo: number;
 	estadoMora: string | null;
 	estadoContrato: string;
-	diaPagoMensual: number | null;
-	diasHastaPago: number; // Calculado: días hasta el próximo pago
+	fechaProximoPago: string | null;
+	diasHastaPago: number | null; // Calculado: días hasta el próximo pago (null si no hay fecha definida)
 	numeroCredito: string | null;
 };
 
@@ -68,8 +68,14 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 			);
 		},
 		cell: ({ row }) => {
-			const dias = row.getValue("diasHastaPago") as number;
+			const dias = row.getValue("diasHastaPago") as number | null;
 			let className = "font-medium";
+
+			// Si no hay fecha de próximo pago definida
+			if (dias === null) {
+				className += " text-gray-500";
+				return <div className={className}>Sin fecha definida</div>;
+			}
 
 			if (dias === 0) {
 				className += " text-red-600";

@@ -617,26 +617,116 @@ function RouteComponent() {
 																	)}
 																</div>
 															) : (
-																<div>
-																	<span className="font-medium">Estado:</span>
-																	<br />
-																	<span className="text-red-600">
-																		Pendiente de pago
+															<div>
+																<span className="font-medium">Estado:</span>
+																<br />
+																<span className="text-red-600">
+																	Pendiente de pago
+																</span>
+																{tieneMora && (
+																	<span className="block font-medium text-red-600 text-xs">
+																		Total: Q
+																		{(
+																			Number(cuota.montoCuota) +
+																			Number(cuota.montoMora)
+																		).toLocaleString()}
 																	</span>
-																	{tieneMora && (
-																		<span className="block font-medium text-red-600 text-xs">
-																			Total: Q
-																			{(
-																				Number(cuota.montoCuota) +
-																				Number(cuota.montoMora)
-																			).toLocaleString()}
-																		</span>
-																	)}
-																</div>
-															)}
-														</div>
+																)}
+															</div>
+														)}
 													</div>
-												);
+
+													{/* Detalles de pago - Solo mostrar si está pagado y tiene detalles */}
+													{esPagada && cuota.detallesPago && (
+														<>
+															<div className="my-2 border-t" />
+															<div className="grid grid-cols-2 gap-2 rounded bg-green-50 p-2 text-xs">
+																<div className="col-span-2 mb-1 font-medium text-green-900">
+																	Desglose del Pago:
+																</div>
+																{Number(cuota.detallesPago.abonoCapital) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">Capital:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.abonoCapital).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{Number(cuota.detallesPago.abonoInteres) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">Interés:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.abonoInteres).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{Number(cuota.detallesPago.abonoIva) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">IVA:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.abonoIva).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{Number(cuota.detallesPago.abonoSeguro) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">Seguro:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.abonoSeguro).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{Number(cuota.detallesPago.abonoGps) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">GPS:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.abonoGps).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{Number(cuota.detallesPago.abonoMembresias) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">Membresías:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.abonoMembresias).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{Number(cuota.detallesPago.pagoMora) > 0 && (
+																	<div className="col-span-2 border-t pt-1">
+																		<span className="text-orange-700">Mora pagada:</span>
+																		<span className="float-right font-medium text-orange-700">
+																			Q{Number(cuota.detallesPago.pagoMora).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																{cuota.detallesPago.pagoOtros && Number(cuota.detallesPago.pagoOtros) > 0 && (
+																	<div>
+																		<span className="text-muted-foreground">Otros:</span>
+																		<span className="float-right font-medium">
+																			Q{Number(cuota.detallesPago.pagoOtros).toLocaleString()}
+																		</span>
+																	</div>
+																)}
+																<div className="col-span-2 mt-2 border-t pt-2">
+																	<div className="flex justify-between text-blue-900">
+																		<span>Capital restante:</span>
+																		<span className="font-bold">
+																			Q{Number(cuota.detallesPago.capitalRestante).toLocaleString()}
+																		</span>
+																	</div>
+																	<div className="flex justify-between text-blue-700 text-xs">
+																		<span>Interés restante:</span>
+																		<span className="font-medium">
+																			Q{Number(cuota.detallesPago.interesRestante).toLocaleString()}
+																		</span>
+																	</div>
+																</div>
+															</div>
+														</>
+													)}
+												</div>
+											);
 											})}
 									</div>
 									<Pagination

@@ -23,41 +23,20 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
 import { orpc } from "@/utils/orpc";
+import { ROLES } from "@/lib/roles";
 
-// Función para calcular la próxima fecha de pago y días restantes
-function calcularProximaFechaPago(diaPagoMensual: number | null) {
-	if (!diaPagoMensual) return null;
+// Función para calcular días restantes hasta la fecha de próximo pago
+function calcularDiasHastaPago(fechaProximoPago: string | null) {
+	if (!fechaProximoPago) return null;
 
 	const ahora = new Date();
 	const hoy = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-	const diaActual = hoy.getDate();
-	const mesActual = hoy.getMonth();
-	const añoActual = hoy.getFullYear();
-
-	let fechaPago: Date;
-	if (diaActual <= diaPagoMensual) {
-		fechaPago = new Date(añoActual, mesActual, diaPagoMensual);
-	} else {
-		fechaPago = new Date(añoActual, mesActual + 1, diaPagoMensual);
-	}
-
-	if (fechaPago.getDate() !== diaPagoMensual) {
-		fechaPago = new Date(fechaPago.getFullYear(), fechaPago.getMonth() + 1, 0);
-	}
+	const fechaPago = new Date(fechaProximoPago);
 
 	const diasRestantes = differenceInDays(fechaPago, hoy);
-
-	console.log("[calcularProximaFechaPago]", {
-		diaPagoMensual,
-		diaActual,
-		hoy: hoy.toISOString(),
-		fechaPago: fechaPago.toISOString(),
-		diasRestantes,
-	});
 
 	return {
 		fechaPago,
@@ -72,9 +51,9 @@ export const Route = createFileRoute("/cobros/")({
 });
 
 function RouteComponent() {
-	const { data: session } = authClient.useSession();
+	const { data: session, } = authClient.useSession();
 	const [filtroTemporal, setFiltroTemporal] =
-		useState<FiltroTemporal>("semana");
+		useState<FiltroTemporal>("todos");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
@@ -98,6 +77,27 @@ function RouteComponent() {
 		enabled: !!session,
 	});
 
+	// Mapear filtroTemporal al enum time
+	const timeParam = useMemo((): "WEEK" | "MONTH" | "DUEMONTH" | "TODAY" | undefined => {
+		switch (filtroTemporal) {
+			case "hoy":
+				return "TODAY";
+			case "semana":
+				return "WEEK";
+			case "quincena":
+				return "DUEMONTH";
+			case "mes":
+				return "MONTH";
+			case "todos":
+				return undefined; // No enviar time cuando es "todos"
+			default:
+				return undefined;
+		}
+	}, [filtroTemporal]);
+
+	const userRole = session?.user.role;
+
+
 	const todosLosCreditos = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({
 			input: {
@@ -105,17 +105,13 @@ function RouteComponent() {
 				offset: (page - 1) * pageSize,
 				estadoMora: filtroEtapa || undefined,
 				nombreUsuario: debouncedFilterValue || undefined,
+				time: timeParam,
+				emailCobrador: userRole !== ROLES.ADMIN ? session?.user?.email : undefined,
 			},
 		}),
 		enabled: !!session,
 	});
 
-	const userProfile = useQuery({
-		...orpc.getUserProfile.queryOptions(),
-		enabled: !!session,
-	});
-
-	const userRole = userProfile.data?.role;
 	const stats = dashboardStats.data?.estatusStats || [];
 	const creditosData = todosLosCreditos.data;
 	const creditos = creditosData?.data || [];
@@ -126,26 +122,34 @@ function RouteComponent() {
 	const creditosConDias = useMemo(() => {
 		return creditos
 			.map((contrato) => {
-				const infoPago = calcularProximaFechaPago(contrato.diaPagoMensual);
-				// Si no hay día de pago, usar días de mora negativos para priorizar
-				// Casos con más mora aparecen primero (más negativos)
-				const diasHastaPago =
-					infoPago?.diasRestantes ?? -(contrato.diasMoraMaximo || 0);
-
-				console.log("[contratoConDias]", {
-					clienteNombre: contrato.clienteNombre,
-					diaPagoMensual: contrato.diaPagoMensual,
-					diasMoraMaximo: contrato.diasMoraMaximo,
-					infoPago,
-					diasHastaPago,
-				});
+				const infoPago = calcularDiasHastaPago(contrato.fechaProximoPago);
+				// Si hay fecha de pago, usar los días calculados
+				// Si NO hay fecha de pago pero HAY mora, usar días de mora negativos
+				// Si NO hay fecha de pago y NO hay mora, usar null (sin fecha definida)
+				let diasHastaPago: number | null;
+				
+				if (infoPago?.diasRestantes !== undefined) {
+					diasHastaPago = infoPago.diasRestantes;
+				} else if (contrato.diasMoraMaximo && contrato.diasMoraMaximo > 0) {
+					// Hay mora pero no hay fecha de próximo pago
+					diasHastaPago = -contrato.diasMoraMaximo;
+				} else {
+					// No hay fecha de pago ni mora
+					diasHastaPago = null;
+				}
 
 				return {
 					...contrato,
 					diasHastaPago,
 				} as ContratoCobranza;
 			})
-			.sort((a, b) => a.diasHastaPago - b.diasHastaPago);
+			.sort((a, b) => {
+				// Ordenar: primero los que tienen fecha (por días), luego los que no tienen
+				if (a.diasHastaPago === null && b.diasHastaPago === null) return 0;
+				if (a.diasHastaPago === null) return 1;
+				if (b.diasHastaPago === null) return 1;
+				return a.diasHastaPago - b.diasHastaPago;
+			});
 	}, [creditos]);
 
 	// Filtrar según el rango temporal seleccionado
@@ -177,7 +181,7 @@ function RouteComponent() {
 
 		return filtrados.filter((c) => {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
-			return c.diasHastaPago <= limite;
+			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
 	}, [
 		creditosConDias,
@@ -522,21 +526,7 @@ function RouteComponent() {
 								);
 							})}
 						</div>
-						<div className="flex items-center space-x-2 rounded-md border px-3 py-2">
-							<Checkbox
-								id="completados-incobrables"
-								checked={mostrarCompletadosIncobrables}
-								onCheckedChange={(checked) =>
-									setMostrarCompletadosIncobrables(checked === true)
-								}
-							/>
-							<label
-								htmlFor="completados-incobrables"
-								className="cursor-pointer font-medium text-sm leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-							>
-								Mostrar completados e incobrables
-							</label>
-						</div>
+						
 					</div>
 
 					{/* Data Table */}

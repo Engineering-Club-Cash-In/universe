@@ -19,7 +19,8 @@
 		"db:migrate": "bun run --filter server db:migrate",
 		"db:seed": "bun run --filter server db:seed",
 		"db:clear": "bun run --filter server db:clear",
-		"check-all": "bash check-all.sh"
+		"check-all": "bash check-all.sh",
+		"push": "bash ./deployWeb.sh"
 	},
 	"dependencies": {
 		"@hookform/resolvers": "^5.2.1",

@@ -46,7 +46,7 @@ export const WhyInvest = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-8 lg:gap-20 pt-24 lg:pt-30 pb-20 items-center justify-center">
+    <div className="flex flex-col gap-8 lg:gap-20 pt-24 lg:pt-30 pb-20 items-center justify-center lg:px-6">
       {/* Barra decorativa superior - solo mobile */}
       <div
         className="w-screen h-[10px] md:hidden mb-8"

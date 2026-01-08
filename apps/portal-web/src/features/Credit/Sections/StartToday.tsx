@@ -25,12 +25,12 @@ export const StartToday = () => {
         <BoottomSheets>¡Estamos Listos para Ayudarte!</BoottomSheets>
       </div>
       <h2 className="text-2xl lg:text-header-2  font-bold">Comienza tu trámite hoy</h2>
-      <p className="text-gray lg:text-xl  lg:w-2/5 text-center">
+      <p className="text-gray lg:text-xl lg:w-1/2  xl:w-2/5 text-center">
         Nuestro equipo está disponible para resolver tus dudas y guiarte en cada
         paso del proceso. Obtén tu préstamo de forma rápida y segura.
       </p>
       {/* Botón con motion */}
-      <div className="lg:w-1/4">
+      <div className="xl:w-1/4 lg:w-1/2">
         <motion.button
           className="items-center text-sm justify-center self-stretch text-primary  w-full hidden lg:flex"
           style={{

@@ -81,7 +81,7 @@ export const FAQ = () => {
   ];
 
   return (
-    <div className="flex flex-col gap-8  lg:pt-26 pb-20 items-center justify-center px-8 lg:px-0">
+    <div className="flex flex-col gap-8  lg:pt-26 pb-20 items-center justify-center px-8 lg:px-20">
       <div className="flex flex-col gap-8 lg:gap-4 text-center justify-center items-center">
         <p className="text-2xl font-semibold lg:text-header-3">
           Preguntas <span className="text-secondary">frecuentes</span>

@@ -147,7 +147,7 @@ export const CarOverlay = () => {
       </div>
 
       {/* Sección 2: Filtros con Selects */}
-      <div className="w-full hidden lg:block lg:w-3/4">
+      <div className="w-full hidden lg:block xl:w-3/4">
         <div
           className="grid grid-cols-1 md:grid-cols-5 gap-4  rounded-3xl p-4"
           style={{
@@ -196,7 +196,7 @@ export const CarOverlay = () => {
       </div>
 
       {/* Sección 3: Buscar por Tipo */}
-      <div className="w-full lg:w-[90%]">
+      <div className="w-full xl:w-[90%]">
         <h3 className="text-2xl text-center lg:text-start lg:text-header-body mb-4 lg:mb-6">
           Buscar por tipo
         </h3>
@@ -241,7 +241,7 @@ export const CarOverlay = () => {
       {isMobile && <ShowBarFiltersMobile />}
 
       {/* Sección 4: Lista de vehículos */}
-      <div className="w-full lg:w-[90%] lg:text-start text-center">
+      <div className="w-full xl:w-[90%] lg:text-start text-center">
         <h3 className="text-2xl lg:text-header-body mb-4 lg:mb-8">
           Autos destacados
         </h3>

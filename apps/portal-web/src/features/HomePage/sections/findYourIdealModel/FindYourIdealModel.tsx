@@ -89,7 +89,7 @@ export const FindYourIdealModel: React.FC = () => {
   }, []);
 
   return (
-    <section className="text-center w-full mt-10 lg:mt-26 overflow-hidden py-2 px-6 lg:px-0 lg:max-w-360 lg:mx-auto">
+    <section className="text-center w-full mt-10 lg:mt-26 overflow-hidden py-2 px-6 xl:px-0  lg:max-w-360 lg:mx-auto">
       <div>
         <h2 className="text-2xl lg:text-header-2  lg:mb-24">
           Encuentra la marca ideal

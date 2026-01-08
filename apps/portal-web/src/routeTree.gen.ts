@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TermsChar38conditionsRouteImport } from './routes/terms&conditions'
 import { Route as StylesRouteImport } from './routes/styles'
 import { Route as SellRouteImport } from './routes/sell'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
@@ -27,6 +28,11 @@ import { Route as MarketplaceIndexRouteImport } from './routes/marketplace/index
 import { Route as MarketplaceSearchIndexRouteImport } from './routes/marketplace/search/index'
 import { Route as MarketplaceSearchIdRouteImport } from './routes/marketplace/search/$id'
 
+const TermsChar38conditionsRoute = TermsChar38conditionsRouteImport.update({
+  id: '/terms&conditions',
+  path: '/terms&conditions',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const StylesRoute = StylesRouteImport.update({
   id: '/styles',
   path: '/styles',
@@ -128,6 +134,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
+  '/terms&conditions': typeof TermsChar38conditionsRoute
   '/marketplace': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
   '/marketplace/search': typeof MarketplaceSearchIndexRoute
@@ -147,6 +154,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
+  '/terms&conditions': typeof TermsChar38conditionsRoute
   '/marketplace': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
   '/marketplace/search': typeof MarketplaceSearchIndexRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/sell': typeof SellRoute
   '/styles': typeof StylesRoute
+  '/terms&conditions': typeof TermsChar38conditionsRoute
   '/marketplace/': typeof MarketplaceIndexRoute
   '/marketplace/search/$id': typeof MarketplaceSearchIdRoute
   '/marketplace/search/': typeof MarketplaceSearchIndexRoute
@@ -188,6 +197,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/sell'
     | '/styles'
+    | '/terms&conditions'
     | '/marketplace'
     | '/marketplace/search/$id'
     | '/marketplace/search'
@@ -207,6 +217,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/sell'
     | '/styles'
+    | '/terms&conditions'
     | '/marketplace'
     | '/marketplace/search/$id'
     | '/marketplace/search'
@@ -226,6 +237,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/sell'
     | '/styles'
+    | '/terms&conditions'
     | '/marketplace/'
     | '/marketplace/search/$id'
     | '/marketplace/search/'
@@ -246,6 +258,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SellRoute: typeof SellRoute
   StylesRoute: typeof StylesRoute
+  TermsChar38conditionsRoute: typeof TermsChar38conditionsRoute
   MarketplaceIndexRoute: typeof MarketplaceIndexRoute
   MarketplaceSearchIdRoute: typeof MarketplaceSearchIdRoute
   MarketplaceSearchIndexRoute: typeof MarketplaceSearchIndexRoute
@@ -253,6 +266,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/terms&conditions': {
+      id: '/terms&conditions'
+      path: '/terms&conditions'
+      fullPath: '/terms&conditions'
+      preLoaderRoute: typeof TermsChar38conditionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/styles': {
       id: '/styles'
       path: '/styles'
@@ -390,6 +410,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SellRoute: SellRoute,
   StylesRoute: StylesRoute,
+  TermsChar38conditionsRoute: TermsChar38conditionsRoute,
   MarketplaceIndexRoute: MarketplaceIndexRoute,
   MarketplaceSearchIdRoute: MarketplaceSearchIdRoute,
   MarketplaceSearchIndexRoute: MarketplaceSearchIndexRoute,

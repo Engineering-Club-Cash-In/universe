@@ -58,7 +58,10 @@ export const CheckBox: React.FC<CheckBoxProps> = ({
               target="_blank"
               rel="noopener noreferrer"
               className="font-[Hero] text-[16px] select-none underline hover:text-white/80 transition-colors"
-              onClick={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange(true);
+              }}
             >
               {label}
             </a>

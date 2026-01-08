@@ -246,6 +246,7 @@ export const FormRegister = () => {
                 onChange={(checked) =>
                   formik.setFieldValue("acceptTerms", checked)
                 }
+                labelHref="/terms&conditions"
                 label="Acepto los términos y condiciones"
                 isLabelLink={true}
               />

@@ -156,3 +156,50 @@ export const getInvestmentsStats = async (dpi: string): Promise<InvestmentsStats
     throw error;
   }
 };
+
+// ============================================
+// INTERFACES PARA ASESORES
+// ============================================
+
+export interface Asesor {
+  asesor_id: number;
+  nombre: string;
+  telefono: string | null;
+  activo: boolean;
+  email: string;
+  is_active: boolean;
+  phone: string;
+}
+
+export interface AsesorResponse {
+  success: boolean;
+  data: Asesor;
+}
+
+/**
+ * Obtener información del asesor por ID
+ */
+export const getAsesorById = async (asesorId: number): Promise<Asesor> => {
+  try {
+    const response = await fetch(`${carteraURL}/advisor?id=${asesorId}`, {
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Error al cargar información del asesor");
+    }
+
+    const result = await response.json();
+    
+    // Si la respuesta tiene formato { success, data }
+    if (result.success && result.data) {
+      return result.data;
+    }
+    
+    // Si la respuesta es directamente el objeto asesor
+    return result;
+  } catch (error) {
+    console.error("Error al obtener información del asesor:", error);
+    throw error;
+  }
+};

@@ -3,7 +3,7 @@
 const carteraURL = import.meta.env.VITE_CARTERA_API_URL || "http://localhost:5000";
 
 // Tipos
-export type CreditStatus = "ACTIVO" | "FINALIZADO" | "PENDIENTE" | "ATRASADO";
+export type CreditStatus = "ACTIVO" | "FINALIZADO" | "PENDIENTE" | "ATRASADO" | "CANCELADO";
 export type CreditType = "Nuevo" | "Renovacion" | "Ampliacion";
 export type FormatoCredito = "Pool" | "Individual";
 export type CuotaStatus = "no_required" | "required" | "pagado" | "atrasado";

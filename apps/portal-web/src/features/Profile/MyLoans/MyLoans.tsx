@@ -8,6 +8,7 @@ import {
 } from "@/components";
 import { useQuery } from "@tanstack/react-query";
 import { getCredits, getNumbersSifco } from "../services";
+import { getAsesorById } from "../services/investmentsService";
 import { useIsMobile, useModalOptionsCall } from "@/hooks";
 import { ContainerMenu } from "../components/ContainerMenu";
 import { useStoreProfile } from "../store/useStoreProfile";
@@ -99,6 +100,37 @@ export const MyLoans = () => {
     );
     // Si no hay foto frontal, usar la primera foto disponible
     return frontPhoto?.url || opportunity.vehicle.photos[0]?.url || "";
+  };
+
+  // Función para contactar al asesor por WhatsApp
+  const handleContactAsesor = async (asesorId: number, numeroSifco: string) => {
+    try {
+      const asesor = await getAsesorById(asesorId);
+      
+      // Usar el teléfono del asesor (phone o telefono)
+      const phoneNumber = asesor.phone || asesor.telefono ;
+      
+      if (!phoneNumber) {
+        console.error("El asesor no tiene un número de teléfono registrado");
+        alert("No se pudo obtener el número del asesor");
+        return;
+      }
+
+      // Crear el mensaje
+      const mensaje = `Hola ${asesor.nombre.split(' ')[0]}, quiero realizar mi pago de mi crédito con número ${numeroSifco}`;
+      
+      // Limpiar el número de teléfono (quitar espacios, guiones, etc.)
+      const cleanPhone = phoneNumber.replace(/\D/g, '');
+      
+      // Crear URL de WhatsApp con el mensaje
+      const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(mensaje)}`;
+      
+      // Abrir WhatsApp
+      window.open(whatsappUrl, '_blank');
+    } catch (error) {
+      console.error("Error al contactar al asesor:", error);
+      alert("No se pudo contactar al asesor. Intenta nuevamente.");
+    }
   };
 
   if (isLoading || isLoadingSifcoNumbers) {
@@ -326,12 +358,15 @@ export const MyLoans = () => {
                         )*/}
 
                         {/* Botón de realizar pago */}
-                        {creditData.credito.statusCredit === "ACTIVO" && (
+                        {creditData.credito.statusCredit !== "CANCELADO" && (
                           <div className="flex justify-end pt-4 border-t border-white/10">
                             <button
                               className="px-6 py-2 lg:py-3 bg-primary hover:bg-primary/90 text-white font-semibold rounded-lg transition-colors flex items-center gap-2"
                               onClick={() => {
-                                setIsModalOpen(true);
+                                handleContactAsesor(
+                                  creditData.credito.asesor_id,
+                                  creditData.credito.numero_credito_sifco
+                                );
                               }}
                             >
                               Realizar Pago

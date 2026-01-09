@@ -66,6 +66,7 @@ export const appRouter = {
 		crmRouter.updateAnalysisChecklistVehicleVerification,
 	getClients: crmRouter.getClients,
 	getClientsStats: crmRouter.getClientsStats,
+	getLeadsAsClients: crmRouter.getLeadsAsClients,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,

@@ -39,7 +39,7 @@ export const GetMoney = () => {
   ];
 
   return (
-    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-40 lg:mt-56 lg:mb-20 lg:px-20 items-center">
+    <section className="text-center lg:text-start flex flex-col px-8 gap-10 lg:flex-row lg:gap-16 xl:gap-40 lg:mt-56 lg:mb-20 lg:px-20 items-center">
       {isMobile && (
         <div
           className="w-full"

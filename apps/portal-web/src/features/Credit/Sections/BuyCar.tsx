@@ -31,7 +31,7 @@ export const BuyCar = () => {
   ];
 
   return (
-    <section className="flex flex-col lg:flex-row  gap-8 lg:gap-40 mb-20 lg:mt-32 mt-6 px-8 lg:px-20 text-center lg:text-start">
+    <section className="flex flex-col lg:flex-row  gap-8 lg:gap-16 xl:gap-40 mb-20 lg:mt-32 mt-6 px-8 lg:px-20 text-center lg:text-start">
       {isMobile && (
         <div
           className="w-full"
@@ -48,7 +48,7 @@ export const BuyCar = () => {
       </h2>
       {/* Lado izquierdo - Imagen */}
       <div>
-        <div className="relative w-full lg:w-[35vw] h-[40svh] lg:h-full">
+        <div className="relative w-full lg:w-[35vw] h-[40svh] xl:h-full">
           {/* Borde con blur - Solo en mobile (detrás de la imagen) */}
           {isMobile && (
             <div

@@ -39,7 +39,7 @@ export const HowFunction = () => {
   return (
     <section
       id="how-it-works"
-      className="pt-24 lg:pt-56 lg:mb-24 px-8 lg:px-20 flex flex-col-reverse lg:flex-row gap-16 lg:gap-40 items-center w-full"
+      className="pt-24 lg:pt-56 lg:mb-24 px-8 lg:px-20 flex flex-col-reverse lg:flex-row gap-16  xl:gap-40 items-center w-full"
     >
       <div className="w-full lg:w-2/5 flex flex-col lg:gap-8 gap-6">
         <h2 className="text-xl lg:text-header-body font-bold text-center text-secondary">
@@ -66,7 +66,7 @@ export const HowFunction = () => {
           ))}
         </div>
       </div>
-      <div className="w-full lg:w-3/5">
+      <div className="w-full lg:w-9/12 xl:w-3/5">
         <Calculator />
       </div>
     </section>

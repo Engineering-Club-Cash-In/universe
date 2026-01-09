@@ -43,7 +43,7 @@ export const ReadyStart = () => {
         {items.map((item, index) => (
           <div
             key={index}
-            className="flex flex-col justify-between p-6 gap-6 rounded-2xl lg:h-80 w-full lg:w-1/4"
+            className="flex flex-col justify-between p-6 gap-6 rounded-2xl lg:h-80 w-full lg:w-2/5 xl:w-1/4"
             style={{
               borderBottom: "8px solid rgba(154, 159, 245, 1)",
               background: "linear-gradient(180deg, #111827 0%, #1F2937 100%)",

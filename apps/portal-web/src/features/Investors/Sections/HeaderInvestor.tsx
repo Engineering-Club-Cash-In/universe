@@ -41,7 +41,7 @@ export const HeaderInvestor = () => {
           </p>
 
           {/* Botones */}
-          <div className="flex gap-6 mt-4  w-full lg:w-3/4">
+          <div className="flex gap-6 mt-4  w-full xl:w-3/4">
             <motion.button
               className="flex items-center p-4 justify-center gap-4 w-full text-secondary  rounded-xl border border-secondary/50 hover:bg-secondary/10 transition-colors"
               whileHover={{ scale: 1.02 }}

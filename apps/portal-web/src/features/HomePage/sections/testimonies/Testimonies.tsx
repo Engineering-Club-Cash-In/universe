@@ -31,7 +31,7 @@ export const Testimonies = () => {
       </div>
 
       {/* Grid de testimonios */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 lg:gap-36 w-full mt-10 lg:mt-16 lg:px-28">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10 xl:gap-36 w-full mt-10 lg:mt-16 xl:px-28 lg:px-12">
         {testimonies.map((testimony, index) => (
           <div
             key={index}

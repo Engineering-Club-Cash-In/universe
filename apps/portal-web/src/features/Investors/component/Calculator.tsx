@@ -87,13 +87,13 @@ export const Calculator: React.FC = () => {
 
   return (
     <div
-      className="p-6 lg:p-16 rounded-3xl"
+      className="p-6 lg:p-8 xl:p-16 rounded-3xl"
       style={{
         border: "0.86px solid rgba(212, 175, 55, 0.20)",
         background: "linear-gradient(180deg, #0A0A0A 0%, #000 100%)",
       }}
     >
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+      <div className="grid grid-cols-1 lg:grid-cols-2 lg:gap-8 xl:gap-12">
         {/* Primer Grid - Inputs */}
         <div className="flex flex-col gap-6">
           <div className="lg:w-1/2 flex items-center justify-center lg:justify-start">

@@ -1,23 +1,27 @@
-import { useForm } from "@tanstack/react-form";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
+	ArrowUpRight,
 	Banknote,
-	Building,
+	Briefcase,
 	Calendar,
+	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
-	Filter,
+	CreditCard,
+	Eye,
+	FileText,
 	HandshakeIcon,
-	MoreHorizontal,
-	Plus,
+	Home,
+	Mail,
+	Phone,
 	Search,
 	User,
+	Car,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
-import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,32 +31,15 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
-import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
 	Dialog,
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
-	DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DatePicker } from "@/components/ui/react-datepicker";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
 import {
 	Table,
 	TableBody,
@@ -61,51 +48,186 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
-import { formatGuatemalaDate, getStatusLabel } from "@/lib/crm-formatters";
-import { client, orpc } from "@/utils/orpc";
+import { formatGuatemalaDate } from "@/lib/crm-formatters";
+import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/clients")({
 	component: RouteComponent,
 });
 
+// Helper functions
+const getClientTypeLabel = (type: string) => {
+	switch (type) {
+		case "individual":
+			return "Individual";
+		case "comerciante":
+			return "Comerciante";
+		case "empresa":
+			return "Empresa";
+		default:
+			return type;
+	}
+};
+
+const getMaritalStatusLabel = (status: string | null) => {
+	if (!status) return "No especificado";
+	switch (status) {
+		case "single":
+			return "Soltero/a";
+		case "married":
+			return "Casado/a";
+		case "divorced":
+			return "Divorciado/a";
+		case "widowed":
+			return "Viudo/a";
+		default:
+			return status;
+	}
+};
+
+const getOccupationLabel = (occupation: string | null) => {
+	if (!occupation) return "No especificado";
+	switch (occupation) {
+		case "owner":
+			return "Propietario";
+		case "employee":
+			return "Empleado";
+		default:
+			return occupation;
+	}
+};
+
+const getWorkTimeLabel = (workTime: string | null) => {
+	if (!workTime) return "No especificado";
+	switch (workTime) {
+		case "less_than_1":
+			return "Menos de 1 año";
+		case "1_to_5":
+			return "1 a 5 años";
+		case "5_to_10":
+			return "5 a 10 años";
+		case "10_plus":
+			return "Más de 10 años";
+		default:
+			return workTime;
+	}
+};
+
+const getLoanPurposeLabel = (purpose: string | null) => {
+	if (!purpose) return "No especificado";
+	switch (purpose) {
+		case "personal":
+			return "Personal";
+		case "business":
+			return "Negocio";
+		default:
+			return purpose;
+	}
+};
+
+const formatCurrency = (value: string | number | null) => {
+	if (!value) return "Q0.00";
+	const num = typeof value === "string" ? Number.parseFloat(value) : value;
+	return `Q${num.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+// Type definition for credit analysis
+type CreditAnalysisData = {
+	leadId: string;
+	monthlyFixedIncome: string | null;
+	monthlyVariableIncome: string | null;
+	monthlyFixedExpenses: string | null;
+	monthlyVariableExpenses: string | null;
+	economicAvailability: string | null;
+	minPayment: string | null;
+	maxPayment: string | null;
+	adjustedPayment: string | null;
+	maxCreditAmount: string | null;
+	analyzedAt: Date;
+} | null;
+
+// Type definition for client data
+type ClientData = {
+	id: string;
+	firstName: string;
+	lastName: string;
+	email: string;
+	phone: string | null;
+	dpi: string | null;
+	age: number | null;
+	clientType: string;
+	maritalStatus: string | null;
+	dependents: number | null;
+	monthlyIncome: string | null;
+	loanAmount: string | null;
+	occupation: string | null;
+	workTime: string | null;
+	loanPurpose: string | null;
+	ownsHome: boolean | null;
+	ownsVehicle: boolean | null;
+	hasCreditCard: boolean | null;
+	jobTitle: string | null;
+	assignedTo: string;
+	createdAt: Date;
+	updatedAt: Date;
+	assignedUser: { id: string; name: string } | null;
+	opportunities: Array<{
+		id: string;
+		title: string;
+		value: string | null;
+		creditType: string;
+		numeroSifco: string | null;
+		status: string;
+		createdAt: Date;
+		stage: {
+			id: string;
+			name: string;
+			closurePercentage: number;
+			color: string | null;
+		} | null;
+		isClosed: boolean;
+	}>;
+	creditAnalysis: CreditAnalysisData;
+	totalClosedValue: number;
+	closedOpportunitiesCount: number;
+};
+
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 	const navigate = Route.useNavigate();
-	const queryClient = useQueryClient();
-	const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
-	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [page, setPage] = useState(0);
 	const pageSize = 20;
+
+	// Modal state
+	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
+	const [selectedClient, setSelectedClient] = useState<ClientData | null>(null);
 
 	// Debounce search
 	useEffect(() => {
 		const timer = setTimeout(() => {
 			setDebouncedSearch(searchTerm);
-			setPage(0); // Reset to first page on search
+			setPage(0);
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [searchTerm]);
 
-	// Reset page when status filter changes
-	useEffect(() => {
-		setPage(0);
-	}, [statusFilter]);
-
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
+
 	const clientsQuery = useQuery({
-		...orpc.getClients.queryOptions({
+		...orpc.getLeadsAsClients.queryOptions({
 			input: {
 				limit: pageSize,
 				offset: page * pageSize,
 				search: debouncedSearch || undefined,
-				status:
-					statusFilter !== "all"
-						? (statusFilter as "active" | "inactive" | "churned")
-						: undefined,
 			},
 		}),
 		enabled:
@@ -113,123 +235,13 @@ function RouteComponent() {
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: [
-			"getClients",
+			"getLeadsAsClients",
 			session?.user?.id,
 			userProfile.data?.role,
 			page,
 			pageSize,
 			debouncedSearch,
-			statusFilter,
 		],
-	});
-
-	const clientsStatsQuery = useQuery({
-		...orpc.getClientsStats.queryOptions(),
-		enabled:
-			!!userProfile.data?.role &&
-			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
-			!!session?.user?.id,
-		queryKey: ["getClientsStats", session?.user?.id, userProfile.data?.role],
-	});
-	const companiesQuery = useQuery({
-		...orpc.getCompanies.queryOptions(),
-		enabled:
-			!!userProfile.data?.role &&
-			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
-			!!session?.user?.id,
-		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
-	});
-	const crmUsersQuery = useQuery({
-		...orpc.getCrmUsers.queryOptions(),
-		enabled:
-			!!userProfile.data?.role &&
-			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
-			!!session?.user?.id,
-		queryKey: ["getCrmUsers", session?.user?.id, userProfile.data?.role],
-	});
-
-	const createClientForm = useForm({
-		defaultValues: {
-			companyId: "",
-			contactPerson: "",
-			contractValue: "",
-			startDate: undefined as Date | undefined,
-			endDate: undefined as Date | undefined,
-			assignedTo: session?.user?.id || "",
-			notes: "",
-		},
-		validators: {
-			onChange: ({ value }) => {
-				if (!value.companyId || value.companyId === "") {
-					return { form: "La empresa es requerida" };
-				}
-				if (!value.contactPerson || value.contactPerson.trim() === "") {
-					return { form: "La persona de contacto es requerida" };
-				}
-				return undefined;
-			},
-		},
-		onSubmit: async ({ value }) => {
-			createClientMutation.mutate({
-				...value,
-				companyId: value.companyId,
-				contractValue: value.contractValue || undefined,
-				startDate: value.startDate
-					? value.startDate.toISOString().split("T")[0]
-					: undefined,
-				endDate: value.endDate
-					? value.endDate.toISOString().split("T")[0]
-					: undefined,
-				assignedTo: value.assignedTo || undefined,
-				notes: value.notes || undefined,
-			});
-		},
-	});
-
-	const createClientMutation = useMutation({
-		mutationFn: (input: {
-			companyId: string;
-			contactPerson: string;
-			contractValue?: string;
-			startDate?: string;
-			endDate?: string;
-			assignedTo?: string;
-			notes?: string;
-		}) => client.createClient(input),
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
-			});
-			toast.success("Cliente creado exitosamente");
-			setIsCreateDialogOpen(false);
-			createClientForm.reset();
-		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al crear cliente");
-		},
-	});
-
-	const updateClientMutation = useMutation({
-		mutationFn: (input: {
-			id: string;
-			companyId?: string;
-			contactPerson?: string;
-			contractValue?: string;
-			startDate?: string;
-			endDate?: string;
-			status?: "active" | "inactive" | "churned";
-			assignedTo?: string;
-			notes?: string;
-		}) => client.updateClient(input),
-		onSuccess: () => {
-			queryClient.invalidateQueries({
-				queryKey: ["getClients", session?.user?.id, userProfile.data?.role],
-			});
-			toast.success("Cliente actualizado exitosamente");
-		},
-		onError: (error: any) => {
-			toast.error(error.message || "Error al actualizar cliente");
-		},
 	});
 
 	useEffect(() => {
@@ -243,10 +255,17 @@ function RouteComponent() {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
 		}
-	}, [session, isPending, userProfile.data?.role]);
+	}, [session, isPending, userProfile.data?.role, navigate]);
+
+	const handleViewDetails = (client: ClientData) => {
+		setSelectedClient(client);
+		setIsDetailsDialogOpen(true);
+	};
 
 	if (isPending || userProfile.isPending) {
-		return <div>Cargando...</div>;
+		return (
+			<div className="flex items-center justify-center p-12">Cargando...</div>
+		);
 	}
 
 	if (
@@ -256,50 +275,21 @@ function RouteComponent() {
 		return null;
 	}
 
-	const getStatusBadgeColor = (status: string) => {
-		switch (status) {
-			case "active":
-				return "bg-green-100 text-green-800";
-			case "inactive":
-				return "bg-gray-100 text-gray-800";
-			case "churned":
-				return "bg-red-100 text-red-800";
-			default:
-				return "bg-blue-100 text-blue-800";
-		}
-	};
-
-	const handleStatusChange = (clientId: string, newStatus: string) => {
-		updateClientMutation.mutate({
-			id: clientId,
-			status: newStatus as "active" | "inactive" | "churned",
-		});
-	};
-
-	// Get clients data from paginated response
-	const clients = clientsQuery.data?.data || [];
+	const clients = (clientsQuery.data?.data || []) as ClientData[];
 	const totalRecords = clientsQuery.data?.total || 0;
 	const totalPages = Math.ceil(totalRecords / pageSize);
-
-	// Get metrics from stats query
-	const totalClients = clientsStatsQuery.data?.total || 0;
-	const activeClients = clientsStatsQuery.data?.active || 0;
-	const churnedClients = clientsStatsQuery.data?.churned || 0;
-	const totalContractValue = clientsStatsQuery.data?.totalContractValue || 0;
 
 	return (
 		<div className="container mx-auto space-y-6 p-6">
 			<div>
 				<h1 className="font-bold text-3xl">Cartera de Clientes</h1>
 				<p className="text-muted-foreground">
-					{userProfile.data.role === "admin"
-						? "Gestiona todas las relaciones con clientes"
-						: "Gestiona tus clientes asignados"}
+					Leads con oportunidades cerradas
 				</p>
 			</div>
 
-			{/* Stats Cards */}
-			<div className="grid gap-4 md:grid-cols-4">
+			{/* Summary Stats */}
+			<div className="grid gap-4 md:grid-cols-3">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">
@@ -308,46 +298,44 @@ function RouteComponent() {
 						<HandshakeIcon className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">{totalClients}</div>
-						<p className="text-muted-foreground text-xs">Relaciones activas</p>
-					</CardContent>
-				</Card>
-				<Card>
-					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">
-							Clientes Activos
-						</CardTitle>
-						<HandshakeIcon className="h-4 w-4 text-green-500" />
-					</CardHeader>
-					<CardContent>
-						<div className="font-bold text-2xl">{activeClients}</div>
+						<div className="font-bold text-2xl">{totalRecords}</div>
 						<p className="text-muted-foreground text-xs">
-							Actualmente comprometidos
+							Leads con créditos cerrados
 						</p>
 					</CardContent>
 				</Card>
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">Perdidos</CardTitle>
-						<HandshakeIcon className="h-4 w-4 text-red-500" />
+						<CardTitle className="font-medium text-sm">
+							Oportunidades Cerradas
+						</CardTitle>
+						<CheckCircle2 className="h-4 w-4 text-green-500" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">{churnedClients}</div>
-						<p className="text-muted-foreground text-xs">Clientes perdidos</p>
+						<div className="font-bold text-2xl">
+							{clients.reduce(
+								(sum, c) => sum + (c.closedOpportunitiesCount || 0),
+								0,
+							)}
+						</div>
+						<p className="text-muted-foreground text-xs">
+							Total de créditos activos
+						</p>
 					</CardContent>
 				</Card>
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-						<CardTitle className="font-medium text-sm">
-							Valor de Contratos
-						</CardTitle>
+						<CardTitle className="font-medium text-sm">Valor Total</CardTitle>
 						<Banknote className="h-4 w-4 text-purple-500" />
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							Q{totalContractValue.toLocaleString()}
+							Q
+							{clients
+								.reduce((sum, c) => sum + (c.totalClosedValue || 0), 0)
+								.toLocaleString()}
 						</div>
-						<p className="text-muted-foreground text-xs">Cartera total</p>
+						<p className="text-muted-foreground text-xs">En créditos cerrados</p>
 					</CardContent>
 				</Card>
 			</div>
@@ -358,315 +346,147 @@ function RouteComponent() {
 						<div>
 							<CardTitle>Directorio de Clientes</CardTitle>
 							<CardDescription>
-								Gestiona y cultiva tus relaciones con clientes
+								Leads que tienen al menos una oportunidad cerrada
 							</CardDescription>
 						</div>
-						{PERMISSIONS.canCreateLeads(userProfile.data.role) && (
-							<Dialog
-								open={isCreateDialogOpen}
-								onOpenChange={(open) => {
-									setIsCreateDialogOpen(open);
-									if (!open) {
-										createClientForm.reset();
-									}
-								}}
-							>
-								<DialogTrigger asChild>
-									<Button>
-										<Plus className="mr-2 h-4 w-4" />
-										Agregar Cliente
-									</Button>
-								</DialogTrigger>
-							<DialogContent className="min-w-2xl max-w-3xl">
-								<DialogHeader>
-									<DialogTitle>Crear Nuevo Cliente</DialogTitle>
-								</DialogHeader>
-								<form
-									onSubmit={(e) => {
-										e.preventDefault();
-										e.stopPropagation();
-										void createClientForm.handleSubmit();
-									}}
-									className="space-y-4"
-								>
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createClientForm.Field name="companyId">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Empresa <span className="text-red-500">*</span>
-														</Label>
-														<Combobox
-															options={
-																companiesQuery.data?.map((company) => ({
-																	value: company.id,
-																	label: company.name,
-																})) || []
-															}
-															value={field.state.value ?? null}
-															onChange={(value) => field.handleChange(value)}
-															placeholder="Seleccionar empresa"
-															width="full"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-										<div>
-											<createClientForm.Field name="contactPerson">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Persona de Contacto{" "}
-															<span className="text-red-500">*</span>
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															placeholder="Nombre del contacto principal"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-									</div>
-
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createClientForm.Field name="contractValue">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Valor del Contrato
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="number"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															placeholder="0.00"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-										<div>
-											<createClientForm.Field name="assignedTo">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Asignado a</Label>
-														<Combobox
-															options={
-																crmUsersQuery.data?.map((user) => ({
-																	value: user.id,
-																	label: user.name,
-																})) || []
-															}
-															value={field.state.value ?? null}
-															onChange={(value) => field.handleChange(value)}
-															placeholder="Seleccionar vendedor"
-															width="full"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-									</div>
-
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createClientForm.Field name="startDate">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Fecha de Inicio</Label>
-														<DatePicker
-															date={field.state.value}
-															onDateChange={(date) => field.handleChange(date)}
-															placeholder="Seleccionar fecha de inicio"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-										<div>
-											<createClientForm.Field name="endDate">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Fecha de Fin</Label>
-														<DatePicker
-															date={field.state.value}
-															onDateChange={(date) => field.handleChange(date)}
-															placeholder="Seleccionar fecha de fin"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-									</div>
-
-									<div>
-										<createClientForm.Field name="notes">
-											{(field) => (
-												<div className="space-y-2">
-													<Label htmlFor={field.name}>Notas</Label>
-													<Textarea
-														id={field.name}
-														name={field.name}
-														value={field.state.value}
-														onBlur={field.handleBlur}
-														onChange={(e) => field.handleChange(e.target.value)}
-														placeholder="Notas adicionales sobre este cliente..."
-														rows={3}
-													/>
-												</div>
-											)}
-										</createClientForm.Field>
-									</div>
-
-									<createClientForm.Subscribe>
-										{(state) => (
-											<Button
-												type="submit"
-												className="w-full"
-												disabled={
-													!state.canSubmit ||
-													state.isSubmitting ||
-													createClientMutation.isPending
-												}
-											>
-												{state.isSubmitting || createClientMutation.isPending
-													? "Creando..."
-													: "Crear Cliente"}
-											</Button>
-										)}
-									</createClientForm.Subscribe>
-								</form>
-							</DialogContent>
-							</Dialog>
-						)}
 					</div>
 				</CardHeader>
 				<CardContent>
-					{/* Filters */}
-					<div className="mb-6 flex gap-4">
-						<div className="flex-1">
-							<div className="relative">
-								<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
-								<Input
-									placeholder="Buscar clientes..."
-									value={searchTerm}
-									onChange={(e) => setSearchTerm(e.target.value)}
-									className="pl-8"
-								/>
-							</div>
+					{/* Search Filter */}
+					<div className="mb-6">
+						<div className="relative max-w-md">
+							<Search className="absolute top-2.5 left-2 h-4 w-4 text-muted-foreground" />
+							<Input
+								placeholder="Buscar por nombre, email, teléfono o DPI..."
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+								className="pl-8"
+							/>
 						</div>
-						<Select value={statusFilter} onValueChange={setStatusFilter}>
-							<SelectTrigger className="w-[180px]">
-								<Filter className="mr-2 h-4 w-4" />
-								<SelectValue placeholder="Filtrar por estado" />
-							</SelectTrigger>
-							<SelectContent>
-								<SelectItem value="all">Todos los Estados</SelectItem>
-								<SelectItem value="active">Activo</SelectItem>
-								<SelectItem value="inactive">Inactivo</SelectItem>
-								<SelectItem value="churned">Perdido</SelectItem>
-							</SelectContent>
-						</Select>
 					</div>
 
 					{clientsQuery.isPending ? (
-						<div>Cargando clientes...</div>
+						<div className="flex items-center justify-center py-12">
+							Cargando clientes...
+						</div>
 					) : clientsQuery.error ? (
-						<div className="text-red-500">
+						<div className="py-4 text-red-500">
 							Error al cargar clientes: {clientsQuery.error.message}
+						</div>
+					) : clients.length === 0 ? (
+						<div className="flex flex-col items-center justify-center py-12 text-center">
+							<HandshakeIcon className="mb-4 h-12 w-12 text-muted-foreground" />
+							<h3 className="font-medium text-lg">No hay clientes aún</h3>
+							<p className="max-w-md text-muted-foreground text-sm">
+								Los clientes aparecerán aquí cuando los leads tengan
+								oportunidades en etapa al 100%
+							</p>
 						</div>
 					) : (
 						<>
 							<Table>
 								<TableHeader>
 									<TableRow>
-										<TableHead>Persona de Contacto</TableHead>
-										<TableHead>Empresa</TableHead>
-										<TableHead>Valor del Contrato</TableHead>
-										<TableHead>Período del Contrato</TableHead>
-										<TableHead>Estado</TableHead>
-										<TableHead>Creado</TableHead>
+										<TableHead>Cliente</TableHead>
+										<TableHead>Contacto</TableHead>
+										<TableHead>Tipo</TableHead>
+										<TableHead>Oportunidades Cerradas</TableHead>
+										<TableHead>Valor Total</TableHead>
+										<TableHead>Desde</TableHead>
 										<TableHead className="text-right">Acciones</TableHead>
 									</TableRow>
 								</TableHeader>
 								<TableBody>
 									{clients.map((clientData) => (
-										<TableRow key={clientData.id}>
+										<TableRow
+											key={clientData.id}
+											className="cursor-pointer hover:bg-muted/50"
+											onClick={() => handleViewDetails(clientData)}
+										>
 											<TableCell>
 												<div className="flex items-center gap-2">
-													<User className="h-4 w-4" />
-													<div className="font-medium">
-														{clientData.contactPerson}
+													<User className="h-4 w-4 text-muted-foreground" />
+													<div>
+														<div className="font-medium">
+															{clientData.firstName} {clientData.lastName}
+														</div>
+														{clientData.dpi && (
+															<div className="text-muted-foreground text-xs">
+																DPI: {clientData.dpi}
+															</div>
+														)}
 													</div>
 												</div>
-											</TableCell>
-											<TableCell>
-												{clientData.company ? (
-													<div className="flex items-center gap-1">
-														<Building className="h-3 w-3" />
-														{clientData.company.name}
-													</div>
-												) : (
-													<span className="text-muted-foreground">
-														Sin empresa
-													</span>
-												)}
-											</TableCell>
-											<TableCell>
-												{clientData.contractValue ? (
-													<div className="flex items-center gap-1 font-medium text-green-600">
-														<Banknote className="h-3 w-3" />Q
-														{Number.parseFloat(
-															clientData.contractValue,
-														).toLocaleString()}
-													</div>
-												) : (
-													<span className="text-muted-foreground">Sin valor</span>
-												)}
 											</TableCell>
 											<TableCell>
 												<div className="space-y-1">
-													{clientData.startDate && (
-														<div className="flex items-center gap-1 text-sm">
-															<Calendar className="h-3 w-3" />
-															{formatGuatemalaDate(clientData.startDate)}
+													<div className="text-sm">{clientData.email}</div>
+													{clientData.phone && (
+														<div className="flex items-center gap-1 text-muted-foreground text-xs">
+															<Phone className="h-3 w-3" />
+															{clientData.phone}
 														</div>
-													)}
-													{clientData.endDate && (
-														<div className="flex items-center gap-1 text-muted-foreground text-sm">
-															<Calendar className="h-3 w-3" />
-															{formatGuatemalaDate(clientData.endDate)}
-														</div>
-													)}
-													{!clientData.startDate && !clientData.endDate && (
-														<span className="text-muted-foreground text-sm">
-															Sin fechas establecidas
-														</span>
 													)}
 												</div>
 											</TableCell>
 											<TableCell>
-												<Badge
-													className={getStatusBadgeColor(clientData.status)}
-													variant="outline"
-												>
-													{getStatusLabel(clientData.status)}
+												<Badge variant="outline" className="capitalize">
+													{getClientTypeLabel(clientData.clientType)}
 												</Badge>
+											</TableCell>
+											<TableCell>
+												<TooltipProvider>
+													<Tooltip>
+														<TooltipTrigger asChild>
+															<div className="flex items-center gap-2">
+																<Badge
+																	variant="secondary"
+																	className="bg-green-100 text-green-800"
+																>
+																	{clientData.closedOpportunitiesCount} cerrada(s)
+																</Badge>
+																{clientData.opportunities.length >
+																	clientData.closedOpportunitiesCount && (
+																	<Badge variant="outline">
+																		+
+																		{clientData.opportunities.length -
+																			clientData.closedOpportunitiesCount}{" "}
+																		abierta(s)
+																	</Badge>
+																)}
+															</div>
+														</TooltipTrigger>
+														<TooltipContent side="bottom" className="max-w-sm">
+															<div className="space-y-2">
+																<p className="font-medium">Oportunidades:</p>
+																{clientData.opportunities.map((opp) => (
+																	<div
+																		key={opp.id}
+																		className="flex items-center gap-2 text-sm"
+																	>
+																		{opp.isClosed ? (
+																			<CheckCircle2 className="h-3 w-3 text-green-500" />
+																		) : (
+																			<FileText className="h-3 w-3 text-muted-foreground" />
+																		)}
+																		<span>{opp.title}</span>
+																		{opp.numeroSifco && (
+																			<Badge variant="outline" className="text-xs">
+																				Crédito: {opp.numeroSifco}
+																			</Badge>
+																		)}
+																	</div>
+																))}
+															</div>
+														</TooltipContent>
+													</Tooltip>
+												</TooltipProvider>
+											</TableCell>
+											<TableCell>
+												<div className="flex items-center gap-1 font-medium text-green-600">
+													<Banknote className="h-3 w-3" />Q
+													{(clientData.totalClosedValue || 0).toLocaleString()}
+												</div>
 											</TableCell>
 											<TableCell>
 												<div className="flex items-center gap-1 text-sm">
@@ -675,42 +495,16 @@ function RouteComponent() {
 												</div>
 											</TableCell>
 											<TableCell className="text-right">
-												<DropdownMenu>
-													<DropdownMenuTrigger asChild>
-														<Button variant="ghost" className="h-8 w-8 p-0">
-															<span className="sr-only">Abrir menú</span>
-															<MoreHorizontal className="h-4 w-4" />
-														</Button>
-													</DropdownMenuTrigger>
-													<DropdownMenuContent align="end">
-														<DropdownMenuLabel>Estado</DropdownMenuLabel>
-														<DropdownMenuSeparator />
-														<DropdownMenuItem
-															onClick={() =>
-																handleStatusChange(clientData.id, "active")
-															}
-															disabled={clientData.status === "active"}
-														>
-															Marcar como Activo
-														</DropdownMenuItem>
-														<DropdownMenuItem
-															onClick={() =>
-																handleStatusChange(clientData.id, "inactive")
-															}
-															disabled={clientData.status === "inactive"}
-														>
-															Marcar como Inactivo
-														</DropdownMenuItem>
-														<DropdownMenuItem
-															onClick={() =>
-																handleStatusChange(clientData.id, "churned")
-															}
-															disabled={clientData.status === "churned"}
-														>
-															Marcar como Perdido
-														</DropdownMenuItem>
-													</DropdownMenuContent>
-												</DropdownMenu>
+												<Button
+													variant="ghost"
+													size="sm"
+													onClick={(e) => {
+														e.stopPropagation();
+														handleViewDetails(clientData);
+													}}
+												>
+													<Eye className="h-4 w-4" />
+												</Button>
 											</TableCell>
 										</TableRow>
 									))}
@@ -756,6 +550,568 @@ function RouteComponent() {
 					)}
 				</CardContent>
 			</Card>
+
+			{/* Details Dialog */}
+			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
+				<DialogContent className="max-h-[85vh] min-w-[900px] max-w-6xl overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>Detalles del Cliente</DialogTitle>
+					</DialogHeader>
+					{selectedClient && (
+						<div className="space-y-6">
+							{/* Header con nombre y badges */}
+							<div className="flex items-start justify-between">
+								<div>
+									<h3 className="font-semibold text-xl">
+										{selectedClient.firstName} {selectedClient.lastName}
+									</h3>
+									<p className="text-muted-foreground">
+										{selectedClient.email}
+									</p>
+								</div>
+								<div className="flex items-center gap-2">
+									<Badge variant="outline" className="text-sm">
+										{getClientTypeLabel(selectedClient.clientType)}
+									</Badge>
+									<Badge className="bg-green-500 hover:bg-green-600">
+										Cliente Activo
+									</Badge>
+								</div>
+							</div>
+
+							{/* Información Personal y de Contacto */}
+							<div className="grid grid-cols-2 gap-6">
+								{/* Información Personal */}
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<User className="h-4 w-4" />
+										Información Personal
+									</h3>
+									<div className="grid grid-cols-2 gap-4">
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Nombre Completo
+											</Label>
+											<p className="font-medium text-sm">
+												{selectedClient.firstName} {selectedClient.lastName}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												DPI
+											</Label>
+											<p className="text-sm">
+												{selectedClient.dpi || "No especificado"}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Edad
+											</Label>
+											<p className="text-sm">
+												{selectedClient.age || "No especificado"}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Estado Civil
+											</Label>
+											<p className="text-sm">
+												{getMaritalStatusLabel(selectedClient.maritalStatus)}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Dependientes
+											</Label>
+											<p className="text-sm">{selectedClient.dependents || 0}</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Cargo
+											</Label>
+											<p className="text-sm">
+												{selectedClient.jobTitle || "No especificado"}
+											</p>
+										</div>
+									</div>
+								</div>
+
+								{/* Información de Contacto */}
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<Phone className="h-4 w-4" />
+										Información de Contacto
+									</h3>
+									<div className="space-y-3">
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Correo Electrónico
+											</Label>
+											<div className="flex items-center gap-2">
+												<Mail className="h-4 w-4 text-muted-foreground" />
+												<p className="text-sm">{selectedClient.email}</p>
+											</div>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Teléfono
+											</Label>
+											<div className="flex items-center gap-2">
+												<Phone className="h-4 w-4 text-muted-foreground" />
+												<p className="text-sm">
+													{selectedClient.phone || "No especificado"}
+												</p>
+											</div>
+										</div>
+										{selectedClient.assignedUser && (
+											<div>
+												<Label className="font-medium text-muted-foreground text-sm">
+													Asesor Asignado
+												</Label>
+												<div className="flex items-center gap-2">
+													<Briefcase className="h-4 w-4 text-muted-foreground" />
+													<p className="text-sm">
+														{selectedClient.assignedUser.name}
+													</p>
+												</div>
+											</div>
+										)}
+									</div>
+								</div>
+							</div>
+
+							{/* Información Financiera y Laboral */}
+							<div className="grid grid-cols-2 gap-6">
+								{/* Información Financiera */}
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<Banknote className="h-4 w-4" />
+										Información Financiera
+									</h3>
+									<div className="grid grid-cols-2 gap-4">
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Ingreso Mensual
+											</Label>
+											<p className="font-medium text-sm">
+												{selectedClient.monthlyIncome
+													? formatCurrency(selectedClient.monthlyIncome)
+													: "No especificado"}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Monto a Financiar
+											</Label>
+											<p className="font-medium text-sm">
+												{selectedClient.loanAmount
+													? formatCurrency(selectedClient.loanAmount)
+													: "No especificado"}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Propósito del Préstamo
+											</Label>
+											<p className="text-sm">
+												{getLoanPurposeLabel(selectedClient.loanPurpose)}
+											</p>
+										</div>
+									</div>
+								</div>
+
+								{/* Información Laboral */}
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<Briefcase className="h-4 w-4" />
+										Información Laboral
+									</h3>
+									<div className="grid grid-cols-2 gap-4">
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Ocupación
+											</Label>
+											<p className="text-sm">
+												{getOccupationLabel(selectedClient.occupation)}
+											</p>
+										</div>
+										<div>
+											<Label className="font-medium text-muted-foreground text-sm">
+												Tiempo en el Trabajo
+											</Label>
+											<p className="text-sm">
+												{getWorkTimeLabel(selectedClient.workTime)}
+											</p>
+										</div>
+									</div>
+								</div>
+							</div>
+
+							{/* Activos */}
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<h3 className="flex items-center gap-2 font-semibold text-base">
+									<Home className="h-4 w-4" />
+									Activos
+								</h3>
+								<div className="flex flex-wrap gap-6">
+									<div className="flex items-center gap-2">
+										<Checkbox
+											checked={selectedClient.ownsHome ?? false}
+											disabled
+										/>
+										<Label className="text-sm">Posee Casa Propia</Label>
+									</div>
+									<div className="flex items-center gap-2">
+										<Checkbox
+											checked={selectedClient.ownsVehicle ?? false}
+											disabled
+										/>
+										<Label className="text-sm">Posee Vehículo Propio</Label>
+									</div>
+									<div className="flex items-center gap-2">
+										<Checkbox
+											checked={selectedClient.hasCreditCard ?? false}
+											disabled
+										/>
+										<Label className="text-sm">Tiene Tarjeta de Crédito</Label>
+									</div>
+								</div>
+							</div>
+
+							{/* Capacidad de Pago */}
+							{selectedClient.creditAnalysis ? (
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<CreditCard className="h-4 w-4" />
+										Análisis de Capacidad de Pago
+									</h3>
+									{/* Income and Expenses Summary */}
+									<div className="grid grid-cols-2 gap-6">
+										<div className="space-y-4">
+											<h4 className="font-medium text-base">
+												Ingresos Mensuales
+											</h4>
+											<div className="space-y-3 rounded-lg bg-green-50 p-4">
+												<div className="flex justify-between">
+													<span className="text-muted-foreground text-sm">
+														Ingresos Fijos:
+													</span>
+													<span className="font-medium">
+														{selectedClient.creditAnalysis.monthlyFixedIncome
+															? formatCurrency(
+																	selectedClient.creditAnalysis.monthlyFixedIncome,
+																)
+															: "-"}
+													</span>
+												</div>
+												<div className="flex justify-between">
+													<span className="text-muted-foreground text-sm">
+														Ingresos Variables:
+													</span>
+													<span className="font-medium">
+														{selectedClient.creditAnalysis.monthlyVariableIncome
+															? formatCurrency(
+																	selectedClient.creditAnalysis.monthlyVariableIncome,
+																)
+															: "-"}
+													</span>
+												</div>
+												<div className="border-t pt-2">
+													<div className="flex justify-between">
+														<span className="font-medium">
+															Total Ingresos:
+														</span>
+														<span className="font-bold text-green-600">
+															{selectedClient.creditAnalysis.monthlyFixedIncome ||
+															selectedClient.creditAnalysis.monthlyVariableIncome
+																? formatCurrency(
+																		Number(
+																			selectedClient.creditAnalysis
+																				.monthlyFixedIncome || 0,
+																		) +
+																			Number(
+																				selectedClient.creditAnalysis
+																					.monthlyVariableIncome || 0,
+																			),
+																	)
+																: "-"}
+														</span>
+													</div>
+												</div>
+											</div>
+										</div>
+
+										<div className="space-y-4">
+											<h4 className="font-medium text-base">
+												Gastos Mensuales
+											</h4>
+											<div className="space-y-3 rounded-lg bg-red-50 p-4">
+												<div className="flex justify-between">
+													<span className="text-muted-foreground text-sm">
+														Gastos Fijos:
+													</span>
+													<span className="font-medium">
+														{selectedClient.creditAnalysis.monthlyFixedExpenses
+															? formatCurrency(
+																	selectedClient.creditAnalysis.monthlyFixedExpenses,
+																)
+															: "-"}
+													</span>
+												</div>
+												<div className="flex justify-between">
+													<span className="text-muted-foreground text-sm">
+														Gastos Variables:
+													</span>
+													<span className="font-medium">
+														{selectedClient.creditAnalysis.monthlyVariableExpenses
+															? formatCurrency(
+																	selectedClient.creditAnalysis.monthlyVariableExpenses,
+																)
+															: "-"}
+													</span>
+												</div>
+												<div className="border-t pt-2">
+													<div className="flex justify-between">
+														<span className="font-medium">Total Gastos:</span>
+														<span className="font-bold text-red-600">
+															{selectedClient.creditAnalysis.monthlyFixedExpenses ||
+															selectedClient.creditAnalysis.monthlyVariableExpenses
+																? formatCurrency(
+																		Number(
+																			selectedClient.creditAnalysis
+																				.monthlyFixedExpenses || 0,
+																		) +
+																			Number(
+																				selectedClient.creditAnalysis
+																					.monthlyVariableExpenses || 0,
+																			),
+																	)
+																: "-"}
+														</span>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+
+									{/* Economic Availability */}
+									<div className="rounded-lg bg-blue-50 p-4">
+										<div className="flex items-center justify-between">
+											<div>
+												<Label className="font-medium text-muted-foreground text-sm">
+													Disponibilidad Económica
+												</Label>
+												<p className="text-muted-foreground text-sm">
+													Capacidad de ahorro mensual
+												</p>
+											</div>
+											<span className="font-bold text-2xl text-blue-600">
+												{selectedClient.creditAnalysis.economicAvailability
+													? formatCurrency(
+															selectedClient.creditAnalysis.economicAvailability,
+														)
+													: "-"}
+											</span>
+										</div>
+									</div>
+
+									{/* Payment Capacity */}
+									<div className="space-y-4">
+										<h4 className="font-medium text-base">
+											Capacidad de Pago
+										</h4>
+										<div className="grid grid-cols-4 gap-4">
+											<div className="rounded-lg border p-4 text-center">
+												<Label className="text-muted-foreground text-xs">
+													Pago Mínimo
+												</Label>
+												<p className="mt-1 font-bold text-lg text-orange-600">
+													{selectedClient.creditAnalysis.minPayment
+														? formatCurrency(
+																selectedClient.creditAnalysis.minPayment,
+															)
+														: "-"}
+												</p>
+											</div>
+											<div className="rounded-lg border p-4 text-center">
+												<Label className="text-muted-foreground text-xs">
+													Pago Ajustado
+												</Label>
+												<p className="mt-1 font-bold text-blue-600 text-lg">
+													{selectedClient.creditAnalysis.adjustedPayment
+														? formatCurrency(
+																selectedClient.creditAnalysis.adjustedPayment,
+															)
+														: "-"}
+												</p>
+											</div>
+											<div className="rounded-lg border p-4 text-center">
+												<Label className="text-muted-foreground text-xs">
+													Pago Máximo
+												</Label>
+												<p className="mt-1 font-bold text-green-600 text-lg">
+													{selectedClient.creditAnalysis.maxPayment
+														? formatCurrency(
+																selectedClient.creditAnalysis.maxPayment,
+															)
+														: "-"}
+												</p>
+											</div>
+											<div className="rounded-lg border bg-primary/5 p-4 text-center">
+												<Label className="text-muted-foreground text-xs">
+													Crédito Máximo
+												</Label>
+												<p className="mt-1 font-bold text-lg text-primary">
+													{selectedClient.creditAnalysis.maxCreditAmount
+														? formatCurrency(
+																selectedClient.creditAnalysis.maxCreditAmount,
+															)
+														: "-"}
+												</p>
+											</div>
+										</div>
+									</div>
+
+									{/* Analysis Date */}
+									<div className="text-right text-muted-foreground text-sm">
+										Análisis realizado:{" "}
+										{formatGuatemalaDate(selectedClient.creditAnalysis.analyzedAt)}
+									</div>
+								</div>
+							) : (
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+									<h3 className="flex items-center gap-2 font-semibold text-base">
+										<CreditCard className="h-4 w-4" />
+										Análisis de Capacidad de Pago
+									</h3>
+									<p className="py-2 text-center text-muted-foreground">
+										No hay análisis de capacidad de pago registrado.
+									</p>
+								</div>
+							)}
+
+							{/* Resumen Financiero */}
+							<div className="grid grid-cols-3 gap-4">
+								<div className="rounded-lg border bg-green-50 p-4 text-center">
+									<Label className="text-muted-foreground text-xs">
+										Oportunidades Cerradas
+									</Label>
+									<p className="mt-1 font-bold text-2xl text-green-600">
+										{selectedClient.closedOpportunitiesCount}
+									</p>
+								</div>
+								<div className="rounded-lg border bg-blue-50 p-4 text-center">
+									<Label className="text-muted-foreground text-xs">
+										Total Oportunidades
+									</Label>
+									<p className="mt-1 font-bold text-2xl text-blue-600">
+										{selectedClient.opportunities.length}
+									</p>
+								</div>
+								<div className="rounded-lg border bg-purple-50 p-4 text-center">
+									<Label className="text-muted-foreground text-xs">
+										Valor Total Cerrado
+									</Label>
+									<p className="mt-1 font-bold text-xl text-purple-600">
+										{formatCurrency(selectedClient.totalClosedValue)}
+									</p>
+								</div>
+							</div>
+
+							{/* Oportunidades del Cliente */}
+							<div className="space-y-4">
+								<h3 className="flex items-center gap-2 font-semibold text-base">
+									<FileText className="h-4 w-4" />
+									Oportunidades
+								</h3>
+								<div className="space-y-3">
+									{selectedClient.opportunities.map((opp) => (
+										<div
+											key={opp.id}
+											className={`rounded-lg border p-4 transition-colors ${
+												opp.isClosed
+													? "border-green-200 bg-green-50/50"
+													: "bg-muted/30"
+											}`}
+										>
+											<div className="flex items-start justify-between">
+												<div className="flex-1 space-y-2">
+													<div className="flex items-center gap-3">
+														{opp.isClosed ? (
+															<CheckCircle2 className="h-5 w-5 text-green-500" />
+														) : (
+															<FileText className="h-5 w-5 text-muted-foreground" />
+														)}
+														<span className="font-semibold">{opp.title}</span>
+														{opp.stage && (
+															<Badge
+																style={{
+																	backgroundColor: opp.stage.color || "#888",
+																	color: "#fff",
+																}}
+															>
+																{opp.stage.name} ({opp.stage.closurePercentage}%)
+															</Badge>
+														)}
+														{opp.isClosed && (
+															<Badge className="bg-green-500">Cerrada</Badge>
+														)}
+													</div>
+													<div className="ml-8 flex flex-wrap items-center gap-4 text-sm">
+														<div className="flex items-center gap-1">
+															<Banknote className="h-4 w-4 text-muted-foreground" />
+															<span className="font-medium">
+																{formatCurrency(opp.value)}
+															</span>
+														</div>
+														<div className="flex items-center gap-1">
+															<Badge variant="outline">
+																{opp.creditType === "autocompra"
+																	? "Autocompra"
+																	: "Sobre Vehículo"}
+															</Badge>
+														</div>
+														{opp.numeroSifco && (
+															<div className="flex items-center gap-1">
+																<Badge
+																	variant="secondary"
+																	className="bg-blue-100 text-blue-800"
+																>
+																	Crédito: {opp.numeroSifco}
+																</Badge>
+															</div>
+														)}
+														<div className="flex items-center gap-1 text-muted-foreground">
+															<Calendar className="h-3 w-3" />
+															{formatGuatemalaDate(opp.createdAt)}
+														</div>
+													</div>
+												</div>
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => {
+														setIsDetailsDialogOpen(false);
+														navigate({
+															to: "/crm/opportunities",
+															search: { opportunityId: opp.id },
+														});
+													}}
+													className="ml-4 shrink-0"
+												>
+													<ArrowUpRight className="mr-1 h-4 w-4" />
+													Ver Oportunidad
+												</Button>
+											</div>
+										</div>
+									))}
+								</div>
+							</div>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
 		</div>
 	);
 }

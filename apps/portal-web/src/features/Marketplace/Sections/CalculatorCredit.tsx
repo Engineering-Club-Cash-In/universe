@@ -128,7 +128,7 @@ export const CalculatorCredit = () => {
                 {/* Campo Monto */}
 
                 {/* Campo Enganche */}
-                <div className="flex lg:flex-row w-full flex-col gap-6">
+                <div className="flex xl:flex-row w-full flex-col gap-6">
                   <div className="w-full">
                     <label
                       htmlFor="monto"
@@ -204,7 +204,7 @@ export const CalculatorCredit = () => {
                     onClick={() => setIsModalOpen(true)}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    className="w-full lg:w-1/2 mt-2 lg:mt-6 py-2 lg:py-4 rounded-lg lg:font-semibold text-white lg:text-lg"
+                    className="w-full xl:w-1/2 mt-2 lg:mt-6 py-2 lg:py-4 rounded-lg lg:font-semibold text-white lg:text-lg"
                     style={{
                       background:
                         "linear-gradient(180deg, #9A9FF5 0%, #5A5D8F 100%)",

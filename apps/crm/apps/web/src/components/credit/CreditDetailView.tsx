@@ -327,12 +327,15 @@ export function CreditDetailView({
 		verificacionDireccion +
 		impuestoCirculacion +
 		traspaso +
-		garantiaMobiliaria +
+		garantiaMobiliaria;
+
+	// Subtotal: Gastos de Abogado
+	const subtotalGastosAbogado =
 		contratoLeasing +
 		autenticaContrato;
 
 	// Total de descuentos
-	const totalDescuentos = subtotalComisionGastos + subtotalOtrosDescuentos;
+	const totalDescuentos = subtotalComisionGastos + subtotalOtrosDescuentos + subtotalGastosAbogado;
 
 	// Líquido a recibir
 	const liquidoARecibir = montoSolicitado - totalDescuentos;
@@ -807,28 +810,51 @@ export function CreditDetailView({
 												</TableCell>
 												<TableCell className="text-right">{garantiaMobiliaria > 0 ? formatCurrency(garantiaMobiliaria) : "Q -"}</TableCell>
 											</TableRow>
-											{contratoLeasing > 0 && (
-												<TableRow>
-													<TableCell>Contrato Leasing</TableCell>
-													<TableCell className="text-center">
-														<Badge variant="default" className="text-xs">SI</Badge>
-													</TableCell>
-													<TableCell className="text-right">{formatCurrency(contratoLeasing)}</TableCell>
-												</TableRow>
-											)}
-											{autenticaContrato > 0 && (
-												<TableRow>
-													<TableCell>Auténtica Contrato Cobranza</TableCell>
-													<TableCell className="text-center">
-														<Badge variant="default" className="text-xs">SI</Badge>
-													</TableCell>
-													<TableCell className="text-right">{formatCurrency(autenticaContrato)}</TableCell>
-												</TableRow>
-											)}
 										</TableBody>
 									</Table>
 									<div className="mt-3 flex justify-end">
 										<span className="font-semibold text-right">{formatCurrency(subtotalOtrosDescuentos)}</span>
+									</div>
+								</div>
+							</div>
+
+							{/* Sección: Gastos de Abogado */}
+							<div className="space-y-3">
+								<h3 className="font-semibold text-sm">
+									Gastos de Abogado
+								</h3>
+								<div className="rounded-lg border bg-muted/30 p-4">
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Concepto</TableHead>
+												<TableHead className="text-center w-24">Descontado</TableHead>
+												<TableHead className="text-right">Monto</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											<TableRow>
+												<TableCell>Contrato Leasing</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={contratoLeasing > 0 ? "default" : "outline"} className="text-xs">
+														{contratoLeasing > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{contratoLeasing > 0 ? formatCurrency(contratoLeasing) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Auténtica contrato de cobranza</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={autenticaContrato > 0 ? "default" : "outline"} className="text-xs">
+														{autenticaContrato > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{autenticaContrato > 0 ? formatCurrency(autenticaContrato) : "Q -"}</TableCell>
+											</TableRow>
+										</TableBody>
+									</Table>
+									<div className="mt-3 flex justify-end">
+										<span className="font-semibold text-right">{formatCurrency(subtotalGastosAbogado)}</span>
 									</div>
 								</div>
 							</div>

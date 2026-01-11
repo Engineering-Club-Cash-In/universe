@@ -273,6 +273,18 @@ function QuoterPage() {
 			transferCost: 1950,
 			adminCost: 0,
 			membershipCost: 0,
+			// Gastos adicionales para detalle de crédito
+			freelanceCost: 0,
+			freelancePercentage: 0,
+			inspectionCost: 0,
+			finesCost: 0,
+			keyCopyCost: 0,
+			keyCopyDiffCost: 0,
+			circulationTaxCost: 0,
+			mobileGuaranteeCost: 0,
+			leasingContractCost: 0,
+			collectionAuthCost: 0,
+			legalCost: 0,
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
@@ -292,6 +304,18 @@ function QuoterPage() {
 				transferCost: Number(value.transferCost),
 				adminCost: Number(value.adminCost),
 				membershipCost: Number(value.membershipCost),
+				// Gastos adicionales para detalle de crédito
+				freelanceCost: Number(value.freelanceCost),
+				freelancePercentage: Number(value.freelancePercentage) || undefined,
+				inspectionCost: Number(value.inspectionCost),
+				finesCost: Number(value.finesCost),
+				keyCopyCost: Number(value.keyCopyCost),
+				keyCopyDiffCost: Number(value.keyCopyDiffCost),
+				circulationTaxCost: Number(value.circulationTaxCost),
+				mobileGuaranteeCost: Number(value.mobileGuaranteeCost),
+				leasingContractCost: Number(value.leasingContractCost),
+				collectionAuthCost: Number(value.collectionAuthCost),
+				legalCost: Number(value.legalCost),
 			});
 		},
 	});
@@ -919,6 +943,239 @@ function QuoterPage() {
 								</CardContent>
 							</Card>
 						</div>
+
+						{/* Gastos Adicionales para Detalle de Crédito */}
+						<Card className="mt-6">
+							<CardHeader>
+								<CardTitle>Gastos Adicionales (Detalle de Crédito)</CardTitle>
+								<CardDescription>
+									Gastos opcionales para el detalle de crédito sobre vehículo
+								</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<div className="grid gap-4 md:grid-cols-4">
+									<quoterForm.Field name="freelanceCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Free lance
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="freelancePercentage">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Free lance (%)
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="inspectionCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Inspección
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="finesCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Multas
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="keyCopyCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Copia de llave
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="keyCopyDiffCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Diferencia copia llave
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="circulationTaxCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Impuesto circulación
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="mobileGuaranteeCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Garantía mobiliaria
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="leasingContractCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Contrato Leasing
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="collectionAuthCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Auténtica contrato cobranza
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
+									<quoterForm.Field name="legalCost">
+										{(field) => (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Gastos legales
+												</Label>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+								</div>
+							</CardContent>
+						</Card>
 
 						{/* Resumen */}
 						<Card className="mt-6">

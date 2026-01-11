@@ -192,6 +192,7 @@ export function CreditDetailView({
 }: CreditDetailViewProps) {
 	const queryClient = useQueryClient();
 	const [isAddCheckOpen, setIsAddCheckOpen] = useState(false);
+	const [porcentajeInversionista, setPorcentajeInversionista] = useState(70);
 
 	// Determinar tipo de crédito
 	const isAutocompra = opportunity.creditType === "autocompra";
@@ -268,6 +269,15 @@ export function CreditDetailView({
 	const tasaMensual = tasaInteres / 12;
 	const iva = tasaMensual * 0.12; // 12% IVA sobre intereses
 	const tasaConIva = tasaMensual + iva;
+
+	// División de cuota entre Inversionista y Empresa
+	const porcentajeEmpresa = 100 - porcentajeInversionista;
+	const cuotaInversionista = montoSolicitado * (tasaMensual / 100) * (porcentajeInversionista / 100);
+	const cuotaEmpresa = montoSolicitado * (tasaMensual / 100) * (porcentajeEmpresa / 100);
+	const ivaInversionista = cuotaInversionista * 0.12;
+	const ivaEmpresa = cuotaEmpresa * 0.12;
+	const totalInversionista = cuotaInversionista + ivaInversionista;
+	const totalEmpresa = cuotaEmpresa + ivaEmpresa;
 
 	// Calcular mes de interés anticipado
 	const interesAnticipado = montoSolicitado * (tasaMensual / 100);
@@ -545,6 +555,58 @@ export function CreditDetailView({
 									<div>
 										<Label className="text-muted-foreground text-xs">Cuota Mensual</Label>
 										<p className="font-medium">{formatCurrency(opportunity.cuotaMensual)}</p>
+									</div>
+								</div>
+
+								{/* División de Cuota: Inversionista vs Empresa */}
+								<div className="mt-4 space-y-3">
+									<div className="flex items-center gap-4">
+										<Label className="text-muted-foreground text-xs whitespace-nowrap">
+											% Inversionista
+										</Label>
+										<Input
+											type="number"
+											min={0}
+											max={100}
+											value={porcentajeInversionista}
+											onChange={(e) => setPorcentajeInversionista(Number(e.target.value))}
+											className="w-20 h-8 text-sm"
+										/>
+										<span className="text-muted-foreground text-xs">
+											(Empresa: {porcentajeEmpresa}%)
+										</span>
+									</div>
+									<div className="rounded-lg border bg-muted/30">
+										<Table>
+											<TableHeader>
+												<TableRow>
+													<TableHead>Concepto</TableHead>
+													<TableHead className="text-right">Cuota</TableHead>
+													<TableHead className="text-right">IVA (12%)</TableHead>
+													<TableHead className="text-right">Total</TableHead>
+												</TableRow>
+											</TableHeader>
+											<TableBody>
+												<TableRow>
+													<TableCell>Inversionista ({porcentajeInversionista}%)</TableCell>
+													<TableCell className="text-right">{formatCurrency(cuotaInversionista)}</TableCell>
+													<TableCell className="text-right">{formatCurrency(ivaInversionista)}</TableCell>
+													<TableCell className="text-right font-medium">{formatCurrency(totalInversionista)}</TableCell>
+												</TableRow>
+												<TableRow>
+													<TableCell>Empresa ({porcentajeEmpresa}%)</TableCell>
+													<TableCell className="text-right">{formatCurrency(cuotaEmpresa)}</TableCell>
+													<TableCell className="text-right">{formatCurrency(ivaEmpresa)}</TableCell>
+													<TableCell className="text-right font-medium">{formatCurrency(totalEmpresa)}</TableCell>
+												</TableRow>
+												<TableRow className="bg-muted/50">
+													<TableCell className="font-semibold">Total</TableCell>
+													<TableCell className="text-right font-semibold">{formatCurrency(cuotaInversionista + cuotaEmpresa)}</TableCell>
+													<TableCell className="text-right font-semibold">{formatCurrency(ivaInversionista + ivaEmpresa)}</TableCell>
+													<TableCell className="text-right font-bold">{formatCurrency(totalInversionista + totalEmpresa)}</TableCell>
+												</TableRow>
+											</TableBody>
+										</Table>
 									</div>
 								</div>
 							</div>

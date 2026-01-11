@@ -125,6 +125,7 @@ function RouteComponent() {
 		maxCreditAmount: "",
 	});
 	const pageSize = 20;
+	const [selectedDepartamento, setSelectedDepartamento] = useState<string>("");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedLeadIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -194,6 +195,28 @@ function RouteComponent() {
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
+
+	// Query para obtener departamentos de Guatemala
+	const departamentosQuery = useQuery<string[]>({
+		queryKey: ["getDepartamentos"],
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		queryFn: () => (client as any).getDepartamentos(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+	});
+
+	// Query para obtener municipios del departamento seleccionado
+	const municipiosQuery = useQuery<string[]>({
+		queryKey: ["getMunicipiosByDepartamento", selectedDepartamento],
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		queryFn: () =>
+			(client as any).getMunicipiosByDepartamento({
+				departamento: selectedDepartamento,
+			}),
+		enabled: !!selectedDepartamento,
+	});
+
 	const creditAnalysisQuery = useQuery({
 		queryKey: ["getCreditAnalysisByLeadId", selectedLead?.id],
 		queryFn: selectedLead?.id
@@ -227,11 +250,16 @@ function RouteComponent() {
 	const createLeadForm = useForm({
 		defaultValues: {
 			firstName: "",
+			middleName: "",
 			lastName: "",
+			secondLastName: "",
 			email: "",
 			phone: "",
 			age: "",
 			dpi: "",
+			departamento: "",
+			municipio: "",
+			zona: "",
 			clientType: "individual" as "individual" | "comerciante" | "empresa",
 			maritalStatus: "single" as "single" | "married" | "divorced" | "widowed",
 			dependents: "0",
@@ -304,6 +332,11 @@ function RouteComponent() {
 				workTime: value.workTime || undefined,
 				loanPurpose: value.loanPurpose || undefined,
 				dpi: value.dpi || undefined,
+				middleName: value.middleName || undefined,
+				secondLastName: value.secondLastName || undefined,
+				departamento: value.departamento || undefined,
+				municipio: value.municipio || undefined,
+				zona: value.zona || undefined,
 				source: value.source,
 				companyId:
 					value.companyId && value.companyId !== "none"
@@ -472,7 +505,15 @@ function RouteComponent() {
 	useEffect(() => {
 		if (editingLead) {
 			createLeadForm.setFieldValue("firstName", editingLead.firstName || "");
+			createLeadForm.setFieldValue(
+				"middleName",
+				(editingLead as any).middleName || "",
+			);
 			createLeadForm.setFieldValue("lastName", editingLead.lastName || "");
+			createLeadForm.setFieldValue(
+				"secondLastName",
+				(editingLead as any).secondLastName || "",
+			);
 			createLeadForm.setFieldValue("email", editingLead.email || "");
 			createLeadForm.setFieldValue("phone", editingLead.phone || "");
 			createLeadForm.setFieldValue(
@@ -531,6 +572,15 @@ function RouteComponent() {
 				editingLead.score ? String(editingLead.score) : "",
 			);
 			createLeadForm.setFieldValue("fit", editingLead.fit || false);
+			// Campos de dirección
+			const departamento = (editingLead as any).departamento || "";
+			createLeadForm.setFieldValue("departamento", departamento);
+			setSelectedDepartamento(departamento);
+			createLeadForm.setFieldValue(
+				"municipio",
+				(editingLead as any).municipio || "",
+			);
+			createLeadForm.setFieldValue("zona", (editingLead as any).zona || "");
 		}
 	}, [editingLead]);
 
@@ -706,7 +756,7 @@ function RouteComponent() {
 									}}
 									className="space-y-4"
 								>
-									<div className="grid grid-cols-2 gap-4">
+									<div className="grid grid-cols-4 gap-4">
 										<div>
 											<createLeadForm.Field
 												name="firstName"
@@ -728,7 +778,7 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Nombre <span className="text-red-500">*</span>
+															Primer Nombre <span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
@@ -754,6 +804,24 @@ function RouteComponent() {
 											</createLeadForm.Field>
 										</div>
 										<div>
+											<createLeadForm.Field name="middleName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>Segundo Nombre</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+														/>
+													</div>
+												)}
+											</createLeadForm.Field>
+										</div>
+										<div>
 											<createLeadForm.Field
 												name="lastName"
 												validators={{
@@ -774,7 +842,7 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Apellido <span className="text-red-500">*</span>
+															Primer Apellido <span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
@@ -795,6 +863,24 @@ function RouteComponent() {
 																{String(error)}
 															</p>
 														))}
+													</div>
+												)}
+											</createLeadForm.Field>
+										</div>
+										<div>
+											<createLeadForm.Field name="secondLastName">
+												{(field) => (
+													<div className="space-y-2">
+														<Label htmlFor={field.name}>Segundo Apellido</Label>
+														<Input
+															id={field.name}
+															name={field.name}
+															value={field.state.value}
+															onBlur={field.handleBlur}
+															onChange={(e) =>
+																field.handleChange(e.target.value)
+															}
+														/>
 													</div>
 												)}
 											</createLeadForm.Field>
@@ -1170,6 +1256,94 @@ function RouteComponent() {
 																}
 																min="0"
 																max="20"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+									</div>
+
+									{/* Dirección */}
+									<div className="space-y-4">
+										<h3 className="font-semibold text-lg">Dirección</h3>
+										<div className="grid grid-cols-3 gap-4">
+											<div>
+												<createLeadForm.Field name="departamento">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Departamento</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) => {
+																	field.handleChange(value);
+																	setSelectedDepartamento(value);
+																	// Reset municipio when departamento changes
+																	createLeadForm.setFieldValue("municipio", "");
+																}}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar departamento" />
+																</SelectTrigger>
+																<SelectContent>
+																	{departamentosQuery.data?.map((dep) => (
+																		<SelectItem key={dep} value={dep}>
+																			{dep}
+																		</SelectItem>
+																	))}
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="municipio">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Municipio</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(value)
+																}
+																disabled={!selectedDepartamento}
+															>
+																<SelectTrigger>
+																	<SelectValue
+																		placeholder={
+																			selectedDepartamento
+																				? "Seleccionar municipio"
+																				: "Primero seleccione departamento"
+																		}
+																	/>
+																</SelectTrigger>
+																<SelectContent>
+																	{municipiosQuery.data?.map((mun) => (
+																		<SelectItem key={mun} value={mun}>
+																			{mun}
+																		</SelectItem>
+																	))}
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="zona">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Zona</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: 1, 10, etc."
 															/>
 														</div>
 													)}

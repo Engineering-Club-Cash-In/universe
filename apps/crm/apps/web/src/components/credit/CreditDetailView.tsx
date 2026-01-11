@@ -407,9 +407,14 @@ export function CreditDetailView({
 										Información interna para el análisis y aprobación del crédito
 									</CardDescription>
 								</div>
-								<Badge variant={isAutocompra ? "default" : "secondary"}>
-									{isAutocompra ? "Autocompra" : "Sobre Vehículo"}
-								</Badge>
+								<div className="flex items-center gap-2">
+									<span className="text-muted-foreground text-sm">
+										Oportunidad: <span className="font-mono font-medium">{opportunity.id.split("-")[0]}</span>
+									</span>
+									<Badge variant={isAutocompra ? "default" : "secondary"}>
+										{isAutocompra ? "Autocompra" : "Sobre Vehículo"}
+									</Badge>
+								</div>
 							</div>
 						</CardHeader>
 						<CardContent className="space-y-6">
@@ -867,6 +872,67 @@ export function CreditDetailView({
 								</div>
 							</div>
 
+							{/* Tabla Resumen con Conclusión Financiera */}
+							<div className="grid grid-cols-2 gap-4">
+								{/* Izquierda: Datos del vehículo */}
+								<div className="rounded-lg border bg-muted/30 p-4">
+									<Table>
+										<TableBody>
+											<TableRow>
+												<TableCell className="font-medium">{quotation?.vehicleType || "Vehículo"}</TableCell>
+												<TableCell></TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Valor Mercado</TableCell>
+												<TableCell className="text-right">{formatCurrency(vehicleInspection?.marketValue)}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Valor Comercial</TableCell>
+												<TableCell className="text-right">{formatCurrency(vehicleInspection?.suggestedCommercialValue)}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Valor Bancario</TableCell>
+												<TableCell className="text-right">{formatCurrency(vehicleInspection?.bankValue)}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell className="h-2"></TableCell>
+												<TableCell></TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Capacidad de Pago</TableCell>
+												<TableCell className="text-right">{formatCurrency(creditAnalysis?.adjustedPayment)}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Procedencia del vehículo</TableCell>
+												<TableCell className="text-right font-medium">{vehiculo?.origin || "N/A"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Edad solicitante(s)</TableCell>
+												<TableCell className="text-right">{lead?.age || "N/A"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Oportunidad</TableCell>
+												<TableCell className="text-right font-mono">{opportunity.id.split("-")[0]}</TableCell>
+											</TableRow>
+										</TableBody>
+									</Table>
+								</div>
+
+								{/* Derecha: Conclusión financiera */}
+								<div className="rounded-lg border bg-muted/30 p-4 flex flex-col justify-center">
+									<div className="space-y-4">
+										<div>
+											<p className="text-muted-foreground text-sm">DESCUENTOS DE:</p>
+											<p className="font-bold text-red-600 text-2xl">{formatCurrency(totalDescuentos)}</p>
+										</div>
+										<div>
+											<p className="text-muted-foreground text-sm">TOTAL A RECIBIR:</p>
+											<p className="font-bold text-green-600 text-2xl">{formatCurrency(liquidoARecibir)}</p>
+										</div>
+									</div>
+								</div>
+							</div>
+
 							{/* Resumen Final */}
 							<div className="rounded-lg border-2 border-primary bg-primary/5 p-4">
 								<div className="grid grid-cols-3 gap-4">
@@ -901,69 +967,78 @@ export function CreditDetailView({
 							</CardDescription>
 						</CardHeader>
 						<CardContent className="space-y-6">
-							{/* Datos del Solicitante */}
-							<div className="rounded-lg border bg-muted/30 p-4">
-								<h3 className="mb-3 font-semibold">Solicitante</h3>
-								<p className="font-medium text-lg">{nombreDeudor}</p>
-								<p className="text-muted-foreground text-sm">NIT: {opportunity.nit || "N/A"}</p>
-							</div>
-
-							{/* Datos del Vehículo */}
-							<div className="rounded-lg border bg-muted/30 p-4">
-								<h3 className="mb-3 font-semibold">Vehículo</h3>
-								<p className="font-medium text-lg">{vehicleString}</p>
-								<p className="text-muted-foreground text-sm">Placas: {vehiculo?.plate || "N/A"}</p>
-							</div>
-
-							{/* Resumen del Crédito */}
-							<div className="space-y-4">
-								<h3 className="font-semibold">Resumen del Crédito</h3>
-								<div className="grid gap-3">
-									<div className="flex justify-between rounded-lg border bg-background p-3">
-										<span className="text-muted-foreground">Monto Solicitado</span>
-										<span className="font-bold">{formatCurrency(montoSolicitado)}</span>
-									</div>
-									<div className="flex justify-between rounded-lg border bg-background p-3">
-										<span className="text-muted-foreground">Cuota Interés Mensual</span>
-										<span className="font-medium">{formatCurrency(opportunity.cuotaMensual)}</span>
-									</div>
-									{royalty > 0 && (
-										<div className="flex justify-between rounded-lg border bg-background p-3">
-											<span className="text-muted-foreground">Royalty</span>
-											<span className="font-medium">{formatCurrency(royalty)}</span>
-										</div>
-									)}
-									{(gastosAdmin > 0 || traspaso > 0 || multas > 0) && (
-										<div className="flex justify-between rounded-lg border bg-background p-3">
-											<span className="text-muted-foreground">Gastos Admin + Traspaso + Multa</span>
-											<span className="font-medium">{formatCurrency(gastosAdmin + traspaso + multas)}</span>
-										</div>
-									)}
-									{seguro > 0 && (
-										<div className="flex justify-between rounded-lg border bg-background p-3">
-											<span className="text-muted-foreground">Cuota de Seguro</span>
-											<span className="font-medium">{formatCurrency(seguro)}</span>
-										</div>
-									)}
-									{gps > 0 && (
-										<div className="flex justify-between rounded-lg border bg-background p-3">
-											<span className="text-muted-foreground">Cuota de GPS</span>
-											<span className="font-medium">{formatCurrency(gps)}</span>
-										</div>
-									)}
-									{gastosLegales > 0 && (
-										<div className="flex justify-between rounded-lg border bg-background p-3">
-											<span className="text-muted-foreground">Gastos Legales</span>
-											<span className="font-medium">{formatCurrency(gastosLegales)}</span>
-										</div>
-									)}
+							{/* Header: Solicitante, Vehículo, Inversionista */}
+							<div className="space-y-2">
+								<div className="flex gap-4">
+									<span className="text-muted-foreground w-28">Solicitante:</span>
+									<span className="font-medium">{nombreDeudor}</span>
+								</div>
+								<div className="flex gap-4">
+									<span className="text-muted-foreground w-28">Vehículo:</span>
+									<span className="font-medium">{vehicleString}</span>
+								</div>
+								<div className="flex gap-4">
+									<span className="text-muted-foreground w-28">Inversionista:</span>
+									<span className="font-medium">{inversionistas.length > 0 ? inversionistas.map(i => i.nombre).join(", ") : "0"}</span>
 								</div>
 							</div>
 
-							{/* Total a Recibir */}
-							<div className="rounded-lg border-2 border-green-500 bg-green-50 p-6 text-center dark:bg-green-950/20">
-								<Label className="text-muted-foreground text-sm">Líquido a Recibir</Label>
-								<p className="font-bold text-3xl text-green-600">{formatCurrency(liquidoARecibir)}</p>
+							{/* Monto Solicitado */}
+							<div className="flex justify-between items-center py-3 border-t">
+								<span className="font-semibold">Monto Solicitado</span>
+								<span className="font-bold text-xl">{formatCurrency(montoSolicitado)}</span>
+							</div>
+
+							{/* Deducciones */}
+							<div className="space-y-3">
+								<h3 className="font-semibold">Deducciones</h3>
+								<Table>
+									<TableBody>
+										<TableRow>
+											<TableCell className="py-2">Cuotas interés mensual (interés sobre saldo)</TableCell>
+											<TableCell className="text-right py-2">{interesAnticipado > 0 ? formatCurrency(interesAnticipado) : "Q -"}</TableCell>
+											<TableCell className="w-28"></TableCell>
+										</TableRow>
+										<TableRow>
+											<TableCell className="py-2">Royalty</TableCell>
+											<TableCell className="text-right py-2">{royalty > 0 ? formatCurrency(royalty) : "Q -"}</TableCell>
+											<TableCell></TableCell>
+										</TableRow>
+										<TableRow>
+											<TableCell className="py-2">Gastos de Traspaso</TableCell>
+											<TableCell className="text-right py-2">{traspaso > 0 ? formatCurrency(traspaso) : "Q -"}</TableCell>
+											<TableCell></TableCell>
+										</TableRow>
+										<TableRow>
+											<TableCell className="py-2">Cuotas de seguro (12 cuotas anuales)</TableCell>
+											<TableCell className="text-right py-2">{seguro > 0 ? formatCurrency(seguro) : "Q -"}</TableCell>
+											<TableCell></TableCell>
+										</TableRow>
+										<TableRow>
+											<TableCell className="py-2">Cuotas de GPS (mensual)</TableCell>
+											<TableCell className="text-right py-2">{gps > 0 ? formatCurrency(gps) : "Q -"}</TableCell>
+											<TableCell></TableCell>
+										</TableRow>
+										<TableRow>
+											<TableCell className="py-2">Gastos legales</TableCell>
+											<TableCell className="text-right py-2">{subtotalGastosAbogado > 0 ? formatCurrency(subtotalGastosAbogado) : "Q -"}</TableCell>
+											<TableCell className="text-right py-2 font-semibold">{formatCurrency(interesAnticipado + royalty + traspaso + seguro + gps + subtotalGastosAbogado)}</TableCell>
+										</TableRow>
+									</TableBody>
+								</Table>
+							</div>
+
+							{/* Líquido a Recibir */}
+							<div className="flex justify-between items-center py-3 border-t-2 border-green-500">
+								<span className="font-semibold">Líquido a recibir</span>
+								<span className="font-bold text-2xl text-green-600">{formatCurrency(montoSolicitado - (interesAnticipado + royalty + traspaso + seguro + gps + subtotalGastosAbogado))}</span>
+							</div>
+
+							{/* Notas */}
+							<div className="text-muted-foreground text-xs space-y-1 pt-4 border-t">
+								<p>*La prima del seguro son 12 cuotas anuales que se pagan mensualmente, al momento de cancelar el crédito se cancela el seguro.</p>
+								<p>*El GPS se paga mensualmente, se cancela al momento de desinstalar el dispositivo GPS.</p>
+								<p className="pt-2 font-medium text-foreground">Nota: El pago de GPS y Seguro son obligatorios y no están incluidos dentro de la cuota mensual de interés.</p>
 							</div>
 						</CardContent>
 					</Card>

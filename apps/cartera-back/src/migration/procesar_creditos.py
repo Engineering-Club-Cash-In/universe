@@ -7,13 +7,12 @@ from collections import defaultdict
 # ============================================
 # 🔧 CONFIGURACIÓN
 # ============================================
-API_ENDPOINT = "http://localhost:7000/processUniqueCredit"
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
 HOJAS_A_PROCESAR = [   
-    "Enero 2026", 
+    "Diciembre 2025", 
 ]
 
 # 🔥 MODO PRUEBA
@@ -396,7 +395,7 @@ def leer_hoja_excel(
 # ============================================
 # 📡 FUNCIÓN PARA ENVIAR A API
 # ============================================
-def enviar_credito_a_api(credito_data: Dict[str, Any]) -> Dict:
+def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dict:
     """Envía un crédito agrupado al endpoint de Elysia"""
     
     print(f"\n   🚀 Enviando crédito a API...")
@@ -415,7 +414,7 @@ def enviar_credito_a_api(credito_data: Dict[str, Any]) -> Dict:
     
     try:
         response = requests.post(
-            API_ENDPOINT,
+            api_endpoint,
             json=payload,
             headers={"Content-Type": "application/json"},
             timeout=120
@@ -431,12 +430,18 @@ def enviar_credito_a_api(credito_data: Dict[str, Any]) -> Dict:
         
         print(f"   ✅ Respuesta de API:")
         print(f"      - Success: {resultado.get('success', False)}")
-        print(f"      - Status: {resultado.get('status', 'N/A')}")
+        
+        # Mostrar campos relevantes según el tipo de respuesta
+        if 'status' in resultado:
+            print(f"      - Status: {resultado.get('status', 'N/A')}")
         
         if not resultado.get('success'):
             print(f"      - Error: {resultado.get('error', 'N/A')}")
         else:
-            print(f"      - Crédito ID: {resultado.get('credito_id', 'N/A')}")
+            if 'credito_id' in resultado:
+                print(f"      - Crédito ID: {resultado.get('credito_id', 'N/A')}")
+            if 'inversionistas_procesados' in resultado:
+                print(f"      - Inversionistas procesados: {resultado.get('inversionistas_procesados', 'N/A')}")
         
         return resultado
         
@@ -458,15 +463,15 @@ def enviar_credito_a_api(credito_data: Dict[str, Any]) -> Dict:
 # ============================================
 # 🚀 FUNCIÓN PRINCIPAL
 # ============================================
-def procesar_multiples_hojas():
+def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
     modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🔥 MODO COMPLETO"
     
     print(f"\n{'='*70}")
-    print(f"{modo_texto}")
+    print(f"{modo_texto} - {modo_nombre}")
     print(f"{'='*70}")
     print(f"📂 Carpeta: {CARPETA_EXCELS}")
     print(f"📄 Archivo: {ARCHIVO_EXCEL}")
-    print(f"🔗 API: {API_ENDPOINT}")
+    print(f"🔗 API: {api_endpoint}")
     print(f"📅 Hojas a procesar: {len(HOJAS_A_PROCESAR)}")
     
     if MODO_PRUEBA:
@@ -521,7 +526,7 @@ def procesar_multiples_hojas():
             print(f"\n{'─'*70}")
             print(f"📋 Procesando: {credito_data['creditoBase']} - {credito_data['cliente']}")
             
-            resultado = enviar_credito_a_api(credito_data)
+            resultado = enviar_credito_a_api(credito_data, api_endpoint)
             
             stats_globales['creditos_procesados'] += 1
             
@@ -545,6 +550,32 @@ def procesar_multiples_hojas():
     print(f"{'='*70}\n")
 
 # ============================================
+# 🎯 MENÚ PRINCIPAL
+# ============================================
+def mostrar_menu():
+    """Muestra el menú de opciones y retorna la selección del usuario"""
+    print(f"\n{'='*70}")
+    print("🔥 PROCESADOR DE EXCEL - CASH-IN")
+    print(f"{'='*70}")
+    print("\n📋 Seleccioná el modo de procesamiento:\n")
+    print("   1️⃣  Procesar CRÉDITOS COMPLETOS (con SIFCO + Inversionistas)")
+    print("      └─ Endpoint: /processUniqueCredit")
+    print("      └─ Consulta SIFCO, crea/actualiza crédito e inversionistas\n")
+    print("   2️⃣  Procesar SOLO INVERSIONISTAS (crédito debe existir)")
+    print("      └─ Endpoint: /processInvestorsOnly")
+    print("      └─ NO toca SIFCO, solo actualiza inversionistas del crédito\n")
+    print("   0️⃣  Salir\n")
+    print(f"{'='*70}")
+    
+    while True:
+        opcion = input("\n👉 Ingresá tu opción (1/2/0): ").strip()
+        
+        if opcion in ['1', '2', '0']:
+            return opcion
+        else:
+            print("❌ Opción inválida. Por favor ingresá 1, 2 o 0.")
+
+# ============================================
 # 🎯 EJECUTAR
 # ============================================
 if __name__ == "__main__":
@@ -554,13 +585,44 @@ if __name__ == "__main__":
     if MODO_PRUEBA:
         print(f"🧪 MODO PRUEBA ACTIVADO")
         print(f"   - Solo se procesará {LIMITE_CREDITOS_PRUEBA} crédito(s) por hoja")
-        print(f"   - Para procesar todos, cambiá MODO_PRUEBA = False\n")
-    
-    input("📌 Presiona ENTER para continuar...")
+        print(f"   - Para procesar todos, cambiá MODO_PRUEBA = False en el código\n")
     
     try:
-        procesar_multiples_hojas()
-        print("\n✅ ¡Proceso completado con éxito!")
+        while True:
+            opcion = mostrar_menu()
+            
+            if opcion == '0':
+                print("\n👋 ¡Hasta luego!")
+                break
+            
+            elif opcion == '1':
+                print("\n✅ Seleccionaste: PROCESAR CRÉDITOS COMPLETOS")
+                api_endpoint = "http://localhost:7000/processUniqueCredit"
+                modo_nombre = "Créditos Completos (SIFCO + Inversionistas)"
+                
+                input("\n📌 Presiona ENTER para continuar...")
+                procesar_multiples_hojas(api_endpoint, modo_nombre)
+                
+                input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
+            
+            elif opcion == '2':
+                print("\n✅ Seleccionaste: PROCESAR SOLO INVERSIONISTAS")
+                api_endpoint = "http://localhost:7000/processInvestorsOnly"
+                modo_nombre = "Solo Inversionistas (sin SIFCO)"
+                
+                print("\n⚠️  IMPORTANTE:")
+                print("   - Los créditos DEBEN existir en la base de datos")
+                print("   - Solo se actualizarán los inversionistas")
+                print("   - NO se consultará SIFCO\n")
+                
+                confirmacion = input("¿Estás seguro de continuar? (s/n): ").strip().lower()
+                
+                if confirmacion == 's':
+                    procesar_multiples_hojas(api_endpoint, modo_nombre)
+                    input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
+                else:
+                    print("\n❌ Operación cancelada")
+            
     except KeyboardInterrupt:
         print("\n\n⚠️ Proceso interrumpido por el usuario")
     except Exception as e:

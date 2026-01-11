@@ -84,8 +84,6 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 		.from(renapInfo)
 		.where(eq(renapInfo.dpi, dpi));
 
-	let leadId: string;
-
 	if (existingRenap.length === 0) {
 		console.log("[DEBUG] DPI not found in renap_info. Inserting new record.");
 		await db.insert(renapInfo).values({
@@ -155,6 +153,10 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 	const age = calculateAge(renapData.birthDate);
 	console.log(`[DEBUG] Calculated age for DPI ${dpi}: ${age}`);
 
+	let leadId: string;
+	let assignedUserId: string;
+	let createdByUserId: string;
+
 	if (existingLead.length === 0) {
 		console.log("[DEBUG] DPI not found in leads. Inserting new lead.");
 		const newLead = await db
@@ -164,17 +166,18 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				lastName: renapData.firstLastName,
 				dpi: renapData.dpi,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
-				assignedTo: randomUser.id, // Assign to random sales user
-				age: age ?? undefined, // Insert calculated age
-				source: "other", // Valid enum value for your schema
-				email: "", // Placeholder (required field in schema)
-				phone: phone, // Provided externally
-				createdBy: randomUser.id, // Assign creator as the same sales user
-				status: "new", // Default status
+				assignedTo: randomUser.id,
+				age: age ?? undefined,
+				source: "other",
+				email: "",
+				phone: phone,
+				createdBy: randomUser.id,
+				status: "new",
 			})
 			.returning({ id: leads.id });
-		// Note: You might want to capture the inserted lead's ID if needed later
 		leadId = newLead[0].id;
+		assignedUserId = randomUser.id;
+		createdByUserId = randomUser.id;
 	} else {
 		console.log("[DEBUG] DPI found in leads. Updating existing lead.");
 		await db
@@ -184,51 +187,88 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 				lastName: renapData.firstLastName,
 				maritalStatus: mapCivilStatusToEnum(renapData.civil_status),
 				assignedTo: existingLead[0].assignedTo,
-				status: "new", // Reset status to 'new' on RENAP update
-				age: age ?? existingLead[0].age, // Update age if valid
+				status: "new",
+				age: age ?? existingLead[0].age,
 				updatedAt: new Date(),
 			})
 			.where(eq(leads.dpi, dpi));
 		leadId = existingLead[0].id;
+		assignedUserId = existingLead[0].assignedTo;
+		createdByUserId = existingLead[0].createdBy;
 	}
 
+	// ========================
+	// 4. Create or Update Magic URL
+	// ========================
 	const magicUrlValue = `${MAGIC_URL_BASE}${dpi}`;
 	console.log(`[DEBUG] Checking magic URL for lead ${leadId}`);
-		const [existingMagicUrl] = await db
-			.select()
-			.from(magicUrls)
-			.where(eq(magicUrls.leadId, leadId))
-			.limit(1);
+	const [existingMagicUrl] = await db
+		.select()
+		.from(magicUrls)
+		.where(eq(magicUrls.leadId, leadId))
+		.limit(1);
 
-		if (existingMagicUrl) {
-			await db
-				.update(magicUrls)
-				.set({
-					url: magicUrlValue,
-					updatedAt: new Date(),
-					used: false,
-					expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 días
-				})
-				.where(eq(magicUrls.id, existingMagicUrl.id));
-		} else {
-			await db.insert(magicUrls).values({
-				leadId: leadId,
+	if (existingMagicUrl) {
+		await db
+			.update(magicUrls)
+			.set({
 				url: magicUrlValue,
-				createdAt: new Date(),
-				expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+				updatedAt: new Date(),
 				used: false,
-			});
-		}
+				expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+			})
+			.where(eq(magicUrls.id, existingMagicUrl.id));
+	} else {
+		await db.insert(magicUrls).values({
+			leadId: leadId,
+			url: magicUrlValue,
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+			used: false,
+		});
+	}
+
 	// ========================
-	// 4. Response
+	// 5. 🔥 SIEMPRE crear nueva oportunidad
+	// ========================
+	const [firstStage] = await db
+		.select()
+		.from(salesStages)
+		.orderBy(asc(salesStages.order))
+		.limit(1);
+
+	if (!firstStage) {
+		throw new Error("[ERROR] No sales stage found");
+	}
+
+	console.log(`[DEBUG] Creating NEW opportunity for lead ${leadId}`);
+
+	const [newOpportunity] = await db
+		.insert(opportunities)
+		.values({
+			leadId: leadId,
+			status: "open",
+			probability: 0,
+			createdAt: new Date(),
+			updatedAt: new Date(),
+			assignedTo: assignedUserId,
+			createdBy: createdByUserId,
+			title: `Oportunidad de crédito para ${renapData.firstName} ${renapData.firstLastName}`,
+			stageId: firstStage.id,
+		})
+		.returning();
+
+	// ========================
+	// 6. Response
 	// ========================
 	console.log(`[DEBUG] RENAP process completed successfully for DPI: ${dpi}`);
 
 	return {
 		success: true,
-		message: "RENAP data processed and synced successfully",
+		message: "RENAP data processed, lead synced, and opportunity created successfully",
 		data: renapData,
 		leadId,
+		opportunityId: newOpportunity.id,
 		magicUrl: magicUrlValue,
 	};
 };
@@ -299,9 +339,7 @@ export const updateLeadAndCreateOpportunity = async (
 		bankStatements3?: string;
 	},
 ) => {
-	console.log(
-		`[DEBUG] Starting updateLeadAndCreateOpportunity for DPI: ${dpi}`,
-	);
+	console.log(`[DEBUG] Starting updateLeadAndCreateOpportunity for DPI: ${dpi}`);
 	console.log("[DEBUG] Data received:", data);
 
 	if (!dpi) {
@@ -321,7 +359,7 @@ export const updateLeadAndCreateOpportunity = async (
 		return {
 			success: false,
 			message: "Lead not found with the provided DPI and status 'new'",
-		}; 
+		};
 	}
 
 	// Normalizar enums
@@ -364,11 +402,7 @@ export const updateLeadAndCreateOpportunity = async (
 			.where(eq(leads.id, existingLead.id));
 	}
 
-	const magicUrlValue = `${MAGIC_URL_BASE}${existingLead.dpi}`;
-
-	let opportunityId: string | null = null;
-
-	// 3. Insertar documentos legales si hay alguno
+	// 3. Insertar/actualizar documentos legales si hay alguno
 	if (
 		data.electricityBill ||
 		data.bankStatements2 ||
@@ -376,7 +410,7 @@ export const updateLeadAndCreateOpportunity = async (
 		data.bankStatements
 	) {
 		console.log(
-			`[DEBUG] Inserting legal documents for lead ${existingLead.id}`,
+			`[DEBUG] Inserting/updating legal documents for lead ${existingLead.id}`,
 		);
 
 		const existingDoc = await db
@@ -387,7 +421,6 @@ export const updateLeadAndCreateOpportunity = async (
 			.then((results) => results[0] || null);
 
 		if (existingDoc) {
-			// 🔄 Update si ya existe
 			await db
 				.update(legalDocuments)
 				.set({
@@ -399,7 +432,6 @@ export const updateLeadAndCreateOpportunity = async (
 				})
 				.where(eq(legalDocuments.leadId, existingLead.id));
 		} else {
-			// 🆕 Insert si no existe
 			await db.insert(legalDocuments).values({
 				leadId: existingLead.id,
 				electricityBill: data.electricityBill ?? null,
@@ -409,115 +441,46 @@ export const updateLeadAndCreateOpportunity = async (
 				createdAt: new Date(),
 			});
 		}
-
-		// 4. Crear oportunidad vinculada al lead
-		const [firstStage] = await db
-			.select()
-			.from(salesStages)
-			.orderBy(asc(salesStages.order))
-			.limit(1);
-
-		if (!firstStage) {
-			throw new Error("[ERROR] No sales stage found");
-		}
-
-		console.log(`[DEBUG] Creating opportunity for lead ${existingLead.id}`);
-
-		// Verificar si ya existe una oportunidad abierta
-		const [existingOpportunity] = await db
-			.select()
-			.from(opportunities)
-			.where(
-				and(
-					eq(opportunities.leadId, existingLead.id),
-					eq(opportunities.status, "open"),
-				),
-			)
-			.limit(1);
-
-		if (existingOpportunity) {
-			console.log(
-				`[DEBUG] Updating existing opportunity ${existingOpportunity.id} for lead ${existingLead.id}`,
-			);
-
-			await db
-				.update(opportunities)
-				.set({
-					updatedAt: new Date(),
-					assignedTo: existingLead.assignedTo,
-					title: `Oportunidad de crédito para ${existingLead.firstName} ${existingLead.lastName}`,
-					status: "open",
-				})
-				.where(eq(opportunities.id, existingOpportunity.id));
-
-			opportunityId = existingOpportunity.id;
-		} else {
-			console.log(
-				`[DEBUG] Creating new opportunity for lead ${existingLead.id}`,
-			);
-
-			const [newOpportunity] = await db
-				.insert(opportunities)
-				.values({
-					leadId: existingLead.id,
-					status: "open",
-					probability: 0,
-					createdAt: new Date(),
-					updatedAt: new Date(),
-					assignedTo: existingLead.assignedTo,
-					createdBy: existingLead.createdBy,
-					title: `Oportunidad de crédito para ${existingLead.firstName} ${existingLead.lastName}`,
-					stageId: firstStage.id,
-				})
-				.returning();
-
-			opportunityId = newOpportunity.id;
-		}
-
-	
 	}
-		// 🔹 Crear o actualizar magic_url para este lead
-		console.log(`[DEBUG] Checking magic URL for lead ${existingLead.id}`);
-		const [existingMagicUrl] = await db
-			.select()
-			.from(magicUrls)
-			.where(eq(magicUrls.leadId, existingLead.id))
-			.limit(1);
 
-		if (existingMagicUrl) {
-			await db
-				.update(magicUrls)
-				.set({
-					url: magicUrlValue,
-					updatedAt: new Date(),
-					used: false,
-					expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000), // 3 días
-				})
-				.where(eq(magicUrls.id, existingMagicUrl.id));
-		} else {
-			await db.insert(magicUrls).values({
-				leadId: existingLead.id,
+	// 4. Actualizar magic URL
+	const magicUrlValue = `${MAGIC_URL_BASE}${existingLead.dpi}`;
+	console.log(`[DEBUG] Checking magic URL for lead ${existingLead.id}`);
+	const [existingMagicUrl] = await db
+		.select()
+		.from(magicUrls)
+		.where(eq(magicUrls.leadId, existingLead.id))
+		.limit(1);
+
+	if (existingMagicUrl) {
+		await db
+			.update(magicUrls)
+			.set({
 				url: magicUrlValue,
-				createdAt: new Date(),
-				expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+				updatedAt: new Date(),
 				used: false,
-			});
-		}
+				expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+			})
+			.where(eq(magicUrls.id, existingMagicUrl.id));
+	} else {
+		await db.insert(magicUrls).values({
+			leadId: existingLead.id,
+			url: magicUrlValue,
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+			used: false,
+		});
+	}
 
-	console.log(
-		`[DEBUG] Lead updated and opportunity created successfully for DPI: ${dpi}`,
-	);
+	console.log(`[DEBUG] Lead updated successfully for DPI: ${dpi}`);
 
 	return {
 		success: true,
-		message:
-			"Lead updated, legal docs saved (if provided), and opportunity created successfully",
+		message: "Lead updated and legal docs saved successfully",
 		leadId: existingLead.id,
-		opportunityId, // ✅ siempre retorna el id de la oportunidad
 		magicUrl: magicUrlValue,
 	};
 };
-
 /**
  * Controller: getLeadProgress
  *

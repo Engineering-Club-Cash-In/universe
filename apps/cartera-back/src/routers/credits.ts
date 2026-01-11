@@ -113,10 +113,13 @@ export const creditRouter = new Elysia()
     page = "1",
     perPage = "10",
     numero_credito_sifco,
-    estado,           // 👈 obligatorio
-    excel,            // 👈 para generar Excel
-    asesor_id,        // 👈 NUEVO
-    nombre_usuario,   // 👈 NUEVO
+    estado,
+    excel,
+    asesor_id,
+    nombre_usuario,
+    email_asesor,        // 🆕 NUEVO
+    cuotas_atrasadas,    // 🆕 NUEVO
+    proximidad_pago,     // 🆕 NUEVO
   } = query as Record<string, string>;
 
   // Validar parámetros requeridos
@@ -139,15 +142,26 @@ export const creditRouter = new Elysia()
     | "INCOBRABLE"
     | "PENDIENTE_CANCELACION"
     | "EN_CONVENIO"
-    | "MOROSO"
-    |"EN_CONVENIO"
+    | "MOROSO";
   
-  // 🆕 Convertir asesor_id a número si existe
+  // Convertir asesor_id a número si existe
   const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
   
-  // 🆕 Nombre de usuario (string)
+  // Nombre de usuario (string)
   const nombreUsuarioParam = nombre_usuario ? String(nombre_usuario) : undefined;
 
+  // 🆕 Email del asesor (string)
+  const emailAsesorParam = email_asesor ? String(email_asesor) : undefined;
+
+  // 🆕 Cuotas atrasadas (número)
+  const cuotasAtrasadasNum = cuotas_atrasadas ? Number(cuotas_atrasadas) : undefined;
+
+  // 🆕 Proximidad de pago (enum)
+  const proximidadPagoParam = proximidad_pago
+    ? (String(proximidad_pago) as "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH")
+    : undefined;
+
+  // Validaciones
   if (
     isNaN(mesNum) ||
     mesNum < 0 ||
@@ -159,10 +173,24 @@ export const creditRouter = new Elysia()
     return { message: "Parámetros 'mes' y/o 'anio' inválidos." };
   }
 
-  // 🆕 Validar asesor_id si se envía
+  // Validar asesor_id si se envía
   if (asesor_id && isNaN(asesorIdNum!)) {
     set.status = 400;
     return { message: "Parámetro 'asesor_id' debe ser un número válido." };
+  }
+
+  // 🆕 Validar cuotas_atrasadas si se envía
+  if (cuotas_atrasadas && isNaN(cuotasAtrasadasNum!)) {
+    set.status = 400;
+    return { message: "Parámetro 'cuotas_atrasadas' debe ser un número válido." };
+  }
+
+  // 🆕 Validar proximidad_pago si se envía
+  if (proximidad_pago && !["TODAY", "WEEK", "TWO_WEEKS", "MONTH", "DUEMONTH"].includes(proximidad_pago)) {
+    set.status = 400;
+    return { 
+      message: "Parámetro 'proximidad_pago' debe ser: TODAY, WEEK, TWO_WEEKS, MONTH o DUEMONTH" 
+    };
   }
 
   // Llamar servicio
@@ -176,8 +204,11 @@ export const creditRouter = new Elysia()
         perPage: perPageNum,
         numero_credito_sifco: numeroCreditoSifco,
         estado: estadoParam,
-        asesor_id: asesorIdNum,           // 👈 NUEVO
-        nombre_usuario: nombreUsuarioParam, // 👈 NUEVO
+        asesor_id: asesorIdNum,
+        nombre_usuario: nombreUsuarioParam,
+        email_asesor: emailAsesorParam,           // 🆕 NUEVO
+        cuotas_atrasadas: cuotasAtrasadasNum,     // 🆕 NUEVO
+        proximidad_pago: proximidadPagoParam,     // 🆕 NUEVO
         excel: true,
       });
       set.status = 200;
@@ -190,10 +221,12 @@ export const creditRouter = new Elysia()
         pageNum,
         perPageNum,
         numeroCreditoSifco,
-        estadoParam,  
-        asesorIdNum,           // 👈 NUEVO
-        nombreUsuarioParam,    // 👈 NUEVO
-        
+        estadoParam,
+        asesorIdNum,
+        nombreUsuarioParam,
+        emailAsesorParam,           // 🆕 NUEVO
+        cuotasAtrasadasNum,         // 🆕 NUEVO
+        proximidadPagoParam         // 🆕 NUEVO
       );
       set.status = 200;
       return result;

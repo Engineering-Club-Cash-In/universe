@@ -9,6 +9,7 @@ import { listarCreditosConDetalle, procesarCreditoIndividual } from "../migratio
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
 import { liquidarCuotasPorUsuario } from "../controllers/liquidateInvestor";
+import { procesarInversionistasSoloExcel } from "../controllers/migrateInvestor";
 // ✅ Schema para sync de pagos desde SIFCO (param opcional)
 const syncCreditPaymentsSchema = z.object({
   numero_credito_sifco: z.string().min(1).optional(),
@@ -620,4 +621,44 @@ export const sifcoRouter = new Elysia()
         tags: ["Créditos"],
       },
     }
-  );
+  ).post(
+  "/processInvestorsOnly",
+  async ({ body, set }) => {
+    try {
+      console.log(`\n📥 ========== RECIBIENDO SOLICITUD ==========`);
+      console.log(`📋 Crédito: ${body.credito.creditoBase}`);
+      console.log(`👥 Filas: ${body.credito.filas.length}`);
+
+      const resultado = await procesarInversionistasSoloExcel(body.credito);
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      return resultado;
+
+    } catch (error: any) {
+      console.error("❌ Error en endpoint:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error.message || "Error interno del servidor",
+      };
+    }
+  },
+  {
+    body: t.Object({
+      credito: t.Object({
+        creditoBase: t.String(),
+        cliente: t.String(),
+        filas: t.Array(t.Any()),
+      }),
+    }),
+    detail: {
+      summary: "Procesar inversionistas desde Excel",
+      description: "Recibe datos de Excel, busca el crédito en BD, borra inversionistas viejos e inserta los nuevos",
+      tags: ["Inversionistas"],
+    },
+  }
+);

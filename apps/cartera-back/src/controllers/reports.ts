@@ -13,12 +13,15 @@ export async function getCreditosWithUserByMesAnioExcel(
     estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO" | "EN_CONVENIO";
     asesor_id?: number;
     nombre_usuario?: string;
+    email_asesor?: string; // 🆕 NUEVO
+    cuotas_atrasadas?: number; // 🆕 NUEVO
+    proximidad_pago?: "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH"; // 🆕 NUEVO
     excel?: boolean;
   }
 ) {
   const { excel, ...rest } = params;
 
-  // 👉 Traemos la data normal
+  // 👉 Traemos la data normal con los nuevos parámetros
   const result = await getCreditosWithUserByMesAnio(
     rest.mes,
     rest.anio,
@@ -27,7 +30,10 @@ export async function getCreditosWithUserByMesAnioExcel(
     rest.numero_credito_sifco,
     rest.estado,
     rest.asesor_id,
-    rest.nombre_usuario
+    rest.nombre_usuario,
+    rest.email_asesor, // 🆕 NUEVO
+    rest.cuotas_atrasadas, // 🆕 NUEVO
+    rest.proximidad_pago // 🆕 NUEVO
   );
 
   if (!excel) return result; // si no piden excel, devolvemos JSON normal
@@ -51,14 +57,28 @@ export async function getCreditosWithUserByMesAnioExcel(
     { header: "Capital", key: "capital", width: 15 },
     { header: "Cuota", key: "cuota", width: 15 },
     { header: "Deuda Total", key: "deuda_total", width: 15 },
+    { header: "Deuda con Mora", key: "deuda_con_mora", width: 15 }, // 🆕
     { header: "Plazo", key: "plazo", width: 10 },
     { header: "Usuario", key: "usuario", width: 25 },
     { header: "NIT", key: "usuario_nit", width: 20 },
     { header: "Categoría", key: "usuario_categoria", width: 15 },
     { header: "Saldo a Favor", key: "saldo_favor", width: 15 },
     { header: "Asesor", key: "asesor", width: 20 },
+    { header: "Email Asesor", key: "email_asesor", width: 30 }, // 🆕
     { header: "Fecha Creación", key: "fecha_creacion", width: 20 },
     { header: "Observaciones", key: "observaciones", width: 50 },
+    
+    // 🆕 Columnas de mora
+    { header: "Tiene Mora", key: "tiene_mora", width: 12 },
+    { header: "Monto Mora", key: "monto_mora", width: 15 },
+    { header: "Cuotas Atrasadas", key: "cuotas_atrasadas", width: 18 },
+    
+    // 🆕 Columnas de próxima cuota
+    { header: "Próxima Cuota #", key: "proxima_cuota_numero", width: 18 },
+    { header: "Fecha Vencimiento", key: "proxima_fecha_venc", width: 20 },
+    { header: "Proximidad", key: "proximidad_pago", width: 15 },
+    { header: "Cuota Pagada", key: "proxima_cuota_pagada", width: 15 },
+    
     { header: "Total CashIn Monto", key: "total_cash_in_monto", width: 20 },
     { header: "Total CashIn IVA", key: "total_cash_in_iva", width: 20 },
     { header: "Total Inversión Monto", key: "total_inversion_monto", width: 20 },
@@ -87,15 +107,29 @@ export async function getCreditosWithUserByMesAnioExcel(
       estado: item.creditos.statusCredit,
       capital: item.creditos.capital,
       cuota: item.creditos.cuota,
-      deuda_total: item.creditos.deudatotal, // cuidado aquí, revisa tu schema
+      deuda_total: item.creditos.deudatotal,
+      deuda_con_mora: item.deuda_total_con_mora || item.creditos.deudatotal, // 🆕
       plazo: item.creditos.plazo,
       usuario: item.usuarios.nombre,
       usuario_nit: item.usuarios.nit,
       usuario_categoria: item.usuarios.categoria,
       saldo_favor: item.usuarios.saldo_a_favor,
       asesor: item.asesores.nombre,
+      email_asesor: "", // 🆕 Lo llenaremos abajo si existe
       fecha_creacion: item.creditos.fecha_creacion,
       observaciones: item.creditos.observaciones,
+      
+      // 🆕 Mora
+      tiene_mora: item.mora ? "Sí" : "No",
+      monto_mora: item.mora?.monto_mora || 0,
+      cuotas_atrasadas: item.mora?.cuotas_atrasadas || 0,
+      
+      // 🆕 Próxima cuota
+      proxima_cuota_numero: item.proxima_cuota?.numero_cuota || "N/A",
+      proxima_fecha_venc: item.proxima_cuota?.fecha_vencimiento || "N/A",
+      proximidad_pago: item.proxima_cuota?.proximidad || "N/A",
+      proxima_cuota_pagada: item.proxima_cuota?.pagado ? "Sí" : "No",
+      
       total_cash_in_monto: item.resumen.total_cash_in_monto,
       total_cash_in_iva: item.resumen.total_cash_in_iva,
       total_inversion_monto: item.resumen.total_inversion_monto,
@@ -119,9 +153,10 @@ export async function getCreditosWithUserByMesAnioExcel(
   });
 
   // 5️⃣ Pasar Excel a buffer
- 
+  const arrayBuffer = await workbook.xlsx.writeBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
 
-  // 6️⃣ Subir a R2 (igual a como subes PDF)
+  // 6️⃣ Subir a R2
   const filename = `reportes/creditos_${Date.now()}.xlsx`;
   const s3 = new S3Client({
     endpoint: process.env.BUCKET_REPORTS_URL,
@@ -131,17 +166,15 @@ export async function getCreditosWithUserByMesAnioExcel(
       secretAccessKey: process.env.R2_SECRET_ACCESS_KEY as string,
     },
   });
-const arrayBuffer = await workbook.xlsx.writeBuffer();
-const uint8Array = new Uint8Array(arrayBuffer); // ✅ convertir a Uint8Array
 
-await s3.send(
-  new PutObjectCommand({
-    Bucket: process.env.BUCKET_REPORTS,
-    Key: filename,
-    Body: uint8Array,
-    ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  })
-);
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: process.env.BUCKET_REPORTS,
+      Key: filename,
+      Body: uint8Array,
+      ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+  );
 
   const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
   console.log("✅ Reporte Excel subido a R2:", url);

@@ -758,15 +758,17 @@ export function CreditDetailView({
 											</TableRow>
 										</TableHeader>
 										<TableBody>
-											<TableRow>
-												<TableCell>Nombramiento</TableCell>
-												<TableCell className="text-center">
-													<Badge variant={nombramiento > 0 ? "default" : "outline"} className="text-xs">
-														{nombramiento > 0 ? "SI" : "NO"}
-													</Badge>
-												</TableCell>
-												<TableCell className="text-right">{nombramiento > 0 ? formatCurrency(nombramiento) : "Q -"}</TableCell>
-											</TableRow>
+											{isAutocompra && (
+												<TableRow>
+													<TableCell>Nombramiento</TableCell>
+													<TableCell className="text-center">
+														<Badge variant={nombramiento > 0 ? "default" : "outline"} className="text-xs">
+															{nombramiento > 0 ? "SI" : "NO"}
+														</Badge>
+													</TableCell>
+													<TableCell className="text-right">{nombramiento > 0 ? formatCurrency(nombramiento) : "Q -"}</TableCell>
+												</TableRow>
+											)}
 											<TableRow>
 												<TableCell>Multas</TableCell>
 												<TableCell className="text-center">
@@ -794,15 +796,17 @@ export function CreditDetailView({
 												</TableCell>
 												<TableCell className="text-right">{diferenciaCopiaLlave > 0 ? formatCurrency(diferenciaCopiaLlave) : "Q -"}</TableCell>
 											</TableRow>
-											<TableRow>
-												<TableCell>Verificación de dirección</TableCell>
-												<TableCell className="text-center">
-													<Badge variant={verificacionDireccion > 0 ? "default" : "outline"} className="text-xs">
-														{verificacionDireccion > 0 ? "SI" : "NO"}
-													</Badge>
-												</TableCell>
-												<TableCell className="text-right">{verificacionDireccion > 0 ? formatCurrency(verificacionDireccion) : "Q -"}</TableCell>
-											</TableRow>
+											{isAutocompra && (
+												<TableRow>
+													<TableCell>Verificación de dirección</TableCell>
+													<TableCell className="text-center">
+														<Badge variant={verificacionDireccion > 0 ? "default" : "outline"} className="text-xs">
+															{verificacionDireccion > 0 ? "SI" : "NO"}
+														</Badge>
+													</TableCell>
+													<TableCell className="text-right">{verificacionDireccion > 0 ? formatCurrency(verificacionDireccion) : "Q -"}</TableCell>
+												</TableRow>
+											)}
 											<TableRow>
 												<TableCell>Impuesto circulación</TableCell>
 												<TableCell className="text-center">

@@ -6,7 +6,7 @@ import { crmProcedure } from "../lib/orpc";
 import { ROLES } from "../lib/roles";
 
 export const checksRouter = {
-	// Crear nuevo cheque
+	// Crear nuevo cheque/transferencia
 	createCheck: crmProcedure
 		.input(
 			z.object({
@@ -14,8 +14,12 @@ export const checksRouter = {
 				quotationId: z.string().uuid().optional(),
 				checkDate: z.string().or(z.date()),
 				issuer: z.string().min(1),
-				bank: z.string().min(1),
+				issuerBank: z.string().min(1),
 				beneficiary: z.string().min(1),
+				accountNumber: z.string().optional(),
+				transferType: z.string().default("TRANSFERENCIA"),
+				accountType: z.string().default("MONETARIA"),
+				beneficiaryBank: z.string().optional(),
 				concept: z.string().min(1),
 				currency: z.string().default("GTQ"),
 				amount: z.number().positive(),
@@ -46,8 +50,12 @@ export const checksRouter = {
 							? new Date(input.checkDate)
 							: input.checkDate,
 					issuer: input.issuer,
-					bank: input.bank,
+					issuerBank: input.issuerBank,
 					beneficiary: input.beneficiary,
+					accountNumber: input.accountNumber,
+					transferType: input.transferType,
+					accountType: input.accountType,
+					beneficiaryBank: input.beneficiaryBank,
 					concept: input.concept,
 					currency: input.currency,
 					amount: input.amount.toString(),
@@ -91,8 +99,12 @@ export const checksRouter = {
 				checkId: z.string().uuid(),
 				checkDate: z.string().or(z.date()).optional(),
 				issuer: z.string().min(1).optional(),
-				bank: z.string().min(1).optional(),
+				issuerBank: z.string().min(1).optional(),
 				beneficiary: z.string().min(1).optional(),
+				accountNumber: z.string().optional(),
+				transferType: z.string().optional(),
+				accountType: z.string().optional(),
+				beneficiaryBank: z.string().optional(),
 				concept: z.string().min(1).optional(),
 				currency: z.string().optional(),
 				amount: z.number().positive().optional(),
@@ -126,8 +138,12 @@ export const checksRouter = {
 							: input.checkDate
 						: undefined,
 					issuer: input.issuer,
-					bank: input.bank,
+					issuerBank: input.issuerBank,
 					beneficiary: input.beneficiary,
+					accountNumber: input.accountNumber,
+					transferType: input.transferType,
+					accountType: input.accountType,
+					beneficiaryBank: input.beneficiaryBank,
 					concept: input.concept,
 					currency: input.currency,
 					amount: input.amount?.toString(),

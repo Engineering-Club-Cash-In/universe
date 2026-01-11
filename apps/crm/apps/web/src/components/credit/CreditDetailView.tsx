@@ -33,6 +33,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
 	Table,
 	TableBody,
 	TableCell,
@@ -242,8 +249,12 @@ export function CreditDetailView({
 		defaultValues: {
 			checkDate: new Date(),
 			issuer: "",
-			bank: "",
+			issuerBank: "",
 			beneficiary: "",
+			accountNumber: "",
+			transferType: "TRANSFERENCIA",
+			accountType: "MONETARIA",
+			beneficiaryBank: "",
 			concept: "",
 			currency: "GTQ",
 			amount: "",
@@ -254,8 +265,12 @@ export function CreditDetailView({
 				quotationId: quotation?.id,
 				checkDate: value.checkDate.toISOString(),
 				issuer: value.issuer,
-				bank: value.bank,
+				issuerBank: value.issuerBank,
 				beneficiary: value.beneficiary,
+				accountNumber: value.accountNumber || undefined,
+				transferType: value.transferType,
+				accountType: value.accountType,
+				beneficiaryBank: value.beneficiaryBank || undefined,
 				concept: value.concept,
 				currency: value.currency,
 				amount: Number.parseFloat(value.amount),
@@ -1089,40 +1104,113 @@ export function CreditDetailView({
 												)}
 											</checkForm.Field>
 
-											<checkForm.Field name="issuer">
-												{(field) => (
-													<div className="space-y-2">
-														<Label>Emisor</Label>
-														<Input
-															value={field.state.value}
-															onChange={(e) => field.handleChange(e.target.value)}
-															placeholder="Nombre del emisor"
-														/>
-													</div>
-												)}
-											</checkForm.Field>
+											<div className="grid grid-cols-2 gap-4">
+												<checkForm.Field name="issuer">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>Emisor</Label>
+															<Input
+																value={field.state.value}
+																onChange={(e) => field.handleChange(e.target.value)}
+																placeholder="Nombre del emisor"
+															/>
+														</div>
+													)}
+												</checkForm.Field>
 
-											<checkForm.Field name="bank">
-												{(field) => (
-													<div className="space-y-2">
-														<Label>Banco</Label>
-														<Input
-															value={field.state.value}
-															onChange={(e) => field.handleChange(e.target.value)}
-															placeholder="Nombre del banco"
-														/>
-													</div>
-												)}
-											</checkForm.Field>
+												<checkForm.Field name="issuerBank">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>Banco Emisor</Label>
+															<Input
+																value={field.state.value}
+																onChange={(e) => field.handleChange(e.target.value)}
+																placeholder="Banco del emisor"
+															/>
+														</div>
+													)}
+												</checkForm.Field>
+											</div>
 
-											<checkForm.Field name="beneficiary">
+											<div className="grid grid-cols-2 gap-4">
+												<checkForm.Field name="beneficiary">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>Beneficiario</Label>
+															<Input
+																value={field.state.value}
+																onChange={(e) => field.handleChange(e.target.value)}
+																placeholder="Nombre del beneficiario"
+															/>
+														</div>
+													)}
+												</checkForm.Field>
+
+												<checkForm.Field name="accountNumber">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>No. Cuenta</Label>
+															<Input
+																value={field.state.value}
+																onChange={(e) => field.handleChange(e.target.value)}
+																placeholder="Número de cuenta"
+															/>
+														</div>
+													)}
+												</checkForm.Field>
+											</div>
+
+											<div className="grid grid-cols-2 gap-4">
+												<checkForm.Field name="transferType">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>Tipo</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) => field.handleChange(value)}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar tipo" />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="TRANSFERENCIA">TRANSFERENCIA</SelectItem>
+																	<SelectItem value="CHEQUE">CHEQUE</SelectItem>
+																	<SelectItem value="EFECTIVO">EFECTIVO</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</checkForm.Field>
+
+												<checkForm.Field name="accountType">
+													{(field) => (
+														<div className="space-y-2">
+															<Label>Tipo de Cuenta</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) => field.handleChange(value)}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar tipo" />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="MONETARIA">MONETARIA</SelectItem>
+																	<SelectItem value="AHORRO">AHORRO</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</checkForm.Field>
+											</div>
+
+											<checkForm.Field name="beneficiaryBank">
 												{(field) => (
 													<div className="space-y-2">
-														<Label>Beneficiario</Label>
+														<Label>Banco Beneficiario</Label>
 														<Input
 															value={field.state.value}
 															onChange={(e) => field.handleChange(e.target.value)}
-															placeholder="Nombre del beneficiario"
+															placeholder="Banco del beneficiario"
 														/>
 													</div>
 												)}
@@ -1146,11 +1234,18 @@ export function CreditDetailView({
 													{(field) => (
 														<div className="space-y-2">
 															<Label>Moneda</Label>
-															<Input
+															<Select
 																value={field.state.value}
-																onChange={(e) => field.handleChange(e.target.value)}
-																placeholder="GTQ"
-															/>
+																onValueChange={(value) => field.handleChange(value)}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Moneda" />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="GTQ">GTQ</SelectItem>
+																	<SelectItem value="USD">USD</SelectItem>
+																</SelectContent>
+															</Select>
 														</div>
 													)}
 												</checkForm.Field>
@@ -1202,47 +1297,57 @@ export function CreditDetailView({
 								</div>
 							) : (
 								<div className="space-y-4">
-									<Table>
-										<TableHeader>
-											<TableRow>
-												<TableHead>Fecha</TableHead>
-												<TableHead>Emisor</TableHead>
-												<TableHead>Banco</TableHead>
-												<TableHead>Beneficiario</TableHead>
-												<TableHead>Concepto</TableHead>
-												<TableHead className="text-right">Monto</TableHead>
-												<TableHead className="w-10" />
-											</TableRow>
-										</TableHeader>
-										<TableBody>
-											{checks.map((check) => (
-												<TableRow key={check.id}>
-													<TableCell>{formatDate(check.checkDate)}</TableCell>
-													<TableCell>{check.issuer}</TableCell>
-													<TableCell>{check.bank}</TableCell>
-													<TableCell>{check.beneficiary}</TableCell>
-													<TableCell>{check.concept}</TableCell>
-													<TableCell className="text-right font-medium">
-														{check.currency} {Number.parseFloat(check.amount).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
-													</TableCell>
-													<TableCell>
-														<Button
-															variant="ghost"
-															size="icon"
-															className="h-8 w-8 text-destructive"
-															onClick={() => {
-																if (confirm("¿Estás seguro de eliminar este cheque?")) {
-																	deleteCheckMutation.mutate(check.id);
-																}
-															}}
-														>
-															<Trash2 className="h-4 w-4" />
-														</Button>
-													</TableCell>
+									<div className="overflow-x-auto">
+										<Table>
+											<TableHeader>
+												<TableRow>
+													<TableHead>Fecha</TableHead>
+													<TableHead>Emisor</TableHead>
+													<TableHead>Banco</TableHead>
+													<TableHead>Beneficiario</TableHead>
+													<TableHead>No. Cuenta</TableHead>
+													<TableHead>Tipo</TableHead>
+													<TableHead>Tipo Cuenta</TableHead>
+													<TableHead>Banco Benef.</TableHead>
+													<TableHead>Concepto</TableHead>
+													<TableHead className="text-right">Monto</TableHead>
+													<TableHead className="w-10" />
 												</TableRow>
-											))}
-										</TableBody>
-									</Table>
+											</TableHeader>
+											<TableBody>
+												{checks.map((check) => (
+													<TableRow key={check.id}>
+														<TableCell className="whitespace-nowrap">{formatDate(check.checkDate)}</TableCell>
+														<TableCell>{check.issuer}</TableCell>
+														<TableCell>{check.issuerBank}</TableCell>
+														<TableCell>{check.beneficiary}</TableCell>
+														<TableCell>{check.accountNumber || "-"}</TableCell>
+														<TableCell>{check.transferType}</TableCell>
+														<TableCell>{check.accountType || "-"}</TableCell>
+														<TableCell>{check.beneficiaryBank || "-"}</TableCell>
+														<TableCell>{check.concept}</TableCell>
+														<TableCell className="text-right font-medium whitespace-nowrap">
+															{check.currency} {Number.parseFloat(check.amount).toLocaleString("es-GT", { minimumFractionDigits: 2 })}
+														</TableCell>
+														<TableCell>
+															<Button
+																variant="ghost"
+																size="icon"
+																className="h-8 w-8 text-destructive"
+																onClick={() => {
+																	if (confirm("¿Estás seguro de eliminar este cheque?")) {
+																		deleteCheckMutation.mutate(check.id);
+																	}
+																}}
+															>
+																<Trash2 className="h-4 w-4" />
+															</Button>
+														</TableCell>
+													</TableRow>
+												))}
+											</TableBody>
+										</Table>
+									</div>
 
 									<Separator />
 

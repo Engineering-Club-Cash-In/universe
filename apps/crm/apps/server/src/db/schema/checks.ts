@@ -21,11 +21,15 @@ export const creditChecks = pgTable("credit_checks", {
 		onDelete: "set null",
 	}),
 
-	// Datos del cheque
+	// Datos del cheque/transferencia
 	checkDate: timestamp("check_date").notNull(),
 	issuer: text("issuer").notNull(), // Emisor
-	bank: text("bank").notNull(), // Banco
+	issuerBank: text("issuer_bank").notNull(), // Banco del emisor
 	beneficiary: text("beneficiary").notNull(), // Beneficiario
+	accountNumber: text("account_number"), // No. Cuenta del beneficiario
+	transferType: text("transfer_type").notNull().default("TRANSFERENCIA"), // TRANSFERENCIA, CHEQUE, etc.
+	accountType: text("account_type").default("MONETARIA"), // MONETARIA, AHORRO, etc.
+	beneficiaryBank: text("beneficiary_bank"), // Banco del beneficiario
 	concept: text("concept").notNull(), // Concepto
 	currency: text("currency").notNull().default("GTQ"), // Moneda (Quetzales por defecto)
 	amount: decimal("amount", { precision: 12, scale: 2 }).notNull(), // Monto

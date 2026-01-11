@@ -307,32 +307,32 @@ export function CreditDetailView({
 	const nombramiento = Number.parseFloat(quotation?.appointmentCost || "0");
 	const verificacionDireccion = Number.parseFloat(quotation?.addressVerificationCost || "0");
 
-	// Total de descuentos (base)
-	let totalDescuentos =
-		interesAnticipado +
+	// Subtotal: Comisión y Gastos de Registro
+	const subtotalComisionGastos =
 		royalty +
 		freelance +
+		inspeccion +
 		gps +
 		seguro +
 		membresia +
 		gastosAdmin +
+		interesAnticipado;
+
+	// Subtotal: Otros Descuentos
+	const subtotalOtrosDescuentos =
+		nombramiento +
 		multas +
 		copiaLlave +
 		diferenciaCopiaLlave +
+		verificacionDireccion +
 		impuestoCirculacion +
 		traspaso +
 		garantiaMobiliaria +
 		contratoLeasing +
 		autenticaContrato;
 
-	// Agregar gastos según tipo de crédito
-	if (isAutocompra) {
-		// Autocompras: NO incluye inspección (ya existe el vehículo), incluye nombramiento y verificación
-		totalDescuentos += nombramiento + verificacionDireccion;
-	} else {
-		// Sobre Vehículo: incluye inspección
-		totalDescuentos += inspeccion;
-	}
+	// Total de descuentos
+	const totalDescuentos = subtotalComisionGastos + subtotalOtrosDescuentos;
 
 	// Líquido a recibir
 	const liquidoARecibir = montoSolicitado - totalDescuentos;
@@ -611,132 +611,233 @@ export function CreditDetailView({
 								</div>
 							</div>
 
-							{/* Sección: Descuentos/Gastos */}
+							{/* Sección: Comisión y Gastos de Registro */}
 							<div className="space-y-3">
 								<h3 className="flex items-center gap-2 font-semibold text-sm">
 									<Percent className="h-4 w-4" />
-									Descuentos y Gastos
+									Comisión y Gastos de Registro
 								</h3>
 								<div className="rounded-lg border bg-muted/30 p-4">
 									<Table>
 										<TableHeader>
 											<TableRow>
 												<TableHead>Concepto</TableHead>
+												<TableHead className="text-center w-24">Descontado</TableHead>
+												<TableHead className="text-right w-20">%</TableHead>
 												<TableHead className="text-right">Monto</TableHead>
 											</TableRow>
 										</TableHeader>
 										<TableBody>
 											<TableRow>
-												<TableCell>Mes de Interés Anticipado</TableCell>
-												<TableCell className="text-right">{formatCurrency(interesAnticipado)}</TableCell>
+												<TableCell>Royalty</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={royalty > 0 ? "default" : "outline"} className="text-xs">
+														{royalty > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{formatPercent(porcentajeRoyalty)}</TableCell>
+												<TableCell className="text-right">{royalty > 0 ? formatCurrency(royalty) : "Q -"}</TableCell>
 											</TableRow>
 											<TableRow>
-												<TableCell>Royalty ({formatPercent(porcentajeRoyalty)})</TableCell>
-												<TableCell className="text-right">{formatCurrency(royalty)}</TableCell>
+												<TableCell>Free Lance</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={freelance > 0 ? "default" : "outline"} className="text-xs">
+														{freelance > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">
+													{Number.parseFloat(quotation?.freelancePercentage || "0") > 0
+														? formatPercent(quotation?.freelancePercentage)
+														: "0.00%"}
+												</TableCell>
+												<TableCell className="text-right">{freelance > 0 ? formatCurrency(freelance) : "Q -"}</TableCell>
 											</TableRow>
-											{freelance > 0 && (
-												<TableRow>
-													<TableCell>Free Lance</TableCell>
-													<TableCell className="text-right">{formatCurrency(freelance)}</TableCell>
-												</TableRow>
-											)}
-											{!isAutocompra && inspeccion > 0 && (
-												<TableRow>
-													<TableCell>Inspección</TableCell>
-													<TableCell className="text-right">{formatCurrency(inspeccion)}</TableCell>
-												</TableRow>
-											)}
-											{isAutocompra && nombramiento > 0 && (
-												<TableRow>
-													<TableCell>Nombramiento</TableCell>
-													<TableCell className="text-right">{formatCurrency(nombramiento)}</TableCell>
-												</TableRow>
-											)}
-											{isAutocompra && verificacionDireccion > 0 && (
-												<TableRow>
-													<TableCell>Verificación de Dirección</TableCell>
-													<TableCell className="text-right">{formatCurrency(verificacionDireccion)}</TableCell>
-												</TableRow>
-											)}
-											{gps > 0 && (
-												<TableRow>
-													<TableCell>GPS</TableCell>
-													<TableCell className="text-right">{formatCurrency(gps)}</TableCell>
-												</TableRow>
-											)}
-											{seguro > 0 && (
-												<TableRow>
-													<TableCell>Seguro INREXSA</TableCell>
-													<TableCell className="text-right">{formatCurrency(seguro)}</TableCell>
-												</TableRow>
-											)}
-											{membresia > 0 && (
-												<TableRow>
-													<TableCell>Membresía</TableCell>
-													<TableCell className="text-right">{formatCurrency(membresia)}</TableCell>
-												</TableRow>
-											)}
-											{gastosAdmin > 0 && (
-												<TableRow>
-													<TableCell>Gastos Administrativos</TableCell>
-													<TableCell className="text-right">{formatCurrency(gastosAdmin)}</TableCell>
-												</TableRow>
-											)}
-											{multas > 0 && (
-												<TableRow>
-													<TableCell>Multas</TableCell>
-													<TableCell className="text-right">{formatCurrency(multas)}</TableCell>
-												</TableRow>
-											)}
-											{copiaLlave > 0 && (
-												<TableRow>
-													<TableCell>Copia de Llave</TableCell>
-													<TableCell className="text-right">{formatCurrency(copiaLlave)}</TableCell>
-												</TableRow>
-											)}
-											{diferenciaCopiaLlave > 0 && (
-												<TableRow>
-													<TableCell>Diferencia Copia de Llave</TableCell>
-													<TableCell className="text-right">{formatCurrency(diferenciaCopiaLlave)}</TableCell>
-												</TableRow>
-											)}
-											{impuestoCirculacion > 0 && (
-												<TableRow>
-													<TableCell>Impuesto de Circulación</TableCell>
-													<TableCell className="text-right">{formatCurrency(impuestoCirculacion)}</TableCell>
-												</TableRow>
-											)}
-											{traspaso > 0 && (
-												<TableRow>
-													<TableCell>Traspaso de Vehículo</TableCell>
-													<TableCell className="text-right">{formatCurrency(traspaso)}</TableCell>
-												</TableRow>
-											)}
-											{garantiaMobiliaria > 0 && (
-												<TableRow>
-													<TableCell>Garantía Mobiliaria</TableCell>
-													<TableCell className="text-right">{formatCurrency(garantiaMobiliaria)}</TableCell>
-												</TableRow>
-											)}
+											<TableRow>
+												<TableCell>Inspección</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={inspeccion > 0 ? "default" : "outline"} className="text-xs">
+														{inspeccion > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">{inspeccion > 0 ? formatCurrency(inspeccion) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>GPS</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={gps > 0 ? "default" : "outline"} className="text-xs">
+														{gps > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">{gps > 0 ? formatCurrency(gps) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Seguro INREXSA</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={seguro > 0 ? "default" : "outline"} className="text-xs">
+														{seguro > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">{seguro > 0 ? formatCurrency(seguro) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Membresía</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={membresia > 0 ? "default" : "outline"} className="text-xs">
+														{membresia > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">{membresia > 0 ? formatCurrency(membresia) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Gastos Administrativos</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={gastosAdmin > 0 ? "default" : "outline"} className="text-xs">
+														{gastosAdmin > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">{gastosAdmin > 0 ? formatCurrency(gastosAdmin) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Intereses</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={interesAnticipado > 0 ? "default" : "outline"} className="text-xs">
+														{interesAnticipado > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">-</TableCell>
+												<TableCell className="text-right">{interesAnticipado > 0 ? formatCurrency(interesAnticipado) : "Q -"}</TableCell>
+											</TableRow>
+										</TableBody>
+									</Table>
+									<div className="mt-3 flex justify-end">
+										<span className="font-semibold text-right">{formatCurrency(subtotalComisionGastos)}</span>
+									</div>
+								</div>
+							</div>
+
+							{/* Sección: Otros Descuentos */}
+							<div className="space-y-3">
+								<h3 className="font-semibold text-sm">
+									Otros Descuentos
+								</h3>
+								<div className="rounded-lg border bg-muted/30 p-4">
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Concepto</TableHead>
+												<TableHead className="text-center w-24">Descontado</TableHead>
+												<TableHead className="text-right">Monto</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											<TableRow>
+												<TableCell>Nombramiento</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={nombramiento > 0 ? "default" : "outline"} className="text-xs">
+														{nombramiento > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{nombramiento > 0 ? formatCurrency(nombramiento) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Multas</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={multas > 0 ? "default" : "outline"} className="text-xs">
+														{multas > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{multas > 0 ? formatCurrency(multas) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Copia de llave</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={copiaLlave > 0 ? "default" : "outline"} className="text-xs">
+														{copiaLlave > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{copiaLlave > 0 ? formatCurrency(copiaLlave) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Diferencia de copia de llave</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={diferenciaCopiaLlave > 0 ? "default" : "outline"} className="text-xs">
+														{diferenciaCopiaLlave > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{diferenciaCopiaLlave > 0 ? formatCurrency(diferenciaCopiaLlave) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Verificación de dirección</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={verificacionDireccion > 0 ? "default" : "outline"} className="text-xs">
+														{verificacionDireccion > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{verificacionDireccion > 0 ? formatCurrency(verificacionDireccion) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Impuesto circulación</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={impuestoCirculacion > 0 ? "default" : "outline"} className="text-xs">
+														{impuestoCirculacion > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{impuestoCirculacion > 0 ? formatCurrency(impuestoCirculacion) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Traspaso de vehículo</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={traspaso > 0 ? "default" : "outline"} className="text-xs">
+														{traspaso > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{traspaso > 0 ? formatCurrency(traspaso) : "Q -"}</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Garantía mobiliaria</TableCell>
+												<TableCell className="text-center">
+													<Badge variant={garantiaMobiliaria > 0 ? "default" : "outline"} className="text-xs">
+														{garantiaMobiliaria > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">{garantiaMobiliaria > 0 ? formatCurrency(garantiaMobiliaria) : "Q -"}</TableCell>
+											</TableRow>
 											{contratoLeasing > 0 && (
 												<TableRow>
 													<TableCell>Contrato Leasing</TableCell>
+													<TableCell className="text-center">
+														<Badge variant="default" className="text-xs">SI</Badge>
+													</TableCell>
 													<TableCell className="text-right">{formatCurrency(contratoLeasing)}</TableCell>
 												</TableRow>
 											)}
 											{autenticaContrato > 0 && (
 												<TableRow>
 													<TableCell>Auténtica Contrato Cobranza</TableCell>
+													<TableCell className="text-center">
+														<Badge variant="default" className="text-xs">SI</Badge>
+													</TableCell>
 													<TableCell className="text-right">{formatCurrency(autenticaContrato)}</TableCell>
 												</TableRow>
 											)}
 										</TableBody>
 									</Table>
-									<Separator className="my-3" />
-									<div className="flex justify-between font-bold">
-										<span>Total Descuentos</span>
-										<span className="text-red-600">{formatCurrency(totalDescuentos)}</span>
+									<div className="mt-3 flex justify-end">
+										<span className="font-semibold text-right">{formatCurrency(subtotalOtrosDescuentos)}</span>
 									</div>
+								</div>
+							</div>
+
+							{/* Total Descuentos */}
+							<div className="rounded-lg border bg-muted/50 p-4">
+								<div className="flex justify-between font-bold text-lg">
+									<span>TOTAL DESCUENTOS</span>
+									<span className="text-red-600">{formatCurrency(totalDescuentos)}</span>
 								</div>
 							</div>
 

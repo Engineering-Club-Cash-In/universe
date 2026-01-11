@@ -3,6 +3,7 @@ import { z } from "zod";
 import { db } from "../database/index";
 import {
   bancos,
+  boletasPagoInversionista,
   creditos,
   creditos_inversionistas,
   cuotas_credito,
@@ -10,6 +11,7 @@ import {
   liquidaciones,
   pagos_credito,
   pagos_credito_inversionistas,
+  platform_users,
   usuarios,
 } from "../database/db/schema";
 import { eq, and, sql, inArray, ilike, like, desc, count } from "drizzle-orm";
@@ -25,13 +27,15 @@ export const insertInvestor = async ({ body, set }: any) => {
 
     // 🔥 Validación flexible
     const errores: string[] = [];
-    
+
     for (let index = 0; index < inversionistasToUpsert.length; index++) {
       const inv = inversionistasToUpsert[index];
-      
+
       // 🔥 Debe venir DPI o nombre (al menos uno)
       if (!inv.dpi && !inv.nombre?.trim()) {
-        errores.push(`Inversionista #${index + 1}: debe proporcionar DPI o nombre`);
+        errores.push(
+          `Inversionista #${index + 1}: debe proporcionar DPI o nombre`
+        );
       }
       // 🔥 Validar DPI si viene
       if (inv.dpi && (typeof inv.dpi !== "number" || inv.dpi < 0)) {
@@ -42,51 +46,63 @@ export const insertInvestor = async ({ body, set }: any) => {
         errores.push(`Inversionista #${index + 1}: email inválido`);
       }
       // 🔥 Validar emite_factura si viene
-      if (inv.emite_factura !== undefined && typeof inv.emite_factura !== "boolean") {
-        errores.push(`Inversionista #${index + 1}: emite_factura debe ser boolean`);
+      if (
+        inv.emite_factura !== undefined &&
+        typeof inv.emite_factura !== "boolean"
+      ) {
+        errores.push(
+          `Inversionista #${index + 1}: emite_factura debe ser boolean`
+        );
       }
-      
+
       // 🔥 Si viene banco (nombre o id), resolverlo
       if (inv.banco) {
         let banco_id = null;
-        
+
         if (typeof inv.banco === "number") {
           const bancoExiste = await db
             .select()
             .from(bancos)
             .where(eq(bancos.banco_id, inv.banco))
             .limit(1);
-          
+
           if (bancoExiste.length === 0) {
-            errores.push(`Inversionista #${index + 1}: banco con ID ${inv.banco} no existe`);
+            errores.push(
+              `Inversionista #${index + 1}: banco con ID ${inv.banco} no existe`
+            );
           } else {
             banco_id = inv.banco;
           }
-        } 
-        else if (typeof inv.banco === "string") {
+        } else if (typeof inv.banco === "string") {
           const nombreBanco = inv.banco.trim();
-          
+
           const bancosCoincidentes = await db
             .select()
             .from(bancos)
             .where(ilike(bancos.nombre, `%${nombreBanco}%`))
             .limit(5);
-          
+
           if (bancosCoincidentes.length === 0) {
-            errores.push(`Inversionista #${index + 1}: no se encontró banco que coincida con "${nombreBanco}"`);
+            errores.push(
+              `Inversionista #${index + 1}: no se encontró banco que coincida con "${nombreBanco}"`
+            );
           } else if (bancosCoincidentes.length === 1) {
             banco_id = bancosCoincidentes[0].banco_id;
           } else {
             const matchExacto = bancosCoincidentes.find(
-              b => b.nombre.toLowerCase() === nombreBanco.toLowerCase()
+              (b) => b.nombre.toLowerCase() === nombreBanco.toLowerCase()
             );
-            
-            banco_id = matchExacto ? matchExacto.banco_id : bancosCoincidentes[0].banco_id;
+
+            banco_id = matchExacto
+              ? matchExacto.banco_id
+              : bancosCoincidentes[0].banco_id;
           }
         } else {
-          errores.push(`Inversionista #${index + 1}: banco debe ser ID (number) o nombre (string)`);
+          errores.push(
+            `Inversionista #${index + 1}: banco debe ser ID (number) o nombre (string)`
+          );
         }
-        
+
         inv._banco_id = banco_id;
       }
     }
@@ -102,7 +118,7 @@ export const insertInvestor = async ({ body, set }: any) => {
     for (const inv of inversionistasToUpsert) {
       // 🔥 Verificar si ya existe
       let existente = null;
-      
+
       if (inv.dpi) {
         // Buscar por DPI
         const result = await db
@@ -124,27 +140,34 @@ export const insertInvestor = async ({ body, set }: any) => {
       if (existente) {
         // 🔥 YA EXISTE → UPDATE solo los campos que vienen
         const updateData: any = {};
-        
+
         if (inv.nombre?.trim()) updateData.nombre = inv.nombre.trim();
-        if (inv.email?.trim()) updateData.email = inv.email.trim().toLowerCase();
-        if (inv.emite_factura !== undefined) updateData.emite_factura = inv.emite_factura;
-        if (inv.tipo_reinversion?.trim()) updateData.tipo_reinversion = inv.tipo_reinversion.trim();
+        if (inv.email?.trim())
+          updateData.email = inv.email.trim().toLowerCase();
+        if (inv.emite_factura !== undefined)
+          updateData.emite_factura = inv.emite_factura;
+        if (inv.tipo_reinversion?.trim())
+          updateData.tipo_reinversion = inv.tipo_reinversion.trim();
         if (inv._banco_id) updateData.banco_id = inv._banco_id;
-        if (inv.tipo_cuenta?.trim()) updateData.tipo_cuenta = inv.tipo_cuenta.trim();
-        if (inv.numero_cuenta?.trim()) updateData.numero_cuenta = inv.numero_cuenta.trim();
+        if (inv.tipo_cuenta?.trim())
+          updateData.tipo_cuenta = inv.tipo_cuenta.trim();
+        if (inv.numero_cuenta?.trim())
+          updateData.numero_cuenta = inv.numero_cuenta.trim();
         if (inv.dpi) updateData.dpi = inv.dpi;
 
         const [updated] = await db
           .update(inversionistas)
           .set(updateData)
-          .where(eq(inversionistas.inversionista_id, existente.inversionista_id))
+          .where(
+            eq(inversionistas.inversionista_id, existente.inversionista_id)
+          )
           .returning();
-        
+
         resultados.push(updated);
       } else {
         // 🔥 NO EXISTE → INSERT (requiere nombre obligatorio)
         const nombre = inv.nombre?.trim();
-        
+
         if (!nombre) {
           // Si no hay nombre, saltamos este registro
           console.warn(`⚠️ Inversionista sin nombre para INSERT:`, inv);
@@ -166,7 +189,7 @@ export const insertInvestor = async ({ body, set }: any) => {
           .insert(inversionistas)
           .values(insertData)
           .returning();
-        
+
         resultados.push(inserted);
       }
     }
@@ -226,7 +249,7 @@ export const getInvestors = async ({ query, set }: any) => {
         set.status = 400;
         return { message: "DPI debe ser un número válido" };
       }
-      
+
       const result = await db
         .select()
         .from(inversionistas)
@@ -980,23 +1003,6 @@ export async function resumeInvestor(
 export const liquidateByInvestorSchema = z.object({
   inversionista_id: z.number().optional(), // 🆕 Ahora es opcional
 });
-
-/**
- * Liquida todos los pagos de un inversionista, o TODOS los pagos si no se especifica ID
- * @param inversionista_id ID del inversionista cuyos pagos serán liquidados (opcional)
- * @returns Un objeto con el mensaje y el número de registros actualizados
- * @throws Error si no se actualiza ningún registro
- */
-/**
- * Liquida todos los pagos NO_LIQUIDADO y genera registros de liquidación
- * @param inversionista_id - ID del inversionista (opcional). Si no se envía, liquida TODOS
- * @returns Información de la liquidación creada
- */
-/**
- * Liquida y genera reporte en una sola operación
- * @param inversionista_id - ID del inversionista (opcional). Si no se envía, liquida TODOS
- * @returns Información de la liquidación con URL del reporte
- */
 export async function liquidateByInvestorId(inversionista_id?: number) {
   if (inversionista_id) {
     console.log(`Liquidando inversionista_id: ${inversionista_id}`);
@@ -1038,11 +1044,52 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
   // 📊 PASO 2: Procesar cada inversionista
   let totalPagosLiquidados = 0;
   let totalLiquidaciones = 0;
-  const reportesGenerados: Array<{ inversionista_id: number; url: string }> = [];
+  let inversionistasSaltados = 0;
+  const reportesGenerados: Array<{ 
+    inversionista_id: number; 
+    url: string;
+    boleta_id: number;
+    boleta_url: string;
+  }> = [];
+  const errores: Array<{
+    inversionista_id: number;
+    razon: string;
+  }> = [];
 
   for (const inv_id of inversionistasALiquidar) {
     try {
       console.log(`\n💰 Procesando inversionista ${inv_id}...`);
+
+      // 🔍 PASO 2.1: Buscar boleta PENDIENTE del inversionista
+      console.log(`  🔍 Buscando boleta PENDIENTE...`);
+      const [boletaPendiente] = await db
+        .select()
+        .from(boletasPagoInversionista)
+        .where(
+          and(
+            eq(boletasPagoInversionista.inversionista_id, inv_id),
+            eq(boletasPagoInversionista.estado, "PENDIENTE")
+          )
+        )
+        .orderBy(desc(boletasPagoInversionista.fecha_subida)) // La más reciente
+        .limit(1);
+
+      // 🚨 SI NO HAY BOLETA PENDIENTE, SALTAR ESTE INVERSIONISTA
+      if (!boletaPendiente) {
+        const razon = "No tiene boleta PENDIENTE";
+        console.warn(`  ⚠️ ${razon} - Saltando inversionista ${inv_id}`);
+        errores.push({
+          inversionista_id: inv_id,
+          razon: razon,
+        });
+        inversionistasSaltados++;
+        continue; // 🔥 Seguir con el siguiente inversionista
+      }
+
+      console.log(`  ✅ Boleta encontrada: ID ${boletaPendiente.boleta_id}`);
+      console.log(`     URL: ${boletaPendiente.boleta_url}`);
+      console.log(`     Monto: Q${boletaPendiente.monto_boleta ?? "N/A"}`);
+      console.log(`     Fecha subida: ${boletaPendiente.fecha_subida}`);
 
       // 🆕 Obtener datos del inversionista
       const resumen = await resumeInvestor(
@@ -1058,6 +1105,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       if (!resumen.inversionistas || resumen.inversionistas.length === 0) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos pendientes`);
+        errores.push({
+          inversionista_id: inv_id,
+          razon: "Sin pagos pendientes",
+        });
+        inversionistasSaltados++;
         continue;
       }
 
@@ -1068,6 +1120,11 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         !inversionista.creditos.some((c) => c.pagos.length > 0)
       ) {
         console.log(`  ⚠️ Inversionista ${inv_id} sin pagos para liquidar`);
+        errores.push({
+          inversionista_id: inv_id,
+          razon: "Sin pagos para liquidar",
+        });
+        inversionistasSaltados++;
         continue;
       }
 
@@ -1078,11 +1135,12 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       console.log(`  📊 Total pagos a liquidar: ${cantidadPagos}`);
 
-      // 🆕 PASO 3: Crear registro de liquidación (sin reporte aún)
+      // 🆕 PASO 3: Crear registro de liquidación CON la boleta
       const [liquidacion] = await db
         .insert(liquidaciones)
         .values({
           inversionista_id: inv_id,
+          boleta_id: boletaPendiente.boleta_id, // 🔥 SIEMPRE con boleta
           total_pagos_liquidados: cantidadPagos,
           total_capital: inversionista.subtotal.total_abono_capital.toString(),
           total_interes: inversionista.subtotal.total_abono_interes.toString(),
@@ -1093,7 +1151,20 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
         })
         .returning();
 
-      console.log(`  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`);
+      console.log(
+        `  ✅ Liquidación creada: liquidacion_id=${liquidacion.liquidacion_id}`
+      );
+
+      // 🔥 PASO 3.1: Marcar boleta como PROCESADO
+      await db
+        .update(boletasPagoInversionista)
+        .set({
+          estado: "PROCESADO",
+          fecha_procesado: new Date(),
+        })
+        .where(eq(boletasPagoInversionista.boleta_id, boletaPendiente.boleta_id));
+
+      console.log(`  ✅ Boleta ${boletaPendiente.boleta_id} marcada como PROCESADO`);
 
       // 🆕 PASO 4: Obtener IDs de pagos y actualizar
       const pagosIds: number[] = [];
@@ -1106,7 +1177,10 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
               and(
                 eq(pagos_credito_inversionistas.inversionista_id, inv_id),
                 eq(pagos_credito_inversionistas.credito_id, credito.credito_id),
-                eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO")
+                eq(
+                  pagos_credito_inversionistas.estado_liquidacion,
+                  "NO_LIQUIDADO"
+                )
               )
             );
           pagosIds.push(...pagosBD.map((p) => p.id));
@@ -1125,17 +1199,17 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
 
       // 🆕 PASO 5: Generar PDF usando la data que YA TENEMOS
       console.log(`  📄 Generando PDF...`);
-      
+
       const logoUrl = process.env.LOGO_URL || "";
       const html = generarHTMLReporte(inversionista as any, logoUrl);
 
       const browser = await puppeteer.launch({
         headless: true,
         args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-gpu',
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
         ],
       });
 
@@ -1175,42 +1249,68 @@ export async function liquidateByInvestorId(inversionista_id?: number) {
       const url = `${process.env.URL_PUBLIC_R2_REPORTS}/${filename}`;
 
       console.log(`  ✅ PDF generado y guardado: ${filename}`);
-// 🆕 PASO 7: Actualizar liquidación con URL del reporte
-await db
-  .update(liquidaciones)
-  .set({ reporte_liquidacion: url })
-  .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
+      
+      // 🆕 PASO 7: Actualizar liquidación con URL del reporte
+      await db
+        .update(liquidaciones)
+        .set({ reporte_liquidacion_url: url })
+        .where(eq(liquidaciones.liquidacion_id, liquidacion.liquidacion_id));
 
-console.log(`  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`);
-      reportesGenerados.push({ inversionista_id: inv_id, url });
+      console.log(
+        `  ✅ Reporte actualizado en liquidación ${liquidacion.liquidacion_id}`
+      );
+      
+      reportesGenerados.push({ 
+        inversionista_id: inv_id, 
+        url,
+        boleta_id: boletaPendiente.boleta_id,
+        boleta_url: boletaPendiente.boleta_url,
+      });
+      
       totalPagosLiquidados += updateResult.rowCount ?? 0;
       totalLiquidaciones++;
-
     } catch (error) {
       console.error(`  ❌ Error procesando inversionista ${inv_id}:`, error);
-      throw error;
+      errores.push({
+        inversionista_id: inv_id,
+        razon: error instanceof Error ? error.message : "Error desconocido",
+      });
+      inversionistasSaltados++;
+      // 🔥 NO hacemos throw, solo seguimos con el siguiente
     }
   }
 
   // 📝 PASO 8: Mensaje final
   const mensaje = inversionista_id
-    ? `Inversionista ${inversionista_id} liquidado correctamente`
-    : `${totalLiquidaciones} inversionistas liquidados correctamente`;
+    ? totalLiquidaciones > 0 
+      ? `Inversionista ${inversionista_id} liquidado correctamente`
+      : `No se pudo liquidar al inversionista ${inversionista_id}`
+    : `${totalLiquidaciones} inversionistas liquidados correctamente (${inversionistasSaltados} saltados)`;
 
   console.log(`\n✅ RESUMEN FINAL:`);
   console.log(`   - Liquidaciones creadas: ${totalLiquidaciones}`);
   console.log(`   - Pagos liquidados: ${totalPagosLiquidados}`);
   console.log(`   - PDFs generados: ${reportesGenerados.length}`);
+  console.log(`   - Boletas procesadas: ${reportesGenerados.length}`);
+  console.log(`   - Inversionistas saltados: ${inversionistasSaltados}`);
+  
+  if (errores.length > 0) {
+    console.log(`\n⚠️ INVERSIONISTAS NO PROCESADOS:`);
+    errores.forEach(e => {
+      console.log(`   - ID ${e.inversionista_id}: ${e.razon}`);
+    });
+  }
 
   return {
     message: mensaje,
     updatedCount: totalPagosLiquidados,
     inversionista_id: inversionista_id ?? "TODOS",
     liquidaciones_creadas: totalLiquidaciones,
-    reportes: reportesGenerados, // 🆕 URLs de los PDFs generados
+    inversionistas_saltados: inversionistasSaltados,
+    reportes: reportesGenerados,
+    errores: errores.length > 0 ? errores : undefined,
   };
 }
- 
 import dayjs from "dayjs";
 import "dayjs/locale/es";
 import { InversionistaReporte } from "../utils/interface";
@@ -1692,7 +1792,9 @@ export async function resumenGlobalInversionistas(
   mes?: number,
   anio?: number,
   excel: boolean = false
-): Promise<InversionistaResumen[] | { success: boolean; url: string; filename: string }> {
+): Promise<
+  InversionistaResumen[] | { success: boolean; url: string; filename: string }
+> {
   // 🔎 Condiciones dinámicas
   const condiciones: any[] = [
     eq(pagos_credito_inversionistas.estado_liquidacion, "NO_LIQUIDADO"),
@@ -1730,10 +1832,10 @@ export async function resumenGlobalInversionistas(
 
       total_abono_capital: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_capital}), 0)`,
       total_abono_interes: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_interes}), 0)`,
-      
+
       // 🆕 IVA: SIEMPRE se suma (mostrar la cantidad)
       total_abono_iva: sql<number>`COALESCE(SUM(${pagos_credito_inversionistas.abono_iva_12}), 0)`,
-      
+
       // 🆕 ISR: Solo se calcula si NO emite factura, de lo contrario = 0
       total_isr: sql<number>`COALESCE(SUM(
         CASE 
@@ -1756,7 +1858,7 @@ export async function resumenGlobalInversionistas(
     })
     .from(inversionistas)
     .leftJoin(
-      bancos, 
+      bancos,
       eq(inversionistas.banco_id, bancos.banco_id) // 🔥 JOIN con tabla bancos
     )
     .leftJoin(
@@ -1838,7 +1940,7 @@ export async function resumenGlobalInversionistas(
 
       // 🆕 Formato de moneda para columnas numéricas
       for (let i = 8; i <= 12; i++) {
-        row.getCell(i).numFmt = 'Q#,##0.00';
+        row.getCell(i).numFmt = "Q#,##0.00";
       }
     });
 
@@ -1954,13 +2056,14 @@ export async function getLiquidaciones({
       // Datos de liquidación
       liquidacion_id: liquidaciones.liquidacion_id,
       inversionista_id: liquidaciones.inversionista_id,
+      boleta_id: liquidaciones.boleta_id, // 🔥 NUEVO
       total_pagos_liquidados: liquidaciones.total_pagos_liquidados,
       total_capital: liquidaciones.total_capital,
       total_interes: liquidaciones.total_interes,
       total_iva: liquidaciones.total_iva,
       total_isr: liquidaciones.total_isr,
       total_cuota: liquidaciones.total_cuota,
-      reporte_liquidacion: liquidaciones.reporte_liquidacion,
+      reporte_liquidacion: liquidaciones.reporte_liquidacion_url,
       fecha_liquidacion: liquidaciones.fecha_liquidacion,
       // Datos del inversionista
       nombre_inversionista: inversionistas.nombre,
@@ -1993,10 +2096,57 @@ export async function getLiquidaciones({
     .limit(perPage)
     .offset((page - 1) * perPage);
 
-  // 💰 Para cada liquidación, traer sus pagos
+  // 💰 Para cada liquidación, traer sus pagos Y boleta
   const liquidacionesConPagos = await Promise.all(
     liquidacionesData.map(async (liq) => {
-      // Traer pagos de esta liquidación
+      // 📄 Traer boleta asociada a esta liquidación (si existe)
+      let boletaData = null;
+      
+      if (liq.boleta_id) {
+        console.log(`🔍 Buscando boleta ID: ${liq.boleta_id} para liquidación ${liq.liquidacion_id}`);
+        
+        const [boleta] = await db
+          .select({
+            boleta_id: boletasPagoInversionista.boleta_id,
+            inversionista_id: boletasPagoInversionista.inversionista_id,
+            boleta_url: boletasPagoInversionista.boleta_url,
+            estado: boletasPagoInversionista.estado,
+            monto_boleta: boletasPagoInversionista.monto_boleta,
+            notas: boletasPagoInversionista.notas,
+            fecha_subida: boletasPagoInversionista.fecha_subida,
+            fecha_procesado: boletasPagoInversionista.fecha_procesado,
+            subido_por_nombre: platform_users.email, // 🔥 Nombre de quien subió
+          })
+          .from(boletasPagoInversionista)
+          .leftJoin(
+            platform_users,
+            eq(boletasPagoInversionista.subido_por, platform_users.id)
+          )
+          .where(eq(boletasPagoInversionista.boleta_id, liq.boleta_id))
+          .limit(1);
+
+        if (boleta) {
+          boletaData = {
+            boleta_id: boleta.boleta_id,
+            inversionista_id: boleta.inversionista_id,
+            boleta_url: boleta.boleta_url,
+            estado: boleta.estado,
+            monto_boleta: boleta.monto_boleta ? Number(boleta.monto_boleta) : null,
+            notas: boleta.notas,
+            fecha_subida: boleta.fecha_subida,
+            fecha_procesado: boleta.fecha_procesado,
+            subido_por: boleta.subido_por_nombre,
+          };
+          
+          console.log(`✅ Boleta encontrada: ${boleta.boleta_url}`);
+        } else {
+          console.warn(`⚠️ Boleta ID ${liq.boleta_id} no encontrada en BD`);
+        }
+      } else {
+        console.log(`ℹ️ Liquidación ${liq.liquidacion_id} no tiene boleta asociada`);
+      }
+
+      // 💳 Traer pagos de esta liquidación
       const pagos = await db
         .select({
           pago_id: pagos_credito_inversionistas.id,
@@ -2021,14 +2171,11 @@ export async function getLiquidaciones({
         )
         .leftJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
         .where(
-          eq(
-            pagos_credito_inversionistas.liquidacion_id,
-            liq.liquidacion_id
-          )
+          eq(pagos_credito_inversionistas.liquidacion_id, liq.liquidacion_id)
         )
         .orderBy(pagos_credito_inversionistas.fecha_pago);
 
-      // Calcular ISR por pago
+      // 💰 Calcular ISR por pago
       const pagosConISR = pagos.map((pago) => {
         const abono_interes = new Big(pago.abono_interes ?? 0);
         const isr = liq.emite_factura ? new Big(0) : abono_interes.times(0.07);
@@ -2049,6 +2196,10 @@ export async function getLiquidaciones({
         nombre_inversionista: liq.nombre_inversionista ?? "TODOS",
         emite_factura: liq.emite_factura,
         dpi: liq.dpi,
+        
+        // 🔥 BOLETA ASOCIADA
+        boleta: boletaData,
+        
         totales: {
           total_pagos_liquidados: liq.total_pagos_liquidados,
           total_capital: Number(liq.total_capital),
@@ -2143,7 +2294,7 @@ export async function getInvestorPerformance(dpi: string) {
     );
 
     // Calcular rendimiento de este crédito
-    const rendimiento_credito = suma_cuotas_liquidadas.times(1.20);
+    const rendimiento_credito = suma_cuotas_liquidadas.times(1.2);
 
     // Acumular rendimiento total
     rendimiento_total = rendimiento_total.plus(rendimiento_credito);

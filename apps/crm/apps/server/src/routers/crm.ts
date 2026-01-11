@@ -308,11 +308,16 @@ export const crmRouter = {
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
+				middleName: z.string().optional(),
 				lastName: z.string().min(1, "Last name is required"),
+				secondLastName: z.string().optional(),
 				email: z.string().email("Valid email is required"),
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				departamento: z.string().optional(),
+				municipio: z.string().optional(),
+				zona: z.string().optional(),
 				clientType: z
 					.enum(["individual", "comerciante", "empresa"])
 					.default("individual"),
@@ -373,11 +378,16 @@ export const crmRouter = {
 			z.object({
 				id: z.string().uuid(),
 				firstName: z.string().min(1, "First name is required").optional(),
+				middleName: z.string().optional(),
 				lastName: z.string().min(1, "Last name is required").optional(),
+				secondLastName: z.string().optional(),
 				email: z.string().email("Valid email is required").optional(),
 				phone: z.string().optional(),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				departamento: z.string().optional(),
+				municipio: z.string().optional(),
+				zona: z.string().optional(),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),

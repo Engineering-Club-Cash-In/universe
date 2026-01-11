@@ -1,6 +1,6 @@
-import { eq, and, lte, gte, sql } from "drizzle-orm";
+import { eq, and, lte, gte, sql, desc } from "drizzle-orm";
 import { db } from "../database";
-import { usuarios, creditos, cuotas_credito, inversionistas, creditos_inversionistas } from "../database/db";
+import { usuarios, creditos, cuotas_credito, inversionistas, creditos_inversionistas, boletasPagoInversionista } from "../database/db";
 import Big from "big.js";
 import fs from "fs"; // 🆕 Para escribir logs
 
@@ -11,7 +11,22 @@ interface LiquidarCuotasInput {
   capital: number;
   nombre_inversionista: string;
 }
-
+// 🔥 FUNCIÓN HELPER PARA NORMALIZAR PORCENTAJES
+function normalizarPorcentaje(valor: string | number | null | undefined): Big {
+  const num = new Big(valor || 0);
+  
+  // Si es menor a 1, ya está en formato decimal (0.20 = 20%)
+  if (num.lt(1)) {
+    console.log(`      🔧 Porcentaje ya en decimal: ${valor} → ${num.toString()}`);
+    return num; // Ya está como 0.20, usar directo
+  }
+  
+  // Si es >= 1, está como entero (20 = 20%), dividir entre 100
+  const decimal = num.div(100);
+  console.log(`      🔧 Porcentaje convertido: ${valor} → ${decimal.toString()}`);
+  return decimal;
+}
+ 
 // 🆕 FUNCIÓN PARA ESCRIBIR LOG DE ADVERTENCIAS
 function escribirLogAdvertencias(tipo: 'ADVERTENCIA' | 'ERROR' | 'RELACION_CREADA', mensaje: string, data?: any) {
   const timestamp = new Date().toISOString();
@@ -908,9 +923,9 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(100);
         const cuotaInteres = capitalTotal.times(porcentajeInteres);
         
-        // 🔥 Valores por defecto (50/50)
-        const porcentajeCashIn = 50;
-        const porcentajeInversionista = 50;
+        // 🔥 Valores por defecto (80/20)
+        const porcentajeCashIn = 20;
+        const porcentajeInversionista = 80;
         
         const montoInversionista = cuotaInteres.times(0.5).toFixed(2);
         const montoCashIn = cuotaInteres.times(0.5).toFixed(2);
@@ -1005,8 +1020,9 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       
       console.log(`      💰 NUEVO Monto aportado: ${nuevoMontoAportado.toFixed(2)}`);
       
-      const porcentajeCashIn = new Big(relacion.porcentaje_cash_in || 0).div(100);
-      const porcentajeInversionista = new Big(relacion.porcentaje_participacion_inversionista || 0).div(100);
+const porcentajeCashIn = normalizarPorcentaje(relacion.porcentaje_cash_in);
+const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_participacion_inversionista);
+
       const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100);
       
       console.log(`      📊 % Cash In: ${porcentajeCashIn.times(100).toString()}%`);
@@ -1036,7 +1052,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       
       console.log(`\n      💾 ACTUALIZANDO EN BD...`);
       
-      await db
+      const update=await db
         .update(creditos_inversionistas)
         .set({
           monto_aportado: nuevoMontoAportado.toFixed(2),
@@ -1053,7 +1069,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
           )
         );
       
-      console.log(`      ✅ INVERSIONISTA ACTUALIZADO`);
+      console.log(`      ✅ INVERSIONISTA ACTUALIZADO ${update}` );
       totalInversionistasActualizados++;
 
       resultadosPorCredito.push({
@@ -1138,5 +1154,426 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       error: error instanceof Error ? error.message : String(error),
       stack: error instanceof Error ? error.stack : undefined
     };
+  }
+}
+
+
+/**
+ * Prepara las URLs completas de las boletas
+ * Maneja el caso donde el base URL ya incluye el folder
+ */
+const prepararURLsBoletas = (url_boletas: string[]): string[] => {
+  const r2BaseUrl = import.meta.env.URL_PUBLIC_R2; // https://pub-xxx.r2.dev/payments-receipts/
+  
+  if (!r2BaseUrl) {
+    throw new Error("URL_PUBLIC_R2 no está configurado en las variables de entorno");
+  }
+  
+  return url_boletas.map((filename) => {
+    // Limpiar cualquier slash que venga
+    const cleanFilename = filename.trim().replace(/^\/+/, '');
+    
+    // Asegurar que el base URL termina con /
+    const baseUrlWithSlash = r2BaseUrl.endsWith("/") 
+      ? r2BaseUrl 
+      : `${r2BaseUrl}/`;
+    
+    // Simplemente pegar el filename
+    return `${baseUrlWithSlash}${cleanFilename}`;
+  });
+};
+
+// 🔥 TIPOS
+interface CreateBoletaInput {
+  inversionista_id: number;
+  boleta_url: string;
+  monto_boleta?: number | string;
+  notas?: string;
+  subido_por?: string;
+}
+
+interface CreateBoletaResponse {
+  success: boolean;
+  message: string;
+  data?: any;
+  error?: string;
+}
+export interface UpdateBoletaInput {
+  boleta_url?: string;
+  estado?: "PENDIENTE" | "PROCESADO";
+  monto_boleta?: string;
+  notas?: string;
+  fecha_procesado?: Date;
+}
+export async function createBoleta(
+  data: CreateBoletaInput
+): Promise<CreateBoletaResponse> {
+  try {
+    console.log("\n📝 ========== CREANDO BOLETA ==========");
+    console.log("📋 Datos recibidos:", {
+      inversionista_id: data.inversionista_id,
+      boleta_url: data.boleta_url, // Solo el filename: "90852b27-18c4-40df-9d7b-f20c8ab7ec33.jpeg"
+      monto_boleta: data.monto_boleta,
+      notas: data.notas,
+      subido_por: data.subido_por,
+    });
+
+    // 1️⃣ Validar que el inversionista existe
+    console.log(
+      `\n🔍 Validando inversionista ID: ${data.inversionista_id}...`
+    );
+    const [inversionista] = await db
+      .select({
+        inversionista_id: inversionistas.inversionista_id,
+        nombre: inversionistas.nombre,
+      })
+      .from(inversionistas)
+      .where(eq(inversionistas.inversionista_id, data.inversionista_id))
+      .limit(1);
+
+    if (!inversionista) {
+      console.error(
+        `❌ Inversionista con ID ${data.inversionista_id} no existe`
+      );
+      return {
+        success: false,
+        message: `Inversionista con ID ${data.inversionista_id} no encontrado`,
+        error: "INVERSIONISTA_NO_EXISTE",
+      };
+    }
+
+    console.log(`✅ Inversionista encontrado: ${inversionista.nombre}`);
+
+    // 2️⃣ Preparar URL completa de la boleta (pegar filename al base URL)
+    const [boletaUrlCompleta] = prepararURLsBoletas([data.boleta_url]);
+    console.log(`\n📎 URL de la boleta: ${boletaUrlCompleta}`);
+
+    // 3️⃣ Preparar monto (si existe)
+    let montoBoleta: string | null = null;
+    if (data.monto_boleta) {
+      montoBoleta = new Big(data.monto_boleta).toFixed(2);
+      console.log(`💰 Monto de la boleta: Q${montoBoleta}`);
+    }
+
+    // 4️⃣ Obtener fecha y hora actual en Guatemala
+    const guatemalaTimeString = new Date().toLocaleString("en-US", {
+      timeZone: "America/Guatemala",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+
+    const [datePart, timePart] = guatemalaTimeString.split(", ");
+    const [month, day, year] = datePart.split("/");
+    const fechaGuatemala = new Date(`${year}-${month}-${day}T${timePart}`);
+
+    console.log(`\n📅 Fecha de subida: ${fechaGuatemala.toISOString()}`);
+
+    // 5️⃣ Insertar la boleta
+    console.log("\n💾 Insertando boleta en la base de datos...");
+    const [nuevaBoleta] = await db
+      .insert(boletasPagoInversionista)
+      .values({
+        inversionista_id: data.inversionista_id,
+        boleta_url: boletaUrlCompleta,
+        monto_boleta: montoBoleta,
+        notas: data.notas || null,
+        subido_por: data.subido_por ? Number(data.subido_por) : null,
+        estado: "PENDIENTE", // 🔥 SIEMPRE PENDIENTE AL CREAR
+        fecha_subida: fechaGuatemala,
+      })
+      .returning();
+
+    console.log(`\n✅ ========== BOLETA CREADA EXITOSAMENTE ==========`);
+    console.log("📄 Detalles:"); 
+    console.log(`   Inversionista: ${inversionista.nombre}`);
+    console.log(`   URL: ${nuevaBoleta.boleta_url}`);
+    console.log(`   Monto: ${nuevaBoleta.monto_boleta ? `Q${nuevaBoleta.monto_boleta}` : "No especificado"}`);
+    console.log(`   Estado: ${nuevaBoleta.estado}`);
+    console.log(`   Fecha: ${nuevaBoleta.fecha_subida}`);
+    console.log(`✅ ========== FIN ==========\n`);
+
+    return {
+      success: true,
+      message: "Boleta creada exitosamente",
+      data: {
+        ...nuevaBoleta,
+        inversionista_nombre: inversionista.nombre,
+      },
+    };
+  } catch (error) {
+    console.error("\n❌ ========== ERROR AL CREAR BOLETA ==========");
+    console.error(error);
+    console.error("❌ ========== FIN ERROR ==========\n");
+
+    return {
+      success: false,
+      message: "Error al crear la boleta",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+// 📖 READ - Obtener boleta por ID
+// ============================================
+export async function getBoletaById(boleta_id: number) {
+  try {
+    console.log(`🔍 Buscando boleta ID: ${boleta_id}`);
+
+    const boleta = await db
+      .select({
+        boleta: boletasPagoInversionista,
+        inversionista: inversionistas,
+      })
+      .from(boletasPagoInversionista)
+      .innerJoin(
+        inversionistas,
+        eq(boletasPagoInversionista.inversionista_id, inversionistas.inversionista_id)
+      )
+      .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
+      .limit(1);
+
+    if (boleta.length === 0) {
+      throw new Error(`Boleta con ID ${boleta_id} no encontrada`);
+    }
+
+    console.log("✅ Boleta encontrada:", boleta[0]);
+    return boleta[0];
+  } catch (error) {
+    console.error("❌ Error obteniendo boleta:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 📖 READ - Listar todas las boletas (con filtros)
+// ============================================
+export async function getAllBoletas(filters?: {
+  inversionista_id?: number;
+  estado?: "PENDIENTE" | "PROCESADO";
+  limit?: number;
+  offset?: number;
+}) {
+  try {
+    console.log("📋 Listando boletas con filtros:", filters);
+
+    // Construir condiciones
+    const conditions: any[] = [];
+    
+    if (filters?.inversionista_id) {
+      conditions.push(eq(boletasPagoInversionista.inversionista_id, filters.inversionista_id));
+    }
+    
+    if (filters?.estado) {
+      conditions.push(eq(boletasPagoInversionista.estado, filters.estado));
+    }
+
+    const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
+
+    // Query
+    const boletas = await db
+      .select({
+        boleta: boletasPagoInversionista,
+        inversionista: inversionistas,
+      })
+      .from(boletasPagoInversionista)
+      .innerJoin(
+        inversionistas,
+        eq(boletasPagoInversionista.inversionista_id, inversionistas.inversionista_id)
+      )
+      .where(whereCondition)
+      .orderBy(desc(boletasPagoInversionista.fecha_subida))
+      .limit(filters?.limit || 100)
+      .offset(filters?.offset || 0);
+
+    console.log(`✅ Boletas encontradas: ${boletas.length}`);
+    return boletas;
+  } catch (error) {
+    console.error("❌ Error listando boletas:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 📖 READ - Obtener boletas PENDIENTES
+// ============================================
+export async function getBoletasPendientes(inversionista_id?: number) {
+  try {
+    console.log(`📋 Obteniendo boletas PENDIENTES${inversionista_id ? ` para inversionista ${inversionista_id}` : ''}`);
+
+    return await getAllBoletas({
+      inversionista_id,
+      estado: "PENDIENTE",
+    });
+  } catch (error) {
+    console.error("❌ Error obteniendo boletas pendientes:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 📖 READ - Obtener boletas por inversionista
+// ============================================
+export async function getBoletasByInversionista(inversionista_id: number) {
+  try {
+    console.log(`📋 Obteniendo boletas para inversionista ${inversionista_id}`);
+
+    return await getAllBoletas({
+      inversionista_id,
+    });
+  } catch (error) {
+    console.error("❌ Error obteniendo boletas por inversionista:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// ✏️ UPDATE - Actualizar boleta
+// ============================================
+export async function updateBoleta(boleta_id: number, data: UpdateBoletaInput) {
+  try {
+    console.log(`✏️ Actualizando boleta ${boleta_id}:`, data);
+
+    // 1️⃣ Verificar que la boleta existe
+    const boletaExiste = await db
+      .select()
+      .from(boletasPagoInversionista)
+      .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
+      .limit(1);
+
+    if (boletaExiste.length === 0) {
+      throw new Error(`Boleta con ID ${boleta_id} no encontrada`);
+    }
+
+    // 2️⃣ Si se marca como PROCESADO, agregar fecha_procesado
+    const updateData: any = { ...data };
+    if (data.estado === "PROCESADO" && !data.fecha_procesado) {
+      updateData.fecha_procesado = new Date();
+    }
+
+    // 3️⃣ Actualizar
+    const [boletaActualizada] = await db
+      .update(boletasPagoInversionista)
+      .set(updateData)
+      .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
+      .returning();
+
+    console.log("✅ Boleta actualizada:", boletaActualizada);
+    return boletaActualizada;
+  } catch (error) {
+    console.error("❌ Error actualizando boleta:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 🔄 UPDATE - Marcar boleta como PROCESADA
+// ============================================
+export async function marcarBoletaComoProcesada(boleta_id: number) {
+  try {
+    console.log(`🔄 Marcando boleta ${boleta_id} como PROCESADA`);
+
+    return await updateBoleta(boleta_id, {
+      estado: "PROCESADO",
+      fecha_procesado: new Date(),
+    });
+  } catch (error) {
+    console.error("❌ Error marcando boleta como procesada:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 🔄 UPDATE - Marcar boleta como PENDIENTE
+// ============================================
+export async function marcarBoletaComoPendiente(boleta_id: number) {
+  try {
+    console.log(`🔄 Marcando boleta ${boleta_id} como PENDIENTE`);
+
+    return await updateBoleta(boleta_id, {
+      estado: "PENDIENTE",
+      fecha_procesado: undefined,
+    });
+  } catch (error) {
+    console.error("❌ Error marcando boleta como pendiente:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 🗑️ DELETE - Eliminar boleta
+// ============================================
+export async function deleteBoleta(boleta_id: number) {
+  try {
+    console.log(`🗑️ Eliminando boleta ${boleta_id}`);
+
+    // 1️⃣ Verificar que la boleta existe
+    const boletaExiste = await db
+      .select()
+      .from(boletasPagoInversionista)
+      .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
+      .limit(1);
+
+    if (boletaExiste.length === 0) {
+      throw new Error(`Boleta con ID ${boleta_id} no encontrada`);
+    }
+
+    // 2️⃣ Verificar que NO esté PROCESADA
+    if (boletaExiste[0].estado === "PROCESADO") {
+      throw new Error(`No se puede eliminar una boleta PROCESADA. Boleta ID: ${boleta_id}`);
+    }
+
+    // 3️⃣ Eliminar
+    const [boletaEliminada] = await db
+      .delete(boletasPagoInversionista)
+      .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
+      .returning();
+
+    console.log("✅ Boleta eliminada:", boletaEliminada);
+    return boletaEliminada;
+  } catch (error) {
+    console.error("❌ Error eliminando boleta:", error);
+    throw error;
+  }
+}
+
+// ============================================
+// 📊 STATS - Estadísticas de boletas
+// ============================================
+export async function getBoletasStats(inversionista_id?: number) {
+  try {
+    console.log(`📊 Obteniendo estadísticas de boletas${inversionista_id ? ` para inversionista ${inversionista_id}` : ''}`);
+
+    const conditions: any[] = [];
+    if (inversionista_id) {
+      conditions.push(eq(boletasPagoInversionista.inversionista_id, inversionista_id));
+    }
+    const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const todasBoletas = await db
+      .select()
+      .from(boletasPagoInversionista)
+      .where(whereCondition);
+
+    const stats = {
+      total: todasBoletas.length,
+      pendientes: todasBoletas.filter(b => b.estado === "PENDIENTE").length,
+      procesadas: todasBoletas.filter(b => b.estado === "PROCESADO").length,
+      monto_total_pendiente: todasBoletas
+        .filter(b => b.estado === "PENDIENTE")
+        .reduce((sum, b) => sum + Number(b.monto_boleta || 0), 0),
+      monto_total_procesado: todasBoletas
+        .filter(b => b.estado === "PROCESADO")
+        .reduce((sum, b) => sum + Number(b.monto_boleta || 0), 0),
+    };
+
+    console.log("✅ Estadísticas:", stats);
+    return stats;
+  } catch (error) {
+    console.error("❌ Error obteniendo estadísticas:", error);
+    throw error;
   }
 }

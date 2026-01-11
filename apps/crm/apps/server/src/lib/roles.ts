@@ -4,6 +4,7 @@
 export const ROLES = {
 	ADMIN: "admin",
 	SALES: "sales",
+	SALES_SUPERVISOR: "sales_supervisor",
 	ANALYST: "analyst",
 	COBROS: "cobros",
 	JURIDICO: "juridico",
@@ -22,6 +23,11 @@ export const ROLE_CONFIG = {
 		label: "Ventas",
 		color: "bg-blue-100 text-blue-800",
 		icon: "User" as const,
+	},
+	[ROLES.SALES_SUPERVISOR]: {
+		label: "Supervisor de Ventas",
+		color: "bg-indigo-100 text-indigo-800",
+		icon: "UserCheck" as const,
 	},
 	[ROLES.ANALYST]: {
 		label: "Analista",
@@ -44,7 +50,10 @@ export const ROLE_CONFIG = {
 export const PERMISSIONS = {
 	// CRM Module Access (analyst can view but not create/edit)
 	canAccessCRM: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES || role === ROLES.ANALYST,
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
 
 	// Analysis Module Access
 	canAccessAnalysis: (role: UserRole | string): boolean =>
@@ -55,24 +64,39 @@ export const PERMISSIONS = {
 
 	// Entity Permissions
 	canCreateCompanies: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES,
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR,
 
 	canCreateLeads: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES,
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR,
 
 	canUpdateLeads: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES,
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR,
 
-	canDeleteLeads: (role: UserRole | string): boolean => role === ROLES.ADMIN,
+	canDeleteLeads: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 
 	canCreateOpportunities: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES,
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR,
 
 	canApproveOpportunities: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
 
 	canExportReports: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.ANALYST,
+		role === ROLES.ADMIN ||
+		role === ROLES.ANALYST ||
+		role === ROLES.SALES_SUPERVISOR,
+
+	// Credit Detail Approval (40% → 50%)
+	canApproveCreditDetail: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
 
 	// Cobros Module Access
 	canAccessCobros: (role: UserRole | string): boolean =>
@@ -86,13 +110,16 @@ export const PERMISSIONS = {
 
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.SALES,
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR,
 
 	// Juridico Module Access
 	canAccessJuridico: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.JURIDICO ||
 		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST,
 
 	canCreateLegalContracts: (role: UserRole | string): boolean =>

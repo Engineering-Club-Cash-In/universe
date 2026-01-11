@@ -28,6 +28,7 @@ import {
 	opportunityDocuments,
 } from "../db/schema/documents";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import {
 	deleteFileFromR2,
 	generateUniqueFilename,
@@ -834,23 +835,12 @@ export const crmRouter = {
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
 
-				// Validate detalle_analisis document when moving from <=40% to >=50%
+				// Validate credit detail approval when moving from <=40% to >=50%
 				if (fromPercentage <= 40 && toPercentage >= 50) {
-					// Check if detalle_analisis document exists for this opportunity
-					const detalleDocument = await db
-						.select()
-						.from(opportunityDocuments)
-						.where(
-							and(
-								eq(opportunityDocuments.opportunityId, id),
-								eq(opportunityDocuments.documentType, "detalle_analisis"),
-							),
-						)
-						.limit(1);
-
-					if (!detalleDocument[0]) {
+					// Check if credit detail has been approved
+					if (!currentOpportunity[0].creditDetailApproved) {
 						throw new Error(
-							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), se requiere subir el archivo de Detalle de Análisis (.xlsx) con el resumen del crédito.",
+							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), el detalle de crédito debe ser aprobado por un supervisor de ventas.",
 						);
 					}
 				}
@@ -1525,6 +1515,51 @@ export const crmRouter = {
 			}
 
 			return { success: true, approved: input.approved };
+		}),
+
+	// Approve credit detail (40% → 50% transition)
+	approveCreditDetail: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Only admin or sales_supervisor can approve
+			if (!PERMISSIONS.canApproveCreditDetail(context.userRole)) {
+				throw new Error(
+					"Solo supervisores de ventas o administradores pueden aprobar el detalle de crédito",
+				);
+			}
+
+			// Get current opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Already approved
+			if (opportunity.creditDetailApproved) {
+				throw new Error("El detalle de crédito ya fue aprobado");
+			}
+
+			// Update opportunity with approval
+			await db
+				.update(opportunities)
+				.set({
+					creditDetailApproved: true,
+					creditDetailApprovedBy: context.userId,
+					creditDetailApprovedAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			return { success: true };
 		}),
 
 	getOpportunityHistory: crmProcedure

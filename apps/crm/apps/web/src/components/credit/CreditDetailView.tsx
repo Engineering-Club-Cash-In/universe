@@ -4,6 +4,7 @@ import {
 	Banknote,
 	Calculator,
 	Car,
+	CheckCircle,
 	CreditCard,
 	FileText,
 	Percent,
@@ -64,6 +65,7 @@ type CreditCheck = Awaited<ReturnType<typeof client.getChecksByOpportunity>>[num
 
 interface CreditDetailViewProps {
 	opportunityId: string;
+	userRole?: string;
 	opportunity: {
 		id: string;
 		title: string;
@@ -80,6 +82,9 @@ interface CreditDetailViewProps {
 		direccion: string | null;
 		inversionistas: string | null;
 		creditType?: "autocompra" | "sobre_vehiculo" | null;
+		creditDetailApproved?: boolean | null;
+		creditDetailApprovedBy?: string | null;
+		creditDetailApprovedAt?: Date | string | null;
 		lead?: {
 			id: string;
 			firstName: string;
@@ -192,6 +197,7 @@ const formatDate = (date: Date | string): string => {
 
 export function CreditDetailView({
 	opportunityId,
+	userRole,
 	opportunity,
 	quotation,
 	vehicleInspection,
@@ -243,6 +249,21 @@ export function CreditDetailView({
 			toast.error(`Error al eliminar cheque: ${error.message}`);
 		},
 	});
+
+	// Mutation para aprobar detalle de crédito
+	const approveCreditDetailMutation = useMutation({
+		mutationFn: () => client.approveCreditDetail({ opportunityId }),
+		onSuccess: () => {
+			toast.success("Detalle de crédito aprobado correctamente");
+			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
+		},
+		onError: (error) => {
+			toast.error(`Error al aprobar: ${error.message}`);
+		},
+	});
+
+	// Verificar si el usuario puede aprobar
+	const canApprove = userRole === "admin" || userRole === "sales_supervisor";
 
 	// Formulario para agregar cheque
 	const checkForm = useForm({
@@ -435,13 +456,33 @@ export function CreditDetailView({
 										Información interna para el análisis y aprobación del crédito
 									</CardDescription>
 								</div>
-								<div className="flex items-center gap-2">
+								<div className="flex items-center gap-3">
 									<span className="text-muted-foreground text-sm">
 										Oportunidad: <span className="font-mono font-medium">{opportunity.id.split("-")[0]}</span>
 									</span>
 									<Badge variant={isAutocompra ? "default" : "secondary"}>
 										{isAutocompra ? "Autocompra" : "Sobre Vehículo"}
 									</Badge>
+									{opportunity.creditDetailApproved ? (
+										<Badge variant="outline" className="border-green-500 bg-green-50 text-green-700">
+											<CheckCircle className="mr-1 h-3 w-3" />
+											Aprobado
+										</Badge>
+									) : canApprove ? (
+										<Button
+											size="sm"
+											variant="default"
+											onClick={() => approveCreditDetailMutation.mutate()}
+											disabled={approveCreditDetailMutation.isPending}
+										>
+											<CheckCircle className="mr-1 h-3 w-3" />
+											{approveCreditDetailMutation.isPending ? "Aprobando..." : "Aprobar Detalle"}
+										</Button>
+									) : (
+										<Badge variant="outline" className="border-yellow-500 bg-yellow-50 text-yellow-700">
+											Pendiente de aprobación
+										</Badge>
+									)}
 								</div>
 							</div>
 						</CardHeader>

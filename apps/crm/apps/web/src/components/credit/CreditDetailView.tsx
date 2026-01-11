@@ -399,6 +399,19 @@ export function CreditDetailView({
 		0
 	);
 
+	// Label dinámico para gastos combinados (Tab 2)
+	const gastosCombinadosLabel = (() => {
+		const partes: string[] = [];
+		if (gastosAdmin > 0) partes.push("Gastos Administrativos");
+		if (traspaso > 0) partes.push("Traspaso");
+		if (multas > 0) partes.push("Multa");
+		if (partes.length === 0) return "Gastos Administrativos, Traspaso y Multa";
+		if (partes.length === 1) return partes[0];
+		if (partes.length === 2) return `${partes[0]} y ${partes[1]}`;
+		return `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
+	})();
+	const gastosCombinados = gastosAdmin + traspaso + multas;
+
 	return (
 		<div className="space-y-6">
 			<Tabs defaultValue="interno" className="w-full">
@@ -1024,8 +1037,8 @@ export function CreditDetailView({
 											<TableCell></TableCell>
 										</TableRow>
 										<TableRow>
-											<TableCell className="py-2">Gastos de Traspaso</TableCell>
-											<TableCell className="text-right py-2">{traspaso > 0 ? formatCurrency(traspaso) : "Q -"}</TableCell>
+											<TableCell className="py-2">{gastosCombinadosLabel}</TableCell>
+											<TableCell className="text-right py-2">{gastosCombinados > 0 ? formatCurrency(gastosCombinados) : "Q -"}</TableCell>
 											<TableCell></TableCell>
 										</TableRow>
 										<TableRow>
@@ -1041,7 +1054,7 @@ export function CreditDetailView({
 										<TableRow>
 											<TableCell className="py-2">Gastos legales</TableCell>
 											<TableCell className="text-right py-2">{subtotalGastosAbogado > 0 ? formatCurrency(subtotalGastosAbogado) : "Q -"}</TableCell>
-											<TableCell className="text-right py-2 font-semibold">{formatCurrency(interesAnticipado + royalty + traspaso + seguro + gps + subtotalGastosAbogado)}</TableCell>
+											<TableCell className="text-right py-2 font-semibold">{formatCurrency(interesAnticipado + royalty + gastosCombinados + seguro + gps + subtotalGastosAbogado)}</TableCell>
 										</TableRow>
 									</TableBody>
 								</Table>
@@ -1050,7 +1063,7 @@ export function CreditDetailView({
 							{/* Líquido a Recibir */}
 							<div className="flex justify-between items-center py-3 border-t-2 border-green-500">
 								<span className="font-semibold">Líquido a recibir</span>
-								<span className="font-bold text-2xl text-green-600">{formatCurrency(montoSolicitado - (interesAnticipado + royalty + traspaso + seguro + gps + subtotalGastosAbogado))}</span>
+								<span className="font-bold text-2xl text-green-600">{formatCurrency(montoSolicitado - (interesAnticipado + royalty + gastosCombinados + seguro + gps + subtotalGastosAbogado))}</span>
 							</div>
 
 							{/* Notas */}

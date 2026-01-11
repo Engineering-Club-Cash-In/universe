@@ -2119,6 +2119,7 @@ function RouteComponent() {
 										return (
 											<CreditDetailView
 												opportunityId={selectedOpportunity.id}
+												userRole={userProfile.data?.role}
 												opportunity={{
 													id: selectedOpportunity.id,
 													title: selectedOpportunity.title,
@@ -2135,6 +2136,9 @@ function RouteComponent() {
 													direccion: selectedOpportunity.direccion,
 													inversionistas: selectedOpportunity.inversionistas,
 													creditType: selectedOpportunity.creditType,
+													creditDetailApproved: selectedOpportunity.creditDetailApproved,
+													creditDetailApprovedBy: selectedOpportunity.creditDetailApprovedBy,
+													creditDetailApprovedAt: selectedOpportunity.creditDetailApprovedAt,
 													lead: selectedOpportunity.lead,
 													vehicle: selectedOpportunity.vehicle,
 												}}

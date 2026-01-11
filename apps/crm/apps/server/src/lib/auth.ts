@@ -26,6 +26,12 @@ export const salesRole = ac.newRole({
 	report: ["read"],
 });
 
+export const salesSupervisorRole = ac.newRole({
+	user: ["read", "update"],
+	lead: ["create", "read", "update", "delete"],
+	report: ["read", "export"],
+});
+
 export const analystRole = ac.newRole({
 	user: ["read"],
 	lead: ["read"],
@@ -55,6 +61,7 @@ export const auth = betterAuth({
 			roles: {
 				admin: adminRole,
 				sales: salesRole,
+				sales_supervisor: salesSupervisorRole,
 				analyst: analystRole,
 				cobros: cobrosRole,
 				juridico: juridicoRole,

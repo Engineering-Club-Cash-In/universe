@@ -275,6 +275,13 @@ export const opportunities = pgTable("opportunities", {
 	direccion: text("direccion"), // Customer address
 	rubros: text("rubros"), // JSON string with expense items (rubros)
 
+	// Credit Detail Approval (40% → 50%)
+	creditDetailApproved: boolean("credit_detail_approved").default(false),
+	creditDetailApprovedBy: text("credit_detail_approved_by").references(
+		() => user.id,
+	),
+	creditDetailApprovedAt: timestamp("credit_detail_approved_at"),
+
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),

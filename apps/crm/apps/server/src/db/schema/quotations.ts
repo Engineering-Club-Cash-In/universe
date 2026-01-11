@@ -101,6 +101,10 @@ export const quotations = pgTable("quotations", {
 	collectionAuthCost: decimal("collection_auth_cost", { precision: 12, scale: 2 }).default("0"), // Auténtica contrato cobranza
 	legalCost: decimal("legal_cost", { precision: 12, scale: 2 }).default("0"), // Gastos legales
 
+	// Gastos específicos de Autocompras
+	appointmentCost: decimal("appointment_cost", { precision: 12, scale: 2 }).default("0"), // Nombramiento
+	addressVerificationCost: decimal("address_verification_cost", { precision: 12, scale: 2 }).default("0"), // Verificación de dirección
+
 	// Valores calculados
 	amountToFinance: decimal("amount_to_finance", {
 		precision: 12,

@@ -2,7 +2,7 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, ilike, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { type NewVehicleVendor, vehicleVendors } from "../db/schema/vehicles";
+import { type NewVehicleVendor, vehicleVendors, vehicles } from "../db/schema/vehicles";
 import { crmProcedure } from "../lib/orpc";
 
 export const vendorsRouter = {
@@ -139,6 +139,31 @@ export const vendorsRouter = {
 				.returning();
 
 			return deleted;
+		}),
+
+	// Get vendor by vehicleId
+	getByVehicleId: crmProcedure
+		.input(z.object({ vehicleId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// First get the vehicle to find the vendorId
+			const [vehicle] = await db
+				.select()
+				.from(vehicles)
+				.where(eq(vehicles.id, input.vehicleId))
+				.limit(1);
+
+			if (!vehicle || !vehicle.vendorId) {
+				return null;
+			}
+
+			// Then get the vendor
+			const [vendor] = await db
+				.select()
+				.from(vehicleVendors)
+				.where(eq(vehicleVendors.id, vehicle.vendorId))
+				.limit(1);
+
+			return vendor || null;
 		}),
 
 	// Search vendors

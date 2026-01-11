@@ -30,6 +30,7 @@ import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2091,14 +2092,67 @@ function RouteComponent() {
 								</TabsContent>
 
 								<TabsContent value="credit" className="mt-6 space-y-4">
-									<form 
+									{/* Detalle de Crédito - Mostrar cuando >= 40% */}
+									{(() => {
+										const currentStageData = salesStagesQuery.data?.find(
+											(s) => s.id === selectedOpportunity.stage?.id,
+										);
+										const showCreditDetail = currentStageData && currentStageData.closurePercentage >= 40;
+
+										if (!showCreditDetail) {
+											return (
+												<div className="rounded-lg border border-dashed p-8 text-center">
+													<FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+													<p className="text-muted-foreground">
+														El detalle de crédito estará disponible cuando la oportunidad alcance el 40% de avance.
+													</p>
+													<p className="mt-2 text-muted-foreground text-sm">
+														Etapa actual: {currentStageData?.name || "Sin etapa"} ({currentStageData?.closurePercentage || 0}%)
+													</p>
+												</div>
+											);
+										}
+
+										// Obtener la cotización más reciente
+										const latestQuotation = opportunityQuotationsQuery.data?.[0] || null;
+
+										return (
+											<CreditDetailView
+												opportunityId={selectedOpportunity.id}
+												opportunity={{
+													id: selectedOpportunity.id,
+													title: selectedOpportunity.title,
+													value: selectedOpportunity.value,
+													tasaInteres: selectedOpportunity.tasaInteres,
+													numeroCuotas: selectedOpportunity.numeroCuotas,
+													cuotaMensual: selectedOpportunity.cuotaMensual,
+													royalti: selectedOpportunity.royalti,
+													porcentajeRoyalti: selectedOpportunity.porcentajeRoyalti,
+													gps: selectedOpportunity.gps,
+													seguro: selectedOpportunity.seguro,
+													membresiaPago: selectedOpportunity.membresiaPago,
+													nit: selectedOpportunity.nit,
+													direccion: selectedOpportunity.direccion,
+													inversionistas: selectedOpportunity.inversionistas,
+													creditType: selectedOpportunity.creditType,
+													lead: selectedOpportunity.lead,
+													vehicle: selectedOpportunity.vehicle,
+												}}
+												quotation={latestQuotation}
+												vehicleInspection={selectedOpportunity.vehicle?.latestInspection || null}
+												creditAnalysis={selectedOpportunity.lead?.creditAnalysis || null}
+											/>
+										);
+									})()}
+
+									<form
 									onSubmit={(e) => {
 										e.preventDefault();
 										e.stopPropagation();
 										void editOpportunityForm.handleSubmit();
 									}}
 									className="space-y-6">
-									
+
 									{/* Términos de Crédito - Mostrar cuando se acerca al 100% */}
 									<editOpportunityForm.Subscribe>
 										{(formState) => {

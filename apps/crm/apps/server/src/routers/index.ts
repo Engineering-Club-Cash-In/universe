@@ -4,10 +4,12 @@ import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 import { authRouter } from "./auth";
+import { checksRouter } from "./checks";
 import { cobrosRouter } from "./cobros";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
 import { legalContractsRouter } from "./legal-contracts";
+import { locationsRouter } from "./locations";
 import { miniagentRouter } from "./miniagent";
 import { notesRouter } from "./notes";
 import { quotationsRouter } from "./quotations";
@@ -134,6 +136,7 @@ export const appRouter = {
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,
 	getVendorById: vendorsRouter.getById,
+	getVendorByVehicleId: vendorsRouter.getByVehicleId,
 	createVendor: vendorsRouter.create,
 	updateVendor: vendorsRouter.update,
 	deleteVendor: vendorsRouter.delete,
@@ -153,6 +156,20 @@ export const appRouter = {
 	updateQuotation: quotationsRouter.updateQuotation,
 	deleteQuotation: quotationsRouter.deleteQuotation,
 	listQuotationsByOpportunity: quotationsRouter.listQuotationsByOpportunity,
+
+	// Credit Checks routes (Emisión de Cheques)
+	createCheck: checksRouter.createCheck,
+	getChecksByOpportunity: checksRouter.getChecksByOpportunity,
+	getChecksByQuotation: checksRouter.getChecksByQuotation,
+	updateCheck: checksRouter.updateCheck,
+	deleteCheck: checksRouter.deleteCheck,
+	getChecksSummary: checksRouter.getChecksSummary,
+
+	// Guatemala Locations routes (Catálogo de ubicaciones)
+	getDepartamentos: locationsRouter.getDepartamentos,
+	getMunicipiosByDepartamento: locationsRouter.getMunicipiosByDepartamento,
+	getAllLocations: locationsRouter.getAllLocations,
+	seedLocations: locationsRouter.seedLocations,
 
 	// Insurance routes
 	getInsuranceCost: insuranceRouter.getInsuranceCost,

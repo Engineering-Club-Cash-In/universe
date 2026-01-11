@@ -120,12 +120,17 @@ export const salesStages = pgTable("sales_stages", {
 export const leads = pgTable("leads", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	firstName: text("first_name").notNull(),
+	middleName: text("middle_name"), // Segundo nombre
 	lastName: text("last_name").notNull(),
+	secondLastName: text("second_last_name"), // Segundo apellido
 	email: text("email").notNull(),
 	phone: text("phone"),
 	age: integer("age"),
 	dpi: text("dpi"),
 	direccion: text("direccion"),
+	departamento: text("departamento"), // Departamento de Guatemala
+	municipio: text("municipio"), // Municipio
+	zona: text("zona"), // Zona
 	clientType: clientTypeEnum("client_type").notNull().default("individual"),
 	maritalStatus: maritalStatusEnum("marital_status"),
 	dependents: integer("dependents").default(0),

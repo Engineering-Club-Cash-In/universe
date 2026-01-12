@@ -67,6 +67,12 @@ export const appRouter = {
 		crmRouter.updateAnalysisChecklistVerification,
 	updateAnalysisChecklistVehicleVerification:
 		crmRouter.updateAnalysisChecklistVehicleVerification,
+	// Disbursement checklist (90% → 100%)
+	getDisbursementChecklist: crmRouter.getDisbursementChecklist,
+	updateDisbursementChecklistItem: crmRouter.updateDisbursementChecklistItem,
+	updateDisbursementChecklistNotes: crmRouter.updateDisbursementChecklistNotes,
+	approveDisbursement: crmRouter.approveDisbursement,
+	getOpportunitiesForDisbursement: crmRouter.getOpportunitiesForDisbursement,
 	getClients: crmRouter.getClients,
 	getClientsStats: crmRouter.getClientsStats,
 	createClient: crmRouter.createClient,

@@ -23,6 +23,7 @@ import {
 } from "../db/schema/crm";
 import {
 	analysisChecklists,
+	disbursementChecklists,
 	documentRequirementsByClientType,
 	documentValidations,
 	opportunityDocuments,
@@ -845,6 +846,15 @@ export const crmRouter = {
 					}
 				}
 
+				// Validate disbursement approval when moving from 90% to 100%
+				if (fromPercentage === 90 && toPercentage === 100) {
+					// Check if disbursement has been approved via checklist
+					if (!currentOpportunity[0].disbursementApproved) {
+						throw new Error(
+							"Para completar la oportunidad (100%), el desembolso debe ser aprobado por un analista completando el checklist de desembolso.",
+						);
+					}
+				}
 
 				// Validate credit terms if moving to 100% stage
 				if (targetStage[0]?.closurePercentage === 100) {
@@ -2841,4 +2851,348 @@ export const crmRouter = {
 
 			return checklistData;
 		}),
+
+	// ============================================================
+	// DISBURSEMENT CHECKLIST ENDPOINTS (90% → 100%)
+	// ============================================================
+
+	// Get or create disbursement checklist for an opportunity
+	getDisbursementChecklist: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// Check if opportunity exists and is at 90%
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					stageId: opportunities.stageId,
+					leadId: opportunities.leadId,
+					value: opportunities.value,
+					disbursementApproved: opportunities.disbursementApproved,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Get stage info
+			const [stage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!stage || stage.closurePercentage !== 90) {
+				throw new Error(
+					"Esta oportunidad no está en la etapa de 90% para desembolso",
+				);
+			}
+
+			// Get lead info
+			let lead: { firstName: string; lastName: string } | undefined;
+			if (opportunity.leadId) {
+				const [leadResult] = await db
+					.select({
+						firstName: leads.firstName,
+						lastName: leads.lastName,
+					})
+					.from(leads)
+					.where(eq(leads.id, opportunity.leadId))
+					.limit(1);
+				lead = leadResult;
+			}
+
+			// Try to get existing checklist
+			let [checklist] = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			// If no checklist exists, create one
+			if (!checklist) {
+				const [newChecklist] = await db
+					.insert(disbursementChecklists)
+					.values({
+						opportunityId: input.opportunityId,
+					})
+					.returning();
+				checklist = newChecklist;
+			}
+
+			// Calculate progress
+			const items = [
+				{ key: "traspasoRealizado", label: "Traspaso del vehículo realizado", completed: checklist.traspasoRealizado },
+				{ key: "documentosEnviadosAsesor", label: "Documentos enviados al asesor para firmas del vendedor", completed: checklist.documentosEnviadosAsesor },
+				{ key: "documentosFirmadosRecibidos", label: "Documentos firmados recibidos", completed: checklist.documentosFirmadosRecibidos },
+				{ key: "copiaLlaveRecibida", label: "Copia de llave recibida", completed: checklist.copiaLlaveRecibida },
+				{ key: "engancheValidado", label: "Enganche completo validado", completed: checklist.engancheValidado },
+				{ key: "listoDesembolsar", label: "Listo para desembolsar", completed: checklist.listoDesembolsar },
+			];
+
+			const completedCount = items.filter((item) => item.completed).length;
+			const progress = Math.round((completedCount / items.length) * 100);
+			const canApprove = items.every((item) => item.completed);
+
+			return {
+				id: checklist.id,
+				opportunityId: checklist.opportunityId,
+				items,
+				progress,
+				canApprove,
+				notes: checklist.notes,
+				completedBy: checklist.completedBy,
+				completedAt: checklist.completedAt,
+				lead: lead ? `${lead.firstName} ${lead.lastName}` : "N/A",
+				value: opportunity.value,
+				disbursementApproved: opportunity.disbursementApproved,
+			};
+		}),
+
+	// Update a specific item in the disbursement checklist
+	updateDisbursementChecklistItem: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				itemKey: z.enum([
+					"traspasoRealizado",
+					"documentosEnviadosAsesor",
+					"documentosFirmadosRecibidos",
+					"copiaLlaveRecibida",
+					"engancheValidado",
+					"listoDesembolsar",
+				]),
+				completed: z.boolean(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Get existing checklist
+			const [checklist] = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!checklist) {
+				throw new Error(
+					"Checklist de desembolso no encontrado. Primero obtén el checklist.",
+				);
+			}
+
+			// Update the specific item
+			const updateData: Record<string, boolean | Date> = {
+				[input.itemKey]: input.completed,
+				updatedAt: new Date(),
+			};
+
+			await db
+				.update(disbursementChecklists)
+				.set(updateData)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId));
+
+			return { success: true };
+		}),
+
+	// Update notes in disbursement checklist
+	updateDisbursementChecklistNotes: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				notes: z.string(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			await db
+				.update(disbursementChecklists)
+				.set({
+					notes: input.notes,
+					updatedAt: new Date(),
+				})
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId));
+
+			return { success: true };
+		}),
+
+	// Approve disbursement (90% → 100% transition)
+	approveDisbursement: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Get checklist and verify all items are completed
+			const [checklist] = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!checklist) {
+				throw new Error("Checklist de desembolso no encontrado");
+			}
+
+			// Verify all items are completed
+			const allCompleted =
+				checklist.traspasoRealizado &&
+				checklist.documentosEnviadosAsesor &&
+				checklist.documentosFirmadosRecibidos &&
+				checklist.copiaLlaveRecibida &&
+				checklist.engancheValidado &&
+				checklist.listoDesembolsar;
+
+			if (!allCompleted) {
+				throw new Error(
+					"Todos los items del checklist deben estar completados antes de aprobar",
+				);
+			}
+
+			// Get current opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Already approved
+			if (opportunity.disbursementApproved) {
+				throw new Error("El desembolso ya fue aprobado");
+			}
+
+			// Get current stage to verify it's 90%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 90) {
+				throw new Error("La oportunidad debe estar en la etapa del 90%");
+			}
+
+			// Get the 100% stage
+			const [targetStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 100))
+				.limit(1);
+
+			if (!targetStage) {
+				throw new Error("No se encontró la etapa del 100%");
+			}
+
+			// Update opportunity with approval and move to 100%
+			await db
+				.update(opportunities)
+				.set({
+					disbursementApproved: true,
+					disbursementApprovedBy: context.userId,
+					disbursementApprovedAt: new Date(),
+					stageId: targetStage.id,
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			// Mark checklist as completed
+			await db
+				.update(disbursementChecklists)
+				.set({
+					completedBy: context.userId,
+					completedAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId));
+
+			// Record stage history
+			await db.insert(opportunityStageHistory).values({
+				opportunityId: input.opportunityId,
+				fromStageId: opportunity.stageId,
+				toStageId: targetStage.id,
+				changedBy: context.userId,
+				reason: "Desembolso aprobado - Checklist completado",
+			});
+
+			return { success: true };
+		}),
+
+	// Get opportunities at 90% for disbursement review
+	getOpportunitiesForDisbursement: analystProcedure.handler(async () => {
+		// Get the 90% stage
+		const [stage90] = await db
+			.select()
+			.from(salesStages)
+			.where(eq(salesStages.closurePercentage, 90))
+			.limit(1);
+
+		if (!stage90) {
+			return [];
+		}
+
+		// Get opportunities at 90%
+		const opps = await db
+			.select({
+				id: opportunities.id,
+				value: opportunities.value,
+				stageId: opportunities.stageId,
+				disbursementApproved: opportunities.disbursementApproved,
+				leadId: opportunities.leadId,
+				createdAt: opportunities.createdAt,
+				updatedAt: opportunities.updatedAt,
+			})
+			.from(opportunities)
+			.where(eq(opportunities.stageId, stage90.id))
+			.orderBy(desc(opportunities.updatedAt));
+
+		// Get lead info for each opportunity
+		const result = await Promise.all(
+			opps.map(async (opp) => {
+				let lead: { firstName: string; lastName: string; phone: string | null } | undefined;
+				if (opp.leadId) {
+					const [leadResult] = await db
+						.select({
+							firstName: leads.firstName,
+							lastName: leads.lastName,
+							phone: leads.phone,
+						})
+						.from(leads)
+						.where(eq(leads.id, opp.leadId))
+						.limit(1);
+					lead = leadResult;
+				}
+
+				// Get checklist status
+				const [checklist] = await db
+					.select()
+					.from(disbursementChecklists)
+					.where(eq(disbursementChecklists.opportunityId, opp.id))
+					.limit(1);
+
+				let progress = 0;
+				if (checklist) {
+					const items = [
+						checklist.traspasoRealizado,
+						checklist.documentosEnviadosAsesor,
+						checklist.documentosFirmadosRecibidos,
+						checklist.copiaLlaveRecibida,
+						checklist.engancheValidado,
+						checklist.listoDesembolsar,
+					];
+					const completedCount = items.filter(Boolean).length;
+					progress = Math.round((completedCount / items.length) * 100);
+				}
+
+				return {
+					...opp,
+					leadName: lead ? `${lead.firstName} ${lead.lastName}` : "N/A",
+					leadPhone: lead?.phone,
+					checklistProgress: progress,
+					hasChecklist: !!checklist,
+				};
+			}),
+		);
+
+		return result;
+	}),
 };

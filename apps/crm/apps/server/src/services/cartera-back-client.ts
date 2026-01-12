@@ -364,13 +364,10 @@ export class CarteraBackClient {
 	async createCredito(input: CreateCreditoInput): Promise<CarteraCredito> {
 		this.cache.invalidate("creditos");
 		// El endpoint /newCredit retorna directamente el objeto CarteraCredito, no envuelto en { data: ... }
-		const response = await this.request<CarteraCredito>(
-			"/newCredit",
-			{
-				method: "POST",
-				body: JSON.stringify(input),
-			},
-		);
+		const response = await this.request<CarteraCredito>("/newCredit", {
+			method: "POST",
+			body: JSON.stringify(input),
+		});
 		return response;
 	}
 
@@ -408,7 +405,9 @@ export class CarteraBackClient {
 			...(params.estado && { estado: params.estado }),
 			...(params.page && { page: params.page.toString() }),
 			...(params.perPage && { perPage: params.perPage.toString() }),
-			...(params.cuotas_atrasadas !== undefined && { cuotas_atrasadas: params.cuotas_atrasadas.toString() }),
+			...(params.cuotas_atrasadas !== undefined && {
+				cuotas_atrasadas: params.cuotas_atrasadas.toString(),
+			}),
 			...(params.time && { proximidad_pago: params.time }),
 			...(params.nombre_usuario && { nombre_usuario: params.nombre_usuario }),
 			...(params.numero_credito_sifco && {
@@ -601,8 +600,14 @@ export class CarteraBackClient {
 			...(params.perPage && { perPage: params.perPage.toString() }),
 		});
 
-		console.log("[CarteraBackClient.getAdvisors] Query params:", queryParams.toString());
-		console.log("[CarteraBackClient.getAdvisors] URL:", `/advisor?${queryParams}`);
+		console.log(
+			"[CarteraBackClient.getAdvisors] Query params:",
+			queryParams.toString(),
+		);
+		console.log(
+			"[CarteraBackClient.getAdvisors] URL:",
+			`/advisor?${queryParams}`,
+		);
 
 		// El endpoint /advisor retorna directamente un array, no un objeto con { data: [...] }
 		const response = await this.request<CarteraAsesor[]>(
@@ -611,7 +616,10 @@ export class CarteraBackClient {
 			true,
 		);
 
-		console.log("[CarteraBackClient.getAdvisors] Response received:", JSON.stringify(response, null, 2));
+		console.log(
+			"[CarteraBackClient.getAdvisors] Response received:",
+			JSON.stringify(response, null, 2),
+		);
 
 		// Transformar la respuesta al formato PaginatedResponse esperado
 		return {

@@ -272,7 +272,6 @@ export const opportunities = pgTable("opportunities", {
 	inversionistas: text("inversionistas"), // JSON string with investors data
 	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
 	numeroSifco: text("numero_sifco"), // SIFCO credit number
-	direccion: text("direccion"), // Customer address
 	rubros: text("rubros"), // JSON string with expense items (rubros)
 
 	// Credit Detail Approval (40% → 50%)

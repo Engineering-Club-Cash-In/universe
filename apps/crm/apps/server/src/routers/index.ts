@@ -92,6 +92,7 @@ export const appRouter = {
 	uploadVehiclePhoto: vehiclesRouter.uploadPhoto,
 	deleteVehiclePhoto: vehiclesRouter.deletePhoto,
 	getVehicleInspectionById: vehiclesRouter.getInspectionById,
+	getLatestInspectionByVehicleId: vehiclesRouter.getLatestInspectionByVehicleId,
 	getVehicleStatistics: vehiclesRouter.getStatistics,
 	createFullVehicleInspection: vehiclesRouter.createFullInspection,
 	processVehicleRegistrationOCR: vehiclesRouter.processVehicleRegistrationOCR,

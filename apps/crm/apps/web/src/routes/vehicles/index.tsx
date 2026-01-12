@@ -247,9 +247,11 @@ function VehiclesDashboard() {
 										</SelectTrigger>
 										<SelectContent>
 											<SelectItem value="all">Todos</SelectItem>
-											<SelectItem value="approved">Aprobados</SelectItem>
 											<SelectItem value="pending">Pendientes</SelectItem>
-											<SelectItem value="rejected">Rechazados</SelectItem>
+											<SelectItem value="available">Disponibles</SelectItem>
+											<SelectItem value="sold">Vendidos</SelectItem>
+											<SelectItem value="maintenance">Mantenimiento</SelectItem>
+											<SelectItem value="auction">Remate</SelectItem>
 										</SelectContent>
 									</Select>
 								</div>

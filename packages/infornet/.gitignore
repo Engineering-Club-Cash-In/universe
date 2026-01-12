@@ -1,0 +1,2 @@
+# Negar la regla global de dist para incluir declaraciones de tipos
+!dist/

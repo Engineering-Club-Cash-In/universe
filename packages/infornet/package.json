@@ -2,9 +2,17 @@
   "name": "@repo/infornet",
   "version": "1.0.0",
   "type": "module",
+  "main": "./index.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./index.ts",
-    "./api": "./api.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./index.ts"
+    },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "import": "./api.ts"
+    }
   },
   "scripts": {
     "dev": "bun --watch server.ts",

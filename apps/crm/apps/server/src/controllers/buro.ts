@@ -3,7 +3,7 @@ import { db } from '@/db';
 import { renapInfo } from '@/db/schema';
 import { type EstudioPersonaJSON, infornetPersonaCache } from '@/db/schema/buro';
 import { eq, and, gt, lte } from 'drizzle-orm';
-import { InfornetClient } from '../../../../../../packages/infornet/index';
+import { InfornetClient } from '@repo/infornet';
 
 // 🔥 Instanciar el cliente con las credenciales del .env
 const infornetClient = new InfornetClient({

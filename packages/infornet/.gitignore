@@ -1,2 +1,8 @@
 # Negar la regla global de dist para incluir declaraciones de tipos
 !dist/
+
+# Ignorar artefactos de build fuera de dist/
+*.js
+*.d.ts
+src/*.js
+src/*.d.ts

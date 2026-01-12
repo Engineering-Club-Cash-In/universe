@@ -81,6 +81,56 @@ export const quotations = pgTable("quotations", {
 		.notNull()
 		.default("0"),
 
+	// Comisiones - Free lance
+	freelanceCost: decimal("freelance_cost", { precision: 12, scale: 2 }).default(
+		"0",
+	),
+	freelancePercentage: decimal("freelance_percentage", {
+		precision: 5,
+		scale: 2,
+	}),
+
+	// Gastos adicionales para detalle de crédito
+	inspectionCost: decimal("inspection_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Inspección
+	finesCost: decimal("fines_cost", { precision: 12, scale: 2 }).default("0"), // Multas
+	keyCopyCost: decimal("key_copy_cost", { precision: 12, scale: 2 }).default(
+		"0",
+	), // Copia de llave
+	keyCopyDiffCost: decimal("key_copy_diff_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Diferencia de copia de llave
+	circulationTaxCost: decimal("circulation_tax_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Impuesto circulación
+	mobileGuaranteeCost: decimal("mobile_guarantee_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Garantía mobiliaria
+	leasingContractCost: decimal("leasing_contract_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Contrato Leasing
+	collectionAuthCost: decimal("collection_auth_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Auténtica contrato cobranza
+	legalCost: decimal("legal_cost", { precision: 12, scale: 2 }).default("0"), // Gastos legales
+
+	// Gastos específicos de Autocompras
+	appointmentCost: decimal("appointment_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Nombramiento
+	addressVerificationCost: decimal("address_verification_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Verificación de dirección
+
 	// Valores calculados
 	amountToFinance: decimal("amount_to_finance", {
 		precision: 12,

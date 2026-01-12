@@ -41,7 +41,14 @@ export const adminRouter = {
 		.input(
 			z.object({
 				userId: z.string(),
-				role: z.enum(["admin", "sales", "analyst", "cobros", "juridico"]),
+				role: z.enum([
+					"admin",
+					"sales",
+					"sales_supervisor",
+					"analyst",
+					"cobros",
+					"juridico",
+				]),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -126,7 +133,14 @@ export const adminRouter = {
 				email: z.string().email("Invalid email address"),
 				password: z.string().min(8, "Password must be at least 8 characters"),
 				role: z
-					.enum(["admin", "sales", "analyst", "cobros", "juridico"])
+					.enum([
+						"admin",
+						"sales",
+						"sales_supervisor",
+						"analyst",
+						"cobros",
+						"juridico",
+					])
 					.default("sales"),
 			}),
 		)

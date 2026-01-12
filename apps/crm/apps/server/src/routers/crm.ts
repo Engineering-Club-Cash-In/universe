@@ -3,12 +3,12 @@ import { z } from "zod";
 import { db } from "../db";
 import {
 	carteraBackReferences,
+	type NewCarteraBackReference,
 	renapInfo,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
 	vehicles,
-	type NewCarteraBackReference,
 } from "../db/schema";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
@@ -23,11 +23,13 @@ import {
 } from "../db/schema/crm";
 import {
 	analysisChecklists,
+	disbursementChecklists,
 	documentRequirementsByClientType,
 	documentValidations,
 	opportunityDocuments,
 } from "../db/schema/documents";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import {
 	deleteFileFromR2,
 	generateUniqueFilename,
@@ -36,9 +38,9 @@ import {
 	validateFile,
 } from "../lib/storage";
 import {
+	type CreateCreditoResult,
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
-	type CreateCreditoResult,
 } from "../services/cartera-back-integration";
 
 export const crmRouter = {
@@ -308,11 +310,16 @@ export const crmRouter = {
 		.input(
 			z.object({
 				firstName: z.string().min(1, "First name is required"),
+				middleName: z.string().optional(),
 				lastName: z.string().min(1, "Last name is required"),
+				secondLastName: z.string().optional(),
 				email: z.string().email("Valid email is required"),
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				departamento: z.string().optional(),
+				municipio: z.string().optional(),
+				zona: z.string().optional(),
 				clientType: z
 					.enum(["individual", "comerciante", "empresa"])
 					.default("individual"),
@@ -373,11 +380,16 @@ export const crmRouter = {
 			z.object({
 				id: z.string().uuid(),
 				firstName: z.string().min(1, "First name is required").optional(),
+				middleName: z.string().optional(),
 				lastName: z.string().min(1, "Last name is required").optional(),
+				secondLastName: z.string().optional(),
 				email: z.string().email("Valid email is required").optional(),
 				phone: z.string().optional(),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				departamento: z.string().optional(),
+				municipio: z.string().optional(),
+				zona: z.string().optional(),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
@@ -767,7 +779,16 @@ export const crmRouter = {
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
-				categoria: z.enum(["Contraseña", "CV Vehículo", "CV Vehículo nuevo", "Fiduciario", "Hipotecario", "Vehículo"]).optional(),
+				categoria: z
+					.enum([
+						"Contraseña",
+						"CV Vehículo",
+						"CV Vehículo nuevo",
+						"Fiduciario",
+						"Hipotecario",
+						"Vehículo",
+					])
+					.optional(),
 				nit: z.string().optional(),
 				royalti: z.number().optional(),
 				porcentajeRoyalti: z.string().optional(),
@@ -780,7 +801,19 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, assignedTo, stageChangeReason, seguro, gps, royalti, porcentajeRoyalti, reserva, membresiaPago, direccion, ...updateData } = input;
+			const {
+				id,
+				assignedTo,
+				stageChangeReason,
+				seguro,
+				gps,
+				royalti,
+				porcentajeRoyalti,
+				reserva,
+				membresiaPago,
+				direccion,
+				...updateData
+			} = input;
 
 			// Get current opportunity to check for stage changes
 			const currentOpportunity = await db
@@ -804,7 +837,7 @@ export const crmRouter = {
 				lead = leadOption[0];
 			}
 
-			let numeroSifco: string | undefined = undefined;
+			let numeroSifco: string | undefined;
 
 			// Validate stage transitions
 			if (input.stageId) {
@@ -824,27 +857,25 @@ export const crmRouter = {
 				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
 				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
 
-				// Validate detalle_analisis document when moving from <=40% to >=50%
+				// Validate credit detail approval when moving from <=40% to >=50%
 				if (fromPercentage <= 40 && toPercentage >= 50) {
-					// Check if detalle_analisis document exists for this opportunity
-					const detalleDocument = await db
-						.select()
-						.from(opportunityDocuments)
-						.where(
-							and(
-								eq(opportunityDocuments.opportunityId, id),
-								eq(opportunityDocuments.documentType, "detalle_analisis"),
-							),
-						)
-						.limit(1);
-
-					if (!detalleDocument[0]) {
+					// Check if credit detail has been approved
+					if (!currentOpportunity[0].creditDetailApproved) {
 						throw new Error(
-							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), se requiere subir el archivo de Detalle de Análisis (.xlsx) con el resumen del crédito.",
+							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), el detalle de crédito debe ser aprobado por un supervisor de ventas.",
 						);
 					}
 				}
 
+				// Validate disbursement approval when moving from 90% to 100%
+				if (fromPercentage === 90 && toPercentage === 100) {
+					// Check if disbursement has been approved via checklist
+					if (!currentOpportunity[0].disbursementApproved) {
+						throw new Error(
+							"Para completar la oportunidad (100%), el desembolso debe ser aprobado por un analista completando el checklist de desembolso.",
+						);
+					}
+				}
 
 				// Validate credit terms if moving to 100% stage
 				if (targetStage[0]?.closurePercentage === 100) {
@@ -860,8 +891,6 @@ export const crmRouter = {
 					if (!opp.value && !input.value)
 						missingFields.push("valor del crédito");
 
-
-
 					// Credit terms
 					const numeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
 					const tasaInteres = input.tasaInteres ?? opp.tasaInteres;
@@ -875,28 +904,38 @@ export const crmRouter = {
 					if (!fechaInicio) missingFields.push("fecha de inicio del contrato");
 					if (!diaPagoMensual) missingFields.push("día de pago mensual");
 
-
 					// Additional credit fields
 					const direccion = input.direccion ?? opp.direccion;
-					const seguro = input.seguro ?? (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
-					const gps = input.gps ?? (opp.gps ? Number.parseFloat(opp.gps) : undefined);
-					const reserva = input.reserva ?? (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
+					const seguro =
+						input.seguro ??
+						(opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
+					const gps =
+						input.gps ?? (opp.gps ? Number.parseFloat(opp.gps) : undefined);
+					const reserva =
+						input.reserva ??
+						(opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
 					const categoria = input.categoria ?? opp.categoria;
 					const nit = input.nit ?? opp.nit;
 					const asesorId = input.asesorId ?? opp.asesorId;
 					const inversionistas = input.inversionistas ?? opp.inversionistas;
 
 					if (!direccion) missingFields.push("dirección del cliente");
-					if (seguro === undefined || seguro === null || seguro <= 0) missingFields.push("seguro (debe ser mayor a 0)");
-					if (gps === undefined || gps === null || gps <= 0) missingFields.push("GPS (debe ser mayor a 0)");
-					if (reserva === undefined || reserva === null || reserva <= 0) missingFields.push("reserva (debe ser mayor a 0)");
+					if (seguro === undefined || seguro === null || seguro <= 0)
+						missingFields.push("seguro (debe ser mayor a 0)");
+					if (gps === undefined || gps === null || gps <= 0)
+						missingFields.push("GPS (debe ser mayor a 0)");
+					if (reserva === undefined || reserva === null || reserva <= 0)
+						missingFields.push("reserva (debe ser mayor a 0)");
 					if (!categoria) missingFields.push("categoría del crédito");
 					if (!nit) missingFields.push("NIT del cliente");
 					if (!asesorId) missingFields.push("asesor");
-					if (!inversionistas || (typeof inversionistas === 'string' && JSON.parse(inversionistas).length === 0)) {
+					if (
+						!inversionistas ||
+						(typeof inversionistas === "string" &&
+							JSON.parse(inversionistas).length === 0)
+					) {
 						missingFields.push("inversionistas (debe haber al menos uno)");
 					}
-
 
 					if (missingFields.length > 0) {
 						console.log("Missing fields for 100% closure:", missingFields);
@@ -907,8 +946,9 @@ export const crmRouter = {
 
 					// If moving to 100%, create client and contract
 					if (targetStage[0]?.closurePercentage === 100) {
-
-						console.log("All required fields present. Creating client and contract...");
+						console.log(
+							"All required fields present. Creating client and contract...",
+						);
 						// All validations passed - create client and contract
 						const opp = currentOpportunity[0];
 						const finalVehicleId = input.vehicleId ?? opp.vehicleId;
@@ -951,7 +991,9 @@ export const crmRouter = {
 						numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 						// Calculate contract end date
 						const fechaInicioDate = new Date(finalFechaInicio as string);
-						console.log(`[CRM] Generating new credit with number: ${numeroSifco}`);
+						console.log(
+							`[CRM] Generating new credit with number: ${numeroSifco}`,
+						);
 
 						// Integrate with cartera-back (dual-write)
 						// IMPORTANTE: Si cartera-back está habilitado, es OBLIGATORIO que funcione
@@ -960,38 +1002,71 @@ export const crmRouter = {
 						let carteraBackError: string | undefined;
 						let creditoResult: CreateCreditoResult | undefined;
 
-						console.log(`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`);
+						console.log(
+							`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`,
+						);
 
 						if (isCarteraBackEnabled()) {
-
 							const [renapInfoOpp] = await db
-									.select()
-									.from(renapInfo)
-									.where(eq(renapInfo.dpi, lead.dpi ?? ""))
-									.limit(1);
+								.select()
+								.from(renapInfo)
+								.where(eq(renapInfo.dpi, lead.dpi ?? ""))
+								.limit(1);
 
+							console.log(
+								`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`,
+							);
 
-							console.log(`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`);
-							
 							// TODO: Get or create usuario_id in cartera-back
 							// For now, we'll use a placeholder (this needs to be implemented)
 							const usuarioId = 1; // PLACEHOLDER - needs proper implementation
 
 							// Create new credit - Si falla, debe detener todo el proceso
-							console.log(`[CRM] Creating credit in cartera-back: ${numeroSifco}`);
+							console.log(
+								`[CRM] Creating credit in cartera-back: ${numeroSifco}`,
+							);
 
 							// Valores finales: primero intenta del input, si no del opp guardado
-							const finalSeguro = seguro !== undefined ? seguro : (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
-							const finalGps = gps !== undefined ? gps : (opp.gps ? Number.parseFloat(opp.gps) : undefined);
-							const finalCategoria = input.categoria || opp.categoria || undefined;
+							const finalSeguro =
+								seguro !== undefined
+									? seguro
+									: opp.seguro
+										? Number.parseFloat(opp.seguro)
+										: undefined;
+							const finalGps =
+								gps !== undefined
+									? gps
+									: opp.gps
+										? Number.parseFloat(opp.gps)
+										: undefined;
+							const finalCategoria =
+								input.categoria || opp.categoria || undefined;
 							const finalNit = input.nit || opp.nit || undefined;
-							const finalRoyalti = royalti !== undefined ? royalti : (opp.royalti ? Number.parseFloat(opp.royalti) : undefined);
+							const finalRoyalti =
+								royalti !== undefined
+									? royalti
+									: opp.royalti
+										? Number.parseFloat(opp.royalti)
+										: undefined;
 							const finalPorcentajeRoyalti = porcentajeRoyalti
 								? Number.parseFloat(porcentajeRoyalti)
-								: (opp.porcentajeRoyalti ? Number.parseFloat(opp.porcentajeRoyalti) : undefined);
-							const finalReserva = reserva !== undefined ? reserva : (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
-							const finalMembresiaPago = membresiaPago !== undefined ? membresiaPago : (opp.membresiaPago ? Number.parseFloat(opp.membresiaPago) : undefined);
-							const finalInversionistas = input.inversionistas || opp.inversionistas || undefined;
+								: opp.porcentajeRoyalti
+									? Number.parseFloat(opp.porcentajeRoyalti)
+									: undefined;
+							const finalReserva =
+								reserva !== undefined
+									? reserva
+									: opp.reserva
+										? Number.parseFloat(opp.reserva)
+										: undefined;
+							const finalMembresiaPago =
+								membresiaPago !== undefined
+									? membresiaPago
+									: opp.membresiaPago
+										? Number.parseFloat(opp.membresiaPago)
+										: undefined;
+							const finalInversionistas =
+								input.inversionistas || opp.inversionistas || undefined;
 							const finalRubros = input.rubros || opp.rubros || undefined;
 							const finalAsesorId = input.asesorId || opp.asesorId || usuarioId; // Usa el del input, o el guardado, o el placeholder
 							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
@@ -1001,12 +1076,16 @@ export const crmRouter = {
 								opportunityId: opp.id,
 								// contratoFinanciamientoId: newContract[0].id,
 								userId: context.userId,
-								usuario_id: lead ? `${lead.firstName} ${lead.lastName}` : "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
+								usuario_id: lead
+									? `${lead.firstName} ${lead.lastName}`
+									: "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
 								asesor_id: finalAsesorId,
 								numero_credito_sifco: finalNumeroSifco,
 								direccion: finalDireccion,
 								capital: Number.parseFloat(finalValue as string),
-								porcentaje_interes: Number.parseFloat(finalTasaInteres as string),
+								porcentaje_interes: Number.parseFloat(
+									finalTasaInteres as string,
+								),
 								plazo: finalNumeroCuotas as number,
 								cuota: Number.parseFloat(finalCuotaMensual as string),
 								tipoCredito: opp.creditType || "autocompra",
@@ -1021,10 +1100,16 @@ export const crmRouter = {
 								porcentaje_royalti: finalPorcentajeRoyalti,
 								reserva: finalReserva,
 								membresias_pago: finalMembresiaPago,
-								inversionistas: finalInversionistas ? JSON.parse(finalInversionistas) : undefined,
+								inversionistas: finalInversionistas
+									? JSON.parse(finalInversionistas)
+									: undefined,
 								rubros: finalRubros ? JSON.parse(finalRubros) : undefined,
-								municipio: renapInfoOpp ? renapInfoOpp.municipalityBornedIn : undefined,
-								departamento: renapInfoOpp ? renapInfoOpp.departmentBornedIn : undefined,
+								municipio: renapInfoOpp
+									? renapInfoOpp.municipalityBornedIn
+									: undefined,
+								departamento: renapInfoOpp
+									? renapInfoOpp.departmentBornedIn
+									: undefined,
 								codigo_postal: "01001", // Placeholder until we have postal code data
 								pais: renapInfoOpp ? renapInfoOpp.bornedIn : undefined,
 							});
@@ -1047,17 +1132,11 @@ export const crmRouter = {
 							);
 						}
 
-
-
 						// Check if client already exists for this lead/company
 						const existingClient = await db
 							.select()
 							.from(clients)
-							.where(
-								and(
-									eq(clients.opportunityId, opp.id),
-								),
-							)
+							.where(and(eq(clients.opportunityId, opp.id)))
 							.limit(1);
 
 						let clientId: string;
@@ -1084,7 +1163,6 @@ export const crmRouter = {
 							clientId = newClient[0].id;
 						}
 
-						
 						const fechaVencimiento = new Date(fechaInicioDate);
 						fechaVencimiento.setMonth(
 							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
@@ -1109,7 +1187,6 @@ export const crmRouter = {
 							})
 							.returning();
 
-
 						// Store reference in CRM
 						const referenceData: NewCarteraBackReference = {
 							opportunityId: opp.id,
@@ -1123,8 +1200,6 @@ export const crmRouter = {
 
 						await db.insert(carteraBackReferences).values(referenceData);
 
-						
-						
 						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
 						// When cartera-back is enabled, installments are managed there
 						if (!isCarteraBackEnabled()) {
@@ -1234,9 +1309,13 @@ export const crmRouter = {
 					...(seguro !== undefined && { seguro: String(seguro) }),
 					...(gps !== undefined && { gps: String(gps) }),
 					...(royalti !== undefined && { royalti: String(royalti) }),
-					...(porcentajeRoyalti !== undefined && { porcentajeRoyalti: String(porcentajeRoyalti) }),
+					...(porcentajeRoyalti !== undefined && {
+						porcentajeRoyalti: String(porcentajeRoyalti),
+					}),
 					...(reserva !== undefined && { reserva: String(reserva) }),
-					...(membresiaPago !== undefined && { membresiaPago: String(membresiaPago) }),
+					...(membresiaPago !== undefined && {
+						membresiaPago: String(membresiaPago),
+					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
 					...(direccion !== undefined && { direccion }),
 					...(numeroSifco !== undefined && { numeroSifco }),
@@ -1517,6 +1596,51 @@ export const crmRouter = {
 			return { success: true, approved: input.approved };
 		}),
 
+	// Approve credit detail (40% → 50% transition)
+	approveCreditDetail: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Only admin or sales_supervisor can approve
+			if (!PERMISSIONS.canApproveCreditDetail(context.userRole)) {
+				throw new Error(
+					"Solo supervisores de ventas o administradores pueden aprobar el detalle de crédito",
+				);
+			}
+
+			// Get current opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Already approved
+			if (opportunity.creditDetailApproved) {
+				throw new Error("El detalle de crédito ya fue aprobado");
+			}
+
+			// Update opportunity with approval
+			await db
+				.update(opportunities)
+				.set({
+					creditDetailApproved: true,
+					creditDetailApprovedBy: context.userId,
+					creditDetailApprovedAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			return { success: true };
+		}),
+
 	getOpportunityHistory: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
@@ -1709,8 +1833,7 @@ export const crmRouter = {
 			conditions.push(eq(clients.assignedTo, context.userId));
 		}
 
-		const whereClause =
-			conditions.length > 0 ? and(...conditions) : undefined;
+		const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
 		const allClients = await db
 			.select({
@@ -2303,7 +2426,10 @@ export const crmRouter = {
 					.limit(1);
 			}
 
-			console.log("[getAnalysisChecklist] creditAnalysisExists:", creditAnalysisExists);
+			console.log(
+				"[getAnalysisChecklist] creditAnalysisExists:",
+				creditAnalysisExists,
+			);
 
 			// Create initial checklist structure
 			const checklistData = {
@@ -2796,4 +2922,392 @@ export const crmRouter = {
 
 			return checklistData;
 		}),
+
+	// ============================================================
+	// DISBURSEMENT CHECKLIST ENDPOINTS (90% → 100%)
+	// ============================================================
+
+	// Get or create disbursement checklist for an opportunity
+	getDisbursementChecklist: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			// Check if opportunity exists and is at 90%
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					stageId: opportunities.stageId,
+					leadId: opportunities.leadId,
+					value: opportunities.value,
+					disbursementApproved: opportunities.disbursementApproved,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Get stage info
+			const [stage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!stage || stage.closurePercentage !== 90) {
+				throw new Error(
+					"Esta oportunidad no está en la etapa de 90% para desembolso",
+				);
+			}
+
+			// Get lead info
+			let lead: { firstName: string; lastName: string } | undefined;
+			if (opportunity.leadId) {
+				const [leadResult] = await db
+					.select({
+						firstName: leads.firstName,
+						lastName: leads.lastName,
+					})
+					.from(leads)
+					.where(eq(leads.id, opportunity.leadId))
+					.limit(1);
+				lead = leadResult;
+			}
+
+			// Try to get existing checklist
+			let [checklist] = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			// If no checklist exists, create one
+			if (!checklist) {
+				const [newChecklist] = await db
+					.insert(disbursementChecklists)
+					.values({
+						opportunityId: input.opportunityId,
+					})
+					.returning();
+				checklist = newChecklist;
+			}
+
+			// Calculate progress
+			const items = [
+				{
+					key: "traspasoRealizado",
+					label: "Traspaso del vehículo realizado",
+					completed: checklist.traspasoRealizado,
+				},
+				{
+					key: "documentosEnviadosAsesor",
+					label: "Documentos enviados al asesor para firmas del vendedor",
+					completed: checklist.documentosEnviadosAsesor,
+				},
+				{
+					key: "documentosFirmadosRecibidos",
+					label: "Documentos firmados recibidos",
+					completed: checklist.documentosFirmadosRecibidos,
+				},
+				{
+					key: "copiaLlaveRecibida",
+					label: "Copia de llave recibida",
+					completed: checklist.copiaLlaveRecibida,
+				},
+				{
+					key: "engancheValidado",
+					label: "Enganche completo validado",
+					completed: checklist.engancheValidado,
+				},
+				{
+					key: "listoDesembolsar",
+					label: "Listo para desembolsar",
+					completed: checklist.listoDesembolsar,
+				},
+			];
+
+			const completedCount = items.filter((item) => item.completed).length;
+			const progress = Math.round((completedCount / items.length) * 100);
+			const canApprove = items.every((item) => item.completed);
+
+			return {
+				id: checklist.id,
+				opportunityId: checklist.opportunityId,
+				items,
+				progress,
+				canApprove,
+				notes: checklist.notes,
+				completedBy: checklist.completedBy,
+				completedAt: checklist.completedAt,
+				lead: lead ? `${lead.firstName} ${lead.lastName}` : "N/A",
+				value: opportunity.value,
+				disbursementApproved: opportunity.disbursementApproved,
+			};
+		}),
+
+	// Update a specific item in the disbursement checklist
+	updateDisbursementChecklistItem: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				itemKey: z.enum([
+					"traspasoRealizado",
+					"documentosEnviadosAsesor",
+					"documentosFirmadosRecibidos",
+					"copiaLlaveRecibida",
+					"engancheValidado",
+					"listoDesembolsar",
+				]),
+				completed: z.boolean(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Get existing checklist
+			const [checklist] = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!checklist) {
+				throw new Error(
+					"Checklist de desembolso no encontrado. Primero obtén el checklist.",
+				);
+			}
+
+			// Security: Explicit whitelist mapping for column names (defense-in-depth)
+			// Even though Zod validates input.itemKey, we use an explicit mapping
+			// to ensure only valid column names are used in the database update
+			const validColumnKeys = {
+				traspasoRealizado: "traspasoRealizado",
+				documentosEnviadosAsesor: "documentosEnviadosAsesor",
+				documentosFirmadosRecibidos: "documentosFirmadosRecibidos",
+				copiaLlaveRecibida: "copiaLlaveRecibida",
+				engancheValidado: "engancheValidado",
+				listoDesembolsar: "listoDesembolsar",
+			} as const;
+
+			const columnKey = validColumnKeys[input.itemKey];
+			if (!columnKey) {
+				throw new Error("Clave de item inválida");
+			}
+
+			// Update the specific item using the validated column key
+			const updateData: Record<string, boolean | Date> = {
+				[columnKey]: input.completed,
+				updatedAt: new Date(),
+			};
+
+			await db
+				.update(disbursementChecklists)
+				.set(updateData)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId));
+
+			return { success: true };
+		}),
+
+	// Update notes in disbursement checklist
+	updateDisbursementChecklistNotes: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				// Security: Limit notes length to prevent DoS and apply trim
+				notes: z.string().max(5000).trim(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			await db
+				.update(disbursementChecklists)
+				.set({
+					notes: input.notes,
+					updatedAt: new Date(),
+				})
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId));
+
+			return { success: true };
+		}),
+
+	// Approve disbursement (90% → 100% transition)
+	approveDisbursement: analystProcedure
+		.input(z.object({ opportunityId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			// Get checklist and verify all items are completed
+			const [checklist] = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId))
+				.limit(1);
+
+			if (!checklist) {
+				throw new Error("Checklist de desembolso no encontrado");
+			}
+
+			// Verify all items are completed
+			const allCompleted =
+				checklist.traspasoRealizado &&
+				checklist.documentosEnviadosAsesor &&
+				checklist.documentosFirmadosRecibidos &&
+				checklist.copiaLlaveRecibida &&
+				checklist.engancheValidado &&
+				checklist.listoDesembolsar;
+
+			if (!allCompleted) {
+				throw new Error(
+					"Todos los items del checklist deben estar completados antes de aprobar",
+				);
+			}
+
+			// Get current opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Already approved
+			if (opportunity.disbursementApproved) {
+				throw new Error("El desembolso ya fue aprobado");
+			}
+
+			// Get current stage to verify it's 90%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 90) {
+				throw new Error("La oportunidad debe estar en la etapa del 90%");
+			}
+
+			// Get the 100% stage
+			const [targetStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 100))
+				.limit(1);
+
+			if (!targetStage) {
+				throw new Error("No se encontró la etapa del 100%");
+			}
+
+			// Update opportunity with approval and move to 100%
+			await db
+				.update(opportunities)
+				.set({
+					disbursementApproved: true,
+					disbursementApprovedBy: context.userId,
+					disbursementApprovedAt: new Date(),
+					stageId: targetStage.id,
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			// Mark checklist as completed
+			await db
+				.update(disbursementChecklists)
+				.set({
+					completedBy: context.userId,
+					completedAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(disbursementChecklists.opportunityId, input.opportunityId));
+
+			// Record stage history
+			await db.insert(opportunityStageHistory).values({
+				opportunityId: input.opportunityId,
+				fromStageId: opportunity.stageId,
+				toStageId: targetStage.id,
+				changedBy: context.userId,
+				reason: "Desembolso aprobado - Checklist completado",
+			});
+
+			return { success: true };
+		}),
+
+	// Get opportunities at 90% for disbursement review
+	getOpportunitiesForDisbursement: analystProcedure.handler(async () => {
+		// Get the 90% stage
+		const [stage90] = await db
+			.select()
+			.from(salesStages)
+			.where(eq(salesStages.closurePercentage, 90))
+			.limit(1);
+
+		if (!stage90) {
+			return [];
+		}
+
+		// Get opportunities at 90%
+		const opps = await db
+			.select({
+				id: opportunities.id,
+				value: opportunities.value,
+				stageId: opportunities.stageId,
+				disbursementApproved: opportunities.disbursementApproved,
+				leadId: opportunities.leadId,
+				createdAt: opportunities.createdAt,
+				updatedAt: opportunities.updatedAt,
+			})
+			.from(opportunities)
+			.where(eq(opportunities.stageId, stage90.id))
+			.orderBy(desc(opportunities.updatedAt));
+
+		// Get lead info for each opportunity
+		const result = await Promise.all(
+			opps.map(async (opp) => {
+				let lead:
+					| { firstName: string; lastName: string; phone: string | null }
+					| undefined;
+				if (opp.leadId) {
+					const [leadResult] = await db
+						.select({
+							firstName: leads.firstName,
+							lastName: leads.lastName,
+							phone: leads.phone,
+						})
+						.from(leads)
+						.where(eq(leads.id, opp.leadId))
+						.limit(1);
+					lead = leadResult;
+				}
+
+				// Get checklist status
+				const [checklist] = await db
+					.select()
+					.from(disbursementChecklists)
+					.where(eq(disbursementChecklists.opportunityId, opp.id))
+					.limit(1);
+
+				let progress = 0;
+				if (checklist) {
+					const items = [
+						checklist.traspasoRealizado,
+						checklist.documentosEnviadosAsesor,
+						checklist.documentosFirmadosRecibidos,
+						checklist.copiaLlaveRecibida,
+						checklist.engancheValidado,
+						checklist.listoDesembolsar,
+					];
+					const completedCount = items.filter(Boolean).length;
+					progress = Math.round((completedCount / items.length) * 100);
+				}
+
+				return {
+					...opp,
+					leadName: lead ? `${lead.firstName} ${lead.lastName}` : "N/A",
+					leadPhone: lead?.phone,
+					checklistProgress: progress,
+					hasChecklist: !!checklist,
+				};
+			}),
+		);
+
+		return result;
+	}),
 };

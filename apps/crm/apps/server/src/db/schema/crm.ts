@@ -120,12 +120,17 @@ export const salesStages = pgTable("sales_stages", {
 export const leads = pgTable("leads", {
 	id: uuid("id").primaryKey().defaultRandom(),
 	firstName: text("first_name").notNull(),
+	middleName: text("middle_name"), // Segundo nombre
 	lastName: text("last_name").notNull(),
+	secondLastName: text("second_last_name"), // Segundo apellido
 	email: text("email").notNull(),
 	phone: text("phone"),
 	age: integer("age"),
 	dpi: text("dpi"),
 	direccion: text("direccion"),
+	departamento: text("departamento"), // Departamento de Guatemala
+	municipio: text("municipio"), // Municipio
+	zona: text("zona"), // Zona
 	clientType: clientTypeEnum("client_type").notNull().default("individual"),
 	maritalStatus: maritalStatusEnum("marital_status"),
 	dependents: integer("dependents").default(0),
@@ -270,6 +275,20 @@ export const opportunities = pgTable("opportunities", {
 	direccion: text("direccion"), // Customer address
 	rubros: text("rubros"), // JSON string with expense items (rubros)
 
+	// Credit Detail Approval (40% → 50%)
+	creditDetailApproved: boolean("credit_detail_approved").default(false),
+	creditDetailApprovedBy: text("credit_detail_approved_by").references(
+		() => user.id,
+	),
+	creditDetailApprovedAt: timestamp("credit_detail_approved_at"),
+
+	// Disbursement Approval (90% → 100%)
+	disbursementApproved: boolean("disbursement_approved").default(false),
+	disbursementApprovedBy: text("disbursement_approved_by").references(
+		() => user.id,
+	),
+	disbursementApprovedAt: timestamp("disbursement_approved_at"),
+
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -281,8 +300,7 @@ export const opportunities = pgTable("opportunities", {
 // Clients table
 export const clients = pgTable("clients", {
 	id: uuid("id").primaryKey().defaultRandom(),
-	companyId: uuid("company_id")
-		.references(() => companies.id),
+	companyId: uuid("company_id").references(() => companies.id),
 	opportunityId: uuid("opportunity_id").references(() => opportunities.id),
 	leadId: uuid("lead_id").references(() => leads.id),
 	contactPerson: text("contact_person").notNull(),

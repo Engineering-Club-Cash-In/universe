@@ -377,51 +377,155 @@ function RouteComponent() {
 										Agregar Cliente
 									</Button>
 								</DialogTrigger>
-							<DialogContent className="min-w-2xl max-w-3xl">
-								<DialogHeader>
-									<DialogTitle>Crear Nuevo Cliente</DialogTitle>
-								</DialogHeader>
-								<form
-									onSubmit={(e) => {
-										e.preventDefault();
-										e.stopPropagation();
-										void createClientForm.handleSubmit();
-									}}
-									className="space-y-4"
-								>
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createClientForm.Field name="companyId">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Empresa <span className="text-red-500">*</span>
-														</Label>
-														<Combobox
-															options={
-																companiesQuery.data?.map((company) => ({
-																	value: company.id,
-																	label: company.name,
-																})) || []
-															}
-															value={field.state.value ?? null}
-															onChange={(value) => field.handleChange(value)}
-															placeholder="Seleccionar empresa"
-															width="full"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
+								<DialogContent className="min-w-2xl max-w-3xl">
+									<DialogHeader>
+										<DialogTitle>Crear Nuevo Cliente</DialogTitle>
+									</DialogHeader>
+									<form
+										onSubmit={(e) => {
+											e.preventDefault();
+											e.stopPropagation();
+											void createClientForm.handleSubmit();
+										}}
+										className="space-y-4"
+									>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createClientForm.Field name="companyId">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Empresa <span className="text-red-500">*</span>
+															</Label>
+															<Combobox
+																options={
+																	companiesQuery.data?.map((company) => ({
+																		value: company.id,
+																		label: company.name,
+																	})) || []
+																}
+																value={field.state.value ?? null}
+																onChange={(value) => field.handleChange(value)}
+																placeholder="Seleccionar empresa"
+																width="full"
+															/>
+														</div>
+													)}
+												</createClientForm.Field>
+											</div>
+											<div>
+												<createClientForm.Field name="contactPerson">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Persona de Contacto{" "}
+																<span className="text-red-500">*</span>
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Nombre del contacto principal"
+															/>
+														</div>
+													)}
+												</createClientForm.Field>
+											</div>
 										</div>
+
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createClientForm.Field name="contractValue">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Valor del Contrato
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="number"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="0.00"
+															/>
+														</div>
+													)}
+												</createClientForm.Field>
+											</div>
+											<div>
+												<createClientForm.Field name="assignedTo">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Asignado a</Label>
+															<Combobox
+																options={
+																	crmUsersQuery.data?.map((user) => ({
+																		value: user.id,
+																		label: user.name,
+																	})) || []
+																}
+																value={field.state.value ?? null}
+																onChange={(value) => field.handleChange(value)}
+																placeholder="Seleccionar vendedor"
+																width="full"
+															/>
+														</div>
+													)}
+												</createClientForm.Field>
+											</div>
+										</div>
+
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createClientForm.Field name="startDate">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Fecha de Inicio
+															</Label>
+															<DatePicker
+																date={field.state.value}
+																onDateChange={(date) =>
+																	field.handleChange(date)
+																}
+																placeholder="Seleccionar fecha de inicio"
+															/>
+														</div>
+													)}
+												</createClientForm.Field>
+											</div>
+											<div>
+												<createClientForm.Field name="endDate">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Fecha de Fin</Label>
+															<DatePicker
+																date={field.state.value}
+																onDateChange={(date) =>
+																	field.handleChange(date)
+																}
+																placeholder="Seleccionar fecha de fin"
+															/>
+														</div>
+													)}
+												</createClientForm.Field>
+											</div>
+										</div>
+
 										<div>
-											<createClientForm.Field name="contactPerson">
+											<createClientForm.Field name="notes">
 												{(field) => (
 													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Persona de Contacto{" "}
-															<span className="text-red-500">*</span>
-														</Label>
-														<Input
+														<Label htmlFor={field.name}>Notas</Label>
+														<Textarea
 															id={field.name}
 															name={field.name}
 															value={field.state.value}
@@ -429,129 +533,33 @@ function RouteComponent() {
 															onChange={(e) =>
 																field.handleChange(e.target.value)
 															}
-															placeholder="Nombre del contacto principal"
+															placeholder="Notas adicionales sobre este cliente..."
+															rows={3}
 														/>
 													</div>
 												)}
 											</createClientForm.Field>
 										</div>
-									</div>
 
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createClientForm.Field name="contractValue">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Valor del Contrato
-														</Label>
-														<Input
-															id={field.name}
-															name={field.name}
-															type="number"
-															value={field.state.value}
-															onBlur={field.handleBlur}
-															onChange={(e) =>
-																field.handleChange(e.target.value)
-															}
-															placeholder="0.00"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-										<div>
-											<createClientForm.Field name="assignedTo">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Asignado a</Label>
-														<Combobox
-															options={
-																crmUsersQuery.data?.map((user) => ({
-																	value: user.id,
-																	label: user.name,
-																})) || []
-															}
-															value={field.state.value ?? null}
-															onChange={(value) => field.handleChange(value)}
-															placeholder="Seleccionar vendedor"
-															width="full"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-									</div>
-
-									<div className="grid grid-cols-2 gap-4">
-										<div>
-											<createClientForm.Field name="startDate">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Fecha de Inicio</Label>
-														<DatePicker
-															date={field.state.value}
-															onDateChange={(date) => field.handleChange(date)}
-															placeholder="Seleccionar fecha de inicio"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-										<div>
-											<createClientForm.Field name="endDate">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>Fecha de Fin</Label>
-														<DatePicker
-															date={field.state.value}
-															onDateChange={(date) => field.handleChange(date)}
-															placeholder="Seleccionar fecha de fin"
-														/>
-													</div>
-												)}
-											</createClientForm.Field>
-										</div>
-									</div>
-
-									<div>
-										<createClientForm.Field name="notes">
-											{(field) => (
-												<div className="space-y-2">
-													<Label htmlFor={field.name}>Notas</Label>
-													<Textarea
-														id={field.name}
-														name={field.name}
-														value={field.state.value}
-														onBlur={field.handleBlur}
-														onChange={(e) => field.handleChange(e.target.value)}
-														placeholder="Notas adicionales sobre este cliente..."
-														rows={3}
-													/>
-												</div>
+										<createClientForm.Subscribe>
+											{(state) => (
+												<Button
+													type="submit"
+													className="w-full"
+													disabled={
+														!state.canSubmit ||
+														state.isSubmitting ||
+														createClientMutation.isPending
+													}
+												>
+													{state.isSubmitting || createClientMutation.isPending
+														? "Creando..."
+														: "Crear Cliente"}
+												</Button>
 											)}
-										</createClientForm.Field>
-									</div>
-
-									<createClientForm.Subscribe>
-										{(state) => (
-											<Button
-												type="submit"
-												className="w-full"
-												disabled={
-													!state.canSubmit ||
-													state.isSubmitting ||
-													createClientMutation.isPending
-												}
-											>
-												{state.isSubmitting || createClientMutation.isPending
-													? "Creando..."
-													: "Crear Cliente"}
-											</Button>
-										)}
-									</createClientForm.Subscribe>
-								</form>
-							</DialogContent>
+										</createClientForm.Subscribe>
+									</form>
+								</DialogContent>
 							</Dialog>
 						)}
 					</div>
@@ -636,7 +644,9 @@ function RouteComponent() {
 														).toLocaleString()}
 													</div>
 												) : (
-													<span className="text-muted-foreground">Sin valor</span>
+													<span className="text-muted-foreground">
+														Sin valor
+													</span>
 												)}
 											</TableCell>
 											<TableCell>

@@ -17,7 +17,7 @@ type EditField =
   | "dpi"
   | "phone"
   | "address"
-  | "banco"
+  | "banco_id"
   | "tipo_cuenta"
   | "numero_cuenta"
   | null;
@@ -30,7 +30,7 @@ export const InfoPerson = () => {
   const [tipoCuenta, setTipoCuenta] = useState("");
   const [numeroCuenta, setNumeroCuenta] = useState("");
   const [editingField, setEditingField] = useState<EditField>(null);
-  const { token, user } = useAuth();
+  const { user } = useAuth();
 
   const isInvestor = user?.role === "INVESTOR";
 
@@ -41,8 +41,7 @@ export const InfoPerson = () => {
     refetch: refetchClient,
   } = useQuery({
     queryKey: ["profile", user?.id],
-    queryFn: () =>
-      getProfile(user?.email || "", user?.dpi || "", token || null),
+    queryFn: () => getProfile(user?.email || "", user?.dpi || ""),
     enabled: !!user?.id && !isInvestor,
   });
 
@@ -64,7 +63,6 @@ export const InfoPerson = () => {
     enabled: isInvestor,
   });
 
-
   const profileData: any = isInvestor ? investorProfile : clientProfile;
   const isLoading = isInvestor ? isLoadingInvestor : isLoadingClient;
   const refetch = isInvestor ? refetchInvestor : refetchClient;
@@ -75,7 +73,7 @@ export const InfoPerson = () => {
       if (isInvestor) {
         // Datos de inversionista
         setDpi(profileData.dpi?.toString() || "");
-        setBanco(profileData.banco || "");
+        setBanco(profileData.banco_id || "");
         setTipoCuenta(profileData.tipo_cuenta || "");
         setNumeroCuenta(profileData.numero_cuenta || "");
       } else {
@@ -107,7 +105,7 @@ export const InfoPerson = () => {
         return phone;
       case "address":
         return address;
-      case "banco":
+      case "banco_id":
         return banco;
       case "tipo_cuenta":
         return tipoCuenta;
@@ -292,14 +290,14 @@ export const InfoPerson = () => {
                   onChange={(value) => setBanco(value)}
                   options={
                     bancos?.map((b) => ({
-                      value: b.codigo,
+                      value: b.banco_id.toString(),
                       label: b.nombre,
                     })) || []
                   }
                   placeholder="Selecciona tu banco"
                 />
                 <button
-                  onClick={() => handleOpenModal("banco")}
+                  onClick={() => handleOpenModal("banco_id")}
                   className="text-primary text-sm mt-2 hover:underline flex items-center gap-1"
                 >
                   <IconEdit />

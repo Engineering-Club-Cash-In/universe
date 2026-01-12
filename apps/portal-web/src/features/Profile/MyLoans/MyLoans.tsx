@@ -19,13 +19,13 @@ export const MyLoans = () => {
   const { optionPayment, isModalOpen, setIsModalOpen } = useModalOptionsCall();
   const isMobile = useIsMobile();
   const { opportunities, setOpportunities } = useStoreProfile();
-  const { user, token: sessionToken } = useAuth();
+  const { user } = useAuth();
 
   // Query para obtener números SIFCO (con cache automático)
   const { data: sifcoNumbers, isLoading: isLoadingSifcoNumbers } = useQuery({
     queryKey: ["sifco-numbers", user?.email],
-    queryFn: () => getNumbersSifco(user?.email ?? "", user?.dpi ?? "", sessionToken),
-    enabled: !!user?.email && !!sessionToken && opportunities.length === 0,
+    queryFn: () => getNumbersSifco(user?.email ?? "", user?.dpi ?? ""),
+    enabled: !!user?.email && opportunities.length === 0,
   });
 
   // Guardar números SIFCO en el store cuando se cargan

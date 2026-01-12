@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { authClient, type User } from "@/lib/auth";
 import { AuthContext } from "./useAuth";
+import { setAuthToken } from "./api/apiAuth";
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -20,8 +21,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // eslint-disable-next-line 
       // @ts-ignore
       setUser(data.user);
+      // Sincronizar token con el cliente API
+      setAuthToken(data.session?.token || null);
     } else {
       setUser(null);
+      setAuthToken(null);
     }
   }, [data]);
 

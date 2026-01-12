@@ -6,7 +6,7 @@ import { createInvestor, getBancos } from "../services/investorService";
 import { useAuth } from "@/lib";
 import { authClient } from "@/lib/auth";
 
-type FieldType = 'dpi' | 'phone' | 'address' | 'banco' | 'tipo_cuenta' | 'numero_cuenta';
+type FieldType = 'dpi' | 'phone' | 'address' | 'banco_id' | 'tipo_cuenta' | 'numero_cuenta';
 
 interface ModalConfirmChangeProps {
   isOpen: boolean;
@@ -27,15 +27,15 @@ export const ModalConfirmChange = ({
 }: ModalConfirmChangeProps) => {
   const [tempValue, setTempValue] = useState(initialValue);
   const [serverError, setServerError] = useState<string>("");
-  const { token, user } = useAuth();
+  const { user } = useAuth();
 
-  const isInvestorField = field && ['banco', 'tipo_cuenta', 'numero_cuenta'].includes(field);
+  const isInvestorField = field && ['banco_id', 'tipo_cuenta', 'numero_cuenta'].includes(field);
 
   // Obtener catálogo de bancos solo si el campo es banco
   const { data: bancos } = useQuery({
     queryKey: ["bancos"],
     queryFn: getBancos,
-    enabled: isOpen && field === 'banco',
+    enabled: isOpen && field === 'banco_id',
   });
 
   // Actualizar tempValue cuando cambia initialValue
@@ -59,7 +59,7 @@ export const ModalConfirmChange = ({
         };
 
         // Solo enviar el campo que se está actualizando
-        if (field === 'banco') payload.banco = value;
+        if (field === 'banco_id') payload.banco_id = Number(value);
         if (field === 'tipo_cuenta') payload.tipo_cuenta = value;
         if (field === 'numero_cuenta') payload.numero_cuenta = value;
 
@@ -86,7 +86,7 @@ export const ModalConfirmChange = ({
       if (field === 'phone') payload.phone = value;
       if (field === 'address') payload.address = value;
 
-      return updateLead(payload, token || null);
+      return updateLead(payload);
     },
     onSuccess: () => {
       setServerError("");
@@ -120,7 +120,7 @@ export const ModalConfirmChange = ({
         return 'Teléfono';
       case 'address':
         return 'Dirección';
-      case 'banco':
+      case 'banco_id':
         return 'Banco';
       case 'tipo_cuenta':
         return 'Tipo de Cuenta';
@@ -152,7 +152,7 @@ export const ModalConfirmChange = ({
         return 'Ingresa tu teléfono';
       case 'address':
         return 'Ingresa tu dirección completa';
-      case 'banco':
+      case 'banco_id':
         return 'Selecciona tu banco';
       case 'tipo_cuenta':
         return 'Selecciona tipo de cuenta';
@@ -181,17 +181,18 @@ export const ModalConfirmChange = ({
 
         <div className="mb-6">
           {/* Campo Select para Banco */}
-          {field === 'banco' && (
+          {field === 'banco_id' && (
             <Select
               variant="light"
               value={tempValue}
               onChange={(value) => {
+                console.log(value)
                 setTempValue(value);
                 if (serverError) setServerError("");
               }}
               options={
                 bancos?.map((b) => ({
-                  value: b.codigo,
+                  value: b.banco_id.toString(),
                   label: b.nombre,
                 })) || []
               }
@@ -217,7 +218,7 @@ export const ModalConfirmChange = ({
           )}
 
           {/* Campo Input para otros campos */}
-          {field !== 'banco' && field !== 'tipo_cuenta' && (
+          {field !== 'banco_id' && field !== 'tipo_cuenta' && (
             <InputIcon
               icon={getFieldIcon()}
               placeholder={getFieldPlaceholder()}
@@ -243,7 +244,7 @@ export const ModalConfirmChange = ({
             onClick={handleConfirmChange}
             isLoading={isSaving}
             size="sm"
-            className={!tempValue.trim() ? "opacity-50 cursor-not-allowed" : ""}
+            className={!tempValue?.trim() ? "opacity-50 cursor-not-allowed" : ""}
           >
             {isSaving ? "Guardando..." : "Confirmar"}
           </Button>

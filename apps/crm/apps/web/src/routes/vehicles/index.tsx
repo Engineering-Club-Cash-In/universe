@@ -108,13 +108,7 @@ function VehiclesDashboard() {
 				status: filterStatus !== "all" ? filterStatus : undefined,
 			},
 		}),
-		queryKey: [
-			"getVehicles",
-			page,
-			pageSize,
-			debouncedSearch,
-			filterStatus,
-		],
+		queryKey: ["getVehicles", page, pageSize, debouncedSearch, filterStatus],
 	});
 	const { data: statistics } = useQuery(
 		orpc.getVehicleStatistics.queryOptions(),

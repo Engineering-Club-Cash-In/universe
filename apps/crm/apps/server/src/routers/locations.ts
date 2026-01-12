@@ -82,7 +82,10 @@ export const locationsRouter = {
 			{ departamento: "Sacatepéquez", municipio: "Ciudad Vieja" },
 			{ departamento: "Sacatepéquez", municipio: "San Miguel Dueñas" },
 			{ departamento: "Sacatepéquez", municipio: "Alotenango" },
-			{ departamento: "Sacatepéquez", municipio: "San Antonio Aguas Calientes" },
+			{
+				departamento: "Sacatepéquez",
+				municipio: "San Antonio Aguas Calientes",
+			},
 			{ departamento: "Sacatepéquez", municipio: "Santa Catarina Barahona" },
 
 			// Escuintla
@@ -159,7 +162,10 @@ export const locationsRouter = {
 			{ departamento: "Alta Verapaz", municipio: "Cahabón" },
 			{ departamento: "Alta Verapaz", municipio: "Chisec" },
 			{ departamento: "Alta Verapaz", municipio: "Chahal" },
-			{ departamento: "Alta Verapaz", municipio: "Fray Bartolomé de las Casas" },
+			{
+				departamento: "Alta Verapaz",
+				municipio: "Fray Bartolomé de las Casas",
+			},
 			{ departamento: "Alta Verapaz", municipio: "Santa Catalina La Tinta" },
 			{ departamento: "Alta Verapaz", municipio: "Raxruhá" },
 
@@ -334,13 +340,19 @@ export const locationsRouter = {
 			{ departamento: "Huehuetenango", municipio: "La Libertad" },
 			{ departamento: "Huehuetenango", municipio: "La Democracia" },
 			{ departamento: "Huehuetenango", municipio: "San Miguel Acatán" },
-			{ departamento: "Huehuetenango", municipio: "San Rafael La Independencia" },
+			{
+				departamento: "Huehuetenango",
+				municipio: "San Rafael La Independencia",
+			},
 			{ departamento: "Huehuetenango", municipio: "Todos Santos Cuchumatán" },
 			{ departamento: "Huehuetenango", municipio: "San Juan Atitán" },
 			{ departamento: "Huehuetenango", municipio: "Santa Eulalia" },
 			{ departamento: "Huehuetenango", municipio: "San Mateo Ixtatán" },
 			{ departamento: "Huehuetenango", municipio: "Colotenango" },
-			{ departamento: "Huehuetenango", municipio: "San Sebastián Huehuetenango" },
+			{
+				departamento: "Huehuetenango",
+				municipio: "San Sebastián Huehuetenango",
+			},
 			{ departamento: "Huehuetenango", municipio: "Tectitán" },
 			{ departamento: "Huehuetenango", municipio: "Concepción Huista" },
 			{ departamento: "Huehuetenango", municipio: "San Juan Ixcoy" },
@@ -403,7 +415,10 @@ export const locationsRouter = {
 			{ departamento: "Suchitepéquez", municipio: "San Francisco Zapotitlán" },
 			{ departamento: "Suchitepéquez", municipio: "San Bernardino" },
 			{ departamento: "Suchitepéquez", municipio: "San José El Ídolo" },
-			{ departamento: "Suchitepéquez", municipio: "Santo Domingo Suchitepéquez" },
+			{
+				departamento: "Suchitepéquez",
+				municipio: "Santo Domingo Suchitepéquez",
+			},
 			{ departamento: "Suchitepéquez", municipio: "San Lorenzo" },
 			{ departamento: "Suchitepéquez", municipio: "Samayac" },
 			{ departamento: "Suchitepéquez", municipio: "San Pablo Jocopilas" },
@@ -433,6 +448,9 @@ export const locationsRouter = {
 
 		await db.insert(guatemalaLocations).values(locations);
 
-		return { message: "Ubicaciones cargadas exitosamente", count: locations.length };
+		return {
+			message: "Ubicaciones cargadas exitosamente",
+			count: locations.length,
+		};
 	}),
 };

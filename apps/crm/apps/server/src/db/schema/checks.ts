@@ -1,10 +1,4 @@
-import {
-	decimal,
-	pgTable,
-	text,
-	timestamp,
-	uuid,
-} from "drizzle-orm/pg-core";
+import { decimal, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { user } from "./auth";
 import { opportunities } from "./crm";
 import { quotations } from "./quotations";

@@ -3,12 +3,12 @@ import { z } from "zod";
 import { db } from "../db";
 import {
 	carteraBackReferences,
+	type NewCarteraBackReference,
 	renapInfo,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
 	vehicles,
-	type NewCarteraBackReference,
 } from "../db/schema";
 import { user } from "../db/schema/auth";
 import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
@@ -38,9 +38,9 @@ import {
 	validateFile,
 } from "../lib/storage";
 import {
+	type CreateCreditoResult,
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
-	type CreateCreditoResult,
 } from "../services/cartera-back-integration";
 
 export const crmRouter = {
@@ -779,7 +779,16 @@ export const crmRouter = {
 				// Additional fields
 				seguro: z.number().optional(),
 				gps: z.number().optional(),
-				categoria: z.enum(["Contraseña", "CV Vehículo", "CV Vehículo nuevo", "Fiduciario", "Hipotecario", "Vehículo"]).optional(),
+				categoria: z
+					.enum([
+						"Contraseña",
+						"CV Vehículo",
+						"CV Vehículo nuevo",
+						"Fiduciario",
+						"Hipotecario",
+						"Vehículo",
+					])
+					.optional(),
 				nit: z.string().optional(),
 				royalti: z.number().optional(),
 				porcentajeRoyalti: z.string().optional(),
@@ -792,7 +801,19 @@ export const crmRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			const { id, assignedTo, stageChangeReason, seguro, gps, royalti, porcentajeRoyalti, reserva, membresiaPago, direccion, ...updateData } = input;
+			const {
+				id,
+				assignedTo,
+				stageChangeReason,
+				seguro,
+				gps,
+				royalti,
+				porcentajeRoyalti,
+				reserva,
+				membresiaPago,
+				direccion,
+				...updateData
+			} = input;
 
 			// Get current opportunity to check for stage changes
 			const currentOpportunity = await db
@@ -816,7 +837,7 @@ export const crmRouter = {
 				lead = leadOption[0];
 			}
 
-			let numeroSifco: string | undefined = undefined;
+			let numeroSifco: string | undefined;
 
 			// Validate stage transitions
 			if (input.stageId) {
@@ -870,8 +891,6 @@ export const crmRouter = {
 					if (!opp.value && !input.value)
 						missingFields.push("valor del crédito");
 
-
-
 					// Credit terms
 					const numeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
 					const tasaInteres = input.tasaInteres ?? opp.tasaInteres;
@@ -885,28 +904,38 @@ export const crmRouter = {
 					if (!fechaInicio) missingFields.push("fecha de inicio del contrato");
 					if (!diaPagoMensual) missingFields.push("día de pago mensual");
 
-
 					// Additional credit fields
 					const direccion = input.direccion ?? opp.direccion;
-					const seguro = input.seguro ?? (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
-					const gps = input.gps ?? (opp.gps ? Number.parseFloat(opp.gps) : undefined);
-					const reserva = input.reserva ?? (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
+					const seguro =
+						input.seguro ??
+						(opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
+					const gps =
+						input.gps ?? (opp.gps ? Number.parseFloat(opp.gps) : undefined);
+					const reserva =
+						input.reserva ??
+						(opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
 					const categoria = input.categoria ?? opp.categoria;
 					const nit = input.nit ?? opp.nit;
 					const asesorId = input.asesorId ?? opp.asesorId;
 					const inversionistas = input.inversionistas ?? opp.inversionistas;
 
 					if (!direccion) missingFields.push("dirección del cliente");
-					if (seguro === undefined || seguro === null || seguro <= 0) missingFields.push("seguro (debe ser mayor a 0)");
-					if (gps === undefined || gps === null || gps <= 0) missingFields.push("GPS (debe ser mayor a 0)");
-					if (reserva === undefined || reserva === null || reserva <= 0) missingFields.push("reserva (debe ser mayor a 0)");
+					if (seguro === undefined || seguro === null || seguro <= 0)
+						missingFields.push("seguro (debe ser mayor a 0)");
+					if (gps === undefined || gps === null || gps <= 0)
+						missingFields.push("GPS (debe ser mayor a 0)");
+					if (reserva === undefined || reserva === null || reserva <= 0)
+						missingFields.push("reserva (debe ser mayor a 0)");
 					if (!categoria) missingFields.push("categoría del crédito");
 					if (!nit) missingFields.push("NIT del cliente");
 					if (!asesorId) missingFields.push("asesor");
-					if (!inversionistas || (typeof inversionistas === 'string' && JSON.parse(inversionistas).length === 0)) {
+					if (
+						!inversionistas ||
+						(typeof inversionistas === "string" &&
+							JSON.parse(inversionistas).length === 0)
+					) {
 						missingFields.push("inversionistas (debe haber al menos uno)");
 					}
-
 
 					if (missingFields.length > 0) {
 						console.log("Missing fields for 100% closure:", missingFields);
@@ -917,8 +946,9 @@ export const crmRouter = {
 
 					// If moving to 100%, create client and contract
 					if (targetStage[0]?.closurePercentage === 100) {
-
-						console.log("All required fields present. Creating client and contract...");
+						console.log(
+							"All required fields present. Creating client and contract...",
+						);
 						// All validations passed - create client and contract
 						const opp = currentOpportunity[0];
 						const finalVehicleId = input.vehicleId ?? opp.vehicleId;
@@ -961,7 +991,9 @@ export const crmRouter = {
 						numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
 						// Calculate contract end date
 						const fechaInicioDate = new Date(finalFechaInicio as string);
-						console.log(`[CRM] Generating new credit with number: ${numeroSifco}`);
+						console.log(
+							`[CRM] Generating new credit with number: ${numeroSifco}`,
+						);
 
 						// Integrate with cartera-back (dual-write)
 						// IMPORTANTE: Si cartera-back está habilitado, es OBLIGATORIO que funcione
@@ -970,38 +1002,71 @@ export const crmRouter = {
 						let carteraBackError: string | undefined;
 						let creditoResult: CreateCreditoResult | undefined;
 
-						console.log(`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`);
+						console.log(
+							`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`,
+						);
 
 						if (isCarteraBackEnabled()) {
-
 							const [renapInfoOpp] = await db
-									.select()
-									.from(renapInfo)
-									.where(eq(renapInfo.dpi, lead.dpi ?? ""))
-									.limit(1);
+								.select()
+								.from(renapInfo)
+								.where(eq(renapInfo.dpi, lead.dpi ?? ""))
+								.limit(1);
 
+							console.log(
+								`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`,
+							);
 
-							console.log(`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`);
-							
 							// TODO: Get or create usuario_id in cartera-back
 							// For now, we'll use a placeholder (this needs to be implemented)
 							const usuarioId = 1; // PLACEHOLDER - needs proper implementation
 
 							// Create new credit - Si falla, debe detener todo el proceso
-							console.log(`[CRM] Creating credit in cartera-back: ${numeroSifco}`);
+							console.log(
+								`[CRM] Creating credit in cartera-back: ${numeroSifco}`,
+							);
 
 							// Valores finales: primero intenta del input, si no del opp guardado
-							const finalSeguro = seguro !== undefined ? seguro : (opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
-							const finalGps = gps !== undefined ? gps : (opp.gps ? Number.parseFloat(opp.gps) : undefined);
-							const finalCategoria = input.categoria || opp.categoria || undefined;
+							const finalSeguro =
+								seguro !== undefined
+									? seguro
+									: opp.seguro
+										? Number.parseFloat(opp.seguro)
+										: undefined;
+							const finalGps =
+								gps !== undefined
+									? gps
+									: opp.gps
+										? Number.parseFloat(opp.gps)
+										: undefined;
+							const finalCategoria =
+								input.categoria || opp.categoria || undefined;
 							const finalNit = input.nit || opp.nit || undefined;
-							const finalRoyalti = royalti !== undefined ? royalti : (opp.royalti ? Number.parseFloat(opp.royalti) : undefined);
+							const finalRoyalti =
+								royalti !== undefined
+									? royalti
+									: opp.royalti
+										? Number.parseFloat(opp.royalti)
+										: undefined;
 							const finalPorcentajeRoyalti = porcentajeRoyalti
 								? Number.parseFloat(porcentajeRoyalti)
-								: (opp.porcentajeRoyalti ? Number.parseFloat(opp.porcentajeRoyalti) : undefined);
-							const finalReserva = reserva !== undefined ? reserva : (opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
-							const finalMembresiaPago = membresiaPago !== undefined ? membresiaPago : (opp.membresiaPago ? Number.parseFloat(opp.membresiaPago) : undefined);
-							const finalInversionistas = input.inversionistas || opp.inversionistas || undefined;
+								: opp.porcentajeRoyalti
+									? Number.parseFloat(opp.porcentajeRoyalti)
+									: undefined;
+							const finalReserva =
+								reserva !== undefined
+									? reserva
+									: opp.reserva
+										? Number.parseFloat(opp.reserva)
+										: undefined;
+							const finalMembresiaPago =
+								membresiaPago !== undefined
+									? membresiaPago
+									: opp.membresiaPago
+										? Number.parseFloat(opp.membresiaPago)
+										: undefined;
+							const finalInversionistas =
+								input.inversionistas || opp.inversionistas || undefined;
 							const finalRubros = input.rubros || opp.rubros || undefined;
 							const finalAsesorId = input.asesorId || opp.asesorId || usuarioId; // Usa el del input, o el guardado, o el placeholder
 							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
@@ -1011,12 +1076,16 @@ export const crmRouter = {
 								opportunityId: opp.id,
 								// contratoFinanciamientoId: newContract[0].id,
 								userId: context.userId,
-								usuario_id: lead ? `${lead.firstName} ${lead.lastName}` : "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
+								usuario_id: lead
+									? `${lead.firstName} ${lead.lastName}`
+									: "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
 								asesor_id: finalAsesorId,
 								numero_credito_sifco: finalNumeroSifco,
 								direccion: finalDireccion,
 								capital: Number.parseFloat(finalValue as string),
-								porcentaje_interes: Number.parseFloat(finalTasaInteres as string),
+								porcentaje_interes: Number.parseFloat(
+									finalTasaInteres as string,
+								),
 								plazo: finalNumeroCuotas as number,
 								cuota: Number.parseFloat(finalCuotaMensual as string),
 								tipoCredito: opp.creditType || "autocompra",
@@ -1031,10 +1100,16 @@ export const crmRouter = {
 								porcentaje_royalti: finalPorcentajeRoyalti,
 								reserva: finalReserva,
 								membresias_pago: finalMembresiaPago,
-								inversionistas: finalInversionistas ? JSON.parse(finalInversionistas) : undefined,
+								inversionistas: finalInversionistas
+									? JSON.parse(finalInversionistas)
+									: undefined,
 								rubros: finalRubros ? JSON.parse(finalRubros) : undefined,
-								municipio: renapInfoOpp ? renapInfoOpp.municipalityBornedIn : undefined,
-								departamento: renapInfoOpp ? renapInfoOpp.departmentBornedIn : undefined,
+								municipio: renapInfoOpp
+									? renapInfoOpp.municipalityBornedIn
+									: undefined,
+								departamento: renapInfoOpp
+									? renapInfoOpp.departmentBornedIn
+									: undefined,
 								codigo_postal: "01001", // Placeholder until we have postal code data
 								pais: renapInfoOpp ? renapInfoOpp.bornedIn : undefined,
 							});
@@ -1057,17 +1132,11 @@ export const crmRouter = {
 							);
 						}
 
-
-
 						// Check if client already exists for this lead/company
 						const existingClient = await db
 							.select()
 							.from(clients)
-							.where(
-								and(
-									eq(clients.opportunityId, opp.id),
-								),
-							)
+							.where(and(eq(clients.opportunityId, opp.id)))
 							.limit(1);
 
 						let clientId: string;
@@ -1094,7 +1163,6 @@ export const crmRouter = {
 							clientId = newClient[0].id;
 						}
 
-						
 						const fechaVencimiento = new Date(fechaInicioDate);
 						fechaVencimiento.setMonth(
 							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
@@ -1119,7 +1187,6 @@ export const crmRouter = {
 							})
 							.returning();
 
-
 						// Store reference in CRM
 						const referenceData: NewCarteraBackReference = {
 							opportunityId: opp.id,
@@ -1133,8 +1200,6 @@ export const crmRouter = {
 
 						await db.insert(carteraBackReferences).values(referenceData);
 
-						
-						
 						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
 						// When cartera-back is enabled, installments are managed there
 						if (!isCarteraBackEnabled()) {
@@ -1244,9 +1309,13 @@ export const crmRouter = {
 					...(seguro !== undefined && { seguro: String(seguro) }),
 					...(gps !== undefined && { gps: String(gps) }),
 					...(royalti !== undefined && { royalti: String(royalti) }),
-					...(porcentajeRoyalti !== undefined && { porcentajeRoyalti: String(porcentajeRoyalti) }),
+					...(porcentajeRoyalti !== undefined && {
+						porcentajeRoyalti: String(porcentajeRoyalti),
+					}),
 					...(reserva !== undefined && { reserva: String(reserva) }),
-					...(membresiaPago !== undefined && { membresiaPago: String(membresiaPago) }),
+					...(membresiaPago !== undefined && {
+						membresiaPago: String(membresiaPago),
+					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
 					...(direccion !== undefined && { direccion }),
 					...(numeroSifco !== undefined && { numeroSifco }),
@@ -1764,8 +1833,7 @@ export const crmRouter = {
 			conditions.push(eq(clients.assignedTo, context.userId));
 		}
 
-		const whereClause =
-			conditions.length > 0 ? and(...conditions) : undefined;
+		const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
 		const allClients = await db
 			.select({
@@ -2358,7 +2426,10 @@ export const crmRouter = {
 					.limit(1);
 			}
 
-			console.log("[getAnalysisChecklist] creditAnalysisExists:", creditAnalysisExists);
+			console.log(
+				"[getAnalysisChecklist] creditAnalysisExists:",
+				creditAnalysisExists,
+			);
 
 			// Create initial checklist structure
 			const checklistData = {
@@ -2924,12 +2995,36 @@ export const crmRouter = {
 
 			// Calculate progress
 			const items = [
-				{ key: "traspasoRealizado", label: "Traspaso del vehículo realizado", completed: checklist.traspasoRealizado },
-				{ key: "documentosEnviadosAsesor", label: "Documentos enviados al asesor para firmas del vendedor", completed: checklist.documentosEnviadosAsesor },
-				{ key: "documentosFirmadosRecibidos", label: "Documentos firmados recibidos", completed: checklist.documentosFirmadosRecibidos },
-				{ key: "copiaLlaveRecibida", label: "Copia de llave recibida", completed: checklist.copiaLlaveRecibida },
-				{ key: "engancheValidado", label: "Enganche completo validado", completed: checklist.engancheValidado },
-				{ key: "listoDesembolsar", label: "Listo para desembolsar", completed: checklist.listoDesembolsar },
+				{
+					key: "traspasoRealizado",
+					label: "Traspaso del vehículo realizado",
+					completed: checklist.traspasoRealizado,
+				},
+				{
+					key: "documentosEnviadosAsesor",
+					label: "Documentos enviados al asesor para firmas del vendedor",
+					completed: checklist.documentosEnviadosAsesor,
+				},
+				{
+					key: "documentosFirmadosRecibidos",
+					label: "Documentos firmados recibidos",
+					completed: checklist.documentosFirmadosRecibidos,
+				},
+				{
+					key: "copiaLlaveRecibida",
+					label: "Copia de llave recibida",
+					completed: checklist.copiaLlaveRecibida,
+				},
+				{
+					key: "engancheValidado",
+					label: "Enganche completo validado",
+					completed: checklist.engancheValidado,
+				},
+				{
+					key: "listoDesembolsar",
+					label: "Listo para desembolsar",
+					completed: checklist.listoDesembolsar,
+				},
 			];
 
 			const completedCount = items.filter((item) => item.completed).length;
@@ -2981,9 +3076,26 @@ export const crmRouter = {
 				);
 			}
 
-			// Update the specific item
+			// Security: Explicit whitelist mapping for column names (defense-in-depth)
+			// Even though Zod validates input.itemKey, we use an explicit mapping
+			// to ensure only valid column names are used in the database update
+			const validColumnKeys = {
+				traspasoRealizado: "traspasoRealizado",
+				documentosEnviadosAsesor: "documentosEnviadosAsesor",
+				documentosFirmadosRecibidos: "documentosFirmadosRecibidos",
+				copiaLlaveRecibida: "copiaLlaveRecibida",
+				engancheValidado: "engancheValidado",
+				listoDesembolsar: "listoDesembolsar",
+			} as const;
+
+			const columnKey = validColumnKeys[input.itemKey];
+			if (!columnKey) {
+				throw new Error("Clave de item inválida");
+			}
+
+			// Update the specific item using the validated column key
 			const updateData: Record<string, boolean | Date> = {
-				[input.itemKey]: input.completed,
+				[columnKey]: input.completed,
 				updatedAt: new Date(),
 			};
 
@@ -3000,7 +3112,8 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				notes: z.string(),
+				// Security: Limit notes length to prevent DoS and apply trim
+				notes: z.string().max(5000).trim(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -3148,7 +3261,9 @@ export const crmRouter = {
 		// Get lead info for each opportunity
 		const result = await Promise.all(
 			opps.map(async (opp) => {
-				let lead: { firstName: string; lastName: string; phone: string | null } | undefined;
+				let lead:
+					| { firstName: string; lastName: string; phone: string | null }
+					| undefined;
 				if (opp.leadId) {
 					const [leadResult] = await db
 						.select({

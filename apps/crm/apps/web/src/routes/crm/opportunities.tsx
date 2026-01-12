@@ -2165,12 +2165,6 @@ function RouteComponent() {
 													vehicle: selectedOpportunity.vehicle,
 												}}
 												quotation={latestQuotation}
-												vehicleInspection={
-													selectedOpportunity.vehicle?.latestInspection || null
-												}
-												creditAnalysis={
-													selectedOpportunity.lead?.creditAnalysis || null
-												}
 											/>
 										);
 									})()}
@@ -3329,6 +3323,36 @@ function RouteComponent() {
 									</editOpportunityForm.Field>
 								</div>
 							</div>
+
+							<editOpportunityForm.Subscribe>
+								{(state) => (
+									<div className="flex gap-3">
+										<Button
+											type="button"
+											variant="outline"
+											className="flex-1"
+											onClick={() => setIsEditDialogOpen(false)}
+										>
+											Cancelar
+										</Button>
+										<Button
+											type="submit"
+											className="flex-1"
+											disabled={
+												!state.canSubmit ||
+												state.isSubmitting ||
+												updateOpportunityMutation.isPending
+											}
+										>
+											{state.isSubmitting ||
+											updateOpportunityMutation.isPending
+												? "Actualizando..."
+												: "Actualizar Oportunidad"}
+										</Button>
+									</div>
+								)}
+							</editOpportunityForm.Subscribe>
+
 						</form>
 
 						{/* Notes Timeline */}

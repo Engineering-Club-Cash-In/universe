@@ -608,6 +608,20 @@ export const vehiclesRouter = {
 			};
 		}),
 
+	// Get latest inspection by vehicle ID
+	getLatestInspectionByVehicleId: protectedProcedure
+		.input(z.object({ vehicleId: z.string().uuid() }))
+		.handler(async ({ input }) => {
+			const [inspection] = await db
+				.select()
+				.from(vehicleInspections)
+				.where(eq(vehicleInspections.vehicleId, input.vehicleId))
+				.orderBy(desc(vehicleInspections.inspectionDate))
+				.limit(1);
+
+			return inspection || null;
+		}),
+
 	// Get statistics
 	getStatistics: publicProcedure.handler(async () => {
 		const allVehicles = await db.select().from(vehicles);

@@ -355,7 +355,7 @@ export function CreditDetailView({
 	);
 
 	// Gastos de la cotización
-	const gps = Number.parseFloat(opportunity.gps || quotation?.gpsCost || "0");
+	const gps = Number.parseFloat(quotation?.gpsCost || "0");
 	const seguro = Number.parseFloat(
 		opportunity.seguro || quotation?.insuranceCost || "0",
 	);

@@ -282,6 +282,13 @@ export const opportunities = pgTable("opportunities", {
 	),
 	creditDetailApprovedAt: timestamp("credit_detail_approved_at"),
 
+	// Disbursement Approval (90% → 100%)
+	disbursementApproved: boolean("disbursement_approved").default(false),
+	disbursementApprovedBy: text("disbursement_approved_by").references(
+		() => user.id,
+	),
+	disbursementApprovedAt: timestamp("disbursement_approved_at"),
+
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),

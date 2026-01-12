@@ -148,3 +148,43 @@ export const analysisChecklists = pgTable("analysis_checklists", {
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Disbursement Verification Type enum - Tipos de verificaciones para desembolso (90% → 100%)
+export const disbursementVerificationTypeEnum = pgEnum(
+	"disbursement_verification_type",
+	[
+		"traspaso_realizado", // Traspaso del vehículo realizado
+		"documentos_enviados_asesor", // Documentos enviados al asesor para firmas del vendedor
+		"documentos_firmados_recibidos", // Documentos firmados recibidos
+		"copia_llave_recibida", // Copia de llave recibida
+		"enganche_validado", // Enganche completo validado
+		"listo_desembolsar", // Listo para desembolsar
+	],
+);
+
+// Disbursement Checklists - Estado completo del checklist de desembolso (90% → 100%)
+export const disbursementChecklists = pgTable("disbursement_checklists", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	opportunityId: uuid("opportunity_id")
+		.notNull()
+		.unique()
+		.references(() => opportunities.id, { onDelete: "cascade" }),
+	// Items del checklist
+	traspasoRealizado: boolean("traspaso_realizado").default(false),
+	documentosEnviadosAsesor: boolean("documentos_enviados_asesor").default(
+		false,
+	),
+	documentosFirmadosRecibidos: boolean("documentos_firmados_recibidos").default(
+		false,
+	),
+	copiaLlaveRecibida: boolean("copia_llave_recibida").default(false),
+	engancheValidado: boolean("enganche_validado").default(false),
+	listoDesembolsar: boolean("listo_desembolsar").default(false),
+	// Notas opcionales
+	notes: text("notes"),
+	// Metadata
+	completedBy: text("completed_by").references(() => user.id),
+	completedAt: timestamp("completed_at"),
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});

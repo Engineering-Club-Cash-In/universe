@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertCircle, CheckCircle, FileText, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle, FileText, XCircle, Wallet } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
+import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,7 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	Tooltip,
 	TooltipContent,
@@ -252,26 +254,44 @@ function AnalysisPage() {
 			<div className="mb-8">
 				<h1 className="font-bold text-3xl">Análisis de Documentación</h1>
 				<p className="mt-2 text-muted-foreground">
-					Revisa y aprueba las oportunidades en etapa de análisis
+					Revisa y aprueba las oportunidades en diferentes etapas
 				</p>
 			</div>
 
-			{opportunities.length === 0 ? (
-				<Alert>
-					<AlertCircle className="h-4 w-4" />
-					<AlertDescription>
-						No hay oportunidades pendientes de análisis en este momento.
-					</AlertDescription>
-				</Alert>
-			) : (
-				<Card>
-					<CardHeader>
-						<CardTitle>Oportunidades Pendientes</CardTitle>
-						<CardDescription>
-							{opportunities.length} oportunidad
-							{opportunities.length !== 1 ? "es" : ""} esperando revisión
-						</CardDescription>
-					</CardHeader>
+			<Tabs defaultValue="analysis" className="w-full">
+				<TabsList className="mb-6">
+					<TabsTrigger value="analysis" className="flex items-center gap-2">
+						<FileText className="h-4 w-4" />
+						Análisis (30% → 40%)
+						{opportunities.length > 0 && (
+							<Badge variant="secondary" className="ml-1">
+								{opportunities.length}
+							</Badge>
+						)}
+					</TabsTrigger>
+					<TabsTrigger value="disbursement" className="flex items-center gap-2">
+						<Wallet className="h-4 w-4" />
+						Desembolso (90% → 100%)
+					</TabsTrigger>
+				</TabsList>
+
+				<TabsContent value="analysis">
+					{opportunities.length === 0 ? (
+						<Alert>
+							<AlertCircle className="h-4 w-4" />
+							<AlertDescription>
+								No hay oportunidades pendientes de análisis en este momento.
+							</AlertDescription>
+						</Alert>
+					) : (
+						<Card>
+							<CardHeader>
+								<CardTitle>Oportunidades Pendientes de Análisis</CardTitle>
+								<CardDescription>
+									{opportunities.length} oportunidad
+									{opportunities.length !== 1 ? "es" : ""} esperando revisión de documentación
+								</CardDescription>
+							</CardHeader>
 					<CardContent>
 						<Table>
 							<TableHeader>
@@ -344,7 +364,13 @@ function AnalysisPage() {
 						</Table>
 					</CardContent>
 				</Card>
-			)}
+					)}
+				</TabsContent>
+
+				<TabsContent value="disbursement">
+					<DisbursementSection />
+				</TabsContent>
+			</Tabs>
 
 			{/* Dialog de aprobación/rechazo */}
 			<Dialog
@@ -450,6 +476,119 @@ function AnalysisPage() {
 					</div>
 				</DialogContent>
 			</Dialog>
+		</div>
+	);
+}
+
+// Component for disbursement section (90% → 100%)
+function DisbursementSection() {
+	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
+		null,
+	);
+
+	const { data: opportunities, isLoading, refetch } = useQuery({
+		queryKey: ["getOpportunitiesForDisbursement"],
+		queryFn: () => client.getOpportunitiesForDisbursement(),
+	});
+
+	if (isLoading) {
+		return (
+			<Card>
+				<CardContent className="flex items-center justify-center py-8">
+					<p className="text-muted-foreground">Cargando oportunidades...</p>
+				</CardContent>
+			</Card>
+		);
+	}
+
+	if (!opportunities || opportunities.length === 0) {
+		return (
+			<Alert>
+				<AlertCircle className="h-4 w-4" />
+				<AlertDescription>
+					No hay oportunidades pendientes de desembolso en este momento.
+				</AlertDescription>
+			</Alert>
+		);
+	}
+
+	return (
+		<div className="grid gap-6 lg:grid-cols-2">
+			{/* Lista de oportunidades */}
+			<Card>
+				<CardHeader>
+					<CardTitle>Oportunidades en 90%</CardTitle>
+					<CardDescription>
+						{opportunities.length} oportunidad
+						{opportunities.length !== 1 ? "es" : ""} pendientes de desembolso
+					</CardDescription>
+				</CardHeader>
+				<CardContent>
+					<div className="space-y-3">
+						{opportunities.map((opp) => (
+							<div
+								key={opp.id}
+								className={`cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/50 ${
+									selectedOpportunity === opp.id
+										? "border-primary bg-muted/50"
+										: ""
+								}`}
+								onClick={() => setSelectedOpportunity(opp.id)}
+							>
+								<div className="flex items-center justify-between">
+									<div>
+										<p className="font-medium">{opp.leadName}</p>
+										<p className="text-muted-foreground text-sm">
+											{opp.leadPhone}
+										</p>
+									</div>
+									<div className="text-right">
+										<p className="font-medium">
+											Q{Number(opp.value).toLocaleString()}
+										</p>
+										<div className="flex items-center gap-2">
+											{opp.hasChecklist ? (
+												<Badge
+													variant={
+														opp.checklistProgress === 100
+															? "default"
+															: "secondary"
+													}
+												>
+													{opp.checklistProgress}%
+												</Badge>
+											) : (
+												<Badge variant="outline">Sin iniciar</Badge>
+											)}
+										</div>
+									</div>
+								</div>
+							</div>
+						))}
+					</div>
+				</CardContent>
+			</Card>
+
+			{/* Checklist de desembolso */}
+			<div>
+				{selectedOpportunity ? (
+					<DisbursementChecklistView
+						opportunityId={selectedOpportunity}
+						onApproved={() => {
+							setSelectedOpportunity(null);
+							refetch();
+						}}
+					/>
+				) : (
+					<Card>
+						<CardContent className="flex items-center justify-center py-12">
+							<p className="text-muted-foreground">
+								Selecciona una oportunidad para ver el checklist de desembolso
+							</p>
+						</CardContent>
+					</Card>
+				)}
+			</div>
 		</div>
 	);
 }

@@ -72,9 +72,14 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 	page?: number;
 	perPage?: number;
 	cuotasAtrasadas?: number;
-	estado?: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | "PENDIENTE_CANCELACION" | "MOROSO";
-	nombre_usuario?:string;
-	numero_credito_sifco?:string;
+	estado?:
+		| "ACTIVO"
+		| "CANCELADO"
+		| "INCOBRABLE"
+		| "PENDIENTE_CANCELACION"
+		| "MOROSO";
+	nombre_usuario?: string;
+	numero_credito_sifco?: string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
 	email_cobrador?: string;
 }) {
@@ -90,19 +95,22 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 			...(params.cuotasAtrasadas !== undefined && {
 				cuotas_atrasadas: params.cuotasAtrasadas,
 			}),
-			...(params.nombre_usuario !== undefined && params.nombre_usuario !== "" && {
-				nombre_usuario: params.nombre_usuario,
-			}),
-			...(params.numero_credito_sifco !== undefined && params.numero_credito_sifco !== "" && {
-				numero_credito_sifco: params.numero_credito_sifco,
-			}),
+			...(params.nombre_usuario !== undefined &&
+				params.nombre_usuario !== "" && {
+					nombre_usuario: params.nombre_usuario,
+				}),
+			...(params.numero_credito_sifco !== undefined &&
+				params.numero_credito_sifco !== "" && {
+					numero_credito_sifco: params.numero_credito_sifco,
+				}),
 			...(params.time !== undefined && { time: params.time }),
-			...(params.email_cobrador !== undefined && params.email_cobrador !== "" && {
-				email_cobrador: params.email_cobrador,
-			}),
+			...(params.email_cobrador !== undefined &&
+				params.email_cobrador !== "" && {
+					email_cobrador: params.email_cobrador,
+				}),
 		})
 		.catch((error) => {
-			console.error(`[Cobros] Error obteniendo créditos:`, error);
+			console.error("[Cobros] Error obteniendo créditos:", error);
 			// Retornar respuesta vacía si falla
 			return {
 				data: [],
@@ -329,72 +337,73 @@ export const cobrosRouter = {
 		.handler(async ({ input }) => {
 			// Si la integración con Cartera-Back está habilitada, obtener datos directamente
 			if (isCarteraBackEnabled()) {
-			try {
-				// Usar mes=0 para obtener TODOS los créditos sin filtrar por mes
-				const mes = 0;
-				const anio = new Date().getFullYear();
+				try {
+					// Usar mes=0 para obtener TODOS los créditos sin filtrar por mes
+					const mes = 0;
+					const anio = new Date().getFullYear();
 
-				// Mapear filtro de estadoMora a parámetros de cartera-back
-				let cuotasAtrasadas: number | undefined;
-				let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
-				let nombre_usuario: string | undefined = input.nombreUsuario ?? undefined;
+					// Mapear filtro de estadoMora a parámetros de cartera-back
+					let cuotasAtrasadas: number | undefined;
+					let estadoCartera: "ACTIVO" | "CANCELADO" | "INCOBRABLE" | undefined;
+					const nombre_usuario: string | undefined =
+						input.nombreUsuario ?? undefined;
 
-				if (input.estadoMora) {
-					switch (input.estadoMora) {
-						case "al_dia":
-							cuotasAtrasadas = 0;
-							estadoCartera = "ACTIVO";
-							break;
-						case "mora_30":
-							cuotasAtrasadas = 1;
-							estadoCartera = "ACTIVO";
-							break;
-						case "mora_60":
-							cuotasAtrasadas = 2;
-							estadoCartera = "ACTIVO";
-							break;
-						case "mora_90":
-							cuotasAtrasadas = 3;
-							estadoCartera = "ACTIVO";
-							break;
-						case "mora_120":
-							// Más de 3 cuotas atrasadas (120+ días)
-							cuotasAtrasadas = 4;
-							estadoCartera = "ACTIVO";
-							break;
-						case "incobrable":
-							// Solo cambiar el estado, sin filtrar por cuotas
-							estadoCartera = "INCOBRABLE";
-							break;
-						case "completado":
-							// Solo cambiar el estado, sin filtrar por cuotas
-							estadoCartera = "CANCELADO";
-							break;
-						default:
-							// Sin filtro, mantener ACTIVO como predeterminado
-							estadoCartera = "ACTIVO";
+					if (input.estadoMora) {
+						switch (input.estadoMora) {
+							case "al_dia":
+								cuotasAtrasadas = 0;
+								estadoCartera = "ACTIVO";
+								break;
+							case "mora_30":
+								cuotasAtrasadas = 1;
+								estadoCartera = "ACTIVO";
+								break;
+							case "mora_60":
+								cuotasAtrasadas = 2;
+								estadoCartera = "ACTIVO";
+								break;
+							case "mora_90":
+								cuotasAtrasadas = 3;
+								estadoCartera = "ACTIVO";
+								break;
+							case "mora_120":
+								// Más de 3 cuotas atrasadas (120+ días)
+								cuotasAtrasadas = 4;
+								estadoCartera = "ACTIVO";
+								break;
+							case "incobrable":
+								// Solo cambiar el estado, sin filtrar por cuotas
+								estadoCartera = "INCOBRABLE";
+								break;
+							case "completado":
+								// Solo cambiar el estado, sin filtrar por cuotas
+								estadoCartera = "CANCELADO";
+								break;
+							default:
+								// Sin filtro, mantener ACTIVO como predeterminado
+								estadoCartera = "ACTIVO";
+						}
+					} else {
+						// Si no hay filtro, usar ACTIVO por defecto
+						estadoCartera = "ACTIVO";
 					}
-				} else {
-					// Si no hay filtro, usar ACTIVO por defecto
-					estadoCartera = "ACTIVO";
-				}
 
-				console.log(
-					`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}`,
-				);
+					console.log(
+						`[Cobros] Obteniendo créditos de Cartera-Back: mes=${mes} (todos), anio=${anio}, page=${Math.floor((input.offset || 0) / (input.limit || 50)) + 1}, perPage=${input.limit || 50}, cuotasAtrasadas=${cuotasAtrasadas}, estado=${estadoCartera}, time=${input.time}, emailCobrador=${input.emailCobrador}`,
+					);
 
-				// Obtener todos los créditos de Cartera-Back con los filtros
-				const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-					mes,
-					anio,
-					page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
-					perPage: input.limit || 50,
-					cuotasAtrasadas,
-					estado: estadoCartera,
-					nombre_usuario,
-					time: input.time,
-					email_cobrador: input.emailCobrador
-				});					// Validar que la respuesta tenga la estructura esperada
+					// Obtener todos los créditos de Cartera-Back con los filtros
+					const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
+						mes,
+						anio,
+						page: Math.floor((input.offset || 0) / (input.limit || 50)) + 1,
+						perPage: input.limit || 50,
+						cuotasAtrasadas,
+						estado: estadoCartera,
+						nombre_usuario,
+						time: input.time,
+						email_cobrador: input.emailCobrador,
+					}); // Validar que la respuesta tenga la estructura esperada
 					if (!creditosResponse || !creditosResponse.data) {
 						console.error(
 							"[Cobros] Respuesta inválida de Cartera-Back:",
@@ -477,7 +486,8 @@ export const cobrosRouter = {
 								estadoContrato,
 								montoFinanciado: credito.creditos.capital.toString(),
 								cuotaMensual: credito.creditos.cuota.toString(),
-								fechaProximoPago: credito.proxima_cuota?.fecha_vencimiento || null,
+								fechaProximoPago:
+									credito.proxima_cuota?.fecha_vencimiento || null,
 								responsableCobros: credito.asesores?.nombre || null,
 								casoCobroId: null,
 								estadoMora,
@@ -494,7 +504,7 @@ export const cobrosRouter = {
 
 					console.log(
 						`[Cobros] Mapeados ${contratos.length} contratos para el frontend`,
-					)
+					);
 
 					return {
 						data: contratos,
@@ -512,13 +522,12 @@ export const cobrosRouter = {
 				}
 			}
 
-
 			return {
 				data: [],
 				total: 0,
 				page: 0,
 				perPage: 0,
-				totalPages: 0
+				totalPages: 0,
 			};
 		}),
 
@@ -732,8 +741,11 @@ export const cobrosRouter = {
 					throw new Error("No tienes permiso para acceder a este caso");
 				}
 			}
-			console.log("Obteniendo historial de contactos para el caso:", input.casoCobroId);
-			console.log("userRole:", context.userRole, "userId:", context.userId); 
+			console.log(
+				"Obteniendo historial de contactos para el caso:",
+				input.casoCobroId,
+			);
+			console.log("userRole:", context.userRole, "userId:", context.userId);
 
 			const contactos = await db
 				.select({
@@ -907,7 +919,6 @@ export const cobrosRouter = {
 		.input(z.object({ numeroSifco: z.string() }))
 		.handler(async ({ input, context }) => {
 			try {
-
 				if (!input.numeroSifco) {
 					throw new Error("El número SIFCO es requerido");
 				}
@@ -934,70 +945,73 @@ export const cobrosRouter = {
 
 				// Verificar si el contrato tiene referencia a cartera-back
 				if (isCarteraBackEnabled()) {
-					
-						console.log(
-							"🔗 Contrato vinculado a cartera-back, obteniendo cuotas de allá",
+					console.log(
+						"🔗 Contrato vinculado a cartera-back, obteniendo cuotas de allá",
+					);
+
+					try {
+						// Obtener crédito completo de cartera-back
+						const creditoCompleto = await carteraBackClient.getCredito(
+							input.numeroSifco,
 						);
 
-						try {
-							// Obtener crédito completo de cartera-back
-							const creditoCompleto = await carteraBackClient.getCredito(
-								input.numeroSifco,
-							);
+						// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
+						const todasLasCuotas = [
+							...(creditoCompleto.cuotasPagadas || []),
+							...(creditoCompleto.cuotasPendientes || []),
+							...(creditoCompleto.cuotasAtrasadas || []),
+						].sort((a, b) => a.numero_cuota - b.numero_cuota);
 
-							// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
-							const todasLasCuotas = [
-								...(creditoCompleto.cuotasPagadas || []),
-								...(creditoCompleto.cuotasPendientes || []),
-								...(creditoCompleto.cuotasAtrasadas || []),
-							].sort((a, b) => a.numero_cuota - b.numero_cuota);
-
-							// Mapear a estructura esperada por frontend
-							return todasLasCuotas.map((cuota) => {
-								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
-								const montoPagadoReal = cuota.pagado && cuota.monto_boleta 
+						// Mapear a estructura esperada por frontend
+						return todasLasCuotas.map((cuota) => {
+							const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+							const montoPagadoReal =
+								cuota.pagado && cuota.monto_boleta
 									? Number(cuota.monto_boleta)
-									: cuota.pagado ? Number(creditoCompleto.credito.cuota) : null;
+									: cuota.pagado
+										? Number(creditoCompleto.credito.cuota)
+										: null;
 
-								return {
-									...cuota,
-									id: cuota.cuota_id.toString(),
-									numeroCuota: cuota.numero_cuota,
-									fechaVencimiento: cuota.fecha_vencimiento,
-									montoCuota: creditoCompleto.credito.cuota,
-									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
-									montoPagado: montoPagadoReal,
-									montoMora: montoMora.toString(),
-									estadoMora: cuota.pagado ? "pagado" : "pendiente",
-									diasMora: 0,
-									detallesPago: cuota.pagado ? {
-										abonoCapital: cuota.abono_capital || "0",
-										abonoInteres: cuota.abono_interes || "0",
-										abonoIva: cuota.abono_iva_12 || "0",
-										abonoSeguro: cuota.abono_seguro || "0",
-										abonoGps: cuota.abono_gps || "0",
-										abonoMembresias: cuota.abono_membresias || "0",
-										pagoMora: cuota.pago_mora || "0",
-										pagoOtros: cuota.pago_otros || "0",
-										capitalRestante: cuota.capital_restante || "0",
-										interesRestante: cuota.interes_restante || "0",
-									} : undefined,
-								};
-							});
-						} catch (error) {
-							console.warn(
-								`⚠️ No se pudieron obtener cuotas de cartera-back para el contrato ${input.numeroSifco}:`,
-								error instanceof Error ? error.message : error,
-							);
-							console.log(
-								"📊 Fallback: intentando obtener cuotas desde DB local...",
-							);
-							// Continuar con DB local más abajo
-						}
-					
+							return {
+								...cuota,
+								id: cuota.cuota_id.toString(),
+								numeroCuota: cuota.numero_cuota,
+								fechaVencimiento: cuota.fecha_vencimiento,
+								montoCuota: creditoCompleto.credito.cuota,
+								fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
+								montoPagado: montoPagadoReal,
+								montoMora: montoMora.toString(),
+								estadoMora: cuota.pagado ? "pagado" : "pendiente",
+								diasMora: 0,
+								detallesPago: cuota.pagado
+									? {
+											abonoCapital: cuota.abono_capital || "0",
+											abonoInteres: cuota.abono_interes || "0",
+											abonoIva: cuota.abono_iva_12 || "0",
+											abonoSeguro: cuota.abono_seguro || "0",
+											abonoGps: cuota.abono_gps || "0",
+											abonoMembresias: cuota.abono_membresias || "0",
+											pagoMora: cuota.pago_mora || "0",
+											pagoOtros: cuota.pago_otros || "0",
+											capitalRestante: cuota.capital_restante || "0",
+											interesRestante: cuota.interes_restante || "0",
+										}
+									: undefined,
+							};
+						});
+					} catch (error) {
+						console.warn(
+							`⚠️ No se pudieron obtener cuotas de cartera-back para el contrato ${input.numeroSifco}:`,
+							error instanceof Error ? error.message : error,
+						);
+						console.log(
+							"📊 Fallback: intentando obtener cuotas desde DB local...",
+						);
+						// Continuar con DB local más abajo
+					}
 				}
 
-				return []
+				return [];
 			} catch (error) {
 				console.error("💥 Error en getHistorialPagos:", {
 					error: error instanceof Error ? error.message : error,
@@ -1174,8 +1188,7 @@ export const cobrosRouter = {
 			}
 
 			try {
-				let numeroSifco: string = input.creditoId ?? ""
-
+				let numeroSifco: string = input.creditoId ?? "";
 
 				// 1. Buscar referencia por sifco número de crédito
 				let reference = await db
@@ -1186,12 +1199,10 @@ export const cobrosRouter = {
 
 				let creditoCompleto: CreditoDirectoResponse | null = null;
 
-
 				if (reference.length === 0) {
 					// Si no hay referencia, buscar el crédito en cartera-back
 					// usando getAllCredits para encontrar el número SIFCO
-					creditoCompleto  = await carteraBackClient.getCredito(numeroSifco);
-
+					creditoCompleto = await carteraBackClient.getCredito(numeroSifco);
 
 					await db.insert(carteraBackReferences).values({
 						carteraCreditoId: creditoCompleto.credito.credito_id,
@@ -1205,7 +1216,12 @@ export const cobrosRouter = {
 					reference = await db
 						.select()
 						.from(carteraBackReferences)
-						.where(eq(carteraBackReferences.carteraCreditoId, creditoCompleto.credito.credito_id))
+						.where(
+							eq(
+								carteraBackReferences.carteraCreditoId,
+								creditoCompleto.credito.credito_id,
+							),
+						)
 						.limit(1);
 				} else {
 					numeroSifco = reference[0].numeroCreditoSifco;
@@ -1297,93 +1313,93 @@ export const cobrosRouter = {
 
 				if (!creditoCompleto) {
 					return null;
-			}
+				}
 
-			// 3. Buscar oportunidad por número SIFCO para obtener vehículo, lead y dirección
-			let vehiculo = null;
-			let leadInfo = null;
-			let direccion = null;
-			let contratoId = reference[0]?.contratoFinanciamientoId || null;
+				// 3. Buscar oportunidad por número SIFCO para obtener vehículo, lead y dirección
+				let vehiculo = null;
+				let leadInfo = null;
+				let direccion = null;
+				const contratoId = reference[0]?.contratoFinanciamientoId || null;
 
-			const oportunidadResult = await db
-				.select({
-					oportunidadId: opportunities.id,
-					vehicleId: opportunities.vehicleId,
-					leadId: opportunities.leadId,
-					direccion: opportunities.direccion,
-					// Datos del vehículo
-					vehiculoMarca: vehicles.make,
-					vehiculoModelo: vehicles.model,
-					vehiculoYear: vehicles.year,
-					vehiculoPlaca: vehicles.licensePlate,
-					// Datos del lead
-					leadFirstName: leads.firstName,
-					leadLastName: leads.lastName,
-					leadEmail: leads.email,
-					leadTelefono: leads.phone,
-				})
-				.from(opportunities)
-				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-				.leftJoin(clients, eq(opportunities.id, clients.opportunityId))
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
-				.where(eq(opportunities.numeroSifco, numeroSifco))
-				.limit(1);
+				const oportunidadResult = await db
+					.select({
+						oportunidadId: opportunities.id,
+						vehicleId: opportunities.vehicleId,
+						leadId: opportunities.leadId,
+						direccion: opportunities.direccion,
+						// Datos del vehículo
+						vehiculoMarca: vehicles.make,
+						vehiculoModelo: vehicles.model,
+						vehiculoYear: vehicles.year,
+						vehiculoPlaca: vehicles.licensePlate,
+						// Datos del lead
+						leadFirstName: leads.firstName,
+						leadLastName: leads.lastName,
+						leadEmail: leads.email,
+						leadTelefono: leads.phone,
+					})
+					.from(opportunities)
+					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+					.leftJoin(clients, eq(opportunities.id, clients.opportunityId))
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(eq(opportunities.numeroSifco, numeroSifco))
+					.limit(1);
 
-			if (oportunidadResult.length > 0) {
-				const opp = oportunidadResult[0];
-				vehiculo = {
-					make: opp.vehiculoMarca,
-					model: opp.vehiculoModelo,
-					year: opp.vehiculoYear,
-					licensePlate: opp.vehiculoPlaca,
-				};
-				leadInfo = {
-					nombre: `${opp.leadFirstName || ""} ${opp.leadLastName || ""}`.trim(),
-					email: opp.leadEmail,
-					telefono: opp.leadTelefono,
-				};
-				direccion = opp.direccion;
-			}
+				if (oportunidadResult.length > 0) {
+					const opp = oportunidadResult[0];
+					vehiculo = {
+						make: opp.vehiculoMarca,
+						model: opp.vehiculoModelo,
+						year: opp.vehiculoYear,
+						licensePlate: opp.vehiculoPlaca,
+					};
+					leadInfo = {
+						nombre:
+							`${opp.leadFirstName || ""} ${opp.leadLastName || ""}`.trim(),
+						email: opp.leadEmail,
+						telefono: opp.leadTelefono,
+					};
+					direccion = opp.direccion;
+				}
 
-			// 4. Buscar o crear caso de cobros automáticamente
-			let casoCobro = null;
+				// 4. Buscar o crear caso de cobros automáticamente
+				let casoCobro = null;
 
-		
 				// Buscar caso activo
 				const casosResult = await db
 					.select()
 					.from(casosCobros)
 					.where(
 						and(
-						    contratoId ? eq(casosCobros.contratoId, contratoId) : eq(casosCobros.numeroCreditoSifco, numeroSifco),
+							contratoId
+								? eq(casosCobros.contratoId, contratoId)
+								: eq(casosCobros.numeroCreditoSifco, numeroSifco),
 							eq(casosCobros.activo, true),
 						),
 					)
-					.limit(1);					
-					if (
-						casosResult.length === 0 &&
-						creditoCompleto.credito.statusCredit !== "CANCELADO"
-					) {
-						// Crear caso de cobros automáticamente
-						if (!context.user?.id) {
-							throw new Error("Usuario no autenticado");
-						}
+					.limit(1);
+				if (
+					casosResult.length === 0 &&
+					creditoCompleto.credito.statusCredit !== "CANCELADO"
+				) {
+					// Crear caso de cobros automáticamente
+					if (!context.user?.id) {
+						throw new Error("Usuario no autenticado");
+					}
 
-						const cuotasAtrasadas =
-							creditoCompleto.cuotasAtrasadas?.length || 0;
-						const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
-						// Calcular días de mora exactos usando la fecha de vencimiento
-						const diasMora = calcularDiasMoraExactos(
-							creditoCompleto.cuotasAtrasadas || [],
-						);
-						const montoEnMora = cuotaMensual * cuotasAtrasadas;
+					const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
+					const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
+					// Calcular días de mora exactos usando la fecha de vencimiento
+					const diasMora = calcularDiasMoraExactos(
+						creditoCompleto.cuotasAtrasadas || [],
+					);
+					const montoEnMora = cuotaMensual * cuotasAtrasadas;
 
-						let estadoMora: (typeof estadoMoraEnum.enumValues)[number] =
-							"al_dia";
-						if (diasMora > 0 && diasMora <= 30) estadoMora = "mora_30";
-						else if (diasMora > 30 && diasMora <= 60) estadoMora = "mora_60";
-						else if (diasMora > 60 && diasMora <= 90) estadoMora = "mora_90";
-						else if (diasMora > 90) estadoMora = "mora_120";
+					let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
+					if (diasMora > 0 && diasMora <= 30) estadoMora = "mora_30";
+					else if (diasMora > 30 && diasMora <= 60) estadoMora = "mora_60";
+					else if (diasMora > 60 && diasMora <= 90) estadoMora = "mora_90";
+					else if (diasMora > 90) estadoMora = "mora_120";
 
 					const nuevosCasos = await db
 						.insert(casosCobros)
@@ -1400,12 +1416,11 @@ export const cobrosRouter = {
 							direccionContacto: direccion || "Sin dirección",
 							numeroCreditoSifco: numeroSifco,
 						})
-						.returning();						
-						casoCobro = nuevosCasos[0];
-					} else {
-						casoCobro = casosResult[0] || null;
-					}
-				
+						.returning();
+					casoCobro = nuevosCasos[0];
+				} else {
+					casoCobro = casosResult[0] || null;
+				}
 
 				console.log(`COBROSCREDITOSDETALLES ${JSON.stringify(casoCobro)}`);
 
@@ -1431,44 +1446,44 @@ export const cobrosRouter = {
 				if (statusCredit === "CANCELADO") estadoContrato = "completado";
 				else if (statusCredit === "INCOBRABLE") estadoContrato = "incobrable";
 
-			return {
-				// ID del caso de cobros (si existe)
-				id: casoCobro?.id || null,
-				contratoId: contratoId,
+				return {
+					// ID del caso de cobros (si existe)
+					id: casoCobro?.id || null,
+					contratoId: contratoId,
 
-				// Datos de mora
-				estadoMora,
-				montoEnMora: montoEnMora.toFixed(2),
-				diasMoraMaximo: diasMora,
-				cuotasVencidas: cuotasAtrasadas,
+					// Datos de mora
+					estadoMora,
+					montoEnMora: montoEnMora.toFixed(2),
+					diasMoraMaximo: diasMora,
+					cuotasVencidas: cuotasAtrasadas,
 
-				// Datos de contacto (del lead y oportunidad)
-				telefonoPrincipal: leadInfo?.telefono || null,
-				telefonoAlternativo: null,
-				emailContacto: leadInfo?.email || null,
-				direccionContacto: direccion || null,
-				proximoContacto: casoCobro?.proximoContacto || null,
-				metodoContactoProximo: null,
+					// Datos de contacto (del lead y oportunidad)
+					telefonoPrincipal: leadInfo?.telefono || null,
+					telefonoAlternativo: null,
+					emailContacto: leadInfo?.email || null,
+					direccionContacto: direccion || null,
+					proximoContacto: casoCobro?.proximoContacto || null,
+					metodoContactoProximo: null,
 
-				// Datos del contrato (de cartera-back)
-				montoFinanciado: creditoCompleto.credito.capital,
-				cuotaMensual: creditoCompleto.credito.cuota,
-				numeroCuotas: creditoCompleto.credito.plazo,
-				fechaInicio: creditoCompleto.credito.fecha_creacion,
-				diaPagoMensual: null, // Cartera-back no tiene día de pago específico
-				estadoContrato,
+					// Datos del contrato (de cartera-back)
+					montoFinanciado: creditoCompleto.credito.capital,
+					cuotaMensual: creditoCompleto.credito.cuota,
+					numeroCuotas: creditoCompleto.credito.plazo,
+					fechaInicio: creditoCompleto.credito.fecha_creacion,
+					diaPagoMensual: null, // Cartera-back no tiene día de pago específico
+					estadoContrato,
 
-				// Datos del cliente (de cartera-back o lead)
-				clienteNombre: leadInfo?.nombre || creditoCompleto.usuario.nombre,
-				clienteNit: creditoCompleto.usuario.nit,
+					// Datos del cliente (de cartera-back o lead)
+					clienteNombre: leadInfo?.nombre || creditoCompleto.usuario.nombre,
+					clienteNit: creditoCompleto.usuario.nit,
 
-				// Datos del vehículo (de la oportunidad)
-				vehiculoMarca: vehiculo?.make || "-",
-				vehiculoModelo: vehiculo?.model || "-",
-				vehiculoYear: vehiculo?.year || null,
-				vehiculoPlaca:
-					vehiculo?.licensePlate ||
-					creditoCompleto.credito.numero_credito_sifco,					// Datos adicionales de Cartera-Back
+					// Datos del vehículo (de la oportunidad)
+					vehiculoMarca: vehiculo?.make || "-",
+					vehiculoModelo: vehiculo?.model || "-",
+					vehiculoYear: vehiculo?.year || null,
+					vehiculoPlaca:
+						vehiculo?.licensePlate ||
+						creditoCompleto.credito.numero_credito_sifco, // Datos adicionales de Cartera-Back
 					numeroCreditoSifco: creditoCompleto.credito.numero_credito_sifco,
 					deudaTotal: creditoCompleto.credito.deudatotal,
 					asesor: null, // Cartera-back no devuelve asesor completo en endpoint /credito
@@ -1731,12 +1746,13 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context: _ }) => {
 			if (!isCarteraBackPaymentsEnabled()) {
-				console.log("[getInversionistas] Cartera-back integration is NOT enabled");
+				console.log(
+					"[getInversionistas] Cartera-back integration is NOT enabled",
+				);
 				throw new Error("Integración con cartera-back no está habilitada");
 			}
 
 			try {
-
 				const result = await carteraBackClient.getInvestors({
 					page: input.page,
 					perPage: input.perPage,
@@ -1761,7 +1777,10 @@ export const cobrosRouter = {
 				};
 			} catch (error) {
 				console.error("[getInversionistas] Error occurred:", error);
-				console.error("[getInversionistas] Error stack:", error instanceof Error ? error.stack : "No stack");
+				console.error(
+					"[getInversionistas] Error stack:",
+					error instanceof Error ? error.stack : "No stack",
+				);
 				throw new Error(
 					`Error obteniendo inversionistas: ${error instanceof Error ? error.message : String(error)}`,
 				);
@@ -1924,17 +1943,23 @@ export const cobrosRouter = {
 			console.log("[getAsesores] Cartera-back integration is enabled");
 
 			try {
-				console.log("[getAsesores] Calling carteraBackClient.getAdvisors with params:", {
-					page: input.page,
-					perPage: input.perPage,
-				});
+				console.log(
+					"[getAsesores] Calling carteraBackClient.getAdvisors with params:",
+					{
+						page: input.page,
+						perPage: input.perPage,
+					},
+				);
 
 				const result = await carteraBackClient.getAdvisors({
 					page: input.page,
 					perPage: input.perPage,
 				});
 
-				console.log("[getAsesores] Result received:", JSON.stringify(result, null, 2));
+				console.log(
+					"[getAsesores] Result received:",
+					JSON.stringify(result, null, 2),
+				);
 
 				return {
 					asesores: result.data.map((asesor) => ({
@@ -1953,7 +1978,10 @@ export const cobrosRouter = {
 				};
 			} catch (error) {
 				console.error("[getAsesores] Error occurred:", error);
-				console.error("[getAsesores] Error stack:", error instanceof Error ? error.stack : "No stack");
+				console.error(
+					"[getAsesores] Error stack:",
+					error instanceof Error ? error.stack : "No stack",
+				);
 				throw new Error(
 					`Error obteniendo asesores: ${error instanceof Error ? error.message : String(error)}`,
 				);

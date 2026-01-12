@@ -15,6 +15,7 @@ import {
   montos_adicionales,
   moras_credito,
   pagos_credito,
+  platform_users,
   usuarios,
 } from "../database/db/schema";
 import { z } from "zod";
@@ -84,8 +85,47 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
     const cuotasPagadas = await db
-      .select()
+      .select({
+        // Campos de cuotas_credito
+        cuota_id: cuotas_credito.cuota_id,
+        credito_id: cuotas_credito.credito_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        pagado: cuotas_credito.pagado,
+        createdAt: cuotas_credito.createdAt,
+
+        // 🔥 Campos de pagos_credito - ABONOS
+        pago_id: pagos_credito.pago_id,
+        monto_boleta: pagos_credito.monto_boleta,
+        abono_capital: pagos_credito.abono_capital,
+        abono_interes: pagos_credito.abono_interes,
+        abono_iva_12: pagos_credito.abono_iva_12,
+        abono_interes_ci: pagos_credito.abono_interes_ci,
+        abono_iva_ci: pagos_credito.abono_iva_ci,
+        abono_seguro: pagos_credito.abono_seguro,
+        abono_gps: pagos_credito.abono_gps,
+        abono_membresias: pagos_credito.membresias_mes,
+
+        // 🔥 RESTANTES
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+        pago_mora: pagos_credito.mora,
+        pago_otros: pagos_credito.otros,
+
+        // 🔥 FLAG
+        pago_cuota_completa: pagos_credito.pagado,
+
+        validationStatus: pagos_credito.validationStatus,
+      })
       .from(cuotas_credito)
+      .leftJoin(
+        pagos_credito,
+        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+      )
       .where(
         and(
           eq(cuotas_credito.credito_id, creditoId),
@@ -93,7 +133,6 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
-
     // 4. Calcular la cuota que toca este mes (según meses transcurridos desde fecha_creacion)
     const fechaInicio = new Date(currentCredit.creditos.fecha_creacion);
     const hoy = new Date();
@@ -113,6 +152,26 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         createdAt: cuotas_credito.createdAt,
         validationStatus: pagos_credito.validationStatus,
         pago_id: pagos_credito.pago_id, // 👈 Agregá esto también
+
+        monto_boleta: pagos_credito.monto_boleta,
+        abono_capital: pagos_credito.abono_capital,
+        abono_interes: pagos_credito.abono_interes,
+        abono_iva_12: pagos_credito.abono_iva_12,
+        abono_interes_ci: pagos_credito.abono_interes_ci,
+        abono_iva_ci: pagos_credito.abono_iva_ci,
+        abono_seguro: pagos_credito.abono_seguro,
+        abono_gps: pagos_credito.abono_gps,
+        abono_membresias: pagos_credito.membresias_mes,
+
+        // 🔥 RESTANTES
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+        pago_mora: pagos_credito.mora,
+        pago_otros: pagos_credito.otros,
       })
       .from(cuotas_credito)
       .innerJoin(
@@ -120,13 +179,12 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
       )
       // 👇 LEFT JOIN con convenios_pagos_resume
-       
+
       .where(
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
-          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
-         
+          lt(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
         )
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
@@ -139,7 +197,27 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         fecha_vencimiento: cuotas_credito.fecha_vencimiento,
         pagado: cuotas_credito.pagado,
         createdAt: cuotas_credito.createdAt,
-        pago_id: pagos_credito.pago_id, // 👈 Agregá esto también
+        // 🔥 Campos de pagos_credito - ABONOS
+        pago_id: pagos_credito.pago_id,
+        monto_boleta: pagos_credito.monto_boleta,
+        abono_capital: pagos_credito.abono_capital,
+        abono_interes: pagos_credito.abono_interes,
+        abono_iva_12: pagos_credito.abono_iva_12,
+        abono_interes_ci: pagos_credito.abono_interes_ci,
+        abono_iva_ci: pagos_credito.abono_iva_ci,
+        abono_seguro: pagos_credito.abono_seguro,
+        abono_gps: pagos_credito.abono_gps,
+        abono_membresias: pagos_credito.membresias_mes,
+
+        // 🔥 RESTANTES
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+        pago_mora: pagos_credito.mora,
+        pago_otros: pagos_credito.otros,
       })
       .from(cuotas_credito)
       .innerJoin(
@@ -155,7 +233,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         and(
           eq(cuotas_credito.credito_id, creditoId),
           eq(cuotas_credito.pagado, false),
-          ne(pagos_credito.validationStatus, "pending"),
+          ne(pagos_credito.validationStatus, "pending")
         )
       )
       .orderBy(cuotas_credito.numero_cuota);
@@ -170,7 +248,27 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         pagado: cuotas_credito.pagado,
         createdAt: cuotas_credito.createdAt,
         validationStatus: pagos_credito.validationStatus,
+        // 🔥 Campos de pagos_credito - ABONOS
         pago_id: pagos_credito.pago_id,
+        monto_boleta: pagos_credito.monto_boleta,
+        abono_capital: pagos_credito.abono_capital,
+        abono_interes: pagos_credito.abono_interes,
+        abono_iva_12: pagos_credito.abono_iva_12,
+        abono_interes_ci: pagos_credito.abono_interes_ci,
+        abono_iva_ci: pagos_credito.abono_iva_ci,
+        abono_seguro: pagos_credito.abono_seguro,
+        abono_gps: pagos_credito.abono_gps,
+        abono_membresias: pagos_credito.membresias_mes,
+
+        // 🔥 RESTANTES
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+        pago_mora: pagos_credito.mora,
+        pago_otros: pagos_credito.otros,
       })
       .from(cuotas_credito)
       .innerJoin(
@@ -185,8 +283,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
         and(
           eq(cuotas_credito.credito_id, creditoId),
           gt(cuotas_credito.numero_cuota, 0),
-          gte(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10)),
-
+          gte(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
         )
       )
       .orderBy(cuotas_credito.fecha_vencimiento)
@@ -202,103 +299,112 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const moraActual = await db
       .select()
       .from(moras_credito)
-      .where(and(eq(moras_credito.credito_id, creditoId), eq(moras_credito.activa, true)));
-const convenioActivo = await db
-  .select()
-  .from(convenios_pago)
-  .where(
-    and(
-      eq(convenios_pago.credito_id, creditoId),
-      eq(convenios_pago.activo, true),
-      eq(convenios_pago.completado, false)
-    )
-  )
-  .limit(1);
-
-let cuotasEnConvenio: any[] = [];
-let pagosConvenio: any[] = [];
-let cuotasConvenioMensuales: any[] = [];
-let cuotaConvenioAPagar = "0";
-
-if (convenioActivo.length > 0) {
-  // Traer los pagos del convenio
-  pagosConvenio = await db
-    .select()
-    .from(convenios_pagos_resume)
-    .where(
-      eq(convenios_pagos_resume.convenio_id, convenioActivo[0].convenio_id)
-    );
-
-  // 🔥 Traer las cuotas mensuales del convenio
-  cuotasConvenioMensuales = await db
-    .select()
-    .from(convenio_cuotas)
-    .where(eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id))
-    .orderBy(convenio_cuotas.numero_cuota);
-
-  // Traer las cuotas que están en el convenio
-  const paymentIds = pagosConvenio.map((p) => p.pago_id);
-
-  if (paymentIds.length > 0) {
-    // Primero traer los pagos para obtener los cuota_id
-    const pagos = await db
+      .where(
+        and(
+          eq(moras_credito.credito_id, creditoId),
+          eq(moras_credito.activa, true)
+        )
+      );
+    const convenioActivo = await db
       .select()
-      .from(pagos_credito)
-      .where(inArray(pagos_credito.pago_id, paymentIds));
-
-    const cuotaIds = pagos.map((p) => p.cuota_id);
-
-    // Luego traer las cuotas
-    cuotasEnConvenio = await db
-      .select()
-      .from(cuotas_credito)
-      .where(inArray(cuotas_credito.cuota_id, cuotaIds))
-      .orderBy(asc(cuotas_credito.numero_cuota));
-  }
-
-   const ahora = new Date();
-  const fechaGuatemalaString = ahora.toLocaleString("en-US", {
-    timeZone: "America/Guatemala",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  
-  const [month, day, year] = fechaGuatemalaString.split(", ")[0].split("/");
-  const fechaActualGuatemala = `${year}-${month}-${day}`;
-  
-  // 🔍 Buscar la cuota del mes actual desde la DB
-  const [cuotaDelMes] = await db
-    .select()
-    .from(convenio_cuotas)
-    .where(
-      and(
-        eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id),
-        gte(convenio_cuotas.fecha_vencimiento, fechaActualGuatemala) // Ya venció o vence hoy
+      .from(convenios_pago)
+      .where(
+        and(
+          eq(convenios_pago.credito_id, creditoId),
+          eq(convenios_pago.activo, true),
+          eq(convenios_pago.completado, false)
+        )
       )
-    )
-    .orderBy(asc(convenio_cuotas.fecha_vencimiento)) // La más reciente que ya venció
-    .limit(1);
-    console.log("cuotaDelMes convenio:", cuotaDelMes);
-  // Si encontramos la cuota del mes y NO tiene fecha_pago, debe pagar
-  if (cuotaDelMes && cuotaDelMes.fecha_pago === null) {
-    cuotaConvenioAPagar = convenioActivo[0].cuota_mensual;
-    console.log(`💰 Debe pagar cuota #${cuotaDelMes.numero_cuota} (vence: ${cuotaDelMes.fecha_vencimiento})`);
-  } else if (cuotaDelMes && cuotaDelMes.fecha_pago) {
-    cuotaConvenioAPagar = "0";
-    console.log(`✅ Cuota #${cuotaDelMes.numero_cuota} ya está pagada el ${cuotaDelMes.fecha_pago}`);
-  } else {
-    cuotaConvenioAPagar = "0";
-    console.log("📅 Aún no hay cuota vencida este mes");
-  }
-}
+      .limit(1);
 
-// 🔥 CALCULAR CUOTA MENSUAL (0 si ya está pagada la cuota actual)
- 
+    let cuotasEnConvenio: any[] = [];
+    let pagosConvenio: any[] = [];
+    let cuotasConvenioMensuales: any[] = [];
+    let cuotaConvenioAPagar = "0";
 
-// Si la cuota actual ya está pagada, poner 0
- 
+    if (convenioActivo.length > 0) {
+      // Traer los pagos del convenio
+      pagosConvenio = await db
+        .select()
+        .from(convenios_pagos_resume)
+        .where(
+          eq(convenios_pagos_resume.convenio_id, convenioActivo[0].convenio_id)
+        );
+
+      // 🔥 Traer las cuotas mensuales del convenio
+      cuotasConvenioMensuales = await db
+        .select()
+        .from(convenio_cuotas)
+        .where(eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id))
+        .orderBy(convenio_cuotas.numero_cuota);
+
+      // Traer las cuotas que están en el convenio
+      const paymentIds = pagosConvenio.map((p) => p.pago_id);
+
+      if (paymentIds.length > 0) {
+        // Primero traer los pagos para obtener los cuota_id
+        const pagos = await db
+          .select()
+          .from(pagos_credito)
+          .where(inArray(pagos_credito.pago_id, paymentIds));
+
+        const cuotaIds = pagos.map((p) => p.cuota_id);
+
+        // Luego traer las cuotas
+        cuotasEnConvenio = await db
+          .select()
+          .from(cuotas_credito)
+          .where(inArray(cuotas_credito.cuota_id, cuotaIds))
+          .orderBy(asc(cuotas_credito.numero_cuota));
+      }
+
+      const ahora = new Date();
+      const fechaGuatemalaString = ahora.toLocaleString("en-US", {
+        timeZone: "America/Guatemala",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      });
+
+      const [month, day, year] = fechaGuatemalaString.split(", ")[0].split("/");
+      const fechaActualGuatemala = `${year}-${month}-${day}`;
+
+      // 🔍 Buscar la cuota del mes actual desde la DB
+      const [cuotaDelMes] = await db
+        .select()
+        .from(convenio_cuotas)
+        .where(
+          and(
+            eq(convenio_cuotas.convenio_id, convenioActivo[0].convenio_id),
+            gte(convenio_cuotas.fecha_vencimiento, fechaActualGuatemala) // Ya venció o vence hoy
+          )
+        )
+        .orderBy(asc(convenio_cuotas.fecha_vencimiento)) // La más reciente que ya venció
+        .limit(1);
+      console.log("cuotaDelMes convenio:", cuotaDelMes);
+      // Si encontramos la cuota del mes y NO tiene fecha_pago, debe pagar
+      if (cuotaDelMes && cuotaDelMes.fecha_pago === null) {
+        cuotaConvenioAPagar = convenioActivo[0].cuota_mensual;
+        console.log(
+          `💰 Debe pagar cuota #${cuotaDelMes.numero_cuota} (vence: ${cuotaDelMes.fecha_vencimiento})`
+        );
+      } else if (cuotaDelMes && cuotaDelMes.fecha_pago) {
+        cuotaConvenioAPagar = "0";
+        console.log(
+          `✅ Cuota #${cuotaDelMes.numero_cuota} ya está pagada el ${cuotaDelMes.fecha_pago}`
+        );
+      } else {
+        cuotaConvenioAPagar = "0";
+        console.log("📅 Aún no hay cuota vencida este mes");
+      }
+    }
+
+    // 🔥 CALCULAR CUOTA MENSUAL (0 si ya está pagada la cuota actual)
+
+    // Si la cuota actual ya está pagada, poner 0
+
     return {
+      flujo: "ACTIVO", 
       credito: currentCredit.creditos,
       usuario: currentCredit.usuarios,
       cuotaActual, // Cuota que debe pagar este mes (número)
@@ -308,10 +414,13 @@ if (convenioActivo.length > 0) {
       cuotasAtrasadas: cuotasAtrasadas,
       cuotasPagadas, // Todas las cuotas pagadas
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
-      convenioActivo: convenioActivo.length > 0 ? {
-  ...convenioActivo[0],
-  cuotaConvenioAPagar, // 👈 Solo esto
-} : null,
+      convenioActivo:
+        convenioActivo.length > 0
+          ? {
+              ...convenioActivo[0],
+              cuotaConvenioAPagar, // 👈 Solo esto
+            }
+          : null,
       cuotasEnConvenio,
       pagosConvenio,
     };
@@ -340,6 +449,20 @@ export interface BadDebt {
   monto_incobrable: number;
 }
 
+// 🆕 Tipos para próxima cuota
+type ProximidadPago = "TODAY" | "WEEK" | "TWO_WEEKS" | "MONTH" | "DUEMONTH";
+
+interface ProximaCuota {
+  cuota_id: number;
+  numero_cuota: number;
+  fecha_vencimiento: string;
+  pagado: boolean;
+  pago_id?: number;
+  validation_status?: string;
+  proximidad: ProximidadPago;
+}
+
+// 🔥 Interface actualizada
 export interface CreditoConInfo {
   creditos: typeof creditos.$inferSelect;
   usuarios: typeof usuarios.$inferSelect;
@@ -357,7 +480,7 @@ export interface CreditoConInfo {
     porcentaje_participacion_inversionista: string;
     porcentaje_cash_in: string;
     cuota_inversionista: string;
-  }[]; // Actualizado para reflejar la estructura real
+  }[];
   resumen: {
     total_cash_in_monto: number;
     total_cash_in_iva: number;
@@ -367,7 +490,35 @@ export interface CreditoConInfo {
   cancelacion?: CreditCancelation | null;
   incobrable?: BadDebt | null;
   rubros?: { nombre_rubro: string; monto: number }[];
+  mora?: any; // 👈 Este también faltaba si no lo tenías
+  deuda_total_con_mora?: string; // 👈 Este también
+  proxima_cuota?: ProximaCuota | null; // 🆕 NUEVO CAMPO
 }
+
+// 🔥 Función auxiliar para calcular proximidad (con zona horaria de Guatemala)
+function calcularProximidad(fechaVencimiento: string): ProximidadPago {
+  // 🇬🇹 Hora de Guatemala
+  const hoy = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+  );
+  hoy.setHours(0, 0, 0, 0);
+
+  const vencimiento = new Date(fechaVencimiento);
+  vencimiento.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor(
+    (vencimiento.getTime() - hoy.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (diffDays === 0) return "TODAY";
+  if (diffDays > 0 && diffDays <= 7) return "WEEK";
+  if (diffDays > 7 && diffDays <= 14) return "TWO_WEEKS";
+  if (diffDays > 14 && diffDays <= 30) return "MONTH";
+  if (diffDays > 30) return "DUEMONTH";
+
+  return "DUEMONTH";
+}
+
 export async function getCreditosWithUserByMesAnio(
   mes: number,
   anio: number,
@@ -381,8 +532,11 @@ export async function getCreditosWithUserByMesAnio(
     | "PENDIENTE_CANCELACION"
     | "MOROSO"
     | "EN_CONVENIO",
-  asesor_id?: number, // 👈 NUEVO
-  nombre_usuario?: string // 👈 NUEVO
+  asesor_id?: number,
+  nombre_usuario?: string,
+  email_asesor?: string, // 🆕 NUEVO
+  cuotas_atrasadas?: number, // 🆕 NUEVO (>= este número)
+  proximidad_pago?: ProximidadPago // 🆕 NUEVO
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -391,11 +545,17 @@ export async function getCreditosWithUserByMesAnio(
   totalPages: number;
 }> {
   console.log(
-    `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}, asesor_id: ${asesor_id}, nombre_usuario: ${nombre_usuario}`
+    `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}, asesor_id: ${asesor_id}, nombre_usuario: ${nombre_usuario}, email_asesor: ${email_asesor}, cuotas_atrasadas: ${cuotas_atrasadas}, proximidad_pago: ${proximidad_pago}`
   );
 
   const offset = (page - 1) * perPage;
   const conditions: any[] = [];
+
+  // 🇬🇹 Fecha actual en Guatemala
+  const hoyGuatemala = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "America/Guatemala" })
+  );
+  const hoyStr = hoyGuatemala.toISOString().slice(0, 10);
 
   try {
     // 📌 Filtros
@@ -413,24 +573,45 @@ export async function getCreditosWithUserByMesAnio(
         );
       }
     }
-    console.log(`🔎 Filtrando por nombre de usuario: ${nombre_usuario}`);
 
     if (estado && estado.length > 0) {
       if (estado === "ACTIVO") {
         console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
+        if (cuotas_atrasadas==0 || cuotas_atrasadas===undefined){
+          
+        conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
+        }else{
+
         conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`);
+        }
       } else {
         console.log(`🔎 Filtrando por estado: ${estado}`);
         conditions.push(eq(creditos.statusCredit, estado));
       }
     }
+
     if (asesor_id) {
       console.log(`🔎 Filtrando por asesor_id: ${asesor_id}`);
       conditions.push(eq(creditos.asesor_id, asesor_id));
     }
+
     if (nombre_usuario && nombre_usuario.length > 0) {
       console.log(`🔎 Filtrando por nombre de usuario: ${nombre_usuario}`);
       conditions.push(sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario}%`}`);
+    }
+
+    // 🆕 Filtro por email del asesor
+    if (email_asesor && email_asesor.length > 0) {
+      console.log(`🔎 Filtrando por email de asesor: ${email_asesor}`);
+      conditions.push(
+        sql`${platform_users.email} ILIKE ${`%${email_asesor}%`}`
+      );
+    }
+
+    // 🆕 Filtro por cuotas atrasadas (>= número)
+    if (cuotas_atrasadas !== undefined && cuotas_atrasadas > 0) {
+      console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
+      conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
     }
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);
@@ -440,16 +621,28 @@ export async function getCreditosWithUserByMesAnio(
 
   let rows: any[] = [];
   try {
-    // 1️⃣ Buscar créditos + usuarios + asesores
+    // 1️⃣ Buscar créditos + usuarios + asesores + platform_users + moras
     rows = await db
       .select({
         creditos,
         usuarios,
         asesores,
+        platform_users,
+        moras_credito,
       })
       .from(creditos)
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
       .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+      // 🆕 JOIN a platform_users para filtrar por email
+      .leftJoin(
+        platform_users,
+        eq(asesores.asesor_id, platform_users.asesor_id)
+      )
+      // 🆕 JOIN a moras para filtrar por cuotas atrasadas
+      .leftJoin(
+        moras_credito,
+        eq(creditos.credito_id, moras_credito.credito_id)
+      )
       .where(whereCondition)
       .limit(perPage)
       .offset(offset)
@@ -561,31 +754,81 @@ export async function getCreditosWithUserByMesAnio(
     {} as Record<number, any>
   );
 
-  // 4️⃣ Moras
-  let moras: any[] = [];
-  try {
-    moras = await db
-      .select({
-        credito_id: moras_credito.credito_id,
-        mora_id: moras_credito.mora_id,
-        activa: moras_credito.activa,
-        porcentaje_mora: moras_credito.porcentaje_mora,
-        monto_mora: moras_credito.monto_mora,
-        cuotas_atrasadas: moras_credito.cuotas_atrasadas,
-        created_at: moras_credito.created_at,
-        updated_at: moras_credito.updated_at,
-      })
-      .from(moras_credito)
-      .where(inArray(moras_credito.credito_id, creditosIds));
+  // 4️⃣ Moras (ya las tenemos del query principal, solo mapeamos)
+  const morasMap: Record<number, any> = {};
+  rows.forEach((row) => {
+    if (row.moras_credito) {
+      morasMap[row.creditos.credito_id] = row.moras_credito;
+    }
+  });
 
-    console.log(`📌 Moras encontradas: ${moras.length}`);
+  // 5️⃣ Próximas cuotas con Window Function 🔥
+  // 5️⃣ Próximas cuotas con Window Function 🔥
+  let proximasCuotas: any[] = [];
+  try {
+    if (creditosIds.length > 0) {
+      console.log("🔍 Buscando próximas cuotas...");
+      console.log("📅 Fecha de hoy (Guatemala):", hoyStr);
+      console.log("🆔 Buscando para créditos:", creditosIds);
+
+      // 🔥 Usar Drizzle para construir el query
+      const cuotasRaw = await db
+        .select({
+          credito_id: cuotas_credito.credito_id,
+          cuota_id: cuotas_credito.cuota_id,
+          numero_cuota: cuotas_credito.numero_cuota,
+          fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+          pagado: cuotas_credito.pagado,
+          pago_id: pagos_credito.pago_id,
+          validation_status: pagos_credito.validationStatus,
+        })
+        .from(cuotas_credito)
+        .leftJoin(
+          pagos_credito,
+          eq(cuotas_credito.cuota_id, pagos_credito.cuota_id)
+        )
+        .where(
+          and(
+            inArray(cuotas_credito.credito_id, creditosIds),
+            gte(cuotas_credito.fecha_vencimiento, hoyStr),
+            gt(cuotas_credito.numero_cuota, 0)
+          )
+        )
+        .orderBy(cuotas_credito.credito_id, cuotas_credito.fecha_vencimiento);
+
+      console.log(
+        `📅 Cuotas encontradas (antes de filtrar): ${cuotasRaw.length}`
+      );
+
+      // 🔥 Filtrar para obtener solo la primera cuota por crédito
+      const cuotasPorCredito = new Map<number, any>();
+      cuotasRaw.forEach((cuota) => {
+        if (!cuotasPorCredito.has(cuota.credito_id)) {
+          cuotasPorCredito.set(cuota.credito_id, cuota);
+        }
+      });
+
+      proximasCuotas = Array.from(cuotasPorCredito.values());
+      console.log(
+        `📅 Próximas cuotas (una por crédito): ${proximasCuotas.length}`
+      );
+    }
   } catch (err) {
-    console.error("❌ Error consultando moras:", err);
+    console.error("❌ Error consultando próximas cuotas:", err);
   }
 
-  const morasMap: Record<number, any> = {};
-  moras.forEach((row) => {
-    morasMap[row.credito_id] = row;
+  // Mapear próximas cuotas con proximidad calculada
+  const proximasCuotasMap: Record<number, ProximaCuota> = {};
+  proximasCuotas.forEach((row: any) => {
+    proximasCuotasMap[row.credito_id] = {
+      cuota_id: row.cuota_id,
+      numero_cuota: row.numero_cuota,
+      fecha_vencimiento: row.fecha_vencimiento,
+      pagado: row.pagado,
+      pago_id: row.pago_id,
+      validation_status: row.validation_status,
+      proximidad: calcularProximidad(row.fecha_vencimiento),
+    };
   });
 
   // --- Cancelaciones & Incobrables ---
@@ -632,33 +875,13 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando incobrables:", err);
   }
 
-  try {
-    const incobrablesIds = rows
-      .filter((r) => r.creditos.statusCredit === "INCOBRABLE")
-      .map((r) => r.creditos.credito_id);
-    if (incobrablesIds.length > 0) {
-      console.log("⚠️ Créditos incobrables:", incobrablesIds);
-      const incobrablesRaw = await db
-        .select()
-        .from(bad_debts)
-        .where(inArray(bad_debts.credit_id, incobrablesIds));
-      incobrables = incobrablesRaw.map((row) => ({
-        ...row,
-        fecha_registro: row.fecha_registro ?? "",
-        monto_incobrable: Number(row.monto_incobrable),
-      }));
-    }
-  } catch (err) {
-    console.error("❌ Error consultando incobrables:", err);
-  }
-
   const cancelacionesMap: Record<number, CreditCancelation> = {};
   cancelaciones.forEach((row) => (cancelacionesMap[row.credit_id] = row));
 
   const incobrablesMap: Record<number, BadDebt> = {};
   incobrables.forEach((row) => (incobrablesMap[row.credit_id] = row));
 
-  // 5️⃣ Map final
+  // 6️⃣ Map final
   let data: CreditoConInfo[] = [];
   try {
     data = rows.map((row) => {
@@ -686,6 +909,9 @@ export async function getCreditosWithUserByMesAnio(
         .plus(new Big(mora?.monto_mora ?? 0))
         .toString();
 
+      // 🆕 Próxima cuota
+      const proxima_cuota = proximasCuotasMap[row.creditos.credito_id] || null;
+
       return {
         creditos: row.creditos,
         usuarios: row.usuarios,
@@ -697,6 +923,7 @@ export async function getCreditosWithUserByMesAnio(
         incobrable,
         mora,
         deuda_total_con_mora,
+        proxima_cuota, // 🆕 NUEVO CAMPO
       };
     });
     console.log(`✅ Créditos mapeados: ${data.length}`);
@@ -704,13 +931,31 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error mapeando créditos:", err);
   }
 
-  // 6️⃣ Paginación
+  // 🆕 Filtrar por proximidad de pago si se especifica
+  if (proximidad_pago) {
+    console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
+    data = data.filter(
+      (credito) => credito.proxima_cuota?.proximidad === proximidad_pago
+    );
+    console.log(`✅ Créditos filtrados por proximidad: ${data.length}`);
+  }
+
+  // 7️⃣ Paginación
   let count = 0;
   try {
     const [{ count: total }] = await db
       .select({ count: sql<number>`COUNT(*)` })
       .from(creditos)
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+      .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
+      .leftJoin(
+        platform_users,
+        eq(asesores.asesor_id, platform_users.asesor_id)
+      )
+      .leftJoin(
+        moras_credito,
+        eq(creditos.credito_id, moras_credito.credito_id)
+      )
       .where(whereCondition);
     count = Number(total);
     console.log(`📊 Total records encontrados: ${count}`);
@@ -1581,9 +1826,10 @@ export async function syncScheduleOnTermsChange({
 
     return { updated: true, changedCuota, changedPlazo };
   });
-} interface MergeCreditParams {
-  numero_credito_origen: string;    // El crédito que se va a absorber
-  numero_credito_destino: string;   // El crédito que va a quedar activo
+}
+interface MergeCreditParams {
+  numero_credito_origen: string; // El crédito que se va a absorber
+  numero_credito_destino: string; // El crédito que va a quedar activo
 }
 
 interface CreditoCompleto {
@@ -1610,16 +1856,15 @@ interface CreditoCompleto {
 // MÉTODO PRINCIPAL: FUSIONAR CRÉDITOS
 // ========================================
 
-export const mergeCreditosAndUpdate = async ({ 
-  numero_credito_origen, 
-  numero_credito_destino
-}: MergeCreditParams): Promise<{ 
-  success: boolean; 
-  message: string; 
+export const mergeCreditosAndUpdate = async ({
+  numero_credito_origen,
+  numero_credito_destino,
+}: MergeCreditParams): Promise<{
+  success: boolean;
+  message: string;
   creditoFinal: any;
   nueva_cuota: number;
 }> => {
-  
   console.log("🔄 ========================================");
   console.log("🔄 INICIANDO FUSIÓN DE CRÉDITOS");
   console.log("🔄 ========================================");
@@ -1632,18 +1877,18 @@ export const mergeCreditosAndUpdate = async ({
     // PASO 1: OBTENER AMBOS CRÉDITOS
     // ========================================
     console.log("📥 PASO 1: Buscando ambos créditos...");
-    
-    const [creditoOrigen] = await db
+
+    const [creditoOrigen] = (await db
       .select()
       .from(creditos)
       .where(eq(creditos.numero_credito_sifco, numero_credito_origen))
-      .limit(1) as CreditoCompleto[];
+      .limit(1)) as CreditoCompleto[];
 
-    const [creditoDestino] = await db
+    const [creditoDestino] = (await db
       .select()
       .from(creditos)
       .where(eq(creditos.numero_credito_sifco, numero_credito_destino))
-      .limit(1) as CreditoCompleto[];
+      .limit(1)) as CreditoCompleto[];
 
     if (!creditoOrigen) {
       console.log("❌ ERROR: No se encontró el crédito origen");
@@ -1652,18 +1897,24 @@ export const mergeCreditosAndUpdate = async ({
 
     if (!creditoDestino) {
       console.log("❌ ERROR: No se encontró el crédito destino");
-      throw new Error(`Crédito destino ${numero_credito_destino} no encontrado`);
+      throw new Error(
+        `Crédito destino ${numero_credito_destino} no encontrado`
+      );
     }
 
-    console.log(`✅ Crédito ORIGEN encontrado - ID: ${creditoOrigen.credito_id}`);
+    console.log(
+      `✅ Crédito ORIGEN encontrado - ID: ${creditoOrigen.credito_id}`
+    );
     console.log(`   - Capital: Q${creditoOrigen.capital}`);
     console.log(`   - Cuota: Q${creditoOrigen.cuota}`);
     console.log(`   - Seguro: Q${creditoOrigen.seguro_10_cuotas}`);
     console.log(`   - GPS: Q${creditoOrigen.gps}`);
     console.log(`   - Membresías: Q${creditoOrigen.membresias_pago}`);
     console.log(`   - Otros: Q${creditoOrigen.otros}`);
-    
-    console.log(`✅ Crédito DESTINO encontrado - ID: ${creditoDestino.credito_id}`);
+
+    console.log(
+      `✅ Crédito DESTINO encontrado - ID: ${creditoDestino.credito_id}`
+    );
     console.log(`   - Capital: Q${creditoDestino.capital}`);
     console.log(`   - Cuota: Q${creditoDestino.cuota}`);
     console.log(`   - Seguro: Q${creditoDestino.seguro_10_cuotas}`);
@@ -1676,7 +1927,7 @@ export const mergeCreditosAndUpdate = async ({
     // PASO 2: SUMAR VALORES Y RECALCULAR
     // ========================================
     console.log("🧮 PASO 2: Sumando capitales y recalculando todo...");
-    
+
     // Sumar capitales
     const capitalOrigen = new Big(creditoOrigen.capital);
     const capitalDestino = new Big(creditoDestino.capital);
@@ -1691,25 +1942,33 @@ export const mergeCreditosAndUpdate = async ({
     console.log(`   📈 Porcentaje interés: ${porcentaje_interes.toString()}%`);
 
     // Calcular cuota_interes con el nuevo capital
-    const cuota_interes = capitalTotal.times(porcentaje_interes.div(100)).round(2);
-    console.log(`   💵 Cuota interés (recalculada): Q${cuota_interes.toString()}`);
+    const cuota_interes = capitalTotal
+      .times(porcentaje_interes.div(100))
+      .round(2);
+    console.log(
+      `   💵 Cuota interés (recalculada): Q${cuota_interes.toString()}`
+    );
 
     // Calcular IVA 12%
     const iva_12 = cuota_interes.times(0.12).round(2);
     console.log(`   🧾 IVA 12%: Q${iva_12.toString()}`);
 
     // Sumar seguros, GPS, membresías, otros
-    const seguro_total = new Big(creditoOrigen.seguro_10_cuotas || "0")
-      .plus(new Big(creditoDestino.seguro_10_cuotas || "0"));
-    
-    const gps_total = new Big(creditoOrigen.gps || "0")
-      .plus(new Big(creditoDestino.gps || "0"));
-    
-    const membresias_total = new Big(creditoOrigen.membresias_pago || "0")
-      .plus(new Big(creditoDestino.membresias_pago || "0"));
-    
-    const otros_total = new Big(creditoOrigen.otros || "0")
-      .plus(new Big(creditoDestino.otros || "0"));
+    const seguro_total = new Big(creditoOrigen.seguro_10_cuotas || "0").plus(
+      new Big(creditoDestino.seguro_10_cuotas || "0")
+    );
+
+    const gps_total = new Big(creditoOrigen.gps || "0").plus(
+      new Big(creditoDestino.gps || "0")
+    );
+
+    const membresias_total = new Big(creditoOrigen.membresias_pago || "0").plus(
+      new Big(creditoDestino.membresias_pago || "0")
+    );
+
+    const otros_total = new Big(creditoOrigen.otros || "0").plus(
+      new Big(creditoDestino.otros || "0")
+    );
 
     console.log(`   🛡️  Seguro total: Q${seguro_total.toString()}`);
     console.log(`   📡 GPS total: Q${gps_total.toString()}`);
@@ -1741,8 +2000,10 @@ export const mergeCreditosAndUpdate = async ({
     // ========================================
     // PASO 3: ACTUALIZAR CRÉDITO DESTINO
     // ========================================
-    console.log("💾 PASO 3: Actualizando crédito destino con valores consolidados...");
-    
+    console.log(
+      "💾 PASO 3: Actualizando crédito destino con valores consolidados..."
+    );
+
     const [creditoActualizado] = await db
       .update(creditos)
       .set({
@@ -1760,7 +2021,9 @@ export const mergeCreditosAndUpdate = async ({
       .where(eq(creditos.credito_id, creditoDestino.credito_id))
       .returning();
 
-    console.log(`   ✅ Crédito ${creditoDestino.numero_credito_sifco} actualizado exitosamente`);
+    console.log(
+      `   ✅ Crédito ${creditoDestino.numero_credito_sifco} actualizado exitosamente`
+    );
     console.log(`   📊 Nuevo capital: Q${capitalTotal.toString()}`);
     console.log(`   💰 Nueva cuota: Q${cuota_total.toString()}`);
     console.log(`   💵 Nueva deuda total: Q${deudatotal.toString()}`);
@@ -1769,33 +2032,45 @@ export const mergeCreditosAndUpdate = async ({
     // ========================================
     // PASO 4: TRASLADAR INVERSIONISTAS DEL ORIGEN AL DESTINO
     // ========================================
-    console.log("👥 PASO 4: Trasladando inversionistas del crédito ORIGEN al DESTINO...");
-    
+    console.log(
+      "👥 PASO 4: Trasladando inversionistas del crédito ORIGEN al DESTINO..."
+    );
+
     const inversionistasOrigen = await db
       .select()
       .from(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, creditoOrigen.credito_id));
 
     if (inversionistasOrigen.length > 0) {
-      console.log(`   📋 Se encontraron ${inversionistasOrigen.length} inversionistas en el crédito origen`);
-      
+      console.log(
+        `   📋 Se encontraron ${inversionistasOrigen.length} inversionistas en el crédito origen`
+      );
+
       // Actualizar el credito_id de todos los inversionistas del origen
       await db
         .update(creditos_inversionistas)
         .set({
-          credito_id: creditoDestino.credito_id
+          credito_id: creditoDestino.credito_id,
         })
-        .where(eq(creditos_inversionistas.credito_id, creditoOrigen.credito_id));
+        .where(
+          eq(creditos_inversionistas.credito_id, creditoOrigen.credito_id)
+        );
 
-      console.log(`   ✅ ${inversionistasOrigen.length} inversionistas trasladados al crédito destino`);
-      
+      console.log(
+        `   ✅ ${inversionistasOrigen.length} inversionistas trasladados al crédito destino`
+      );
+
       inversionistasOrigen.forEach((inv, index) => {
-        console.log(`      ${index + 1}. Inversionista ID: ${inv.inversionista_id}`);
+        console.log(
+          `      ${index + 1}. Inversionista ID: ${inv.inversionista_id}`
+        );
         console.log(`         - Monto aportado: Q${inv.monto_aportado}`);
         console.log(`         - Cuota: Q${inv.cuota_inversionista}`);
       });
     } else {
-      console.log(`   ℹ️  No hay inversionistas en el crédito origen para trasladar`);
+      console.log(
+        `   ℹ️  No hay inversionistas en el crédito origen para trasladar`
+      );
     }
     console.log("");
 
@@ -1803,15 +2078,17 @@ export const mergeCreditosAndUpdate = async ({
     // PASO 5: MARCAR CRÉDITO ORIGEN COMO CANCELADO
     // ========================================
     console.log("🔒 PASO 5: Marcando crédito origen como CANCELADO...");
-    
+
     await db
       .update(creditos)
       .set({
-        statusCredit: "CANCELADO"
+        statusCredit: "CANCELADO",
       })
       .where(eq(creditos.credito_id, creditoOrigen.credito_id));
 
-    console.log(`   ✅ Crédito ${creditoOrigen.numero_credito_sifco} (ID: ${creditoOrigen.credito_id}) marcado como CANCELADO`);
+    console.log(
+      `   ✅ Crédito ${creditoOrigen.numero_credito_sifco} (ID: ${creditoOrigen.credito_id}) marcado como CANCELADO`
+    );
     console.log("");
 
     // ========================================
@@ -1821,10 +2098,10 @@ export const mergeCreditosAndUpdate = async ({
     console.log(`   🔄 Llamando updateInstallments con:`);
     console.log(`      - numero_credito_sifco: ${numero_credito_destino}`);
     console.log(`      - nueva_cuota: Q${cuota_total.toNumber()}`);
-    
+
     await updateInstallments({
       numero_credito_sifco: numero_credito_destino,
-      nueva_cuota: cuota_total.toNumber()
+      nueva_cuota: cuota_total.toNumber(),
     });
 
     console.log(`   ✅ Cuotas recalculadas exitosamente`);
@@ -1843,12 +2120,16 @@ export const mergeCreditosAndUpdate = async ({
     console.log("✅ ========================================");
     console.log("✅ FUSIÓN COMPLETADA EXITOSAMENTE");
     console.log("✅ ========================================");
-    console.log(`📋 Crédito activo: ${numero_credito_destino} (ID: ${creditoDestino.credito_id})`);
+    console.log(
+      `📋 Crédito activo: ${numero_credito_destino} (ID: ${creditoDestino.credito_id})`
+    );
     console.log(`💰 Capital consolidado: Q${capitalTotal.toString()}`);
     console.log(`💵 Nueva cuota mensual: Q${cuota_total.toString()}`);
     console.log(`💵 Nueva deuda total: Q${deudatotal.toString()}`);
     console.log(`👥 Total inversionistas: ${totalInversionistas}`);
-    console.log(`🔒 Crédito cancelado: ${numero_credito_origen} (ID: ${creditoOrigen.credito_id})`);
+    console.log(
+      `🔒 Crédito cancelado: ${numero_credito_origen} (ID: ${creditoOrigen.credito_id})`
+    );
     console.log("");
 
     return {
@@ -1862,10 +2143,9 @@ export const mergeCreditosAndUpdate = async ({
         cuota: cuota_total.toString(),
         deuda_total: deudatotal.toString(),
         total_inversionistas: totalInversionistas,
-        credito_cancelado: numero_credito_origen
-      }
+        credito_cancelado: numero_credito_origen,
+      },
     };
-
   } catch (error) {
     console.log("❌ ========================================");
     console.log("❌ ERROR EN LA FUSIÓN DE CRÉDITOS");
@@ -1884,9 +2164,9 @@ interface UpdateInstallmentsParams {
   nueva_cuota: number;
 }
 
-const updateInstallments = async ({ 
-  numero_credito_sifco, 
-  nueva_cuota 
+const updateInstallments = async ({
+  numero_credito_sifco,
+  nueva_cuota,
 }: UpdateInstallmentsParams): Promise<void> => {
   console.log(`   🔄 Ejecutando updateInstallments...`);
   console.log(`   📋 Crédito: ${numero_credito_sifco}`);

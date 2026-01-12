@@ -304,7 +304,10 @@ def procesar_excel(archivo_path):
                 
                 # VALIDACIONES
                 palabras_invalidas = ['total', 'suma', 'gran total', 'subtotal', 'monto', 'nan', 'none']
-                cliente_invalido = any(x in cliente.lower() for x in palabras_invalidas)
+                
+                # 🔥 FIX: Validar palabras completas, no subcadenas
+                palabras_cliente = cliente.lower().split()
+                cliente_invalido = any(palabra in palabras_invalidas for palabra in palabras_cliente)
                 
                 if (cliente and 
                     not cliente_invalido and
@@ -333,7 +336,6 @@ def procesar_excel(archivo_path):
         import traceback
         traceback.print_exc()
         return []
-
 # ============================================
 # 🚀 FUNCIÓN PRINCIPAL
 # ============================================

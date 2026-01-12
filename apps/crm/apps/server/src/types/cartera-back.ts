@@ -512,10 +512,10 @@ export interface GetAllCreditsParams {
 	perPage?: number;
 	numero_credito_sifco?: string;
 	excel?: boolean;
-	cuotas_atrasadas?:number;
-	nombre_usuario?:string;
+	cuotas_atrasadas?: number;
+	nombre_usuario?: string;
 	time?: "WEEK" | "MONTH" | "DUEMONTH" | "TODAY";
-	email_cobrador?:string;
+	email_cobrador?: string;
 }
 
 export interface GetPaymentsParams {

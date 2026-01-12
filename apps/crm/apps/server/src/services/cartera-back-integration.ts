@@ -185,7 +185,7 @@ export async function createCreditoInCarteraBack(
 			seguro_10_cuotas: params.seguro_10_cuotas,
 			gps: params.gps,
 			observaciones: params.observaciones,
-			no_poliza: (params.no_poliza || ""),
+			no_poliza: params.no_poliza || "",
 			direccion: params.direccion || "",
 			// Nuevos campos adicionales
 			categoria: params.categoria,
@@ -194,7 +194,7 @@ export async function createCreditoInCarteraBack(
 			porcentaje_royalti: params.porcentaje_royalti ?? 0,
 			inversionistas: params.inversionistas,
 			rubros: params.rubros,
-			membresias_pago: params.membresias_pago ?? 0, 
+			membresias_pago: params.membresias_pago ?? 0,
 			como_se_entero: "",
 			otros: 0,
 			reserva: params.reserva ?? 0,
@@ -204,11 +204,17 @@ export async function createCreditoInCarteraBack(
 			pais: params.pais || "",
 		};
 
-		console.log("[CarteraBackSync] Creating credit with data:", JSON.stringify(creditoInput, null, 2));
+		console.log(
+			"[CarteraBackSync] Creating credit with data:",
+			JSON.stringify(creditoInput, null, 2),
+		);
 
 		const credito = await carteraBackClient.createCredito(creditoInput);
 
-		console.log("[CarteraBackSync] Credit created successfully:", JSON.stringify(credito, null, 2));
+		console.log(
+			"[CarteraBackSync] Credit created successfully:",
+			JSON.stringify(credito, null, 2),
+		);
 
 		// Log success
 		await logSyncOperation({

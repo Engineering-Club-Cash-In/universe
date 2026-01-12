@@ -248,14 +248,20 @@ export interface GetCreditoByNumeroActivoResponse {
   cuotaActualPagada: boolean;
   cuotaActualStatus: 'no_required' | 'pending' | 'validated' | 'capital' | 'reset';
 
+  // 🔥 ARRAYS DE CUOTAS (ahora con campos de abonos)
   cuotasAtrasadas: Cuota[];
   cuotasPagadas: Cuota[];
   cuotasPendientes: Cuota[];
-    convenioActivo: ConvenioActivo | null;
+  
+  // 🔥 CONVENIO (puede ser null)
+  convenioActivo: ConvenioActivo | null;
+  
+  // 🔥 ESTOS YA NO SON NECESARIOS porque están dentro de convenioActivo
+  // pero los dejamos para compatibilidad
   cuotasEnConvenio: Cuota[];
   pagosConvenio: ConvenioPagosResume[];
-
 }
+
 
 export interface CancelacionCredito {
   id: number;
@@ -2240,4 +2246,102 @@ interface PagoCompletoResponse {
 export const getPagoCompleto = async (pagoId: number): Promise<PagoCompletoResponse> => {
   const response = await api.get(`/api/dte/pago-completo/${pagoId}`);
   return response.data;
+};
+ 
+
+// 🔥 TIPOS
+export interface Boleta {
+  boleta_id: number;
+  inversionista_id: number;
+  boleta_url: string;
+  estado: "PENDIENTE" | "PROCESADO";
+  monto_boleta: string | null;
+  notas: string | null;
+  fecha_subida: string;
+  fecha_procesado: string | null;
+  subido_por: number | null;
+}
+
+export interface CreateBoletaDTO {
+  inversionista_id: number;
+  boleta_url: string;
+  monto_boleta?: string;
+  notas?: string;
+  subido_por?: number;
+}
+
+export interface GetBoletasFilters {
+  inversionista_id?: number;
+  estado?: "PENDIENTE" | "PROCESADO";
+  limit?: number;
+  offset?: number;
+}
+
+export interface BoletaConInversionista {
+  boleta: Boleta;
+  inversionista: {
+    inversionista_id: number;
+    nombre: string;
+    dpi: string;
+    emite_factura: boolean;
+  };
+}
+
+// ============================================
+// 📝 CREATE - Crear boleta
+// ============================================
+export const createBoleta = async (data: CreateBoletaDTO) => {
+  try {
+    console.log("📝 Creando boleta:", data);
+
+    const response = await axios.post<{
+      success: boolean;
+      message: string;
+      data: Boleta;
+    }>(`${API_URL}/boletas`, data);
+
+    return response.data;
+  } catch (error: any) {
+    console.error("❌ Error creando boleta:", error);
+    throw new Error(
+      error.response?.data?.message || "Error al crear boleta"
+    );
+  }
+};
+
+// ============================================
+// 📖 READ - Listar boletas
+// ============================================
+export const getBoletas = async (filters?: GetBoletasFilters) => {
+  try {
+    console.log("📋 Obteniendo boletas con filtros:", filters);
+
+    const params = new URLSearchParams();
+    
+    if (filters?.inversionista_id) {
+      params.append("inversionista_id", filters.inversionista_id.toString());
+    }
+    if (filters?.estado) {
+      params.append("estado", filters.estado);
+    }
+    if (filters?.limit) {
+      params.append("limit", filters.limit.toString());
+    }
+    if (filters?.offset) {
+      params.append("offset", filters.offset.toString());
+    }
+
+    const response = await axios.get<{
+      success: boolean;
+      data: BoletaConInversionista[];
+      total: number;
+    }>(`${API_URL}/boletas?${params.toString()}`);
+
+    return response.data;
+  } catch (error: any) {
+    console.error("❌ Error obteniendo boletas:", error);
+    throw new Error(
+      error.response?.data?.message || "Error al obtener boletas"
+    );
+  }
 };

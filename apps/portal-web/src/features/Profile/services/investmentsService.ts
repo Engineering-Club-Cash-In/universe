@@ -1,6 +1,8 @@
-// import { ensureCarteraAuth } from "./loginCartera";
+/**
+ * Servicio de inversiones y liquidaciones - Proxy a través de Better Auth API
+ */
 
-const carteraURL = import.meta.env.VITE_CARTERA_API_URL || "http://localhost:4000";
+import apiAuth from "@/lib/api/apiAuth";
 
 // ============================================
 // INTERFACES PARA LIQUIDACIONES
@@ -60,25 +62,25 @@ export const getLiquidaciones = async (
   perPage: number = 10
 ): Promise<LiquidacionesResponse> => {
   try {
-    // Asegurar autenticación
-    // const token = await ensureCarteraAuth();
-
-    const response = await fetch(
-      `${carteraURL}/liquidaciones?dpi=${dpi}&page=${page}&perPage=${perPage}`,
-      {
-        credentials: "include",
-        /*headers: {
-          "Authorization": `Bearer ${token}`,
-        },*/
-      }
+    const response = await apiAuth.get<{
+      success: boolean;
+      liquidaciones: Liquidacion[];
+      page: number;
+      perPage: number;
+      totalItems: number;
+      totalPages: number;
+    }>(
+      `/api/cartera/liquidaciones?dpi=${encodeURIComponent(dpi)}&page=${page}&perPage=${perPage}`
     );
 
-    if (!response.ok) {
-      throw new Error("Error al cargar las liquidaciones");
-    }
-
-    const result: LiquidacionesResponse = await response.json();
-    return result;
+    const result = response.data;
+    return {
+      liquidaciones: result.liquidaciones || [],
+      page: result.page || page,
+      perPage: result.perPage || perPage,
+      totalItems: result.totalItems || 0,
+      totalPages: result.totalPages || 0,
+    };
   } catch (error) {
     console.error("Error al obtener liquidaciones:", error);
     throw error;
@@ -135,22 +137,10 @@ export interface InvestmentsStatsResponse {
  */
 export const getInvestmentsStats = async (dpi: string): Promise<InvestmentsStats> => {
   try {
-    // Asegurar autenticación
-    // const token = await ensureCarteraAuth();
-
-    const response = await fetch(`${carteraURL}/inversionistas/rendimiento?dpi=${dpi}`, {
-      credentials: "include",
-      /*headers: {
-        "Authorization": `Bearer ${token}`,
-      },*/
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al cargar las estadísticas de inversión");
-    }
-
-    const result: InvestmentsStatsResponse = await response.json();
-    return result.data;
+    const response = await apiAuth.get<InvestmentsStatsResponse>(
+      `/api/cartera/investments/stats?dpi=${encodeURIComponent(dpi)}`
+    );
+    return response.data.data;
   } catch (error) {
     console.error("Error al obtener estadísticas de inversión:", error);
     throw error;
@@ -181,23 +171,10 @@ export interface AsesorResponse {
  */
 export const getAsesorById = async (asesorId: number): Promise<Asesor> => {
   try {
-    const response = await fetch(`${carteraURL}/advisor?id=${asesorId}`, {
-      credentials: "include",
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al cargar información del asesor");
-    }
-
-    const result = await response.json();
-    
-    // Si la respuesta tiene formato { success, data }
-    if (result.success && result.data) {
-      return result.data;
-    }
-    
-    // Si la respuesta es directamente el objeto asesor
-    return result;
+    const response = await apiAuth.get<AsesorResponse>(
+      `/api/cartera/advisor?id=${asesorId}`
+    );
+    return response.data.data;
   } catch (error) {
     console.error("Error al obtener información del asesor:", error);
     throw error;

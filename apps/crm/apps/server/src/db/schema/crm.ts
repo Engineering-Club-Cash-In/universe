@@ -300,8 +300,7 @@ export const opportunities = pgTable("opportunities", {
 // Clients table
 export const clients = pgTable("clients", {
 	id: uuid("id").primaryKey().defaultRandom(),
-	companyId: uuid("company_id")
-		.references(() => companies.id),
+	companyId: uuid("company_id").references(() => companies.id),
 	opportunityId: uuid("opportunity_id").references(() => opportunities.id),
 	leadId: uuid("lead_id").references(() => leads.id),
 	contactPerson: text("contact_person").notNull(),

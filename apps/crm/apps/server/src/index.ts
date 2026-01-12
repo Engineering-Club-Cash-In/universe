@@ -10,22 +10,22 @@ import {
 	updateLeadAndCreateOpportunity,
 	validateMagicUrlController,
 } from "./controllers/bot";
+import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
-import { createPublicLead } from "./controllers/public-lead";
 import {
 	getLeadByEmail,
+	getLeadLegalContracts,
+	getLeadOpportunityDocuments,
+	getSifcoNumbersByDpi,
 	updateLeadByEmail,
 	validatePortalToken,
-	getLeadOpportunityDocuments,
-	getLeadLegalContracts,
-	getSifcoNumbersByDpi,
 } from "./controllers/portal-lead";
+import { createPublicLead } from "./controllers/public-lead";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
 import externalContractsRouter from "./routes/external-contracts";
-import   { infornetController } from "./controllers/buro";
 
 const app = new Hono();
 
@@ -416,109 +416,111 @@ app.post("/info/liveness-validation", async (c) => {
 	}
 });
 app.post("/info/validate-otp", async (c) => {
-  const body = await c.req.json();
-  const { token, dpi } = body as { token?: string; dpi?: string };
+	const body = await c.req.json();
+	const { token, dpi } = body as { token?: string; dpi?: string };
 
-  // Validaciones
-  if (!token) {
-    return c.json({ success: false, message: "Token is required" }, 400);
-  }
+	// Validaciones
+	if (!token) {
+		return c.json({ success: false, message: "Token is required" }, 400);
+	}
 
-  if (!dpi) {
-    return c.json({ success: false, message: "DPI is required" }, 400);
-  }
+	if (!dpi) {
+		return c.json({ success: false, message: "DPI is required" }, 400);
+	}
 
-  // Validar formato DPI guatemalteco (13 dígitos)
-  if (!/^\d{13}$/.test(dpi)) {
-    return c.json(
-      { 
-        success: false, 
-        message: "DPI debe tener 13 dígitos" 
-      }, 
-      400
-    );
-  }
+	// Validar formato DPI guatemalteco (13 dígitos)
+	if (!/^\d{13}$/.test(dpi)) {
+		return c.json(
+			{
+				success: false,
+				message: "DPI debe tener 13 dígitos",
+			},
+			400,
+		);
+	}
 
-  try {
-    // Validar si el token es correcto
-    const isValid = token === "1234";
+	try {
+		// Validar si el token es correcto
+		const isValid = token === "1234";
 
-    if (!isValid) {
-      return c.json(
-        {
-          success: false,
-          message: "Invalid token",
-          tokenValidated: false,
-        },
-        401
-      );
-    }
+		if (!isValid) {
+			return c.json(
+				{
+					success: false,
+					message: "Invalid token",
+					tokenValidated: false,
+				},
+				401,
+			);
+		}
 
-    // ✅ Token válido, ahora obtener info de Infornet
-    console.log(`🔍 OTP válido, consultando Infornet para DPI: ${dpi}`);
-    
-    const estudioResult = await infornetController.obtenerEstudioPorDPI(dpi);
+		// ✅ Token válido, ahora obtener info de Infornet
+		console.log(`🔍 OTP válido, consultando Infornet para DPI: ${dpi}`);
 
-    if (!estudioResult.success) {
-      return c.json(
-        {
-          success: false,
-          message: estudioResult.error || "Error al obtener información de Infornet",
-          tokenValidated: true,
-          infornetError: true,
-        },
-        404
-      );
-    }
+		const estudioResult = await infornetController.obtenerEstudioPorDPI(dpi);
 
-    // Análisis de riesgo
-    const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
+		if (!estudioResult.success) {
+			return c.json(
+				{
+					success: false,
+					message:
+						estudioResult.error || "Error al obtener información de Infornet",
+					tokenValidated: true,
+					infornetError: true,
+				},
+				404,
+			);
+		}
 
-    // 🔥 Determinar si pasó el buró
-    const pasoBuro = !analisisRiesgo?.detalles.tieneDelitosPenales && 
-                     !analisisRiesgo?.detalles.tieneMorosidad;
+		// Análisis de riesgo
+		const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
 
-    // 🔥 Mensaje descriptivo del resultado
-    let mensajeBuro = "Aprobado";
-    const motivosRechazo: string[] = [];
+		// 🔥 Determinar si pasó el buró
+		const pasoBuro =
+			!analisisRiesgo?.detalles.tieneDelitosPenales &&
+			!analisisRiesgo?.detalles.tieneMorosidad;
 
-    if (analisisRiesgo?.detalles.tieneDelitosPenales) {
-      motivosRechazo.push("Tiene antecedentes penales");
-    }
-    if (analisisRiesgo?.detalles.tieneMorosidad) {
-      motivosRechazo.push("Tiene historial de morosidad");
-    }
+		// 🔥 Mensaje descriptivo del resultado
+		let mensajeBuro = "Aprobado";
+		const motivosRechazo: string[] = [];
 
-    if (!pasoBuro) {
-      mensajeBuro = `Rechazado: ${motivosRechazo.join(", ")}`;
-    }
+		if (analisisRiesgo?.detalles.tieneDelitosPenales) {
+			motivosRechazo.push("Tiene antecedentes penales");
+		}
+		if (analisisRiesgo?.detalles.tieneMorosidad) {
+			motivosRechazo.push("Tiene historial de morosidad");
+		}
 
-    return c.json(
-      {
-        success: true,
-        message: "Token validated successfully",
-        tokenValidated: true,
-        pasoBuro: pasoBuro, // 🔥 TRUE = Aprobado, FALSE = Rechazado
-        mensajeBuro: mensajeBuro, // 🔥 Mensaje descriptivo
-        data: {
-          estudio: estudioResult.data,
-          fromCache: estudioResult.fromCache,
-          analisisRiesgo: analisisRiesgo,
-        },
-      },
-      200
-    );
-  } catch (err: any) {
-    console.error("Error en validate-otp:", err);
-    return c.json(
-      {
-        success: false,
-        message: err.message || "Internal server error",
-        tokenValidated: false,
-      },
-      500
-    );
-  }
+		if (!pasoBuro) {
+			mensajeBuro = `Rechazado: ${motivosRechazo.join(", ")}`;
+		}
+
+		return c.json(
+			{
+				success: true,
+				message: "Token validated successfully",
+				tokenValidated: true,
+				pasoBuro: pasoBuro, // 🔥 TRUE = Aprobado, FALSE = Rechazado
+				mensajeBuro: mensajeBuro, // 🔥 Mensaje descriptivo
+				data: {
+					estudio: estudioResult.data,
+					fromCache: estudioResult.fromCache,
+					analisisRiesgo: analisisRiesgo,
+				},
+			},
+			200,
+		);
+	} catch (err: any) {
+		console.error("Error en validate-otp:", err);
+		return c.json(
+			{
+				success: false,
+				message: err.message || "Internal server error",
+				tokenValidated: false,
+			},
+			500,
+		);
+	}
 });
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
@@ -526,8 +528,16 @@ app.post("/api/public/lead", createPublicLead);
 // Portal endpoints (protected with BETTER_SECRET_PORTAL token)
 app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);
 app.post("/api/portal/lead/update", validatePortalToken, updateLeadByEmail);
-app.get("/api/portal/lead/documents", validatePortalToken, getLeadOpportunityDocuments);
-app.get("/api/portal/lead/contracts", validatePortalToken, getLeadLegalContracts);
+app.get(
+	"/api/portal/lead/documents",
+	validatePortalToken,
+	getLeadOpportunityDocuments,
+);
+app.get(
+	"/api/portal/lead/contracts",
+	validatePortalToken,
+	getLeadLegalContracts,
+);
 app.get("/api/portal/lead/sifco", validatePortalToken, getSifcoNumbersByDpi);
 
 app.get("/webhook/facebook-lead", async (c) => {

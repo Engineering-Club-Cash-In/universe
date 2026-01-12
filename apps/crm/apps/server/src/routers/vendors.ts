@@ -2,7 +2,11 @@ import { ORPCError } from "@orpc/server";
 import { and, desc, eq, ilike, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { type NewVehicleVendor, vehicleVendors, vehicles } from "../db/schema/vehicles";
+import {
+	type NewVehicleVendor,
+	vehicles,
+	vehicleVendors,
+} from "../db/schema/vehicles";
 import { crmProcedure } from "../lib/orpc";
 
 export const vendorsRouter = {

@@ -25,8 +25,8 @@ import {
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
 import { type ContratoCobranza, columns } from "@/lib/cobros/columns";
-import { orpc } from "@/utils/orpc";
 import { ROLES } from "@/lib/roles";
+import { orpc } from "@/utils/orpc";
 
 // Función para calcular días restantes hasta la fecha de próximo pago
 function calcularDiasHastaPago(fechaProximoPago: string | null) {
@@ -51,9 +51,8 @@ export const Route = createFileRoute("/cobros/")({
 });
 
 function RouteComponent() {
-	const { data: session, } = authClient.useSession();
-	const [filtroTemporal, setFiltroTemporal] =
-		useState<FiltroTemporal>("todos");
+	const { data: session } = authClient.useSession();
+	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("todos");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
 	const [filtroEtapa, setFiltroEtapa] = useState<string | null>(null);
@@ -78,7 +77,12 @@ function RouteComponent() {
 	});
 
 	// Mapear filtroTemporal al enum time
-	const timeParam = useMemo((): "WEEK" | "MONTH" | "DUEMONTH" | "TODAY" | undefined => {
+	const timeParam = useMemo(():
+		| "WEEK"
+		| "MONTH"
+		| "DUEMONTH"
+		| "TODAY"
+		| undefined => {
 		switch (filtroTemporal) {
 			case "hoy":
 				return "TODAY";
@@ -97,7 +101,6 @@ function RouteComponent() {
 
 	const userRole = session?.user.role;
 
-
 	const todosLosCreditos = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({
 			input: {
@@ -106,7 +109,8 @@ function RouteComponent() {
 				estadoMora: filtroEtapa || undefined,
 				nombreUsuario: debouncedFilterValue || undefined,
 				time: timeParam,
-				emailCobrador: userRole !== ROLES.ADMIN ? session?.user?.email : undefined,
+				emailCobrador:
+					userRole !== ROLES.ADMIN ? session?.user?.email : undefined,
 			},
 		}),
 		enabled: !!session,
@@ -127,7 +131,7 @@ function RouteComponent() {
 				// Si NO hay fecha de pago pero HAY mora, usar días de mora negativos
 				// Si NO hay fecha de pago y NO hay mora, usar null (sin fecha definida)
 				let diasHastaPago: number | null;
-				
+
 				if (infoPago?.diasRestantes !== undefined) {
 					diasHastaPago = infoPago.diasRestantes;
 				} else if (contrato.diasMoraMaximo && contrato.diasMoraMaximo > 0) {
@@ -183,11 +187,7 @@ function RouteComponent() {
 			// Incluir casos en mora (días negativos) y casos próximos a vencer
 			return c?.diasHastaPago !== null && c?.diasHastaPago <= limite;
 		});
-	}, [
-		creditosConDias,
-		filtroTemporal,
-		mostrarCompletadosIncobrables,
-	]);
+	}, [creditosConDias, filtroTemporal, mostrarCompletadosIncobrables]);
 
 	// Check permissions after all hooks
 	if (!userRole || !PERMISSIONS.canAccessCobros(userRole)) {
@@ -246,24 +246,24 @@ function RouteComponent() {
 	if (dashboardStats.isLoading) {
 		return (
 			<div className="container mx-auto space-y-6 p-6">
-			<div>
-				<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
-				<p className="text-muted-foreground">
-					Gestión y seguimiento de cobranza - Enfoque preventivo
-				</p>
+				<div>
+					<h1 className="font-bold text-3xl">Dashboard de Cobros</h1>
+					<p className="text-muted-foreground">
+						Gestión y seguimiento de cobranza - Enfoque preventivo
+					</p>
+				</div>
+				<Card className="border-blue-200 bg-blue-50">
+					<CardContent className="flex items-center gap-3 py-4">
+						<Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+						<div>
+							<p className="font-medium text-blue-900">
+								Cargando información de cobros...
+							</p>
+							<p className="text-blue-700 text-sm">Cartera</p>
+						</div>
+					</CardContent>
+				</Card>
 			</div>
-		<Card className="border-blue-200 bg-blue-50">
-			<CardContent className="flex items-center gap-3 py-4">
-			<Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-			<div>
-				<p className="font-medium text-blue-900">
-				Cargando información de cobros...
-				</p>
-				<p className="text-blue-700 text-sm">Cartera</p>
-			</div>
-			</CardContent>
-		</Card>
-		</div>
 		);
 	}
 
@@ -526,7 +526,6 @@ function RouteComponent() {
 								);
 							})}
 						</div>
-						
 					</div>
 
 					{/* Data Table */}

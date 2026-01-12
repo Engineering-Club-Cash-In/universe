@@ -4,11 +4,13 @@ import {
 	Circle,
 	FileCheck,
 	Key,
+	Loader2,
 	Send,
 	Truck,
 	Wallet,
-	Loader2,
 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,8 +18,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
 import { client } from "@/utils/orpc";
-import { toast } from "sonner";
-import { useState } from "react";
 
 interface DisbursementChecklistViewProps {
 	opportunityId: string;
@@ -186,7 +186,7 @@ export function DisbursementChecklistView({
 						<Badge variant="outline">Pendiente</Badge>
 					)}
 				</div>
-				<div className="mt-2 text-sm text-muted-foreground">
+				<div className="mt-2 text-muted-foreground text-sm">
 					<span className="font-medium">{checklist.lead}</span> -{" "}
 					{formatCurrency(checklist.value)}
 				</div>
@@ -215,8 +215,7 @@ export function DisbursementChecklistView({
 									handleItemChange(item.key, checked as boolean)
 								}
 								disabled={
-									checklist.disbursementApproved ||
-									updateItemMutation.isPending
+									checklist.disbursementApproved || updateItemMutation.isPending
 								}
 							/>
 							<div className="flex flex-1 items-center space-x-2">
@@ -226,9 +225,7 @@ export function DisbursementChecklistView({
 								<label
 									htmlFor={item.key}
 									className={`flex-1 text-sm ${
-										item.completed
-											? "text-muted-foreground line-through"
-											: ""
+										item.completed ? "text-muted-foreground line-through" : ""
 									}`}
 								>
 									{item.label}
@@ -243,7 +240,7 @@ export function DisbursementChecklistView({
 
 				{/* Notes */}
 				<div className="space-y-2">
-					<label className="text-sm font-medium">Notas</label>
+					<label className="font-medium text-sm">Notas</label>
 					<Textarea
 						value={notes}
 						onChange={(e) => setNotes(e.target.value)}

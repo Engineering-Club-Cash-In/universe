@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 // Catálogo de departamentos y municipios de Guatemala
 export const guatemalaLocations = pgTable(

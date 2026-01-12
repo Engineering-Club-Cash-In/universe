@@ -20,7 +20,8 @@
 		"db:seed": "bun run --filter server db:seed",
 		"db:clear": "bun run --filter server db:clear",
 		"check-all": "bash check-all.sh",
-		"push": "bash ./deployWeb.sh"
+		"push": "bash ./deployWeb.sh",
+		"pr": "bash ./create-pr.sh"
 	},
 	"dependencies": {
 		"@hookform/resolvers": "^5.2.1",

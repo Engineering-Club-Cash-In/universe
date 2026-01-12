@@ -122,8 +122,7 @@ export const cuotasPago = pgTable("cuotas_pago", {
 // Casos de cobros - Se crean cuando hay cuotas en mora
 export const casosCobros = pgTable("casos_cobros", {
 	id: uuid("id").primaryKey().defaultRandom(),
-	contratoId: uuid("contrato_id")
-		.references(() => contratosFinanciamiento.id),
+	contratoId: uuid("contrato_id").references(() => contratosFinanciamiento.id),
 
 	// Referencia a cartera-back (nullable para compatibilidad con datos legacy)
 	numeroCreditoSifco: text("numero_credito_sifco"),

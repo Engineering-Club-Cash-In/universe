@@ -778,7 +778,8 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Primer Nombre <span className="text-red-500">*</span>
+															Primer Nombre{" "}
+															<span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}
@@ -842,7 +843,8 @@ function RouteComponent() {
 												{(field) => (
 													<div className="space-y-2">
 														<Label htmlFor={field.name}>
-															Primer Apellido <span className="text-red-500">*</span>
+															Primer Apellido{" "}
+															<span className="text-red-500">*</span>
 														</Label>
 														<Input
 															id={field.name}

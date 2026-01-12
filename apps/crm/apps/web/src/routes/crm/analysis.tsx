@@ -1,6 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { AlertCircle, CheckCircle, FileText, XCircle, Wallet } from "lucide-react";
+import {
+	AlertCircle,
+	CheckCircle,
+	FileText,
+	Wallet,
+	XCircle,
+} from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
@@ -32,8 +38,8 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
 	Tooltip,
 	TooltipContent,
@@ -289,81 +295,94 @@ function AnalysisPage() {
 								<CardTitle>Oportunidades Pendientes de Análisis</CardTitle>
 								<CardDescription>
 									{opportunities.length} oportunidad
-									{opportunities.length !== 1 ? "es" : ""} esperando revisión de documentación
+									{opportunities.length !== 1 ? "es" : ""} esperando revisión de
+									documentación
 								</CardDescription>
 							</CardHeader>
-					<CardContent>
-						<Table>
-							<TableHeader>
-								<TableRow>
-									<TableHead>Título</TableHead>
-									<TableHead>Lead</TableHead>
-									<TableHead>Empresa</TableHead>
-									<TableHead>Valor</TableHead>
-									<TableHead>Fecha Esperada</TableHead>
-									<TableHead>Acciones</TableHead>
-								</TableRow>
-							</TableHeader>
-							<TableBody>
-								{opportunities.map((opportunity) => (
-									<TableRow key={opportunity.id}>
-										<TableCell className="font-medium">
-											{opportunity.title}
-										</TableCell>
-										<TableCell>
-											{opportunity.lead ? (
-												<div>
-													<p className="font-medium">
-														{opportunity.lead.firstName}{" "}
-														{opportunity.lead.lastName}
-													</p>
-													<p className="text-muted-foreground text-sm">
-														{opportunity.lead.email}
-													</p>
-												</div>
-											) : (
-												<span className="text-muted-foreground">Sin lead</span>
-											)}
-										</TableCell>
-										<TableCell>
-											{opportunity.company?.name || (
-												<span className="text-muted-foreground">
-													Sin empresa
-												</span>
-											)}
-										</TableCell>
-										<TableCell>
-											{opportunity.value ? (
-												<span className="font-medium">
-													Q{Number(opportunity.value).toLocaleString()}
-												</span>
-											) : (
-												<span className="text-muted-foreground">Sin valor</span>
-											)}
-										</TableCell>
-										<TableCell>
-											{opportunity.expectedCloseDate ? (
-												new Date(
-													opportunity.expectedCloseDate,
-												).toLocaleDateString("es-GT")
-											) : (
-												<span className="text-muted-foreground">Sin fecha</span>
-											)}
-										</TableCell>
-										<TableCell>
-											<OpportunityActions
-												opportunity={opportunity}
-												onApprove={() => handleApprovalClick(opportunity, true)}
-												onReject={() => handleApprovalClick(opportunity, false)}
-												onViewDocuments={() => handleViewDocuments(opportunity)}
-											/>
-										</TableCell>
-									</TableRow>
-								))}
-							</TableBody>
-						</Table>
-					</CardContent>
-				</Card>
+							<CardContent>
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead>Título</TableHead>
+											<TableHead>Lead</TableHead>
+											<TableHead>Empresa</TableHead>
+											<TableHead>Valor</TableHead>
+											<TableHead>Fecha Esperada</TableHead>
+											<TableHead>Acciones</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{opportunities.map((opportunity) => (
+											<TableRow key={opportunity.id}>
+												<TableCell className="font-medium">
+													{opportunity.title}
+												</TableCell>
+												<TableCell>
+													{opportunity.lead ? (
+														<div>
+															<p className="font-medium">
+																{opportunity.lead.firstName}{" "}
+																{opportunity.lead.lastName}
+															</p>
+															<p className="text-muted-foreground text-sm">
+																{opportunity.lead.email}
+															</p>
+														</div>
+													) : (
+														<span className="text-muted-foreground">
+															Sin lead
+														</span>
+													)}
+												</TableCell>
+												<TableCell>
+													{opportunity.company?.name || (
+														<span className="text-muted-foreground">
+															Sin empresa
+														</span>
+													)}
+												</TableCell>
+												<TableCell>
+													{opportunity.value ? (
+														<span className="font-medium">
+															Q{Number(opportunity.value).toLocaleString()}
+														</span>
+													) : (
+														<span className="text-muted-foreground">
+															Sin valor
+														</span>
+													)}
+												</TableCell>
+												<TableCell>
+													{opportunity.expectedCloseDate ? (
+														new Date(
+															opportunity.expectedCloseDate,
+														).toLocaleDateString("es-GT")
+													) : (
+														<span className="text-muted-foreground">
+															Sin fecha
+														</span>
+													)}
+												</TableCell>
+												<TableCell>
+													<OpportunityActions
+														opportunity={opportunity}
+														onApprove={() =>
+															handleApprovalClick(opportunity, true)
+														}
+														onReject={() =>
+															handleApprovalClick(opportunity, false)
+														}
+														onViewDocuments={() =>
+															handleViewDocuments(opportunity)
+														}
+													/>
+												</TableCell>
+											</TableRow>
+										))}
+									</TableBody>
+								</Table>
+							</CardContent>
+						</Card>
 					)}
 				</TabsContent>
 
@@ -486,7 +505,11 @@ function DisbursementSection() {
 		null,
 	);
 
-	const { data: opportunities, isLoading, refetch } = useQuery({
+	const {
+		data: opportunities,
+		isLoading,
+		refetch,
+	} = useQuery({
 		queryKey: ["getOpportunitiesForDisbursement"],
 		queryFn: () => client.getOpportunitiesForDisbursement(),
 	});

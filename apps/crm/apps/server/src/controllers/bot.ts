@@ -265,7 +265,8 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 
 	return {
 		success: true,
-		message: "RENAP data processed, lead synced, and opportunity created successfully",
+		message:
+			"RENAP data processed, lead synced, and opportunity created successfully",
 		data: renapData,
 		leadId,
 		opportunityId: newOpportunity.id,
@@ -339,7 +340,9 @@ export const updateLeadAndCreateOpportunity = async (
 		bankStatements3?: string;
 	},
 ) => {
-	console.log(`[DEBUG] Starting updateLeadAndCreateOpportunity for DPI: ${dpi}`);
+	console.log(
+		`[DEBUG] Starting updateLeadAndCreateOpportunity for DPI: ${dpi}`,
+	);
 	console.log("[DEBUG] Data received:", data);
 
 	if (!dpi) {

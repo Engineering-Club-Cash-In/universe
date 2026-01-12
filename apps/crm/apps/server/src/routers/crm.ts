@@ -1,4 +1,4 @@
-import { and, count, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, isNotNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -628,7 +628,6 @@ export const crmRouter = {
 				membresiaPago: opportunities.membresiaPago,
 				inversionistas: opportunities.inversionistas,
 				asesorId: opportunities.asesorId,
-				direccion: opportunities.direccion,
 				rubros: opportunities.rubros,
 				company: {
 					id: companies.id,
@@ -651,6 +650,19 @@ export const crmRouter = {
 					id: user.id,
 					name: user.name,
 				},
+				vehicle: {
+					id: vehicles.id,
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					licensePlate: vehicles.licensePlate,
+					vinNumber: vehicles.vinNumber,
+					origin: vehicles.origin,
+					color: vehicles.color,
+					vehicleType: vehicles.vehicleType,
+					kmMileage: vehicles.kmMileage,
+					status: vehicles.status,
+				},
 			};
 
 			const baseQuery = db
@@ -659,7 +671,8 @@ export const crmRouter = {
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-				.leftJoin(user, eq(opportunities.assignedTo, user.id));
+				.leftJoin(user, eq(opportunities.assignedTo, user.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id));
 
 			// Build conditions
 			const conditions = [];
@@ -904,8 +917,6 @@ export const crmRouter = {
 					if (!fechaInicio) missingFields.push("fecha de inicio del contrato");
 					if (!diaPagoMensual) missingFields.push("día de pago mensual");
 
-					// Additional credit fields
-					const direccion = input.direccion ?? opp.direccion;
 					const seguro =
 						input.seguro ??
 						(opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
@@ -919,7 +930,6 @@ export const crmRouter = {
 					const asesorId = input.asesorId ?? opp.asesorId;
 					const inversionistas = input.inversionistas ?? opp.inversionistas;
 
-					if (!direccion) missingFields.push("dirección del cliente");
 					if (seguro === undefined || seguro === null || seguro <= 0)
 						missingFields.push("seguro (debe ser mayor a 0)");
 					if (gps === undefined || gps === null || gps <= 0)
@@ -1070,7 +1080,7 @@ export const crmRouter = {
 							const finalRubros = input.rubros || opp.rubros || undefined;
 							const finalAsesorId = input.asesorId || opp.asesorId || usuarioId; // Usa el del input, o el guardado, o el placeholder
 							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
-							const finalDireccion = direccion || opp.direccion || undefined;
+							const finalDireccion = direccion || lead.direccion || undefined;
 
 							creditoResult = await createCreditoInCarteraBack({
 								opportunityId: opp.id,
@@ -1859,6 +1869,236 @@ export const crmRouter = {
 			totalContractValue,
 		};
 	}),
+
+	// NEW: Get leads that are considered "clients" (have at least one closed opportunity)
+	// A lead is a client if they have an opportunity with:
+	// 1. numeroSifco set, OR
+	// 2. stage with closurePercentage = 100
+	getLeadsAsClients: crmProcedure
+		.input(
+			z.object({
+				limit: z.number().min(1).max(100).default(20),
+				offset: z.number().min(0).default(0),
+				search: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { limit, offset, search } = input;
+
+			// First, get all stages with 100% closure
+			const closedStages = await db
+				.select({ id: salesStages.id })
+				.from(salesStages)
+				.where(gte(salesStages.closurePercentage, 100));
+
+			const closedStageIds = closedStages.map((s) => s.id);
+
+			// Build subquery to find leads with at least one closed opportunity
+			// A closed opportunity is one with numeroSifco OR in a 100% stage
+			const leadsWithClosedOpportunities = await db
+				.selectDistinct({ leadId: opportunities.leadId })
+				.from(opportunities)
+				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+				.where(
+					and(
+						isNotNull(opportunities.leadId),
+						or(
+							isNotNull(opportunities.numeroSifco),
+							closedStageIds.length > 0
+								? sql`${opportunities.stageId} IN (${sql.join(closedStageIds.map(id => sql`${id}`), sql`, `)})`
+								: sql`false`,
+						),
+					),
+				);
+
+			const clientLeadIds = leadsWithClosedOpportunities
+				.map((r) => r.leadId)
+				.filter((id): id is string => id !== null);
+
+			if (clientLeadIds.length === 0) {
+				return {
+					data: [],
+					total: 0,
+					limit,
+					offset,
+				};
+			}
+
+			// Build conditions for the main query
+			const conditions: any[] = [
+				sql`${leads.id} IN (${sql.join(clientLeadIds.map(id => sql`${id}`), sql`, `)})`,
+			];
+
+			// Filter by user if not admin
+			if (context.userRole !== "admin") {
+				conditions.push(eq(leads.assignedTo, context.userId));
+			}
+
+			// Search filter
+			if (search && search.trim() !== "") {
+				const searchPattern = `%${search.trim()}%`;
+				conditions.push(
+					or(
+						ilike(leads.firstName, searchPattern),
+						ilike(leads.lastName, searchPattern),
+						ilike(leads.email, searchPattern),
+						ilike(leads.phone, searchPattern),
+						ilike(leads.dpi, searchPattern),
+					),
+				);
+			}
+
+			const whereClause = and(...conditions);
+
+			// Get total count
+			const countResult = await db
+				.select({ count: sql<number>`count(*)` })
+				.from(leads)
+				.where(whereClause);
+
+			const total = Number(countResult[0]?.count || 0);
+
+			// Get paginated leads
+			const clientLeads = await db
+				.select({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					age: leads.age,
+					clientType: leads.clientType,
+					maritalStatus: leads.maritalStatus,
+					dependents: leads.dependents,
+					monthlyIncome: leads.monthlyIncome,
+					loanAmount: leads.loanAmount,
+					occupation: leads.occupation,
+					workTime: leads.workTime,
+					loanPurpose: leads.loanPurpose,
+					ownsHome: leads.ownsHome,
+					ownsVehicle: leads.ownsVehicle,
+					hasCreditCard: leads.hasCreditCard,
+					jobTitle: leads.jobTitle,
+					assignedTo: leads.assignedTo,
+					createdAt: leads.createdAt,
+					updatedAt: leads.updatedAt,
+					assignedUser: {
+						id: user.id,
+						name: user.name,
+					},
+				})
+				.from(leads)
+				.leftJoin(user, eq(leads.assignedTo, user.id))
+				.where(whereClause)
+				.orderBy(desc(leads.createdAt))
+				.limit(limit)
+				.offset(offset);
+
+			// Now get the opportunities for each lead
+			const leadIds = clientLeads.map((l) => l.id);
+			
+			const leadsOpportunities = leadIds.length > 0 
+				? await db
+					.select({
+						id: opportunities.id,
+						title: opportunities.title,
+						leadId: opportunities.leadId,
+						value: opportunities.value,
+						creditType: opportunities.creditType,
+						numeroSifco: opportunities.numeroSifco,
+						status: opportunities.status,
+						createdAt: opportunities.createdAt,
+						stage: {
+							id: salesStages.id,
+							name: salesStages.name,
+							closurePercentage: salesStages.closurePercentage,
+							color: salesStages.color,
+						},
+					})
+					.from(opportunities)
+					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+					.where(sql`${opportunities.leadId} IN (${sql.join(leadIds.map(id => sql`${id}`), sql`, `)})`)
+					.orderBy(desc(opportunities.createdAt))
+				: [];
+
+			// Group opportunities by lead
+			const opportunitiesByLead = leadsOpportunities.reduce(
+				(acc, opp) => {
+					const leadId = opp.leadId;
+					if (leadId) {
+						if (!acc[leadId]) {
+							acc[leadId] = [];
+						}
+						acc[leadId].push({
+							id: opp.id,
+							title: opp.title,
+							value: opp.value,
+							creditType: opp.creditType,
+							numeroSifco: opp.numeroSifco,
+							status: opp.status,
+							createdAt: opp.createdAt,
+							stage: opp.stage,
+							isClosed: opp.numeroSifco !== null || (opp.stage?.closurePercentage ?? 0) >= 100,
+						});
+					}
+					return acc;
+				},
+				{} as Record<string, any[]>,
+			);
+
+			// Get credit analysis for each lead
+			const creditAnalysisByLead = leadIds.length > 0
+				? await db
+					.select({
+						leadId: creditAnalysis.leadId,
+						monthlyFixedIncome: creditAnalysis.monthlyFixedIncome,
+						monthlyVariableIncome: creditAnalysis.monthlyVariableIncome,
+						monthlyFixedExpenses: creditAnalysis.monthlyFixedExpenses,
+						monthlyVariableExpenses: creditAnalysis.monthlyVariableExpenses,
+						economicAvailability: creditAnalysis.economicAvailability,
+						minPayment: creditAnalysis.minPayment,
+						maxPayment: creditAnalysis.maxPayment,
+						adjustedPayment: creditAnalysis.adjustedPayment,
+						maxCreditAmount: creditAnalysis.maxCreditAmount,
+						analyzedAt: creditAnalysis.analyzedAt,
+					})
+					.from(creditAnalysis)
+					.where(sql`${creditAnalysis.leadId} IN (${sql.join(leadIds.map(id => sql`${id}`), sql`, `)})`)
+				: [];
+
+			// Map credit analysis by lead ID
+			const creditAnalysisMap = creditAnalysisByLead.reduce(
+				(acc, ca) => {
+					if (ca.leadId) {
+						acc[ca.leadId] = ca;
+					}
+					return acc;
+				},
+				{} as Record<string, typeof creditAnalysisByLead[0]>,
+			);
+
+			// Combine leads with their opportunities and credit analysis
+			const data = clientLeads.map((lead) => ({
+				...lead,
+				opportunities: opportunitiesByLead[lead.id] || [],
+				creditAnalysis: creditAnalysisMap[lead.id] || null,
+				// Calculate total value from closed opportunities
+				totalClosedValue: (opportunitiesByLead[lead.id] || [])
+					.filter((opp: any) => opp.isClosed)
+					.reduce((sum: number, opp: any) => sum + (Number.parseFloat(opp.value || "0") || 0), 0),
+				// Count of closed opportunities
+				closedOpportunitiesCount: (opportunitiesByLead[lead.id] || [])
+					.filter((opp: any) => opp.isClosed).length,
+			}));
+
+			return {
+				data,
+				total,
+				limit,
+				offset,
+			};
+		}),
 
 	createClient: crmProcedure
 		.input(

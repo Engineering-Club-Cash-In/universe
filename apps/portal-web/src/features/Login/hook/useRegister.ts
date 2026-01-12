@@ -4,8 +4,7 @@ import { useState } from "react";
 import type { RegisterCredentials } from "@/lib/auth";
 import { authClient } from "@/lib/auth";
 import { useNavigate } from "@tanstack/react-router";
-import { sendLead } from "@/features/FormLeads/service/serviceLead";
-import { createInvestor } from "@/features/Profile/services/investorService";
+import { registerExternalUser } from "@/features/Profile/services/unifiedService";
 
 // Esquema de validación con Yup
 const validationSchema = Yup.object({
@@ -68,31 +67,16 @@ export const useRegister = () => {
           role: values.userType, // Enviar el role al backend
         } as any);
 
-        // Si el registro fue exitoso, enviar datos según el tipo de usuario
+        // Si el registro fue exitoso, registrar en CRM o Cartera según tipo
         if (response?.data?.user?.id) {
           try {
-            if (values.userType === "CLIENT") {
-              // Para clientes, enviar como lead
-              await sendLead({
-                nombreCompleto: values.fullName,
-                correo: values.email,
-                telefono: values.phone,
-                dpi: values.dpi,
-                descripcion: `Tipo de usuario: ${values.userType}`,
-              });
-            } else if (values.userType === "INVESTOR") {
-              // Para inversionistas, crear en cartera
-              await createInvestor({
-                nombre: values.fullName,
-                dpi: parseInt(values.dpi),
-                email: values.email,
-                emite_factura: false,
-                tipo_reinversion: "sin_reinversion",
-                banco: null,
-                tipo_cuenta: null,
-                numero_cuenta: "",
-              });
-            }
+            await registerExternalUser({
+              userType: values.userType,
+              fullName: values.fullName,
+              email: values.email,
+              dpi: values.dpi,
+              phone: values.phone,
+            });
           } catch (error) {
             console.error("Error al registrar usuario adicional:", error);
             // No detener el flujo si falla, el usuario ya fue registrado en better-auth

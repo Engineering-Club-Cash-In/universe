@@ -1,54 +1,55 @@
 /**
- * Servicio de documentos y contratos - Proxy a través de Better Auth API
+ * Servicio para operaciones del CRM - Documentos y Contratos
  */
 
-import apiAuth from "@/lib/api/apiAuth";
-import type { AxiosError } from "axios";
+import { env } from "../../config/env";
 
-// Tipos de documentos según el enum del backend
+// ============================================
+// TIPOS DE DOCUMENTOS
+// ============================================
+
 export type DocumentType =
   // Documentos específicos para análisis (Individual y Comerciante)
-  | "dpi" // DPI vigente
-  | "licencia" // Licencia vigente
-  | "recibo_luz" // Recibo de luz (no mayor a 2 meses)
-  | "recibo_adicional" // Recibo adicional con misma dirección
-  | "formularios" // Formularios completamente llenos
-  | "estados_cuenta_1" // Estado de cuenta mes 1
-  | "estados_cuenta_2" // Estado de cuenta mes 2
-  | "estados_cuenta_3" // Estado de cuenta mes 3
+  | "dpi"
+  | "licencia"
+  | "recibo_luz"
+  | "recibo_adicional"
+  | "formularios"
+  | "estados_cuenta_1"
+  | "estados_cuenta_2"
+  | "estados_cuenta_3"
   // Documentos para comerciantes
-  | "patente_comercio" // Patente de comercio
+  | "patente_comercio"
   // Documentos para empresas (S.A)
-  | "representacion_legal" // Representación Legal
-  | "constitucion_sociedad" // Constitución de sociedad
-  | "patente_mercantil" // Patente de comercio y mercantil
-  | "iva_1" // Formulario IVA mes 1
-  | "iva_2" // Formulario IVA mes 2
-  | "iva_3" // Formulario IVA mes 3
-  | "estado_financiero" // Estado financiero último año
-  | "clausula_consentimiento" // Cláusula de consentimiento de la empresa
-  | "minutas" // Minutas
+  | "representacion_legal"
+  | "constitucion_sociedad"
+  | "patente_mercantil"
+  | "iva_1"
+  | "iva_2"
+  | "iva_3"
+  | "estado_financiero"
+  | "clausula_consentimiento"
+  | "minutas"
   // Documentos específicos de vehículos
-  | "tarjeta_circulacion" // Tarjeta de circulación del vehículo
-  | "titulo_propiedad" // Título de propiedad del vehículo
-  | "dpi_dueno" // DPI del dueño (cuando vehículo a nombre de individual)
-  | "patente_comercio_vehiculo" // Patente de comercio (empresa individual)
-  | "representacion_legal_vehiculo" // Representación legal (S.A)
-  | "dpi_representante_legal_vehiculo" // DPI del representante legal (S.A)
-  | "pago_impuesto_circulacion" // Comprobante de pago de impuesto de circulación
-  | "consulta_sat" // Captura de pantalla de consulta SAT
-  | "consulta_garantias_mobiliarias" // Certificación de garantías mobiliarias (RGM)
-  // Categorías generales (legacy - mantener por compatibilidad)
-  | "identification" // DPI, pasaporte
-  | "income_proof" // Comprobantes de ingresos
-  | "bank_statement" // Estados de cuenta
-  | "business_license" // Patente de comercio
-  | "property_deed" // Escrituras
-  | "vehicle_title" // Tarjeta de circulación
-  | "credit_report" // Reporte crediticio
-  | "other" // Otros documentos
-  // Documento de detalle de análisis
-  | "detalle_analisis"; // Archivo Excel con detalle del crédito
+  | "tarjeta_circulacion"
+  | "titulo_propiedad"
+  | "dpi_dueno"
+  | "patente_comercio_vehiculo"
+  | "representacion_legal_vehiculo"
+  | "dpi_representante_legal_vehiculo"
+  | "pago_impuesto_circulacion"
+  | "consulta_sat"
+  | "consulta_garantias_mobiliarias"
+  // Categorías generales (legacy)
+  | "identification"
+  | "income_proof"
+  | "bank_statement"
+  | "business_license"
+  | "property_deed"
+  | "vehicle_title"
+  | "credit_report"
+  | "other"
+  | "detalle_analisis";
 
 export type ContractType =
   | "cobertura_inrexsa"
@@ -58,7 +59,10 @@ export type ContractType =
 
 export type ContractStatus = "pending" | "signed" | "completed" | "cancelled";
 
-// Interfaces basadas en la respuesta del API
+// ============================================
+// INTERFACES
+// ============================================
+
 export interface Document {
   id: string;
   filename: string;
@@ -123,26 +127,33 @@ export interface ContractsResponse {
   data: Contract[];
 }
 
-// Servicios
+// ============================================
+// FUNCIONES
+// ============================================
 
 /**
  * Obtiene todos los documentos personales del usuario
  */
 export const getPersonalDocuments = async (
   email: string,
-  dpi: string
+  dpi: string,
+  token?: string
 ): Promise<Document[]> => {
-  try {
-    const response = await apiAuth.get<DocumentsResponse>(
-      `/api/crm/documents?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`
-    );
-    return response.data.data;
-  } catch (error) {
-    const axiosError = error as AxiosError;
-    const customError: any = new Error("Error al cargar los documentos");
-    customError.status = axiosError.response?.status;
-    throw customError;
+  const response = await fetch(
+    `${env.CRM_API_URL}/api/portal/lead/documents?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
+    {
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Error al cargar los documentos");
   }
+
+  const result = (await response.json()) as DocumentsResponse;
+  return result.data;
 };
 
 /**
@@ -150,19 +161,24 @@ export const getPersonalDocuments = async (
  */
 export const getContracts = async (
   email: string,
-  dpi: string
+  dpi: string,
+  token?: string
 ): Promise<Contract[]> => {
-  try {
-    const response = await apiAuth.get<ContractsResponse>(
-      `/api/crm/contracts?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`
-    );
-    return response.data.data;
-  } catch (error) {
-    const axiosError = error as AxiosError;
-    const customError: any = new Error("Error al cargar los contratos");
-    customError.status = axiosError.response?.status;
-    throw customError;
+  const response = await fetch(
+    `${env.CRM_API_URL}/api/portal/lead/contracts?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`,
+    {
+      headers: {
+        ...(token && { Authorization: `Bearer ${token}` }),
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error("Error al cargar los contratos");
   }
+
+  const result = (await response.json()) as ContractsResponse;
+  return result.data;
 };
 
 /**

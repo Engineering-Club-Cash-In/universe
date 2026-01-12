@@ -104,9 +104,10 @@ interface CreditDetailViewProps {
 		} | null;
 		vehicle?: {
 			id: string;
-			brand: string;
-			line: string;
+			make: string;
 			model: string;
+			year: string;
+			licensePlate: string | null;
 			color: string | null;
 			plate: string | null;
 			origin: string | null;
@@ -170,16 +171,6 @@ interface CreditDetailViewProps {
 		status: "draft" | "sent" | "accepted" | "rejected";
 		notes: string | null;
 	} | null;
-	vehicleInspection?: {
-		id: string;
-		marketValue: string | null;
-		suggestedCommercialValue: string | null;
-		bankValue: string | null;
-	} | null;
-	creditAnalysis?: {
-		id: string;
-		adjustedPayment: string | null;
-	} | null;
 }
 
 // Formateador de moneda
@@ -213,8 +204,6 @@ export function CreditDetailView({
 	userRole,
 	opportunity,
 	quotation,
-	vehicleInspection,
-	creditAnalysis,
 }: CreditDetailViewProps) {
 	const queryClient = useQueryClient();
 	const [isAddCheckOpen, setIsAddCheckOpen] = useState(false);
@@ -222,6 +211,26 @@ export function CreditDetailView({
 
 	// Determinar tipo de crédito
 	const isAutocompra = opportunity.creditType === "autocompra";
+
+	// Query para obtener la última inspección del vehículo
+	const vehicleInspectionQuery = useQuery({
+		queryKey: ["getLatestInspectionByVehicleId", opportunity.vehicle?.id],
+		queryFn: () =>
+			client.getLatestInspectionByVehicleId({ vehicleId: opportunity.vehicle!.id }),
+		enabled: !!opportunity.vehicle?.id,
+	});
+
+	// Query para obtener el análisis de crédito del lead
+	const creditAnalysisQuery = useQuery({
+		queryKey: ["getCreditAnalysisByLeadId", opportunity.lead?.id],
+		queryFn: () =>
+			client.getCreditAnalysisByLeadId({ leadId: opportunity.lead!.id }),
+		enabled: !!opportunity.lead?.id,
+	});
+
+	// Datos de inspección y análisis de crédito
+	const vehicleInspection = vehicleInspectionQuery.data;
+	const creditAnalysis = creditAnalysisQuery.data;
 
 	// Query para obtener el vendor del vehículo (solo para Autocompras)
 	const vendorQuery = useQuery({
@@ -319,11 +328,11 @@ export function CreditDetailView({
 	});
 
 	// Calcular valores derivados
-	const montoSolicitado = Number.parseFloat(opportunity.value || "0");
-	const tasaInteres = Number.parseFloat(opportunity.tasaInteres || "0");
-	const tasaMensual = tasaInteres / 12;
+	const montoSolicitado = Number.parseFloat(quotation?.totalFinanced || "0");
+	const tasaMensual = Number.parseFloat(quotation?.interestRate || "0");
+	const tasaInteres = tasaMensual * 12;
 	const iva = tasaMensual * IVA_RATE;
-	const tasaConIva = tasaMensual + iva;
+	const numeroCuotas = quotation?.termMonths || 0;
 
 	// División de cuota entre Inversionista y Empresa
 	const porcentajeEmpresa = 100 - porcentajeInversionista;
@@ -346,7 +355,7 @@ export function CreditDetailView({
 	);
 
 	// Gastos de la cotización
-	const gps = Number.parseFloat(opportunity.gps || quotation?.gpsCost || "0");
+	const gps = Number.parseFloat(quotation?.gpsCost || "0");
 	const seguro = Number.parseFloat(
 		opportunity.seguro || quotation?.insuranceCost || "0",
 	);
@@ -417,7 +426,7 @@ export function CreditDetailView({
 	// Información del vehículo
 	const vehiculo = opportunity.vehicle;
 	const vehicleString = vehiculo
-		? `${vehiculo.brand} ${vehiculo.line} ${vehiculo.model}`
+		? `${vehiculo.make} ${vehiculo.model} ${vehiculo.year}`
 		: "No asignado";
 
 	// Información del lead (deudor)
@@ -609,7 +618,7 @@ export function CreditDetailView({
 										<Label className="text-muted-foreground text-xs">
 											Placas
 										</Label>
-										<p className="font-medium">{vehiculo?.plate || "N/A"}</p>
+										<p className="font-medium">{vehiculo?.licensePlate || "N/A"}</p>
 									</div>
 									<div>
 										<Label className="text-muted-foreground text-xs">
@@ -712,7 +721,7 @@ export function CreditDetailView({
 											Plazo
 										</Label>
 										<p className="font-medium">
-											{opportunity.numeroCuotas || "N/A"} meses
+											{numeroCuotas || "N/A"} meses
 										</p>
 									</div>
 									<div>
@@ -732,7 +741,7 @@ export function CreditDetailView({
 											Cuota Mensual
 										</Label>
 										<p className="font-medium">
-											{formatCurrency(opportunity.cuotaMensual)}
+											{formatCurrency(quotation?.monthlyPayment)}
 										</p>
 									</div>
 								</div>

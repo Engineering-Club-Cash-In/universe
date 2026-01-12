@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { InputIcon, Button, IconPerson } from "@/components";
 import { useMutation } from "@tanstack/react-query";
-import { sendLead } from "@/features/FormLeads/service/serviceLead";
-import { createInvestor } from "../services/investorService";
 import { useAuth } from "@/lib";
 import { authClient } from "@/lib/auth";
+import { registerExternalUser } from "../services";
 
 interface CompleteProfileFormProps {
   onSuccess: () => void;
@@ -30,27 +29,12 @@ export const CompleteProfileForm = ({
         role: userType,
       } as any);
 
-      // 2. Crear lead o inversionista según el tipo
-      if (userType === "CLIENT") {
-        await sendLead({
-          nombreCompleto: user?.name || user?.email.split("@")[0] || "",
-          correo: user?.email || "",
-          telefono: "",
-          dpi: dpi,
-          descripcion: `Tipo de usuario: ${userType}`,
-        });
-      } else if (userType === "INVESTOR") {
-        await createInvestor({
-          nombre: user?.name || "",
-          dpi: parseInt(dpi),
-          email: user?.email || "",
-          emite_factura: false,
-          tipo_reinversion: "sin_reinversion",
-          banco: null,
-          tipo_cuenta: null,
-          numero_cuenta: "",
-        });
-      }
+      await registerExternalUser({
+        userType: userType,
+        fullName: user?.name || user?.email.split("@")[0] || "",
+        email: user?.email ?? "",
+        dpi: dpi,
+      });
     },
     onSuccess: () => {
       setError("");

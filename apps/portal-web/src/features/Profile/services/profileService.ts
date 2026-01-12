@@ -1,4 +1,9 @@
-const crmURL = import.meta.env.VITE_CRM_API_URL || "http://localhost:4000";
+/**
+ * Servicio de perfil - Proxy a través de Better Auth API
+ */
+
+import apiAuth from "@/lib/api/apiAuth";
+import type { AxiosError } from "axios";
 
 export interface ProfileData {
   name: string;
@@ -65,90 +70,61 @@ export interface UpdateLeadPayload {
  */
 export const getProfile = async (
   email: string,
-  dpi: string,
-  token: string | null
+  dpi: string
 ): Promise<ProfileData> => {
-  const response = await fetch(`${crmURL}/api/portal/lead?email=${email}&dpi=${dpi}`, {
-    credentials: "include",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    const error: {
-      message: string;
-      status?: number;
-      //
-      data?: {
-        success: boolean;
-        error?: string;
-      };
-    } = new Error(result.error || "Error al cargar el perfil");
-    error.status = response.status;
-    error.data = result;
-    throw error;
+  try {
+    const response = await apiAuth.get<{ data: ProfileData }>(
+      `/api/crm/profile?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`
+    );
+    return response.data.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ error?: string; success?: boolean }>;
+    const errorMessage = axiosError.response?.data?.error || "Error al cargar el perfil";
+    const customError: any = new Error(errorMessage);
+    customError.status = axiosError.response?.status;
+    customError.data = axiosError.response?.data;
+    throw customError;
   }
-
-  return result.data as ProfileData;
 };
 
 /**
  * Actualizar información del lead (DPI, teléfono o dirección)
  */
 export const updateLead = async (
-  payload: UpdateLeadPayload,
-  token: string | null
+  payload: UpdateLeadPayload
 ): Promise<UpdateFieldResponse> => {
-  const response = await fetch(`${crmURL}/api/portal/lead/update`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    credentials: "include",
-    body: JSON.stringify(payload),
-  });
+  try {
+    const response = await apiAuth.post<UpdateFieldResponse>(
+      "/api/crm/profile/update",
+      payload
+    );
 
-  const result = await response.json();
+    if (!response.data.success) {
+      throw new Error(response.data.error || "Error al actualizar la información");
+    }
 
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || "Error al actualizar la información");
+    return response.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ error?: string }>;
+    throw new Error(axiosError.response?.data?.error || "Error al actualizar la información");
   }
-
-  return result;
 };
 
 export const getNumbersSifco = async (
   email: string,
-  dpi: string,
-  token: string | null
+  dpi: string
 ): Promise<Opportunity[]> => {
-  const response = await fetch(`${crmURL}/api/portal/lead/sifco?email=${email}&dpi=${dpi}`, {
-    credentials: "include",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  const result = await response.json();
-
-  if (!response.ok) {
-    const error: {
-      message: string;
-      status?: number;
-      //
-      data?: {
-        success: boolean;
-        error?: string;
-      };
-    } = new Error(result.error || "Error al cargar los números Sifco");
-    error.status = response.status;
-    error.data = result;
-    throw error;
+  try {
+    const response = await apiAuth.get<{ data: Opportunity[] }>(
+      `/api/crm/sifco?email=${encodeURIComponent(email)}&dpi=${encodeURIComponent(dpi)}`
+    );
+    return response.data.data;
+  } catch (error) {
+    const axiosError = error as AxiosError<{ error?: string; success?: boolean }>;
+    const errorMessage = axiosError.response?.data?.error || "Error al cargar los números Sifco";
+    const customError: any = new Error(errorMessage);
+    customError.status = axiosError.response?.status;
+    customError.data = axiosError.response?.data;
+    throw customError;
   }
-
-  return result.data as Opportunity[];
 };

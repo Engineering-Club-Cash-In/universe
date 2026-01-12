@@ -628,7 +628,6 @@ export const crmRouter = {
 				membresiaPago: opportunities.membresiaPago,
 				inversionistas: opportunities.inversionistas,
 				asesorId: opportunities.asesorId,
-				direccion: opportunities.direccion,
 				rubros: opportunities.rubros,
 				company: {
 					id: companies.id,
@@ -651,6 +650,19 @@ export const crmRouter = {
 					id: user.id,
 					name: user.name,
 				},
+				vehicle: {
+					id: vehicles.id,
+					make: vehicles.make,
+					model: vehicles.model,
+					year: vehicles.year,
+					licensePlate: vehicles.licensePlate,
+					vinNumber: vehicles.vinNumber,
+					origin: vehicles.origin,
+					color: vehicles.color,
+					vehicleType: vehicles.vehicleType,
+					kmMileage: vehicles.kmMileage,
+					status: vehicles.status,
+				},
 			};
 
 			const baseQuery = db
@@ -659,7 +671,8 @@ export const crmRouter = {
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-				.leftJoin(user, eq(opportunities.assignedTo, user.id));
+				.leftJoin(user, eq(opportunities.assignedTo, user.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id));
 
 			// Build conditions
 			const conditions = [];
@@ -904,8 +917,6 @@ export const crmRouter = {
 					if (!fechaInicio) missingFields.push("fecha de inicio del contrato");
 					if (!diaPagoMensual) missingFields.push("día de pago mensual");
 
-					// Additional credit fields
-					const direccion = input.direccion ?? opp.direccion;
 					const seguro =
 						input.seguro ??
 						(opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
@@ -919,7 +930,6 @@ export const crmRouter = {
 					const asesorId = input.asesorId ?? opp.asesorId;
 					const inversionistas = input.inversionistas ?? opp.inversionistas;
 
-					if (!direccion) missingFields.push("dirección del cliente");
 					if (seguro === undefined || seguro === null || seguro <= 0)
 						missingFields.push("seguro (debe ser mayor a 0)");
 					if (gps === undefined || gps === null || gps <= 0)
@@ -1070,7 +1080,7 @@ export const crmRouter = {
 							const finalRubros = input.rubros || opp.rubros || undefined;
 							const finalAsesorId = input.asesorId || opp.asesorId || usuarioId; // Usa el del input, o el guardado, o el placeholder
 							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
-							const finalDireccion = direccion || opp.direccion || undefined;
+							const finalDireccion = direccion || lead.direccion || undefined;
 
 							creditoResult = await createCreditoInCarteraBack({
 								opportunityId: opp.id,

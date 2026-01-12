@@ -13,6 +13,7 @@ async function createOpportunityForLead(
 	firstName: string,
 	lastName: string,
 	systemUserId: string,
+	notes: string = "",
 ) {
 	const [firstStage] = await db
 		.select()
@@ -37,6 +38,7 @@ async function createOpportunityForLead(
 			createdBy: systemUserId,
 			createdAt: new Date(),
 			updatedAt: new Date(),
+			notes: notes,
 		})
 		.returning();
 
@@ -97,6 +99,7 @@ export async function createPublicLead(c: Context) {
 				lead.firstName,
 				lead.lastName,
 				systemUser.id,
+				body.notes ?? "",
 			);
 
 			// Si encontró el lead por DPI y no tiene email (o tiene un email diferente al enviado)
@@ -193,6 +196,7 @@ export async function createPublicLead(c: Context) {
 			newLead.firstName,
 			newLead.lastName,
 			systemUser.id,
+			body.notes ?? "",
 		);
 
 		return c.json({

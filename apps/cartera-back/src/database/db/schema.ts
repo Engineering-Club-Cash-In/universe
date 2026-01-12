@@ -624,15 +624,72 @@ export const facturas_electronicas = customSchema.table("facturas_electronicas",
 
 
 // 🆕 TABLA: liquidaciones
+// ============================================
+// 🆕 ENUM para estado de boleta
+// ============================================
+export const estadoBoletaEnum = pgEnum("estado_boleta", [
+  "PENDIENTE",
+  "PROCESADO"
+]);
+
+// ============================================
+// 🆕 TABLA: boletas_pago_inversionista
+// ============================================
+export const boletasPagoInversionista = customSchema.table(
+  "boletas_pago_inversionista",
+  {
+    boleta_id: serial("boleta_id").primaryKey(),
+    
+    // 🔥 INVERSIONISTA (obligatorio)
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+    
+    // URL de la boleta del banco (foto o PDF)
+    boleta_url: text("boleta_url").notNull(),
+    
+    // Estado del comprobante
+    estado: estadoBoletaEnum("estado").notNull().default("PENDIENTE"),
+    
+    // Metadata
+    notas: text("notas"),
+    monto_boleta: numeric("monto_boleta", { precision: 18, scale: 2 }),
+    
+    // Fechas
+    fecha_subida: timestamp("fecha_subida", { withTimezone: true })
+      .notNull()
+      .$default(() => new Date()),
+    fecha_procesado: timestamp("fecha_procesado", { withTimezone: true }),
+    
+    // Quién subió la boleta
+    subido_por: integer("subido_por")
+      .references(() => platform_users.id, { onDelete: "set null" }),
+  },
+  (table) => ({
+    inversionistaIdx: index("idx_boletas_inversionista").on(
+      table.inversionista_id
+    ),
+    estadoIdx: index("idx_boletas_estado").on(table.estado),
+    fechaIdx: index("idx_boletas_fecha_subida").on(table.fecha_subida),
+  })
+);
+
+// ============================================
+// 🔄 ACTUALIZACIÓN: liquidaciones
+// ============================================
 export const liquidaciones = customSchema.table(
   "liquidaciones",
   {
     liquidacion_id: serial("liquidacion_id").primaryKey(),
     
-    // Inversionista (OPCIONAL - null = liquidación masiva)
-    inversionista_id: integer("inversionista_id").references(
-      () => inversionistas.inversionista_id
-    ),
+    // Inversionista (OBLIGATORIO)
+    inversionista_id: integer("inversionista_id")
+      .notNull()
+      .references(() => inversionistas.inversionista_id, { onDelete: "cascade" }),
+    
+    // 🆕 ENLACE A LA BOLETA que originó esta liquidación
+    boleta_id: integer("boleta_id")
+      .references(() => boletasPagoInversionista.boleta_id, { onDelete: "set null" }),
     
     // Totales de la liquidación
     total_pagos_liquidados: integer("total_pagos_liquidados").notNull().default(0),
@@ -641,17 +698,24 @@ export const liquidaciones = customSchema.table(
     total_iva: numeric("total_iva", { precision: 18, scale: 2 }).notNull().default("0"),
     total_isr: numeric("total_isr", { precision: 18, scale: 2 }).notNull().default("0"),
     total_cuota: numeric("total_cuota", { precision: 18, scale: 2 }).notNull().default("0"),
-    reporte_liquidacion: text("reporte_liquidacion"),
+    
+    // Reporte de liquidación (Excel/PDF)
+    reporte_liquidacion_url: text("reporte_liquidacion_url"),
+    
     // Fecha
     fecha_liquidacion: timestamp("fecha_liquidacion", { withTimezone: true })
       .notNull()
       .$default(() => new Date()),
+    
+    // Metadata
+    creado_por: integer("creado_por")
+      .references(() => platform_users.id, { onDelete: "set null" }),
   },
   (table) => ({
     inversionistaIdx: index("idx_liquidaciones_inversionista").on(
       table.inversionista_id
     ),
+    boletaIdx: index("idx_liquidaciones_boleta").on(table.boleta_id),
     fechaIdx: index("idx_liquidaciones_fecha").on(table.fecha_liquidacion),
-      reporte_liquidacion: text("reporte_liquidacion"),
   })
 );

@@ -89,6 +89,8 @@ export interface FichaPrincipalPersona {
   estadoCivil?: string;
   profesion?: string;
   nacionalidad?: string;
+  lugarNacimiento?: string;
+  pais?: string;
 }
 
 export interface DocumentoIdentidad {

@@ -113,3 +113,6 @@ export {
   parseEstudioPersonaResponse,
   parseEstudioEmpresaResponse,
 } from './src/xml-parser';
+
+// API Server (opcional - para correr como servicio standalone)
+ export { createInfornetAPI } from './api';

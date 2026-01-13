@@ -240,6 +240,10 @@ export const crmRouter = {
 					notes: leads.notes,
 					score: leads.score,
 					fit: leads.fit,
+					departamento: leads.departamento,
+					municipio: leads.municipio,
+					zona: leads.zona,
+					direccion: leads.direccion,
 					scoredAt: leads.scoredAt,
 					createdAt: leads.createdAt,
 					updatedAt: leads.updatedAt,
@@ -638,6 +642,11 @@ export const crmRouter = {
 					firstName: leads.firstName,
 					lastName: leads.lastName,
 					email: leads.email,
+					age: leads.age,
+					direccion: leads.direccion,
+					departamento: leads.departamento,
+					municipio: leads.municipio,
+					zona: leads.zona,
 				},
 				stage: {
 					id: salesStages.id,
@@ -808,9 +817,10 @@ export const crmRouter = {
 				reserva: z.number().optional(),
 				membresiaPago: z.number().optional(),
 				inversionistas: z.string().optional(), // JSON string
-				asesorId: z.number().optional(), // Advisor ID from cartera-back
+				asesorId: z.number().optional(),
 				direccion: z.string().optional(),
 				rubros: z.string().optional(), // JSON string with expense items
+				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -825,6 +835,7 @@ export const crmRouter = {
 				reserva,
 				membresiaPago,
 				direccion,
+				gastosAdministrativos,
 				...updateData
 			} = input;
 
@@ -1326,8 +1337,10 @@ export const crmRouter = {
 					...(membresiaPago !== undefined && {
 						membresiaPago: String(membresiaPago),
 					}),
+					...(gastosAdministrativos !== undefined && {
+						gastosAdministrativos: String(gastosAdministrativos),
+					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
-					...(direccion !== undefined && { direccion }),
 					...(numeroSifco !== undefined && { numeroSifco }),
 					updatedAt: new Date(),
 				})
@@ -1338,6 +1351,17 @@ export const crmRouter = {
 				throw new Error(
 					"Opportunity not found or you don't have permission to update it",
 				);
+			}
+
+			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
+			if (direccion !== undefined && currentOpportunity[0].leadId) {
+				await db
+					.update(leads)
+					.set({
+						direccion,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, currentOpportunity[0].leadId));
 			}
 
 			// Record stage history if stage changed
@@ -1637,6 +1661,53 @@ export const crmRouter = {
 				throw new Error("El detalle de crédito ya fue aprobado");
 			}
 
+			// Validar que los campos requeridos estén llenos
+			const camposFaltantes: string[] = [];
+
+			if (!opportunity.categoria) {
+				camposFaltantes.push("Categoría");
+			}
+			if (!opportunity.nit) {
+				camposFaltantes.push("NIT");
+			}
+			if (!opportunity.diaPagoMensual) {
+				camposFaltantes.push("Día de pago mensual");
+			}
+
+			// Validar dirección desde el lead
+			if (opportunity.leadId) {
+				const [leadData] = await db
+					.select({ direccion: leads.direccion })
+					.from(leads)
+					.where(eq(leads.id, opportunity.leadId))
+					.limit(1);
+				if (!leadData?.direccion) {
+					camposFaltantes.push("Dirección");
+				}
+			} else {
+				camposFaltantes.push("Lead/Dirección");
+			}
+
+			// Validar inversionistas
+			if (!opportunity.inversionistas) {
+				camposFaltantes.push("Inversionistas");
+			} else {
+				try {
+					const inversionistasParsed = JSON.parse(opportunity.inversionistas);
+					if (!Array.isArray(inversionistasParsed) || inversionistasParsed.length === 0) {
+						camposFaltantes.push("Inversionistas");
+					}
+				} catch {
+					camposFaltantes.push("Inversionistas (formato inválido)");
+				}
+			}
+
+			if (camposFaltantes.length > 0) {
+				throw new Error(
+					`Faltan campos requeridos para aprobar: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`
+				);
+			}
+
 			// Update opportunity with approval
 			await db
 				.update(opportunities)
@@ -1649,6 +1720,36 @@ export const crmRouter = {
 				.where(eq(opportunities.id, input.opportunityId));
 
 			return { success: true };
+		}),
+
+	// Get credit detail approval status
+	getCreditDetailApprovalStatus: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get opportunity
+			const [opportunity] = await db
+				.select({
+					creditDetailApproved: opportunities.creditDetailApproved,
+					creditDetailApprovedBy: opportunities.creditDetailApprovedBy,
+					creditDetailApprovedAt: opportunities.creditDetailApprovedAt,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			return {
+				approved: opportunity.creditDetailApproved || false,
+				approvedBy: opportunity.creditDetailApprovedBy || null,
+				approvedAt: opportunity.creditDetailApprovedAt || null,
+			};
 		}),
 
 	getOpportunityHistory: crmProcedure

@@ -273,6 +273,7 @@ export const opportunities = pgTable("opportunities", {
 	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
 	numeroSifco: text("numero_sifco"), // SIFCO credit number
 	rubros: text("rubros"), // JSON string with expense items (rubros)
+	direccion: text("direccion"), // Client address
 
 	// Credit Detail Approval (40% → 50%)
 	creditDetailApproved: boolean("credit_detail_approved").default(false),

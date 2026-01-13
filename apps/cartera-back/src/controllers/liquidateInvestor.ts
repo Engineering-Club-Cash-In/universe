@@ -3,6 +3,7 @@ import { db } from "../database";
 import { usuarios, creditos, cuotas_credito, inversionistas, creditos_inversionistas, boletasPagoInversionista } from "../database/db";
 import Big from "big.js";
 import fs from "fs"; // 🆕 Para escribir logs
+import path from "path/win32";
 
 // 📊 INTERFACE PARA EL INPUT
 interface LiquidarCuotasInput {
@@ -11,6 +12,37 @@ interface LiquidarCuotasInput {
   capital: number;
   nombre_inversionista: string;
 }
+
+interface RelacionFallida {
+  credito: string;
+  credito_id: number;
+  inversionista_buscado: string;
+  inversionista_id: number;
+  capital_intentado: string;
+  razon: string;
+  inversionistas_existentes: Array<{
+    nombre: string;
+    inversionista_id: number;
+    monto_aportado: string;
+  }>;
+}
+
+interface ResultadoCredito {
+  credito_id: number;
+  numero_credito: string;
+  cuota_encontrada: number | null;
+  cuotas_liquidadas: number;
+  inversionistas_actualizados: number;
+  relacion_creada: boolean;
+  error?: string;
+  advertencia?: string;
+  inversionistas_existentes?: string[];
+  cuotas_actualizadas?: Array<{
+    numero_cuota: number;
+    fecha_vencimiento: string;
+  }>;
+}
+const CREAR_RELACIONES_AUTOMATICAMENTE = true;  
 // 🔥 FUNCIÓN HELPER PARA NORMALIZAR PORCENTAJES
 function normalizarPorcentaje(valor: string | number | null | undefined): Big {
   const num = new Big(valor || 0);
@@ -468,10 +500,67 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
   };
 }
 
-// 🔥 ENDPOINT PRINCIPAL (MODO AGRESIVO - CREA RELACIONES AUTOMÁTICAMENTE)
+
+const guardarRelacionesFallidas = async (
+  relacionesFallidas: RelacionFallida[],
+  usuario: { nombre: string; usuario_id: number },
+  inversionista: { nombre: string; inversionista_id: number },
+  capital: string,
+  mes: string
+) => {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `relaciones-fallidas-${timestamp}.json`;
+    const filePath = path.join(process.cwd(), "logs", fileName);
+
+    // Crear carpeta logs si no existe
+    const logsDir = path.join(process.cwd(), "logs");
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+
+    const logData = {
+      timestamp: new Date().toISOString(),
+      usuario: {
+        nombre: usuario.nombre,
+        usuario_id: usuario.usuario_id
+      },
+      inversionista_buscado: {
+        nombre: inversionista.nombre,
+        inversionista_id: inversionista.inversionista_id
+      },
+      capital: capital,
+      mes: mes,
+      total_creditos_fallidos: relacionesFallidas.length,
+      relaciones_fallidas: relacionesFallidas,
+      resumen: {
+        creditos_sin_relacion: relacionesFallidas.filter(r => r.razon === "No existe la relación").length,
+        total_inversionistas_alternativos: relacionesFallidas.reduce((sum, r) => sum + r.inversionistas_existentes.length, 0)
+      }
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(logData, null, 2), "utf-8");
+
+    console.log(`\n💾 ========== LOG DE RELACIONES FALLIDAS ==========`);
+    console.log(`   Archivo: ${filePath}`);
+    console.log(`   Total créditos fallidos: ${relacionesFallidas.length}`);
+    console.log(`================================================\n`);
+
+    return filePath;
+  } catch (error) {
+    console.error(`❌ Error guardando log de relaciones fallidas:`, error);
+    return null;
+  }
+};
+
+// ========================================
+// 🔥 ENDPOINT PRINCIPAL
+// ========================================
+
 export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
   try {
     console.log("🔥 ========== INICIANDO LIQUIDACIÓN DE CUOTAS ==========");
+    console.log(`🔧 MODO CREAR RELACIONES: ${CREAR_RELACIONES_AUTOMATICAMENTE ? 'ACTIVADO ✅' : 'DESACTIVADO ❌'}`);
     console.log("📝 Input original:", JSON.stringify(input, null, 2));
 
     // 🆕 VALIDAR INPUT ANTES DE PROCESAR
@@ -779,10 +868,11 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
     // ============================================
     // 6️⃣ PROCESAR CADA CRÉDITO
     // ============================================
-    const resultadosPorCredito = [];
+    const resultadosPorCredito: ResultadoCredito[] = [];
+    const relacionesFallidas: RelacionFallida[] = [];
     let creditosSinCuotas = 0;
     let totalInversionistasActualizados = 0;
-    let totalRelacionesCreadas = 0; // 🆕 CONTADOR
+    let totalRelacionesCreadas = 0;
     const advertencias: string[] = [];
 
     for (const credito of creditosUsuario) {
@@ -896,7 +986,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       }
 
       // ============================================
-      // 🆕 9️⃣ BUSCAR Y ACTUALIZAR INVERSIONISTA (MODO AGRESIVO)
+      // 🆕 9️⃣ BUSCAR Y VALIDAR RELACIÓN INVERSIONISTA
       // ============================================
       console.log(`\n   👥 ========== BUSCANDO INVERSIONISTA EN ESTE CRÉDITO ==========`);
       
@@ -911,95 +1001,147 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
           )
         );
 
+      // 🔥 VALIDAR SI EXISTE LA RELACIÓN
       if (relacionInversionista.length === 0) {
-        // 🔥 MODO AGRESIVO: CREAR LA RELACIÓN AUTOMÁTICAMENTE
-        const advertencia = `🔥 Crédito ${credito.numero_credito_sifco}: El inversionista "${inversionista.nombre}" NO participaba - CREANDO RELACIÓN AUTOMÁTICAMENTE`;
-        console.log(`   ${advertencia}`);
-        advertencias.push(advertencia);
+        const errorMsg = `❌ Crédito ${credito.numero_credito_sifco}: El inversionista "${inversionista.nombre}" NO participa en este crédito`;
+        console.error(`   ${errorMsg}`);
         
-        console.log(`\n   🔧 ========== CREANDO RELACIÓN AUTOMÁTICA ==========`);
+        // 🆕 BUSCAR QUÉ INVERSIONISTAS SÍ PARTICIPAN EN ESTE CRÉDITO
+        console.log(`\n   🔍 Inversionistas que SÍ participan en este crédito:`);
         
-        // Calcular valores
-        const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(100);
-        const cuotaInteres = capitalTotal.times(porcentajeInteres);
+        const inversionistasDelCredito = await db
+          .select({
+            inversionista_id: inversionistas.inversionista_id,
+            nombre: inversionistas.nombre,
+            monto_aportado: creditos_inversionistas.monto_aportado
+          })
+          .from(creditos_inversionistas)
+          .innerJoin(inversionistas, eq(inversionistas.inversionista_id, creditos_inversionistas.inversionista_id))
+          .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
         
-        // 🔥 Valores por defecto (80/20)
-        const porcentajeCashIn = 20;
-        const porcentajeInversionista = 80;
-        
-        const montoInversionista = cuotaInteres.times(0.5).toFixed(2);
-        const montoCashIn = cuotaInteres.times(0.5).toFixed(2);
-        const ivaInversionista = new Big(montoInversionista).times(0.12).toFixed(2);
-        const ivaCashIn = new Big(montoCashIn).times(0.12).toFixed(2);
-        
-        console.log(`      💰 Capital: ${capitalTotal.toFixed(2)}`);
-        console.log(`      📊 % Interés crédito: ${porcentajeInteres.times(100).toString()}%`);
-        console.log(`      💵 Cuota interés: ${cuotaInteres.toFixed(2)}`);
-        console.log(`      📊 % Cash In: ${porcentajeCashIn}% (por defecto)`);
-        console.log(`      📊 % Inversionista: ${porcentajeInversionista}% (por defecto)`);
-        console.log(`      💵 Monto inversionista: ${montoInversionista}`);
-        console.log(`      💵 Monto cash_in: ${montoCashIn}`);
-        console.log(`      📄 IVA inversionista: ${ivaInversionista}`);
-        console.log(`      📄 IVA cash_in: ${ivaCashIn}`);
-        
-        // 🔥 INSERTAR EN BD
-        await db
-          .insert(creditos_inversionistas)
-          .values({
-            credito_id: credito.credito_id,
-            inversionista_id: inversionista.inversionista_id,
-            monto_aportado: capitalTotal.toFixed(2),
-            porcentaje_cash_in: porcentajeCashIn.toString(),
-            porcentaje_participacion_inversionista: porcentajeInversionista.toString(),
-            cuota_inversionista: "0",
-            monto_inversionista: montoInversionista,
-            monto_cash_in: montoCashIn,
-            iva_inversionista: ivaInversionista,
-            iva_cash_in: ivaCashIn
+        if (inversionistasDelCredito.length === 0) {
+          console.log(`   ℹ️  Este crédito NO tiene inversionistas asociados`);
+        } else {
+          inversionistasDelCredito.forEach((inv, idx) => {
+            console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id}) - Aportado: Q${inv.monto_aportado}`);
           });
+        }
         
-        console.log(`      ✅ RELACIÓN CREADA CON ÉXITO`);
-        totalInversionistasActualizados++;
-        totalRelacionesCreadas++; // 🆕
-        
-        // 🆕 ESCRIBIR LOG DE RELACIÓN CREADA
-        escribirLogAdvertencias('RELACION_CREADA', 
-          `Se creó automáticamente la relación inversionista-crédito`, 
-          {
-            usuario: usuario.nombre,
-            usuario_id: usuario.usuario_id,
-            inversionista: inversionista.nombre,
-            inversionista_id: inversionista.inversionista_id,
-            credito: credito.numero_credito_sifco,
+        // 🔥 SI ESTÁ ACTIVADO, CREAR LA RELACIÓN AUTOMÁTICAMENTE
+        if (CREAR_RELACIONES_AUTOMATICAMENTE) {
+          console.log(`\n   🔥 ========== CREANDO RELACIÓN AUTOMÁTICAMENTE ==========`);
+          
+          const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(100);
+          const cuotaInteres = capitalTotal.times(porcentajeInteres);
+          
+          // 🔥 Valores por defecto (28% Cash-In / 72% Inversionista)
+          const porcentajeCashIn = 28;
+          const porcentajeInversionista = 72;
+          
+          const montoInversionista = cuotaInteres.times(porcentajeInversionista).div(100).toFixed(2);
+          const montoCashIn = cuotaInteres.times(porcentajeCashIn).div(100).toFixed(2);
+          const ivaInversionista = new Big(montoInversionista).times(0.12).toFixed(2);
+          const ivaCashIn = new Big(montoCashIn).times(0.12).toFixed(2);
+          
+          console.log(`      💰 Capital: ${capitalTotal.toFixed(2)}`);
+          console.log(`      📊 % Interés crédito: ${porcentajeInteres.times(100).toString()}%`);
+          console.log(`      💵 Cuota interés: ${cuotaInteres.toFixed(2)}`);
+          console.log(`      📊 % Cash In: ${porcentajeCashIn}% (por defecto)`);
+          console.log(`      📊 % Inversionista: ${porcentajeInversionista}% (por defecto)`);
+          console.log(`      💵 Monto inversionista: ${montoInversionista}`);
+          console.log(`      💵 Monto cash_in: ${montoCashIn}`);
+          console.log(`      📄 IVA inversionista: ${ivaInversionista}`);
+          console.log(`      📄 IVA cash_in: ${ivaCashIn}`);
+          
+          // 🔥 INSERTAR EN BD
+          await db
+            .insert(creditos_inversionistas)
+            .values({
+              credito_id: credito.credito_id,
+              inversionista_id: inversionista.inversionista_id,
+              monto_aportado: capitalTotal.toFixed(2),
+              porcentaje_cash_in: porcentajeCashIn.toString(),
+              porcentaje_participacion_inversionista: porcentajeInversionista.toString(),
+              cuota_inversionista: "0",
+              monto_inversionista: montoInversionista,
+              monto_cash_in: montoCashIn,
+              iva_inversionista: ivaInversionista,
+              iva_cash_in: ivaCashIn
+            });
+          
+          console.log(`      ✅ RELACIÓN CREADA CON ÉXITO`);
+          totalInversionistasActualizados++;
+          totalRelacionesCreadas++;
+          
+          // 🆕 ESCRIBIR LOG DE RELACIÓN CREADA
+          escribirLogAdvertencias('RELACION_CREADA', 
+            `Se creó automáticamente la relación inversionista-crédito`, 
+            {
+              usuario: usuario.nombre,
+              usuario_id: usuario.usuario_id,
+              inversionista: inversionista.nombre,
+              inversionista_id: inversionista.inversionista_id,
+              credito: credito.numero_credito_sifco,
+              credito_id: credito.credito_id,
+              capital: capitalTotal.toString(),
+              porcentaje_cash_in: porcentajeCashIn,
+              porcentaje_inversionista: porcentajeInversionista,
+              monto_inversionista: montoInversionista,
+              monto_cash_in: montoCashIn,
+              iva_inversionista: ivaInversionista,
+              iva_cash_in: ivaCashIn,
+              mes: rangoMes.mesDescriptivo
+            }
+          );
+          
+          resultadosPorCredito.push({
             credito_id: credito.credito_id,
-            capital: capitalTotal.toString(),
-            porcentaje_cash_in: porcentajeCashIn,
-            porcentaje_inversionista: porcentajeInversionista,
-            monto_inversionista: montoInversionista,
-            monto_cash_in: montoCashIn,
-            iva_inversionista: ivaInversionista,
-            iva_cash_in: ivaCashIn,
-            mes: rangoMes.mesDescriptivo
-          }
-        );
+            numero_credito: credito.numero_credito_sifco,
+            cuota_encontrada: numeroCuotaALiquidar || null,
+            cuotas_liquidadas: cuotasLiquidadas,
+            inversionistas_actualizados: 1,
+            relacion_creada: true,
+            advertencia: "Relación inversionista-crédito creada automáticamente (28/72)",
+            cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
+              .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
+              .map(c => ({
+                numero_cuota: c.numero_cuota,
+                fecha_vencimiento: c.fecha_vencimiento
+              })) : []
+          });
+          
+          continue;
+        }
+        
+        // 🆕 SI NO ESTÁ ACTIVADO, GUARDAR EN RELACIONES FALLIDAS
+        relacionesFallidas.push({
+          credito: credito.numero_credito_sifco,
+          credito_id: credito.credito_id,
+          inversionista_buscado: inversionista.nombre,
+          inversionista_id: inversionista.inversionista_id,
+          capital_intentado: capitalTotal.toString(),
+          razon: "No existe la relación",
+          inversionistas_existentes: inversionistasDelCredito.map(inv => ({
+            nombre: inv.nombre,
+            inversionista_id: inv.inversionista_id,
+            monto_aportado: inv.monto_aportado
+          }))
+        });
+        
+        advertencias.push(errorMsg);
         
         resultadosPorCredito.push({
           credito_id: credito.credito_id,
           numero_credito: credito.numero_credito_sifco,
           cuota_encontrada: numeroCuotaALiquidar || null,
-          cuotas_liquidadas: cuotasLiquidadas,
-          inversionistas_actualizados: 1,
-          relacion_creada: true, // 🆕
-          advertencia: "Relación inversionista-crédito creada automáticamente (50/50)",
-          cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
-            .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
-            .map(c => ({
-              numero_cuota: c.numero_cuota,
-              fecha_vencimiento: c.fecha_vencimiento
-            })) : []
+          cuotas_liquidadas: 0,
+          inversionistas_actualizados: 0,
+          relacion_creada: false,
+          error: errorMsg,
+          inversionistas_existentes: inversionistasDelCredito.map(inv => inv.nombre)
         });
         
-        continue;
+        continue; // 🔥 SALTAR ESTE CRÉDITO
       }
 
       // ✅ SI SÍ EXISTE LA RELACIÓN - ACTUALIZAR
@@ -1009,7 +1151,7 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       console.log(`      Monto aportado ANTERIOR: ${relacion.monto_aportado}`);
       console.log(`      % Cash In: ${relacion.porcentaje_cash_in}%`);
       console.log(`      % Inversionista: ${relacion.porcentaje_participacion_inversionista}%`);
-      console.log(`      Cuota inversionista: ${relacion.cuota_inversionista}%`);
+      console.log(`      Cuota inversionista: ${relacion.cuota_inversionista}`);
 
       // ============================================
       // 🆕 🔟 RECALCULAR TODO CON EL NUEVO CAPITAL
@@ -1020,8 +1162,8 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
       
       console.log(`      💰 NUEVO Monto aportado: ${nuevoMontoAportado.toFixed(2)}`);
       
-const porcentajeCashIn = normalizarPorcentaje(relacion.porcentaje_cash_in);
-const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_participacion_inversionista);
+      const porcentajeCashIn = normalizarPorcentaje(relacion.porcentaje_cash_in);
+      const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_participacion_inversionista);
 
       const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100);
       
@@ -1052,7 +1194,7 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
       
       console.log(`\n      💾 ACTUALIZANDO EN BD...`);
       
-      const update=await db
+      await db
         .update(creditos_inversionistas)
         .set({
           monto_aportado: nuevoMontoAportado.toFixed(2),
@@ -1069,7 +1211,7 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
           )
         );
       
-      console.log(`      ✅ INVERSIONISTA ACTUALIZADO ${update}` );
+      console.log(`      ✅ INVERSIONISTA ACTUALIZADO`);
       totalInversionistasActualizados++;
 
       resultadosPorCredito.push({
@@ -1079,7 +1221,7 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
         cuotas_liquidadas: cuotasLiquidadas,
         inversionistas_actualizados: 1,
         relacion_creada: false,
-        advertencia: cuotasLiquidadas === 0 ? "No había cuota para liquidar en este mes, pero el inversionista fue actualizado" : null,
+        advertencia: cuotasLiquidadas === 0 ? "No había cuota para liquidar en este mes, pero el inversionista fue actualizado" : undefined,
         cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
           .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
           .map(c => ({
@@ -1087,6 +1229,38 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
             fecha_vencimiento: c.fecha_vencimiento
           })) : []
       });
+    }
+
+    // ============================================
+    // 🆕 GUARDAR LOG DE RELACIONES FALLIDAS
+    // ============================================
+    let logFilePath = null;
+    if (relacionesFallidas.length > 0) {
+      console.log(`\n🔥 ========== RELACIONES FALLIDAS DETECTADAS ==========`);
+      console.log(`   Total créditos con relaciones faltantes: ${relacionesFallidas.length}`);
+      
+      relacionesFallidas.forEach((relFallida, idx) => {
+        console.log(`\n   ${idx + 1}. Crédito: ${relFallida.credito}`);
+        console.log(`      Inversionista buscado: ${relFallida.inversionista_buscado}`);
+        console.log(`      Capital: Q${relFallida.capital_intentado}`);
+        console.log(`      Inversionistas existentes en este crédito:`);
+        
+        if (relFallida.inversionistas_existentes.length === 0) {
+          console.log(`         - (ninguno)`);
+        } else {
+          relFallida.inversionistas_existentes.forEach(inv => {
+            console.log(`         - ${inv.nombre} (Q${inv.monto_aportado})`);
+          });
+        }
+      });
+      
+      logFilePath = await guardarRelacionesFallidas(
+        relacionesFallidas,
+        usuario,
+        inversionista,
+        capitalTotal.toString(),
+        rangoMes.mesDescriptivo
+      );
     }
 
     // ============================================
@@ -1100,7 +1274,8 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
     console.log(`✅ Mes buscado: ${rangoMes.mesDescriptivo}`);
     console.log(`💰 Capital aplicado: ${capitalTotal.toString()}`);
     console.log(`👥 Inversionistas actualizados: ${totalInversionistasActualizados}`);
-    console.log(`🔥 Relaciones creadas: ${totalRelacionesCreadas}`); // 🆕
+    console.log(`🔥 Relaciones creadas: ${totalRelacionesCreadas}`);
+    console.log(`❌ Relaciones fallidas: ${relacionesFallidas.length}`);
     console.log(`⚠️ Créditos sin cuotas para este mes: ${creditosSinCuotas}`);
 
     if (advertencias.length > 0) {
@@ -1131,15 +1306,18 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
         creditos_sin_cuotas: creditosSinCuotas,
         cuotas_reseteadas: totalCuotasReseteadas,
         inversionistas_actualizados: totalInversionistasActualizados,
-        relaciones_creadas: totalRelacionesCreadas, // 🆕
+        relaciones_creadas: totalRelacionesCreadas,
+        relaciones_fallidas: relacionesFallidas.length,
         cuota_mes_original: input.cuota_mes,
         cuota_mes_normalizada: cuota_mes_normalizada,
         rango_liquidado: rangoMes,
         total_cuotas_liquidadas: totalCuotasLiquidadas,
         advertencias: advertencias,
+        log_file: logFilePath,
         detalle_por_credito: resultadosPorCredito,
+        detalle_relaciones_fallidas: relacionesFallidas,
       },
-      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}${totalRelacionesCreadas > 0 ? ` (${totalRelacionesCreadas} relación${totalRelacionesCreadas > 1 ? 'es' : ''} creada${totalRelacionesCreadas > 1 ? 's' : ''})` : ''}${advertencias.length > 0 ? ` (${advertencias.length} advertencia${advertencias.length > 1 ? 's' : ''})` : ''}`,
+      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}${totalRelacionesCreadas > 0 ? ` (${totalRelacionesCreadas} relación${totalRelacionesCreadas > 1 ? 'es' : ''} creada${totalRelacionesCreadas > 1 ? 's' : ''})` : ''}${relacionesFallidas.length > 0 ? ` (${relacionesFallidas.length} relación${relacionesFallidas.length > 1 ? 'es' : ''} fallida${relacionesFallidas.length > 1 ? 's' : ''})` : ''}${advertencias.length > 0 ? ` (${advertencias.length} advertencia${advertencias.length > 1 ? 's' : ''})` : ''}`,
     };
   } catch (error) {
     console.error("❌ Error en liquidación de cuotas:", error);
@@ -1156,7 +1334,6 @@ const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_partici
     };
   }
 }
-
 
 /**
  * Prepara las URLs completas de las boletas

@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { useInspection } from "../contexts/InspectionContext";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { toast, Toaster } from "sonner";
@@ -37,44 +37,28 @@ import {
 import VehicleRegistrationOCR from "../components/vehicle-registration-ocr";
 const formSchema = z.object({
   // Section 1: Technician Info
-  technicianName: z.string().min(1, { message: "El nombre es requerido" }),
+  technicianName: z.string({ message: "El nombre es requerido" }).min(1, { message: "El nombre es requerido" }),
   inspectionDate: z.date({ message: "La fecha es requerida" }),
 
   // Section 2: Vehicle Info
-  vehicleMake: z.string().min(1, { message: "La marca es requerida" }),
-  vehicleModel: z.string().min(1, { message: "La línea es requerida" }),
-  vehicleYear: z.string().min(1, { message: "El año es requerido" }),
-  licensePlate: z
-    .string()
-    .min(1, { message: "El número de placa es requerido" }),
-  vinNumber: z
-    .string()
-    .min(1, { message: "El número VIN/Chasis es requerido" }),
+  vehicleMake: z.string({ message: "La marca es requerida" }).min(1, { message: "La marca es requerida" }),
+  vehicleModel: z.string({ message: "La línea es requerida" }).min(1, { message: "La línea es requerida" }),
+  vehicleYear: z.string({ message: "El año es requerido" }).min(1, { message: "El año es requerido" }),
+  licensePlate: z.string({ message: "El número de placa es requerido" }).min(1, { message: "El número de placa es requerido" }),
+  vinNumber: z.string({ message: "El número VIN/Chasis es requerido" }).min(1, { message: "El número VIN/Chasis es requerido" }),
   milesMileage: z.string().optional(),
-  kmMileage: z.string().min(1, { message: "El kilometraje es requerido" }),
-  origin: z.enum(["Nacional", "Importado"], {
-    message: "La procedencia es requerida",
-  }),
-  vehicleType: z
-    .string()
-    .min(1, { message: "El tipo de vehículo es requerido" }),
-  color: z.string().min(1, { message: "El color es requerido" }),
-  cylinders: z.string().min(1, { message: "Los cilindros son requeridos" }),
-  engineCC: z.string().min(1, { message: "El motor (CC) es requerido" }),
-  fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"], {
-    message: "El tipo de combustible es requerido",
-  }),
-  transmission: z.enum(["Automático", "Manual"], {
-    message: "La transmisión es requerida",
-  }),
-  inspectionResult: z
-    .string()
-    .min(1, { message: "El resultado de la inspección es requerido" }),
+  kmMileage: z.string({ message: "El kilometraje es requerido" }).min(1, { message: "El kilometraje es requerido" }),
+  origin: z.enum(["Nacional", "Importado"], { message: "La procedencia es requerida" }),
+  vehicleType: z.string({ message: "El tipo de vehículo es requerido" }).min(1, { message: "El tipo de vehículo es requerido" }),
+  color: z.string({ message: "El color es requerido" }).min(1, { message: "El color es requerido" }),
+  cylinders: z.string({ message: "Los cilindros son requeridos" }).min(1, { message: "Los cilindros son requeridos" }),
+  engineCC: z.string({ message: "El motor (CC) es requerido" }).min(1, { message: "El motor (CC) es requerido" }),
+  fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"], { message: "El tipo de combustible es requerido" }),
+  transmission: z.enum(["Automático", "Manual"], { message: "La transmisión es requerida" }),
+  inspectionResult: z.string({ message: "Las observaciones son requeridas" }).min(1, { message: "Las observaciones son requeridas" }),
 
   // Section 3: Test Drive
-  testDrive: z.enum(["Sí", "No"], {
-    message: "Esta información es requerida",
-  }),
+  testDrive: z.enum(["Sí", "No"], { message: "Esta información es requerida" }),
   noTestDriveReason: z.string().optional(),
 });
 
@@ -83,10 +67,14 @@ interface VehicleInspectionFormProps {
   isWizardMode?: boolean;
 }
 
-export default function VehicleInspectionForm({
+export interface VehicleInspectionFormRef {
+  triggerValidation: () => Promise<boolean>;
+}
+
+const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspectionFormProps>(({
   onComplete,
   isWizardMode = false
-}: VehicleInspectionFormProps) {
+}, ref) => {
   const { formData, setFormData } = useInspection();
   const topRef = useRef<HTMLDivElement>(null);
   const [formSubmitted, setFormSubmitted] = useState(false);
@@ -95,9 +83,46 @@ export default function VehicleInspectionForm({
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
 
   const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: formData || {},
+    resolver: standardSchemaResolver(formSchema),
+    defaultValues: {
+      technicianName: "",
+      inspectionDate: undefined,
+      vehicleMake: "",
+      vehicleModel: "",
+      vehicleYear: "",
+      licensePlate: "",
+      vinNumber: "",
+      milesMileage: "",
+      kmMileage: "",
+      origin: undefined,
+      vehicleType: "",
+      color: "",
+      cylinders: "",
+      engineCC: "",
+      fuelType: undefined,
+      transmission: undefined,
+      inspectionResult: "",
+      testDrive: undefined,
+      noTestDriveReason: "",
+      ...formData,
+    },
   });
+
+  // Exponer método de validación para el wizard
+  useImperativeHandle(ref, () => ({
+    triggerValidation: async () => {
+      const result = await form.trigger();
+      if (!result) {
+        // Scroll al primer campo con error
+        const firstError = Object.keys(form.formState.errors)[0];
+        if (firstError) {
+          const element = document.querySelector(`[name="${firstError}"]`);
+          element?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+      return result;
+    }
+  }));
 
   useEffect(() => {
     if (formSubmitted) {
@@ -147,27 +172,32 @@ export default function VehicleInspectionForm({
     setFormSubmitted(true);
   }
 
-  const handleOCRData = (mappedData: any) => {
+  const handleOCRData = (mappedData: Partial<Record<string, unknown>>) => {
     // Update form with OCR data and trigger validation only for filled fields
-    Object.keys(mappedData).forEach(key => {
-      if (mappedData[key]) {
-        form.setValue(key as any, mappedData[key], {
-          shouldValidate: true,
-          shouldDirty: true,
-          shouldTouch: true
-        });
+    for (const key of Object.keys(mappedData)) {
+      const value = mappedData[key as string];
+      if (value != null && value !== "") {
+        form.setValue(
+          key as keyof z.infer<typeof formSchema>,
+          value as z.infer<typeof formSchema>[keyof z.infer<typeof formSchema>],
+          {
+            shouldValidate: true,
+            shouldDirty: true,
+            shouldTouch: true
+          }
+        );
       }
-    });
+    }
 
     // Clear validation errors for fields that OCR cannot fill
-    const nonOCRFields = [
+    const nonOCRFields: Array<keyof z.infer<typeof formSchema>> = [
       'technicianName', 'inspectionDate', 'milesMileage', 'kmMileage',
       'fuelType', 'transmission', 'inspectionResult', 'testDrive', 'noTestDriveReason'
     ];
 
-    nonOCRFields.forEach(field => {
-      form.clearErrors(field as any);
-    });
+    for (const field of nonOCRFields) {
+      form.clearErrors(field);
+    }
 
     // Save to context
     const currentData = form.getValues();
@@ -380,8 +410,8 @@ export default function VehicleInspectionForm({
                           {...field}
                           onChange={(e) => {
                             field.onChange(e);
-                            const miles = parseFloat(e.target.value);
-                            if (!isNaN(miles)) {
+                            const miles = Number.parseFloat(e.target.value);
+                            if (!Number.isNaN(miles)) {
                               const km = Math.round(miles * 1.60934);
                               form.setValue("kmMileage", km.toString());
                             }
@@ -406,8 +436,8 @@ export default function VehicleInspectionForm({
                           {...field}
                           onChange={(e) => {
                             field.onChange(e);
-                            const km = parseFloat(e.target.value);
-                            if (!isNaN(km)) {
+                            const km = Number.parseFloat(e.target.value);
+                            if (!Number.isNaN(km)) {
                               const miles = Math.round(km * 0.621371);
                               form.setValue("milesMileage", miles.toString());
                             }
@@ -423,7 +453,7 @@ export default function VehicleInspectionForm({
               <FormField
                 control={form.control}
                 name="origin"
-                render={({ field }) => (
+                render={({ field, fieldState }) => (
                   <FormItem>
                     <FormLabel>Procedencia del vehículo</FormLabel>
                     <Select
@@ -431,7 +461,7 @@ export default function VehicleInspectionForm({
                       value={field.value}
                     >
                       <FormControl>
-                        <SelectTrigger className="w-full">
+                        <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
                           <SelectValue placeholder="Seleccione la procedencia" />
                         </SelectTrigger>
                       </FormControl>
@@ -449,7 +479,7 @@ export default function VehicleInspectionForm({
                 <FormField
                   control={form.control}
                   name="vehicleType"
-                  render={({ field }) => (
+                  render={({ field, fieldState }) => (
                     <FormItem>
                       <FormLabel>Tipo de vehículo</FormLabel>
                       <Select
@@ -457,7 +487,7 @@ export default function VehicleInspectionForm({
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="w-full">
+                          <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
                             <SelectValue placeholder="Seleccione el tipo" />
                           </SelectTrigger>
                         </FormControl>
@@ -525,7 +555,7 @@ export default function VehicleInspectionForm({
                 <FormField
                   control={form.control}
                   name="fuelType"
-                  render={({ field }) => (
+                  render={({ field, fieldState }) => (
                     <FormItem>
                       <FormLabel>Combustible</FormLabel>
                       <Select
@@ -533,7 +563,7 @@ export default function VehicleInspectionForm({
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="w-full">
+                          <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
                             <SelectValue placeholder="Seleccione el tipo de combustible" />
                           </SelectTrigger>
                         </FormControl>
@@ -552,7 +582,7 @@ export default function VehicleInspectionForm({
                 <FormField
                   control={form.control}
                   name="transmission"
-                  render={({ field }) => (
+                  render={({ field, fieldState }) => (
                     <FormItem>
                       <FormLabel>Transmisión</FormLabel>
                       <Select
@@ -560,7 +590,7 @@ export default function VehicleInspectionForm({
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="w-full">
+                          <SelectTrigger className={cn("w-full", fieldState.error && "border-red-500")}>
                             <SelectValue placeholder="Seleccione el tipo de transmisión" />
                           </SelectTrigger>
                         </FormControl>
@@ -607,14 +637,14 @@ export default function VehicleInspectionForm({
               <FormField
                 control={form.control}
                 name="testDrive"
-                render={({ field }) => (
+                render={({ field, fieldState }) => (
                   <FormItem className="space-y-3">
                     <FormLabel>¿Se realizó prueba de manejo?</FormLabel>
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
                         value={field.value}
-                        className="flex flex-col space-y-1"
+                        className={cn("flex flex-col space-y-1", fieldState.error && "border border-red-500 rounded-md p-2")}
                       >
                         <FormItem className="flex items-center space-x-3 space-y-0">
                           <FormControl>
@@ -647,7 +677,7 @@ export default function VehicleInspectionForm({
                       <FormControl>
                         <Textarea
                           placeholder="Razón por la que no se realizó la prueba"
-                          className="min-h-[80px]"
+                          className="min-h-20"
                           {...field}
                           value={field.value || ""}
                         />
@@ -674,4 +704,6 @@ export default function VehicleInspectionForm({
       </Form>
     </div>
   );
-}
+});
+
+export default VehicleInspectionForm;

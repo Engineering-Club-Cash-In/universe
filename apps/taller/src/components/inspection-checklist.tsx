@@ -11,8 +11,8 @@ import {
   Gauge,
   Shield,
   Zap,
-  FileText,
   Sparkles,
+  FileText,
 } from "lucide-react";
 import { useInspection } from "../contexts/InspectionContext";
 import { cn } from "@/lib/utils";
@@ -33,158 +33,332 @@ import {
 } from "@/components/ui/collapsible";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-// Definición de categorías y puntos críticos de inspección
-const inspectionCategories = [
+// ==========================================
+// CRITERIOS DE RECHAZO (Causales de rechazo)
+// ==========================================
+const rejectionCriteria: Array<{
+  id: string;
+  title: string;
+  icon: typeof Shield;
+  critical: boolean;
+  items: Array<{ id: string; label: string; critical: boolean }>;
+}> = [
   {
-    id: "structural",
-    title: "Daños Estructurales o Reparaciones Mayores",
+    id: "structural-damage",
+    title: "Daños o Reparaciones Estructurales",
     icon: Shield,
     critical: true,
     items: [
       {
-        id: "chassis-bent",
-        label: "Chasis doblado, soldado o con signos de corte",
+        id: "chassis-damage",
+        label: "Daños en chasis, largueros longitudinales, zonas de deformación delantera y trasera",
         critical: true,
       },
       {
-        id: "poor-repairs",
-        label: "Reparaciones mal ejecutadas tras colisiones graves",
+        id: "poor-paint-work",
+        label: "Trabajos de pintura mal realizados en gran parte del vehículo",
         critical: true,
       },
       {
-        id: "rebuilt-signs",
-        label: "Señales de haber sido reconstruido o armado",
+        id: "major-replacements",
+        label: "Sustituciones mayores de piezas de estructura o carrocería",
         critical: true,
       },
       {
         id: "vin-altered",
-        label: "Número de chasis/VIN alterado o no legible",
+        label: "Números de identificación alterados o no legibles (Chasis, VIN, motor, etc)",
+        critical: true,
+      },
+      {
+        id: "structural-corrosion",
+        label: "Corrosión estructural avanzada y excesiva",
         critical: true,
       },
     ],
   },
   {
-    id: "engine-transmission",
-    title: "Condición del Motor y Transmisión",
+    id: "engine-transmission-rejection",
+    title: "Condiciones de Motor y Transmisión",
     icon: Wrench,
     critical: true,
     items: [
       {
-        id: "visible-leaks",
-        label: "Fugas visibles de aceite, agua o combustible",
+        id: "major-fluid-leaks",
+        label: "Fugas mayores de fluidos (aceite, agua, refrigerante, frenos, transmisión)",
         critical: true,
       },
       {
         id: "abnormal-smoke",
-        label: "Humo anormal (blanco, azul, negro)",
+        label: "Humo anormal (blanco, azul o negro)",
         critical: true,
       },
       {
-        id: "engine-knock",
-        label: "Golpeteo en el motor o problemas de encendido",
+        id: "engine-sounds",
+        label: "Sonidos anormales en el motor (Golpeteo, problemas de encendido)",
         critical: true,
       },
       {
-        id: "transmission-issues",
-        label: "Transmisión con patinaje, golpes o respuesta irregular",
+        id: "power-loss-transmission",
+        label: "Pérdida de potencia, transmisión con respuesta irregular o golpeteo (verificar en prueba de manejo)",
         critical: true,
       },
     ],
   },
   {
-    id: "suspension-brakes",
+    id: "suspension-brakes-steering-rejection",
     title: "Suspensión, Frenos y Dirección",
     icon: Gauge,
     critical: true,
     items: [
       {
-        id: "shock-absorbers",
-        label: "Amortiguadores sin retención o con fugas",
+        id: "shock-leaks",
+        label: "Amortiguadores con fuga",
         critical: true,
       },
       {
-        id: "brake-issues",
-        label: "Frenos con ruido, falta de presión o desgaste extremo",
+        id: "brake-system-issues",
+        label: "Sistema de frenos con ruidos anormales, fugas mayores en mangueras y tuberías",
         critical: true,
       },
       {
-        id: "joints-bushings",
-        label: "Rótulas, terminales o bujes deteriorados",
-        critical: true,
-      },
-      {
-        id: "steering-play",
-        label: "Dirección con juego excesivo o vibración anormal",
+        id: "steering-wear",
+        label: "Dirección y tren delantero con desgaste excesivo o vibración anormal",
         critical: true,
       },
     ],
   },
   {
-    id: "body-glass",
+    id: "body-glass-rejection",
     title: "Carrocería y Cristales",
     icon: Car,
     critical: true,
     items: [
       {
-        id: "structural-rust",
-        label: "Oxidación estructural avanzada",
+        id: "body-corrosion",
+        label: "Corrosión de piezas de carrocería avanzada y excesiva",
         critical: true,
       },
       {
-        id: "visible-damage",
-        label: "Daños visibles en pilares, techo o marcos",
+        id: "pillar-roof-damage",
+        label: "Daños visibles en pilares, techo y marcos",
         critical: true,
       },
       {
-        id: "loose-parts",
-        label: "Bumper, luces o piezas sueltas o ausentes",
+        id: "paint-loose-parts",
+        label: "Daños en pintura excesivos, piezas sueltas, presencia de masilla excesiva",
         critical: true,
       },
     ],
   },
+];
+
+// ==========================================
+// PUNTOS DE INSPECCIÓN ADICIONALES (No causales de rechazo)
+// ==========================================
+const additionalInspectionPoints: Array<{
+  id: string;
+  title: string;
+  icon: typeof Shield;
+  critical: boolean;
+  items: Array<{ id: string; label: string; critical: boolean }>;
+}> = [
   {
-    id: "tires",
-    title: "Estado de Llantas",
+    id: "engine-transmission-detail",
+    title: "Motor y Transmisión (Detalle)",
+    icon: Wrench,
+    critical: false,
+    items: [
+      {
+        id: "engine-startup",
+        label: "Encendido sin ruidos ni vibraciones anormales",
+        critical: false,
+      },
+      {
+        id: "oil-transmission-leaks",
+        label: "Ausencia de fugas de aceite o líquido de transmisión",
+        critical: false,
+      },
+      {
+        id: "engine-oil-condition",
+        label: "Nivel y estado del aceite del motor (color, consistencia)",
+        critical: false,
+      },
+      {
+        id: "coolant-level",
+        label: "Nivel y estado del líquido refrigerante",
+        critical: false,
+      },
+      {
+        id: "exhaust-smoke",
+        label: "Ausencia de humo inusual en el escape (negro, azul o blanco constante)",
+        critical: false,
+      },
+      {
+        id: "hoses-belts",
+        label: "Mangueras y correas en buen estado, sin grietas ni desgaste",
+        critical: false,
+      },
+      {
+        id: "obd2-scan",
+        label: "Prueba de escáner OBD2 (sin errores activos)",
+        critical: false,
+      },
+    ],
+  },
+  {
+    id: "brakes-suspension-detail",
+    title: "Frenos y Suspensión (Detalle)",
     icon: Gauge,
-    critical: true,
+    critical: false,
     items: [
       {
-        id: "uneven-wear",
-        label: "Llantas con desgaste disparejo",
-        critical: true,
+        id: "brake-fluid-level",
+        label: "Nivel del líquido de frenos",
+        critical: false,
       },
       {
-        id: "bulges-cuts",
-        label: "Abultamientos o cortes laterales",
-        critical: true,
+        id: "brake-pads-discs",
+        label: "Desgaste de pastillas y discos de freno (surcos profundos o marcas inusuales)",
+        critical: false,
+      },
+      {
+        id: "brake-lines",
+        label: "Líneas, mangueras y conexiones de frenos sin fugas ni corrosión",
+        critical: false,
+      },
+      {
+        id: "brake-pedal-travel",
+        label: "Recorrido del pedal de freno (altura, juego libre y distancia de reserva)",
+        critical: false,
+      },
+      {
+        id: "shocks-suspension",
+        label: "Amortiguadores y suspensión (prueba de rebote, ausencia de fugas, bases de amortiguadores)",
+        critical: false,
+      },
+      {
+        id: "dust-covers-bushings",
+        label: "Guardapolvos y silentblocks visibles en buen estado",
+        critical: false,
       },
     ],
   },
   {
-    id: "electrical-system",
-    title: "Sistema Eléctrico y Tablero",
-    icon: Zap,
-    critical: true,
+    id: "steering-tires-detail",
+    title: "Tren Delantero, Dirección y Neumáticos (Detalle)",
+    icon: Car,
+    critical: false,
     items: [
+      {
+        id: "ball-joints",
+        label: "Rótulas",
+        critical: false,
+      },
+      {
+        id: "bushings",
+        label: "Bujes",
+        critical: false,
+      },
+      {
+        id: "cv-joints",
+        label: "Puntas de flecha",
+        critical: false,
+      },
+      {
+        id: "steering-rack",
+        label: "Cremallera (verificación de fugas, estado de puntas)",
+        critical: false,
+      },
+      {
+        id: "stabilizer-bar",
+        label: "Barra estabilizadora",
+        critical: false,
+      },
+      {
+        id: "steering-play",
+        label: "Holgura de la dirección (excesivo movimiento del volante sin respuesta)",
+        critical: false,
+      },
+      {
+        id: "tire-wear-tread",
+        label: "Desgaste uniforme de los neumáticos y profundidad de la banda de rodadura adecuada",
+        critical: false,
+      },
+      {
+        id: "tire-pressure",
+        label: "Presión de aire correcta en todos los neumáticos (incluida la rueda de repuesto)",
+        critical: false,
+      },
+    ],
+  },
+  {
+    id: "electrical-other-detail",
+    title: "Sistema Eléctrico y Otros (Detalle)",
+    icon: Zap,
+    critical: false,
+    items: [
+      {
+        id: "lights-interior-exterior",
+        label: "Funcionamiento de todas las luces exteriores e interiores",
+        critical: false,
+      },
+      {
+        id: "battery-condition",
+        label: "Estado de la batería (terminales limpios, sin corrosión)",
+        critical: false,
+      },
+      {
+        id: "ac-heating-accessories",
+        label: "Funcionamiento del aire acondicionado, calefacción, radio y otros accesorios",
+        critical: false,
+      },
+      {
+        id: "wipers-washer",
+        label: "Limpiaparabrisas y líquido lavaparabrisas operativos",
+        critical: false,
+      },
+      {
+        id: "horn-functional",
+        label: "Bocina funcional",
+        critical: false,
+      },
       {
         id: "warning-lights",
         label: "Testigos activos en el tablero (Check Engine, ABS, airbag)",
-        critical: true,
+        critical: false,
       },
       {
         id: "odometer-tampered",
         label: "Kilometraje alterado",
-        critical: true,
+        critical: false,
       },
       {
         id: "lights-broken",
         label: "Faros, frenos o luces direccionales quebrados y opacos",
-        critical: true,
+        critical: false,
       },
       {
         id: "dashboard-altered",
         label: "Tablero alterado o con señales de manipulación",
-        critical: true,
+        critical: false,
+      },
+    ],
+  },
+  {
+    id: "tires-condition-detail",
+    title: "Estado de Llantas (Detalle)",
+    icon: Gauge,
+    critical: false,
+    items: [
+      {
+        id: "uneven-tire-wear",
+        label: "Llantas con desgaste irregular",
+        critical: false,
+      },
+      {
+        id: "tire-bulges-cuts",
+        label: "Abultamientos o cortes laterales",
+        critical: false,
       },
     ],
   },
@@ -192,26 +366,29 @@ const inspectionCategories = [
     id: "documentation",
     title: "Documentación y Legalidad",
     icon: FileText,
-    critical: true,
+    critical: false,
     items: [
       {
         id: "vin-mismatch",
         label: "VIN no coincide con papelería",
-        critical: true,
+        critical: false,
       },
       {
         id: "theft-report",
         label: "Vehículo con reporte de robo o antecedentes dudosos",
-        critical: true,
+        critical: false,
       },
       {
         id: "pending-fines",
         label: "Multas graves pendientes o papelería incompleta",
-        critical: true,
+        critical: false,
       },
     ],
   },
 ];
+
+// Combinar todas las categorías
+const inspectionCategories = [...rejectionCriteria, ...additionalInspectionPoints];
 
 interface InspectionChecklistProps {
   onComplete?: () => void;

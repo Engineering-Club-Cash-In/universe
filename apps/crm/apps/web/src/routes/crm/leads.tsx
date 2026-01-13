@@ -198,9 +198,9 @@ function RouteComponent() {
 
 	// Query para obtener departamentos de Guatemala
 	const departamentosQuery = useQuery<string[]>({
+		...orpc.getDepartamentos.queryOptions(),
 		queryKey: ["getDepartamentos"],
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		queryFn: () => (client as any).getDepartamentos(),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role),
@@ -1659,8 +1659,9 @@ function RouteComponent() {
 												}
 											>
 												{state.isSubmitting || createLeadMutation.isPending
-													? "Creando..."
-													: "Crear Lead"}
+													? "Cargando...":
+														editingLead ? "Editar Lead" : "Crear Lead"
+													}
 											</Button>
 										)}
 									</createLeadForm.Subscribe>

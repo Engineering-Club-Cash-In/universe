@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -13,7 +13,7 @@ import { prepareInspectionData, createFullInspection } from "../services/vehicle
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import VehicleInspectionForm from "./vehicle-inspection";
+import VehicleInspectionForm, { type VehicleInspectionFormRef } from "./vehicle-inspection";
 import InspectionChecklist from "../components/inspection-checklist";
 import VehiclePictures from "./vehicle-pictures";
 import VehicleValuation from "../components/vehicle-valuation";
@@ -29,8 +29,8 @@ const STEPS = [
   },
   {
     id: "checklist",
-    title: "Criterios Críticos",
-    description: "Evaluación de puntos de rechazo",
+    title: "Checklist",
+    description: "Evaluación del vehículo",
     icon: ClipboardCheck,
   },
   {
@@ -50,6 +50,7 @@ const STEPS = [
 export default function VehicleInspectionWizard() {
   const { formData, checklistItems, photos, resetInspection, currentStep, setCurrentStep } = useInspection();
   const [basicInfoCompleted, setBasicInfoCompleted] = useState(false);
+  const vehicleFormRef = useRef<VehicleInspectionFormRef>(null);
   const [checklistCompleted, setChecklistCompleted] = useState(false);
   const [photosCompleted, setPhotosCompleted] = useState(false);
   const [valuationCompleted, setValuationCompleted] = useState(false);
@@ -57,9 +58,17 @@ export default function VehicleInspectionWizard() {
 
   const progress = ((currentStep + 1) / STEPS.length) * 100;
 
-  const handleNextStep = () => {
+  const handleNextStep = async () => {
     // Validar que el paso actual esté completo antes de avanzar
     if (currentStep === 0 && !basicInfoCompleted) {
+      // Triggear validación del formulario para mostrar errores en campos
+      if (vehicleFormRef.current) {
+        const isValid = await vehicleFormRef.current.triggerValidation();
+        if (!isValid) {
+          toast.error("Por favor complete los campos marcados en rojo");
+          return;
+        }
+      }
       toast.error("Por favor complete la información básica antes de continuar");
       return;
     }
@@ -237,7 +246,8 @@ export default function VehicleInspectionWizard() {
           <div className="p-3 sm:p-5">
             {currentStep === 0 && (
               <div>
-                <VehicleInspectionForm 
+                <VehicleInspectionForm
+                  ref={vehicleFormRef}
                   onComplete={() => {
                     setBasicInfoCompleted(true);
                     // Avanzar automáticamente al siguiente paso

@@ -316,6 +316,7 @@ export function CreditDetailView({
 			const membresiaValue = Number.parseFloat(quotation?.membershipCost || "0");
 			const numeroCuotasValue = quotation?.termMonths || 0;
 			const gastosAdminValue = Number.parseFloat(quotation?.adminCost || "0");
+			const finalValue = quotation?.totalFinanced || opportunity.value || "0";
 			// Reserva = 600 + seguro
 			const reservaValue = 600 + seguroValue;
 
@@ -379,6 +380,7 @@ export function CreditDetailView({
 				porcentajeRoyalti: royaltyPercentageValue,
 				reserva: reservaValue,
 				membresiaPago: membresiaValue,
+				value: finalValue,
 				// Rubros (Otros Descuentos) como JSON string
 				rubros: JSON.stringify(rubrosArray),
 				// Gastos administrativos para "otros" en cartera
@@ -411,14 +413,37 @@ export function CreditDetailView({
 		if (!editDiaPagoMensual && !opportunity.diaPagoMensual) {
 			camposFaltantes.push("Día de pago mensual");
 		}
-		if (editInversionistas.length === 0) {
+		
+		// Validar inversionistas
+		let inversionistasToValidate: SelectedInversionista[] = [];
+		if (editInversionistas.length > 0) {
+			inversionistasToValidate = editInversionistas;
+		} else {
 			try {
 				const parsed = opportunity.inversionistas ? JSON.parse(opportunity.inversionistas) : [];
-				if (!Array.isArray(parsed) || parsed.length === 0) {
+				if (Array.isArray(parsed) && parsed.length > 0) {
+					inversionistasToValidate = parsed;
+				} else {
 					camposFaltantes.push("Inversionistas");
 				}
 			} catch {
 				camposFaltantes.push("Inversionistas");
+			}
+		}
+		
+		// Validar que la suma de montos aportados = totalFinanced (capital)
+		if (inversionistasToValidate.length > 0 && quotation?.totalFinanced) {
+			const totalAportado = inversionistasToValidate.reduce(
+				(sum, inv) => sum + (inv.monto_aportado || 0),
+				0
+			);
+			const capitalCredito = Number.parseFloat(quotation.totalFinanced);
+			
+			// Permitir una pequeña diferencia por redondeo (1 centavo)
+			if (Math.abs(totalAportado - capitalCredito) > 0.01) {
+				camposFaltantes.push(
+					`La suma de montos aportados (Q${totalAportado.toLocaleString()}) debe ser igual al capital del crédito (Q${capitalCredito.toLocaleString()})`
+				);
 			}
 		}
 		
@@ -427,13 +452,22 @@ export function CreditDetailView({
 
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
-		mutationFn: () => {
+		mutationFn: async () => {
 			const camposFaltantes = validateRequiredFields();
 			if (camposFaltantes.length > 0) {
 				throw new Error(
 					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`
 				);
 			}
+			
+			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
+			if (quotation?.totalFinanced && (Number(quotation?.totalFinanced) !== Number(opportunity.value)))  {
+				await client.updateOpportunity({
+					id: opportunityId,
+					value: quotation.totalFinanced,
+				});
+			}
+			
 			return client.approveCreditDetail({ opportunityId });
 		},
 		onSuccess: () => {

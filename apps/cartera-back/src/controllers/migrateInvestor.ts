@@ -1,7 +1,9 @@
 import Big from "big.js";
 import { db } from "../database";
 import { creditos, creditos_inversionistas, inversionistas } from "../database/db";
-import { eq, or, ilike, sql } from "drizzle-orm";
+import { eq, or, ilike } from "drizzle-orm";
+import fs from "fs";
+import path from "path";
 
 // ========================================
 // TIPOS E INTERFACES
@@ -23,6 +25,19 @@ interface CreditoAgrupadoInversionistas {
   filas: FilaExcelInversionista[];
 }
 
+interface InversionistaNoEncontrado {
+  nombreExcel: string;
+  creditoSIFCO: string;
+  cliente: string;
+  capital: string;
+  timestamp: string;
+  candidatosCercanos?: Array<{
+    nombre: string;
+    similitud: number;
+    inversionista_id: number;
+  }>;
+}
+
 // ========================================
 // FUNCIONES AUXILIARES: Normalización y Similitud
 // ========================================
@@ -30,7 +45,7 @@ interface CreditoAgrupadoInversionistas {
 /**
  * Normaliza un nombre de forma MUY agresiva para matching
  */
-const normalizarNombreAgresivo = (nombre: string): string => {
+const normalizarNombre = (nombre: string): string => {
   return nombre
     .toLowerCase()
     .normalize("NFD")
@@ -45,7 +60,7 @@ const normalizarNombreAgresivo = (nombre: string): string => {
  * Extrae las palabras clave del nombre (sin palabras comunes)
  */
 const extraerPalabrasClave = (nombre: string): string[] => {
-  const nombreNorm = normalizarNombreAgresivo(nombre);
+  const nombreNorm = normalizarNombre(nombre);
   const palabrasComunes = new Set([
     "de", "del", "la", "los", "las", "el", 
     "y", "e", "o", "u"
@@ -102,9 +117,9 @@ const calcularLevenshtein = (str1: string, str2: string): number => {
 /**
  * Calcula similitud mejorada con matching por palabras MÁS FLEXIBLE
  */
-const calcularSimilitudMejorada = (str1: string, str2: string): number => {
-  const s1Norm = normalizarNombreAgresivo(str1);
-  const s2Norm = normalizarNombreAgresivo(str2);
+const calcularSimilitud = (str1: string, str2: string): number => {
+  const s1Norm = normalizarNombre(str1);
+  const s2Norm = normalizarNombre(str2);
 
   console.log(`      🔎 Comparando: "${s1Norm}" <-> "${s2Norm}"`);
 
@@ -184,17 +199,25 @@ const calcularSimilitudMejorada = (str1: string, str2: string): number => {
 };
 
 /**
- * 🔥 BUSCA INVERSIONISTA CON LIKE EN DB + FUZZY FALLBACK
+ * 🔥 BUSCA INVERSIONISTA CON ESTRATEGIA DUAL: LIKE EN BD + FUZZY FALLBACK
  */
-const buscarInversionistaConLike = async (
+const buscarInversionistaInteligente = async (
   nombreBuscado: string,
   todosInversionistas: Array<{ inversionista_id: number; nombre: string }>
-): Promise<{ inversionista_id: number; nombre: string; similitud: number; metodo: string } | null> => {
+): Promise<{ 
+  inversionista_id: number; 
+  nombre: string; 
+  similitud: number; 
+  metodo: string;
+  candidatosCercanos?: Array<{ nombre: string; similitud: number; inversionista_id: number }>;
+} | null> => {
   
   console.log(`\n   🔍 Buscando match para: "${nombreBuscado}"`);
   
   const palabrasClave = extraerPalabrasClave(nombreBuscado);
   console.log(`   📊 Palabras clave: [${palabrasClave.join(", ")}]`);
+
+  let candidatosCercanos: Array<{ nombre: string; similitud: number; inversionista_id: number }> = [];
 
   // 1️⃣ ESTRATEGIA 1: LIKE con las palabras clave en BD
   if (palabrasClave.length > 0) {
@@ -221,8 +244,14 @@ const buscarInversionistaConLike = async (
         let mejorMatch: { inversionista_id: number; nombre: string; similitud: number } | null = null;
 
         for (const inv of resultadosLike) {
-          const similitud = calcularSimilitudMejorada(nombreBuscado, inv.nombre);
+          const similitud = calcularSimilitud(nombreBuscado, inv.nombre);
           console.log(`   💡 Candidato LIKE: "${inv.nombre}" → ${similitud}%`);
+
+          candidatosCercanos.push({
+            nombre: inv.nombre,
+            similitud,
+            inversionista_id: inv.inversionista_id
+          });
 
           if (!mejorMatch || similitud > mejorMatch.similitud) {
             mejorMatch = {
@@ -235,7 +264,7 @@ const buscarInversionistaConLike = async (
 
         if (mejorMatch && mejorMatch.similitud >= 50) {
           console.log(`   ✅ MEJOR MATCH (LIKE): "${mejorMatch.nombre}" → ${mejorMatch.similitud}%`);
-          return { ...mejorMatch, metodo: "LIKE" };
+          return { ...mejorMatch, metodo: "LIKE", candidatosCercanos };
         }
       }
     } catch (error) {
@@ -252,8 +281,19 @@ const buscarInversionistaConLike = async (
     similitud: number;
   } | null = null;
 
+  // Guardar top 5 candidatos para diagnóstico
+  const topCandidatos: Array<{ nombre: string; similitud: number; inversionista_id: number }> = [];
+
   for (const inv of todosInversionistas) {
-    const similitud = calcularSimilitudMejorada(nombreBuscado, inv.nombre);
+    const similitud = calcularSimilitud(nombreBuscado, inv.nombre);
+
+    if (similitud >= 30) { // Umbral bajo para capturar candidatos cercanos
+      topCandidatos.push({
+        nombre: inv.nombre,
+        similitud,
+        inversionista_id: inv.inversionista_id
+      });
+    }
 
     if (similitud >= 50) {
       if (!mejorMatch || similitud > mejorMatch.similitud) {
@@ -268,12 +308,21 @@ const buscarInversionistaConLike = async (
     }
   }
 
+  // Ordenar y tomar top 5
+  topCandidatos.sort((a, b) => b.similitud - a.similitud);
+  candidatosCercanos = topCandidatos.slice(0, 5);
+
   if (mejorMatch) {
     console.log(`   ✅ MEJOR MATCH (FUZZY): "${mejorMatch.nombre}" → ${mejorMatch.similitud}%`);
-    return { ...mejorMatch, metodo: "FUZZY" };
+    return { ...mejorMatch, metodo: "FUZZY", candidatosCercanos };
   }
 
-  console.log(`   ❌ No se encontró match`);
+  console.log(`   ❌ No se encontró match >= 50%`);
+  console.log(`   🔍 Top 5 candidatos más cercanos:`);
+  candidatosCercanos.forEach((c, idx) => {
+    console.log(`      ${idx + 1}. [${c.similitud}%] "${c.nombre}" (ID: ${c.inversionista_id})`);
+  });
+
   return null;
 };
 
@@ -298,6 +347,42 @@ const toBigExcel = (value: any, defaultValue: string | number = "0"): Big => {
     return new Big(cleaned || defaultValue);
   } catch {
     return new Big(defaultValue);
+  }
+};
+
+// ========================================
+// 💾 GUARDAR LOG DE INVERSIONISTAS NO ENCONTRADOS
+// ========================================
+
+const guardarInversionistasNoEncontrados = async (
+  inversionistasNoEncontrados: InversionistaNoEncontrado[]
+) => {
+  try {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `inversionistas-no-encontrados-${timestamp}.json`;
+    const filePath = path.join(process.cwd(), "logs", fileName);
+
+    // Crear carpeta logs si no existe
+    const logsDir = path.join(process.cwd(), "logs");
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+
+    const logData = {
+      timestamp: new Date().toISOString(),
+      total: inversionistasNoEncontrados.length,
+      inversionistas: inversionistasNoEncontrados
+    };
+
+    fs.writeFileSync(filePath, JSON.stringify(logData, null, 2), "utf-8");
+
+    console.log(`\n💾 Log guardado: ${filePath}`);
+    console.log(`   Total registros: ${inversionistasNoEncontrados.length}`);
+
+    return filePath;
+  } catch (error) {
+    console.error(`❌ Error guardando log:`, error);
+    return null;
   }
 };
 
@@ -369,11 +454,11 @@ export async function procesarInversionistasSoloExcel(
 
     console.log(`✅ ${todosInversionistas.length} inversionistas cargados`);
 
-    // 4️⃣ Mapear inversionistas desde Excel con búsqueda LIKE + fuzzy
+    // 4️⃣ Mapear inversionistas desde Excel con búsqueda inteligente
     console.log(`\n👥 Mapeando inversionistas desde Excel (LIKE + Fuzzy)...`);
     
     const inversionistasData = [];
-    const inversionistasNoEncontrados: string[] = [];
+    const inversionistasNoEncontrados: InversionistaNoEncontrado[] = [];
     const matchStats = { LIKE: 0, FUZZY: 0 };
 
     for (const fila of creditoAgrupado.filas) {
@@ -386,15 +471,24 @@ export async function procesarInversionistasSoloExcel(
 
       console.log(`\n   📋 Procesando: "${nombreInversionista}"`);
 
-      // 🔥 Búsqueda con LIKE + Fuzzy fallback
-      const match = await buscarInversionistaConLike(
+      // 🔥 Búsqueda inteligente (LIKE + Fuzzy)
+      const match = await buscarInversionistaInteligente(
         nombreInversionista,
         todosInversionistas
       );
 
       if (!match) {
         console.error(`   ❌ No se encontró match para "${nombreInversionista}"`);
-        inversionistasNoEncontrados.push(nombreInversionista);
+        
+        inversionistasNoEncontrados.push({
+          nombreExcel: nombreInversionista,
+          creditoSIFCO: fila.CreditoSIFCO,
+          cliente: creditoAgrupado.cliente,
+          capital: String(fila.Capital || "0"),
+          timestamp: new Date().toISOString(),
+          candidatosCercanos: []
+        });
+        
         continue;
       }
 
@@ -410,8 +504,6 @@ export async function procesarInversionistasSoloExcel(
 
       // Calcular montos
       const montoAportado = toBigExcel(fila.Capital, "0");
-      
-      // 🔥 LOS PORCENTAJES YA VIENEN EN DECIMAL DEL EXCEL (0.2, 0.8)
       const porcentajeCashIn = toBigExcel(fila.PorcentajeCashIn || 0, "0");
       const porcentajeInversion = toBigExcel(fila.PorcentajeInversionista || 0, "0");
       const interes = new Big(creditoDB.porcentaje_interes || 0);
@@ -423,16 +515,12 @@ export async function procesarInversionistasSoloExcel(
       // Calcular cuota de interés del inversionista
       const newCuotaInteres = montoAportado.times(interes.div(100));
 
-      // 🔥 FIX CRÍTICO: NO DIVIDIR ENTRE 100 PORQUE YA SON DECIMALES
-      // Excel viene: 0.2 (20%) y 0.8 (80%)
-      // Antes: cuotaInteres × 0.8 ÷ 100 = ERROR ❌
-      // Ahora: cuotaInteres × 0.8 = CORRECTO ✅
       const montoInversionista = newCuotaInteres
-        .times(porcentajeInversion)  // 234.95 × 0.8 = 187.96 ✅
+        .times(porcentajeInversion)
         .round(2);
         
       const montoCashIn = newCuotaInteres
-        .times(porcentajeCashIn)  // 234.95 × 0.2 = 46.99 ✅
+        .times(porcentajeCashIn)
         .round(2);
 
       // Calcular IVAs
@@ -444,7 +532,6 @@ export async function procesarInversionistasSoloExcel(
         ? montoCashIn.times(0.12).round(2)
         : new Big(0);
 
-      // Cuota del inversionista
       const cuotaInv = fila.Cuota
         ? toBigExcel(fila.Cuota, "0")
         : new Big(0);
@@ -455,7 +542,7 @@ export async function procesarInversionistasSoloExcel(
       console.log(`   📊 IVA Cash-In: Q${ivaCashIn.toString()}`);
       console.log(`   🎯 Cuota: Q${cuotaInv.toString()}`);
 
-      // 🔥 CONVERTIR PORCENTAJES A FORMATO ENTERO PARA BD (0.2 → 20, 0.8 → 80)
+      // Convertir porcentajes a formato entero para BD (0.2 → 20, 0.8 → 80)
       const porcentajeCashInParaBD = porcentajeCashIn.times(100).toString();
       const porcentajeInversionParaBD = porcentajeInversion.times(100).toString();
 
@@ -466,7 +553,6 @@ export async function procesarInversionistasSoloExcel(
         credito_id: creditoDB.credito_id,
         inversionista_id: match.inversionista_id,
         monto_aportado: montoAportado.toFixed(2),
-        // 🔥 GUARDAR COMO ENTEROS (20, 80) NO DECIMALES (0.20, 0.80)
         porcentaje_cash_in: porcentajeCashInParaBD,
         porcentaje_participacion_inversionista: porcentajeInversionParaBD,
         monto_inversionista: montoInversionista.toFixed(2),
@@ -485,12 +571,15 @@ export async function procesarInversionistasSoloExcel(
     console.log(`   ✅ Total exitosos: ${inversionistasData.length}`);
     console.log(`   ❌ No encontrados: ${inversionistasNoEncontrados.length}`);
 
-    // 6️⃣ Validar si hubo inversionistas no encontrados
+    // 6️⃣ Guardar archivo con los que fallaron
+    let logFilePath = null;
     if (inversionistasNoEncontrados.length > 0) {
       console.warn(`\n⚠️  INVERSIONISTAS NO ENCONTRADOS:`);
-      inversionistasNoEncontrados.forEach((nombre) => {
-        console.warn(`   - "${nombre}"`);
+      inversionistasNoEncontrados.forEach((inv) => {
+        console.warn(`   - "${inv.nombreExcel}" (Crédito: ${inv.creditoSIFCO})`);
       });
+
+      logFilePath = await guardarInversionistasNoEncontrados(inversionistasNoEncontrados);
     }
 
     // 7️⃣ Insertar todos los inversionistas
@@ -503,7 +592,8 @@ export async function procesarInversionistasSoloExcel(
         creditoBase: creditoAgrupado.creditoBase,
         error: "No se encontraron inversionistas válidos",
         inversionistas_procesados: 0,
-        inversionistas_no_encontrados: inversionistasNoEncontrados,
+        inversionistas_no_encontrados: inversionistasNoEncontrados.map(inv => inv.nombreExcel),
+        log_file: logFilePath,
       };
     }
 
@@ -519,8 +609,9 @@ export async function procesarInversionistasSoloExcel(
       credito_id: creditoDB.credito_id,
       inversionistas_procesados: inversionistasData.length,
       inversionistas_eliminados: deletedCount.rowCount ?? 0,
-      inversionistas_no_encontrados: inversionistasNoEncontrados,
+      inversionistas_no_encontrados: inversionistasNoEncontrados.map(inv => inv.nombreExcel),
       match_stats: matchStats,
+      log_file: logFilePath,
       detalles: inversionistasData.map(inv => ({
         inversionista_id: inv.inversionista_id,
         monto_aportado: inv.monto_aportado,

@@ -1,7 +1,8 @@
-import { ensureCarteraAuth } from "./loginCartera";
+/**
+ * Servicio de inversionistas - Proxy a través de Better Auth API
+ */
 
-const carteraURL =
-  import.meta.env.VITE_CARTERA_API_URL || "http://localhost:5000";
+import apiAuth from "@/lib/api/apiAuth";
 
 // Interfaces
 export interface CreateInvestorPayload {
@@ -10,7 +11,7 @@ export interface CreateInvestorPayload {
   email?: string;
   emite_factura?: boolean;
   tipo_reinversion: string;
-  banco?: string | null;
+  banco_id?: string | null;
   tipo_cuenta?: string | null;
   numero_cuenta?: string;
 }
@@ -28,7 +29,7 @@ export interface InvestorProfile {
   email: string;
   emite_factura: boolean;
   tipo_reinversion: string;
-  banco: string | null;
+  banco_id: string | null;
   tipo_cuenta: string | null;
   numero_cuenta: string | null;
 }
@@ -46,24 +47,11 @@ export const createInvestor = async (
   payload: CreateInvestorPayload
 ): Promise<CreateInvestorResponse> => {
   try {
-    // Asegurar autenticación
-    // const token = await ensureCarteraAuth();
-
-    const response = await fetch(`${carteraURL}/investor`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        // "Authorization": `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al crear el inversionista");
-    }
-
-    const data: CreateInvestorResponse = await response.json();
-    return data;
+    const response = await apiAuth.post<CreateInvestorResponse>(
+      "/api/cartera/investor",
+      payload
+    );
+    return response.data;
   } catch (error) {
     console.error("Error al crear inversionista:", error);
     throw error;
@@ -77,21 +65,10 @@ export const getInvestorProfile = async (
   dpi: string
 ): Promise<InvestorProfile> => {
   try {
-    // Asegurar autenticación
-    // const token = await ensureCarteraAuth();
-
-    const response = await fetch(`${carteraURL}/investor?dpi=${dpi}`, {
-      headers: {
-        //"Authorization": `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al obtener perfil del inversionista");
-    }
-
-    const data: InvestorProfile = await response.json();
-    return data;
+    const response = await apiAuth.get<{ data: InvestorProfile }>(
+      `/api/cartera/investor?dpi=${encodeURIComponent(dpi)}`
+    );
+    return response.data.data;
   } catch (error) {
     console.error("Error al obtener perfil del inversionista:", error);
     throw error;
@@ -103,22 +80,10 @@ export const getInvestorProfile = async (
  */
 export const getBancos = async (): Promise<Banco[]> => {
   try {
-    // Asegurar autenticación
-    const token = await ensureCarteraAuth();
-
-    const response = await fetch(`${carteraURL}/bancos`, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error("Error al obtener catálogo de bancos");
-    }
-
-    const data = await response.json();
-    return data.data;
+    const response = await apiAuth.get<{ data: Banco[] }>(
+      "/api/cartera/bancos"
+    );
+    return response.data.data;
   } catch (error) {
     console.error("Error al obtener bancos:", error);
     throw error;

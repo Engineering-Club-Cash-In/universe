@@ -19,6 +19,12 @@ export interface EnvConfig {
   SMTP_FROM: string;
   // Frontend URL for password reset
   FRONTEND_URL: string;
+  // Cartera API Config
+  CARTERA_API_URL: string;
+  CARTERA_USER: string;
+  CARTERA_PASSWORD: string;
+  // CRM API Config
+  CRM_API_URL: string;
 }
 
 function validateEnv(): EnvConfig {
@@ -81,6 +87,12 @@ function validateEnv(): EnvConfig {
     SMTP_FROM: process.env.SMTP_FROM!,
     // Frontend
     FRONTEND_URL: process.env.FRONTEND_URL || process.env.CORS_ORIGIN || "http://localhost:5173",
+    // Cartera API
+    CARTERA_API_URL: process.env.CARTERA_API_URL || "http://localhost:5000",
+    CARTERA_USER: process.env.CARTERA_USER || "",
+    CARTERA_PASSWORD: process.env.CARTERA_PASSWORD || "",
+    // CRM API
+    CRM_API_URL: process.env.CRM_API_URL || "http://localhost:4000",
   };
 }
 

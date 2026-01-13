@@ -2134,6 +2134,36 @@ function RouteComponent() {
 										const latestQuotation =
 											opportunityQuotationsQuery.data?.[0] || null;
 
+										// Si no hay cotización, mostrar mensaje para crear una
+										if (!latestQuotation) {
+											return (
+												<div className="rounded-lg border border-dashed border-orange-300 bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
+													<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
+													<h3 className="mb-2 font-semibold text-lg">
+														Se requiere una cotización
+													</h3>
+													<p className="mb-4 text-muted-foreground">
+														Para ver el detalle del crédito, primero debes crear
+														una cotización para esta oportunidad.
+													</p>
+													<Button
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/crm/quoter",
+																search: {
+																	opportunityId: selectedOpportunity.id,
+																},
+															});
+														}}
+													>
+														<Calculator className="mr-2 h-4 w-4" />
+														Crear Cotización
+													</Button>
+												</div>
+											);
+										}
+
 										return (
 											<CreditDetailView
 												opportunityId={selectedOpportunity.id}

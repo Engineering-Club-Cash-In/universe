@@ -6,13 +6,15 @@ import {
 	Car,
 	CheckCircle,
 	CreditCard,
+	Edit2,
 	FileText,
 	Percent,
 	Plus,
+	Save,
 	Trash2,
 	User,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,6 +25,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
 	DialogContent,
@@ -51,6 +54,25 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { client } from "@/utils/orpc";
+
+// Tipos de categorías de crédito
+type CreditCategory =
+	| ""
+	| "Contraseña"
+	| "CV Vehículo"
+	| "CV Vehículo nuevo"
+	| "Fiduciario"
+	| "Hipotecario"
+	| "Vehículo";
+
+// Tipo para inversionista seleccionado
+interface SelectedInversionista {
+	inversionista_id: number;
+	nombre: string;
+	porcentaje_participacion: number;
+	monto_aportado: number;
+	porcentaje_cash_in: number;
+}
 
 // Constantes financieras
 const IVA_RATE = 0.12; // 12% IVA Guatemala
@@ -209,6 +231,45 @@ export function CreditDetailView({
 	const [isAddCheckOpen, setIsAddCheckOpen] = useState(false);
 	const [porcentajeInversionista, setPorcentajeInversionista] = useState(DEFAULT_INVESTOR_PERCENTAGE);
 
+	// Estados para campos editables del crédito
+	const [isEditing, setIsEditing] = useState(false);
+	const [editDireccion, setEditDireccion] = useState<string>("");
+	const [editCategoria, setEditCategoria] = useState<CreditCategory>("");
+	const [editNit, setEditNit] = useState<string>("");
+	const [editInversionistas, setEditInversionistas] = useState<SelectedInversionista[]>([]);
+
+	// Inicializar valores desde opportunity
+	useEffect(() => {
+		// Construir dirección desde lead o usar la existente
+		const leadDireccion = opportunity.lead
+			? [
+					opportunity.lead.municipio,
+					opportunity.lead.departamento,
+					opportunity.lead.zona ? `Zona ${opportunity.lead.zona}` : null,
+				]
+					.filter(Boolean)
+					.join(", ")
+			: "";
+		setEditDireccion(opportunity.direccion || leadDireccion || "");
+		setEditNit(opportunity.nit || "");
+		
+		// Parsear inversionistas existentes
+		if (opportunity.inversionistas) {
+			try {
+				const parsed = JSON.parse(opportunity.inversionistas) as SelectedInversionista[];
+				setEditInversionistas(parsed);
+			} catch {
+				setEditInversionistas([]);
+			}
+		}
+	}, [opportunity]);
+
+	// Query para obtener inversionistas disponibles
+	const inversionistasQuery = useQuery({
+		queryKey: ["getInversionistas"],
+		queryFn: () => client.getInversionistas({ page: 1, perPage: 100 }),
+	});
+
 	// Determinar tipo de crédito
 	const isAutocompra = opportunity.creditType === "autocompra";
 
@@ -275,6 +336,27 @@ export function CreditDetailView({
 		},
 		onError: (error) => {
 			toast.error(`Error al eliminar cheque: ${error.message}`);
+		},
+	});
+
+	// Mutation para guardar campos editables del crédito
+	const saveCreditDetailsMutation = useMutation({
+		mutationFn: async () => {
+			return client.updateOpportunity({
+				id: opportunityId,
+				direccion: editDireccion,
+				categoria: editCategoria || undefined,
+				nit: editNit,
+				inversionistas: JSON.stringify(editInversionistas),
+			});
+		},
+		onSuccess: () => {
+			toast.success("Datos del crédito guardados correctamente");
+			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
+			setIsEditing(false);
+		},
+		onError: (error) => {
+			toast.error(`Error al guardar: ${error.message}`);
 		},
 	});
 
@@ -527,25 +609,61 @@ export function CreditDetailView({
 											<CheckCircle className="mr-1 h-3 w-3" />
 											Aprobado
 										</Badge>
-									) : canApprove ? (
-										<Button
-											size="sm"
-											variant="default"
-											onClick={() => approveCreditDetailMutation.mutate()}
-											disabled={approveCreditDetailMutation.isPending}
-										>
-											<CheckCircle className="mr-1 h-3 w-3" />
-											{approveCreditDetailMutation.isPending
-												? "Aprobando..."
-												: "Aprobar Detalle"}
-										</Button>
 									) : (
-										<Badge
-											variant="outline"
-											className="border-yellow-500 bg-yellow-50 text-yellow-700"
-										>
-											Pendiente de aprobación
-										</Badge>
+										<>
+											{isEditing ? (
+												<>
+													<Button
+														size="sm"
+														variant="outline"
+														onClick={() => setIsEditing(false)}
+													>
+														Cancelar
+													</Button>
+													<Button
+														size="sm"
+														variant="default"
+														onClick={() => saveCreditDetailsMutation.mutate()}
+														disabled={saveCreditDetailsMutation.isPending}
+													>
+														<Save className="mr-1 h-3 w-3" />
+														{saveCreditDetailsMutation.isPending
+															? "Guardando..."
+															: "Guardar Cambios"}
+													</Button>
+												</>
+											) : (
+												<Button
+													size="sm"
+													variant="outline"
+													onClick={() => setIsEditing(true)}
+												>
+													<Edit2 className="mr-1 h-3 w-3" />
+													Editar
+												</Button>
+											)}
+											{canApprove && !isEditing && (
+												<Button
+													size="sm"
+													variant="default"
+													onClick={() => approveCreditDetailMutation.mutate()}
+													disabled={approveCreditDetailMutation.isPending}
+												>
+													<CheckCircle className="mr-1 h-3 w-3" />
+													{approveCreditDetailMutation.isPending
+														? "Aprobando..."
+														: "Aprobar Detalle"}
+												</Button>
+											)}
+											{!canApprove && !isEditing && (
+												<Badge
+													variant="outline"
+													className="border-yellow-500 bg-yellow-50 text-yellow-700"
+												>
+													Pendiente de aprobación
+												</Badge>
+											)}
+										</>
 									)}
 								</div>
 							</div>
@@ -580,7 +698,41 @@ export function CreditDetailView({
 									</div>
 									<div>
 										<Label className="text-muted-foreground text-xs">NIT</Label>
-										<p className="font-medium">{opportunity.nit || "N/A"}</p>
+										{isEditing ? (
+											<Input
+												value={editNit}
+												onChange={(e) => setEditNit(e.target.value)}
+												placeholder="Ingrese NIT..."
+												className="mt-1"
+											/>
+										) : (
+											<p className="font-medium">{editNit || opportunity.nit || "N/A"}</p>
+										)}
+									</div>
+									<div>
+										<Label className="text-muted-foreground text-xs">
+											Categoría
+										</Label>
+										{isEditing ? (
+											<Select
+												value={editCategoria}
+												onValueChange={(value) => setEditCategoria(value as CreditCategory)}
+											>
+												<SelectTrigger className="mt-1">
+													<SelectValue placeholder="Seleccionar categoría" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="Contraseña">Contraseña</SelectItem>
+													<SelectItem value="CV Vehículo">CV Vehículo</SelectItem>
+													<SelectItem value="CV Vehículo nuevo">CV Vehículo nuevo</SelectItem>
+													<SelectItem value="Fiduciario">Fiduciario</SelectItem>
+													<SelectItem value="Hipotecario">Hipotecario</SelectItem>
+													<SelectItem value="Vehículo">Vehículo</SelectItem>
+												</SelectContent>
+											</Select>
+										) : (
+											<p className="font-medium">{editCategoria || "N/A"}</p>
+										)}
 									</div>
 									<div>
 										<Label className="text-muted-foreground text-xs">
@@ -588,18 +740,176 @@ export function CreditDetailView({
 										</Label>
 										<p className="font-medium">{lead?.age || "N/A"} años</p>
 									</div>
-									<div className="col-span-2">
+									<div>
 										<Label className="text-muted-foreground text-xs">
 											Dirección
 										</Label>
-										<p className="font-medium">
-											{lead?.departamento && lead?.municipio
-												? `${lead.municipio}, ${lead.departamento}${lead.zona ? ` - Zona ${lead.zona}` : ""}`
-												: opportunity.direccion || "N/A"}
-										</p>
+										{isEditing ? (
+											<Input
+												value={editDireccion}
+												onChange={(e) => setEditDireccion(e.target.value)}
+												placeholder="Ingrese dirección..."
+												className="mt-1"
+											/>
+										) : (
+											<p className="font-medium">
+												{editDireccion || opportunity.direccion || "N/A"}
+											</p>
+										)}
 									</div>
 								</div>
 							</div>
+
+							{/* Sección: Inversionistas (editable) */}
+							{(isEditing || editInversionistas.length > 0) && (
+								<div className="space-y-3">
+									<div className="flex items-center justify-between">
+										<h3 className="flex items-center gap-2 font-semibold text-sm">
+											<Banknote className="h-4 w-4" />
+											Inversionistas
+										</h3>
+										{isEditing && (
+											<Button
+												type="button"
+												size="sm"
+												variant="outline"
+												onClick={() => {
+													setEditInversionistas([
+														...editInversionistas,
+														{
+															inversionista_id: 0,
+															nombre: "",
+															porcentaje_participacion: 0,
+															monto_aportado: 0,
+															porcentaje_cash_in: 0,
+														},
+													]);
+												}}
+											>
+												<Plus className="mr-1 h-3 w-3" />
+												Agregar
+											</Button>
+										)}
+									</div>
+									<div className="rounded-lg border bg-muted/30 p-4">
+										{editInversionistas.length === 0 ? (
+											<p className="text-center text-muted-foreground text-sm">
+												No hay inversionistas asignados
+											</p>
+										) : (
+											<div className="space-y-3">
+												{editInversionistas.map((inv, index) => (
+													<div
+														key={index}
+														className="flex items-center gap-3 rounded-lg border bg-background p-3"
+													>
+														{isEditing ? (
+															<>
+																<div className="flex-1">
+																	<Label className="text-xs">Inversionista</Label>
+																	<Combobox
+																		value={inv.inversionista_id > 0 ? inv.inversionista_id.toString() : null}
+																		onChange={(value) => {
+																			const newInv = [...editInversionistas];
+																			const selectedInv = inversionistasQuery.data?.inversionistas?.find(
+																				(i) => i.inversionistaId.toString() === value
+																			);
+																			newInv[index].inversionista_id = Number.parseInt(value || "0");
+																			newInv[index].nombre = selectedInv?.nombre || "";
+																			setEditInversionistas(newInv);
+																		}}
+																		options={
+																			inversionistasQuery.data?.inversionistas?.map((investor) => ({
+																				label: investor.nombre,
+																				value: investor.inversionistaId.toString(),
+																			})) || []
+																		}
+																		placeholder="Seleccionar..."
+																		width="full"
+																	/>
+																</div>
+																<div className="w-24">
+																	<Label className="text-xs">% Participación</Label>
+																	<Input
+																		type="number"
+																		step="0.01"
+																		value={inv.porcentaje_participacion}
+																		onChange={(e) => {
+																			const newInv = [...editInversionistas];
+																			newInv[index].porcentaje_participacion = Number.parseFloat(e.target.value) || 0;
+																			setEditInversionistas(newInv);
+																		}}
+																		placeholder="0.00"
+																	/>
+																</div>
+																<div className="w-32">
+																	<Label className="text-xs">Monto Aportado (Q)</Label>
+																	<Input
+																		type="number"
+																		step="0.01"
+																		value={inv.monto_aportado}
+																		onChange={(e) => {
+																			const newInv = [...editInversionistas];
+																			newInv[index].monto_aportado = Number.parseFloat(e.target.value) || 0;
+																			setEditInversionistas(newInv);
+																		}}
+																		placeholder="0.00"
+																	/>
+																</div>
+																<div className="w-24">
+																	<Label className="text-xs">% Cash In</Label>
+																	<Input
+																		type="number"
+																		step="0.01"
+																		value={inv.porcentaje_cash_in}
+																		onChange={(e) => {
+																			const newInv = [...editInversionistas];
+																			newInv[index].porcentaje_cash_in = Number.parseFloat(e.target.value) || 0;
+																			setEditInversionistas(newInv);
+																		}}
+																		placeholder="0.00"
+																	/>
+																</div>
+																<Button
+																	type="button"
+																	variant="destructive"
+																	size="icon"
+																	className="h-8 w-8 shrink-0"
+																	onClick={() => {
+																		const newInv = [...editInversionistas];
+																		newInv.splice(index, 1);
+																		setEditInversionistas(newInv);
+																	}}
+																>
+																	<Trash2 className="h-3 w-3" />
+																</Button>
+															</>
+														) : (
+															<>
+																<div className="flex-1">
+																	<p className="font-medium">{inv.nombre}</p>
+																</div>
+																<div className="text-right">
+																	<p className="text-muted-foreground text-xs">Participación</p>
+																	<p className="font-medium">{inv.porcentaje_participacion}%</p>
+																</div>
+																<div className="text-right">
+																	<p className="text-muted-foreground text-xs">Aportado</p>
+																	<p className="font-medium">{formatCurrency(inv.monto_aportado)}</p>
+																</div>
+																<div className="text-right">
+																	<p className="text-muted-foreground text-xs">Cash In</p>
+																	<p className="font-medium">{inv.porcentaje_cash_in}%</p>
+																</div>
+															</>
+														)}
+													</div>
+												))}
+											</div>
+										)}
+									</div>
+								</div>
+							)}
 
 							{/* Sección: Datos del Vehículo */}
 							<div className="space-y-3">
@@ -662,38 +972,6 @@ export function CreditDetailView({
 									</div>
 								</div>
 							</div>
-
-							{/* Sección: Inversionistas */}
-							{inversionistas.length > 0 && (
-								<div className="space-y-3">
-									<h3 className="flex items-center gap-2 font-semibold text-sm">
-										<Banknote className="h-4 w-4" />
-										Inversionistas
-									</h3>
-									<div className="rounded-lg border bg-muted/30 p-4">
-										<Table>
-											<TableHeader>
-												<TableRow>
-													<TableHead>Inversionista</TableHead>
-													<TableHead className="text-right">
-														Participación
-													</TableHead>
-												</TableRow>
-											</TableHeader>
-											<TableBody>
-												{inversionistas.map((inv, idx) => (
-													<TableRow key={idx}>
-														<TableCell>{inv.nombre}</TableCell>
-														<TableCell className="text-right">
-															{formatPercent(inv.porcentaje)}
-														</TableCell>
-													</TableRow>
-												))}
-											</TableBody>
-										</Table>
-									</div>
-								</div>
-							)}
 
 							{/* Sección: Términos del Crédito */}
 							<div className="space-y-3">

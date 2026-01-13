@@ -638,6 +638,8 @@ export const crmRouter = {
 					firstName: leads.firstName,
 					lastName: leads.lastName,
 					email: leads.email,
+					age: leads.age,
+					direccion: leads.direccion,
 				},
 				stage: {
 					id: salesStages.id,

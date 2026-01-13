@@ -54,6 +54,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { client } from "@/utils/orpc";
+import type { IOpportunity } from "@/routes/crm/opportunities";
 
 // Tipos de categorías de crédito
 type CreditCategory =
@@ -94,55 +95,7 @@ type CreditCheck = Awaited<
 interface CreditDetailViewProps {
 	opportunityId: string;
 	userRole?: string;
-	opportunity: {
-		id: string;
-		title: string;
-		value: string | null;
-		tasaInteres: string | null;
-		numeroCuotas: number | null;
-		cuotaMensual: string | null;
-		royalti: string | null;
-		porcentajeRoyalti: string | null;
-		gps: string | null;
-		seguro: string | null;
-		membresiaPago: string | null;
-		nit: string | null;
-		direccion: string | null;
-		inversionistas: string | null;
-		creditType?: "autocompra" | "sobre_vehiculo" | null;
-		creditDetailApproved?: boolean | null;
-		creditDetailApprovedBy?: string | null;
-		creditDetailApprovedAt?: Date | string | null;
-		lead?: {
-			id: string;
-			firstName: string;
-			middleName?: string | null;
-			lastName: string;
-			secondLastName?: string | null;
-			age?: number | null;
-			departamento?: string | null;
-			municipio?: string | null;
-			zona?: string | null;
-		} | null;
-		vehicle?: {
-			id: string;
-			make: string;
-			model: string;
-			year: string;
-			licensePlate: string | null;
-			color: string | null;
-			plate: string | null;
-			origin: string | null;
-			vendor?: {
-				id: string;
-				name: string;
-				phone: string;
-				dpi: string;
-				vendorType: string;
-				companyName: string | null;
-			} | null;
-		} | null;
-	};
+	opportunity: IOpportunity;
 	quotation?: {
 		id: string;
 		createdAt: Date;
@@ -239,6 +192,7 @@ export function CreditDetailView({
 	const [editCategoria, setEditCategoria] = useState<CreditCategory>("");
 	const [editNit, setEditNit] = useState<string>("");
 	const [editInversionistas, setEditInversionistas] = useState<SelectedInversionista[]>([]);
+	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
 
 	// Inicializar valores desde opportunity
 	useEffect(() => {
@@ -252,8 +206,10 @@ export function CreditDetailView({
 					.filter(Boolean)
 					.join(", ")
 			: "";
-		setEditDireccion(opportunity.direccion || leadDireccion || "");
+		setEditDireccion(lead?.direccion || leadDireccion || "");
 		setEditNit(opportunity.nit || "");
+		setEditCategoria((opportunity.categoria as CreditCategory) || "");
+		setEditDiaPagoMensual(opportunity.diaPagoMensual || 15);
 		
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {
@@ -344,12 +300,83 @@ export function CreditDetailView({
 	// Mutation para guardar campos editables del crédito
 	const saveCreditDetailsMutation = useMutation({
 		mutationFn: async () => {
+			// Campos de la cotización que se guardan en la oportunidad
+			const cuotaMensual = quotation?.monthlyPayment || "0";
+			const tasaMensualValue = quotation?.interestRate || "0";
+			const seguroValue = Number.parseFloat(quotation?.insuranceCost || "0");
+			const gpsValue = Number.parseFloat(quotation?.gpsCost || "0");
+			const royaltyValue = Number.parseFloat(quotation?.royalty || "0");
+			const royaltyPercentageValue = quotation?.royaltyPercentage || "4.0";
+			const membresiaValue = Number.parseFloat(quotation?.membershipCost || "0");
+			const numeroCuotasValue = quotation?.termMonths || 0;
+			const gastosAdminValue = Number.parseFloat(quotation?.adminCost || "0");
+			// Reserva = 600 + seguro
+			const reservaValue = 600 + seguroValue;
+
+			// Construir rubros desde los "Otros Descuentos" de la cotización
+			const rubrosArray: { nombre_rubro: string; monto: number }[] = [];
+			
+			const nombramiento = Number.parseFloat(quotation?.appointmentCost || "0");
+			if (nombramiento > 0) rubrosArray.push({ nombre_rubro: "Nombramiento", monto: nombramiento });
+			
+			const multasValue = Number.parseFloat(quotation?.finesCost || "0");
+			if (multasValue > 0) rubrosArray.push({ nombre_rubro: "Multas", monto: multasValue });
+			
+			const copiaLlaveValue = Number.parseFloat(quotation?.keyCopyCost || "0");
+			if (copiaLlaveValue > 0) rubrosArray.push({ nombre_rubro: "Copia de llave", monto: copiaLlaveValue });
+			
+			const diferenciaCopiaLlaveValue = Number.parseFloat(quotation?.keyCopyDiffCost || "0");
+			if (diferenciaCopiaLlaveValue > 0) rubrosArray.push({ nombre_rubro: "Diferencia copia llave", monto: diferenciaCopiaLlaveValue });
+			
+			const verificacionDireccionValue = Number.parseFloat(quotation?.addressVerificationCost || "0");
+			if (verificacionDireccionValue > 0) rubrosArray.push({ nombre_rubro: "Verificación de dirección", monto: verificacionDireccionValue });
+			
+			const impuestoCirculacionValue = Number.parseFloat(quotation?.circulationTaxCost || "0");
+			if (impuestoCirculacionValue > 0) rubrosArray.push({ nombre_rubro: "Impuesto de circulación", monto: impuestoCirculacionValue });
+			
+			const traspasoValue = Number.parseFloat(quotation?.transferCost || "0");
+			if (traspasoValue > 0) rubrosArray.push({ nombre_rubro: "Traspaso", monto: traspasoValue });
+			
+			const garantiaMobiliariaValue = Number.parseFloat(quotation?.mobileGuaranteeCost || "0");
+			if (garantiaMobiliariaValue > 0) rubrosArray.push({ nombre_rubro: "Garantía mobiliaria", monto: garantiaMobiliariaValue });
+			
+			const contratoLeasingValue = Number.parseFloat(quotation?.leasingContractCost || "0");
+			if (contratoLeasingValue > 0) rubrosArray.push({ nombre_rubro: "Contrato Leasing", monto: contratoLeasingValue });
+			
+			const autenticaContratoValue = Number.parseFloat(quotation?.collectionAuthCost || "0");
+			if (autenticaContratoValue > 0) rubrosArray.push({ nombre_rubro: "Auténtica contrato cobranza", monto: autenticaContratoValue });
+			
+			const gastosLegalesValue = Number.parseFloat(quotation?.legalCost || "0");
+			if (gastosLegalesValue > 0) rubrosArray.push({ nombre_rubro: "Gastos legales", monto: gastosLegalesValue });
+			
+			const freelanceValue = Number.parseFloat(quotation?.freelanceCost || "0");
+			if (freelanceValue > 0) rubrosArray.push({ nombre_rubro: "Free lance", monto: freelanceValue });
+			
+			const inspeccionValue = Number.parseFloat(quotation?.inspectionCost || "0");
+			if (inspeccionValue > 0) rubrosArray.push({ nombre_rubro: "Inspección", monto: inspeccionValue });
+
 			return client.updateOpportunity({
 				id: opportunityId,
+				// Campos editables directamente
 				direccion: editDireccion,
 				categoria: editCategoria || undefined,
 				nit: editNit,
 				inversionistas: JSON.stringify(editInversionistas),
+				diaPagoMensual: editDiaPagoMensual,
+				// Campos de la cotización
+				numeroCuotas: numeroCuotasValue,
+				tasaInteres: tasaMensualValue,
+				cuotaMensual: cuotaMensual,
+				seguro: seguroValue,
+				gps: gpsValue,
+				royalti: royaltyValue,
+				porcentajeRoyalti: royaltyPercentageValue,
+				reserva: reservaValue,
+				membresiaPago: membresiaValue,
+				// Rubros (Otros Descuentos) como JSON string
+				rubros: JSON.stringify(rubrosArray),
+				// Gastos administrativos para "otros" en cartera
+				gastosAdministrativos: gastosAdminValue,
 			});
 		},
 		onSuccess: () => {
@@ -362,9 +389,47 @@ export function CreditDetailView({
 		},
 	});
 
+	// Validar campos requeridos antes de aprobar
+	const validateRequiredFields = (): string[] => {
+		const camposFaltantes: string[] = [];
+		
+		if (!editCategoria && !opportunity.categoria) {
+			camposFaltantes.push("Categoría");
+		}
+		if (!editNit && !opportunity.nit) {
+			camposFaltantes.push("NIT");
+		}
+		if (!editDireccion && !lead?.direccion) {
+			camposFaltantes.push("Dirección");
+		}
+		if (!editDiaPagoMensual && !opportunity.diaPagoMensual) {
+			camposFaltantes.push("Día de pago mensual");
+		}
+		if (editInversionistas.length === 0) {
+			try {
+				const parsed = opportunity.inversionistas ? JSON.parse(opportunity.inversionistas) : [];
+				if (!Array.isArray(parsed) || parsed.length === 0) {
+					camposFaltantes.push("Inversionistas");
+				}
+			} catch {
+				camposFaltantes.push("Inversionistas");
+			}
+		}
+		
+		return camposFaltantes;
+	};
+
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
-		mutationFn: () => client.approveCreditDetail({ opportunityId }),
+		mutationFn: () => {
+			const camposFaltantes = validateRequiredFields();
+			if (camposFaltantes.length > 0) {
+				throw new Error(
+					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`
+				);
+			}
+			return client.approveCreditDetail({ opportunityId });
+		},
 		onSuccess: () => {
 			toast.success("Detalle de crédito aprobado correctamente");
 			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
@@ -596,15 +661,6 @@ export function CreditDetailView({
 									</CardDescription>
 								</div>
 								<div className="flex items-center gap-3">
-									<span className="text-muted-foreground text-sm">
-										Oportunidad:{" "}
-										<span className="font-medium font-mono">
-											{opportunity.id.split("-")[0]}
-										</span>
-									</span>
-									<Badge variant={isAutocompra ? "default" : "secondary"}>
-										{isAutocompra ? "Autocompra" : "Sobre Vehículo"}
-									</Badge>
 									{opportunity.creditDetailApproved ? (
 										<Badge
 											variant="outline"
@@ -757,163 +813,32 @@ export function CreditDetailView({
 											/>
 										) : (
 											<p className="font-medium">
-												{editDireccion || opportunity.direccion || "N/A"}
+												{editDireccion || lead?.direccion || "N/A"}
+											</p>
+										)}
+									</div>
+									<div>
+										<Label className="text-muted-foreground text-xs">
+											Día de Pago Mensual
+										</Label>
+										{isEditing ? (
+											<Input
+												type="number"
+												min={1}
+												max={31}
+												value={editDiaPagoMensual}
+												onChange={(e) => setEditDiaPagoMensual(Number(e.target.value) || 15)}
+												placeholder="15"
+												className="mt-1"
+											/>
+										) : (
+											<p className="font-medium">
+												Día {editDiaPagoMensual || opportunity.diaPagoMensual || 15}
 											</p>
 										)}
 									</div>
 								</div>
 							</div>
-
-							{/* Sección: Inversionistas (editable) */}
-							{(isEditing || editInversionistas.length > 0) && (
-								<div className="space-y-3">
-									<div className="flex items-center justify-between">
-										<h3 className="flex items-center gap-2 font-semibold text-sm">
-											<Banknote className="h-4 w-4" />
-											Inversionistas
-										</h3>
-										{isEditing && (
-											<Button
-												type="button"
-												size="sm"
-												variant="outline"
-												onClick={() => {
-													setEditInversionistas([
-														...editInversionistas,
-														{
-															inversionista_id: 0,
-															nombre: "",
-															porcentaje_participacion: 0,
-															monto_aportado: 0,
-															porcentaje_cash_in: 0,
-														},
-													]);
-												}}
-											>
-												<Plus className="mr-1 h-3 w-3" />
-												Agregar
-											</Button>
-										)}
-									</div>
-									<div className="rounded-lg border bg-muted/30 p-4">
-										{editInversionistas.length === 0 ? (
-											<p className="text-center text-muted-foreground text-sm">
-												No hay inversionistas asignados
-											</p>
-										) : (
-											<div className="space-y-3">
-												{editInversionistas.map((inv, index) => (
-													<div
-														key={index}
-														className="flex items-center gap-3 rounded-lg border bg-background p-3"
-													>
-														{isEditing ? (
-															<>
-																<div className="flex-1">
-																	<Label className="text-xs">Inversionista</Label>
-																	<Combobox
-																		value={inv.inversionista_id > 0 ? inv.inversionista_id.toString() : null}
-																		onChange={(value) => {
-																			const newInv = [...editInversionistas];
-																			const selectedInv = inversionistasQuery.data?.inversionistas?.find(
-																				(i) => i.inversionistaId.toString() === value
-																			);
-																			newInv[index].inversionista_id = Number.parseInt(value || "0");
-																			newInv[index].nombre = selectedInv?.nombre || "";
-																			setEditInversionistas(newInv);
-																		}}
-																		options={
-																			inversionistasQuery.data?.inversionistas?.map((investor) => ({
-																				label: investor.nombre,
-																				value: investor.inversionistaId.toString(),
-																			})) || []
-																		}
-																		placeholder="Seleccionar..."
-																		width="full"
-																	/>
-																</div>
-																<div className="w-24">
-																	<Label className="text-xs">% Participación</Label>
-																	<Input
-																		type="number"
-																		step="0.01"
-																		value={inv.porcentaje_participacion}
-																		onChange={(e) => {
-																			const newInv = [...editInversionistas];
-																			newInv[index].porcentaje_participacion = Number.parseFloat(e.target.value) || 0;
-																			setEditInversionistas(newInv);
-																		}}
-																		placeholder="0.00"
-																	/>
-																</div>
-																<div className="w-32">
-																	<Label className="text-xs">Monto Aportado (Q)</Label>
-																	<Input
-																		type="number"
-																		step="0.01"
-																		value={inv.monto_aportado}
-																		onChange={(e) => {
-																			const newInv = [...editInversionistas];
-																			newInv[index].monto_aportado = Number.parseFloat(e.target.value) || 0;
-																			setEditInversionistas(newInv);
-																		}}
-																		placeholder="0.00"
-																	/>
-																</div>
-																<div className="w-24">
-																	<Label className="text-xs">% Cash In</Label>
-																	<Input
-																		type="number"
-																		step="0.01"
-																		value={inv.porcentaje_cash_in}
-																		onChange={(e) => {
-																			const newInv = [...editInversionistas];
-																			newInv[index].porcentaje_cash_in = Number.parseFloat(e.target.value) || 0;
-																			setEditInversionistas(newInv);
-																		}}
-																		placeholder="0.00"
-																	/>
-																</div>
-																<Button
-																	type="button"
-																	variant="destructive"
-																	size="icon"
-																	className="h-8 w-8 shrink-0"
-																	onClick={() => {
-																		const newInv = [...editInversionistas];
-																		newInv.splice(index, 1);
-																		setEditInversionistas(newInv);
-																	}}
-																>
-																	<Trash2 className="h-3 w-3" />
-																</Button>
-															</>
-														) : (
-															<>
-																<div className="flex-1">
-																	<p className="font-medium">{inv.nombre}</p>
-																</div>
-																<div className="text-right">
-																	<p className="text-muted-foreground text-xs">Participación</p>
-																	<p className="font-medium">{inv.porcentaje_participacion}%</p>
-																</div>
-																<div className="text-right">
-																	<p className="text-muted-foreground text-xs">Aportado</p>
-																	<p className="font-medium">{formatCurrency(inv.monto_aportado)}</p>
-																</div>
-																<div className="text-right">
-																	<p className="text-muted-foreground text-xs">Cash In</p>
-																	<p className="font-medium">{inv.porcentaje_cash_in}%</p>
-																</div>
-															</>
-														)}
-													</div>
-												))}
-											</div>
-										)}
-									</div>
-								</div>
-							)}
 
 							{/* Sección: Datos del Vehículo */}
 							<div className="space-y-3">
@@ -1102,6 +1027,164 @@ export function CreditDetailView({
 											</TableBody>
 										</Table>
 									</div>
+
+									{/* Inversionistas (debajo de la tabla de división de cuota) */}
+									{(isEditing || editInversionistas.length > 0) && (
+										<div className="mt-4 space-y-3">
+											<div className="flex items-center justify-between">
+												<h4 className="flex items-center gap-2 font-semibold text-sm">
+													<Banknote className="h-4 w-4" />
+													Inversionistas
+												</h4>
+												{isEditing && (
+													<Button
+														type="button"
+														size="sm"
+														variant="outline"
+														onClick={() => {
+															setEditInversionistas([
+																...editInversionistas,
+																{
+																	inversionista_id: 0,
+																	nombre: "",
+																	porcentaje_participacion: porcentajeInversionista,
+																	monto_aportado: 0,
+																	porcentaje_cash_in: 100 - porcentajeInversionista,
+																},
+															]);
+														}}
+													>
+														<Plus className="mr-1 h-3 w-3" />
+														Agregar
+													</Button>
+												)}
+											</div>
+											<div className="rounded-lg border bg-muted/30 p-4">
+												{editInversionistas.length === 0 ? (
+													<p className="text-center text-muted-foreground text-sm">
+														No hay inversionistas asignados
+													</p>
+												) : (
+													<div className="space-y-3">
+														{editInversionistas.map((inv, index) => (
+															<div
+																key={index}
+																className="rounded-lg border bg-background p-3"
+															>
+																{isEditing ? (
+																	<div className="space-y-3">
+																		{/* Fila 1: Inversionista + Preview porcentajes + Eliminar */}
+																		<div className="flex items-start gap-3">
+																			<div className="flex-1">
+																				<Label className="text-xs">Inversionista</Label>
+																				<Combobox
+																					value={inv.inversionista_id > 0 ? inv.inversionista_id.toString() : null}
+																					onChange={(value) => {
+																						const newInv = [...editInversionistas];
+																						const selectedInv = inversionistasQuery.data?.inversionistas?.find(
+																							(i) => i.inversionistaId.toString() === value
+																						);
+																						newInv[index].inversionista_id = Number.parseInt(value || "0");
+																						newInv[index].nombre = selectedInv?.nombre || "";
+																						setEditInversionistas(newInv);
+																					}}
+																					options={
+																						inversionistasQuery.data?.inversionistas?.map((investor) => ({
+																							label: investor.nombre,
+																							value: investor.inversionistaId.toString(),
+																						})) || []
+																					}
+																					placeholder="Seleccionar..."
+																					width="full"
+																				/>
+																				{/* Preview de porcentajes debajo del inversionista */}
+																				<div className="mt-2 flex items-center gap-4 text-muted-foreground text-xs">
+																					<span>Participación: <span className="font-medium text-foreground">{inv.porcentaje_participacion}%</span></span>
+																					<span>Cash In: <span className="font-medium text-foreground">{inv.porcentaje_cash_in}%</span></span>
+																				</div>
+																			</div>
+																			<Button
+																				type="button"
+																				variant="destructive"
+																				size="icon"
+																				className="h-8 w-8 shrink-0 mt-5"
+																				onClick={() => {
+																					const newInv = [...editInversionistas];
+																					newInv.splice(index, 1);
+																					setEditInversionistas(newInv);
+																				}}
+																			>
+																				<Trash2 className="h-3 w-3" />
+																			</Button>
+																		</div>
+																		{/* Fila 2: Monto Aportado (destacado) + Porcentajes editables */}
+																		<div className="grid grid-cols-3 gap-3">
+																			<div>
+																				<Label className="text-xs font-semibold text-primary">Monto Aportado (Q) *</Label>
+																				<Input
+																					type="number"
+																					step="0.01"
+																					value={inv.monto_aportado}
+																					onChange={(e) => {
+																						const newInv = [...editInversionistas];
+																						newInv[index].monto_aportado = Number.parseFloat(e.target.value) || 0;
+																						setEditInversionistas(newInv);
+																					}}
+																					placeholder="0.00"
+																					className="border-primary/50 focus:border-primary"
+																				/>
+																			</div>
+																			<div>
+																				<Label className="text-xs">% Participación</Label>
+																				<Input
+																					type="number"
+																					step="0.01"
+																					value={inv.porcentaje_participacion}
+																					onChange={(e) => {
+																						const newInv = [...editInversionistas];
+																						newInv[index].porcentaje_participacion = Number.parseFloat(e.target.value) || 0;
+																						setEditInversionistas(newInv);
+																					}}
+																					placeholder={porcentajeInversionista.toString()}
+																				/>
+																			</div>
+																			<div>
+																				<Label className="text-xs">% Cash In</Label>
+																				<Input
+																					type="number"
+																					step="0.01"
+																					value={inv.porcentaje_cash_in}
+																					onChange={(e) => {
+																						const newInv = [...editInversionistas];
+																						newInv[index].porcentaje_cash_in = Number.parseFloat(e.target.value) || 0;
+																						setEditInversionistas(newInv);
+																					}}
+																					placeholder={(100 - porcentajeInversionista).toString()}
+																				/>
+																			</div>
+																		</div>
+																	</div>
+																) : (
+																	<div className="flex items-center gap-3">
+																		<div className="flex-1">
+																			<p className="font-medium">{inv.nombre}</p>
+																			<p className="text-muted-foreground text-xs">
+																				Participación: {inv.porcentaje_participacion}% • Cash In: {inv.porcentaje_cash_in}%
+																			</p>
+																		</div>
+																		<div className="text-right">
+																			<p className="text-muted-foreground text-xs">Monto Aportado</p>
+																			<p className="font-bold text-primary text-lg">{formatCurrency(inv.monto_aportado)}</p>
+																		</div>
+																	</div>
+																)}
+															</div>
+														))}
+													</div>
+												)}
+											</div>
+										</div>
+									)}
 								</div>
 							</div>
 
@@ -1616,12 +1699,64 @@ export function CreditDetailView({
 									</div>
 								</div>
 							</div>
-						</CardContent>
-					</Card>
-				</TabsContent>
 
-				{/* TAB 2: Detalle Cliente */}
-				<TabsContent value="cliente" className="mt-4 space-y-4">
+						{/* Botones de acción al final */}
+						{!opportunity.creditDetailApproved && (
+							<div className="flex items-center justify-end gap-3 border-t pt-4">
+								{isEditing ? (
+									<>
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() => setIsEditing(false)}
+										>
+											Cancelar
+										</Button>
+										<Button
+											size="sm"
+											variant="default"
+											onClick={() => saveCreditDetailsMutation.mutate()}
+											disabled={saveCreditDetailsMutation.isPending}
+										>
+											<Save className="mr-1 h-3 w-3" />
+											{saveCreditDetailsMutation.isPending
+												? "Guardando..."
+												: "Guardar Cambios"}
+										</Button>
+									</>
+								) : (
+									<>
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() => setIsEditing(true)}
+										>
+											<Edit2 className="mr-1 h-3 w-3" />
+											Editar
+										</Button>
+										{canApprove && (
+											<Button
+												size="sm"
+												variant="default"
+												onClick={() => approveCreditDetailMutation.mutate()}
+												disabled={approveCreditDetailMutation.isPending}
+											>
+												<CheckCircle className="mr-1 h-3 w-3" />
+												{approveCreditDetailMutation.isPending
+													? "Aprobando..."
+													: "Aprobar Detalle"}
+											</Button>
+										)}
+									</>
+								)}
+							</div>
+						)}
+					</CardContent>
+				</Card>
+			</TabsContent>
+
+			{/* TAB 2: Detalle Cliente */}
+			<TabsContent value="cliente" className="mt-4 space-y-4">
 					<Card>
 						<CardHeader className="pb-3">
 							<CardTitle className="flex items-center gap-2 text-lg">

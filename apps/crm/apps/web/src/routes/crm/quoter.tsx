@@ -431,6 +431,45 @@ function QuoterPage() {
 		}
 	};
 
+	// Cuando se selecciona un vehículo desde la oportunidad, auto-llenar datos
+	const handleOpportunityVehicleSelect = async (vehicle: {
+		id: string;
+		make: string;
+		model: string;
+		year: number;
+		vehicleType?: string | null;
+	}) => {
+		// Primero llenamos los datos básicos del vehículo
+		quoterForm.setFieldValue("vehicleId", vehicle.id);
+		quoterForm.setFieldValue("vehicleBrand", vehicle.make);
+		quoterForm.setFieldValue("vehicleLine", vehicle.model);
+		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
+
+		// Obtener la inspección más reciente para el marketValue
+		try {
+			const inspection = await client.getLatestInspectionByVehicleId({
+				vehicleId: vehicle.id,
+			});
+
+			if (inspection?.marketValue) {
+				const numericValue = Number(inspection.marketValue);
+				quoterForm.setFieldValue("vehicleValue", numericValue);
+
+				// Auto-llenar monto asegurado (igual al valor)
+				quoterForm.setFieldValue("insuredAmount", numericValue);
+
+				// Auto-calcular enganche al 20%
+				const downPayment = Math.round(numericValue * 0.2);
+				quoterForm.setFieldValue("downPayment", downPayment);
+
+				// Actualizar seguro y membresía
+				updateInsuranceCost(numericValue, quoterForm.state.values.vehicleType);
+			}
+		} catch (error) {
+			console.error("Error al obtener inspección del vehículo:", error);
+		}
+	};
+
 	// Cuando se selecciona un vehículo, auto-llenar datos
 	const handleVehicleSelect = (vehicleId: string) => {
 		const vehicle = vehiclesQuery.data?.data?.find(
@@ -555,9 +594,20 @@ function QuoterPage() {
 												})) || []),
 											]}
 											value={field.state.value || "none"}
-											onChange={(value) =>
-												field.handleChange(value === "none" ? "" : value)
-											}
+											onChange={(value) => {
+												const selectedValue = value === "none" ? "" : value;
+												field.handleChange(selectedValue);
+
+												// Si la oportunidad tiene vehículo, auto-seleccionarlo
+												if (selectedValue) {
+													const opportunity = opportunitiesQuery.data?.find(
+														(opp: any) => opp.id === selectedValue,
+													);
+													if (opportunity?.vehicle?.id) {
+														handleOpportunityVehicleSelect(opportunity.vehicle);
+													}
+												}
+											}}
 											onSearchChange={setOpportunitiesSearch}
 											isLoading={opportunitiesQuery.isFetching}
 											placeholder="Buscar oportunidad..."

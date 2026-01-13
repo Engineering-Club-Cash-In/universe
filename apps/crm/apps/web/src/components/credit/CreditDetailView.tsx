@@ -228,6 +228,12 @@ export function CreditDetailView({
 		queryFn: () => client.getInversionistas({ page: 1, perPage: 100 }),
 	});
 
+	// Query para obtener el estado de aprobación del detalle de crédito
+	const creditDetailApprovalQuery = useQuery({
+		queryKey: ["getCreditDetailApprovalStatus", opportunityId],
+		queryFn: () => client.getCreditDetailApprovalStatus({ opportunityId }),
+	});
+
 	// Determinar tipo de crédito
 	const isAutocompra = opportunity.creditType === "autocompra";
 
@@ -433,6 +439,7 @@ export function CreditDetailView({
 		onSuccess: () => {
 			toast.success("Detalle de crédito aprobado correctamente");
 			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
+			queryClient.invalidateQueries({ queryKey: ["getCreditDetailApprovalStatus", opportunityId] });
 		},
 		onError: (error) => {
 			toast.error(`Error al aprobar: ${error.message}`);
@@ -661,7 +668,7 @@ export function CreditDetailView({
 									</CardDescription>
 								</div>
 								<div className="flex items-center gap-3">
-									{opportunity.creditDetailApproved ? (
+									{creditDetailApprovalQuery.data?.approved ? (
 										<Badge
 											variant="outline"
 											className="border-green-500 bg-green-50 text-green-700"
@@ -1701,7 +1708,7 @@ export function CreditDetailView({
 							</div>
 
 						{/* Botones de acción al final */}
-						{!opportunity.creditDetailApproved && (
+						{!creditDetailApprovalQuery.data?.approved && (
 							<div className="flex items-center justify-end gap-3 border-t pt-4">
 								{isEditing ? (
 									<>

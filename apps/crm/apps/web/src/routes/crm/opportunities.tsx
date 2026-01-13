@@ -306,6 +306,76 @@ export const Route = createFileRoute("/crm/opportunities")({
 	}).parse,
 });
 
+
+export interface IOpportunity  {
+		id: string;
+		title: string;
+		value: string | null;
+		tasaInteres: string | null;
+		numeroCuotas: number | null;
+		cuotaMensual: string | null;
+		royalti: string | null;
+		porcentajeRoyalti: string | null;
+		gps: string | null;
+		seguro: string | null;
+		membresiaPago: string | null;
+		nit: string | null;
+		// direccion: string | null;
+		inversionistas: string | null;
+		status: string;
+		creditType?: "autocompra" | "sobre_vehiculo" | null;
+		creditDetailApproved?: boolean | null;
+		creditDetailApprovedBy?: string | null;
+		creditDetailApprovedAt?: Date | string | null;
+		stage: any;
+		vehicleId: string | null;
+		expectedCloseDate: Date | string | null;
+		probability: number | null;
+		notes: string | null;
+		createdAt: Date | string;
+		updatedAt: Date | string;
+		asesorId: number | null;
+		fechaInicio: Date | string | null;
+		diaPagoMensual: number | null;
+		categoria: any;
+		reserva: string | null;
+		rubros: string | null;
+		leadId: string | null;
+		company: any;
+		assignedUser: any;
+		lead?: {
+			id: string;
+			firstName: string;
+			middleName?: string | null;
+			lastName: string;
+			email?: string | null;
+			secondLastName?: string | null;
+			age?: number | null;
+			departamento?: string | null;
+			municipio?: string | null;
+			direccion?: string | null;
+			zona?: string | null;
+		} | null;
+		vehicle?: {
+			id: string;
+			make: string;
+			model: string;
+			year: string;
+			licensePlate: string | null;
+			color: string | null;
+			plate: string | null;
+			origin: string | null;
+			vendor?: {
+				id: string;
+				name: string;
+				phone: string;
+				dpi: string;
+				vendorType: string;
+				companyName: string | null;
+			} | null;
+		} | null;
+	};
+
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 	const navigate = Route.useNavigate();
@@ -315,7 +385,7 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
-	const [selectedOpportunity, setSelectedOpportunity] = useState<any>(null);
+	const [selectedOpportunity, setSelectedOpportunity] = useState<IOpportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
@@ -527,7 +597,7 @@ function RouteComponent() {
 			);
 			editOpportunityForm.setFieldValue(
 				"direccion",
-				selectedOpportunity.direccion || "",
+				selectedOpportunity?.lead?.direccion || "",
 			);
 			// Parse inversionistas from JSON string
 			const inversionistas = selectedOpportunity.inversionistas
@@ -953,6 +1023,7 @@ function RouteComponent() {
 					(opp) => opp.id === variables.id,
 				);
 				if (updatedOpportunity) {
+					// @ts-ignore
 					setSelectedOpportunity(updatedOpportunity);
 				}
 
@@ -1062,6 +1133,7 @@ function RouteComponent() {
 				(opp) => opp.id === search.opportunityId,
 			);
 			if (opportunity) {
+					// @ts-ignore
 				setSelectedOpportunity(opportunity);
 				setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
@@ -2168,32 +2240,7 @@ function RouteComponent() {
 											<CreditDetailView
 												opportunityId={selectedOpportunity.id}
 												userRole={userProfile.data?.role}
-												opportunity={{
-													id: selectedOpportunity.id,
-													title: selectedOpportunity.title,
-													value: selectedOpportunity.value,
-													tasaInteres: selectedOpportunity.tasaInteres,
-													numeroCuotas: selectedOpportunity.numeroCuotas,
-													cuotaMensual: selectedOpportunity.cuotaMensual,
-													royalti: selectedOpportunity.royalti,
-													porcentajeRoyalti:
-														selectedOpportunity.porcentajeRoyalti,
-													gps: selectedOpportunity.gps,
-													seguro: selectedOpportunity.seguro,
-													membresiaPago: selectedOpportunity.membresiaPago,
-													nit: selectedOpportunity.nit,
-													direccion: selectedOpportunity.direccion,
-													inversionistas: selectedOpportunity.inversionistas,
-													creditType: selectedOpportunity.creditType,
-													creditDetailApproved:
-														selectedOpportunity.creditDetailApproved,
-													creditDetailApprovedBy:
-														selectedOpportunity.creditDetailApprovedBy,
-													creditDetailApprovedAt:
-														selectedOpportunity.creditDetailApprovedAt,
-													lead: selectedOpportunity.lead,
-													vehicle: selectedOpportunity.vehicle,
-												}}
+												opportunity={selectedOpportunity}
 												quotation={latestQuotation}
 											/>
 										);
@@ -3076,34 +3123,7 @@ function RouteComponent() {
 												) : null;
 											}}
 										</editOpportunityForm.Subscribe>
-										<editOpportunityForm.Subscribe>
-											{(state) => (
-												<div className="flex gap-3">
-													<Button
-														type="button"
-														variant="outline"
-														className="flex-1"
-														onClick={() => setIsEditDialogOpen(false)}
-													>
-														Cancelar
-													</Button>
-													<Button
-														type="submit"
-														className="flex-1"
-														disabled={
-															!state.canSubmit ||
-															state.isSubmitting ||
-															updateOpportunityMutation.isPending
-														}
-													>
-														{state.isSubmitting ||
-														updateOpportunityMutation.isPending
-															? "Actualizando..."
-															: "Actualizar Oportunidad"}
-													</Button>
-												</div>
-											)}
-										</editOpportunityForm.Subscribe>
+										
 									</form>
 								</TabsContent>
 							</Tabs>

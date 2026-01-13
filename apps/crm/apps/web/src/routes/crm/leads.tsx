@@ -1659,8 +1659,9 @@ function RouteComponent() {
 												}
 											>
 												{state.isSubmitting || createLeadMutation.isPending
-													? "Creando..."
-													: "Crear Lead"}
+													? "Cargando...":
+														editingLead ? "Editar Lead" : "Crear Lead"
+													}
 											</Button>
 										)}
 									</createLeadForm.Subscribe>

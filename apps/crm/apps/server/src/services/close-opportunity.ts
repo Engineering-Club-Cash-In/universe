@@ -4,7 +4,9 @@
  * Including credit creation in cartera-back, client creation, and contract generation
  */
 
-import { and, eq } from "drizzle-orm";
+import crypto from "node:crypto";
+import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { db } from "../db";
 import {
 	carteraBackReferences,
@@ -16,13 +18,25 @@ import {
 	clients,
 	leads,
 	opportunities,
-	salesStages,
 } from "../db/schema/crm";
 import {
 	type CreateCreditoResult,
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+/** Minimum reserve amount in Quetzales */
+export const MIN_RESERVA = 600;
+
+/** Default postal code for Guatemala City */
+export const DEFAULT_CODIGO_POSTAL = "01001";
+
+/** Credit number prefix for CRM-generated credits */
+export const CREDIT_NUMBER_PREFIX = "CRM";
 
 // ============================================================================
 // TYPES
@@ -97,12 +111,16 @@ interface CreateCreditResult {
 	error?: string;
 }
 
+/** Transaction type for Drizzle */
+type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 interface CompleteClientParams {
 	opportunity: OpportunityData;
 	lead: LeadData;
 	numeroSifco: string;
 	creditoResult?: CreateCreditoResult;
 	userId: string;
+	tx: Transaction;
 }
 
 interface CompleteClientResult {
@@ -113,16 +131,35 @@ interface CompleteClientResult {
 }
 
 // ============================================================================
+// VALIDATION SCHEMAS (Zod)
+// ============================================================================
+
+/** Schema for validating inversionista data from CRM */
+const inversionistaCRMSchema = z.object({
+	inversionista_id: z.number().int().positive(),
+	nombre: z.string().optional(),
+	porcentaje_participacion: z.number().min(0).max(100),
+	monto_aportado: z.number().min(0),
+	porcentaje_cash_in: z.number().min(0).max(100),
+});
+
+/** Schema for validating array of inversionistas */
+const inversionistasArraySchema = z.array(inversionistaCRMSchema).min(1);
+
+/** Schema for validating rubro data */
+const rubroSchema = z.object({
+	nombre_rubro: z.string().min(1),
+	monto: z.number().min(0),
+});
+
+/** Schema for validating array of rubros */
+const rubrosArraySchema = z.array(rubroSchema);
+
+// ============================================================================
 // TRANSFORMATIONS
 // ============================================================================
 
-interface InversionistaCRM {
-	inversionista_id: number;
-	nombre?: string;
-	porcentaje_participacion: number;
-	monto_aportado: number;
-	porcentaje_cash_in: number;
-}
+type InversionistaCRM = z.infer<typeof inversionistaCRMSchema>;
 
 interface InversionistaCartera {
 	inversionista_id: number;
@@ -145,6 +182,55 @@ function transformInversionistasForCartera(
 		porcentaje_cash_in: inv.porcentaje_cash_in,
 		porcentaje_inversion: inv.porcentaje_participacion,
 	}));
+}
+
+/**
+ * Safely parses and validates inversionistas JSON string
+ * @returns Validated array of inversionistas or null if invalid
+ */
+function parseInversionistas(jsonString: string | null): InversionistaCRM[] | null {
+	if (!jsonString) return null;
+	try {
+		const parsed = JSON.parse(jsonString);
+		const result = inversionistasArraySchema.safeParse(parsed);
+		if (!result.success) {
+			console.error("[CloseOpportunity] Invalid inversionistas data:", result.error.message);
+			return null;
+		}
+		return result.data;
+	} catch (error) {
+		console.error("[CloseOpportunity] Failed to parse inversionistas JSON:", error);
+		return null;
+	}
+}
+
+/**
+ * Safely parses and validates rubros JSON string
+ * @returns Validated array of rubros or empty array if invalid
+ */
+function parseRubros(jsonString: string | null): z.infer<typeof rubrosArraySchema> {
+	if (!jsonString) return [];
+	try {
+		const parsed = JSON.parse(jsonString);
+		const result = rubrosArraySchema.safeParse(parsed);
+		if (!result.success) {
+			console.error("[CloseOpportunity] Invalid rubros data:", result.error.message);
+			return [];
+		}
+		return result.data;
+	} catch (error) {
+		console.error("[CloseOpportunity] Failed to parse rubros JSON:", error);
+		return [];
+	}
+}
+
+/**
+ * Generates a unique credit number using UUID
+ * Format: CRM-{uuid} (e.g., CRM-550e8400-e29b-41d4-a716-446655440000)
+ */
+function generateNumeroSifco(): string {
+	const uuid = crypto.randomUUID();
+	return `${CREDIT_NUMBER_PREFIX}-${uuid}`;
 }
 
 // ============================================================================
@@ -178,12 +264,10 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 	if (!opp.categoria) missingFields.push("categoría del crédito");
 	if (!opp.nit) missingFields.push("NIT del cliente");
 
-	if (
-		!opp.inversionistas ||
-		(typeof opp.inversionistas === "string" &&
-			JSON.parse(opp.inversionistas).length === 0)
-	) {
-		missingFields.push("inversionistas (debe haber al menos uno)");
+	// Validate inversionistas using safe parser
+	const inversionistas = parseInversionistas(opp.inversionistas);
+	if (!inversionistas || inversionistas.length === 0) {
+		missingFields.push("inversionistas (debe haber al menos uno con datos válidos)");
 	}
 
 	return missingFields;
@@ -253,10 +337,11 @@ async function createCredit(params: CreateCreditParams): Promise<CreateCreditRes
 			porcentaje_royalti: porcentajeRoyalti,
 			reserva: reserva,
 			membresias_pago: membresiaPago,
-			inversionistas: opportunity.inversionistas
-				? transformInversionistasForCartera(JSON.parse(opportunity.inversionistas))
-				: undefined,
-			rubros: opportunity.rubros ? JSON.parse(opportunity.rubros) : undefined,
+			inversionistas: (() => {
+				const parsed = parseInversionistas(opportunity.inversionistas);
+				return parsed ? transformInversionistasForCartera(parsed) : undefined;
+			})(),
+			rubros: parseRubros(opportunity.rubros),
 			municipio:
 				lead.municipio?.toUpperCase() ||
 				(renapInfoData ? renapInfoData.municipalityBornedIn : undefined),
@@ -264,7 +349,7 @@ async function createCredit(params: CreateCreditParams): Promise<CreateCreditRes
 				lead.departamento?.toUpperCase() ||
 				(renapInfoData ? renapInfoData.departmentBornedIn : undefined),
 			otros: gastosAdministrativos,
-			codigo_postal: "01001",
+			codigo_postal: DEFAULT_CODIGO_POSTAL,
 			pais: renapInfoData ? renapInfoData.bornedIn : undefined,
 		});
 
@@ -289,9 +374,10 @@ async function createCredit(params: CreateCreditParams): Promise<CreateCreditRes
 
 /**
  * 2. Completes the client flow: creates/gets client, creates contract, stores reference
+ * Uses transaction context for atomic operations
  */
 async function completeClient(params: CompleteClientParams): Promise<CompleteClientResult> {
-	const { opportunity, lead, numeroSifco, creditoResult, userId } = params;
+	const { opportunity, lead, numeroSifco, creditoResult, userId, tx } = params;
 
 	console.log("[CloseOpportunity] Completing client flow...");
 
@@ -300,7 +386,7 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 		const fechaInicioDate = new Date();
 
 		// Check if client already exists for this opportunity
-		const existingClient = await db
+		const existingClient = await tx
 			.select()
 			.from(clients)
 			.where(eq(clients.opportunityId, opportunity.id))
@@ -318,7 +404,7 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 			}
 
 			// Create new client
-			const newClient = await db
+			const newClient = await tx
 				.insert(clients)
 				.values({
 					...(companyId && { companyId }),
@@ -344,7 +430,7 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 		);
 
 		// Create financing contract (local CRM)
-		const newContract = await db
+		const newContract = await tx
 			.insert(contratosFinanciamiento)
 			.values({
 				clientId,
@@ -375,7 +461,7 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 			createdBy: userId,
 		};
 
-		await db.insert(carteraBackReferences).values(referenceData);
+		await tx.insert(carteraBackReferences).values(referenceData);
 		console.log("[CloseOpportunity] Stored cartera-back reference");
 
 		// Update contract notes with sync status
@@ -384,7 +470,7 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 				? `\n✓ Sincronizado con cartera-back: ${numeroSifco}`
 				: `\n⚠ Error sincronizando con cartera-back`;
 
-			await db
+			await tx
 				.update(contratosFinanciamiento)
 				.set({
 					notes: `${newContract[0].notes}${syncNote}`,
@@ -498,12 +584,8 @@ export async function closeOpportunity(
 
 		console.log("[CloseOpportunity] Lead data found:", lead.id);
 
-		// Generate SIFCO credit number
-		const timestamp = Date.now();
-		const randomSuffix = Math.floor(Math.random() * 1000)
-			.toString()
-			.padStart(3, "0");
-		const numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
+		// Generate unique SIFCO credit number using UUID
+		const numeroSifco = generateNumeroSifco();
 		console.log(`[CloseOpportunity] Generated numero SIFCO: ${numeroSifco}`);
 
 		// 1. Create credit in cartera-back
@@ -521,40 +603,47 @@ export async function closeOpportunity(
 			};
 		}
 
-		// 2. Complete client flow (client, contract, references)
-		const clientResult = await completeClient({
-			opportunity,
-			lead,
-			numeroSifco,
-			creditoResult: creditResult.creditoResult,
-			userId,
-		});
-
-		if (!clientResult.success) {
-			return {
-				success: false,
-				error: clientResult.error || "Error al completar el flujo de cliente",
-			};
-		}
-
-		// 3. Update opportunity with numeroSifco and mark as won
-		await db
-			.update(opportunities)
-			.set({
+		// 2. Complete local operations in a transaction for atomicity
+		// This ensures that if any local operation fails, all changes are rolled back
+		const transactionResult = await db.transaction(async (tx) => {
+			// Complete client flow (client, contract, references)
+			const clientResult = await completeClient({
+				opportunity,
+				lead,
 				numeroSifco,
-				status: "won",
-				actualCloseDate: new Date(),
-				updatedAt: new Date(),
-			})
-			.where(eq(opportunities.id, opportunityId));
+				creditoResult: creditResult.creditoResult,
+				userId,
+				tx,
+			});
+
+			if (!clientResult.success) {
+				throw new Error(clientResult.error || "Error al completar el flujo de cliente");
+			}
+
+			// Update opportunity with numeroSifco and mark as won
+			await tx
+				.update(opportunities)
+				.set({
+					numeroSifco,
+					status: "won",
+					actualCloseDate: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, opportunityId));
+
+			return {
+				clientId: clientResult.clientId,
+				contractId: clientResult.contractId,
+			};
+		});
 
 		console.log(`[CloseOpportunity] ✓ Opportunity closed successfully: ${opportunityId}`);
 
 		return {
 			success: true,
 			numeroSifco,
-			clientId: clientResult.clientId,
-			contractId: clientResult.contractId,
+			clientId: transactionResult.clientId,
+			contractId: transactionResult.contractId,
 			creditoId: creditResult.creditoResult?.credito_id,
 		};
 	} catch (error) {

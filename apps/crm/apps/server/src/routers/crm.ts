@@ -1722,6 +1722,36 @@ export const crmRouter = {
 			return { success: true };
 		}),
 
+	// Get credit detail approval status
+	getCreditDetailApprovalStatus: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get opportunity
+			const [opportunity] = await db
+				.select({
+					creditDetailApproved: opportunities.creditDetailApproved,
+					creditDetailApprovedBy: opportunities.creditDetailApprovedBy,
+					creditDetailApprovedAt: opportunities.creditDetailApprovedAt,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			return {
+				approved: opportunity.creditDetailApproved || false,
+				approvedBy: opportunity.creditDetailApprovedBy || null,
+				approvedAt: opportunity.creditDetailApprovedAt || null,
+			};
+		}),
+
 	getOpportunityHistory: crmProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {

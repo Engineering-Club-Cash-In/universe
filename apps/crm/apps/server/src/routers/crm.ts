@@ -266,6 +266,52 @@ export const crmRouter = {
 			};
 		}),
 
+	getLeadById: crmProcedure
+		.input(z.object({ leadId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const [lead] = await db
+				.select({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					status: leads.status,
+					source: leads.source,
+					assignedTo: leads.assignedTo,
+					companyId: leads.companyId,
+					notes: leads.notes,
+					createdAt: leads.createdAt,
+					updatedAt: leads.updatedAt,
+					company: companies,
+					assignedUser: {
+						id: user.id,
+						name: user.name,
+					},
+				})
+				.from(leads)
+				.leftJoin(companies, eq(leads.companyId, companies.id))
+				.leftJoin(user, eq(leads.assignedTo, user.id))
+				.where(eq(leads.id, input.leadId))
+				.limit(1);
+
+			if (!lead) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Lead no encontrado",
+				});
+			}
+
+			// Sales users can only see their assigned leads
+			if (context.userRole === "sales" && lead.assignedTo !== context.userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver este lead",
+				});
+			}
+
+			return lead;
+		}),
+
 	getLeadsStats: crmProcedure.handler(async ({ context }) => {
 		// Build role-based condition
 		const roleCondition =

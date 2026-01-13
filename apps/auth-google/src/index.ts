@@ -5,6 +5,9 @@ import { testConnection } from "./db/connection";
 import authRoutes from "./routes/auth.routes";
 import healthRoutes from "./routes/health.routes";
 import profileRoutes from "./routes/profile.routes";
+import carteraRoutes from "./routes/cartera.routes";
+import crmRoutes from "./routes/crm.routes";
+import unifiedRoutes from "./routes/unified.routes";
 import { errorHandler, notFoundHandler } from "./middleware/error";
 import {
   apiLimiter,
@@ -48,6 +51,15 @@ app.route("/api/auth", authRoutes);
 // Profile routes
 app.route("/api/profile", profileRoutes);
 
+// Cartera routes (proxy a la API de cartera)
+app.route("/api/cartera", carteraRoutes);
+
+// CRM routes (proxy a la API del CRM)
+app.route("/api/crm", crmRoutes);
+
+// Unified routes (operaciones que involucran CRM + Cartera)
+app.route("/api/unified", unifiedRoutes);
+
 // 404 handler
 app.notFound(notFoundHandler);
 
@@ -65,6 +77,8 @@ testConnection().then((connected) => {
 ║   🔐 Better Auth: Enabled                     ║
 ║   🗄️  Database: Connected                      ║
 ║   🛡️  Rate Limiting: Enabled                   ║
+║   💰 Cartera API: Enabled                     ║
+║   📋 CRM API: Enabled                         ║
 ║   ⚡ Hono + Bun Server: Active                 ║
 ╚═══════════════════════════════════════════════╝
     `);

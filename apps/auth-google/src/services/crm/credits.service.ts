@@ -1,16 +1,24 @@
 /**
- * Servicio de créditos - Proxy a través de Better Auth API
+ * Servicio para operaciones de créditos desde Cartera
+ * (Los créditos se consultan en Cartera pero los números SIFCO vienen del CRM)
  */
 
-import apiAuth from "@/lib/api/apiAuth";
+import { env } from "../../config/env";
+import { ensureCarteraAuth } from "../cartera/carteraAuth.service";
 
-// Tipos
+// ============================================
+// TIPOS
+// ============================================
+
 export type CreditStatus = "ACTIVO" | "FINALIZADO" | "PENDIENTE" | "ATRASADO" | "CANCELADO";
 export type CreditType = "Nuevo" | "Renovacion" | "Ampliacion";
 export type FormatoCredito = "Pool" | "Individual";
 export type CuotaStatus = "no_required" | "required" | "pagado" | "atrasado";
 
-// Interfaces basadas en la API de cartera
+// ============================================
+// INTERFACES
+// ============================================
+
 export interface Credito {
   credito_id: number;
   usuario_id: number;
@@ -80,7 +88,9 @@ export interface CreditoResponse {
   pagosConvenio: any[];
 }
 
-// Servicios
+// ============================================
+// FUNCIONES
+// ============================================
 
 /**
  * Obtener créditos por números SIFCO
@@ -91,10 +101,32 @@ export const getCredits = async (numerosSifco: string[]): Promise<CreditoRespons
   }
 
   try {
-    const response = await apiAuth.get<{ data: CreditoResponse[] }>(
-      `/api/crm/credits?numerosSifco=${encodeURIComponent(numerosSifco.join(","))}`
-    );
-    return response.data.data || [];
+    const token = await ensureCarteraAuth();
+
+    // Hacer fetch para cada número SIFCO
+    const promises = numerosSifco.map(async (numeroSifco) => {
+      const response = await fetch(
+        `${env.CARTERA_API_URL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+        {
+          headers: {
+           //  Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        console.error(`Error al cargar crédito ${numeroSifco}`);
+        return null;
+      }
+
+      const data = (await response.json()) as CreditoResponse;
+      return data;
+    });
+
+    const results = await Promise.all(promises);
+
+    // Filtrar resultados nulos (errores)
+    return results.filter((credit): credit is CreditoResponse => credit !== null);
   } catch (error) {
     console.error("Error al obtener créditos:", error);
     return [];
@@ -108,10 +140,23 @@ export const getCreditByNumeroSifco = async (
   numeroSifco: string
 ): Promise<CreditoResponse | null> => {
   try {
-    const response = await apiAuth.get<{ data: CreditoResponse }>(
-      `/api/crm/credit?numeroSifco=${encodeURIComponent(numeroSifco)}`
+    const token = await ensureCarteraAuth();
+
+    const response = await fetch(
+      `${env.CARTERA_API_URL}/credito?numero_credito_sifco=${encodeURIComponent(numeroSifco)}`,
+      {
+        headers: {
+          // Authorization: `Bearer ${token}`,
+        },
+      }
     );
-    return response.data.data;
+
+    if (!response.ok) {
+      throw new Error("Error al cargar el crédito");
+    }
+
+    const data = (await response.json()) as CreditoResponse;
+    return data;
   } catch (error) {
     console.error("Error al obtener crédito:", error);
     return null;

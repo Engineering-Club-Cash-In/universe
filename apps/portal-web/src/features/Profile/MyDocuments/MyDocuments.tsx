@@ -18,19 +18,19 @@ import { ContainerMenu } from "../components/ContainerMenu";
 import { useIsMobile } from "@/hooks";
 
 export const MyDocuments = () => {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
 
   // Obtener contratos
   const { data: contracts, isLoading: loadingContracts } = useQuery({
     queryKey: ["contracts", user?.email],
-    queryFn: () => getContracts(user?.email || "", user?.dpi || "", token || null),
+    queryFn: () => getContracts(user?.email || "", user?.dpi || ""),
     enabled: !!user?.email,
   });
 
   // Obtener documentos personales
   const { data: documents, isLoading: loadingDocuments } = useQuery({
     queryKey: ["personal-documents", user?.email],
-    queryFn: () => getPersonalDocuments(user?.email || "", user?.dpi || "", token || null),
+    queryFn: () => getPersonalDocuments(user?.email || "", user?.dpi || ""),
     enabled: !!user?.email,
   });
 

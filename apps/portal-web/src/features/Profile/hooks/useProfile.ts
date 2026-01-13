@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { sendLead } from "@/features/FormLeads/service/serviceLead";
-import { createInvestor } from "../services/investorService";
+import { registerExternalUser } from "../services/unifiedService";
 import { useAuth } from "@/lib";
 import { authClient } from "@/lib/auth";
 
@@ -42,38 +41,22 @@ export const useProfile = () => {
         console.log(`Creando usuario tipo ${userType} desde OAuth`);
         // Mantener isLoading en true mientras se procesa y recarga
         try {
-          if (userType === "CLIENT") {
-            // Para clientes, enviar como lead
-            await sendLead({
-              nombreCompleto: user.name || user.email.split("@")[0],
-              correo: user.email,
-              telefono: phone,
-              dpi: dpi,
-              descripcion: `Tipo de usuario: ${userType}`,
-            });
-            await authClient.updateUser({
-              dpi: dpi,
-            } as any);
-            console.log("Lead creado exitosamente");
-          } else if (userType === "INVESTOR") {
-            await authClient.updateUser({
-              dpi: dpi,
-              role: "INVESTOR",
-            } as any);
-            // Para inversionistas, crear en cartera
-            await createInvestor({
-              nombre: user.name || user.email.split("@")[0],
-              dpi: parseInt(dpi),
-              email: user.email,
-              emite_factura: false,
-              tipo_reinversion: "sin_reinversion",
-              banco: null,
-              tipo_cuenta: null,
-              numero_cuenta: "",
-            });
+          // Usar el servicio unificado para registrar en CRM o Cartera
+          await registerExternalUser({
+            userType: userType,
+            fullName: user.name || user.email.split("@")[0],
+            email: user.email,
+            dpi: dpi,
+            phone: phone,
+          });
 
-            console.log("Investor creado exitosamente");
-          }
+          // Actualizar DPI y role en Better Auth
+          await authClient.updateUser({
+            dpi: dpi,
+            ...(userType === "INVESTOR" && { role: "INVESTOR" }),
+          } as any);
+
+          console.log(`${userType} creado exitosamente`);
 
           // Limpiar parámetros de la URL y recargar
           const newUrl = window.location.pathname;

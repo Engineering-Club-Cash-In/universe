@@ -276,6 +276,8 @@ function QuoterPage() {
 			// Gastos adicionales para detalle de crédito
 			freelanceCost: 0,
 			freelancePercentage: 0,
+			royalty: 0,
+			royaltyPercentage: 4.0,
 			inspectionCost: 0,
 			finesCost: 0,
 			keyCopyCost: 0,
@@ -307,6 +309,8 @@ function QuoterPage() {
 				// Gastos adicionales para detalle de crédito
 				freelanceCost: Number(value.freelanceCost),
 				freelancePercentage: Number(value.freelancePercentage) || undefined,
+				royalty: Number(value.royalty),
+				royaltyPercentage: Number(value.royaltyPercentage),
 				inspectionCost: Number(value.inspectionCost),
 				finesCost: Number(value.finesCost),
 				keyCopyCost: Number(value.keyCopyCost),
@@ -360,12 +364,17 @@ function QuoterPage() {
 		const transferCost = Number(values.transferCost);
 		const membershipCost = Number(values.membershipCost);
 
+		// Calcular royalty: 4% del monto a financiar
+		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
+		const calculatedRoyalty = amountToFinance * (royaltyPercentage / 100);
+		quoterForm.setFieldValue("royalty", Math.round(calculatedRoyalty * 100) / 100);
+
 		// Calcular Gastos Administrativos según Excel
 		// B22 = Monto a financiar + Traspaso + 1400 + GPS + Seguro
 		const b22 = amountToFinance + transferCost + 1400 + gpsCost + insuranceCost;
 
 		// Gastos Admin = 400 + ROUNDUP(B22*4%,0) + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro
-		const royalty = Math.ceil(b22 * 0.04); // 4% redondeado hacia arriba
+		const royalty = Math.ceil(b22 * 0.04); // 4% redondeado hacia arriba (para gastos admin)
 		const extraCost = Math.ceil(b22 * 0.0178) + gpsCost + insuranceCost; // 1.78% + GPS + Seguro
 		const adminCost = 400 + royalty + 400 + 600 + extraCost;
 
@@ -954,6 +963,32 @@ function QuoterPage() {
 							</CardHeader>
 							<CardContent>
 								<div className="grid gap-4 md:grid-cols-4">
+									<quoterForm.Field name="royalty">
+										{(field) => (
+											<div>
+												<div className="mb-2 flex items-center justify-between">
+													<Label htmlFor={field.name}>Royalty</Label>
+													<span className="text-muted-foreground text-xs">
+														{quoterForm.state.values.royaltyPercentage}% del
+														monto a financiar
+													</span>
+												</div>
+												<Input
+													id={field.name}
+													type="number"
+													step="0.01"
+													value={field.state.value || ""}
+													onChange={(e) =>
+														field.handleChange(Number(e.target.value) || 0)
+													}
+													placeholder="0"
+													disabled
+													className="bg-muted"
+												/>
+											</div>
+										)}
+									</quoterForm.Field>
+
 									<quoterForm.Field name="freelanceCost">
 										{(field) => (
 											<div>

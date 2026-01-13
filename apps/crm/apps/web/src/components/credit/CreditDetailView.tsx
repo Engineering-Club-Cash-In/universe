@@ -153,6 +153,8 @@ interface CreditDetailViewProps {
 		// Campos nuevos - opcionales para compatibilidad con cotizaciones antiguas
 		freelanceCost?: string | null;
 		freelancePercentage?: string | null;
+		royalty?: string | null;
+		royaltyPercentage?: string | null;
 		inspectionCost?: string | null;
 		finesCost?: string | null;
 		keyCopyCost?: string | null;
@@ -348,10 +350,12 @@ export function CreditDetailView({
 	// Calcular mes de interés anticipado
 	const interesAnticipado = montoSolicitado * (tasaMensual / 100);
 
-	// Royalty
-	const royalty = Number.parseFloat(opportunity.royalti || "0");
+	// Royalty - priorizar el de la cotización, si no existe usar el de la oportunidad
+	const royalty = Number.parseFloat(
+		quotation?.royalty || opportunity.royalti || "0",
+	);
 	const porcentajeRoyalty = Number.parseFloat(
-		opportunity.porcentajeRoyalti || "0",
+		quotation?.royaltyPercentage || opportunity.porcentajeRoyalti || "4.0",
 	);
 
 	// Gastos de la cotización

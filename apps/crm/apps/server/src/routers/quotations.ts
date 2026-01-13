@@ -125,6 +125,8 @@ export const quotationsRouter = {
 				// Gastos adicionales para detalle de crédito
 				freelanceCost: z.number().default(0),
 				freelancePercentage: z.number().optional(),
+				royalty: z.number().default(0),
+				royaltyPercentage: z.number().default(4.0),
 				inspectionCost: z.number().default(0),
 				finesCost: z.number().default(0),
 				keyCopyCost: z.number().default(0),
@@ -175,6 +177,12 @@ export const quotationsRouter = {
 				(input.downPayment / input.vehicleValue) * 100;
 			const amountToFinance = input.vehicleValue - input.downPayment;
 
+			// Calcular royalty si no se proporcionó: 4% del total financiado
+			const royalty =
+				input.royalty > 0
+					? input.royalty
+					: (input.vehicleValue - input.downPayment) * (input.royaltyPercentage / 100);
+
 			// Costos que se financian (NO incluyen seguro ni GPS)
 			const financedCosts =
 				input.transferCost + input.adminCost + input.membershipCost;
@@ -215,6 +223,8 @@ export const quotationsRouter = {
 					// Gastos adicionales para detalle de crédito
 					freelanceCost: input.freelanceCost.toString(),
 					freelancePercentage: input.freelancePercentage?.toString() ?? null,
+					royalty: royalty.toFixed(2),
+					royaltyPercentage: input.royaltyPercentage.toString(),
 					inspectionCost: input.inspectionCost.toString(),
 					finesCost: input.finesCost.toString(),
 					keyCopyCost: input.keyCopyCost.toString(),

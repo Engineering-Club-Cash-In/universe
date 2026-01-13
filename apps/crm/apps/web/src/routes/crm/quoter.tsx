@@ -1,6 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { z } from "zod";
 import {
 	Calculator,
 	Eye,
@@ -53,7 +54,12 @@ import { authClient } from "@/lib/auth-client";
 import { generateQuotationPdf } from "@/lib/generate-pdf";
 import { client, orpc } from "@/utils/orpc";
 
+const searchSchema = z.object({
+	opportunityId: z.string().optional(),
+});
+
 export const Route = createFileRoute("/crm/quoter")({
+	validateSearch: searchSchema,
 	beforeLoad: async ({ location }) => {
 		const session = await authClient.getSession();
 		if (!session.data?.session) {
@@ -154,6 +160,7 @@ function QuoterPage() {
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const queryClient = useQueryClient();
 	const navigate = Route.useNavigate();
+	const { opportunityId: initialOpportunityId } = Route.useSearch();
 
 	const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(
 		null,
@@ -319,6 +326,13 @@ function QuoterPage() {
 			});
 		},
 	});
+
+	// Pre-seleccionar la oportunidad si viene en la URL
+	useEffect(() => {
+		if (initialOpportunityId) {
+			quoterForm.setFieldValue("opportunityId", initialOpportunityId);
+		}
+	}, [initialOpportunityId]);
 
 	// Obtener costo de seguro automáticamente
 	const updateInsuranceCost = async (

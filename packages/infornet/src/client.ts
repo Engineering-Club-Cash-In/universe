@@ -68,9 +68,9 @@ export class InfornetClient {
       this.timeout = DEFAULT_TIMEOUT;
     }
 
-    if (!this.credentials.username || !this.credentials.password) {
+    /*if (!this.credentials.username || !this.credentials.password) {
       throw new ValidationError('Username y password son requeridos');
-    }
+    }*/
   }
 
   /**

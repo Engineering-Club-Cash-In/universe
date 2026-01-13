@@ -90,6 +90,13 @@ export const quotations = pgTable("quotations", {
 		scale: 2,
 	}),
 
+	// Royalty (4% del monto solicitado)
+	royalty: decimal("royalty", { precision: 12, scale: 2 }).default("0"),
+	royaltyPercentage: decimal("royalty_percentage", {
+		precision: 5,
+		scale: 2,
+	}).default("4.00"),
+
 	// Gastos adicionales para detalle de crédito
 	inspectionCost: decimal("inspection_cost", {
 		precision: 12,

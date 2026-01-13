@@ -146,6 +146,7 @@ export interface CreateCreditoParams {
 	// campos para la facturacion
 	direccion?: string;
 	rubros?: any[];
+	otros?: number;
 	municipio?: string | null;
 	departamento?: string | null;
 	codigo_postal?: string | null;
@@ -196,7 +197,7 @@ export async function createCreditoInCarteraBack(
 			rubros: params.rubros,
 			membresias_pago: params.membresias_pago ?? 0,
 			como_se_entero: "",
-			otros: 0,
+			otros: params.otros ?? 0,
 			reserva: params.reserva ?? 0,
 			municipio: params.municipio || "",
 			departamento: params.departamento || "",

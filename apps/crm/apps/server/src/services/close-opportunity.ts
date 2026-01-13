@@ -12,6 +12,7 @@ import {
 	carteraBackReferences,
 	type NewCarteraBackReference,
 	renapInfo,
+	vehicles,
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
 import {
@@ -630,6 +631,18 @@ export async function closeOpportunity(
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, opportunityId));
+
+			// Update vehicle status to 'sold'
+			if (opportunity.vehicleId) {
+				await tx
+					.update(vehicles)
+					.set({
+						status: "sold",
+						updatedAt: new Date(),
+					})
+					.where(eq(vehicles.id, opportunity.vehicleId));
+				console.log(`[CloseOpportunity] ✓ Vehicle ${opportunity.vehicleId} marked as sold`);
+			}
 
 			return {
 				clientId: clientResult.clientId,

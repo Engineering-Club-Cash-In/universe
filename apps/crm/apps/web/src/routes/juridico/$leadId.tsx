@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, Loader2, Plus, User } from "lucide-react";
 import { useState } from "react";
+import { z } from "zod";
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { CreateContractModal } from "@/components/juridico/CreateContractModal";
 import { Button } from "@/components/ui/button";
@@ -16,11 +17,15 @@ import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
+	validateSearch: z.object({
+		opportunityId: z.string().uuid().optional(),
+	}).optional(),
 	component: RouteComponent,
 });
 
 function RouteComponent() {
 	const { leadId } = Route.useParams();
+	const searchParams = Route.useSearch();
 	const navigate = Route.useNavigate();
 	const {
 		canViewLegal,
@@ -29,11 +34,21 @@ function RouteComponent() {
 	} = useJuridicoPermissions();
 
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+	const opportunityId = searchParams?.opportunityId;
+
+	// Obtener información del lead
+	const {
+		data: leadInfo,
+		isLoading: isLoadingLead,
+	} = useQuery({
+		...orpc.getLeadById.queryOptions({ input: { leadId } }),
+		enabled: canViewLegal && !!leadId,
+	});
 
 	// Obtener contratos del lead
 	const {
 		data: contracts,
-		isLoading,
+		isLoading: isLoadingContracts,
 		refetch,
 	} = useQuery({
 		...orpc.listLegalContractsByLead.queryOptions({ input: { leadId } }),
@@ -46,6 +61,8 @@ function RouteComponent() {
 		return null;
 	}
 
+	const isLoading = isLoadingLead || isLoadingContracts;
+
 	if (isLoading) {
 		return (
 			<div className="container mx-auto flex min-h-[400px] items-center justify-center py-8">
@@ -53,8 +70,6 @@ function RouteComponent() {
 			</div>
 		);
 	}
-
-	const leadInfo = contracts && contracts.length > 0 ? contracts[0].lead : null;
 
 	return (
 		<div className="container mx-auto space-y-6 py-8">
@@ -77,7 +92,7 @@ function RouteComponent() {
 							<h1 className="font-bold text-3xl">
 								{leadInfo
 									? `${leadInfo.firstName} ${leadInfo.lastName}`
-									: "Cargando..."}
+									: "Lead"}
 							</h1>
 							{leadInfo && (
 								<p className="text-muted-foreground">
@@ -142,6 +157,7 @@ function RouteComponent() {
 				open={isCreateModalOpen}
 				onOpenChange={setIsCreateModalOpen}
 				onSuccess={refetch}
+				preselectedOpportunityId={opportunityId}
 			/>
 		</div>
 	);

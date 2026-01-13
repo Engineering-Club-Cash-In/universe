@@ -28,6 +28,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
+import { isVehicleAvailable } from "@/utils/constants";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
@@ -1547,12 +1548,12 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data?.map(
-															(vehicle: any) => ({
+														...(vehiclesQuery.data?.data
+															?.filter((vehicle: any) => isVehicleAvailable(vehicle.status))
+															?.map((vehicle: any) => ({
 																value: vehicle.id,
 																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-															}),
-														) || []),
+															})) || []),
 													]}
 													value={field.state.value ?? "none"}
 													onChange={(value) =>
@@ -2388,12 +2389,14 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data?.map(
-															(vehicle: any) => ({
+														...(vehiclesQuery.data?.data
+															?.filter((vehicle: any) => 
+																isVehicleAvailable(vehicle.status, selectedOpportunity?.vehicleId, vehicle.id)
+															)
+															?.map((vehicle: any) => ({
 																value: vehicle.id,
 																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-															}),
-														) || []),
+															})) || []),
 													]}
 													value={field.state.value || "none"}
 													onChange={(value) =>

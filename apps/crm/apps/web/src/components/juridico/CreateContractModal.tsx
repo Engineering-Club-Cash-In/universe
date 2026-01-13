@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Loader2, Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +48,16 @@ export function CreateContractModal({
 	});
 
 	const [newAdditionalLink, setNewAdditionalLink] = useState("");
+
+	// Actualizar opportunityId cuando cambia preselectedOpportunityId
+	useEffect(() => {
+		if (preselectedOpportunityId) {
+			setFormData((prev) => ({
+				...prev,
+				opportunityId: preselectedOpportunityId,
+			}));
+		}
+	}, [preselectedOpportunityId]);
 
 	// Query opportunities for this lead
 	const { data: opportunities, isLoading: isLoadingOpportunities } = useQuery({
@@ -124,6 +134,10 @@ export function CreateContractModal({
 			toast.error("El nombre del contrato es requerido");
 			return;
 		}
+		if (!formData.opportunityId) {
+			toast.error("Debe seleccionar una oportunidad para asociar el contrato");
+			return;
+		}
 
 		createMutation.mutate({
 			leadId,
@@ -136,7 +150,7 @@ export function CreateContractModal({
 				formData.additionalSigningLinks.length > 0
 					? formData.additionalSigningLinks
 					: undefined,
-			opportunityId: formData.opportunityId || undefined,
+			opportunityId: formData.opportunityId,
 		});
 	};
 
@@ -192,7 +206,9 @@ export function CreateContractModal({
 
 						{/* Oportunidad asociada */}
 						<div className="space-y-2">
-							<Label htmlFor="opportunityId">Oportunidad Asociada</Label>
+							<Label htmlFor="opportunityId">
+								Oportunidad Asociada <span className="text-red-500">*</span>
+							</Label>
 							<Select
 								value={formData.opportunityId}
 								onValueChange={(value) =>
@@ -204,7 +220,7 @@ export function CreateContractModal({
 								disabled={createMutation.isPending || isLoadingOpportunities}
 							>
 								<SelectTrigger className="w-full">
-									<SelectValue placeholder="Seleccionar oportunidad (opcional)" />
+									<SelectValue placeholder="Seleccionar oportunidad" />
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="none">Sin oportunidad</SelectItem>
@@ -217,7 +233,7 @@ export function CreateContractModal({
 								</SelectContent>
 							</Select>
 							<p className="text-muted-foreground text-xs">
-								Asocia este contrato a una oportunidad específica
+								El contrato debe estar asociado a una oportunidad
 							</p>
 						</div>
 

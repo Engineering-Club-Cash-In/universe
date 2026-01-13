@@ -241,7 +241,7 @@ function RouteComponent() {
 												key={opp.id}
 												className="cursor-pointer hover:bg-muted/50"
 												onClick={() =>
-													navigate({ to: `/juridico/${opp.lead.id}` })
+													navigate({ to: `/juridico/${opp.lead.id}?opportunityId=${opp.id}` })
 												}
 											>
 												<TableCell>
@@ -295,6 +295,7 @@ function RouteComponent() {
 													<Link
 														to="/juridico/$leadId"
 														params={{ leadId: opp.lead.id }}
+														search={{ opportunityId: opp.id }}
 														className="font-medium text-primary text-sm hover:underline"
 														onClick={(e) => e.stopPropagation()}
 													>

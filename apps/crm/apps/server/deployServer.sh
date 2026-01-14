@@ -3,8 +3,15 @@
 # Exit on error
 set -e
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Navigate to the monorepo root (universe)
+MONOREPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
+
+echo "📂 Building from monorepo root: $MONOREPO_ROOT"
+
 echo "🔨 Building image..."
-podman build -t cci/crm-api .
+podman build -t cci/crm-api -f "$SCRIPT_DIR/Dockerfile" "$MONOREPO_ROOT"
 
 echo "🏷️ Tagging image..."
 podman tag cci/crm-api:latest public.ecr.aws/a6w8m2u2/cci/crm-api:latest

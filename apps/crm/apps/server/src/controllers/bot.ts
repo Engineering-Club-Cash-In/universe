@@ -255,6 +255,7 @@ export const getRenapInfoController = async (dpi: string, phone: string) => {
 			createdBy: createdByUserId,
 			title: `Oportunidad de crédito para ${renapData.firstName} ${renapData.firstLastName}`,
 			stageId: firstStage.id,
+			source: "other", // Bot source
 		})
 		.returning();
 
@@ -372,9 +373,6 @@ export const updateLeadAndCreateOpportunity = async (
 	const normalizedWorkTime = data.workTime
 		? (workTimeMap[data.workTime.toUpperCase()] ?? null)
 		: null;
-	const normalizedLoanPurpose = data.loanPurpose
-		? (loanPurposeMap[data.loanPurpose.toUpperCase()] ?? null)
-		: null;
 
 	// 2. Construir objeto de actualización dinámico
 	const leadUpdates: Partial<typeof leads.$inferInsert> = {};
@@ -385,8 +383,6 @@ export const updateLeadAndCreateOpportunity = async (
 	if (normalizedOccupation !== null)
 		leadUpdates.occupation = normalizedOccupation;
 	if (normalizedWorkTime !== null) leadUpdates.workTime = normalizedWorkTime;
-	if (normalizedLoanPurpose !== null)
-		leadUpdates.loanPurpose = normalizedLoanPurpose;
 	if (data.ownsHome !== undefined) leadUpdates.ownsHome = data.ownsHome;
 	if (data.ownsVehicle !== undefined)
 		leadUpdates.ownsVehicle = data.ownsVehicle;
@@ -530,7 +526,6 @@ export const getLeadProgress = async (phone: string) => {
 		if (!lead.loanAmount) steps.push("loanAmount");
 		if (!lead.occupation) steps.push("occupation");
 		if (!lead.workTime) steps.push("workTime");
-		if (!lead.loanPurpose) steps.push("loanPurpose");
 		if (!docs || !docs.electricityBill) steps.push("electricityBill");
 		if (!docs || !docs.bankStatements) steps.push("bankStatements");
 

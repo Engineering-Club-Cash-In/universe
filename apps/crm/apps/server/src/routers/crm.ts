@@ -223,7 +223,6 @@ export const crmRouter = {
 					loanAmount: leads.loanAmount,
 					occupation: leads.occupation,
 					workTime: leads.workTime,
-					loanPurpose: leads.loanPurpose,
 					ownsHome: leads.ownsHome,
 					ownsVehicle: leads.ownsVehicle,
 					hasCreditCard: leads.hasCreditCard,
@@ -377,7 +376,6 @@ export const crmRouter = {
 				workTime: z
 					.enum(["less_than_1", "1_to_5", "5_to_10", "10_plus"])
 					.optional(),
-				loanPurpose: z.enum(["personal", "business"]).optional(),
 				ownsHome: z.boolean().default(false),
 				ownsVehicle: z.boolean().default(false),
 				hasCreditCard: z.boolean().default(false),
@@ -444,7 +442,6 @@ export const crmRouter = {
 				workTime: z
 					.enum(["less_than_1", "1_to_5", "5_to_10", "10_plus"])
 					.optional(),
-				loanPurpose: z.enum(["personal", "business"]).optional(),
 				ownsHome: z.boolean().optional(),
 				ownsVehicle: z.boolean().optional(),
 				hasCreditCard: z.boolean().optional(),
@@ -768,6 +765,18 @@ export const crmRouter = {
 				companyId: z.string().uuid().optional(),
 				vehicleId: z.string().uuid().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
+				source: z
+					.enum([
+						"website",
+						"referral",
+						"cold_call",
+						"email",
+						"social_media",
+						"event",
+						"other",
+					])
+					.optional(),
+				loanPurpose: z.enum(["personal", "business"]).optional(),
 				value: z.string().optional(), // Will be converted to decimal
 				stageId: z.string().uuid(),
 				probability: z.number().min(0).max(100).optional(),
@@ -786,16 +795,23 @@ export const crmRouter = {
 				);
 			}
 
-			// If a lead is provided, get the company from the lead
+			// If a lead is provided, get the company and source from the lead
 			let companyId = input.companyId;
+			let source = input.source;
 			if (input.leadId) {
 				const lead = await db
 					.select()
 					.from(leads)
 					.where(eq(leads.id, input.leadId))
 					.limit(1);
-				if (lead.length > 0 && lead[0].companyId) {
-					companyId = lead[0].companyId;
+				if (lead.length > 0) {
+					if (lead[0].companyId) {
+						companyId = lead[0].companyId;
+					}
+					// If source not provided, take from lead
+					if (!source && lead[0].source) {
+						source = lead[0].source;
+					}
 				}
 			}
 
@@ -804,6 +820,7 @@ export const crmRouter = {
 				.values({
 					...input,
 					companyId,
+					source,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)
@@ -861,6 +878,7 @@ export const crmRouter = {
 				direccion: z.string().optional(),
 				rubros: z.string().optional(), // JSON string with expense items
 				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
+				loanPurpose: z.enum(["personal", "business"]).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1741,7 +1759,6 @@ export const crmRouter = {
 					loanAmount: leads.loanAmount,
 					occupation: leads.occupation,
 					workTime: leads.workTime,
-					loanPurpose: leads.loanPurpose,
 					ownsHome: leads.ownsHome,
 					ownsVehicle: leads.ownsVehicle,
 					hasCreditCard: leads.hasCreditCard,

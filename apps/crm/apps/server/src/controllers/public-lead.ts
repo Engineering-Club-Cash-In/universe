@@ -14,6 +14,8 @@ async function createOpportunityForLead(
 	lastName: string,
 	systemUserId: string,
 	notes: string = "",
+	source?: "website" | "referral" | "cold_call" | "email" | "social_media" | "event" | "other",
+	loanPurpose?: "personal" | "business",
 ) {
 	const [firstStage] = await db
 		.select()
@@ -39,6 +41,8 @@ async function createOpportunityForLead(
 			createdAt: new Date(),
 			updatedAt: new Date(),
 			notes: notes,
+			source: source,
+			loanPurpose: loanPurpose,
 		})
 		.returning();
 
@@ -100,6 +104,8 @@ export async function createPublicLead(c: Context) {
 				lead.lastName,
 				systemUser.id,
 				body.notes ?? "",
+				body.source || lead.source || "website",
+				body.loanPurpose,
 			);
 
 			// Si encontró el lead por DPI y no tiene email (o tiene un email diferente al enviado)
@@ -170,7 +176,6 @@ export async function createPublicLead(c: Context) {
 				loanAmount: body.loanAmount?.toString(),
 				occupation: body.occupation,
 				workTime: body.workTime,
-				loanPurpose: body.loanPurpose,
 				ownsHome: body.ownsHome ?? false,
 				ownsVehicle: body.ownsVehicle ?? false,
 				hasCreditCard: body.hasCreditCard ?? false,
@@ -197,6 +202,8 @@ export async function createPublicLead(c: Context) {
 			newLead.lastName,
 			systemUser.id,
 			body.notes ?? "",
+			body.source || "website",
+			body.loanPurpose,
 		);
 
 		return c.json({

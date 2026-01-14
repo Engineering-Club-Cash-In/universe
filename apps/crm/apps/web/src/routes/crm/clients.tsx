@@ -120,18 +120,6 @@ const getWorkTimeLabel = (workTime: string | null) => {
 	}
 };
 
-const getLoanPurposeLabel = (purpose: string | null) => {
-	if (!purpose) return "No especificado";
-	switch (purpose) {
-		case "personal":
-			return "Personal";
-		case "business":
-			return "Negocio";
-		default:
-			return purpose;
-	}
-};
-
 const formatCurrency = (value: string | number | null) => {
 	if (!value) return "Q0.00";
 	const num = typeof value === "string" ? Number.parseFloat(value) : value;
@@ -169,7 +157,6 @@ type ClientData = {
 	loanAmount: string | null;
 	occupation: string | null;
 	workTime: string | null;
-	loanPurpose: string | null;
 	ownsHome: boolean | null;
 	ownsVehicle: boolean | null;
 	hasCreditCard: boolean | null;
@@ -708,14 +695,6 @@ function RouteComponent() {
 												{selectedClient.loanAmount
 													? formatCurrency(selectedClient.loanAmount)
 													: "No especificado"}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Propósito del Préstamo
-											</Label>
-											<p className="text-sm">
-												{getLoanPurposeLabel(selectedClient.loanPurpose)}
 											</p>
 										</div>
 									</div>

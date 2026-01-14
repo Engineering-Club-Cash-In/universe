@@ -127,7 +127,6 @@ export async function getLeadByEmail(c: Context) {
 			loanAmount: result.lead.loanAmount,
 			occupation: result.lead.occupation,
 			workTime: result.lead.workTime,
-			loanPurpose: result.lead.loanPurpose,
 			ownsHome: result.lead.ownsHome,
 			ownsVehicle: result.lead.ownsVehicle,
 			hasCreditCard: result.lead.hasCreditCard,

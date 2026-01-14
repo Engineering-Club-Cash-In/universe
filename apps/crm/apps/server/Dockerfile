@@ -31,6 +31,11 @@ COPY . .
 # Instalamos dependencias (necesario para bun build --compile)
 RUN bun install
 
+# Reemplazar el symlink de @repo/infornet con el contenido real
+RUN rm -rf node_modules/@repo/infornet && \
+    mkdir -p node_modules/@repo && \
+    cp -r /usr/src/app/packages/infornet node_modules/@repo/infornet
+
 # Compilamos la app
 RUN bun build \
     --compile \

@@ -316,7 +316,7 @@ export function CreditDetailView({
 			const membresiaValue = Number.parseFloat(quotation?.membershipCost || "0");
 			const numeroCuotasValue = quotation?.termMonths || 0;
 			const gastosAdminValue = Number.parseFloat(quotation?.adminCost || "0");
-			const finalValue = quotation?.totalFinanced || opportunity.value || "0";
+			const finalValue = quotation?.amountToFinance || opportunity.value || "0";
 			// Reserva = 600 + seguro
 			const reservaValue = 600 + seguroValue;
 
@@ -431,13 +431,13 @@ export function CreditDetailView({
 			}
 		}
 		
-		// Validar que la suma de montos aportados = totalFinanced (capital)
-		if (inversionistasToValidate.length > 0 && quotation?.totalFinanced) {
+		// Validar que la suma de montos aportados = amountToFinance (capital)
+		if (inversionistasToValidate.length > 0 && quotation?.amountToFinance) {
 			const totalAportado = inversionistasToValidate.reduce(
 				(sum, inv) => sum + (inv.monto_aportado || 0),
 				0
 			);
-			const capitalCredito = Number.parseFloat(quotation.totalFinanced);
+			const capitalCredito = Number.parseFloat(quotation.amountToFinance);
 			
 			// Permitir una pequeña diferencia por redondeo (1 centavo)
 			if (Math.abs(totalAportado - capitalCredito) > 0.01) {
@@ -460,11 +460,11 @@ export function CreditDetailView({
 				);
 			}
 			
-			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
-			if (quotation?.totalFinanced && (Number(quotation?.totalFinanced) !== Number(opportunity.value)))  {
+			// Actualizar el value de la oportunidad con el amountToFinance de la cotización
+			if (quotation?.amountToFinance && (Number(quotation?.amountToFinance) !== Number(opportunity.value)))  {
 				await client.updateOpportunity({
 					id: opportunityId,
-					value: quotation.totalFinanced,
+					value: quotation.amountToFinance,
 				});
 			}
 			
@@ -518,7 +518,8 @@ export function CreditDetailView({
 	});
 
 	// Calcular valores derivados
-	const montoSolicitado = Number.parseFloat(quotation?.totalFinanced || "0");
+	const montoTotalFinanciar = Number.parseFloat(quotation?.totalFinanced || "0");
+	const montoFinanciar = Number.parseFloat(quotation?.amountToFinance || "0");
 	const tasaMensual = Number.parseFloat(quotation?.interestRate || "0");
 	const tasaInteres = tasaMensual * 12;
 	const iva = tasaMensual * IVA_RATE;
@@ -527,16 +528,16 @@ export function CreditDetailView({
 	// División de cuota entre Inversionista y Empresa
 	const porcentajeEmpresa = 100 - porcentajeInversionista;
 	const cuotaInversionista =
-		montoSolicitado * (tasaMensual / 100) * (porcentajeInversionista / 100);
+		montoTotalFinanciar * (tasaMensual / 100) * (porcentajeInversionista / 100);
 	const cuotaEmpresa =
-		montoSolicitado * (tasaMensual / 100) * (porcentajeEmpresa / 100);
+		montoTotalFinanciar * (tasaMensual / 100) * (porcentajeEmpresa / 100);
 	const ivaInversionista = cuotaInversionista * IVA_RATE;
 	const ivaEmpresa = cuotaEmpresa * IVA_RATE;
 	const totalInversionista = cuotaInversionista + ivaInversionista;
 	const totalEmpresa = cuotaEmpresa + ivaEmpresa;
 
 	// Calcular mes de interés anticipado
-	const interesAnticipado = montoSolicitado * (tasaMensual / 100);
+	const interesAnticipado = montoTotalFinanciar * (tasaMensual / 100);
 
 	// Royalty - priorizar el de la cotización, si no existe usar el de la oportunidad
 	const royalty = Number.parseFloat(
@@ -613,7 +614,7 @@ export function CreditDetailView({
 		subtotalComisionGastos + subtotalOtrosDescuentos + subtotalGastosAbogado;
 
 	// Líquido a recibir
-	const liquidoARecibir = montoSolicitado - totalDescuentos;
+	const liquidoARecibir = montoTotalFinanciar - totalDescuentos;
 
 	// Información del vehículo
 	const vehiculo = opportunity.vehicle;
@@ -955,7 +956,7 @@ export function CreditDetailView({
 											Monto Solicitado
 										</Label>
 										<p className="font-bold text-green-600 text-lg">
-											{formatCurrency(montoSolicitado)}
+											{formatCurrency(montoFinanciar)}
 										</p>
 									</div>
 									<div>
@@ -1716,10 +1717,10 @@ export function CreditDetailView({
 								<div className="grid grid-cols-3 gap-4">
 									<div className="text-center">
 										<Label className="text-muted-foreground text-xs">
-											Monto Solicitado
+											Monto total a financiar
 										</Label>
 										<p className="font-bold text-xl">
-											{formatCurrency(montoSolicitado)}
+											{formatCurrency(montoTotalFinanciar)}
 										</p>
 									</div>
 									<div className="text-center">
@@ -1837,7 +1838,7 @@ export function CreditDetailView({
 							<div className="flex items-center justify-between border-t py-3">
 								<span className="font-semibold">Monto Solicitado</span>
 								<span className="font-bold text-xl">
-									{formatCurrency(montoSolicitado)}
+									{formatCurrency(montoTotalFinanciar)}
 								</span>
 							</div>
 
@@ -1920,7 +1921,7 @@ export function CreditDetailView({
 								<span className="font-semibold">Líquido a recibir</span>
 								<span className="font-bold text-2xl text-green-600">
 									{formatCurrency(
-										montoSolicitado -
+										montoTotalFinanciar -
 											(interesAnticipado +
 												royalty +
 												gastosCombinados +

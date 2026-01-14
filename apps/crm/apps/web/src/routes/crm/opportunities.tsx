@@ -66,6 +66,8 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatDate,
 	formatGuatemalaDate,
+	getLoanPurposeLabel,
+	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
@@ -322,6 +324,8 @@ export interface IOpportunity  {
 		// direccion: string | null;
 		inversionistas: string | null;
 		status: string;
+		source?: "website" | "referral" | "cold_call" | "email" | "social_media" | "event" | "other" | null;
+		loanPurpose?: "personal" | "business" | null;
 		creditType?: "autocompra" | "sobre_vehiculo" | null;
 		creditDetailApproved?: boolean | null;
 		creditDetailApprovedBy?: string | null;
@@ -613,6 +617,11 @@ function RouteComponent() {
 				"asesorId",
 				selectedOpportunity.asesorId || 0,
 			);
+			// Loan Purpose
+			editOpportunityForm.setFieldValue(
+				"loanPurpose",
+				selectedOpportunity.loanPurpose || "",
+			);
 		}
 
 		if (openEditModal) {
@@ -745,6 +754,7 @@ function RouteComponent() {
 			leadId: "none",
 			vehicleId: "",
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+			loanPurpose: "" as "" | "personal" | "business",
 			value: "",
 			stageId: "",
 			probability: undefined as number | undefined,
@@ -769,6 +779,7 @@ function RouteComponent() {
 				...value,
 				stageId: value.stageId || firstStage?.id || "",
 				creditType: value.creditType,
+				loanPurpose: value.loanPurpose || undefined,
 				leadId:
 					value.leadId && value.leadId !== "none" ? value.leadId : undefined,
 				vehicleId: value.vehicleId || undefined,
@@ -786,6 +797,7 @@ function RouteComponent() {
 			leadId: "none",
 			vehicleId: "",
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+			loanPurpose: "" as "" | "personal" | "business",
 			value: "",
 			stageId: "",
 			probability: undefined as number | undefined,
@@ -877,6 +889,7 @@ function RouteComponent() {
 						value.rubros.length > 0 ? JSON.stringify(value.rubros) : undefined,
 					asesorId: value.asesorId > 0 ? value.asesorId : undefined,
 					direccion: value.direccion || undefined,
+					loanPurpose: value.loanPurpose || undefined,
 				});
 			}
 		},
@@ -886,6 +899,7 @@ function RouteComponent() {
 		mutationFn: (input: {
 			title: string;
 			creditType: "autocompra" | "sobre_vehiculo";
+			loanPurpose?: "personal" | "business";
 			leadId?: string;
 			companyId?: string;
 			vehicleId?: string;
@@ -949,6 +963,7 @@ function RouteComponent() {
 			rubros?: string;
 			asesorId?: number;
 			direccion?: string;
+			loanPurpose?: "personal" | "business";
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -1514,6 +1529,40 @@ function RouteComponent() {
 									</createOpportunityForm.Field>
 								</div>
 								<div>
+									<createOpportunityForm.Field name="loanPurpose">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>
+													Propósito del Préstamo
+												</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(
+															value as "personal" | "business",
+														)
+													}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar propósito" />
+													</SelectTrigger>
+													<SelectContent align="start">
+														<SelectItem value="personal">
+															Personal
+														</SelectItem>
+														<SelectItem value="business">
+															Negocio
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</createOpportunityForm.Field>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div className="col-span-2">
 									<createOpportunityForm.Field name="leadId">
 										{(field) => (
 											<div className="space-y-2">
@@ -1883,6 +1932,36 @@ function RouteComponent() {
 													<span className="font-medium">
 														{selectedOpportunity.assignedUser.name ||
 															"Usuario sin nombre"}
+													</span>
+												</div>
+											</div>
+										)}
+
+										{/* Source */}
+										{selectedOpportunity.source && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Fuente
+												</Label>
+												<div className="flex items-center gap-3">
+													<Target className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{getSourceLabel(selectedOpportunity.source)}
+													</span>
+												</div>
+											</div>
+										)}
+
+										{/* Loan Purpose */}
+										{selectedOpportunity.loanPurpose && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Propósito del Préstamo
+												</Label>
+												<div className="flex items-center gap-3">
+													<Banknote className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{getLoanPurposeLabel(selectedOpportunity.loanPurpose)}
 													</span>
 												</div>
 											</div>
@@ -2382,6 +2461,40 @@ function RouteComponent() {
 									</editOpportunityForm.Field>
 								</div>
 								<div>
+									<editOpportunityForm.Field name="loanPurpose">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>
+													Propósito del Préstamo
+												</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(
+															value as "personal" | "business",
+														)
+													}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar propósito" />
+													</SelectTrigger>
+													<SelectContent align="start">
+														<SelectItem value="personal">
+															Personal
+														</SelectItem>
+														<SelectItem value="business">
+															Negocio
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</editOpportunityForm.Field>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div>
 									<editOpportunityForm.Field name="vehicleId">
 										{(field) => (
 											<div className="space-y-2">
@@ -2411,9 +2524,8 @@ function RouteComponent() {
 										)}
 									</editOpportunityForm.Field>
 								</div>
-							</div>
 
-							<div>
+									<div>
 								<editOpportunityForm.Field name="stageId">
 									{(field) => (
 										<div className="space-y-2">
@@ -2437,7 +2549,7 @@ function RouteComponent() {
 									)}
 								</editOpportunityForm.Field>
 							</div>
-
+							</div>
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<editOpportunityForm.Field name="probability">

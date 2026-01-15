@@ -32,7 +32,7 @@ interface ModalEditCreditProps {
   investorsInitial?: InvestorItem[];
   onSuccess: () => void;
   investorsOptions: InvestorOption[];
-  advisorsOptions: { asesor_id: number; nombre: string }[]; // ✅ NUEVO
+  advisorsOptions: { asesor_id: number; nombre: string }[];
 }
 
 const creditFields = [
@@ -44,9 +44,9 @@ const creditFields = [
   "asesor_id",
   "cuota",
   "numero_credito_sifco",
-  "otros", // nuevo campo
-  "seguro_10_cuotas", // nuevo campo
-  "membresias_pago", // nuevo campo
+  "otros",
+  "seguro_10_cuotas",
+  "membresias_pago",
 ] as const;
 
 type CreditField = (typeof creditFields)[number];
@@ -63,6 +63,7 @@ const fieldLabels: Record<CreditField, string> = {
   membresias_pago: "Membresías pago",
   asesor_id: "Asesor",
 };
+
 export function ModalEditCredit({
   open,
   onClose,
@@ -70,8 +71,7 @@ export function ModalEditCredit({
   investorsInitial,
   onSuccess,
   investorsOptions,
-  advisorsOptions
-
+  advisorsOptions,
 }: ModalEditCreditProps) {
   const { mutate: updateCredit, isPending } = useUpdateCredit();
 
@@ -82,7 +82,6 @@ export function ModalEditCredit({
       monto_aportado: Number(inv.monto_aportado),
       porcentaje_cash_in: Number(inv.porcentaje_cash_in),
       porcentaje_inversion: Number(inv.porcentaje_inversion),
-      cuota_inversionista: Number(inv.cuota_inversionista ?? 0), // NUEVO
     })) || [];
 
   const formik = useFormik({
@@ -91,6 +90,24 @@ export function ModalEditCredit({
       investors: parsedInvestors,
     },
     enableReinitialize: true,
+    validate: (values) => {
+      const errors: any = {};
+
+      // 🔥 VALIDAR QUE LA SUMA DE MONTOS APORTADOS = CAPITAL
+      if (values.investors.length > 0) {
+        const sumaMontos = values.investors.reduce(
+          (sum, inv) => sum + Number(inv.monto_aportado || 0),
+          0
+        );
+        const capital = Number(values.capital || 0);
+
+        if (Math.abs(sumaMontos - capital) > 0.01) {
+          errors.investors = `La suma de montos aportados (Q${sumaMontos.toFixed(2)}) debe ser igual al capital (Q${capital.toFixed(2)})`;
+        }
+      }
+
+      return errors;
+    },
     onSubmit: (values) => {
       if (Object.keys(formik.errors).length > 0) {
         window.alert(
@@ -129,7 +146,6 @@ export function ModalEditCredit({
           monto_aportado: Number(i.monto_aportado),
           porcentaje_cash_in: Number(i.porcentaje_cash_in),
           porcentaje_inversion: Number(i.porcentaje_inversion),
-          cuota_inversionista: Number(i.cuota_inversionista ?? 0),
         })),
       };
       updateCredit(payload, {
@@ -199,64 +215,64 @@ export function ModalEditCredit({
               </h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {creditFields.map((name) => {
-  // ✅ Renderizado especial para asesor_id como select
-  if (name === "asesor_id") {
-    return (
-      <div key={name} className="flex flex-col gap-1">
-        <Label className="text-gray-700 font-medium">
-          {fieldLabels[name]}
-        </Label>
-        <select
-          name={name}
-          value={formik.values[name] ?? ""}
-          onChange={formik.handleChange}
-          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
-        >
-          <option value="">Seleccione un asesor</option>
-          {advisorsOptions.map((adv) => (
-            <option key={adv.asesor_id} value={adv.asesor_id}>
-              {adv.nombre}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  }
+                  // ✅ Renderizado especial para asesor_id como select
+                  if (name === "asesor_id") {
+                    return (
+                      <div key={name} className="flex flex-col gap-1">
+                        <Label className="text-gray-700 font-medium">
+                          {fieldLabels[name]}
+                        </Label>
+                        <select
+                          name={name}
+                          value={formik.values[name] ?? ""}
+                          onChange={formik.handleChange}
+                          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
+                        >
+                          <option value="">Seleccione un asesor</option>
+                          {advisorsOptions.map((adv) => (
+                            <option key={adv.asesor_id} value={adv.asesor_id}>
+                              {adv.nombre}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  }
 
-  // ✅ Renderizado normal para los demás campos
-  return (
-    <div key={name} className="flex flex-col gap-1">
-      <Label className="text-gray-700 font-medium">
-        {fieldLabels[name]}
-      </Label>
-      <Input
-        type={
-          [
-            "observaciones",
-            "no_poliza",
-            "numero_credito_sifco",
-          ].includes(name)
-            ? "text"
-            : "number"
-        }
-        name={name}
-        value={formik.values[name] ?? ""}
-        onChange={formik.handleChange}
-        className="bg-blue-50 border-blue-200 text-gray-800"
-        min={
-          [
-            "observaciones",
-            "no_poliza",
-            "numero_credito_sifco",
-          ].includes(name)
-            ? undefined
-            : 0
-        }
-        step="any"
-      />
-    </div>
-  );
-})}
+                  // ✅ Renderizado normal para los demás campos
+                  return (
+                    <div key={name} className="flex flex-col gap-1">
+                      <Label className="text-gray-700 font-medium">
+                        {fieldLabels[name]}
+                      </Label>
+                      <Input
+                        type={
+                          [
+                            "observaciones",
+                            "no_poliza",
+                            "numero_credito_sifco",
+                          ].includes(name)
+                            ? "text"
+                            : "number"
+                        }
+                        name={name}
+                        value={formik.values[name] ?? ""}
+                        onChange={formik.handleChange}
+                        className="bg-blue-50 border-blue-200 text-gray-800"
+                        min={
+                          [
+                            "observaciones",
+                            "no_poliza",
+                            "numero_credito_sifco",
+                          ].includes(name)
+                            ? undefined
+                            : 0
+                        }
+                        step="any"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -346,15 +362,7 @@ export function ModalEditCredit({
                         max={100}
                       />
                     </div>
-                    <div className="w-36 min-w-[120px]">
-                      <Label>Cuota Inversionista</Label>
-                      <Input
-                        type="number"
-                        name={`investors.${index}.cuota_inversionista`}
-                        value={inv.cuota_inversionista ?? ""}
-                        onChange={formik.handleChange}
-                      />
-                    </div>
+
                     <Button
                       type="button"
                       variant="outline"
@@ -375,6 +383,13 @@ export function ModalEditCredit({
                 <Plus className="w-4 h-4" />
                 Agregar Inversionista
               </Button>
+
+              {/* 🔥 MOSTRAR ERROR DE VALIDACIÓN */}
+              {formik.errors.investors && typeof formik.errors.investors === 'string' && (
+                <div className="text-red-600 text-sm font-medium bg-red-50 border border-red-200 rounded-lg p-3">
+                  ⚠️ {formik.errors.investors}
+                </div>
+              )}
             </div>
           </form>
         </div>

@@ -3,6 +3,7 @@ import pandas as pd
 import requests
 from typing import List, Dict, Any
 from collections import defaultdict
+import json
 
 # ============================================
 # 🔧 CONFIGURACIÓN
@@ -179,6 +180,54 @@ def detectar_pools_raros(df: pd.DataFrame, col_credito: str, col_nombre: str, co
     return creditos_pool_raro
 
 # ============================================
+# 🔍 VALIDAR PORCENTAJES
+# ============================================
+def validar_porcentajes(fila: Dict[str, Any], credito_sifco: str) -> Dict[str, Any]:
+    """
+    Valida que los porcentajes sean correctos
+    Retorna dict con warnings si hay problemas
+    """
+    warnings = []
+    
+    try:
+        # Obtener porcentajes
+        pct_cash_in = float(fila.get('PorcentajeCashIn', 0) or 0)
+        pct_inversionista = float(fila.get('PorcentajeInversionista', 0) or 0)
+        
+        # Validar que estén en formato decimal (0.0 a 1.0)
+        if pct_cash_in > 1.0 or pct_inversionista > 1.0:
+            warnings.append(f"⚠️ Porcentajes parecen estar en formato entero (>1.0)")
+            warnings.append(f"   Cash-In: {pct_cash_in}, Inversionista: {pct_inversionista}")
+            
+            # Intentar corregir asumiendo que están en formato 20, 80 en lugar de 0.2, 0.8
+            if pct_cash_in > 1.0:
+                pct_cash_in_corregido = pct_cash_in / 100
+                warnings.append(f"   🔧 Corrigiendo Cash-In: {pct_cash_in} → {pct_cash_in_corregido}")
+                fila['PorcentajeCashIn'] = pct_cash_in_corregido
+                pct_cash_in = pct_cash_in_corregido
+            
+            if pct_inversionista > 1.0:
+                pct_inv_corregido = pct_inversionista / 100
+                warnings.append(f"   🔧 Corrigiendo Inversionista: {pct_inversionista} → {pct_inv_corregido}")
+                fila['PorcentajeInversionista'] = pct_inv_corregido
+                pct_inversionista = pct_inv_corregido
+        
+        # Validar que sumen aproximadamente 1.0 (100%)
+        suma = pct_cash_in + pct_inversionista
+        if abs(suma - 1.0) > 0.01:  # Tolerancia de 1%
+            warnings.append(f"⚠️ Porcentajes no suman 100%: {suma*100:.2f}%")
+            warnings.append(f"   Cash-In: {pct_cash_in*100}% + Inversionista: {pct_inversionista*100}%")
+    
+    except (ValueError, TypeError) as e:
+        warnings.append(f"❌ Error validando porcentajes: {e}")
+    
+    return {
+        'valido': len(warnings) == 0,
+        'warnings': warnings,
+        'fila_corregida': fila
+    }
+
+# ============================================
 # 📖 FUNCIÓN PARA LEER UNA HOJA Y AGRUPAR
 # ============================================
 def leer_hoja_excel(
@@ -188,6 +237,7 @@ def leer_hoja_excel(
     """
     Lee una hoja específica del Excel y agrupa filas por crédito.
     Detecta pools raros y los convierte automáticamente.
+    🔥 EVITA DUPLICAR INVERSIONISTAS EN POOLS RAROS
     """
     print(f"\n{'='*70}")
     print(f"📄 Procesando hoja: {nombre_hoja}")
@@ -222,6 +272,7 @@ def leer_hoja_excel(
         col_credito = None
         col_nombre = None
         col_formato = None
+        col_inversionista = None
         
         for col in df.columns:
             col_normalizado = str(col).lower().replace('#', '').replace('crédito', 'credito').strip()
@@ -230,13 +281,17 @@ def leer_hoja_excel(
                 col_credito = col
                 print(f"✅ Columna crédito: '{col}'")
             
-            if not col_nombre and 'nombre' in col_normalizado and 'formato' not in col_normalizado:
+            if not col_nombre and 'nombre' in col_normalizado and 'formato' not in col_normalizado and 'inversionista' not in col_normalizado:
                 col_nombre = col
                 print(f"✅ Columna nombre: '{col}'")
             
             if not col_formato and 'formato' in col_normalizado and 'credito' in col_normalizado:
                 col_formato = col
                 print(f"✅ Columna formato: '{col}'")
+            
+            if not col_inversionista and 'inversionista' in col_normalizado and 'porcentaje' not in col_normalizado and 'cuota' not in col_normalizado and 'iva' not in col_normalizado:
+                col_inversionista = col
+                print(f"✅ Columna inversionista: '{col}'")
         
         if not col_credito:
             print(f"❌ No se encontró columna de CréditoSIFCO")
@@ -247,6 +302,9 @@ def leer_hoja_excel(
         
         if not col_formato:
             print(f"⚠️ No se encontró columna de Formato crédito")
+        
+        if not col_inversionista:
+            print(f"⚠️ No se encontró columna de Inversionista")
         
         # Limpiar DataFrame
         df_clean = df.dropna(subset=[col_credito])
@@ -276,31 +334,47 @@ def leer_hoja_excel(
                     continue
                 
                 cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
-                if numero_credito_raw not in clientes_creditos[cliente]:
-                    clientes_creditos[cliente].append(numero_credito_raw)
+                inversionista = str(row[col_inversionista]).strip() if col_inversionista and row[col_inversionista] else ""
+                
+                # 🔥 Clave única: credito + inversionista (para evitar duplicados)
+                clave_unica = f"{numero_credito_raw}||{inversionista}"
+                
+                if clave_unica not in clientes_creditos[cliente]:
+                    clientes_creditos[cliente].append(clave_unica)
             
             # Crear mapeo de variaciones
-            for cliente, creditos in clientes_creditos.items():
-                creditos_ordenados = sorted(set(creditos))
+            for cliente, claves in clientes_creditos.items():
+                # Extraer solo los créditos únicos
+                creditos_unicos = list(set([c.split('||')[0] for c in claves]))
+                creditos_ordenados = sorted(creditos_unicos)
                 
                 print(f"\n   🔧 Cliente: {cliente}")
                 print(f"      Créditos pool raro: {creditos_ordenados}")
                 
-                # El primero es la base
-                base = creditos_ordenados[0]
-                mapeo_variaciones[base] = base
-                print(f"      ✅ Base: {base}")
+                # 🔥 IMPORTANTE: Crear variaciones ÚNICAS por crédito + inversionista
+                inversionistas_por_credito = defaultdict(int)
                 
-                # Los demás se convierten en variaciones
-                for idx, credito in enumerate(creditos_ordenados[1:], start=1):
-                    variacion = f"{base}_{idx}"
-                    mapeo_variaciones[credito] = variacion
-                    print(f"      🔄 {credito} → {variacion}")
+                for clave in claves:
+                    credito_raw, inversionista = clave.split('||')
+                    
+                    # Si es el primer crédito Y el primer inversionista → sin variación
+                    if credito_raw == creditos_ordenados[0] and inversionistas_por_credito[credito_raw] == 0:
+                        mapeo_variaciones[clave] = credito_raw
+                        print(f"      ✅ Base: {credito_raw} (Inv: {inversionista[:20]}...)")
+                    else:
+                        # Calcular índice de variación basado en el número de inversionistas ya procesados
+                        idx_variacion = sum(1 for k in mapeo_variaciones.keys() if k.startswith(credito_raw + '||'))
+                        variacion = f"{credito_raw}_{idx_variacion + 1}"
+                        mapeo_variaciones[clave] = variacion
+                        print(f"      🔄 {credito_raw} → {variacion} (Inv: {inversionista[:20]}...)")
+                    
+                    inversionistas_por_credito[credito_raw] += 1
             
             print(f"\n{'─'*70}\n")
         
         # 🎯 AGRUPAR FILAS
         creditos_data = {}
+        warnings_globales = []
         
         for idx, row in df_clean.iterrows():
             numero_credito_raw = str(row[col_credito]).strip()
@@ -309,12 +383,32 @@ def leer_hoja_excel(
                 continue
             
             cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
+            inversionista = str(row[col_inversionista]).strip() if col_inversionista and row[col_inversionista] else ""
+            
+            # Convertir fila con mapeo
+            fila_dict = {}
+            for col in df.columns:
+                valor = row[col]
+                nombre_campo = MAPEO_COLUMNAS.get(col, col)
+                fila_dict[nombre_campo] = convertir_valor(nombre_campo, valor)
+            
+            # 🔍 VALIDAR PORCENTAJES
+            validacion = validar_porcentajes(fila_dict, numero_credito_raw)
+            if not validacion['valido']:
+                warnings_globales.extend(validacion['warnings'])
+                print(f"\n⚠️ Warnings para {numero_credito_raw}:")
+                for warning in validacion['warnings']:
+                    print(f"   {warning}")
+            
+            # Usar fila corregida
+            fila_dict = validacion['fila_corregida']
             
             # 🔥 DETERMINAR EL CRÉDITO FINAL
-            if numero_credito_raw in mapeo_variaciones:
+            clave_unica = f"{numero_credito_raw}||{inversionista}"
+            
+            if clave_unica in mapeo_variaciones:
                 # Es un pool raro, usar el mapeo
-                numero_credito_final = mapeo_variaciones[numero_credito_raw]
-                # La base es el crédito sin variación
+                numero_credito_final = mapeo_variaciones[clave_unica]
                 numero_credito_base = numero_credito_final.split('_')[0]
             else:
                 # No es pool raro, usar lógica normal
@@ -328,13 +422,6 @@ def leer_hoja_excel(
                     'cliente': cliente,
                     'filas': []
                 }
-            
-            # Convertir fila con mapeo
-            fila_dict = {}
-            for col in df.columns:
-                valor = row[col]
-                nombre_campo = MAPEO_COLUMNAS.get(col, col)
-                fila_dict[nombre_campo] = convertir_valor(nombre_campo, valor)
             
             # 🔥 SOBRESCRIBIR el CreditoSIFCO con el número final (puede tener variación)
             fila_dict['CreditoSIFCO'] = numero_credito_final
@@ -373,13 +460,18 @@ def leer_hoja_excel(
         print(f"   🟢 Pools normales (con _1, _2): {pools_normales}")
         print(f"   🟡 Pools raros convertidos: {pools_raros_convertidos}")
         
+        if warnings_globales:
+            print(f"\n⚠️ Total de warnings: {len(warnings_globales)}")
+        
         # Mostrar ejemplos
         print(f"\n📋 Primeros 3 créditos:")
         for credito_key, credito_data in list(creditos_data.items())[:3]:
             creditos_en_pool = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
+            inversionistas_en_pool = set(f.get('Inversionista', 'N/A') for f in credito_data['filas'])
             print(f"   📋 {credito_data['creditoBase']}: {credito_data['cliente']}")
             print(f"      Filas: {len(credito_data['filas'])}")
             print(f"      Créditos: {', '.join(sorted(creditos_en_pool))}")
+            print(f"      Inversionistas: {', '.join(sorted(inversionistas_en_pool))}")
         
         if len(creditos_data) > 3:
             print(f"   ... y {len(creditos_data) - 3} créditos más")
@@ -402,6 +494,12 @@ def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dic
     print(f"      - Crédito: {credito_data['creditoBase']}")
     print(f"      - Cliente: {credito_data['cliente']}")
     print(f"      - Filas: {len(credito_data['filas'])}")
+    
+    # Mostrar inversionistas únicos
+    inversionistas_unicos = set(f.get('Inversionista', 'N/A') for f in credito_data['filas'])
+    print(f"      - Inversionistas únicos: {len(inversionistas_unicos)}")
+    for inv in sorted(inversionistas_unicos):
+        print(f"         • {inv}")
     
     # Mostrar si tiene variaciones
     creditos_en_pool = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
@@ -442,6 +540,10 @@ def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dic
                 print(f"      - Crédito ID: {resultado.get('credito_id', 'N/A')}")
             if 'inversionistas_procesados' in resultado:
                 print(f"      - Inversionistas procesados: {resultado.get('inversionistas_procesados', 'N/A')}")
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado.get('inversionistas_no_encontrados', [])
+                if no_encontrados:
+                    print(f"      - ⚠️ No encontrados: {', '.join(no_encontrados)}")
         
         return resultado
         
@@ -502,6 +604,7 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
         'creditos_exitosos': 0,
         'creditos_fallidos': 0,
         'creditos_no_encontrados': 0,
+        'inversionistas_no_encontrados': []
     }
     
     for nombre_hoja in HOJAS_A_PROCESAR:
@@ -532,6 +635,19 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
             
             if resultado.get('success'):
                 stats_globales['creditos_exitosos'] += 1
+                
+                # Recopilar inversionistas no encontrados
+                if 'inversionistas_no_encontrados' in resultado:
+                    no_encontrados = resultado['inversionistas_no_encontrados']
+                    if no_encontrados:
+                        stats_globales['inversionistas_no_encontrados'].extend([
+                            {
+                                'credito': credito_data['creditoBase'],
+                                'cliente': credito_data['cliente'],
+                                'inversionista': inv
+                            }
+                            for inv in no_encontrados
+                        ])
             elif resultado.get('status') == 'no_encontrado':
                 stats_globales['creditos_no_encontrados'] += 1
             else:
@@ -547,6 +663,26 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
     print(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
     print(f"   ⏭️  No encontrados: {stats_globales['creditos_no_encontrados']}")
     print(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    # Mostrar inversionistas no encontrados
+    if stats_globales['inversionistas_no_encontrados']:
+        print(f"\n{'='*70}")
+        print(f"⚠️  INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        print(f"{'='*70}")
+        
+        # Agrupar por inversionista
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            print(f"\n❌ {inversionista}")
+            for cred in creditos:
+                print(f"   - {cred['credito']} ({cred['cliente']})")
+    
     print(f"{'='*70}\n")
 
 # ============================================

@@ -1,92 +1,92 @@
 import * as React from "react";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
-} from "@/components/ui/sidebar";
-import {
   Banknote,
   CreditCard,
   ListOrdered,
   LogOut,
   Landmark,
+  ChevronDown,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
 import { useAuth } from "@/Provider/authProvider";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 const menuOptions = [
   {
     key: "registro-prestamo",
     label: "Registro Crédito",
-    icon: <Banknote className="mr-2 h-5 w-5" />,
+    icon: <Banknote className="h-5 w-5" />,
     path: "/realizarCredito",
     roles: ["ADMIN"],
   },
   {
     key: "registro-pago",
     label: "Registro Pago",
-    icon: <CreditCard className="mr-2 h-5 w-5" />,
+    icon: <CreditCard className="h-5 w-5" />,
     path: "/realizarPago",
     roles: ["ADMIN", "ASESOR"],
   },
   {
     key: "total-prestamos",
     label: "Créditos",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/creditos",
     roles: ["ADMIN", "CONTA", "ASESOR"],
   },
   {
     key: "total-pagos",
     label: "Pagos",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/pagos",
     roles: ["ADMIN", "CONTA", "ASESOR"],
   },
   {
     key: "investors",
     label: "Inversionistas",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/inversionistas",
     roles: ["ADMIN"],
   },
   {
     key: "advisors",
     label: "Usuarios",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/usuarios",
     roles: ["ADMIN"],
   },
   {
     key: "late-fee",
     label: "Moras",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/mora",
     roles: ["ADMIN"],
   },
   {
     key: "banks-fee",
     label: "Bancos",
-    icon: <Landmark className="mr-2 h-5 w-5" />,
+    icon: <Landmark className="h-5 w-5" />,
     path: "/bancos",
     roles: ["ADMIN"],
   },
   {
     key: "summary-advisors",
     label: "Resumen de Asesores",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/resumenAsesores",
     roles: ["ADMIN", "ASESOR"],
   },
   {
     key: "payment-agreements",
     label: "Convenios",
-    icon: <ListOrdered className="mr-2 h-5 w-5" />,
+    icon: <ListOrdered className="h-5 w-5" />,
     path: "/convenios",
     roles: ["ADMIN"],
   },
@@ -107,106 +107,129 @@ export function DashBoardCartera() {
     user ? opt.roles.includes(user.role) : false
   );
 
-  const renderMenu = (closeMenu?: () => void) => (
-    <SidebarMenu className="space-y-1">
-      {filteredOptions.map((opt) => (
-        <SidebarMenuItem key={opt.key}>
-          <SidebarMenuButton
-            isActive={location.pathname === opt.path}
-            onClick={() => {
-              navigate(opt.path);
-              if (closeMenu) closeMenu();
-            }}
-            className={`w-full flex items-center text-left text-gray-900 font-medium rounded-lg transition-all duration-200 ease-in-out
-              ${
-                location.pathname === opt.path
-                  ? "bg-white border border-blue-600 shadow-md font-bold ring-2 ring-blue-100 ring-inset scale-[1.02]"
-                  : "hover:bg-blue-50 hover:scale-[1.01]"
-              }`}
-            style={
-              location.pathname === opt.path
-                ? { borderLeftWidth: 6, borderLeftColor: "#2563eb" }
-                : undefined
-            }
-          >
-            {opt.icon}
-            {opt.label}
-          </SidebarMenuButton>
-        </SidebarMenuItem>
-      ))}
-    </SidebarMenu>
-  );
-
   return (
     <>
-      {/* 🔹 Hamburguesa SOLO en mobile */}
-      <button
-        className="fixed top-4 left-4 z-50 lg:hidden p-2 rounded-full bg-white shadow-lg border border-blue-100 hover:shadow-xl hover:scale-105 transition-all duration-200"
-        onClick={() => setMenuOpen(true)}
-        aria-label="Abrir menú"
-      >
-        <Menu className="h-7 w-7 text-blue-700" />
-      </button>
+      {/* 🔥 NAVBAR HORIZONTAL - DESKTOP */}
+<nav className="hidden lg:flex sticky top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg h-16">
+ 
+        <div className="w-full max-w-[1920px] mx-auto px-6 flex items-center justify-between">
+          {/* Logo */}
+          <div className="flex items-center gap-4">
+            <img
+              src="/logo-cashin.png"
+              alt="Club Cashin Logo"
+              className="h-10 drop-shadow-md"
+              style={{ objectFit: "contain" }}
+            />
+          </div>
 
-      {/* 🔹 Sidebar COMPLETAMENTE ESTÁTICO - SIN COLAPSO - SIEMPRE VISIBLE */}
-      <Sidebar className="hidden lg:flex fixed left-0 top-0 h-screen bg-gradient-to-b from-[#f8fbff] to-white border-r-4 border-blue-600 shadow-xl w-[260px] flex-col overflow-hidden">
-        {" "}
-        {/* Header fijo en la parte superior */}
-        <SidebarHeader className="flex-shrink-0 flex flex-col items-center justify-center py-6 px-6 border-b border-blue-100">
+          {/* Menu Items - Horizontal */}
+          <div className="flex items-center gap-2 flex-1 justify-center">
+            {filteredOptions.map((opt) => (
+              <button
+                key={opt.key}
+                onClick={() => navigate(opt.path)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap ${
+                  location.pathname === opt.path
+                    ? "bg-blue-600 text-white shadow-md scale-105"
+                    : "text-gray-700 hover:bg-blue-100 hover:scale-105"
+                }`}
+              >
+                {opt.icon}
+                <span className="text-sm">{opt.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* User Info + Logout */}
+          <div className="flex items-center gap-3">
+            {user && (
+              <div className="bg-blue-50 rounded-lg px-4 py-2 border border-blue-200">
+                <p className="text-sm font-semibold text-gray-900">
+                  {user.email.split("@")[0]}
+                </p>
+                <p className="text-xs text-gray-500">{user.role}</p>
+              </div>
+            )}
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-red-600 font-medium hover:bg-red-50 transition-all duration-200"
+            >
+              <LogOut className="h-5 w-5" />
+              <span className="text-sm">Salir</span>
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* 🔥 NAVBAR MOBILE - Con Hamburguesa */}<nav className="lg:hidden sticky top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg h-16">
+
+        <div className="w-full px-4 flex items-center justify-between h-full">
+          {/* Hamburguesa */}
+          <button
+            className="p-2 rounded-lg bg-white shadow-md border border-blue-100 hover:shadow-xl hover:scale-105 transition-all duration-200"
+            onClick={() => setMenuOpen(true)}
+            aria-label="Abrir menú"
+          >
+            <Menu className="h-6 w-6 text-blue-700" />
+          </button>
+
+          {/* Logo centrado */}
           <img
             src="/logo-cashin.png"
             alt="Club Cashin Logo"
-            className="h-12 mb-3 drop-shadow-md"
+            className="h-8 drop-shadow-md"
             style={{ objectFit: "contain" }}
           />
+
+          {/* User Dropdown */}
           {user && (
-            <div className="text-center bg-blue-50 rounded-lg px-4 py-2 w-full">
-              <p className="text-sm font-semibold text-gray-900 truncate">
-                Hola, {user.email.split("@")[0]}
-              </p>
-              <p className="text-xs text-gray-500 font-medium">
-                Rol: {user.role}
-              </p>
-            </div>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 hover:bg-blue-100 transition-all">
+                  <div className="text-right">
+                    <p className="text-xs font-semibold text-gray-900">
+                      {user.email.split("@")[0]}
+                    </p>
+                  </div>
+                  <ChevronDown className="h-4 w-4 text-blue-600" />
+                </button>
+              </DropdownMenuTrigger>
+
+              <DropdownMenuContent align="end" className="w-48">
+                <div className="px-3 py-2">
+                  <p className="text-sm font-semibold text-gray-900">
+                    {user.email.split("@")[0]}
+                  </p>
+                  <p className="text-xs text-gray-500">Rol: {user.role}</p>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="text-red-600 cursor-pointer"
+                >
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Cerrar sesión
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
-        </SidebarHeader>
-        {/* Contenido con scroll independiente */}
-        <SidebarContent className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
-          <div className="flex flex-col h-full justify-between">
-            {/* Menú principal */}
-            <div className="flex-1">{renderMenu()}</div>
+        </div>
+      </nav>
 
-            {/* Botón de logout fijo en la parte inferior */}
-            <div className="mt-6 pt-4 border-t border-blue-100">
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton
-                    onClick={handleLogout}
-                    className="w-full flex items-center text-left text-red-600 font-medium rounded-lg hover:bg-red-50 transition-all duration-200 hover:scale-[1.02]"
-                  >
-                    <LogOut className="mr-2 h-5 w-5" />
-                    Cerrar sesión
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </div>
-          </div>
-        </SidebarContent>
-        {/* ⚠️ REMOVIDO: SidebarRail (la barrita que permite colapsar) */}
-      </Sidebar>
-
-      {/* 🔹 Drawer en mobile - MEJORADO */}
+      {/* 🔥 DRAWER MOBILE - Igual que antes */}
       {menuOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
-          {/* Overlay con animación */}
+          {/* Overlay */}
           <div
             className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm animate-fadeIn"
             onClick={() => setMenuOpen(false)}
           />
 
-          {/* Drawer con animación de entrada */}
+          {/* Drawer */}
           <aside className="relative bg-gradient-to-b from-white to-blue-50 w-80 max-w-[85vw] h-full shadow-2xl border-r-4 border-blue-600 flex flex-col overflow-hidden animate-slideInLeft">
-            {/* Botón de cerrar */}
+            {/* Botón cerrar */}
             <button
               className="absolute top-4 right-4 z-10 p-2 rounded-full bg-blue-50 hover:bg-blue-100 transition-all duration-200 hover:rotate-90"
               onClick={() => setMenuOpen(false)}
@@ -216,7 +239,7 @@ export function DashBoardCartera() {
             </button>
 
             {/* Header */}
-            <SidebarHeader className="flex-shrink-0 flex flex-col items-center justify-center py-6 px-6 border-b border-blue-100">
+            <div className="flex-shrink-0 flex flex-col items-center justify-center py-6 px-6 border-b border-blue-100">
               <img
                 src="/logo-cashin.png"
                 alt="Club Cashin Logo"
@@ -233,36 +256,50 @@ export function DashBoardCartera() {
                   </p>
                 </div>
               )}
-            </SidebarHeader>
+            </div>
 
-            {/* Contenido con scroll */}
-            <SidebarContent className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
-              <div className="flex flex-col h-full justify-between">
-                <div className="flex-1">
-                  {renderMenu(() => setMenuOpen(false))}
-                </div>
+            {/* Menu Items */}
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
+              <div className="flex flex-col gap-2">
+                {filteredOptions.map((opt) => (
+                  <button
+                    key={opt.key}
+                    onClick={() => {
+                      navigate(opt.path);
+                      setMenuOpen(false);
+                    }}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition-all duration-200 text-left ${
+                      location.pathname === opt.path
+                        ? "bg-blue-600 text-white shadow-md"
+                        : "text-gray-700 hover:bg-blue-100"
+                    }`}
+                  >
+                    {opt.icon}
+                    <span>{opt.label}</span>
+                  </button>
+                ))}
 
-                <div className="mt-6 pt-4 border-t border-blue-100">
-                  <SidebarMenu>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton
-                        onClick={() => {
-                          handleLogout();
-                          setMenuOpen(false);
-                        }}
-                        className="w-full flex items-center text-left text-red-600 font-medium rounded-lg hover:bg-red-50 transition-all duration-200"
-                      >
-                        <LogOut className="mr-2 h-5 w-5" />
-                        Cerrar sesión
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  </SidebarMenu>
+                {/* Logout en el drawer */}
+                <div className="mt-4 pt-4 border-t border-blue-200">
+                  <button
+                    onClick={() => {
+                      handleLogout();
+                      setMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium text-red-600 hover:bg-red-50 transition-all duration-200"
+                  >
+                    <LogOut className="h-5 w-5" />
+                    <span>Cerrar sesión</span>
+                  </button>
                 </div>
               </div>
-            </SidebarContent>
+            </div>
           </aside>
         </div>
       )}
+
+      {/* 🔥 SPACER para que el contenido no quede debajo del navbar */}
+     
     </>
   );
 }

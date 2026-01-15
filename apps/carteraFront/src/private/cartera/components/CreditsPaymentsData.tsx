@@ -280,12 +280,12 @@ export function ListaCreditosPagos() {
   }
 
   return (
-    <div
-      className={`
-        fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8
-        ${isMobile ? "" : "overflow-x-auto"}
-      `}
-    >
+<div
+  className={`
+    flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-8
+    ${isMobile ? "" : "overflow-x-auto"}
+  `}
+>
       {/* Título */}
       <div className="flex flex-col items-center mb-6">
         <h1 className="text-3xl font-extrabold text-blue-700 text-center">

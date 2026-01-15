@@ -8,7 +8,7 @@ import {
   cuotas_credito, 
   pagos_credito 
 } from "../database/db";
-import { findOrCreateAdvisorByName } from "./advisor";
+import { findOrCreateAdvisorByName, getAsesorConMenorCarga } from "./advisor";
 import { findOrCreateUserByName } from "./users";
 
 // ========================================
@@ -16,8 +16,7 @@ import { findOrCreateUserByName } from "./users";
 // ========================================
 
 interface Inversionista {
-  inversionista_id: number;
-  cuota_inversionista?: number;
+  inversionista_id: number; 
   porcentaje_cash_in: number;
   porcentaje_inversion: number;
   monto_aportado: number;
@@ -55,8 +54,8 @@ interface CreditDataForInsert {
   gps: string;
   observaciones: string;
   no_poliza: string;
-  como_se_entero: string;
   asesor_id: number;
+  como_se_entero: string; 
   plazo: number;
   iva_12: string;
   membresias_pago: string;
@@ -155,8 +154,7 @@ const creditSchema = z.object({
   gps: z.number().min(0),
   observaciones: z.string().max(1000),
   no_poliza: z.string().max(1000),
-  como_se_entero: z.string().max(100),
-  asesor: z.number().max(1000),
+  como_se_entero: z.string().max(100), 
   plazo: z.number().int().min(1).max(360),
   cuota: z.number().min(0),
   membresias_pago: z.number().min(0),
@@ -180,8 +178,7 @@ const creditSchema = z.object({
         inversionista_id: z.number().int().positive(),
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
-        porcentaje_inversion: z.number().min(0).max(100),
-        cuota_inversionista: z.number().min(0).optional(),
+        porcentaje_inversion: z.number().min(0).max(100), 
       })
     )
     .min(0),
@@ -201,25 +198,7 @@ const creditSchema = z.object({
 // ========================================
 
 const validateCreditData = (creditData: CreditData, set: SetContext): ValidationResult => {
-  // Validar suma de cuotas inversionistas
-  const totalCuotaInversionista = creditData.inversionistas.reduce(
-    (acc: Big, inv: Inversionista) => acc.plus(inv.cuota_inversionista ?? 0),
-    new Big(0)
-  );
-
-  const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
-  if (Number(creditData.cuota) !== totalCuotaInversionistaRedondeado.toNumber()) {
-    set.status = 400;
-    return {
-      success: false,
-      error: {
-        message: "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
-        cuotaEsperada: creditData.cuota,
-        totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
-      }
-    };
-  }
-
+ 
   // Validar porcentajes cash_in + inversion = 100
   for (const inv of creditData.inversionistas) {
     const sumaPorcentajes = Number(inv.porcentaje_cash_in ?? 0) + Number(inv.porcentaje_inversion ?? 0);
@@ -295,7 +274,9 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     creditData.pais ?? null
   );
 
-  
+  console.log("🎯 Aplicando load balancing de asesores...");
+  const asesor_id = await getAsesorConMenorCarga();
+  console.log(`✅ Asesor asignado automáticamente: ${asesor_id}`);
 
   const formatCredit = creditData.inversionistas.some(
     (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
@@ -315,7 +296,7 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
     observaciones: creditData.observaciones ?? "0",
     no_poliza: creditData.no_poliza ?? "",
     como_se_entero: creditData.como_se_entero ?? "",
-    asesor_id: parseInt(creditData.asesor),
+    asesor_id: asesor_id,
     plazo: creditData.plazo,
     iva_12: iva_12.toString(),
     membresias_pago: creditData.membresias_pago.toString(),
@@ -350,54 +331,86 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
   }
 
   // Insertar inversionistas
-  const creditosInversionistasData: InversionistaData[] = creditData.inversionistas.map((inv: Inversionista) => {
-    const montoAportado = new Big(inv.monto_aportado);
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(inv.porcentaje_inversion);
-    const interes = new Big(creditDataForInsert.porcentaje_interes ?? 0);
-    const newCuotaInteres = new Big(montoAportado ?? 0).times(interes.div(100));
+  const capitalTotal = new Big(creditData.capital);
+const cuotaTotal = new Big(creditData.cuota);
 
-    const montoInversionista = newCuotaInteres.times(porcentajeInversion).div(100).toFixed(2);
-    const montoCashIn = newCuotaInteres.times(porcentajeCashIn).div(100).toFixed(2);
+const creditosInversionistasData: InversionistaData[] = creditData.inversionistas.map((inv: Inversionista) => {
+  const montoAportado = new Big(inv.monto_aportado);
+  const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+  const porcentajeInversion = new Big(inv.porcentaje_inversion);
+  
+  // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN EN BASE AL CAPITAL
+  const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+  
+  console.log(`📊 Inversionista ${inv.inversionista_id}:`);
+  console.log(`   - Monto aportado: Q${montoAportado.toFixed(2)}`);
+  console.log(`   - % Participación: ${porcentajeParticipacion.toFixed(2)}%`);
+  
+  // 🔥 CALCULAR CUOTA DEL INVERSIONISTA (% participación * cuota total)
+  const cuotaInversionista = cuotaTotal.times(porcentajeParticipacion.div(100)).round(2);
+  
+  console.log(`   - Cuota calculada: Q${cuotaInversionista.toFixed(2)}`);
+  
+  // Calcular interés sobre el monto aportado
+  const interes = new Big(creditDataForInsert.porcentaje_interes ?? 0);
+  const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
 
-    const ivaInversionista = Number(montoInversionista) > 0 
-      ? new Big(montoInversionista).times(0.12) 
-      : new Big(0);
-    const ivaCashIn = Number(montoCashIn) > 0 
-      ? new Big(montoCashIn).times(0.12) 
-      : new Big(0);
+  // Distribución del interés entre inversionista y cash-in
+  const montoInversionista = newCuotaInteres.times(porcentajeInversion).div(100).round(2);
+  const montoCashIn = newCuotaInteres.times(porcentajeCashIn).div(100).round(2);
 
-    const cuotaInv = inv.cuota_inversionista === 0
-      ? creditData.cuota.toString()
-      : inv.cuota_inversionista?.toString() ?? creditData.cuota.toString();
+  // Calcular IVAs
+  const ivaInversionista = Number(montoInversionista) > 0 
+    ? montoInversionista.times(0.12).round(2)
+    : new Big(0);
+  const ivaCashIn = Number(montoCashIn) > 0 
+    ? montoCashIn.times(0.12).round(2)
+    : new Big(0);
 
-    return {
-      credito_id: newCredit.credito_id,
-      inversionista_id: inv.inversionista_id,
-      monto_aportado: montoAportado.toString(),
-      porcentaje_cash_in: porcentajeCashIn.toString(),
-      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-      monto_inversionista: montoInversionista.toString(),
-      monto_cash_in: montoCashIn.toString(),
-      iva_inversionista: ivaInversionista.toString(),
-      iva_cash_in: ivaCashIn.toString(),
-      fecha_creacion: new Date(),
-      cuota_inversionista: cuotaInv,
-    };
-  });
+  return {
+    credito_id: newCredit.credito_id,
+    inversionista_id: inv.inversionista_id,
+    monto_aportado: montoAportado.toString(),
+    porcentaje_cash_in: porcentajeCashIn.toString(),
+    porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+    monto_inversionista: montoInversionista.toString(),
+    monto_cash_in: montoCashIn.toString(),
+    iva_inversionista: ivaInversionista.toString(),
+    iva_cash_in: ivaCashIn.toString(),
+    fecha_creacion: new Date(),
+    cuota_inversionista: cuotaInversionista.toString(), // 🔥 CALCULADA AUTOMÁTICAMENTE
+  };
+});
 
-  let total_monto_cash_in = new Big(0);
-  let total_iva_cash_in = new Big(0);
+// 🔥 VALIDAR QUE LA SUMA DE CUOTAS CALCULADAS = CUOTA TOTAL
+const sumaCuotasCalculadas = creditosInversionistasData.reduce(
+  (acc, inv) => acc.plus(inv.cuota_inversionista),
+  new Big(0)
+);
 
-  creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }: InversionistaData) => {
-    total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
-    total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
-  });
+console.log(`🔍 Validación de cuotas:`);
+console.log(`   - Cuota total del crédito: Q${cuotaTotal.toFixed(2)}`);
+console.log(`   - Suma de cuotas inversionistas: Q${sumaCuotasCalculadas.toFixed(2)}`);
+console.log(`   - Diferencia: Q${cuotaTotal.minus(sumaCuotasCalculadas).abs().toFixed(2)}`);
 
-  if (creditosInversionistasData.length > 0) {
-    await db.insert(creditos_inversionistas).values(creditosInversionistasData);
-  }
+// Validar con tolerancia de 0.01 por redondeo
+if (cuotaTotal.minus(sumaCuotasCalculadas).abs().gt(0.01)) {
+  throw new Error(
+    `Error en cálculo de cuotas: La suma de cuotas inversionistas (${sumaCuotasCalculadas.toFixed(2)}) no coincide con la cuota total (${cuotaTotal.toFixed(2)})`
+  );
+}
 
+let total_monto_cash_in = new Big(0);
+let total_iva_cash_in = new Big(0);
+
+creditosInversionistasData.forEach(({ monto_cash_in, iva_cash_in }: InversionistaData) => {
+  total_monto_cash_in = total_monto_cash_in.plus(monto_cash_in);
+  total_iva_cash_in = total_iva_cash_in.plus(iva_cash_in);
+});
+
+if (creditosInversionistasData.length > 0) {
+  await db.insert(creditos_inversionistas).values(creditosInversionistasData);
+}
   return {
     newCredit,
     creditDataForInsert,
@@ -626,6 +639,7 @@ const insertPayments = async (
       observaciones: "",
       paymentFalse: false,
       pagoConvenio: "0",
+      
     });
   }
 

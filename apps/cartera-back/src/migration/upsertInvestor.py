@@ -9,7 +9,7 @@ from datetime import datetime
 # ============================================
 # 🔧 CONFIGURACIÓN
 # ============================================
-CARPETA_EXCELS_LIQUIDACIONES = r"C:\Users\Kelvin Palacios\Documents\analis de datos\Liquidaciones"
+CARPETA_EXCELS_LIQUIDACIONES = r"C:\Users\Kelvin Palacios\Documents\analis de datos\Liquidaciones\LiquidacionesEnero"
 
 # EXCEL CON DPIs
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"

@@ -1,0 +1,835 @@
+{
+	"info": {
+		"_postman_id": "a0951585-16cf-4831-925c-0f177ac478a9",
+		"name": "Clientes API",
+		"description": "Colección para probar todos los endpoints de clientes",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "9622069",
+		"_collection_link": "https://cash-in-9010.postman.co/workspace/CASH-IN-Workspace~a5a8b32e-2ead-432c-8436-d6dda8691598/collection/9622069-a0951585-16cf-4831-925c-0f177ac478a9?action=share&source=collection_link&creator=9622069"
+	},
+	"item": [
+		{
+			"name": "WSClientesEmailConsulta",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/consultar-email",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"consultar-email"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSVerPrestamosPorCliente",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"clienteCodigo\": 1132}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/prestamos",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"prestamos"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "/TCrPrestamos/{PreNumero}",
+			"protocolProfileBehavior": {
+				"disableBodyPruning": true
+			},
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "Genexus-Agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"clienteCodigo\": 1132}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/creditos/01022001200083",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"creditos",
+						"01022001200083"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSVerCuotasPorPrestamo",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Genexus-Agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"numeroPrestamo\": 01010104173600\r\n  }",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/creditos/cuotas",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"creditos",
+						"cuotas"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Estado De cuenta",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Genexus-Agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"numeroPrestamo\": \"01010214104070\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/creditos/estado-cuenta",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"creditos",
+						"estado-cuenta"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSVerPrestamosPorCliente Copy",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!7f3ea25bba3e70de8ae86181158d230a90ef08b165c5cb7b45bba316db21fe3f25860d1fa83188",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"ClCliCod\": 1132}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://test.sifco.org/ClubCashIn/rest/WSVerPrestamosPorCliente",
+					"protocol": "https",
+					"host": [
+						"test",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSVerPrestamosPorCliente"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "/TCrPrestamos/{PreNumero}",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "GET",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!7f3ea25bba3e70de8ae86181158d230a90ef08b165c5cb7b45bba316db21fe3f25860d1fa83188",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "https://test.sifco.org/ClubCashIn/rest/TCrPrestamos/01010214110410",
+					"protocol": "https",
+					"host": [
+						"test",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"TCrPrestamos",
+						"01010214110410"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSInformacionPrestamo",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!69d66decfa2cc4fba81b16aba3b292d41a932eeb156577cc99d3d9a917bcb9beb7177aa35da256",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n   \"ConsultaValorIdentificador\": \"01010104154890\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/WSInformacionPrestamo",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSInformacionPrestamo"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSVerCuotasPorPrestamo",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!7f3ea25bba3e70de8ae86181158d230a90ef08b165c5cb7b45bba316db21fe3f25860d1fa83188",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n   \"NumeroPrestamo\": \"01010214110410\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://test.sifco.org/ClubCashIn/rest/WSVerCuotasPorPrestamo",
+					"protocol": "https",
+					"host": [
+						"test",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSVerCuotasPorPrestamo"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSRecargosLibres",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!ce290cd3f9669781bd877c8134aef60452852245f02f7476d29e3c2fe5ce1cc67af3474e9d1141",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n    \"Modo\": \"DSP\",\r\n    \"ConsultaNumeroPrestamo\":\"01010214119010\",\r\n    \"RecargosLibres\": []\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/WSRecargosLibres",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSRecargosLibres"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSCrEstadoCuenta Copy",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!ce290cd3f9669781bd877c8134aef60452852245f02f7476d29e3c2fe5ce1cc67af3474e9d1141",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n   \"NumeroPrestamo\": \"01010214114920\" \r\n \r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/WSCrEstadoCuenta",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSCrEstadoCuenta"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSCrEstadoCuenta",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!ce290cd3f9669781bd877c8134aef60452852245f02f7476d29e3c2fe5ce1cc67af3474e9d1141",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n   \"NumeroPrestamo\": \"01010214114920\" \r\n \r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://app.sifco.org/ClubCashIn/rest/WSCrEstadoCuenta",
+					"protocol": "https",
+					"host": [
+						"app",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSCrEstadoCuenta"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "WSRecargosLibres Copy",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "authorization",
+						"value": "OAuth e12cbbcf-0042-4e30-96b3-c66d356c742b!7f3ea25bba3e70de8ae86181158d230a90ef08b165c5cb7b45bba316db21fe3f25860d1fa83188",
+						"type": "text"
+					},
+					{
+						"key": "genexus-agent",
+						"value": "SmartDevice Application",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n   \"NumeroPrestamo\": \"01010214110410\"\r\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "https://test.sifco.org/ClubCashIn/rest/WSVerCuotasPorPrestamo",
+					"protocol": "https",
+					"host": [
+						"test",
+						"sifco",
+						"org"
+					],
+					"path": [
+						"ClubCashIn",
+						"rest",
+						"WSVerCuotasPorPrestamo"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Listar clientes Copy",
+			"request": {
+				"auth": {
+					"type": "bearer"
+				},
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/clientes?limite=10&pagina=1",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes"
+					],
+					"query": [
+						{
+							"key": "limite",
+							"value": "10"
+						},
+						{
+							"key": "pagina",
+							"value": "1"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Obtener cliente por ID",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/123",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"123"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Obtener cuentas del cliente",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/123/cuentas",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"123",
+						"cuentas"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Obtener historial crediticio",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/123/historial-crediticio",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"123",
+						"historial-crediticio"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Obtener documentos del cliente",
+			"request": {
+				"method": "GET",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/123/documentos",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"123",
+						"documentos"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Buscar clientes",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"nombre\": \"Juan\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/buscar",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"buscar"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Validar cliente",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"tipoIdentificacion\": \"DPI\",\n  \"numeroIdentificacion\": \"1234567890101\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/validar",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"validar"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Crear cliente",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"nombre\": \"Pedro\",\n  \"dpi\": \"1234567890101\",\n  \"telefono\": \"55555555\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/clientes",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Agregar documento a cliente",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"tipo\": \"DPI\",\n  \"archivo\": \"base64string...\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/123/documentos",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"123",
+						"documentos"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Actualizar cliente",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"telefono\": \"987654321\"\n}"
+				},
+				"url": {
+					"raw": "http://localhost:9000/api/clientes/123",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"clientes",
+						"123"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "token-api",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"url": {
+					"raw": "http://localhost:9000/api/auth/test",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "9000",
+					"path": [
+						"api",
+						"auth",
+						"test"
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "New Request",
+			"request": {
+				"method": "GET",
+				"header": []
+			},
+			"response": []
+		}
+	]
+}

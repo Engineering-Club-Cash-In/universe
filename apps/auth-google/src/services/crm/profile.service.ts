@@ -74,6 +74,7 @@ export interface SendLeadPayload {
   telefono?: string;
   dpi: string;
   descripcion?: string;
+  isRegister?: boolean;
 }
 
 // ============================================

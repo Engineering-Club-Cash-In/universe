@@ -259,6 +259,7 @@ function QuoterPage() {
 		defaultValues: {
 			opportunityId: "",
 			vehicleId: "",
+			creditType: "sobre_vehiculo" as "autocompra" | "sobre_vehiculo",
 			vehicleBrand: "",
 			vehicleLine: "",
 			vehicleModel: "",
@@ -287,6 +288,9 @@ function QuoterPage() {
 			leasingContractCost: 0,
 			collectionAuthCost: 0,
 			legalCost: 0,
+			// Gastos específicos de Autocompras
+			appointmentCost: 0,
+			addressVerificationCost: 0,
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
@@ -320,6 +324,9 @@ function QuoterPage() {
 				leasingContractCost: Number(value.leasingContractCost),
 				collectionAuthCost: Number(value.collectionAuthCost),
 				legalCost: Number(value.legalCost),
+				// Gastos específicos de Autocompras
+				appointmentCost: Number(value.appointmentCost),
+				addressVerificationCost: Number(value.addressVerificationCost),
 			});
 		},
 	});
@@ -364,11 +371,6 @@ function QuoterPage() {
 		const transferCost = Number(values.transferCost);
 		const membershipCost = Number(values.membershipCost);
 
-		// Calcular royalty: 4% del monto a financiar
-		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
-		const calculatedRoyalty = amountToFinance * (royaltyPercentage / 100);
-		quoterForm.setFieldValue("royalty", Math.round(calculatedRoyalty * 100) / 100);
-
 		// Calcular Gastos Administrativos según Excel
 		// B22 = Monto a financiar + Traspaso + 1400 + GPS + Seguro
 		const b22 = amountToFinance + transferCost + 1400 + gpsCost + insuranceCost;
@@ -380,6 +382,12 @@ function QuoterPage() {
 
 		// Actualizar el campo de gastos administrativos
 		quoterForm.setFieldValue("adminCost", Math.round(adminCost * 100) / 100);
+
+		// Calcular royalty: 4% del monto total a financiar (monto a financiar + gastos administrativos + traspaso)
+		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
+		const baseForRoyalty = amountToFinance + adminCost + transferCost;
+		const calculatedRoyalty = baseForRoyalty * (royaltyPercentage / 100);
+		quoterForm.setFieldValue("royalty", Math.round(calculatedRoyalty * 100) / 100);
 
 		// Costos que se financian (NO incluyen seguro ni GPS)
 		// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
@@ -529,7 +537,7 @@ function QuoterPage() {
 									Asignar a Oportunidad (Opcional)
 								</CardTitle>
 							</CardHeader>
-							<CardContent>
+							<CardContent className="space-y-4">
 								<quoterForm.Field name="opportunityId">
 									{(field) => (
 										<Combobox
@@ -537,19 +545,72 @@ function QuoterPage() {
 												{ value: "none", label: "Sin oportunidad" },
 												...(opportunitiesQuery.data?.map((opp: any) => ({
 													value: opp.id,
-													label: `${opp.title} - ${opp.lead ? `${opp.lead.firstName} ${opp.lead.lastName}` : "Sin lead"}`,
+													label: `${opp.title} - ${opp.lead ? `${opp.lead.firstName} ${opp.lead.lastName}` : "Sin lead"} (${opp.creditType === "autocompra" ? "Autocompra" : "Sobre Vehículo"})`,
 												})) || []),
 											]}
 											value={field.state.value || "none"}
-											onChange={(value) =>
-												field.handleChange(value === "none" ? "" : value)
-											}
+											onChange={(value) => {
+												field.handleChange(value === "none" ? "" : value);
+												// Auto-seleccionar el tipo de crédito de la oportunidad
+												if (value && value !== "none") {
+													const selectedOpp = opportunitiesQuery.data?.find(
+														(opp: any) => opp.id === value,
+													);
+													if (selectedOpp?.creditType) {
+														quoterForm.setFieldValue(
+															"creditType",
+															selectedOpp.creditType,
+														);
+													}
+												}
+											}}
 											onSearchChange={setOpportunitiesSearch}
 											isLoading={opportunitiesQuery.isFetching}
 											placeholder="Buscar oportunidad..."
 											width="full"
 										/>
 									)}
+								</quoterForm.Field>
+
+								{/* Selector de Tipo de Crédito */}
+								<quoterForm.Field name="creditType">
+									{(field) => {
+										const hasOpportunity = !!quoterForm.state.values.opportunityId;
+										const selectedOpp = opportunitiesQuery.data?.find(
+											(opp: any) => opp.id === quoterForm.state.values.opportunityId,
+										);
+										const isDisabled = hasOpportunity && !!selectedOpp?.creditType;
+
+										return (
+											<div>
+												<Label htmlFor={field.name} className="mb-2">
+													Tipo de Crédito
+												</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(value as "autocompra" | "sobre_vehiculo")
+													}
+													disabled={isDisabled}
+												>
+													<SelectTrigger>
+														<SelectValue placeholder="Seleccionar tipo..." />
+													</SelectTrigger>
+													<SelectContent>
+														<SelectItem value="autocompra">Autocompra</SelectItem>
+														<SelectItem value="sobre_vehiculo">
+															Sobre Vehículo
+														</SelectItem>
+													</SelectContent>
+												</Select>
+												{isDisabled && (
+													<p className="mt-1 text-muted-foreground text-xs">
+														Tipo de crédito definido por la oportunidad
+													</p>
+												)}
+											</div>
+										);
+									}}
 								</quoterForm.Field>
 							</CardContent>
 						</Card>
@@ -970,7 +1031,7 @@ function QuoterPage() {
 													<Label htmlFor={field.name}>Royalty</Label>
 													<span className="text-muted-foreground text-xs">
 														{quoterForm.state.values.royaltyPercentage}% del
-														monto a financiar
+														monto total a financiar
 													</span>
 												</div>
 												<Input
@@ -1208,6 +1269,51 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
+
+									{/* Campos específicos de Autocompras */}
+									{quoterForm.state.values.creditType === "autocompra" && (
+										<>
+											<quoterForm.Field name="appointmentCost">
+												{(field) => (
+													<div>
+														<Label htmlFor={field.name} className="mb-2">
+															Nombramiento
+														</Label>
+														<Input
+															id={field.name}
+															type="number"
+															step="0.01"
+															value={field.state.value || ""}
+															onChange={(e) =>
+																field.handleChange(Number(e.target.value) || 0)
+															}
+															placeholder="0"
+														/>
+													</div>
+												)}
+											</quoterForm.Field>
+
+											<quoterForm.Field name="addressVerificationCost">
+												{(field) => (
+													<div>
+														<Label htmlFor={field.name} className="mb-2">
+															Verificación de dirección
+														</Label>
+														<Input
+															id={field.name}
+															type="number"
+															step="0.01"
+															value={field.state.value || ""}
+															onChange={(e) =>
+																field.handleChange(Number(e.target.value) || 0)
+															}
+															placeholder="0"
+														/>
+													</div>
+												)}
+											</quoterForm.Field>
+										</>
+									)}
 								</div>
 							</CardContent>
 						</Card>

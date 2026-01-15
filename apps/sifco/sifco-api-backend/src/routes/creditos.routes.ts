@@ -27,6 +27,199 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
     });
   }
 
+  // GET /api/creditos/verificar-cuotas-diciembre
+  // Endpoint para verificar cuotas de diciembre 2025 contra el archivo credits.txt
+  // NOTA: Este endpoint debe estar ANTES de GET /api/creditos/:id para evitar que sea interceptado
+  if (method === 'GET' && path.length === 3 && path[2] === 'verificar-cuotas-diciembre') {
+    try {
+      console.log('📋 Iniciando verificación de cuotas de diciembre 2025...');
+      
+      // Leer el archivo credits.txt y convertirlo en array
+      const fs = await import('node:fs');
+      const pathModule = await import('node:path');
+      const creditsFilePath = pathModule.join(import.meta.dir, '..', 'utils', 'credits.txt');
+      const creditsContent = fs.readFileSync(creditsFilePath, 'utf-8');
+      
+      // Parsear el archivo: cada línea tiene "numeroPrestamo\tcuotaEsperada"
+      const creditosEsperados = creditsContent
+        .split('\n')
+        .filter(line => line.trim() !== '')
+        .map(line => {
+          const [numeroPrestamo, cuotaEsperada] = line.split('\t');
+          return {
+            numeroPrestamo: numeroPrestamo.trim(),
+            cuotaEsperadaDic2025: Number.parseInt(cuotaEsperada.trim(), 10)
+          };
+        });
+
+      console.log(`📊 Total de créditos a verificar: ${creditosEsperados.length}`);
+
+      const discrepancias: {
+        numeroPrestamo: string;
+        cuotaEsperada: number;
+        cuotaEncontrada: number | null;
+        fechaCuota: string | null;
+        error?: string;
+      }[] = [];
+
+      const resultadosExitosos: {
+        numeroPrestamo: string;
+        cuotaEsperada: number;
+        cuotaEncontrada: number;
+      }[] = [];
+
+      // Procesar cada crédito
+      for (const credito of creditosEsperados) {
+        try {
+          console.log(`🔍 Consultando crédito: ${credito.numeroPrestamo}`);
+          
+          const estadoCuenta = await creditosService.consultarEstadoCuentaPrestamo(credito.numeroPrestamo);
+          
+          if (!estadoCuenta.success || !estadoCuenta.data) {
+            discrepancias.push({
+              numeroPrestamo: credito.numeroPrestamo,
+              cuotaEsperada: credito.cuotaEsperadaDic2025,
+              cuotaEncontrada: null,
+              fechaCuota: null,
+              error: estadoCuenta.error || 'No se pudo obtener estado de cuenta'
+            });
+            continue;
+          }
+
+          const planPagosCuotas = estadoCuenta.data.ConsultaResultado?.PlanPagos_Cuotas || [];
+          
+          // Buscar la cuota de diciembre 2025 (formato fecha: YYYY-MM-DD)
+          const cuotaDic2025 = planPagosCuotas.find(cuota => {
+            const fecha = cuota.Fecha;
+            // Verificar que sea diciembre 2025 (mes 12, año 2025)
+            if (fecha) {
+              const [year, month] = fecha.split('-');
+              return year === '2025' && month === '12';
+            }
+            return false;
+          });
+
+          if (!cuotaDic2025) {
+            discrepancias.push({
+              numeroPrestamo: credito.numeroPrestamo,
+              cuotaEsperada: credito.cuotaEsperadaDic2025,
+              cuotaEncontrada: null,
+              fechaCuota: null,
+              error: 'No se encontró cuota para diciembre 2025'
+            });
+            continue;
+          }
+
+          const cuotaEncontrada = cuotaDic2025.CapitalNumeroCuota;
+
+          // Comparar con la cuota esperada
+          if (cuotaEncontrada === credito.cuotaEsperadaDic2025) {
+            resultadosExitosos.push({
+              numeroPrestamo: credito.numeroPrestamo,
+              cuotaEsperada: credito.cuotaEsperadaDic2025,
+              cuotaEncontrada: cuotaEncontrada
+            });
+          } else {
+            discrepancias.push({
+              numeroPrestamo: credito.numeroPrestamo,
+              cuotaEsperada: credito.cuotaEsperadaDic2025,
+              cuotaEncontrada: cuotaEncontrada,
+              fechaCuota: cuotaDic2025.Fecha
+            });
+          }
+
+        } catch (err: any) {
+          discrepancias.push({
+            numeroPrestamo: credito.numeroPrestamo,
+            cuotaEsperada: credito.cuotaEsperadaDic2025,
+            cuotaEncontrada: null,
+            fechaCuota: null,
+            error: err.message || 'Error desconocido'
+          });
+        }
+      }
+
+      console.log(`✅ Verificación completada. Discrepancias encontradas: ${discrepancias.length}`);
+
+      // Guardar resultados en archivo txt
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const outputFilePath = pathModule.join(import.meta.dir, '..', 'utils', `verificacion-cuotas-${timestamp}.txt`);
+      
+      let outputContent = `=== VERIFICACIÓN DE CUOTAS DICIEMBRE 2025 ===\n`;
+      outputContent += `Fecha de ejecución: ${new Date().toLocaleString()}\n`;
+      outputContent += `Total de créditos verificados: ${creditosEsperados.length}\n`;
+      outputContent += `Coincidencias: ${resultadosExitosos.length}\n`;
+      outputContent += `Discrepancias: ${discrepancias.length}\n\n`;
+      
+      outputContent += `=== DISCREPANCIAS ===\n`;
+      if (discrepancias.length === 0) {
+        outputContent += `No se encontraron discrepancias.\n`;
+      } else {
+        for (const d of discrepancias) {
+          outputContent += `\nPréstamo: ${d.numeroPrestamo}\n`;
+          outputContent += `  Cuota esperada (txt): ${d.cuotaEsperada}\n`;
+          outputContent += `  Cuota encontrada (SIFCO): ${d.cuotaEncontrada ?? 'N/A'}\n`;
+          outputContent += `  Fecha cuota: ${d.fechaCuota ?? 'N/A'}\n`;
+          if (d.error) {
+            outputContent += `  Error: ${d.error}\n`;
+          }
+        }
+      }
+      
+      outputContent += `\n=== COINCIDENCIAS ===\n`;
+      for (const r of resultadosExitosos) {
+        outputContent += `Préstamo: ${r.numeroPrestamo} - Cuota: ${r.cuotaEncontrada} ✓\n`;
+      }
+      
+      // Escribir archivo
+      fs.writeFileSync(outputFilePath, outputContent, 'utf-8');
+      console.log(`📄 Resultados guardados en: ${outputFilePath}`);
+      
+      // También imprimir resumen en consola
+      console.log('\n========== RESUMEN ==========');
+      console.log(`Total créditos: ${creditosEsperados.length}`);
+      console.log(`Coincidencias: ${resultadosExitosos.length}`);
+      console.log(`Discrepancias: ${discrepancias.length}`);
+      if (discrepancias.length > 0) {
+        console.log('\n--- DISCREPANCIAS ---');
+        for (const d of discrepancias) {
+          console.log(`${d.numeroPrestamo}: esperado=${d.cuotaEsperada}, encontrado=${d.cuotaEncontrada ?? 'N/A'} ${d.error ? `(${d.error})` : ''}`);
+        }
+      }
+      console.log('=============================\n');
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            totalCreditos: creditosEsperados.length,
+            coincidencias: resultadosExitosos.length,
+            discrepancias: discrepancias.length,
+            detalleDiscrepancias: discrepancias,
+            detalleCoincidencias: resultadosExitosos
+          }
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+
+    } catch (err: any) {
+      console.error('❌ Error en verificar-cuotas-diciembre:', err);
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `[ERROR] Falló la verificación de cuotas: ${err.message || err}`,
+        }),
+        {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  }
+
   // GET /api/creditos/:id
   if (method === 'GET' && path.length === 3) {
     const creditoId = path[2];

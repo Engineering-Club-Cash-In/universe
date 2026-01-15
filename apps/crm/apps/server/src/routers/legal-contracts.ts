@@ -102,7 +102,7 @@ export const legalContractsRouter = {
 					},
 				})
 				.from(generatedLegalContracts)
-				.innerJoin(leads, eq(generatedLegalContracts.leadId, leads.id))
+				.leftJoin(leads, eq(generatedLegalContracts.leadId, leads.id))
 				.leftJoin(
 					opportunities,
 					eq(generatedLegalContracts.opportunityId, opportunities.id),
@@ -135,6 +135,10 @@ export const legalContractsRouter = {
 				})
 				.from(generatedLegalContracts)
 				.innerJoin(leads, eq(generatedLegalContracts.leadId, leads.id))
+				.leftJoin(
+					opportunities,
+					eq(generatedLegalContracts.opportunityId, opportunities.id),
+				)
 				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId))
 				.orderBy(generatedLegalContracts.generatedAt);
 

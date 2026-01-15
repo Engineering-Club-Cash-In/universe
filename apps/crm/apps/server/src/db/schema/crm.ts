@@ -138,7 +138,6 @@ export const leads = pgTable("leads", {
 	loanAmount: decimal("loan_amount", { precision: 12, scale: 2 }),
 	occupation: occupationTypeEnum("occupation"),
 	workTime: workTimeEnum("work_time"),
-	loanPurpose: loanPurposeEnum("loan_purpose"),
 	ownsHome: boolean("owns_home").default(false),
 	ownsVehicle: boolean("owns_vehicle").default(false),
 	hasCreditCard: boolean("has_credit_card").default(false),
@@ -238,6 +237,8 @@ export const opportunities = pgTable("opportunities", {
 	companyId: uuid("company_id").references(() => companies.id),
 	vehicleId: uuid("vehicle_id").references(() => vehicles.id), // Relación con vehículo (opcional)
 	creditType: creditTypeEnum("credit_type").notNull().default("autocompra"),
+	source: leadSourceEnum("source"), // Source of the opportunity (from lead or input)
+	loanPurpose: loanPurposeEnum("loan_purpose"), // Purpose of the loan (migrated from leads)
 	value: decimal("value", { precision: 12, scale: 2 }),
 	stageId: uuid("stage_id")
 		.notNull()
@@ -273,7 +274,7 @@ export const opportunities = pgTable("opportunities", {
 	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
 	numeroSifco: text("numero_sifco"), // SIFCO credit number
 	rubros: text("rubros"), // JSON string with expense items (rubros)
-	direccion: text("direccion"), // Client address
+	gastosAdministrativos: decimal("gastos_administrativos", { precision: 12, scale: 2 }), // Administrative expenses (for "otros" in cartera-back)
 
 	// Credit Detail Approval (40% → 50%)
 	creditDetailApproved: boolean("credit_detail_approved").default(false),

@@ -70,7 +70,6 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
-	getLoanPurposeLabel,
 	getMaritalStatusLabel,
 	getOccupationLabel,
 	getSourceLabel,
@@ -198,9 +197,9 @@ function RouteComponent() {
 
 	// Query para obtener departamentos de Guatemala
 	const departamentosQuery = useQuery<string[]>({
+		...orpc.getDepartamentos.queryOptions(),
 		queryKey: ["getDepartamentos"],
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		queryFn: () => (client as any).getDepartamentos(),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role),
@@ -267,7 +266,6 @@ function RouteComponent() {
 			loanAmount: "",
 			occupation: "employee" as "owner" | "employee",
 			workTime: "1_to_5" as "less_than_1" | "1_to_5" | "5_to_10" | "10_plus",
-			loanPurpose: "personal" as "personal" | "business",
 			ownsHome: false,
 			ownsVehicle: false,
 			hasCreditCard: false,
@@ -330,7 +328,6 @@ function RouteComponent() {
 				maritalStatus: value.maritalStatus || undefined,
 				occupation: value.occupation || undefined,
 				workTime: value.workTime || undefined,
-				loanPurpose: value.loanPurpose || undefined,
 				dpi: value.dpi || undefined,
 				middleName: value.middleName || undefined,
 				secondLastName: value.secondLastName || undefined,
@@ -545,10 +542,6 @@ function RouteComponent() {
 			createLeadForm.setFieldValue(
 				"workTime",
 				editingLead.workTime || "1_to_5",
-			);
-			createLeadForm.setFieldValue(
-				"loanPurpose",
-				editingLead.loanPurpose || "personal",
 			);
 			createLeadForm.setFieldValue("ownsHome", editingLead.ownsHome || false);
 			createLeadForm.setFieldValue(
@@ -1479,37 +1472,6 @@ function RouteComponent() {
 												</createLeadForm.Field>
 											</div>
 										</div>
-										<div>
-											<createLeadForm.Field name="loanPurpose">
-												{(field) => (
-													<div className="space-y-2">
-														<Label htmlFor={field.name}>
-															Propósito del Préstamo
-														</Label>
-														<Select
-															value={field.state.value}
-															onValueChange={(value) =>
-																field.handleChange(
-																	value as "personal" | "business",
-																)
-															}
-														>
-															<SelectTrigger>
-																<SelectValue placeholder="Seleccionar propósito" />
-															</SelectTrigger>
-															<SelectContent>
-																<SelectItem value="personal">
-																	Personal
-																</SelectItem>
-																<SelectItem value="business">
-																	Negocio
-																</SelectItem>
-															</SelectContent>
-														</Select>
-													</div>
-												)}
-											</createLeadForm.Field>
-										</div>
 									</div>
 
 									{/* Assets */}
@@ -1659,8 +1621,9 @@ function RouteComponent() {
 												}
 											>
 												{state.isSubmitting || createLeadMutation.isPending
-													? "Creando..."
-													: "Crear Lead"}
+													? "Cargando...":
+														editingLead ? "Editar Lead" : "Crear Lead"
+													}
 											</Button>
 										)}
 									</createLeadForm.Subscribe>
@@ -2083,16 +2046,6 @@ function RouteComponent() {
 											<p className="font-medium text-sm">
 												{selectedLead.loanAmount
 													? formatCurrency(selectedLead.loanAmount)
-													: "No especificado"}
-											</p>
-										</div>
-										<div>
-											<Label className="font-medium text-muted-foreground text-sm">
-												Propósito del Préstamo
-											</Label>
-											<p className="text-sm">
-												{selectedLead.loanPurpose
-													? getLoanPurposeLabel(selectedLead.loanPurpose)
 													: "No especificado"}
 											</p>
 										</div>

@@ -127,7 +127,6 @@ export async function getLeadByEmail(c: Context) {
 			loanAmount: result.lead.loanAmount,
 			occupation: result.lead.occupation,
 			workTime: result.lead.workTime,
-			loanPurpose: result.lead.loanPurpose,
 			ownsHome: result.lead.ownsHome,
 			ownsVehicle: result.lead.ownsVehicle,
 			hasCreditCard: result.lead.hasCreditCard,
@@ -252,15 +251,9 @@ export async function updateLeadByEmail(c: Context) {
 				updatedAt: leads.updatedAt,
 			});
 
-		// If address was updated, also update all opportunities associated with this lead
-		if (address !== undefined && updatedLead) {
-			await db
-				.update(opportunities)
-				.set({
-					direccion: address,
-					updatedAt: new Date(),
-				})
-				.where(eq(opportunities.leadId, updatedLead.id));
+// If address was updated, also update the lead direccion
+	if (address !== undefined && updatedLead) {
+		// Direccion is now only in the leads table, no need to update opportunities
 		}
 
 		// If DPI was updated, call RENAP to get information

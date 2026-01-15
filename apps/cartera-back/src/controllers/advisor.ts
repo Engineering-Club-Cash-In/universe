@@ -1,7 +1,7 @@
 // controllers/advisors.ts
 import { db } from '../database/index';
 import { asesores, creditos, moras_credito, platform_users } from '../database/db/schema';
-import { and, eq, like, sql } from 'drizzle-orm';
+import { and, eq, like, or, sql } from 'drizzle-orm';
 import bcrypt from "bcrypt";
 import Big from 'big.js';
 export const insertAdvisor = async ({ body, set }: any) => {
@@ -415,5 +415,94 @@ export async function getCreditosPorAsesorController(
   } catch (error) {
     console.error("❌ Error general en getCreditosPorAsesorController:", error);
     throw new Error(`Error obteniendo créditos por asesor: ${error}`);
+  }
+}
+
+
+
+interface AsesorConCarga {
+  asesor_id: number;
+  nombre: string; 
+  total_creditos: number;
+  capital_total: string;
+}
+
+export async function getAsesorConMenorCarga(): Promise<number> {
+  try {
+    console.log("🔍 Buscando asesor con menor carga de capital...");
+
+    // 1️⃣ Obtener todos los asesores activos
+    const asesoresActivos = await db
+      .select({
+        asesor_id: asesores.asesor_id,
+        nombre: asesores.nombre, 
+      })
+      .from(asesores)
+      .where(eq(asesores.activo, true));
+
+    if (asesoresActivos.length === 0) {
+      throw new Error("No hay asesores activos disponibles");
+    }
+
+    console.log(`👥 Asesores activos encontrados: ${asesoresActivos.length}`);
+
+    // 2️⃣ Calcular carga de capital por cada asesor
+    const asesoresConCarga: AsesorConCarga[] = await Promise.all(
+      asesoresActivos.map(async (asesor) => {
+        // Obtener todos los créditos ACTIVOS del asesor
+         const creditosAsesor = await db
+          .select({
+            capital: creditos.capital,
+            statusCredit: creditos.statusCredit,
+          })
+          .from(creditos)
+          .where(
+            and(
+              eq(creditos.asesor_id, asesor.asesor_id),
+              or(
+                eq(creditos.statusCredit, "ACTIVO"),
+                eq(creditos.statusCredit, "MOROSO")
+              )
+            )
+          );
+
+
+        // Sumar el capital total
+        let capitalTotal = new Big(0);
+        creditosAsesor.forEach((c) => {
+          capitalTotal = capitalTotal.plus(c.capital || 0);
+        });
+
+        return {
+          asesor_id: asesor.asesor_id,
+          nombre: asesor.nombre,
+          total_creditos: creditosAsesor.length,
+          capital_total: capitalTotal.toFixed(2),
+        };
+      })
+    );
+
+    // 3️⃣ Ordenar por capital total (menor a mayor)
+    asesoresConCarga.sort((a, b) => {
+      return new Big(a.capital_total).cmp(new Big(b.capital_total));
+    });
+
+    console.log("📊 Carga de asesores:");
+    asesoresConCarga.forEach((a) => {
+      console.log(
+        `   - ${a.nombre}: ${a.total_creditos} créditos, Capital: Q${a.capital_total}`
+      );
+    });
+
+    // 4️⃣ Retornar el ID del asesor con menor carga
+    const asesorSeleccionado = asesoresConCarga[0];
+    console.log(
+      `✅ Asesor seleccionado: ${asesorSeleccionado.nombre} (ID: ${asesorSeleccionado.asesor_id})`
+    );
+
+    return asesorSeleccionado.asesor_id;
+  } catch (error) {
+    console.error("❌ Error obteniendo asesor con menor carga:", error);
+    throw new Error(`Error en load balancing de asesores: ${error}`);
   }
 }

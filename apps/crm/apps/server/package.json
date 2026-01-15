@@ -35,7 +35,8 @@
 		"hono": "^4.8.2",
 		"pg": "^8.14.1",
 		"zod": "^3.23.8",
-		"@repo/infornet": "file:../../../../packages/infornet"
+		"@repo/infornet": "file:../../../../packages/infornet",
+		"@repo/sms": "file:../../../../packages/sms"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.2.6",

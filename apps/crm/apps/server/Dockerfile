@@ -8,11 +8,16 @@ WORKDIR /usr/src/app
 FROM base AS builder
 WORKDIR /usr/src/app
 
-# Copiamos el paquete infornet (dependencia local)
+# Copiamos los paquetes locales (infornet y sms)
 COPY packages/infornet ./packages/infornet
+COPY packages/sms ./packages/sms
 
 # Instalamos dependencias del paquete infornet
 WORKDIR /usr/src/app/packages/infornet
+RUN bun install
+
+# Instalamos dependencias del paquete sms
+WORKDIR /usr/src/app/packages/sms
 RUN bun install
 
 # Copiamos el código del server manteniendo la estructura de rutas
@@ -22,6 +27,12 @@ COPY apps/crm/apps/server ./apps/crm/apps/server
 # Instalamos dependencias desde el directorio del server
 WORKDIR /usr/src/app/apps/crm/apps/server
 RUN bun install
+
+# Reemplazar los symlinks de @repo/* con el contenido real
+RUN rm -rf node_modules/@repo/infornet node_modules/@repo/sms && \
+    mkdir -p node_modules/@repo && \
+    cp -r /usr/src/app/packages/infornet node_modules/@repo/infornet && \
+    cp -r /usr/src/app/packages/sms node_modules/@repo/sms
 
 # Compilamos la app
 RUN bun build \

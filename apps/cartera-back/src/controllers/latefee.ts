@@ -261,7 +261,7 @@ export async function procesarMoras() {
     hoy.setHours(0, 0, 0, 0); // Resetear a medianoche
     console.log("[INFO] Current Guatemala date (midnight):", hoy.toISOString());
 
-    // 1. Get all installments
+    // 1. Get all installments WITH PROPER JOIN
     const cuotas = await db
       .select({
         credito_id: cuotas_credito.credito_id,
@@ -269,21 +269,37 @@ export async function procesarMoras() {
         pagado: cuotas_credito.pagado,
         statusCredit: creditos.statusCredit,
       })
-      .from(cuotas_credito);
+      .from(cuotas_credito)
+      .innerJoin(creditos, eq(cuotas_credito.credito_id, creditos.credito_id)); // 🔥 AGREGAR JOIN
+
+    console.log(`[DEBUG] Total installments fetched: ${cuotas.length}`);
 
     // 2. Filter overdue installments (comparación por DÍA completo)
     const cuotasVencidas = cuotas.filter((c) => {
       const fechaVenc = toZonedTime(c.fecha_vencimiento, zona);
       fechaVenc.setHours(0, 0, 0, 0); // Resetear a medianoche
       
-      return (
-        fechaVenc < hoy && 
-        c.pagado === false && 
-        c.statusCredit !== "EN_CONVENIO"
-      );
+      const isOverdue = fechaVenc < hoy;
+      const isUnpaid = c.pagado === false;
+      const isNotInAgreement = c.statusCredit !== "EN_CONVENIO";
+
+      // 🔥 LOGGING DETALLADO
+      if (isOverdue && isUnpaid) {
+        console.log(`[DEBUG] Cuota vencida encontrada:`, {
+          credito_id: c.credito_id,
+          fecha_vencimiento: fechaVenc.toISOString(),
+          hoy: hoy.toISOString(),
+          pagado: c.pagado,
+          statusCredit: c.statusCredit,
+          cumple_filtros: isNotInAgreement
+        });
+      }
+      
+      return isOverdue && isUnpaid && isNotInAgreement;
     });
 
-    console.log("[DEBUG] Overdue installments found:", cuotasVencidas);
+    console.log(`[DEBUG] Overdue installments found: ${cuotasVencidas.length}`);
+    console.log("[DEBUG] Details:", cuotasVencidas);
 
     // 3. Group by credit
     const moraPorCredito: Record<number, number> = {};
@@ -296,6 +312,12 @@ export async function procesarMoras() {
       "[DEBUG] Grouping overdue installments by credit:",
       moraPorCredito
     );
+
+    // 🔥 VERIFICAR SI HAY CRÉDITOS CON MORA
+    if (Object.keys(moraPorCredito).length === 0) {
+      console.log("[INFO] No credits with overdue installments found.");
+      return;
+    }
 
     // 4. Process each credit with overdue installments
     for (const [creditoIdStr, cuotasAtrasadas] of Object.entries(moraPorCredito)) {
@@ -319,11 +341,11 @@ export async function procesarMoras() {
       console.log(`[DEBUG] Credit capital: ${capital.toString()}`);
 
       // Calculate mora = capital × percentage × overdue installments
-      const porcentaje = new Big("0.0112"); // 1.2% monthly penalty
+      const porcentaje = new Big("0.012"); // 1.2% mensual
       const moraNueva = capital.times(porcentaje).times(cuotasAtrasadas);
       console.log(`[DEBUG] New mora calculated: ${moraNueva.toString()}`);
 
-      // 🔥 Usar el upsert en vez del if/else
+      // 🔥 Usar el upsert
       const result = await createMora({
         credito_id: creditoId,
         monto_mora: Number(moraNueva.toString()),
@@ -332,7 +354,7 @@ export async function procesarMoras() {
 
       if (result.success) {
         console.log(
-          `[SUCCESS] Mora upserted for credit #${creditoId} → Status: ${result.status}`
+          `[SUCCESS] Mora upserted for credit #${creditoId} → Status: ${result.status}, Monto: Q${moraNueva.toFixed(2)}`
         );
       } else {
         console.error(
@@ -345,6 +367,7 @@ export async function procesarMoras() {
     console.log("\n[JOB] Finished mora processing.");
   } catch (error: any) {
     console.error("[ERROR] Failed to process moras:", error.message);
+    console.error("[ERROR] Stack trace:", error.stack);
     throw error;
   }
 }

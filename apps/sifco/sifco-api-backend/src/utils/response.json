@@ -1,526 +1,2531 @@
 {
-    "success": true,
-    "data": {
-        "totalCreditos": 87,
-        "coincidencias": 8,
-        "discrepancias": 79,
-        "detalleDiscrepancias": [
-            {
-                "numeroPrestamo": "01010214108510",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-26"
-            },
-            {
-                "numeroPrestamo": "01010214103370",
-                "cuotaEsperada": 42,
-                "cuotaEncontrada": 41,
-                "fechaCuota": "2025-12-08"
-            },
-            {
-                "numeroPrestamo": "01010214107830",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010214106610",
-                "cuotaEsperada": 28,
-                "cuotaEncontrada": 27,
-                "fechaCuota": "2025-12-05"
-            },
-            {
-                "numeroPrestamo": "01010214108690",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-07"
-            },
-            {
-                "numeroPrestamo": "01010214108710",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-08"
-            },
-            {
-                "numeroPrestamo": "01010214107550",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-13"
-            },
-            {
-                "numeroPrestamo": "01010214107600",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-15"
-            },
-            {
-                "numeroPrestamo": "01010214109130",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-06"
-            },
-            {
-                "numeroPrestamo": "01010214106590",
-                "cuotaEsperada": 28,
-                "cuotaEncontrada": 27,
-                "fechaCuota": "2025-12-01"
-            },
-            {
-                "numeroPrestamo": "01010214106670",
-                "cuotaEsperada": 28,
-                "cuotaEncontrada": 27,
-                "fechaCuota": "2025-12-08"
-            },
-            {
-                "numeroPrestamo": "01010214108090",
-                "cuotaEsperada": 25,
-                "cuotaEncontrada": 24,
-                "fechaCuota": "2025-12-19"
-            },
-            {
-                "numeroPrestamo": "01010214107570",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-14"
-            },
-            {
-                "numeroPrestamo": "01010214103700",
-                "cuotaEsperada": 41,
-                "cuotaEncontrada": 40,
-                "fechaCuota": "2025-12-23"
-            },
-            {
-                "numeroPrestamo": "01010214106130",
-                "cuotaEsperada": 30,
-                "cuotaEncontrada": 29,
-                "fechaCuota": "2025-12-18"
-            },
-            {
-                "numeroPrestamo": "01010214109400",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-26"
-            },
-            {
-                "numeroPrestamo": "01010214104570",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 35,
-                "fechaCuota": "2025-12-10"
-            },
-            {
-                "numeroPrestamo": "01010214108230",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-04"
-            },
-            {
-                "numeroPrestamo": "01010214107540",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-10"
-            },
-            {
-                "numeroPrestamo": "01010214109310",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-21"
-            },
-            {
-                "numeroPrestamo": "01010214117710",
-                "cuotaEsperada": 51,
-                "cuotaEncontrada": 8,
-                "fechaCuota": "2025-12-16"
-            },
-            {
-                "numeroPrestamo": "01010214108790",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-14"
-            },
-            {
-                "numeroPrestamo": "01010214106020",
-                "cuotaEsperada": 30,
-                "cuotaEncontrada": 29,
-                "fechaCuota": "2025-12-11"
-            },
-            {
-                "numeroPrestamo": "01010214107450",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-03"
-            },
-            {
-                "numeroPrestamo": "01010214109010",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-27"
-            },
-            {
-                "numeroPrestamo": "01010214105220",
-                "cuotaEsperada": 33,
-                "cuotaEncontrada": 32,
-                "fechaCuota": "2025-12-04"
-            },
-            {
-                "numeroPrestamo": "01010214109200",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-11"
-            },
-            {
-                "numeroPrestamo": "01010214107920",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 24,
-                "fechaCuota": "2025-12-03"
-            },
-            {
-                "numeroPrestamo": "01010214117590",
-                "cuotaEsperada": 31,
-                "cuotaEncontrada": 7,
-                "fechaCuota": "2025-12-14"
-            },
-            {
-                "numeroPrestamo": "01010214108470",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-25"
-            },
-            {
-                "numeroPrestamo": "01010214103090",
-                "cuotaEsperada": 44,
-                "cuotaEncontrada": 43,
-                "fechaCuota": "2025-12-27"
-            },
-            {
-                "numeroPrestamo": "01010214117650",
-                "cuotaEsperada": 43,
-                "cuotaEncontrada": 8,
-                "fechaCuota": "2025-12-17"
-            },
-            {
-                "numeroPrestamo": "01010214107260",
-                "cuotaEsperada": 27,
-                "cuotaEncontrada": 26,
-                "fechaCuota": "2025-12-24"
-            },
-            {
-                "numeroPrestamo": "01010214107440",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-03"
-            },
-            {
-                "numeroPrestamo": "01010214103670",
-                "cuotaEsperada": 41,
-                "cuotaEncontrada": 40,
-                "fechaCuota": "2025-12-19"
-            },
-            {
-                "numeroPrestamo": "01010214118320",
-                "cuotaEsperada": 37,
-                "cuotaEncontrada": 6,
-                "fechaCuota": "2025-12-15"
-            },
-            {
-                "numeroPrestamo": "01010214105820",
-                "cuotaEsperada": 31,
-                "cuotaEncontrada": 30,
-                "fechaCuota": "2025-12-09"
-            },
-            {
-                "numeroPrestamo": "01010214107660",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-20"
-            },
-            {
-                "numeroPrestamo": "01010214109020",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010214107860",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-29"
-            },
-            {
-                "numeroPrestamo": "01010214105770",
-                "cuotaEsperada": 31,
-                "cuotaEncontrada": 30,
-                "fechaCuota": "2025-12-07"
-            },
-            {
-                "numeroPrestamo": "01010202102180",
-                "cuotaEsperada": 48,
-                "cuotaEncontrada": 47,
-                "fechaCuota": "2025-12-24"
-            },
-            {
-                "numeroPrestamo": "01010214108490",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-25"
-            },
-            {
-                "numeroPrestamo": "01010214104240",
-                "cuotaEsperada": 38,
-                "cuotaEncontrada": 37,
-                "fechaCuota": "2025-12-11"
-            },
-            {
-                "numeroPrestamo": "01010214106530",
-                "cuotaEsperada": 29,
-                "cuotaEncontrada": 28,
-                "fechaCuota": "2025-12-30"
-            },
-            {
-                "numeroPrestamo": "01010214106110",
-                "cuotaEsperada": 30,
-                "cuotaEncontrada": 29,
-                "fechaCuota": "2025-12-14"
-            },
-            {
-                "numeroPrestamo": "01010214109170",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-08"
-            },
-            {
-                "numeroPrestamo": "01010214108620",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010202117910",
-                "cuotaEsperada": 49,
-                "cuotaEncontrada": 8,
-                "fechaCuota": "2025-12-30"
-            },
-            {
-                "numeroPrestamo": "01010214107840",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-29"
-            },
-            {
-                "numeroPrestamo": "01010214107790",
-                "cuotaEsperada": 26,
-                "cuotaEncontrada": 25,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010214109410",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-26"
-            },
-            {
-                "numeroPrestamo": "01010214108410",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-23"
-            },
-            {
-                "numeroPrestamo": "01010214106510",
-                "cuotaEsperada": 29,
-                "cuotaEncontrada": 28,
-                "fechaCuota": "2025-12-29"
-            },
-            {
-                "numeroPrestamo": "01010214108760",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-12"
-            },
-            {
-                "numeroPrestamo": "01010214103920",
-                "cuotaEsperada": 40,
-                "cuotaEncontrada": 39,
-                "fechaCuota": "2025-12-29"
-            },
-            {
-                "numeroPrestamo": "01010214109040",
-                "cuotaEsperada": 23,
-                "cuotaEncontrada": 22,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010202117820",
-                "cuotaEsperada": 50,
-                "cuotaEncontrada": 8,
-                "fechaCuota": "2025-12-17"
-            },
-            {
-                "numeroPrestamo": "01010214107360",
-                "cuotaEsperada": 27,
-                "cuotaEncontrada": 26,
-                "fechaCuota": "2025-12-30"
-            },
-            {
-                "numeroPrestamo": "01010214107210",
-                "cuotaEsperada": 36,
-                "cuotaEncontrada": 32,
-                "fechaCuota": "2025-12-27"
-            },
-            {
-                "numeroPrestamo": "01010214107200",
-                "cuotaEsperada": 36,
-                "cuotaEncontrada": 32,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010202102050",
-                "cuotaEsperada": 48,
-                "cuotaEncontrada": 47,
-                "fechaCuota": "2025-12-10"
-            },
-            {
-                "numeroPrestamo": "01010214117640",
-                "cuotaEsperada": 39,
-                "cuotaEncontrada": 8,
-                "fechaCuota": "2025-12-04"
-            },
-            {
-                "numeroPrestamo": "01010214108420",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-23"
-            },
-            {
-                "numeroPrestamo": "01010214104530",
-                "cuotaEsperada": 37,
-                "cuotaEncontrada": 36,
-                "fechaCuota": "2025-12-20"
-            },
-            {
-                "numeroPrestamo": "01010214109270",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-20"
-            },
-            {
-                "numeroPrestamo": "01010214109360",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-26"
-            },
-            {
-                "numeroPrestamo": "01010202117700",
-                "cuotaEsperada": 49,
-                "cuotaEncontrada": 8,
-                "fechaCuota": "2025-12-21"
-            },
-            {
-                "numeroPrestamo": "01010214105520",
-                "cuotaEsperada": 32,
-                "cuotaEncontrada": 31,
-                "fechaCuota": "2025-12-15"
-            },
-            {
-                "numeroPrestamo": "01010214106400",
-                "cuotaEsperada": 29,
-                "cuotaEncontrada": 28,
-                "fechaCuota": "2025-12-11"
-            },
-            {
-                "numeroPrestamo": "01010214109280",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-20"
-            },
-            {
-                "numeroPrestamo": "01010214105880",
-                "cuotaEsperada": 31,
-                "cuotaEncontrada": 30,
-                "fechaCuota": "2025-12-16"
-            },
-            {
-                "numeroPrestamo": "01010214107410",
-                "cuotaEsperada": 27,
-                "cuotaEncontrada": 26,
-                "fechaCuota": "2025-12-30"
-            },
-            {
-                "numeroPrestamo": "01010214103290",
-                "cuotaEsperada": 43,
-                "cuotaEncontrada": 42,
-                "fechaCuota": "2025-12-29"
-            },
-            {
-                "numeroPrestamo": "01010214108000",
-                "cuotaEsperada": 27,
-                "cuotaEncontrada": 26,
-                "fechaCuota": "2025-12-06"
-            },
-            {
-                "numeroPrestamo": "01010214108560",
-                "cuotaEsperada": 24,
-                "cuotaEncontrada": 23,
-                "fechaCuota": "2025-12-28"
-            },
-            {
-                "numeroPrestamo": "01010202102090",
-                "cuotaEsperada": 48,
-                "cuotaEncontrada": 47,
-                "fechaCuota": "2025-12-12"
-            },
-            {
-                "numeroPrestamo": "01010214103540",
-                "cuotaEsperada": 42,
-                "cuotaEncontrada": 41,
-                "fechaCuota": "2025-12-25"
-            },
-            {
-                "numeroPrestamo": "01010214109350",
-                "cuotaEsperada": 22,
-                "cuotaEncontrada": 21,
-                "fechaCuota": "2025-12-26"
-            }
-        ],
-        "detalleCoincidencias": [
-            {
-                "numeroPrestamo": "01010214109660",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109580",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109590",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109570",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109510",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109670",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109630",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            },
-            {
-                "numeroPrestamo": "01010214109620",
-                "cuotaEsperada": 20,
-                "cuotaEncontrada": 20
-            }
-        ]
-    }
+  "success": true,
+  "data": {
+    "totalCreditos": 282,
+    "coincidencias": 19,
+    "discrepancias": 263,
+    "detalleDiscrepancias": [
+      {
+        "numeroPrestamo": "01010214115350",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 11,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 51,
+        "cuotasPorCrear": 9
+      },
+      {
+        "numeroPrestamo": "01010214106990",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010202101380",
+        "cuotaEsperada": 51,
+        "cuotaEncontrada": 50,
+        "fechaCuota": "2025-12-01",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108510",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214117990",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 6,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 45,
+        "cuotasPorCrear": 15
+      },
+      {
+        "numeroPrestamo": "01010214104200",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 0,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 44,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214108640",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-02",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202105740",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-02",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105930",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113070",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 15,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 55,
+        "cuotasPorCrear": 5
+      },
+      {
+        "numeroPrestamo": "01010214113080",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 15,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 55,
+        "cuotasPorCrear": 5
+      },
+      {
+        "numeroPrestamo": "01010214106280",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202106270",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105750",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103980",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202106640",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106250",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103370",
+        "cuotaEsperada": 42,
+        "cuotaEncontrada": 41,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105470",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-05",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107830",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102450",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 45,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117420",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-02",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 32,
+        "cuotasPorCrear": 16
+      },
+      {
+        "numeroPrestamo": "01010214104370",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 36,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107060",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202108250",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-05",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106610",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-05",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108690",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108680",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108700",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117560",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 37,
+        "cuotasPorCrear": 23
+      },
+      {
+        "numeroPrestamo": "01010214108710",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202108660",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-05",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106940",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108200",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104110",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117520",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 37,
+        "cuotasPorCrear": 23
+      },
+      {
+        "numeroPrestamo": "01010214108270",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109230",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202105710",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105260",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108070",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117580",
+        "cuotaEsperada": 45,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 23,
+        "cuotasPorCrear": 37
+      },
+      {
+        "numeroPrestamo": "01010202107530",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-09",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107550",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104440",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 36,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109160",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106800",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 28,
+        "cuotasPorCrear": 20
+      },
+      {
+        "numeroPrestamo": "01010214106360",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106340",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 38,
+        "plazoEncontrado": 38,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107600",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107460",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 47,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214107960",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117570",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 23,
+        "cuotasPorCrear": 37
+      },
+      {
+        "numeroPrestamo": "01010214104850",
+        "cuotaEsperada": 35,
+        "cuotaEncontrada": 34,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104860",
+        "cuotaEsperada": 35,
+        "cuotaEncontrada": 34,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103850",
+        "cuotaEsperada": 40,
+        "cuotaEncontrada": 39,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108780",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108880",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105320",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-17",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112950",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 15,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 30,
+        "cuotasPorCrear": 30
+      },
+      {
+        "numeroPrestamo": "01010214112940",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 15,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 30,
+        "cuotasPorCrear": 30
+      },
+      {
+        "numeroPrestamo": "01010303200670",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 57,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214109130",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104010",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106590",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-01",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106670",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108090",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104040",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117600",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 31,
+        "cuotasPorCrear": 29
+      },
+      {
+        "numeroPrestamo": "01010214105490",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108150",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 70,
+        "plazoEncontrado": 70,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107570",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108810",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115390",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 12
+      },
+      {
+        "numeroPrestamo": "01010214107220",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105330",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103700",
+        "cuotaEsperada": 41,
+        "cuotaEncontrada": 40,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108380",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106920",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108170",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104540",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 36,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103740",
+        "cuotaEsperada": 41,
+        "cuotaEncontrada": 40,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104880",
+        "cuotaEsperada": 35,
+        "cuotaEncontrada": 34,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115120",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 11,
+        "fechaCuota": "2025-12-09",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 37,
+        "cuotasPorCrear": 11
+      },
+      {
+        "numeroPrestamo": "01010214115130",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 11,
+        "fechaCuota": "2025-12-09",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 37,
+        "cuotasPorCrear": 11
+      },
+      {
+        "numeroPrestamo": "01010214108050",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108100",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106130",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105110",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-24",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202113040",
+        "cuotaEsperada": 45,
+        "cuotaEncontrada": 16,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 20,
+        "cuotasPorCrear": 28
+      },
+      {
+        "numeroPrestamo": "01010214109400",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105310",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105300",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105290",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104570",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 35,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107640",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109380",
+        "cuotaEsperada": 21,
+        "cuotaEncontrada": 20,
+        "fechaCuota": "2025-12-05",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109390",
+        "cuotaEsperada": 21,
+        "cuotaEncontrada": 20,
+        "fechaCuota": "2025-12-05",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104910",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-02",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 24
+      },
+      {
+        "numeroPrestamo": "01010214111660",
+        "cuotaEsperada": 40,
+        "cuotaEncontrada": 16,
+        "fechaCuota": "2025-12-01",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 32,
+        "cuotasPorCrear": 28
+      },
+      {
+        "numeroPrestamo": "01010214106750",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104430",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 36,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108230",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105730",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108770",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202108260",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107540",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202101800",
+        "cuotaEsperada": 49,
+        "cuotaEncontrada": 48,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104000",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106420",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-17",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109310",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117710",
+        "cuotaEsperada": 51,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 18,
+        "cuotasPorCrear": 42
+      },
+      {
+        "numeroPrestamo": "01010214108830",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117690",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 37,
+        "cuotasPorCrear": 23
+      },
+      {
+        "numeroPrestamo": "01010214106430",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107690",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103610",
+        "cuotaEsperada": 41,
+        "cuotaEncontrada": 40,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104090",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-24",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202106090",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108080",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106660",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108670",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108790",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106020",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-11",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107450",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108910",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118410",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 6,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 24,
+        "plazoEncontrado": 10,
+        "cuotasPorCrear": 14
+      },
+      {
+        "numeroPrestamo": "01010214107850",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104810",
+        "cuotaEsperada": 35,
+        "cuotaEncontrada": 34,
+        "fechaCuota": "2025-12-09",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108930",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109010",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-27",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109100",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105010",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 24
+      },
+      {
+        "numeroPrestamo": "01010214103840",
+        "cuotaEsperada": 40,
+        "cuotaEncontrada": 39,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105220",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109200",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-11",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107920",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102690",
+        "cuotaEsperada": 45,
+        "cuotaEncontrada": 44,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117590",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 37,
+        "cuotasPorCrear": 23
+      },
+      {
+        "numeroPrestamo": "01010214108300",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-17",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202101400",
+        "cuotaEsperada": 52,
+        "cuotaEncontrada": 51,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104340",
+        "cuotaEsperada": 38,
+        "cuotaEncontrada": 37,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108470",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108500",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117960",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-27",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 24
+      },
+      {
+        "numeroPrestamo": "01010214103090",
+        "cuotaEsperada": 44,
+        "cuotaEncontrada": 43,
+        "fechaCuota": "2025-12-27",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117650",
+        "cuotaEsperada": 43,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-17",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 26,
+        "cuotasPorCrear": 34
+      },
+      {
+        "numeroPrestamo": "01010214107260",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-24",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105160",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104300",
+        "cuotaEsperada": 38,
+        "cuotaEncontrada": 37,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107440",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103670",
+        "cuotaEsperada": 41,
+        "cuotaEncontrada": 40,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109340",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118320",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 6,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 30,
+        "cuotasPorCrear": 30
+      },
+      {
+        "numeroPrestamo": "01010214106140",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105820",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-09",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107820",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104330",
+        "cuotaEsperada": 38,
+        "cuotaEncontrada": 37,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106030",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107660",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109020",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104320",
+        "cuotaEsperada": 38,
+        "cuotaEncontrada": 37,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107860",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108370",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102560",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 45,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105770",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107970",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102180",
+        "cuotaEsperada": 48,
+        "cuotaEncontrada": 47,
+        "fechaCuota": "2025-12-24",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108490",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105090",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104240",
+        "cuotaEsperada": 38,
+        "cuotaEncontrada": 37,
+        "fechaCuota": "2025-12-11",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106530",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106460",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106110",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103860",
+        "cuotaEsperada": 40,
+        "cuotaEncontrada": 39,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117680",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-24",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 25,
+        "cuotasPorCrear": 23
+      },
+      {
+        "numeroPrestamo": "01010214109170",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-08",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108620",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117400",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 29,
+        "cuotasPorCrear": 31
+      },
+      {
+        "numeroPrestamo": "01010202107800",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117910",
+        "cuotaEsperada": 49,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 17,
+        "cuotasPorCrear": 43
+      },
+      {
+        "numeroPrestamo": "01010214107840",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202106000",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 52,
+        "cuotasPorCrear": 8
+      },
+      {
+        "numeroPrestamo": "01010214107790",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 49,
+        "plazoEncontrado": 49,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108290",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202104820",
+        "cuotaEsperada": 35,
+        "cuotaEncontrada": 34,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109410",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105390",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108410",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105180",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106510",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108020",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-13",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105080",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105550",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 46,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214108760",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108220",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104160",
+        "cuotaEsperada": 38,
+        "cuotaEncontrada": 37,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106170",
+        "cuotaEsperada": 30,
+        "cuotaEncontrada": 29,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103920",
+        "cuotaEsperada": 40,
+        "cuotaEncontrada": 39,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109040",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117820",
+        "cuotaEsperada": 50,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-17",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 19,
+        "cuotasPorCrear": 41
+      },
+      {
+        "numeroPrestamo": "01010214105690",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108210",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108190",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108600",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107360",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105190",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-01",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202108040",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102430",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 45,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107210",
+        "cuotaEsperada": 36,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-27",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 51,
+        "cuotasPorCrear": 9
+      },
+      {
+        "numeroPrestamo": "01010214107200",
+        "cuotaEsperada": 36,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 51,
+        "cuotasPorCrear": 9
+      },
+      {
+        "numeroPrestamo": "01010202102050",
+        "cuotaEsperada": 48,
+        "cuotaEncontrada": 47,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103710",
+        "cuotaEsperada": 41,
+        "cuotaEncontrada": 40,
+        "fechaCuota": "2025-12-24",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108110",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 24,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117640",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-04",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 30,
+        "cuotasPorCrear": 30
+      },
+      {
+        "numeroPrestamo": "01010214107680",
+        "cuotaEsperada": 26,
+        "cuotaEncontrada": 25,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104120",
+        "cuotaEsperada": 39,
+        "cuotaEncontrada": 38,
+        "fechaCuota": "2025-12-27",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108420",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214104530",
+        "cuotaEsperada": 37,
+        "cuotaEncontrada": 36,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106600",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106490",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-03",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107130",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-17",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109270",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109360",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117700",
+        "cuotaEsperada": 49,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 20,
+        "cuotasPorCrear": 40
+      },
+      {
+        "numeroPrestamo": "01010214106240",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-01",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105520",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202107290",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105370",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106400",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-11",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109280",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117810",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 23,
+        "cuotasPorCrear": 37
+      },
+      {
+        "numeroPrestamo": "01010101001040",
+        "cuotaEsperada": 43,
+        "cuotaEncontrada": 44,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105880",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-16",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107410",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202109080",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202109070",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103290",
+        "cuotaEsperada": 43,
+        "cuotaEncontrada": 42,
+        "fechaCuota": "2025-12-29",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202106740",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 27,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108000",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109060",
+        "cuotaEsperada": 23,
+        "cuotaEncontrada": 22,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105030",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 33,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108330",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102350",
+        "cuotaEsperada": 47,
+        "cuotaEncontrada": 46,
+        "fechaCuota": "2025-12-21",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108460",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108560",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108610",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108630",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 23,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102340",
+        "cuotaEsperada": 47,
+        "cuotaEncontrada": 46,
+        "fechaCuota": "2025-12-18",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107180",
+        "cuotaEsperada": 27,
+        "cuotaEncontrada": 26,
+        "fechaCuota": "2025-12-19",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105580",
+        "cuotaEsperada": 32,
+        "cuotaEncontrada": 31,
+        "fechaCuota": "2025-12-23",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105280",
+        "cuotaEsperada": 33,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-14",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202104900",
+        "cuotaEsperada": 35,
+        "cuotaEncontrada": 34,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214106540",
+        "cuotaEsperada": 29,
+        "cuotaEncontrada": 28,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202102090",
+        "cuotaEsperada": 48,
+        "cuotaEncontrada": 47,
+        "fechaCuota": "2025-12-12",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214105990",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 30,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214107190",
+        "cuotaEsperada": 28,
+        "cuotaEncontrada": 32,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010202103590",
+        "cuotaEsperada": 45,
+        "cuotaEncontrada": 0,
+        "fechaCuota": "2025-12-20",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214103540",
+        "cuotaEsperada": 42,
+        "cuotaEncontrada": 41,
+        "fechaCuota": "2025-12-25",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010101001120",
+        "cuotaEsperada": 46,
+        "cuotaEncontrada": 0,
+        "fechaCuota": "2025-12-22",
+        "plazoCompleto": 76,
+        "plazoEncontrado": 76,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214102910",
+        "cuotaEsperada": 44,
+        "cuotaEncontrada": 43,
+        "fechaCuota": "2025-12-06",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109950",
+        "cuotaEsperada": 21,
+        "cuotaEncontrada": 20,
+        "fechaCuota": "2025-12-10",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109350",
+        "cuotaEsperada": 22,
+        "cuotaEncontrada": 21,
+        "fechaCuota": "2025-12-26",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      }
+    ],
+    "detalleCoincidencias": [
+      {
+        "numeroPrestamo": "01010101001190",
+        "cuotaEsperada": 31,
+        "cuotaEncontrada": 31,
+        "plazoCompleto": 300,
+        "plazoEncontrado": 300,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109660",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109580",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109450",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109470",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109550",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010101001170",
+        "cuotaEsperada": 34,
+        "cuotaEncontrada": 34,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109590",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010206104710",
+        "cuotaEsperada": 36,
+        "cuotaEncontrada": 36,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109570",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010101001230",
+        "cuotaEsperada": 25,
+        "cuotaEncontrada": 25,
+        "plazoCompleto": 300,
+        "plazoEncontrado": 298,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214109460",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109510",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108540",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 24,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214108280",
+        "cuotaEsperada": 24,
+        "cuotaEncontrada": 24,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109440",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109670",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109630",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109620",
+        "cuotaEsperada": 20,
+        "cuotaEncontrada": 20,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      }
+    ]
+  }
 }

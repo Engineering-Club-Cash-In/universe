@@ -48,30 +48,31 @@ export class OTPController {
 				})
 				.returning();
 
-			// 5. Enviar SMS
-			const smsClient = new SMSClient({
-				token: process.env.SMS_TOKEN!,
-				apiKey: parseInt(process.env.SMS_API_KEY!),
-			});
+// 5. Enviar SMS - COMENTADO TEMPORALMENTE
+		// const smsClient = new SMSClient({
+		// 	token: process.env.SMS_TOKEN!,
+		// 	apiKey: parseInt(process.env.SMS_API_KEY!),
+		// });
 
-			const message = `Tu código de verificación es: ${code}. Válido por 5 minutos.`;
+		// const message = `Tu código de verificación es: ${code}. Válido por 5 minutos.`;
 
-			await smsClient.send({
-				msisdns: [phoneNumber],
-				message,
-				country: "GT",
-				tag: "otp-verification",
-			});
+		// await smsClient.send({
+		// 	msisdns: [phoneNumber],
+		// 	message,
+		// 	country: "GT",
+		// 	tag: "otp-verification",
+		// });
 
-			console.log(`✅ OTP enviado a ${phoneNumber} para DPI: ${dpi}`);
+		console.log(`✅ OTP generado para ${phoneNumber} - DPI: ${dpi} - Código: ${code}`);
 
 			return {
 				success: true,
-				message: "OTP enviado exitosamente",
+				message: "OTP generado exitosamente",
 				data: {
 					otpId: newOtp.id,
 					expiresAt: newOtp.expiresAt,
 					phoneNumber: phoneNumber,
+					code: code, // 🔥 Solo para desarrollo - remover en producción
 				},
 				status: 200 as const,
 			};

@@ -639,6 +639,7 @@ const insertPayments = async (
       observaciones: "",
       paymentFalse: false,
       pagoConvenio: "0",
+      
     });
   }
 

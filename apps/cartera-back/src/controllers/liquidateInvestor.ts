@@ -42,7 +42,7 @@ interface ResultadoCredito {
     fecha_vencimiento: string;
   }>;
 }
-const CREAR_RELACIONES_AUTOMATICAMENTE = true;  
+const CREAR_RELACIONES_AUTOMATICAMENTE = false;  
 // 🔥 FUNCIÓN HELPER PARA NORMALIZAR PORCENTAJES
 function normalizarPorcentaje(valor: string | number | null | undefined): Big {
   const num = new Big(valor || 0);

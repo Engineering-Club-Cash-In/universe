@@ -213,6 +213,7 @@ function QuoterPage() {
 			client.getOpportunities({
 				limit: 50,
 				search: debouncedOpportunitiesSearch || undefined,
+				notStatus: "won"
 			}),
 		enabled: !!session,
 	});
@@ -604,7 +605,7 @@ function QuoterPage() {
 											value={field.state.value || "none"}
 											onChange={(value) => {
 												field.handleChange(value === "none" ? "" : value);
-												// Auto-seleccionar el tipo de crédito de la oportunidad
+												// Auto-seleccionar el tipo de crédito y vehículo de la oportunidad
 												if (value && value !== "none") {
 													const selectedOpp = opportunitiesQuery.data?.find(
 														(opp: any) => opp.id === value,
@@ -614,6 +615,16 @@ function QuoterPage() {
 															"creditType",
 															selectedOpp.creditType,
 														);
+													}
+													// Si la oportunidad tiene un vehículo, auto-llenar sus datos
+													if (selectedOpp?.vehicle?.id) {
+														handleOpportunityVehicleSelect({
+															id: selectedOpp.vehicle.id,
+															make: selectedOpp.vehicle.make,
+															model: selectedOpp.vehicle.model,
+															year: selectedOpp.vehicle.year,
+															vehicleType: selectedOpp.vehicle.vehicleType,
+														});
 													}
 												}
 											}}

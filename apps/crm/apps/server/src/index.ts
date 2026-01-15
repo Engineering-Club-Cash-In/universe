@@ -26,6 +26,10 @@ import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
 import externalContractsRouter from "./routes/external-contracts";
+import { otps } from "./db/schema/otp";
+import { and, eq, gt, sql, desc } from "drizzle-orm";
+import type { db } from "./db";
+import { otpController } from "./controllers/otp";
 
 const app = new Hono();
 
@@ -386,49 +390,20 @@ app.get("/info/validate-magic-url", async (c) => {
 	return c.json(result, result.success ? 200 : 400);
 });
 
-app.post("/info/liveness-validation", async (c) => {
+// 🔥 ENDPOINT - Enviar OTP
+app.post("/info/send-otp", async (c) => {
 	const body = await c.req.json();
-	const { dpi } = body as { dpi?: string };
+	const { dpi, phoneNumber } = body as { dpi?: string; phoneNumber?: string };
 
+	// Validaciones de formato
 	if (!dpi) {
 		return c.json({ success: false, message: "DPI is required" }, 400);
 	}
 
-	try {
-		const result = await hasPassedLiveness(dpi); // 👈 usamos el método que ya hicimos
-
-		return c.json(
-			{
-				success: true,
-				dpi,
-				livenessValidated: result,
-			},
-			200,
-		);
-	} catch (err: any) {
-		return c.json(
-			{
-				success: false,
-				message: err.message || "Internal server error",
-			},
-			500,
-		);
-	}
-});
-app.post("/info/validate-otp", async (c) => {
-	const body = await c.req.json();
-	const { token, dpi } = body as { token?: string; dpi?: string };
-
-	// Validaciones
-	if (!token) {
-		return c.json({ success: false, message: "Token is required" }, 400);
+	if (!phoneNumber) {
+		return c.json({ success: false, message: "Phone number is required" }, 400);
 	}
 
-	if (!dpi) {
-		return c.json({ success: false, message: "DPI is required" }, 400);
-	}
-
-	// Validar formato DPI guatemalteco (13 dígitos)
 	if (!/^\d{13}$/.test(dpi)) {
 		return c.json(
 			{
@@ -439,22 +414,60 @@ app.post("/info/validate-otp", async (c) => {
 		);
 	}
 
-	try {
-		// Validar si el token es correcto
-		const isValid = token === "1234";
+	if (!/^502\d{8}$/.test(phoneNumber)) {
+		return c.json(
+			{
+				success: false,
+				message: "Número debe tener formato 502XXXXXXXX",
+			},
+			400,
+		);
+	}
 
-		if (!isValid) {
-			return c.json(
-				{
-					success: false,
-					message: "Invalid token",
-					tokenValidated: false,
-				},
-				401,
-			);
-		}
+	// Llamar al controller
+	const result = await otpController.sendOTP(dpi, phoneNumber);
+	return c.json(result, result.status);
+});
 
-		// ✅ Token válido, ahora obtener info de Infornet
+// 🔥 ENDPOINT - Validar OTP
+app.post("/info/validate-otp", async (c) => {
+	const body = await c.req.json();
+	const { code, dpi } = body as { code?: string; dpi?: string };
+
+	// Validaciones de formato
+	if (!code) {
+		return c.json({ success: false, message: "Code is required" }, 400);
+	}
+
+	if (!dpi) {
+		return c.json({ success: false, message: "DPI is required" }, 400);
+	}
+
+	if (!/^\d{13}$/.test(dpi)) {
+		return c.json(
+			{
+				success: false,
+				message: "DPI debe tener 13 dígitos",
+			},
+			400,
+		);
+	}
+
+	if (!/^\d{4}$/.test(code)) {
+		return c.json(
+			{
+				success: false,
+				message: "Código debe tener 4 dígitos",
+			},
+			400,
+		);
+	}
+
+	// Llamar al controller para validar
+	const result = await otpController.validateOTP(dpi, code);
+
+	// Si es exitoso, consultar Infornet
+	if (result.success && result.data) {
 		console.log(`🔍 OTP válido, consultando Infornet para DPI: ${dpi}`);
 
 		const estudioResult = await infornetController.obtenerEstudioPorDPI(dpi);
@@ -464,7 +477,8 @@ app.post("/info/validate-otp", async (c) => {
 				{
 					success: false,
 					message:
-						estudioResult.error || "Error al obtener información de Infornet",
+						estudioResult.error ||
+						"Error al obtener información de Infornet",
 					tokenValidated: true,
 					infornetError: true,
 				},
@@ -498,10 +512,10 @@ app.post("/info/validate-otp", async (c) => {
 		return c.json(
 			{
 				success: true,
-				message: "Token validated successfully",
+				message: "OTP validated successfully",
 				tokenValidated: true,
-				pasoBuro: pasoBuro, // 🔥 TRUE = Aprobado, FALSE = Rechazado
-				mensajeBuro: mensajeBuro, // 🔥 Mensaje descriptivo
+				pasoBuro: pasoBuro,
+				mensajeBuro: mensajeBuro,
 				data: {
 					estudio: estudioResult.data,
 					fromCache: estudioResult.fromCache,
@@ -510,18 +524,114 @@ app.post("/info/validate-otp", async (c) => {
 			},
 			200,
 		);
-	} catch (err: any) {
-		console.error("Error en validate-otp:", err);
+	}
+
+	// Si falló la validación, retornar el error
+	return c.json(result, result.status);
+});
+
+app.post("/info/validate-otp", async (c) => {
+	const body = await c.req.json();
+	const { code, dpi } = body as { code?: string; dpi?: string };
+
+	// Validaciones de formato
+	if (!code) {
+		return c.json({ success: false, message: "Code is required" }, 400);
+	}
+
+	if (!dpi) {
+		return c.json({ success: false, message: "DPI is required" }, 400);
+	}
+
+	if (!/^\d{13}$/.test(dpi)) {
 		return c.json(
 			{
 				success: false,
-				message: err.message || "Internal server error",
-				tokenValidated: false,
+				message: "DPI debe tener 13 dígitos",
 			},
-			500,
+			400,
 		);
 	}
+
+	if (!/^\d{4}$/.test(code)) {
+		return c.json(
+			{
+				success: false,
+				message: "Código debe tener 4 dígitos",
+			},
+			400,
+		);
+	}
+
+	// Llamar al controller para validar
+	const result = await otpController.validateOTP(dpi, code);
+
+	// Si es exitoso, consultar Infornet
+	if (result.success && result.data) {
+		console.log(`🔍 OTP válido, consultando Infornet para DPI: ${dpi}`);
+
+		const estudioResult = await infornetController.obtenerEstudioPorDPI(dpi);
+
+		if (!estudioResult.success) {
+			return c.json(
+				{
+					success: false,
+					message:
+						estudioResult.error ||
+						"Error al obtener información de Infornet",
+					tokenValidated: true,
+					infornetError: true,
+				},
+				404,
+			);
+		}
+
+		// Análisis de riesgo
+		const analisisRiesgo = await infornetController.analizarRiesgo(dpi);
+
+		// 🔥 Determinar si pasó el buró
+		const pasoBuro =
+			!analisisRiesgo?.detalles.tieneDelitosPenales &&
+			!analisisRiesgo?.detalles.tieneMorosidad;
+
+		// 🔥 Mensaje descriptivo del resultado
+		let mensajeBuro = "Aprobado";
+		const motivosRechazo: string[] = [];
+
+		if (analisisRiesgo?.detalles.tieneDelitosPenales) {
+			motivosRechazo.push("Tiene antecedentes penales");
+		}
+		if (analisisRiesgo?.detalles.tieneMorosidad) {
+			motivosRechazo.push("Tiene historial de morosidad");
+		}
+
+		if (!pasoBuro) {
+			mensajeBuro = `Rechazado: ${motivosRechazo.join(", ")}`;
+		}
+
+		return c.json(
+			{
+				success: true,
+				message: "OTP validated successfully",
+				tokenValidated: true,
+				pasoBuro: pasoBuro,
+				mensajeBuro: mensajeBuro,
+				data: {
+					estudio: estudioResult.data,
+					fromCache: estudioResult.fromCache,
+					analisisRiesgo: analisisRiesgo,
+				},
+			},
+			200,
+		);
+	}
+
+	// Si falló la validación, retornar el error
+	return c.json(result, result.status);
 });
+
+// 🔥 ENDPOINT - Validar OTP con control de intentos
+ 
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 

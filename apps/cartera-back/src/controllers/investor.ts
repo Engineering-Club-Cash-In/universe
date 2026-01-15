@@ -627,14 +627,22 @@ export async function resumeInvestor(
       inversionista: inversionistas.nombre,
       emite_factura: inversionistas.emite_factura,
       reinversion: inversionistas.tipo_reinversion,
-      banco_id: inversionistas.banco_id, // 🔥 ID del banco
-      banco_nombre: bancos.nombre, // 🔥 Nombre del banco desde la tabla
+      banco_id: inversionistas.banco_id,
+      banco_nombre: bancos.nombre,
       tipo_cuenta: inversionistas.tipo_cuenta,
       numero_cuenta: inversionistas.numero_cuenta,
       dpi: inversionistas.dpi,
+   tiene_boleta_pendiente: sql<boolean>`
+      EXISTS (
+        SELECT 1 
+        FROM cartera.boletas_pago_inversionista 
+        WHERE cartera.boletas_pago_inversionista.inversionista_id = ${inversionistas.inversionista_id}
+        AND cartera.boletas_pago_inversionista.estado = 'PENDIENTE'
+      )
+    `.as('tiene_boleta_pendiente'),
     })
     .from(inversionistas)
-    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id)) // 🔥 JOIN con bancos
+    .leftJoin(bancos, eq(inversionistas.banco_id, bancos.banco_id))
     .where(and(...queryConditions))
     .limit(1);
 
@@ -785,13 +793,15 @@ export async function resumeInvestor(
               cuota: cuotas_credito.numero_cuota,
               estado_liquidacion:
                 pagos_credito_inversionistas.estado_liquidacion,
+              fecha_vencimiento_cuota: cuotas_credito.fecha_vencimiento, // 🔥 FECHA DE LA CUOTA
+              fecha_pago_efectivo_cuota: cuotas_credito.fecha_liquidacion_inversionistas, // 🔥 FECHA PAGO EFECTIVO
             })
             .from(pagos_credito_inversionistas)
             .innerJoin(
               pagos_credito,
               eq(pagos_credito_inversionistas.pago_id, pagos_credito.pago_id)
             )
-            .innerJoin(
+            .innerJoin( 
               cuotas_credito,
               eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
             )
@@ -820,10 +830,11 @@ export async function resumeInvestor(
           // 🧮 Detalle de pagos
           const pagos_detalle = pagos
             .sort((a, b) => {
-              if (!a.fecha_pago) return 1;
-              if (!b.fecha_pago) return -1;
-              const fechaA = new Date(a.fecha_pago).getTime();
-              const fechaB = new Date(b.fecha_pago).getTime();
+              // 🔥 ORDENAR POR FECHA DE VENCIMIENTO DE LA CUOTA
+              if (!a.fecha_vencimiento_cuota) return 1;
+              if (!b.fecha_vencimiento_cuota) return -1;
+              const fechaA = new Date(a.fecha_vencimiento_cuota).getTime();
+              const fechaB = new Date(b.fecha_vencimiento_cuota).getTime();
               return fechaA - fechaB;
             })
             .map((pago) => {
@@ -835,7 +846,13 @@ export async function resumeInvestor(
               let cuota_inversor;
               let abonoGeneralInteres;
 
-              // 🆕 CORRECCIÓN: Cálculo según emite_factura
+              // 🔥 USAR FECHA DE LA CUOTA PARA EL MES (prioridad: fecha_pago_efectivo, luego fecha_vencimiento)
+        const fechaParaMes = pago.fecha_vencimiento_cuota || pago.fecha_vencimiento_cuota;
+const mes = fechaParaMes
+  ? dayjs(fechaParaMes).format('MMMM') // 🔥 Esto da el mes correcto
+  : null;
+  console.log("Fecha para mes:", fechaParaMes, "→ Mes:", mes);
+       // 🆕 CORRECCIÓN: Cálculo según emite_factura
               if (inv.emite_factura) {
                 abonoGeneralInteres = abono_interes.plus(abono_iva);
               } else {
@@ -887,9 +904,7 @@ export async function resumeInvestor(
               total_cuota = total_cuota.plus(cuota_inversor);
 
               return {
-                mes: pago.fecha_pago
-                  ? pago.fecha_pago.toLocaleString("es-GT", { month: "long" })
-                  : null,
+                mes, // 🔥 AHORA USA LA FECHA DE LA CUOTA
                 abono_capital: Number(abono_capital.toString()),
                 abono_interes: Number(abono_interes.toString()),
                 abono_iva: Number(abono_iva.toString()),
@@ -898,6 +913,8 @@ export async function resumeInvestor(
                 cuota_inversor: Number(cuota_inversor.toString()),
                 cuota: cuota,
                 fecha_pago: pago.fecha_pago,
+                fecha_vencimiento_cuota: pago.fecha_vencimiento_cuota, // 🔥 NUEVA
+                fecha_pago_efectivo_cuota: pago.fecha_pago_efectivo_cuota, // 🔥 NUEVA
                 cuota_inversionista: c.cuota_inversionista,
                 abonoGeneralInteres: Number(abonoGeneralInteres.toString()),
                 tasaInteresInvesor: Number(
@@ -961,11 +978,12 @@ export async function resumeInvestor(
         inversionista_id: inv.inversionista_id,
         nombre_inversionista: inv.inversionista,
         emite_factura: inv.emite_factura,
-        banco_id: inv.banco_id, // 🔥 ID del banco
-        banco: inv.banco_nombre, // 🔥 Nombre del banco
+        banco_id: inv.banco_id,
+        banco: inv.banco_nombre,
         tipo_cuenta: inv.tipo_cuenta,
         numero_cuenta: inv.numero_cuenta,
         re_inversion: inv.reinversion,
+        tieneBoletaPendiente: inv.tiene_boleta_pendiente,
         dpi: inv.dpi,
         creditos: creditosData,
         subtotal: {

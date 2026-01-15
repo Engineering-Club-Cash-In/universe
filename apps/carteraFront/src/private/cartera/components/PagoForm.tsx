@@ -72,7 +72,7 @@ export function PagoForm() {
   const { bancos, loading: loadingBancos } = useBancos();
 
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+<div className="flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-4">
       <OpcionesExcesoModal
         open={modalExcesoOpen}
         mode={modalMode}

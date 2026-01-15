@@ -599,8 +599,7 @@ export interface InversionistaPayload {
   inversionista_id: number;
   monto_aportado: number;
   porcentaje_cash_in: number;
-  porcentaje_inversion: number;
-  cuota_inversionista: number; // Nuevo campo opcional
+  porcentaje_inversion: number; 
 }
 
 export interface UpdateCreditBody {
@@ -714,6 +713,7 @@ export interface InversionistaConCreditos {
   numero_cuenta: string | null;   // 🔹 nuevo
   re_inversion:string
   dpi:number | null
+  tieneBoletaPendiente:boolean
 
 }
 

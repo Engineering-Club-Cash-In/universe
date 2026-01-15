@@ -359,7 +359,7 @@ export function PaymentsTable() {
   };
 
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto pt-8 pb-8">
+   <div className="flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-2">
       <div className="bg-blue-50 rounded-xl shadow-md p-5 w-full max-w-6xl">
         <h2 className="text-2xl font-bold text-blue-900 mb-4 flex items-center gap-2">
           <BadgeDollarSign className="w-6 h-6 text-blue-700" />

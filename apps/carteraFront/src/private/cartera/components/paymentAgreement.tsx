@@ -212,8 +212,7 @@ console.log("🔍 DEBUG:", {
   canceladoData: !!canceladoData,
   hasActiveAgreement,
 });
-  return (
-    <div className="fixed inset-0 flex justify-center bg-gradient-to-br from-blue-50 to-white overflow-auto px-4 py-8">
+  return (<div className="flex justify-center bg-gradient-to-br from-blue-50 to-white overflow-auto px-4 py-2">
       <div className="w-full max-w-4xl">
         <h1 className="text-3xl font-bold text-blue-900 mb-6 text-center">
           Crear Convenio de Pago

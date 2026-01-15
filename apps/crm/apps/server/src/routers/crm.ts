@@ -1,4 +1,4 @@
-import { and, count, desc, eq, gte, ilike, isNotNull, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, isNotNull, not, or, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { db } from "../db";
@@ -631,6 +631,7 @@ export const crmRouter = {
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
 					limit: z.number().min(1).max(100).default(50),
+					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
 				})
 				.optional(),
 		)
@@ -738,6 +739,10 @@ export const crmRouter = {
 						ilike(leads.lastName, `%${searchTerm}%`),
 					),
 				);
+			}
+
+			if (input?.notStatus) {
+				conditions.push(not(eq(opportunities.status, input.notStatus)));
 			}
 
 			// Role-based filter: non-admin can only see their own opportunities

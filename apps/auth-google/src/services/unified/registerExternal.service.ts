@@ -50,6 +50,7 @@ export const registerExternalUser = async (
         telefono: phone,
         dpi: dpi,
         descripcion: `Registro desde portal - Tipo: ${userType}`,
+        isRegister: true
       });
 
       return {

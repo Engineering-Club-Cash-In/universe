@@ -40,15 +40,16 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
       const creditsFilePath = pathModule.join(import.meta.dir, '..', 'utils', 'credits.txt');
       const creditsContent = fs.readFileSync(creditsFilePath, 'utf-8');
       
-      // Parsear el archivo: cada línea tiene "numeroPrestamo\tcuotaEsperada"
+      // Parsear el archivo: cada línea tiene "numeroPrestamo\tcuotaEsperada\tplazo"
       const creditosEsperados = creditsContent
         .split('\n')
         .filter(line => line.trim() !== '')
         .map(line => {
-          const [numeroPrestamo, cuotaEsperada] = line.split('\t');
+          const [numeroPrestamo, cuotaEsperada, plazo] = line.split('\t');
           return {
             numeroPrestamo: numeroPrestamo.trim(),
-            cuotaEsperadaDic2025: Number.parseInt(cuotaEsperada.trim(), 10)
+            cuotaEsperadaDic2025: Number.parseInt(cuotaEsperada.trim(), 10),
+            plazoCompleto: Number.parseInt(plazo.trim(), 10)
           };
         });
 
@@ -59,6 +60,9 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
         cuotaEsperada: number;
         cuotaEncontrada: number | null;
         fechaCuota: string | null;
+        plazoCompleto: number;
+        plazoEncontrado: number;
+        cuotasPorCrear: number;
         error?: string;
       }[] = [];
 
@@ -66,6 +70,9 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
         numeroPrestamo: string;
         cuotaEsperada: number;
         cuotaEncontrada: number;
+        plazoCompleto: number;
+        plazoEncontrado: number;
+        cuotasPorCrear: number;
       }[] = [];
 
       // Procesar cada crédito
@@ -81,12 +88,19 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
               cuotaEsperada: credito.cuotaEsperadaDic2025,
               cuotaEncontrada: null,
               fechaCuota: null,
+              plazoCompleto: credito.plazoCompleto,
+              plazoEncontrado: 0,
+              cuotasPorCrear: credito.plazoCompleto,
               error: estadoCuenta.error || 'No se pudo obtener estado de cuenta'
             });
             continue;
           }
 
           const planPagosCuotas = estadoCuenta.data.ConsultaResultado?.PlanPagos_Cuotas || [];
+          
+          // Calcular el plazo encontrado (cantidad de cuotas en el estado de cuenta)
+          const plazoEncontrado = planPagosCuotas.length;
+          const cuotasPorCrear = credito.plazoCompleto - plazoEncontrado;
           
           // Buscar la cuota de diciembre 2025 (formato fecha: YYYY-MM-DD)
           const cuotaDic2025 = planPagosCuotas.find(cuota => {
@@ -105,6 +119,9 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
               cuotaEsperada: credito.cuotaEsperadaDic2025,
               cuotaEncontrada: null,
               fechaCuota: null,
+              plazoCompleto: credito.plazoCompleto,
+              plazoEncontrado: plazoEncontrado,
+              cuotasPorCrear: cuotasPorCrear,
               error: 'No se encontró cuota para diciembre 2025'
             });
             continue;
@@ -117,14 +134,20 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
             resultadosExitosos.push({
               numeroPrestamo: credito.numeroPrestamo,
               cuotaEsperada: credito.cuotaEsperadaDic2025,
-              cuotaEncontrada: cuotaEncontrada
+              cuotaEncontrada: cuotaEncontrada,
+              plazoCompleto: credito.plazoCompleto,
+              plazoEncontrado: plazoEncontrado,
+              cuotasPorCrear: cuotasPorCrear
             });
           } else {
             discrepancias.push({
               numeroPrestamo: credito.numeroPrestamo,
               cuotaEsperada: credito.cuotaEsperadaDic2025,
               cuotaEncontrada: cuotaEncontrada,
-              fechaCuota: cuotaDic2025.Fecha
+              fechaCuota: cuotaDic2025.Fecha,
+              plazoCompleto: credito.plazoCompleto,
+              plazoEncontrado: plazoEncontrado,
+              cuotasPorCrear: cuotasPorCrear
             });
           }
 
@@ -134,6 +157,9 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
             cuotaEsperada: credito.cuotaEsperadaDic2025,
             cuotaEncontrada: null,
             fechaCuota: null,
+            plazoCompleto: credito.plazoCompleto,
+            plazoEncontrado: 0,
+            cuotasPorCrear: credito.plazoCompleto,
             error: err.message || 'Error desconocido'
           });
         }
@@ -160,6 +186,9 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
           outputContent += `  Cuota esperada (txt): ${d.cuotaEsperada}\n`;
           outputContent += `  Cuota encontrada (SIFCO): ${d.cuotaEncontrada ?? 'N/A'}\n`;
           outputContent += `  Fecha cuota: ${d.fechaCuota ?? 'N/A'}\n`;
+          outputContent += `  Plazo completo: ${d.plazoCompleto}\n`;
+          outputContent += `  Plazo encontrado: ${d.plazoEncontrado}\n`;
+          outputContent += `  Cuotas por crear: ${d.cuotasPorCrear}\n`;
           if (d.error) {
             outputContent += `  Error: ${d.error}\n`;
           }
@@ -168,12 +197,29 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
       
       outputContent += `\n=== COINCIDENCIAS ===\n`;
       for (const r of resultadosExitosos) {
-        outputContent += `Préstamo: ${r.numeroPrestamo} - Cuota: ${r.cuotaEncontrada} ✓\n`;
+        outputContent += `Préstamo: ${r.numeroPrestamo} - Cuota: ${r.cuotaEncontrada} ✓ (Plazo completo: ${r.plazoCompleto}, Plazo encontrado: ${r.plazoEncontrado}, Por crear: ${r.cuotasPorCrear})\n`;
       }
       
       // Escribir archivo
       fs.writeFileSync(outputFilePath, outputContent, 'utf-8');
       console.log(`📄 Resultados guardados en: ${outputFilePath}`);
+      
+      // Preparar respuesta JSON
+      const responseData = {
+        success: true,
+        data: {
+          totalCreditos: creditosEsperados.length,
+          coincidencias: resultadosExitosos.length,
+          discrepancias: discrepancias.length,
+          detalleDiscrepancias: discrepancias,
+          detalleCoincidencias: resultadosExitosos
+        }
+      };
+      
+      // Guardar respuesta JSON en response.json
+      const responseJsonPath = pathModule.join(import.meta.dir, '..', 'utils', 'response.json');
+      fs.writeFileSync(responseJsonPath, JSON.stringify(responseData, null, 2), 'utf-8');
+      console.log(`📄 Respuesta JSON guardada en: ${responseJsonPath}`);
       
       // También imprimir resumen en consola
       console.log('\n========== RESUMEN ==========');
@@ -183,22 +229,13 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
       if (discrepancias.length > 0) {
         console.log('\n--- DISCREPANCIAS ---');
         for (const d of discrepancias) {
-          console.log(`${d.numeroPrestamo}: esperado=${d.cuotaEsperada}, encontrado=${d.cuotaEncontrada ?? 'N/A'} ${d.error ? `(${d.error})` : ''}`);
+          console.log(`${d.numeroPrestamo}: esperado=${d.cuotaEsperada}, encontrado=${d.cuotaEncontrada ?? 'N/A'}, plazo completo=${d.plazoCompleto}, plazo encontrado=${d.plazoEncontrado}, por crear=${d.cuotasPorCrear} ${d.error ? `(${d.error})` : ''}`);
         }
       }
       console.log('=============================\n');
 
       return new Response(
-        JSON.stringify({
-          success: true,
-          data: {
-            totalCreditos: creditosEsperados.length,
-            coincidencias: resultadosExitosos.length,
-            discrepancias: discrepancias.length,
-            detalleDiscrepancias: discrepancias,
-            detalleCoincidencias: resultadosExitosos
-          }
-        }),
+        JSON.stringify(responseData),
         {
           status: 200,
           headers: { 'Content-Type': 'application/json' },

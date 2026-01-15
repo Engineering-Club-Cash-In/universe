@@ -1,6 +1,7 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { z } from "zod";
 import {
 	Calculator,
 	Eye,
@@ -53,7 +54,12 @@ import { authClient } from "@/lib/auth-client";
 import { generateQuotationPdf } from "@/lib/generate-pdf";
 import { client, orpc } from "@/utils/orpc";
 
+const searchSchema = z.object({
+	opportunityId: z.string().optional(),
+});
+
 export const Route = createFileRoute("/crm/quoter")({
+	validateSearch: searchSchema,
 	beforeLoad: async ({ location }) => {
 		const session = await authClient.getSession();
 		if (!session.data?.session) {
@@ -154,6 +160,7 @@ function QuoterPage() {
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const queryClient = useQueryClient();
 	const navigate = Route.useNavigate();
+	const { opportunityId: initialOpportunityId } = Route.useSearch();
 
 	const [selectedQuotationId, setSelectedQuotationId] = useState<string | null>(
 		null,
@@ -331,6 +338,13 @@ function QuoterPage() {
 		},
 	});
 
+	// Pre-seleccionar la oportunidad si viene en la URL
+	useEffect(() => {
+		if (initialOpportunityId) {
+			quoterForm.setFieldValue("opportunityId", initialOpportunityId);
+		}
+	}, [initialOpportunityId]);
+
 	// Obtener costo de seguro automáticamente
 	const updateInsuranceCost = async (
 		insuredAmount: number,
@@ -422,6 +436,45 @@ function QuoterPage() {
 			setAmortizationTable(table);
 		} else {
 			setAmortizationTable([]);
+		}
+	};
+
+	// Cuando se selecciona un vehículo desde la oportunidad, auto-llenar datos
+	const handleOpportunityVehicleSelect = async (vehicle: {
+		id: string;
+		make: string;
+		model: string;
+		year: number;
+		vehicleType?: string | null;
+	}) => {
+		// Primero llenamos los datos básicos del vehículo
+		quoterForm.setFieldValue("vehicleId", vehicle.id);
+		quoterForm.setFieldValue("vehicleBrand", vehicle.make);
+		quoterForm.setFieldValue("vehicleLine", vehicle.model);
+		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
+
+		// Obtener la inspección más reciente para el marketValue
+		try {
+			const inspection = await client.getLatestInspectionByVehicleId({
+				vehicleId: vehicle.id,
+			});
+
+			if (inspection?.marketValue) {
+				const numericValue = Number(inspection.marketValue);
+				quoterForm.setFieldValue("vehicleValue", numericValue);
+
+				// Auto-llenar monto asegurado (igual al valor)
+				quoterForm.setFieldValue("insuredAmount", numericValue);
+
+				// Auto-calcular enganche al 20%
+				const downPayment = Math.round(numericValue * 0.2);
+				quoterForm.setFieldValue("downPayment", downPayment);
+
+				// Actualizar seguro y membresía
+				updateInsuranceCost(numericValue, quoterForm.state.values.vehicleType);
+			}
+		} catch (error) {
+			console.error("Error al obtener inspección del vehículo:", error);
 		}
 	};
 

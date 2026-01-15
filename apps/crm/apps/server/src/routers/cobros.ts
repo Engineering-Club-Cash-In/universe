@@ -1326,7 +1326,7 @@ export const cobrosRouter = {
 						oportunidadId: opportunities.id,
 						vehicleId: opportunities.vehicleId,
 						leadId: opportunities.leadId,
-						direccion: opportunities.direccion,
+						direccion: leads.direccion,
 						// Datos del vehículo
 						vehiculoMarca: vehicles.make,
 						vehiculoModelo: vehicles.model,

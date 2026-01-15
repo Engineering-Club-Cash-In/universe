@@ -28,6 +28,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
+import { isVehicleAvailable } from "@/utils/constants";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
@@ -65,6 +66,8 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatDate,
 	formatGuatemalaDate,
+	getLoanPurposeLabel,
+	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
 import { client, orpc } from "@/utils/orpc";
@@ -137,14 +140,12 @@ function DraggableOpportunityCard({
 						(!opportunity.inversionistas ||
 							(typeof opportunity.inversionistas === "string" &&
 								JSON.parse(opportunity.inversionistas).length === 0) ||
-							!opportunity.asesorId ||
 							!opportunity.numeroCuotas ||
 							!opportunity.tasaInteres ||
 							!opportunity.cuotaMensual ||
 							!opportunity.diaPagoMensual ||
 							!opportunity.seguro ||
 							!opportunity.gps ||
-							!opportunity.direccion ||
 							!opportunity.nit ||
 							!opportunity.categoria);
 
@@ -306,6 +307,78 @@ export const Route = createFileRoute("/crm/opportunities")({
 	}).parse,
 });
 
+
+export interface IOpportunity  {
+		id: string;
+		title: string;
+		value: string | null;
+		tasaInteres: string | null;
+		numeroCuotas: number | null;
+		cuotaMensual: string | null;
+		royalti: string | null;
+		porcentajeRoyalti: string | null;
+		gps: string | null;
+		seguro: string | null;
+		membresiaPago: string | null;
+		nit: string | null;
+		// direccion: string | null;
+		inversionistas: string | null;
+		status: string;
+		source?: "website" | "referral" | "cold_call" | "email" | "social_media" | "event" | "other" | null;
+		loanPurpose?: "personal" | "business" | null;
+		creditType?: "autocompra" | "sobre_vehiculo" | null;
+		creditDetailApproved?: boolean | null;
+		creditDetailApprovedBy?: string | null;
+		creditDetailApprovedAt?: Date | string | null;
+		stage: any;
+		vehicleId: string | null;
+		expectedCloseDate: Date | string | null;
+		probability: number | null;
+		notes: string | null;
+		createdAt: Date | string;
+		updatedAt: Date | string;
+		asesorId: number | null;
+		fechaInicio: Date | string | null;
+		diaPagoMensual: number | null;
+		categoria: any;
+		reserva: string | null;
+		rubros: string | null;
+		leadId: string | null;
+		company: any;
+		assignedUser: any;
+		lead?: {
+			id: string;
+			firstName: string;
+			middleName?: string | null;
+			lastName: string;
+			email?: string | null;
+			secondLastName?: string | null;
+			age?: number | null;
+			departamento?: string | null;
+			municipio?: string | null;
+			direccion?: string | null;
+			zona?: string | null;
+		} | null;
+		vehicle?: {
+			id: string;
+			make: string;
+			model: string;
+			year: string;
+			licensePlate: string | null;
+			color: string | null;
+			plate: string | null;
+			origin: string | null;
+			vendor?: {
+				id: string;
+				name: string;
+				phone: string;
+				dpi: string;
+				vendorType: string;
+				companyName: string | null;
+			} | null;
+		} | null;
+	};
+
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
 	const navigate = Route.useNavigate();
@@ -315,7 +388,7 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
-	const [selectedOpportunity, setSelectedOpportunity] = useState<any>(null);
+	const [selectedOpportunity, setSelectedOpportunity] = useState<IOpportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
@@ -527,7 +600,7 @@ function RouteComponent() {
 			);
 			editOpportunityForm.setFieldValue(
 				"direccion",
-				selectedOpportunity.direccion || "",
+				selectedOpportunity?.lead?.direccion || "",
 			);
 			// Parse inversionistas from JSON string
 			const inversionistas = selectedOpportunity.inversionistas
@@ -543,6 +616,11 @@ function RouteComponent() {
 			editOpportunityForm.setFieldValue(
 				"asesorId",
 				selectedOpportunity.asesorId || 0,
+			);
+			// Loan Purpose
+			editOpportunityForm.setFieldValue(
+				"loanPurpose",
+				selectedOpportunity.loanPurpose || "",
 			);
 		}
 
@@ -676,6 +754,7 @@ function RouteComponent() {
 			leadId: "none",
 			vehicleId: "",
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+			loanPurpose: "" as "" | "personal" | "business",
 			value: "",
 			stageId: "",
 			probability: undefined as number | undefined,
@@ -700,6 +779,7 @@ function RouteComponent() {
 				...value,
 				stageId: value.stageId || firstStage?.id || "",
 				creditType: value.creditType,
+				loanPurpose: value.loanPurpose || undefined,
 				leadId:
 					value.leadId && value.leadId !== "none" ? value.leadId : undefined,
 				vehicleId: value.vehicleId || undefined,
@@ -717,6 +797,7 @@ function RouteComponent() {
 			leadId: "none",
 			vehicleId: "",
 			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+			loanPurpose: "" as "" | "personal" | "business",
 			value: "",
 			stageId: "",
 			probability: undefined as number | undefined,
@@ -808,6 +889,7 @@ function RouteComponent() {
 						value.rubros.length > 0 ? JSON.stringify(value.rubros) : undefined,
 					asesorId: value.asesorId > 0 ? value.asesorId : undefined,
 					direccion: value.direccion || undefined,
+					loanPurpose: value.loanPurpose || undefined,
 				});
 			}
 		},
@@ -817,6 +899,7 @@ function RouteComponent() {
 		mutationFn: (input: {
 			title: string;
 			creditType: "autocompra" | "sobre_vehiculo";
+			loanPurpose?: "personal" | "business";
 			leadId?: string;
 			companyId?: string;
 			vehicleId?: string;
@@ -880,6 +963,7 @@ function RouteComponent() {
 			rubros?: string;
 			asesorId?: number;
 			direccion?: string;
+			loanPurpose?: "personal" | "business";
 		}) => client.updateOpportunity(input),
 		onMutate: async (variables) => {
 			const opportunitiesQueryKey = [
@@ -953,6 +1037,7 @@ function RouteComponent() {
 					(opp) => opp.id === variables.id,
 				);
 				if (updatedOpportunity) {
+					// @ts-ignore
 					setSelectedOpportunity(updatedOpportunity);
 				}
 
@@ -1062,6 +1147,7 @@ function RouteComponent() {
 				(opp) => opp.id === search.opportunityId,
 			);
 			if (opportunity) {
+					// @ts-ignore
 				setSelectedOpportunity(opportunity);
 				setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
@@ -1443,6 +1529,40 @@ function RouteComponent() {
 									</createOpportunityForm.Field>
 								</div>
 								<div>
+									<createOpportunityForm.Field name="loanPurpose">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>
+													Propósito del Préstamo
+												</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(
+															value as "personal" | "business",
+														)
+													}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar propósito" />
+													</SelectTrigger>
+													<SelectContent align="start">
+														<SelectItem value="personal">
+															Personal
+														</SelectItem>
+														<SelectItem value="business">
+															Negocio
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</createOpportunityForm.Field>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div className="col-span-2">
 									<createOpportunityForm.Field name="leadId">
 										{(field) => (
 											<div className="space-y-2">
@@ -1477,12 +1597,12 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data?.map(
-															(vehicle: any) => ({
+														...(vehiclesQuery.data?.data
+															?.filter((vehicle: any) => isVehicleAvailable(vehicle.status))
+															?.map((vehicle: any) => ({
 																value: vehicle.id,
 																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-															}),
-														) || []),
+															})) || []),
 													]}
 													value={field.state.value ?? "none"}
 													onChange={(value) =>
@@ -1816,6 +1936,36 @@ function RouteComponent() {
 												</div>
 											</div>
 										)}
+
+										{/* Source */}
+										{selectedOpportunity.source && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Fuente
+												</Label>
+												<div className="flex items-center gap-3">
+													<Target className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{getSourceLabel(selectedOpportunity.source)}
+													</span>
+												</div>
+											</div>
+										)}
+
+										{/* Loan Purpose */}
+										{selectedOpportunity.loanPurpose && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Propósito del Préstamo
+												</Label>
+												<div className="flex items-center gap-3">
+													<Banknote className="h-5 w-5 text-muted-foreground" />
+													<span className="font-medium">
+														{getLoanPurposeLabel(selectedOpportunity.loanPurpose)}
+													</span>
+												</div>
+											</div>
+										)}
 									</div>
 
 									{/* Weighted Value */}
@@ -2134,947 +2284,46 @@ function RouteComponent() {
 										const latestQuotation =
 											opportunityQuotationsQuery.data?.[0] || null;
 
+										// Si no hay cotización, mostrar mensaje para crear una
+										if (!latestQuotation) {
+											return (
+												<div className="rounded-lg border border-dashed border-orange-300 bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
+													<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
+													<h3 className="mb-2 font-semibold text-lg">
+														Se requiere una cotización
+													</h3>
+													<p className="mb-4 text-muted-foreground">
+														Para ver el detalle del crédito, primero debes crear
+														una cotización para esta oportunidad.
+													</p>
+													<Button
+														onClick={() => {
+															setIsDetailsDialogOpen(false);
+															navigate({
+																to: "/crm/quoter",
+																search: {
+																	opportunityId: selectedOpportunity.id,
+																},
+															});
+														}}
+													>
+														<Calculator className="mr-2 h-4 w-4" />
+														Crear Cotización
+													</Button>
+												</div>
+											);
+										}
+
 										return (
 											<CreditDetailView
 												opportunityId={selectedOpportunity.id}
 												userRole={userProfile.data?.role}
-												opportunity={{
-													id: selectedOpportunity.id,
-													title: selectedOpportunity.title,
-													value: selectedOpportunity.value,
-													tasaInteres: selectedOpportunity.tasaInteres,
-													numeroCuotas: selectedOpportunity.numeroCuotas,
-													cuotaMensual: selectedOpportunity.cuotaMensual,
-													royalti: selectedOpportunity.royalti,
-													porcentajeRoyalti:
-														selectedOpportunity.porcentajeRoyalti,
-													gps: selectedOpportunity.gps,
-													seguro: selectedOpportunity.seguro,
-													membresiaPago: selectedOpportunity.membresiaPago,
-													nit: selectedOpportunity.nit,
-													direccion: selectedOpportunity.direccion,
-													inversionistas: selectedOpportunity.inversionistas,
-													creditType: selectedOpportunity.creditType,
-													creditDetailApproved:
-														selectedOpportunity.creditDetailApproved,
-													creditDetailApprovedBy:
-														selectedOpportunity.creditDetailApprovedBy,
-													creditDetailApprovedAt:
-														selectedOpportunity.creditDetailApprovedAt,
-													lead: selectedOpportunity.lead,
-													vehicle: selectedOpportunity.vehicle,
-												}}
+												opportunity={selectedOpportunity}
 												quotation={latestQuotation}
 											/>
 										);
 									})()}
 
-									<form
-										onSubmit={(e) => {
-											e.preventDefault();
-											e.stopPropagation();
-											void editOpportunityForm.handleSubmit();
-										}}
-										className="space-y-6"
-									>
-										{/* Términos de Crédito - Mostrar cuando se acerca al 100% */}
-										<editOpportunityForm.Subscribe>
-											{(formState) => {
-												const selectedStageData = salesStagesQuery.data?.find(
-													(s) => s.id === formState.values.stageId,
-												);
-												const showCreditTerms =
-													selectedStageData &&
-													selectedStageData.closurePercentage >= 80;
-
-												return showCreditTerms ? (
-													<div className="space-y-4 rounded-lg border border-yellow-200 bg-yellow-50 p-4 dark:border-yellow-900 dark:bg-yellow-950/20">
-														<div className="flex items-center gap-2">
-															<div className="flex h-8 w-8 items-center justify-center rounded-full bg-yellow-500 text-white">
-																<span className="font-bold text-sm">!</span>
-															</div>
-															<div>
-																<h3 className="font-semibold text-sm">
-																	Términos de Crédito Requeridos
-																</h3>
-																<p className="text-muted-foreground text-xs">
-																	Esta oportunidad está cerca del cierre.
-																	Complete los términos de crédito para poder
-																	cerrarla al 100%.
-																</p>
-															</div>
-														</div>
-
-														{/* Asesor */}
-														<div className="mb-4">
-															<editOpportunityForm.Field name="asesorId">
-																{(field) => (
-																	<div className="space-y-2">
-																		<Label htmlFor={field.name}>
-																			Asesor{" "}
-																			{selectedStageData.closurePercentage ===
-																				100 && (
-																				<span className="text-red-500">*</span>
-																			)}
-																		</Label>
-																		<Combobox
-																			value={
-																				field.state.value > 0
-																					? field.state.value.toString()
-																					: null
-																			}
-																			onChange={(value) => {
-																				field.handleChange(
-																					Number.parseInt(value || "0"),
-																				);
-																			}}
-																			options={
-																				asesoresQuery.data?.asesores?.map(
-																					(asesor) => ({
-																						label: asesor.nombre,
-																						value: asesor.asesorId.toString(),
-																					}),
-																				) || []
-																			}
-																			placeholder="Seleccionar asesor"
-																			width="full"
-																		/>
-																		<p className="text-muted-foreground text-xs">
-																			Selecciona el asesor responsable del
-																			crédito
-																		</p>
-																	</div>
-																)}
-															</editOpportunityForm.Field>
-														</div>
-
-														<div className="grid grid-cols-2 gap-4">
-															<div>
-																<editOpportunityForm.Field name="numeroCuotas">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Número de Cuotas{" "}
-																				{selectedStageData.closurePercentage ===
-																					100 && (
-																					<span className="text-red-500">
-																						*
-																					</span>
-																				)}
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				min="1"
-																				max="84"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="12, 24, 36, 48, 60, 72, 84"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Plazo del crédito en meses
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="tasaInteres">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Tasa de Interés (%){" "}
-																				{selectedStageData.closurePercentage ===
-																					100 && (
-																					<span className="text-red-500">
-																						*
-																					</span>
-																				)}
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				max="100"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="15.50"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Tasa de interés anual
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="cuotaMensual">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Cuota Mensual (Q){" "}
-																				{selectedStageData.closurePercentage ===
-																					100 && (
-																					<span className="text-red-500">
-																						*
-																					</span>
-																				)}
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="2500.00"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Monto de cada cuota mensual
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="fechaInicio">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Fecha de Inicio{" "}
-																				{selectedStageData.closurePercentage ===
-																					100 && (
-																					<span className="text-red-500">
-																						*
-																					</span>
-																				)}
-																			</Label>
-																			<DatePicker
-																				date={
-																					field.state.value
-																						? new Date(field.state.value)
-																						: undefined
-																				}
-																				onDateChange={(date) => {
-																					field.handleChange(
-																						date
-																							? date.toISOString().split("T")[0]
-																							: "",
-																					);
-																					field.handleBlur();
-																				}}
-																				placeholder="Seleccionar fecha de inicio"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Fecha de inicio del contrato
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="diaPagoMensual">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Día de Pago Mensual{" "}
-																				{selectedStageData.closurePercentage ===
-																					100 && (
-																					<span className="text-red-500">
-																						*
-																					</span>
-																				)}
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				min="1"
-																				max="31"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="15"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Día del mes para realizar el pago (1-31)
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="seguro">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Seguro (Q)
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) => {
-																					const seguroValue =
-																						Number.parseFloat(e.target.value) ||
-																						0;
-																					field.handleChange(e.target.value);
-																					// Actualizar reserva automáticamente: MIN_RESERVA + seguro
-																					const newReserva =
-																						MIN_RESERVA + seguroValue;
-																					editOpportunityForm.setFieldValue(
-																						"reserva",
-																						newReserva.toString(),
-																					);
-																				}}
-																				placeholder="0.00"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Monto del seguro (actualiza reserva
-																				automáticamente)
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>{" "}
-															<div>
-																<editOpportunityForm.Field name="gps">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				GPS (Q)
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="0.00"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Monto del GPS
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="categoria">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Categoría
-																			</Label>
-																			<Select
-																				value={field.state.value}
-																				onValueChange={(value) => {
-																					field.handleChange(
-																						value as
-																							| ""
-																							| "Contraseña"
-																							| "CV Vehículo"
-																							| "CV Vehículo nuevo"
-																							| "Fiduciario"
-																							| "Hipotecario"
-																							| "Vehículo",
-																					);
-																				}}
-																			>
-																				<SelectTrigger>
-																					<SelectValue placeholder="Seleccionar categoría" />
-																				</SelectTrigger>
-																				<SelectContent>
-																					<SelectItem value="Contraseña">
-																						Contraseña
-																					</SelectItem>
-																					<SelectItem value="CV Vehículo">
-																						CV Vehículo
-																					</SelectItem>
-																					<SelectItem value="CV Vehículo nuevo">
-																						CV Vehículo nuevo
-																					</SelectItem>
-																					<SelectItem value="Fiduciario">
-																						Fiduciario
-																					</SelectItem>
-																					<SelectItem value="Hipotecario">
-																						Hipotecario
-																					</SelectItem>
-																					<SelectItem value="Vehículo">
-																						Vehículo
-																					</SelectItem>
-																				</SelectContent>
-																			</Select>
-																			<p className="text-muted-foreground text-xs">
-																				Categoría del crédito
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="nit">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>NIT</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="text"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="12345678-9"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Número de identificación tributaria
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="royalti">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Royalti (Q)
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="0.00"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Monto del royalti
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="porcentajeRoyalti">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Porcentaje Royalti (%)
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				max="100"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="0.00"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Porcentaje del royalti
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="reserva">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Reserva (Q)
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min={MIN_RESERVA}
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) => {
-																					const value =
-																						Number.parseFloat(e.target.value) ||
-																						0;
-																					if (value < MIN_RESERVA) {
-																						field.handleChange(
-																							MIN_RESERVA.toString(),
-																						);
-																					} else {
-																						field.handleChange(e.target.value);
-																					}
-																				}}
-																				placeholder={MIN_RESERVA.toString()}
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Monto de reserva (mínimo Q{MIN_RESERVA})
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="membresiaPago">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Membresía Pago (Q)
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="number"
-																				step="0.01"
-																				min="0"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="0.00"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Pago de membresía
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-															<div>
-																<editOpportunityForm.Field name="direccion">
-																	{(field) => (
-																		<div className="space-y-2">
-																			<Label htmlFor={field.name}>
-																				Dirección
-																			</Label>
-																			<Input
-																				id={field.name}
-																				name={field.name}
-																				type="text"
-																				value={field.state.value}
-																				onBlur={field.handleBlur}
-																				onChange={(e) =>
-																					field.handleChange(e.target.value)
-																				}
-																				placeholder="Dirección del cliente"
-																			/>
-																			<p className="text-muted-foreground text-xs">
-																				Dirección completa del cliente
-																			</p>
-																		</div>
-																	)}
-																</editOpportunityForm.Field>
-															</div>
-														</div>
-													</div>
-												) : null;
-											}}
-										</editOpportunityForm.Subscribe>{" "}
-										{/* Inversionistas Section */}
-										<editOpportunityForm.Subscribe>
-											{(formState) => {
-												const selectedStageData = salesStagesQuery.data?.find(
-													(s) => s.id === formState.values.stageId,
-												);
-												const showInversionistas =
-													selectedStageData &&
-													selectedStageData.closurePercentage >= 80;
-
-												return showInversionistas ? (
-													<div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4 dark:border-blue-900 dark:bg-blue-950/20">
-														<div className="flex items-center justify-between">
-															<div className="flex items-center gap-2">
-																<div className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-white">
-																	<span className="font-bold text-sm">$</span>
-																</div>
-																<div>
-																	<h3 className="font-semibold text-sm">
-																		Inversionistas
-																	</h3>
-																	<p className="text-muted-foreground text-xs">
-																		Agrega los inversionistas que participan en
-																		este crédito
-																	</p>
-																</div>
-															</div>
-															<editOpportunityForm.Field name="inversionistas">
-																{(field) => (
-																	<Button
-																		type="button"
-																		size="sm"
-																		onClick={() => {
-																			field.handleChange([
-																				...field.state.value,
-																				{
-																					inversionista_id: 0,
-																					porcentaje_participacion: 0,
-																					cuota_inversionista: 0,
-																					monto_aportado: 0,
-																					porcentaje_cash_in: 0,
-																					porcentaje_inversion: 0,
-																				},
-																			]);
-																		}}
-																	>
-																		Agregar Inversionista
-																	</Button>
-																)}
-															</editOpportunityForm.Field>
-														</div>
-
-														<editOpportunityForm.Field name="inversionistas">
-															{(field) => (
-																<div className="space-y-3">
-																	{field.state.value.map((inv, index) => (
-																		<div
-																			key={index}
-																			className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
-																		>
-																			<div className="mb-3 flex items-center justify-between">
-																				<h4 className="font-semibold text-sm">
-																					Inversionista #{index + 1}
-																				</h4>
-																				<Button
-																					type="button"
-																					variant="destructive"
-																					size="sm"
-																					onClick={() => {
-																						const newInv = [
-																							...field.state.value,
-																						];
-																						newInv.splice(index, 1);
-																						field.handleChange(newInv);
-																					}}
-																				>
-																					Eliminar
-																				</Button>
-																			</div>
-																			<div className="grid grid-cols-3 gap-3">
-																				<div className="space-y-2">
-																					<Label>Inversionista</Label>
-																					<Combobox
-																						value={
-																							inv.inversionista_id > 0
-																								? inv.inversionista_id.toString()
-																								: null
-																						}
-																						onChange={(value) => {
-																							const newInv = [
-																								...field.state.value,
-																							];
-																							newInv[index].inversionista_id =
-																								Number.parseInt(value || "0");
-																							field.handleChange(newInv);
-																						}}
-																						options={
-																							inversionistasQuery.data?.inversionistas?.map(
-																								(investor) => ({
-																									label: investor.nombre,
-																									value:
-																										investor.inversionistaId.toString(),
-																								}),
-																							) || []
-																						}
-																						placeholder="Seleccionar inversionista"
-																						width="full"
-																					/>
-																				</div>
-																				<div className="space-y-2">
-																					<Label>% Participación</Label>
-																					<Input
-																						type="number"
-																						step="0.01"
-																						value={inv.porcentaje_participacion}
-																						onChange={(e) => {
-																							const newInv = [
-																								...field.state.value,
-																							];
-																							newInv[
-																								index
-																							].porcentaje_participacion =
-																								Number.parseFloat(
-																									e.target.value,
-																								);
-																							field.handleChange(newInv);
-																						}}
-																						placeholder="0.00"
-																					/>
-																				</div>
-																				<div className="space-y-2">
-																					<Label>Cuota Inversionista (Q)</Label>
-																					<Input
-																						type="number"
-																						step="0.01"
-																						value={inv.cuota_inversionista}
-																						onChange={(e) => {
-																							const newInv = [
-																								...field.state.value,
-																							];
-																							newInv[
-																								index
-																							].cuota_inversionista =
-																								Number.parseFloat(
-																									e.target.value,
-																								);
-																							field.handleChange(newInv);
-																						}}
-																						placeholder="0.00"
-																					/>
-																				</div>
-																				<div className="space-y-2">
-																					<Label>Monto Aportado (Q)</Label>
-																					<Input
-																						type="number"
-																						step="0.01"
-																						value={inv.monto_aportado}
-																						onChange={(e) => {
-																							const newInv = [
-																								...field.state.value,
-																							];
-																							newInv[index].monto_aportado =
-																								Number.parseFloat(
-																									e.target.value,
-																								);
-																							field.handleChange(newInv);
-																						}}
-																						placeholder="0.00"
-																					/>
-																				</div>
-																				<div className="space-y-2">
-																					<Label>% Cash In</Label>
-																					<Input
-																						type="number"
-																						step="0.01"
-																						value={inv.porcentaje_cash_in}
-																						onChange={(e) => {
-																							const newInv = [
-																								...field.state.value,
-																							];
-																							newInv[index].porcentaje_cash_in =
-																								Number.parseFloat(
-																									e.target.value,
-																								);
-																							field.handleChange(newInv);
-																						}}
-																						placeholder="0.00"
-																					/>
-																				</div>
-																				<div className="space-y-2">
-																					<Label>% Inversión</Label>
-																					<Input
-																						type="number"
-																						step="0.01"
-																						value={inv.porcentaje_inversion}
-																						onChange={(e) => {
-																							const newInv = [
-																								...field.state.value,
-																							];
-																							newInv[
-																								index
-																							].porcentaje_inversion =
-																								Number.parseFloat(
-																									e.target.value,
-																								);
-																							field.handleChange(newInv);
-																						}}
-																						placeholder="0.00"
-																					/>
-																				</div>
-																			</div>
-																		</div>
-																	))}
-																</div>
-															)}
-														</editOpportunityForm.Field>
-													</div>
-												) : null;
-											}}
-										</editOpportunityForm.Subscribe>
-										{/* Rubros Section */}
-										<editOpportunityForm.Subscribe>
-											{(formState) => {
-												const selectedStageData = salesStagesQuery.data?.find(
-													(s) => s.id === formState.values.stageId,
-												);
-												const showRubros =
-													selectedStageData &&
-													selectedStageData.closurePercentage >= 80;
-												return showRubros ? (
-													<div className="space-y-4 rounded-lg border border-green-200 bg-green-50 p-4 dark:border-green-900 dark:bg-green-950/20">
-														<div className="flex items-center justify-between">
-															<div className="flex items-center gap-2">
-																<div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500 text-white">
-																	<span className="font-bold text-sm">₡</span>
-																</div>
-																<div>
-																	<h3 className="font-semibold text-sm">
-																		Rubros
-																	</h3>
-																	<p className="text-muted-foreground text-xs">
-																		Agrega los rubros de gastos del crédito
-																	</p>
-																</div>
-															</div>
-															<editOpportunityForm.Field name="rubros">
-																{(field) => (
-																	<Button
-																		type="button"
-																		size="sm"
-																		onClick={() => {
-																			field.handleChange([
-																				...field.state.value,
-																				{
-																					nombre_rubro: "",
-																					monto: 0,
-																				},
-																			]);
-																		}}
-																	>
-																		Agregar Rubro
-																	</Button>
-																)}
-															</editOpportunityForm.Field>
-														</div>
-
-														<editOpportunityForm.Field name="rubros">
-															{(field) => (
-																<div className="space-y-3">
-																	{field.state.value.map((rubro, index) => (
-																		<div
-																			key={index}
-																			className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900"
-																		>
-																			<div className="mb-3 flex items-center justify-between">
-																				<h4 className="font-semibold text-sm">
-																					Rubro #{index + 1}
-																				</h4>
-																				<Button
-																					type="button"
-																					variant="destructive"
-																					size="sm"
-																					onClick={() => {
-																						const newRubros = [
-																							...field.state.value,
-																						];
-																						newRubros.splice(index, 1);
-																						field.handleChange(newRubros);
-																					}}
-																				>
-																					Eliminar
-																				</Button>
-																			</div>
-																			<div className="grid grid-cols-2 gap-3">
-																				<div className="space-y-2">
-																					<Label>Nombre del Rubro</Label>
-																					<Input
-																						type="text"
-																						value={rubro.nombre_rubro}
-																						onChange={(e) => {
-																							const newRubros = [
-																								...field.state.value,
-																							];
-																							newRubros[index].nombre_rubro =
-																								e.target.value;
-																							field.handleChange(newRubros);
-																						}}
-																						placeholder="Ej: Comisión administrativa"
-																					/>
-																				</div>
-																				<div className="space-y-2">
-																					<Label>Monto (Q)</Label>
-																					<Input
-																						type="number"
-																						step="0.01"
-																						value={rubro.monto}
-																						onChange={(e) => {
-																							const newRubros = [
-																								...field.state.value,
-																							];
-																							newRubros[index].monto =
-																								Number.parseFloat(
-																									e.target.value,
-																								);
-																							field.handleChange(newRubros);
-																						}}
-																						placeholder="0.00"
-																					/>
-																				</div>
-																			</div>
-																		</div>
-																	))}
-																</div>
-															)}
-														</editOpportunityForm.Field>
-													</div>
-												) : null;
-											}}
-										</editOpportunityForm.Subscribe>
-										<editOpportunityForm.Subscribe>
-											{(state) => (
-												<div className="flex gap-3">
-													<Button
-														type="button"
-														variant="outline"
-														className="flex-1"
-														onClick={() => setIsEditDialogOpen(false)}
-													>
-														Cancelar
-													</Button>
-													<Button
-														type="submit"
-														className="flex-1"
-														disabled={
-															!state.canSubmit ||
-															state.isSubmitting ||
-															updateOpportunityMutation.isPending
-														}
-													>
-														{state.isSubmitting ||
-														updateOpportunityMutation.isPending
-															? "Actualizando..."
-															: "Actualizar Oportunidad"}
-													</Button>
-												</div>
-											)}
-										</editOpportunityForm.Subscribe>
-									</form>
 								</TabsContent>
 							</Tabs>
 						)}
@@ -3212,6 +2461,40 @@ function RouteComponent() {
 									</editOpportunityForm.Field>
 								</div>
 								<div>
+									<editOpportunityForm.Field name="loanPurpose">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>
+													Propósito del Préstamo
+												</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) =>
+														field.handleChange(
+															value as "personal" | "business",
+														)
+													}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar propósito" />
+													</SelectTrigger>
+													<SelectContent align="start">
+														<SelectItem value="personal">
+															Personal
+														</SelectItem>
+														<SelectItem value="business">
+															Negocio
+														</SelectItem>
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</editOpportunityForm.Field>
+								</div>
+							</div>
+
+							<div className="grid grid-cols-2 gap-4">
+								<div>
 									<editOpportunityForm.Field name="vehicleId">
 										{(field) => (
 											<div className="space-y-2">
@@ -3219,12 +2502,14 @@ function RouteComponent() {
 												<Combobox
 													options={[
 														{ value: "none", label: "Sin vehículo" },
-														...(vehiclesQuery.data?.data?.map(
-															(vehicle: any) => ({
+														...(vehiclesQuery.data?.data
+															?.filter((vehicle: any) => 
+																isVehicleAvailable(vehicle.status, selectedOpportunity?.vehicleId, vehicle.id)
+															)
+															?.map((vehicle: any) => ({
 																value: vehicle.id,
 																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
-															}),
-														) || []),
+															})) || []),
 													]}
 													value={field.state.value || "none"}
 													onChange={(value) =>
@@ -3239,9 +2524,8 @@ function RouteComponent() {
 										)}
 									</editOpportunityForm.Field>
 								</div>
-							</div>
 
-							<div>
+									<div>
 								<editOpportunityForm.Field name="stageId">
 									{(field) => (
 										<div className="space-y-2">
@@ -3265,7 +2549,7 @@ function RouteComponent() {
 									)}
 								</editOpportunityForm.Field>
 							</div>
-
+							</div>
 							<div className="grid grid-cols-2 gap-4">
 								<div>
 									<editOpportunityForm.Field name="probability">

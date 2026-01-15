@@ -1,10 +1,8 @@
 import { and, count, desc, eq, gte, ilike, isNotNull, or, sql } from "drizzle-orm";
+import { ORPCError } from "@orpc/server";
 import { z } from "zod";
 import { db } from "../db";
 import {
-	carteraBackReferences,
-	type NewCarteraBackReference,
-	renapInfo,
 	vehicleDocumentRequirements,
 	vehicleDocuments,
 	vehicleInspections,
@@ -37,11 +35,7 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
-import {
-	type CreateCreditoResult,
-	createCreditoInCarteraBack,
-	isCarteraBackEnabled,
-} from "../services/cartera-back-integration";
+import { closeOpportunity } from "../services/close-opportunity";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -229,7 +223,6 @@ export const crmRouter = {
 					loanAmount: leads.loanAmount,
 					occupation: leads.occupation,
 					workTime: leads.workTime,
-					loanPurpose: leads.loanPurpose,
 					ownsHome: leads.ownsHome,
 					ownsVehicle: leads.ownsVehicle,
 					hasCreditCard: leads.hasCreditCard,
@@ -240,6 +233,10 @@ export const crmRouter = {
 					notes: leads.notes,
 					score: leads.score,
 					fit: leads.fit,
+					departamento: leads.departamento,
+					municipio: leads.municipio,
+					zona: leads.zona,
+					direccion: leads.direccion,
 					scoredAt: leads.scoredAt,
 					createdAt: leads.createdAt,
 					updatedAt: leads.updatedAt,
@@ -266,6 +263,52 @@ export const crmRouter = {
 				limit,
 				offset,
 			};
+		}),
+
+	getLeadById: crmProcedure
+		.input(z.object({ leadId: z.string().uuid() }))
+		.handler(async ({ input, context }) => {
+			const [lead] = await db
+				.select({
+					id: leads.id,
+					firstName: leads.firstName,
+					lastName: leads.lastName,
+					email: leads.email,
+					phone: leads.phone,
+					dpi: leads.dpi,
+					status: leads.status,
+					source: leads.source,
+					assignedTo: leads.assignedTo,
+					companyId: leads.companyId,
+					notes: leads.notes,
+					createdAt: leads.createdAt,
+					updatedAt: leads.updatedAt,
+					company: companies,
+					assignedUser: {
+						id: user.id,
+						name: user.name,
+					},
+				})
+				.from(leads)
+				.leftJoin(companies, eq(leads.companyId, companies.id))
+				.leftJoin(user, eq(leads.assignedTo, user.id))
+				.where(eq(leads.id, input.leadId))
+				.limit(1);
+
+			if (!lead) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Lead no encontrado",
+				});
+			}
+
+			// Sales users can only see their assigned leads
+			if (context.userRole === "sales" && lead.assignedTo !== context.userId) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permiso para ver este lead",
+				});
+			}
+
+			return lead;
 		}),
 
 	getLeadsStats: crmProcedure.handler(async ({ context }) => {
@@ -333,7 +376,6 @@ export const crmRouter = {
 				workTime: z
 					.enum(["less_than_1", "1_to_5", "5_to_10", "10_plus"])
 					.optional(),
-				loanPurpose: z.enum(["personal", "business"]).optional(),
 				ownsHome: z.boolean().default(false),
 				ownsVehicle: z.boolean().default(false),
 				hasCreditCard: z.boolean().default(false),
@@ -400,7 +442,6 @@ export const crmRouter = {
 				workTime: z
 					.enum(["less_than_1", "1_to_5", "5_to_10", "10_plus"])
 					.optional(),
-				loanPurpose: z.enum(["personal", "business"]).optional(),
 				ownsHome: z.boolean().optional(),
 				ownsVehicle: z.boolean().optional(),
 				hasCreditCard: z.boolean().optional(),
@@ -638,6 +679,11 @@ export const crmRouter = {
 					firstName: leads.firstName,
 					lastName: leads.lastName,
 					email: leads.email,
+					age: leads.age,
+					direccion: leads.direccion,
+					departamento: leads.departamento,
+					municipio: leads.municipio,
+					zona: leads.zona,
 				},
 				stage: {
 					id: salesStages.id,
@@ -719,6 +765,18 @@ export const crmRouter = {
 				companyId: z.string().uuid().optional(),
 				vehicleId: z.string().uuid().optional(),
 				creditType: z.enum(["autocompra", "sobre_vehiculo"]),
+				source: z
+					.enum([
+						"website",
+						"referral",
+						"cold_call",
+						"email",
+						"social_media",
+						"event",
+						"other",
+					])
+					.optional(),
+				loanPurpose: z.enum(["personal", "business"]).optional(),
 				value: z.string().optional(), // Will be converted to decimal
 				stageId: z.string().uuid(),
 				probability: z.number().min(0).max(100).optional(),
@@ -737,16 +795,23 @@ export const crmRouter = {
 				);
 			}
 
-			// If a lead is provided, get the company from the lead
+			// If a lead is provided, get the company and source from the lead
 			let companyId = input.companyId;
+			let source = input.source;
 			if (input.leadId) {
 				const lead = await db
 					.select()
 					.from(leads)
 					.where(eq(leads.id, input.leadId))
 					.limit(1);
-				if (lead.length > 0 && lead[0].companyId) {
-					companyId = lead[0].companyId;
+				if (lead.length > 0) {
+					if (lead[0].companyId) {
+						companyId = lead[0].companyId;
+					}
+					// If source not provided, take from lead
+					if (!source && lead[0].source) {
+						source = lead[0].source;
+					}
 				}
 			}
 
@@ -755,6 +820,7 @@ export const crmRouter = {
 				.values({
 					...input,
 					companyId,
+					source,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)
@@ -808,9 +874,11 @@ export const crmRouter = {
 				reserva: z.number().optional(),
 				membresiaPago: z.number().optional(),
 				inversionistas: z.string().optional(), // JSON string
-				asesorId: z.number().optional(), // Advisor ID from cartera-back
+				asesorId: z.number().optional(),
 				direccion: z.string().optional(),
 				rubros: z.string().optional(), // JSON string with expense items
+				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
+				loanPurpose: z.enum(["personal", "business"]).optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -825,6 +893,7 @@ export const crmRouter = {
 				reserva,
 				membresiaPago,
 				direccion,
+				gastosAdministrativos,
 				...updateData
 			} = input;
 
@@ -838,19 +907,6 @@ export const crmRouter = {
 			if (!currentOpportunity[0]) {
 				throw new Error("Opportunity not found");
 			}
-
-			// Get lead if leadId exists
-			let lead = null;
-			if (currentOpportunity[0].leadId) {
-				const leadOption = await db
-					.select()
-					.from(leads)
-					.where(eq(leads.id, currentOpportunity[0].leadId))
-					.limit(1);
-				lead = leadOption[0];
-			}
-
-			let numeroSifco: string | undefined;
 
 			// Validate stage transitions
 			if (input.stageId) {
@@ -874,9 +930,10 @@ export const crmRouter = {
 				if (fromPercentage <= 40 && toPercentage >= 50) {
 					// Check if credit detail has been approved
 					if (!currentOpportunity[0].creditDetailApproved) {
-						throw new Error(
-							"Para avanzar de análisis (40%) a la siguiente etapa (50%+), el detalle de crédito debe ser aprobado por un supervisor de ventas.",
-						);
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Para avanzar de análisis (40%) a la siguiente etapa (50%+), el detalle de crédito debe ser aprobado por un supervisor de ventas.",
+						});
 					}
 				}
 
@@ -884,380 +941,18 @@ export const crmRouter = {
 				if (fromPercentage === 90 && toPercentage === 100) {
 					// Check if disbursement has been approved via checklist
 					if (!currentOpportunity[0].disbursementApproved) {
-						throw new Error(
-							"Para completar la oportunidad (100%), el desembolso debe ser aprobado por un analista completando el checklist de desembolso.",
+						console.log(
+							"Disbursement not approved, cannot move to 100% stage",
 						);
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Para completar la oportunidad (100%), el desembolso debe ser aprobado por un analista completando el checklist de desembolso.",
+						});
 					}
 				}
 
-				// Validate credit terms if moving to 100% stage
-				if (targetStage[0]?.closurePercentage === 100) {
-					// Check all required fields for contract creation
-					const opp = currentOpportunity[0];
-					const missingFields: string[] = [];
-
-					console.log("Validating required fields for 100% closure...", opp);
-
-					if (!opp.vehicleId && !input.vehicleId)
-						missingFields.push("vehículo");
-					if (!opp.leadId) missingFields.push("lead/contacto");
-					if (!opp.value && !input.value)
-						missingFields.push("valor del crédito");
-
-					// Credit terms
-					const numeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
-					const tasaInteres = input.tasaInteres ?? opp.tasaInteres;
-					const cuotaMensual = input.cuotaMensual ?? opp.cuotaMensual;
-					const fechaInicio = input.fechaInicio ?? opp.fechaInicio;
-					const diaPagoMensual = input.diaPagoMensual ?? opp.diaPagoMensual;
-
-					if (!numeroCuotas) missingFields.push("número de cuotas");
-					if (!tasaInteres) missingFields.push("tasa de interés");
-					if (!cuotaMensual) missingFields.push("cuota mensual");
-					if (!fechaInicio) missingFields.push("fecha de inicio del contrato");
-					if (!diaPagoMensual) missingFields.push("día de pago mensual");
-
-					const seguro =
-						input.seguro ??
-						(opp.seguro ? Number.parseFloat(opp.seguro) : undefined);
-					const gps =
-						input.gps ?? (opp.gps ? Number.parseFloat(opp.gps) : undefined);
-					const reserva =
-						input.reserva ??
-						(opp.reserva ? Number.parseFloat(opp.reserva) : undefined);
-					const categoria = input.categoria ?? opp.categoria;
-					const nit = input.nit ?? opp.nit;
-					const asesorId = input.asesorId ?? opp.asesorId;
-					const inversionistas = input.inversionistas ?? opp.inversionistas;
-
-					if (seguro === undefined || seguro === null || seguro <= 0)
-						missingFields.push("seguro (debe ser mayor a 0)");
-					if (gps === undefined || gps === null || gps <= 0)
-						missingFields.push("GPS (debe ser mayor a 0)");
-					if (reserva === undefined || reserva === null || reserva <= 0)
-						missingFields.push("reserva (debe ser mayor a 0)");
-					if (!categoria) missingFields.push("categoría del crédito");
-					if (!nit) missingFields.push("NIT del cliente");
-					if (!asesorId) missingFields.push("asesor");
-					if (
-						!inversionistas ||
-						(typeof inversionistas === "string" &&
-							JSON.parse(inversionistas).length === 0)
-					) {
-						missingFields.push("inversionistas (debe haber al menos uno)");
-					}
-
-					if (missingFields.length > 0) {
-						console.log("Missing fields for 100% closure:", missingFields);
-						throw new Error(
-							`No se puede cerrar la oportunidad al 100%. Faltan los siguientes datos: ${missingFields.join(", ")}`,
-						);
-					}
-
-					// If moving to 100%, create client and contract
-					if (targetStage[0]?.closurePercentage === 100) {
-						console.log(
-							"All required fields present. Creating client and contract...",
-						);
-						// All validations passed - create client and contract
-						const opp = currentOpportunity[0];
-						const finalVehicleId = input.vehicleId ?? opp.vehicleId;
-						const finalValue = input.value ?? opp.value;
-						const finalNumeroCuotas = input.numeroCuotas ?? opp.numeroCuotas;
-						const finalTasaInteres = input.tasaInteres ?? opp.tasaInteres;
-						const finalCuotaMensual = input.cuotaMensual ?? opp.cuotaMensual;
-						const finalFechaInicio = input.fechaInicio ?? opp.fechaInicio;
-						const finalDiaPagoMensual =
-							input.diaPagoMensual ?? opp.diaPagoMensual;
-
-						if (!opp.leadId) {
-							throw new Error(
-								"No se puede crear el contrato sin un lead asociado",
-							);
-						}
-
-						// Get lead data to obtain companyId
-						const leadData = await db
-							.select()
-							.from(leads)
-							.where(eq(leads.id, opp.leadId))
-							.limit(1);
-
-						if (!leadData[0]) {
-							throw new Error("Lead no encontrado");
-						}
-
-						const lead = leadData[0];
-						console.log("Lead data for contract creation:", lead);
-						const companyId = opp?.companyId ?? lead.companyId ?? undefined;
-						console.log(`[CRM] dpi for renap lookup: ${lead?.dpi ?? "N/A"}`);
-
-						// Generate SIFCO credit number (unique identifier)
-						// Este número se genera UNA VEZ cuando la oportunidad llega al 100%
-						const timestamp = Date.now();
-						const randomSuffix = Math.floor(Math.random() * 1000)
-							.toString()
-							.padStart(3, "0");
-						numeroSifco = `CRM-${timestamp}-${randomSuffix}`;
-						// Calculate contract end date
-						const fechaInicioDate = new Date(finalFechaInicio as string);
-						console.log(
-							`[CRM] Generating new credit with number: ${numeroSifco}`,
-						);
-
-						// Integrate with cartera-back (dual-write)
-						// IMPORTANTE: Si cartera-back está habilitado, es OBLIGATORIO que funcione
-						// Si falla, no se debe continuar con la actualización de la oportunidad
-						let carteraBackSuccess = false;
-						let carteraBackError: string | undefined;
-						let creditoResult: CreateCreditoResult | undefined;
-
-						console.log(
-							`[CRM] Cartera-back integration is ${isCarteraBackEnabled() ? "ENABLED" : "DISABLED"}`,
-						);
-
-						if (isCarteraBackEnabled()) {
-							const [renapInfoOpp] = await db
-								.select()
-								.from(renapInfo)
-								.where(eq(renapInfo.dpi, lead.dpi ?? ""))
-								.limit(1);
-
-							console.log(
-								`[CRM] Renap info found: ${renapInfoOpp ? "YES" : "NO"}`,
-							);
-
-							// TODO: Get or create usuario_id in cartera-back
-							// For now, we'll use a placeholder (this needs to be implemented)
-							const usuarioId = 1; // PLACEHOLDER - needs proper implementation
-
-							// Create new credit - Si falla, debe detener todo el proceso
-							console.log(
-								`[CRM] Creating credit in cartera-back: ${numeroSifco}`,
-							);
-
-							// Valores finales: primero intenta del input, si no del opp guardado
-							const finalSeguro =
-								seguro !== undefined
-									? seguro
-									: opp.seguro
-										? Number.parseFloat(opp.seguro)
-										: undefined;
-							const finalGps =
-								gps !== undefined
-									? gps
-									: opp.gps
-										? Number.parseFloat(opp.gps)
-										: undefined;
-							const finalCategoria =
-								input.categoria || opp.categoria || undefined;
-							const finalNit = input.nit || opp.nit || undefined;
-							const finalRoyalti =
-								royalti !== undefined
-									? royalti
-									: opp.royalti
-										? Number.parseFloat(opp.royalti)
-										: undefined;
-							const finalPorcentajeRoyalti = porcentajeRoyalti
-								? Number.parseFloat(porcentajeRoyalti)
-								: opp.porcentajeRoyalti
-									? Number.parseFloat(opp.porcentajeRoyalti)
-									: undefined;
-							const finalReserva =
-								reserva !== undefined
-									? reserva
-									: opp.reserva
-										? Number.parseFloat(opp.reserva)
-										: undefined;
-							const finalMembresiaPago =
-								membresiaPago !== undefined
-									? membresiaPago
-									: opp.membresiaPago
-										? Number.parseFloat(opp.membresiaPago)
-										: undefined;
-							const finalInversionistas =
-								input.inversionistas || opp.inversionistas || undefined;
-							const finalRubros = input.rubros || opp.rubros || undefined;
-							const finalAsesorId = input.asesorId || opp.asesorId || usuarioId; // Usa el del input, o el guardado, o el placeholder
-							const finalNumeroSifco = numeroSifco; // Usa el del input, o el guardado, o el generado
-							const finalDireccion = direccion || lead.direccion || undefined;
-
-							creditoResult = await createCreditoInCarteraBack({
-								opportunityId: opp.id,
-								// contratoFinanciamientoId: newContract[0].id,
-								userId: context.userId,
-								usuario_id: lead
-									? `${lead.firstName} ${lead.lastName}`
-									: "Sin nombre", // Placeholder until proper usuario_id mapping is implemented
-								asesor_id: finalAsesorId,
-								numero_credito_sifco: finalNumeroSifco,
-								direccion: finalDireccion,
-								capital: Number.parseFloat(finalValue as string),
-								porcentaje_interes: Number.parseFloat(
-									finalTasaInteres as string,
-								),
-								plazo: finalNumeroCuotas as number,
-								cuota: Number.parseFloat(finalCuotaMensual as string),
-								tipoCredito: opp.creditType || "autocompra",
-								fecha_creacion: fechaInicioDate.toISOString(),
-								observaciones: `Crédito generado desde CRM - Oportunidad: ${opp.title}`,
-								// Nuevos campos adicionales (primero del input, luego del opp)
-								seguro_10_cuotas: finalSeguro,
-								gps: finalGps,
-								categoria: finalCategoria,
-								nit: finalNit,
-								royalti: finalRoyalti,
-								porcentaje_royalti: finalPorcentajeRoyalti,
-								reserva: finalReserva,
-								membresias_pago: finalMembresiaPago,
-								inversionistas: finalInversionistas
-									? JSON.parse(finalInversionistas)
-									: undefined,
-								rubros: finalRubros ? JSON.parse(finalRubros) : undefined,
-								municipio: renapInfoOpp
-									? renapInfoOpp.municipalityBornedIn
-									: undefined,
-								departamento: renapInfoOpp
-									? renapInfoOpp.departmentBornedIn
-									: undefined,
-								codigo_postal: "01001", // Placeholder until we have postal code data
-								pais: renapInfoOpp ? renapInfoOpp.bornedIn : undefined,
-							});
-
-							carteraBackSuccess = creditoResult.success;
-							carteraBackError = creditoResult.error;
-
-							if (!creditoResult.success) {
-								// Si falla la creación del crédito, lanzar error y detener todo
-								console.error(
-									`[CRM] CRITICAL: Failed to create credit in cartera-back: ${carteraBackError}`,
-								);
-								throw new Error(
-									`No se pudo crear el crédito en cartera-back: ${carteraBackError || "Error desconocido"}. La oportunidad no se actualizará hasta que el crédito se cree exitosamente.`,
-								);
-							}
-
-							console.log(
-								`[CRM] ✓ Credit successfully created in cartera-back: ${numeroSifco}`,
-							);
-						}
-
-						// Check if client already exists for this lead/company
-						const existingClient = await db
-							.select()
-							.from(clients)
-							.where(and(eq(clients.opportunityId, opp.id)))
-							.limit(1);
-
-						let clientId: string;
-
-						if (existingClient.length > 0) {
-							clientId = existingClient[0].id;
-						} else {
-							// Create new client
-							const newClient = await db
-								.insert(clients)
-								.values({
-									companyId,
-									opportunityId: opp.id,
-									contactPerson: `${lead.firstName} ${lead.lastName}`,
-									contractValue: finalValue,
-									startDate: new Date(finalFechaInicio as string),
-									status: "active",
-									assignedTo: opp.assignedTo,
-									notes: `Cliente generado automáticamente desde oportunidad: ${opp.title}`,
-									createdBy: context.userId,
-								})
-								.returning();
-
-							clientId = newClient[0].id;
-						}
-
-						const fechaVencimiento = new Date(fechaInicioDate);
-						fechaVencimiento.setMonth(
-							fechaVencimiento.getMonth() + (finalNumeroCuotas as number),
-						);
-
-						// Create financing contract (local CRM)
-						const newContract = await db
-							.insert(contratosFinanciamiento)
-							.values({
-								clientId,
-								vehicleId: finalVehicleId as string,
-								montoFinanciado: finalValue as string,
-								cuotaMensual: finalCuotaMensual as string,
-								numeroCuotas: finalNumeroCuotas as number,
-								tasaInteres: finalTasaInteres as string,
-								fechaInicio: fechaInicioDate,
-								fechaVencimiento,
-								diaPagoMensual: finalDiaPagoMensual as number,
-								estado: "activo",
-								notes: `Contrato generado desde oportunidad: ${opp.title}`,
-								createdBy: context.userId,
-							})
-							.returning();
-
-						// Store reference in CRM
-						const referenceData: NewCarteraBackReference = {
-							opportunityId: opp.id,
-							contratoFinanciamientoId: newContract[0].id,
-							carteraCreditoId: creditoResult?.credito_id as number,
-							numeroCreditoSifco: creditoResult?.numero_credito_sifco as string,
-							syncedAt: new Date(),
-							lastSyncStatus: "success",
-							createdBy: context.userId,
-						};
-
-						await db.insert(carteraBackReferences).values(referenceData);
-
-						// Generate payment installments (cuotas) - ONLY if cartera-back is disabled
-						// When cartera-back is enabled, installments are managed there
-						if (!isCarteraBackEnabled()) {
-							const cuotasValues = [];
-							for (let i = 1; i <= (finalNumeroCuotas as number); i++) {
-								const fechaVencimientoCuota = new Date(fechaInicioDate);
-								fechaVencimientoCuota.setMonth(
-									fechaVencimientoCuota.getMonth() + i,
-								);
-								// Set to the payment day of the month
-								fechaVencimientoCuota.setDate(finalDiaPagoMensual as number);
-
-								cuotasValues.push({
-									contratoId: newContract[0].id,
-									numeroCuota: i,
-									fechaVencimiento: fechaVencimientoCuota,
-									montoCuota: finalCuotaMensual as string,
-									estadoMora: "al_dia" as const,
-									diasMora: 0,
-								});
-							}
-
-							await db.insert(cuotasPago).values(cuotasValues);
-						} else {
-							console.log(
-								"[CRM] Skipping local cuotas generation - managed by cartera-back",
-							);
-						}
-
-						// Update contract notes with sync status
-						if (isCarteraBackEnabled()) {
-							const syncNote = carteraBackSuccess
-								? `\n✓ Sincronizado con cartera-back: ${numeroSifco}`
-								: `\n⚠ Error sincronizando con cartera-back: ${carteraBackError}`;
-
-							await db
-								.update(contratosFinanciamiento)
-								.set({
-									notes: `${newContract[0].notes}${syncNote}`,
-									updatedAt: new Date(),
-								})
-								.where(eq(contratosFinanciamiento.id, newContract[0].id));
-						}
-
-						// Update opportunity to mark as won and set close date
-						updateData.status = "won";
-					}
-				}
+				// Note: The actual 100% closure logic (credit creation, client, contract)
+				// is now handled by approveDisbursement via closeOpportunity service
 			}
 
 			// Sales users can only update opportunities assigned to them
@@ -1326,9 +1021,10 @@ export const crmRouter = {
 					...(membresiaPago !== undefined && {
 						membresiaPago: String(membresiaPago),
 					}),
+					...(gastosAdministrativos !== undefined && {
+						gastosAdministrativos: String(gastosAdministrativos),
+					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
-					...(direccion !== undefined && { direccion }),
-					...(numeroSifco !== undefined && { numeroSifco }),
 					updatedAt: new Date(),
 				})
 				.where(whereClause)
@@ -1338,6 +1034,17 @@ export const crmRouter = {
 				throw new Error(
 					"Opportunity not found or you don't have permission to update it",
 				);
+			}
+
+			// Si viene direccion, actualizar en el lead en lugar de la oportunidad
+			if (direccion !== undefined && currentOpportunity[0].leadId) {
+				await db
+					.update(leads)
+					.set({
+						direccion,
+						updatedAt: new Date(),
+					})
+					.where(eq(leads.id, currentOpportunity[0].leadId));
 			}
 
 			// Record stage history if stage changed
@@ -1637,6 +1344,53 @@ export const crmRouter = {
 				throw new Error("El detalle de crédito ya fue aprobado");
 			}
 
+			// Validar que los campos requeridos estén llenos
+			const camposFaltantes: string[] = [];
+
+			if (!opportunity.categoria) {
+				camposFaltantes.push("Categoría");
+			}
+			if (!opportunity.nit) {
+				camposFaltantes.push("NIT");
+			}
+			if (!opportunity.diaPagoMensual) {
+				camposFaltantes.push("Día de pago mensual");
+			}
+
+			// Validar dirección desde el lead
+			if (opportunity.leadId) {
+				const [leadData] = await db
+					.select({ direccion: leads.direccion })
+					.from(leads)
+					.where(eq(leads.id, opportunity.leadId))
+					.limit(1);
+				if (!leadData?.direccion) {
+					camposFaltantes.push("Dirección");
+				}
+			} else {
+				camposFaltantes.push("Lead/Dirección");
+			}
+
+			// Validar inversionistas
+			if (!opportunity.inversionistas) {
+				camposFaltantes.push("Inversionistas");
+			} else {
+				try {
+					const inversionistasParsed = JSON.parse(opportunity.inversionistas);
+					if (!Array.isArray(inversionistasParsed) || inversionistasParsed.length === 0) {
+						camposFaltantes.push("Inversionistas");
+					}
+				} catch {
+					camposFaltantes.push("Inversionistas (formato inválido)");
+				}
+			}
+
+			if (camposFaltantes.length > 0) {
+				throw new Error(
+					`Faltan campos requeridos para aprobar: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`
+				);
+			}
+
 			// Update opportunity with approval
 			await db
 				.update(opportunities)
@@ -1649,6 +1403,36 @@ export const crmRouter = {
 				.where(eq(opportunities.id, input.opportunityId));
 
 			return { success: true };
+		}),
+
+	// Get credit detail approval status
+	getCreditDetailApprovalStatus: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get opportunity
+			const [opportunity] = await db
+				.select({
+					creditDetailApproved: opportunities.creditDetailApproved,
+					creditDetailApprovedBy: opportunities.creditDetailApprovedBy,
+					creditDetailApprovedAt: opportunities.creditDetailApprovedAt,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			return {
+				approved: opportunity.creditDetailApproved || false,
+				approvedBy: opportunity.creditDetailApprovedBy || null,
+				approvedAt: opportunity.creditDetailApprovedAt || null,
+			};
 		}),
 
 	getOpportunityHistory: crmProcedure
@@ -1975,7 +1759,6 @@ export const crmRouter = {
 					loanAmount: leads.loanAmount,
 					occupation: leads.occupation,
 					workTime: leads.workTime,
-					loanPurpose: leads.loanPurpose,
 					ownsHome: leads.ownsHome,
 					ownsVehicle: leads.ownsVehicle,
 					hasCreditCard: leads.hasCreditCard,
@@ -3380,7 +3163,9 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!checklist) {
-				throw new Error("Checklist de desembolso no encontrado");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Checklist de desembolso no encontrado",
+				});
 			}
 
 			// Verify all items are completed
@@ -3393,9 +3178,10 @@ export const crmRouter = {
 				checklist.listoDesembolsar;
 
 			if (!allCompleted) {
-				throw new Error(
-					"Todos los items del checklist deben estar completados antes de aprobar",
-				);
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Todos los items del checklist deben estar completados antes de aprobar",
+				});
 			}
 
 			// Get current opportunity
@@ -3406,12 +3192,16 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!opportunity) {
-				throw new Error("Oportunidad no encontrada");
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
 			}
 
 			// Already approved
 			if (opportunity.disbursementApproved) {
-				throw new Error("El desembolso ya fue aprobado");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "El desembolso ya fue aprobado",
+				});
 			}
 
 			// Get current stage to verify it's 90%
@@ -3422,7 +3212,9 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!currentStage || currentStage.closurePercentage !== 90) {
-				throw new Error("La oportunidad debe estar en la etapa del 90%");
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La oportunidad debe estar en la etapa del 90%",
+				});
 			}
 
 			// Get the 100% stage
@@ -3433,7 +3225,21 @@ export const crmRouter = {
 				.limit(1);
 
 			if (!targetStage) {
-				throw new Error("No se encontró la etapa del 100%");
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró la etapa del 100%",
+				});
+			}
+
+			// Close the opportunity (create credit, client, contract)
+			const closeResult = await closeOpportunity({
+				opportunityId: input.opportunityId,
+				userId: context.userId,
+			});
+
+			if (!closeResult.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: closeResult.error || "Error al cerrar la oportunidad",
+				});
 			}
 
 			// Update opportunity with approval and move to 100%
@@ -3467,7 +3273,12 @@ export const crmRouter = {
 				reason: "Desembolso aprobado - Checklist completado",
 			});
 
-			return { success: true };
+			return {
+				success: true,
+				numeroSifco: closeResult.numeroSifco,
+				clientId: closeResult.clientId,
+				contractId: closeResult.contractId,
+			};
 		}),
 
 	// Get opportunities at 90% for disbursement review

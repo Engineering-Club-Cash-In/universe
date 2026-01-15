@@ -163,8 +163,7 @@ const creditUpdateSchema = z.object({
         inversionista_id: z.number().int().positive(),
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
-        porcentaje_inversion: z.number().min(0).max(100),
-        cuota_inversionista: z.number().min(0).optional(),
+        porcentaje_inversion: z.number().min(0).max(100), 
       })
     )
     .min(0),
@@ -217,35 +216,7 @@ const validateInvestorsPercentages = (
   return { success: true };
 };
 
-/**
- * Valida que la suma de cuotas de inversionistas coincida con la cuota del crédito
- */
-const validateInvestorsQuotas = (
-  inversionistas: CreditUpdateData["inversionistas"],
-  cuota: number,
-  set: SetContext
-): ValidationResult => {
-  const totalCuotaInversionista = inversionistas.reduce(
-    (acc: Big, inv) => acc.plus(inv.cuota_inversionista ?? 0),
-    new Big(0)
-  );
-  const totalCuotaInversionistaRedondeado = totalCuotaInversionista.round(2);
-
-  if (Number(cuota) !== totalCuotaInversionistaRedondeado.toNumber()) {
-    set.status = 400;
-    return {
-      success: false,
-      error: {
-        message:
-          "La suma de las cuotas asignadas a los inversionistas debe ser igual a la cuota del crédito.",
-        cuotaEsperada: cuota,
-        totalCuotaInversionista: totalCuotaInversionistaRedondeado.toNumber(),
-      },
-    };
-  }
-  return { success: true };
-};
-
+ 
 /**
  * Valida que la suma de montos aportados coincida con el capital
  */
@@ -418,12 +389,34 @@ const updateInvestors = async (
   await db
     .delete(creditos_inversionistas)
     .where(eq(creditos_inversionistas.credito_id, credito_id));
+    console.log(current.capital,"current values ")
+
+  // 🔥 OBTENER CAPITAL Y CUOTA TOTAL DEL CRÉDITO
+  const capitalTotal =new Big(current?.capital)
+  const cuotaTotal = new Big(current?.cuota)
+
+  console.log(`💰 Capital Total: Q${capitalTotal.toFixed(2)}`);
+  console.log(`📊 Cuota Total: Q${cuotaTotal.toFixed(2)}`);
 
   // Preparar datos de nuevos inversionistas
   const creditosInversionistasData = inversionistas.map((inv) => {
     const montoAportado = new Big(inv.monto_aportado);
     const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
     const porcentajeInversion = new Big(inv.porcentaje_inversion);
+    
+    // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN EN BASE AL CAPITAL
+    const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+    
+    console.log(`📊 Inversionista ${inv.inversionista_id}:`);
+    console.log(`   - Monto aportado: Q${montoAportado.toFixed(2)}`);
+    console.log(`   - % Participación: ${porcentajeParticipacion.toFixed(2)}%`);
+    
+    // 🔥 CALCULAR CUOTA DEL INVERSIONISTA (% participación * cuota total)
+    const cuotaInversionista = cuotaTotal.times(porcentajeParticipacion.div(100)).round(2);
+    
+    console.log(`   - Cuota calculada: Q${cuotaInversionista.toFixed(2)}`);
+
+    // Calcular interés sobre el monto aportado
     const interes = new Big(
       updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
     );
@@ -456,7 +449,7 @@ const updateInvestors = async (
       iva_inversionista: ivaInversionista.toString(),
       iva_cash_in: ivaCashIn.toString(),
       fecha_creacion: new Date(),
-      cuota_inversionista: inv.cuota_inversionista?.toString() ?? "0",
+      cuota_inversionista: cuotaInversionista.toString(), // 🔥 CALCULADA AUTOMÁTICAMENTE
       numero_credito_sifco: numero_credito_sifco ?? undefined,
     };
   });
@@ -550,23 +543,8 @@ export const updateCredit = async ({ body, set }: any) => {
       return percentagesValidation.error;
     }
 
-    const quotasValidation = validateInvestorsQuotas(
-      inversionistas,
-      cuota,
-      set
-    );
-    if (!quotasValidation.success) {
-      return quotasValidation.error;
-    }
 
-    const capitalValidation = validateInvestorsCapital(
-      inversionistas,
-      fieldsToUpdate.capital,
-      set
-    );
-    if (!capitalValidation.success) {
-      return capitalValidation.error;
-    }
+    
 
     // 4. Preparar campos de actualización
     const updateFields: any = { ...fieldsToUpdate };

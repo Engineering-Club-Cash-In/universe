@@ -13,6 +13,7 @@ import type {
 	CarteraCredito,
 	CarteraInversionista,
 	CarteraPagoCredito,
+	CarteraStatsResponse,
 	CarteraUsuario,
 	CreateCreditoInput,
 	CreatePagoInput,
@@ -629,6 +630,23 @@ export class CarteraBackClient {
 			total: response.length,
 			totalPages: 1,
 		};
+	}
+
+	// ========================================================================
+	// STATS (ESTADÍSTICAS)
+	// ========================================================================
+
+	async getStats(params: { email?: string } = {}): Promise<CarteraStatsResponse> {
+		const queryParams = new URLSearchParams({
+			...(params.email && { email: params.email }),
+		});
+
+		const url = params.email ? `/stats?${queryParams}` : "/stats";
+
+		// Este endpoint retorna directamente el objeto de stats
+		const response = await this.request<CarteraStatsResponse>(url, { method: "GET" }, true);
+
+		return response;
 	}
 
 	// ========================================================================

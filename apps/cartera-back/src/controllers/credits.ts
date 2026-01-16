@@ -2173,3 +2173,204 @@ const updateInstallments = async ({
   console.log(`   💰 Nueva cuota: Q${nueva_cuota}`);
   // Aquí va tu implementación existente
 };
+
+// ========================================
+// ESTADÍSTICAS DE CRÉDITOS
+// ========================================
+
+interface CreditStats {
+  cantidad: number;
+  porcentaje: string;
+  sumaCapital: string;
+  sumaMora: string;
+}
+
+interface CreditStatsResponse {
+  totalCreditos: number;
+  efectividad: string; // Porcentaje de créditos SIN cuotas atrasadas
+  porCuotasAtrasadas: {
+    "0": CreditStats;
+    "1": CreditStats;
+    "2": CreditStats;
+    "3": CreditStats;
+    "4": CreditStats;
+  };
+  porEstado: {
+    cancelado: CreditStats;
+    incobrable: CreditStats;
+  };
+}
+
+export const getCreditStats = async (email?: string): Promise<CreditStatsResponse> => {
+  console.log(`📊 Obteniendo estadísticas de créditos...`);
+  if (email) {
+    console.log(`   🔍 Filtrando por asesor con email: ${email}`);
+  }
+
+  // Obtener el asesor_id si se proporciona email
+  let asesorId: number | null = null;
+  if (email) {
+    const platformUser = await db
+      .select({ asesor_id: platform_users.asesor_id })
+      .from(platform_users)
+      .where(eq(platform_users.email, email))
+      .limit(1);
+
+    if (platformUser.length > 0 && platformUser[0].asesor_id) {
+      asesorId = platformUser[0].asesor_id;
+      console.log(`   ✅ Asesor encontrado con ID: ${asesorId}`);
+    } else {
+      console.log(`   ⚠️ No se encontró asesor con email: ${email}`);
+    }
+  }
+
+  // Primero obtener el total de créditos activos para calcular porcentajes
+  const baseConditionsTotal = [
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
+  ];
+  if (asesorId) {
+    baseConditionsTotal.push(eq(creditos.asesor_id, asesorId));
+  }
+
+  const totalResult = await db
+    .select({
+      total: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+    })
+    .from(creditos)
+    .where(and(...baseConditionsTotal));
+
+  const totalCreditosActivos = totalResult[0]?.total || 0;
+
+  // Estadísticas por cuotas atrasadas (0, 1, 2, 3, 4) - Solo créditos ACTIVOS o MOROSOS
+  const statsPerCuotasAtrasadas: Record<string, CreditStats> = {
+    "0": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "1": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "2": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "3": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "4": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+  };
+
+  // Consulta para créditos activos/morosos con sus moras
+  const baseConditionsActive = [
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
+  ];
+
+  if (asesorId) {
+    baseConditionsActive.push(eq(creditos.asesor_id, asesorId));
+  }
+
+  let creditosSinAtraso = 0;
+
+  for (const cuotasNum of [0, 1, 2, 3, 4]) {
+    const result = await db
+      .select({
+        cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+        sumaCapital: sql<string>`COALESCE(SUM(${creditos.capital}), 0)::text`,
+        sumaMora: sql<string>`COALESCE(SUM(CASE WHEN ${moras_credito.activa} = true THEN ${moras_credito.monto_mora} ELSE 0 END), 0)::text`,
+      })
+      .from(creditos)
+      .leftJoin(
+        moras_credito,
+        and(
+          eq(creditos.credito_id, moras_credito.credito_id),
+          eq(moras_credito.activa, true)
+        )
+      )
+      .where(
+        and(
+          ...baseConditionsActive,
+          sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
+        )
+      );
+
+    const cantidad = result[0]?.cantidad || 0;
+    const porcentaje = totalCreditosActivos > 0 
+      ? ((cantidad / totalCreditosActivos) * 100).toFixed(2) 
+      : "0";
+
+    if (cuotasNum === 0) {
+      creditosSinAtraso = cantidad;
+    }
+
+    statsPerCuotasAtrasadas[cuotasNum.toString()] = {
+      cantidad,
+      porcentaje,
+      sumaCapital: result[0]?.sumaCapital || "0",
+      sumaMora: result[0]?.sumaMora || "0",
+    };
+  }
+
+  // Calcular efectividad: porcentaje de créditos SIN cuotas atrasadas
+  const efectividad = totalCreditosActivos > 0 
+    ? ((creditosSinAtraso / totalCreditosActivos) * 100).toFixed(2) 
+    : "0";
+
+  // Estadísticas por estado (CANCELADO, INCOBRABLE)
+  const statsPerEstado = {
+    cancelado: { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    incobrable: { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+  };
+
+  // Obtener total de créditos cancelados + incobrables para sus porcentajes
+  const baseConditionsStatusTotal = [
+    inArray(creditos.statusCredit, ["CANCELADO", "INCOBRABLE"]),
+  ];
+  if (asesorId) {
+    baseConditionsStatusTotal.push(eq(creditos.asesor_id, asesorId));
+  }
+
+  const totalStatusResult = await db
+    .select({
+      total: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+    })
+    .from(creditos)
+    .where(and(...baseConditionsStatusTotal));
+
+  const totalCreditosStatus = totalStatusResult[0]?.total || 0;
+
+  for (const estado of ["CANCELADO", "INCOBRABLE"] as const) {
+    const baseConditionsStatus = [eq(creditos.statusCredit, estado)];
+
+    if (asesorId) {
+      baseConditionsStatus.push(eq(creditos.asesor_id, asesorId));
+    }
+
+    const result = await db
+      .select({
+        cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+        sumaCapital: sql<string>`COALESCE(SUM(${creditos.capital}), 0)::text`,
+        sumaMora: sql<string>`COALESCE(SUM(CASE WHEN ${moras_credito.activa} = true THEN ${moras_credito.monto_mora} ELSE 0 END), 0)::text`,
+      })
+      .from(creditos)
+      .leftJoin(
+        moras_credito,
+        and(
+          eq(creditos.credito_id, moras_credito.credito_id),
+          eq(moras_credito.activa, true)
+        )
+      )
+      .where(and(...baseConditionsStatus));
+
+    const cantidad = result[0]?.cantidad || 0;
+    const porcentaje = totalCreditosStatus > 0 
+      ? ((cantidad / totalCreditosStatus) * 100).toFixed(2) 
+      : "0";
+
+    const key = estado.toLowerCase() as "cancelado" | "incobrable";
+    statsPerEstado[key] = {
+      cantidad,
+      porcentaje,
+      sumaCapital: result[0]?.sumaCapital || "0",
+      sumaMora: result[0]?.sumaMora || "0",
+    };
+  }
+
+  console.log(`📊 Estadísticas obtenidas exitosamente`);
+
+  return {
+    totalCreditos: totalCreditosActivos,
+    efectividad,
+    porCuotasAtrasadas: statsPerCuotasAtrasadas as CreditStatsResponse["porCuotasAtrasadas"],
+    porEstado: statsPerEstado,
+  };
+};

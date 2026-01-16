@@ -139,6 +139,13 @@ export const quotationsRouter = {
 				// Gastos específicos de Autocompras
 				appointmentCost: z.number().default(0),
 				addressVerificationCost: z.number().default(0),
+				// Gastos extra para detalle de crédito (descuentos iniciales)
+				extraGpsCost: z.number().default(0),
+				extraInsuranceCost: z.number().default(0),
+				extraMembershipCost: z.number().default(0),
+				extraAdminCost: z.number().default(600),
+				interestCost: z.number().default(0),
+				vehicleTransferCost: z.number().default(0),
 				notes: z.string().optional(),
 			}),
 		)
@@ -184,8 +191,8 @@ export const quotationsRouter = {
 					: (input.vehicleValue - input.downPayment) * (input.royaltyPercentage / 100);
 
 			// Costos que se financian (NO incluyen seguro ni GPS)
-			const financedCosts =
-				input.transferCost + input.adminCost + input.membershipCost;
+			// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
+			const financedCosts = input.transferCost + input.adminCost;
 
 			const totalFinanced = amountToFinance + financedCosts;
 
@@ -237,6 +244,13 @@ export const quotationsRouter = {
 					// Gastos específicos de Autocompras
 					appointmentCost: input.appointmentCost.toString(),
 					addressVerificationCost: input.addressVerificationCost.toString(),
+					// Gastos extra para detalle de crédito (descuentos iniciales)
+					extraGpsCost: input.extraGpsCost.toString(),
+					extraInsuranceCost: input.extraInsuranceCost.toString(),
+					extraMembershipCost: input.extraMembershipCost.toString(),
+					extraAdminCost: input.extraAdminCost.toString(),
+					interestCost: input.interestCost.toString(),
+					vehicleTransferCost: input.vehicleTransferCost.toString(),
 					amountToFinance: amountToFinance.toString(),
 					totalFinanced: totalFinanced.toString(),
 					monthlyPayment: monthlyPayment.toFixed(2),

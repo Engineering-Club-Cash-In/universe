@@ -184,7 +184,7 @@ export async function createCreditoInCarteraBack(
 			cuota: params.cuota,
 			// asesor: params.asesor_id,
 			seguro_10_cuotas: params.seguro_10_cuotas,
-			gps: params.gps,
+			gps: params.gps ?? 0,
 			observaciones: params.observaciones,
 			no_poliza: params.no_poliza || "",
 			direccion: params.direccion || "",

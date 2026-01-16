@@ -78,6 +78,7 @@ interface SelectedInversionista {
 // Constantes financieras
 const IVA_RATE = 0.12; // 12% IVA Guatemala
 const DEFAULT_INVESTOR_PERCENTAGE = 70; // Porcentaje default para inversionista
+const DEFAULT_RESERVA = 600; // Reserva default
 
 // Tipo para inversionistas parseados del JSON
 interface Inversionista {
@@ -316,16 +317,15 @@ export function CreditDetailView({
 			// Campos de la cotización que se guardan en la oportunidad
 			const cuotaMensual = quotation?.monthlyPayment || "0";
 			const tasaMensualValue = quotation?.interestRate || "0";
-			const seguroValue = Number.parseFloat(quotation?.insuranceCost || "0");
-			const gpsValue = Number.parseFloat(quotation?.gpsCost || "0");
+			const seguroValue = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+			const gpsValue = Number.parseFloat(quotation?.extraGpsCost || "0");
 			const royaltyValue = Number.parseFloat(quotation?.royalty || "0");
 			const royaltyPercentageValue = quotation?.royaltyPercentage || "4.0";
-			const membresiaValue = Number.parseFloat(quotation?.membershipCost || "0");
+			const membresiaValue = Number.parseFloat(quotation?.extraMembershipCost || "0");
 			const numeroCuotasValue = quotation?.termMonths || 0;
-			const gastosAdminValue = Number.parseFloat(quotation?.adminCost || "0");
-			const finalValue = quotation?.amountToFinance || opportunity.value || "0";
-			// Reserva = 600 + seguro
-			const reservaValue = 600 + seguroValue;
+			const gastosAdminValue = Number.parseFloat(quotation?.extraAdminCost || "0");
+			const finalValue = quotation?.totalFinanced || opportunity.value || "0";
+			const reservaValue = DEFAULT_RESERVA + seguroValue;
 
 			// Construir rubros desde los "Otros Descuentos" de la cotización
 			const rubrosArray: { nombre_rubro: string; monto: number }[] = [];
@@ -369,6 +369,12 @@ export function CreditDetailView({
 			const inspeccionValue = Number.parseFloat(quotation?.inspectionCost || "0");
 			if (inspeccionValue > 0) rubrosArray.push({ nombre_rubro: "Inspección", monto: inspeccionValue });
 
+			const appointmentValue = Number.parseFloat(quotation?.appointmentCost || "0");
+			if (appointmentValue > 0) rubrosArray.push({ nombre_rubro: "Nombramiento", monto: appointmentValue });
+
+			const addressVerificationValue = Number.parseFloat(quotation?.addressVerificationCost || "0");
+			if (addressVerificationValue > 0) rubrosArray.push({ nombre_rubro: "Verificación de dirección", monto: addressVerificationValue });
+			
 			return client.updateOpportunity({
 				id: opportunityId,
 				// Campos editables directamente
@@ -439,12 +445,12 @@ export function CreditDetailView({
 		}
 		
 		// Validar que la suma de montos aportados = amountToFinance (capital)
-		if (inversionistasToValidate.length > 0 && quotation?.amountToFinance) {
+		if (inversionistasToValidate.length > 0 && quotation?.totalFinanced) {
 			const totalAportado = inversionistasToValidate.reduce(
 				(sum, inv) => sum + (inv.monto_aportado || 0),
 				0
 			);
-			const capitalCredito = Number.parseFloat(quotation.amountToFinance);
+			const capitalCredito = Number.parseFloat(quotation.totalFinanced);
 			
 			// Permitir una pequeña diferencia por redondeo (1 centavo)
 			if (Math.abs(totalAportado - capitalCredito) > 0.01) {
@@ -467,13 +473,14 @@ export function CreditDetailView({
 				);
 			}
 			
-			// Actualizar el value de la oportunidad con el amountToFinance de la cotización
-			if (quotation?.amountToFinance && (Number(quotation?.amountToFinance) !== Number(opportunity.value)))  {
+			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
+			if (quotation?.totalFinanced && (Number(quotation?.totalFinanced) !== Number(opportunity.value)))  {
 				await client.updateOpportunity({
 					id: opportunityId,
-					value: quotation.amountToFinance,
+					value: quotation.totalFinanced,
 				});
 			}
+			
 			
 			return client.approveCreditDetail({ opportunityId });
 		},
@@ -1021,10 +1028,11 @@ export function CreditDetailView({
 											type="number"
 											min={0}
 											max={100}
-											value={porcentajeInversionista}
-											onChange={(e) =>
-												setPorcentajeInversionista(Number(e.target.value))
-											}
+											value={porcentajeInversionista === 0 ? "" : porcentajeInversionista}
+											onChange={(e) => {
+												const value = e.target.value === "" ? 0 : Number(e.target.value);
+												setPorcentajeInversionista(isNaN(value) ? 0 : value);
+											}}
 											className="h-8 w-20 text-sm"
 										/>
 										<span className="text-muted-foreground text-xs">
@@ -1154,6 +1162,7 @@ export function CreditDetailView({
 																					}
 																					placeholder="Seleccionar..."
 																					width="full"
+																					isInModal
 																				/>
 																				{/* Preview de porcentajes debajo del inversionista */}
 																				<div className="mt-2 flex items-center gap-4 text-muted-foreground text-xs">
@@ -1182,10 +1191,11 @@ export function CreditDetailView({
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.monto_aportado}
+																					value={inv.monto_aportado === 0 ? "" : inv.monto_aportado}
 																					onChange={(e) => {
 																						const newInv = [...editInversionistas];
-																						newInv[index].monto_aportado = Number.parseFloat(e.target.value) || 0;
+																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
+																						newInv[index].monto_aportado = isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
 																					placeholder="0.00"
@@ -1197,13 +1207,15 @@ export function CreditDetailView({
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.porcentaje_participacion}
+																					value={inv.porcentaje_participacion === 0 ? "" : inv.porcentaje_participacion}
 																					onChange={(e) => {
 																						const newInv = [...editInversionistas];
-																						newInv[index].porcentaje_participacion = Number.parseFloat(e.target.value) || 0;
+																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
+																						newInv[index].porcentaje_participacion = isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
-																					placeholder={porcentajeInversionista.toString()}
+																					placeholder="0"	
+
 																				/>
 																			</div>
 																			<div>
@@ -1211,13 +1223,14 @@ export function CreditDetailView({
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.porcentaje_cash_in}
+																					value={inv.porcentaje_cash_in === 0 ? "" : inv.porcentaje_cash_in}
 																					onChange={(e) => {
 																						const newInv = [...editInversionistas];
-																						newInv[index].porcentaje_cash_in = Number.parseFloat(e.target.value) || 0;
+																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
+																						newInv[index].porcentaje_cash_in = isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
-																					placeholder={(100 - porcentajeInversionista).toString()}
+																					placeholder="0"
 																				/>
 																			</div>
 																		</div>

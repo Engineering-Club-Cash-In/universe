@@ -536,8 +536,22 @@ export function CreditDetailView({
 	const totalInversionista = cuotaInversionista + ivaInversionista;
 	const totalEmpresa = cuotaEmpresa + ivaEmpresa;
 
-	// Calcular mes de interés anticipado
-	const interesAnticipado = montoTotalFinanciar * (tasaMensual / 100);
+	// Interés para la tabla de paridad (inversionista vs empresa)
+	const interesParidad = montoTotalFinanciar * (tasaMensual / 100);
+
+	// Calcular interés anticipado según fórmula de Excel:
+	// B22 = montoFinanciar + traspaso + 400 + 400 + 600 + GPS + Seguro
+	// Interés = ROUNDUP(B22 * 1.78%)
+	const gps = Number.parseFloat(quotation?.gpsCost || "0");
+	const seguro = Number.parseFloat(
+		opportunity.seguro || quotation?.insuranceCost || "0",
+	);
+	const membresia = Number.parseFloat(
+		opportunity.membresiaPago || quotation?.membershipCost || "0",
+	);
+	const traspaso = Number.parseFloat(quotation?.transferCost || "0");
+	const b22 = montoFinanciar + traspaso + 400 + 400 + 600 + gps + seguro;
+	const interesAnticipado = Math.ceil(b22 * 0.0178);
 
 	// Royalty - priorizar el de la cotización, si no existe usar el de la oportunidad
 	const royalty = Number.parseFloat(
@@ -547,16 +561,8 @@ export function CreditDetailView({
 		quotation?.royaltyPercentage || opportunity.porcentajeRoyalti || "4.0",
 	);
 
-	// Gastos de la cotización
-	const gps = Number.parseFloat(quotation?.gpsCost || "0");
-	const seguro = Number.parseFloat(
-		opportunity.seguro || quotation?.insuranceCost || "0",
-	);
-	const membresia = Number.parseFloat(
-		opportunity.membresiaPago || quotation?.membershipCost || "0",
-	);
+	// Gastos de la cotización (gps, seguro, membresia, traspaso ya declarados arriba)
 	const gastosAdmin = Number.parseFloat(quotation?.adminCost || "0");
-	const traspaso = Number.parseFloat(quotation?.transferCost || "0");
 	const freelance = Number.parseFloat(quotation?.freelanceCost || "0");
 	const inspeccion = Number.parseFloat(quotation?.inspectionCost || "0");
 	const multas = Number.parseFloat(quotation?.finesCost || "0");
@@ -956,7 +962,7 @@ export function CreditDetailView({
 											Monto Solicitado
 										</Label>
 										<p className="font-bold text-green-600 text-lg">
-											{formatCurrency(montoFinanciar)}
+											{formatCurrency(montoTotalFinanciar)}
 										</p>
 									</div>
 									<div>

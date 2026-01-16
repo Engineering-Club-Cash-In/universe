@@ -132,104 +132,108 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
-	getDashboardStats: cobrosProcedure.handler(async ({ context }) => {
-		// Si la integración con Cartera-Back está habilitada, calcular stats desde Cartera-Back
-		if (isCarteraBackEnabled()) {
-			try {
-				// Usar mes=0 para obtener TODOS los créditos sin filtrar por mes
-				// (el backend de cartera-back trata mes=0 como "sin filtro de fecha")
-				const mes = 0;
-				const anio = new Date().getFullYear();
+	getDashboardStats: cobrosProcedure
+		.input(
+			z.object({
+				emailCobrador: z.string().optional(),
+			}).optional(),
+		)
+		.handler(async ({ input, context }) => {
+			// Si la integración con Cartera-Back está habilitada, usar el endpoint de stats
+			if (isCarteraBackEnabled()) {
+        try {
+          console.log(
+            `[Cobros] Obteniendo stats desde Cartera-Back endpoint /stats${input?.emailCobrador ? `?email=${input.emailCobrador}` : ""}`
+          );
 
-				console.log(
-					`[Cobros] Calculando stats desde Cartera-Back: mes=${mes} (todos), anio=${anio}`,
-				);
+          // Usar el nuevo endpoint de stats de cartera-back
+          const statsResponse = await carteraBackClient.getStats({
+            email: input?.emailCobrador,
+          });
 
-				// Obtener todos los créditos de Cartera-Back de todos los estados
-				const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-					mes,
-					anio,
-					page: 1,
-					perPage: 10000, // Obtener todos para calcular stats
-				});
+          // Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
+          const estatusStats = [
+            {
+              estadoMora: "al_dia",
+              totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["0"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["0"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["0"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_30",
+              totalCases: statsResponse.porCuotasAtrasadas["1"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["1"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["1"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["1"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_60",
+              totalCases: statsResponse.porCuotasAtrasadas["2"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["2"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["2"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["2"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_90",
+              totalCases: statsResponse.porCuotasAtrasadas["3"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["3"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["3"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["3"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_120",
+              totalCases: statsResponse.porCuotasAtrasadas["4"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["4"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["4"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "completado",
+              totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
+              montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
+              sumaCapital: statsResponse.porEstado.cancelado?.sumaCapital || "0",
+              porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
+            },
+            {
+              estadoMora: "incobrable",
+              totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
+              montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
+              sumaCapital: statsResponse.porEstado.incobrable?.sumaCapital || "0",
+              porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
+            },
+          ];
 
-				if (!creditosResponse || !creditosResponse.data) {
-					throw new Error("Estructura de respuesta inválida");
-				}
+          console.log(
+            "[Cobros] Stats obtenidas desde endpoint /stats:",
+            estatusStats
+          );
 
-				// Procesar estadísticas para el embudo
-				const embudoStats = {
-					al_dia: { totalCases: 0, montoTotal: "0" },
-					mora_30: { totalCases: 0, montoTotal: "0" },
-					mora_60: { totalCases: 0, montoTotal: "0" },
-					mora_90: { totalCases: 0, montoTotal: "0" },
-					mora_120: { totalCases: 0, montoTotal: "0" },
-					pagado: { totalCases: 0, montoTotal: "0" },
-					incobrable: { totalCases: 0, montoTotal: "0" },
-					completado: { totalCases: 0, montoTotal: "0" },
-				};
+          // Contactos realizados hoy
+          const contactosHoy = await db
+            .select({ count: count() })
+            .from(contactosCobros)
+            .where(
+              gte(
+                contactosCobros.fechaContacto,
+                new Date(new Date().setHours(0, 0, 0, 0))
+              )
+            );
 
-				// Contar créditos por estado de mora
-				for (const credito of creditosResponse.data) {
-					// Acceder a los datos anidados correctamente
-					const statusCredit = credito.creditos.statusCredit;
-					const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
-					const montoMora = Number(credito.mora?.monto_mora ?? 0);
-
-					// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
-					// NO retorna las fechas de vencimiento de las cuotas individuales.
-					// Solo /credito retorna el array completo con fechas para cálculo exacto.
-					const diasMora = cuotasAtrasadas * 30;
-
-					// Determinar estado de mora
-					let estadoMora: keyof typeof embudoStats;
-					if (statusCredit === "CANCELADO") {
-						estadoMora = "completado";
-					} else if (statusCredit === "INCOBRABLE") {
-						estadoMora = "incobrable";
-					} else if (diasMora === 0) {
-						estadoMora = "al_dia";
-					} else if (diasMora <= 30) {
-						estadoMora = "mora_30";
-					} else if (diasMora <= 60) {
-						estadoMora = "mora_60";
-					} else if (diasMora <= 90) {
-						estadoMora = "mora_90";
-					} else {
-						estadoMora = "mora_120";
-					}
-
-					embudoStats[estadoMora].totalCases += 1;
-					const currentMonto = Number(embudoStats[estadoMora].montoTotal);
-					embudoStats[estadoMora].montoTotal = (
-						currentMonto + montoMora
-					).toString();
-				}
-
-				console.log(
-					"[Cobros] Stats calculadas desde Cartera-Back:",
-					embudoStats,
-				);
-
-				return {
-					estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
-						estadoMora: estado,
-						...data,
-					})),
-					totalCasosAsignados: creditosResponse.data.filter((c) => {
-						const cuotasAtrasadas = c.mora?.cuotas_atrasadas ?? 0;
-						return cuotasAtrasadas > 0;
-					}).length,
-					contactosHoy: 0, // No disponible en Cartera-Back
-				};
-			} catch (error) {
-				console.error(
-					"[Cobros] Error calculando stats desde Cartera-Back:",
-					error,
-				);
-				// Fallback a datos locales
-			}
-		}
+          return {
+            estatusStats,
+            totalCasosAsignados: statsResponse.totalCreditos,
+            efectividad: statsResponse.efectividad,
+            contactosHoy: contactosHoy[0]?.count || 0,
+          };
+        } catch (error) {
+          console.error(
+            "[Cobros] Error obteniendo stats desde Cartera-Back:",
+            error
+          );
+          // Fallback a datos locales
+        }
+      }
 
 		// Fallback: Calcular stats desde la base de datos local
 		const estatusStats = await db
@@ -248,14 +252,14 @@ export const cobrosRouter = {
 
 		// Procesar estadísticas para el embudo
 		const embudoStats = {
-			al_dia: { totalCases: 0, montoTotal: "0" },
-			mora_30: { totalCases: 0, montoTotal: "0" },
-			mora_60: { totalCases: 0, montoTotal: "0" },
-			mora_90: { totalCases: 0, montoTotal: "0" },
-			mora_120: { totalCases: 0, montoTotal: "0" },
-			pagado: { totalCases: 0, montoTotal: "0" },
-			incobrable: { totalCases: 0, montoTotal: "0" },
-			completado: { totalCases: 0, montoTotal: "0" },
+			al_dia: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_30: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_60: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_90: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_120: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			pagado: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			incobrable: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			completado: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
 		};
 
 		estatusStats.forEach((stat) => {
@@ -318,6 +322,7 @@ export const cobrosRouter = {
 				...data,
 			})),
 			totalCasosAsignados: casosAsignados[0]?.count || 0,
+			efectividad: "0",
 			contactosHoy: contactosHoy[0]?.count || 0,
 		};
 	}),
@@ -452,7 +457,7 @@ export const cobrosRouter = {
 							let vehiculoMarca = "-";
 							let vehiculoModelo = "-";
 							let vehiculoYear: number | null = null;
-							let vehiculoPlaca = numeroSifco;
+							let vehiculoPlaca = "-";
 
 							if (numeroSifco) {
 								const [oportunidad] = await db
@@ -472,7 +477,7 @@ export const cobrosRouter = {
 									vehiculoMarca = oportunidad.marca || "-";
 									vehiculoModelo = oportunidad.modelo || "-";
 									vehiculoYear = oportunidad.year;
-									vehiculoPlaca = oportunidad.placa || numeroSifco;
+									vehiculoPlaca = oportunidad.placa || "";
 								}
 							}
 

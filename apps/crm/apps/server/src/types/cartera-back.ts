@@ -572,6 +572,33 @@ export interface PagoDetalle {
 }
 
 // ============================================================================
+// STATS (ESTADÍSTICAS)
+// ============================================================================
+
+export interface CarteraStatsBucket {
+	cantidad: number;
+	porcentaje: string;
+	sumaCapital: string;
+	sumaMora: string;
+}
+
+export interface CarteraStatsResponse {
+	totalCreditos: number;
+	efectividad: string;
+	porCuotasAtrasadas: {
+		[key: string]: CarteraStatsBucket; // "0", "1", "2", "3", "4"+
+	};
+	porEstado: {
+		cancelado?: CarteraStatsBucket;
+		incobrable?: CarteraStatsBucket;
+	};
+}
+
+export interface GetStatsParams {
+	email?: string; // Email del asesor para filtrar
+}
+
+// ============================================================================
 // ERROR TYPES
 // ============================================================================
 

@@ -7,7 +7,8 @@ import {
   getCreditosIncobrables,
   getCreditosWithUserByMesAnio, 
   mergeCreditosAndUpdate, 
-  resetCredit, 
+  resetCredit,
+  getCreditStats, 
 } from "../controllers/credits";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
@@ -1051,5 +1052,95 @@ export const creditRouter = new Elysia()
         }),
       },
     }
-  );
-
+  )
+  // ========================================
+  // ENDPOINT: ESTADÍSTICAS DE CRÉDITOS
+  // ========================================
+  .get("/stats", async ({ query }) => {
+    const { email } = query;
+    const stats = await getCreditStats(email);
+    return stats;
+  }, {
+    query: t.Object({
+      email: t.Optional(t.String({ description: "Email del asesor para filtrar solo sus créditos" })),
+    }),
+    detail: {
+      summary: "Obtener estadísticas de créditos",
+      description: `
+        Obtiene estadísticas agregadas de los créditos, incluyendo:
+        
+        **Campos generales:**
+        - totalCreditos: Total de créditos activos/morosos/en convenio
+        - efectividad: Porcentaje de créditos SIN cuotas atrasadas
+        
+        **Por cuotas atrasadas (0, 1, 2, 3, 4):**
+        - Cantidad de créditos
+        - Porcentaje respecto al total
+        - Suma del capital
+        - Suma de mora
+        
+        **Por estado (Cancelado, Incobrable):**
+        - Cantidad de créditos
+        - Porcentaje respecto al total de cancelados+incobrables
+        - Suma del capital
+        - Suma de mora (si aplica)
+        
+        **Filtro opcional:**
+        Si se proporciona el email del asesor, solo se muestran los créditos asignados a ese asesor.
+        Si no se proporciona, se muestran todos los créditos.
+      `,
+      tags: ["Créditos", "Estadísticas"],
+    },
+    response: {
+      200: t.Object({
+        totalCreditos: t.Number(),
+        efectividad: t.String(),
+        porCuotasAtrasadas: t.Object({
+          "0": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "1": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "2": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "3": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          "4": t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+        }),
+        porEstado: t.Object({
+          cancelado: t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+          incobrable: t.Object({
+            cantidad: t.Number(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
+            sumaMora: t.String(),
+          }),
+        }),
+      }),
+    },
+  });

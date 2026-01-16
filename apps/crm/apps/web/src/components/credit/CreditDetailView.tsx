@@ -1028,10 +1028,11 @@ export function CreditDetailView({
 											type="number"
 											min={0}
 											max={100}
-											value={porcentajeInversionista}
-											onChange={(e) =>
-												setPorcentajeInversionista(Number(e.target.value))
-											}
+											value={porcentajeInversionista === 0 ? "" : porcentajeInversionista}
+											onChange={(e) => {
+												const value = e.target.value === "" ? 0 : Number(e.target.value);
+												setPorcentajeInversionista(isNaN(value) ? 0 : value);
+											}}
 											className="h-8 w-20 text-sm"
 										/>
 										<span className="text-muted-foreground text-xs">
@@ -1161,6 +1162,7 @@ export function CreditDetailView({
 																					}
 																					placeholder="Seleccionar..."
 																					width="full"
+																					isInModal
 																				/>
 																				{/* Preview de porcentajes debajo del inversionista */}
 																				<div className="mt-2 flex items-center gap-4 text-muted-foreground text-xs">
@@ -1189,10 +1191,11 @@ export function CreditDetailView({
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.monto_aportado}
+																					value={inv.monto_aportado === 0 ? "" : inv.monto_aportado}
 																					onChange={(e) => {
 																						const newInv = [...editInversionistas];
-																						newInv[index].monto_aportado = Number.parseFloat(e.target.value) || 0;
+																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
+																						newInv[index].monto_aportado = isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
 																					placeholder="0.00"
@@ -1204,13 +1207,15 @@ export function CreditDetailView({
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.porcentaje_participacion}
+																					value={inv.porcentaje_participacion === 0 ? "" : inv.porcentaje_participacion}
 																					onChange={(e) => {
 																						const newInv = [...editInversionistas];
-																						newInv[index].porcentaje_participacion = Number.parseFloat(e.target.value) || 0;
+																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
+																						newInv[index].porcentaje_participacion = isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
-																					placeholder={porcentajeInversionista.toString()}
+																					placeholder="0"	
+
 																				/>
 																			</div>
 																			<div>
@@ -1218,13 +1223,14 @@ export function CreditDetailView({
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.porcentaje_cash_in}
+																					value={inv.porcentaje_cash_in === 0 ? "" : inv.porcentaje_cash_in}
 																					onChange={(e) => {
 																						const newInv = [...editInversionistas];
-																						newInv[index].porcentaje_cash_in = Number.parseFloat(e.target.value) || 0;
+																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
+																						newInv[index].porcentaje_cash_in = isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
-																					placeholder={(100 - porcentajeInversionista).toString()}
+																					placeholder="0"
 																				/>
 																			</div>
 																		</div>

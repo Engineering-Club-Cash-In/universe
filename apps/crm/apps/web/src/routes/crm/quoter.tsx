@@ -861,6 +861,13 @@ function QuoterPage() {
 				// Gastos específicos de Autocompras
 				appointmentCost: Number(value.appointmentCost),
 				addressVerificationCost: Number(value.addressVerificationCost),
+				// Gastos extra para detalle de crédito (descuentos iniciales)
+				extraGpsCost: Number(value.extraGpsCost),
+				extraInsuranceCost: Number(value.extraInsuranceCost),
+				extraMembershipCost: Number(value.extraMembershipCost),
+				extraAdminCost: Number(value.extraAdminCost),
+				interestCost: Number(value.interestCost),
+				vehicleTransferCost: Number(value.vehicleTransferCost),
 			});
 		},
 	});

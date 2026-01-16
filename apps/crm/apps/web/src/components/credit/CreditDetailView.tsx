@@ -142,6 +142,13 @@ interface CreditDetailViewProps {
 		// Gastos específicos de Autocompras
 		appointmentCost?: string | null;
 		addressVerificationCost?: string | null;
+		// Gastos extra para detalle de crédito (descuentos iniciales)
+		extraGpsCost?: string | null;
+		extraInsuranceCost?: string | null;
+		extraMembershipCost?: string | null;
+		extraAdminCost?: string | null;
+		interestCost?: string | null;
+		vehicleTransferCost?: string | null;
 		amountToFinance: string;
 		totalFinanced: string;
 		monthlyPayment: string;
@@ -539,20 +546,6 @@ export function CreditDetailView({
 	// Interés para la tabla de paridad (inversionista vs empresa)
 	const interesParidad = montoTotalFinanciar * (tasaMensual / 100);
 
-	// Calcular interés anticipado según fórmula de Excel:
-	// B22 = montoFinanciar + traspaso + 400 + 400 + 600 + GPS + Seguro
-	// Interés = ROUNDUP(B22 * 1.78%)
-	const gps = Number.parseFloat(quotation?.gpsCost || "0");
-	const seguro = Number.parseFloat(
-		opportunity.seguro || quotation?.insuranceCost || "0",
-	);
-	const membresia = Number.parseFloat(
-		opportunity.membresiaPago || quotation?.membershipCost || "0",
-	);
-	const traspaso = Number.parseFloat(quotation?.transferCost || "0");
-	const b22 = montoFinanciar + traspaso + 400 + 400 + 600 + gps + seguro;
-	const interesAnticipado = Math.ceil(b22 * 0.0178);
-
 	// Royalty - priorizar el de la cotización, si no existe usar el de la oportunidad
 	const royalty = Number.parseFloat(
 		quotation?.royalty || opportunity.royalti || "0",
@@ -561,10 +554,22 @@ export function CreditDetailView({
 		quotation?.royaltyPercentage || opportunity.porcentajeRoyalti || "4.0",
 	);
 
-	// Gastos de la cotización (gps, seguro, membresia, traspaso ya declarados arriba)
-	const gastosAdmin = Number.parseFloat(quotation?.adminCost || "0");
+	// ========================================
+	// GASTOS EXTRA (descuentos iniciales) - Sección "Comisión y Gastos de Registro"
+	// Estos son los valores que se muestran en la tabla de gastos del cotizador
+	// ========================================
 	const freelance = Number.parseFloat(quotation?.freelanceCost || "0");
 	const inspeccion = Number.parseFloat(quotation?.inspectionCost || "0");
+	// Usar los campos extra* que se guardaron desde el cotizador
+	const gps = Number.parseFloat(quotation?.extraGpsCost || "0");
+	const seguro = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+	const membresia = Number.parseFloat(quotation?.extraMembershipCost || "0");
+	const gastosAdminBase = Number.parseFloat(quotation?.extraAdminCost || "600");
+	const interesAnticipado = Number.parseFloat(quotation?.interestCost || "0");
+
+	// ========================================
+	// Sección "Otros Descuentos"
+	// ========================================
 	const multas = Number.parseFloat(quotation?.finesCost || "0");
 	const copiaLlave = Number.parseFloat(quotation?.keyCopyCost || "0");
 	const diferenciaCopiaLlave = Number.parseFloat(
@@ -573,9 +578,14 @@ export function CreditDetailView({
 	const impuestoCirculacion = Number.parseFloat(
 		quotation?.circulationTaxCost || "0",
 	);
+	const traspaso = Number.parseFloat(quotation?.vehicleTransferCost || "0");
 	const garantiaMobiliaria = Number.parseFloat(
 		quotation?.mobileGuaranteeCost || "0",
 	);
+
+	// ========================================
+	// Sección "Gastos de Abogado"
+	// ========================================
 	const contratoLeasing = Number.parseFloat(
 		quotation?.leasingContractCost || "0",
 	);
@@ -598,7 +608,7 @@ export function CreditDetailView({
 		gps +
 		seguro +
 		membresia +
-		gastosAdmin +
+		gastosAdminBase +
 		interesAnticipado;
 
 	// Subtotal: Otros Descuentos
@@ -673,7 +683,7 @@ export function CreditDetailView({
 	// Label dinámico para gastos combinados (Tab 2)
 	const gastosCombinadosLabel = (() => {
 		const partes: string[] = [];
-		if (gastosAdmin > 0) partes.push("Gastos Administrativos");
+		if (gastosAdminBase > 0) partes.push("Gastos Administrativos");
 		if (traspaso > 0) partes.push("Traspaso");
 		if (multas > 0) partes.push("Multa");
 		if (partes.length === 0) return "Gastos Administrativos, Traspaso y Multa";
@@ -681,7 +691,7 @@ export function CreditDetailView({
 		if (partes.length === 2) return `${partes[0]} y ${partes[1]}`;
 		return `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`;
 	})();
-	const gastosCombinados = gastosAdmin + traspaso + multas;
+	const gastosCombinados = gastosAdminBase + traspaso + multas;
 
 	return (
 		<div className="space-y-6">
@@ -1357,16 +1367,16 @@ export function CreditDetailView({
 												<TableCell>Gastos Administrativos</TableCell>
 												<TableCell className="text-center">
 													<Badge
-														variant={gastosAdmin > 0 ? "default" : "outline"}
+														variant={gastosAdminBase > 0 ? "default" : "outline"}
 														className="text-xs"
 													>
-														{gastosAdmin > 0 ? "SI" : "NO"}
+														{gastosAdminBase > 0 ? "SI" : "NO"}
 													</Badge>
 												</TableCell>
 												<TableCell className="text-right">-</TableCell>
 												<TableCell className="text-right">
-													{gastosAdmin > 0
-														? formatCurrency(gastosAdmin)
+													{gastosAdminBase > 0
+														? formatCurrency(gastosAdminBase)
 														: "Q -"}
 												</TableCell>
 											</TableRow>

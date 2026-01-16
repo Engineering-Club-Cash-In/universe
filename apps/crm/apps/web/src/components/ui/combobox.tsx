@@ -32,6 +32,7 @@ interface ComboboxDemoProps {
 	onChange: (value: string) => void;
 	onSearchChange?: (search: string) => void;
 	isLoading?: boolean;
+	isInModal?: boolean;
 }
 
 export function Combobox({
@@ -43,14 +44,37 @@ export function Combobox({
 	onChange,
 	onSearchChange,
 	isLoading,
+	isInModal = false,
 }: ComboboxDemoProps) {
 	const [open, setOpen] = React.useState(false);
 	const [searchValue, setSearchValue] = React.useState("");
+	const triggerRef = React.useRef<HTMLButtonElement>(null);
+
+	// Mantener la posición del scroll cuando se abre el popover en un modal
+	const handleOpenChange = React.useCallback((newOpen: boolean) => {
+		if (isInModal && newOpen) {
+			// Guardar la posición del scroll del contenedor padre (DialogContent)
+			const scrollContainer = triggerRef.current?.closest('[data-radix-scroll-area-viewport], [class*="overflow-y-auto"], [class*="overflow-auto"]');
+			const scrollTop = scrollContainer?.scrollTop ?? 0;
+			
+			setOpen(newOpen);
+			
+			// Restaurar la posición después de que React actualice el DOM
+			requestAnimationFrame(() => {
+				if (scrollContainer) {
+					scrollContainer.scrollTop = scrollTop;
+				}
+			});
+		} else {
+			setOpen(newOpen);
+		}
+	}, [isInModal]);
 
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
+		<Popover open={open} onOpenChange={handleOpenChange}>
 			<PopoverTrigger asChild>
 				<Button
+					ref={triggerRef}
 					variant="outline"
 					role="combobox"
 					aria-expanded={open}
@@ -68,6 +92,10 @@ export function Combobox({
 			</PopoverTrigger>
 			<PopoverContent
 				align="start"
+				onOpenAutoFocus={isInModal ? (e) => e.preventDefault() : undefined}
+				onCloseAutoFocus={isInModal ? (e) => e.preventDefault() : undefined}
+				sideOffset={4}
+				avoidCollisions={isInModal}
 				className={cn(
 					"min-w-[300px] p-0",
 					popOverWidth === "full"

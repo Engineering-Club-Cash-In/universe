@@ -184,6 +184,7 @@ interface QuotationFormValues {
 	keyCopyCost: number;
 	keyCopyDiffCost: number;
 	circulationTaxCost: number;
+	vehicleTransferCost: number;
 	mobileGuaranteeCost: number;
 	leasingContractCost: number;
 	collectionAuthCost: number;
@@ -329,6 +330,14 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		label: "Impuesto circulación",
 		type: "fixed",
 		valueField: "circulationTaxCost",
+		creditType: "all",
+		section: "otros",
+	},
+	{
+		name: "vehicleTransfer",
+		label: "Traspaso de vehículo",
+		type: "fixed",
+		valueField: "vehicleTransferCost",
 		creditType: "all",
 		section: "otros",
 	},
@@ -747,7 +756,7 @@ function QuoterPage() {
 			interestRate: 1.5,
 			insuranceCost: 0,
 			gpsCost: 148.2,
-			transferCost: 1950,
+			transferCost: 545, // 395 + 150 según Excel
 			adminCost: 0,
 			membershipCost: 0,
 			// Gastos adicionales para detalle de crédito
@@ -760,13 +769,14 @@ function QuoterPage() {
 			keyCopyCost: 0,
 			keyCopyDiffCost: 0,
 			circulationTaxCost: 0,
-			mobileGuaranteeCost: 0,
+			vehicleTransferCost: 0,
+			mobileGuaranteeCost: 400,
 			leasingContractCost: 0,
 			collectionAuthCost: 0,
 			legalCost: 0,
 			// Gastos específicos de Autocompras
-			appointmentCost: 0,
-			addressVerificationCost: 0,
+			appointmentCost: 150,
+			addressVerificationCost: 395,
 			// Interés calculado automáticamente
 			interestCost: 0,
 			// Gastos extra (separados de los principales)

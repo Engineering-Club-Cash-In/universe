@@ -247,20 +247,11 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 	if (!opp.numeroCuotas) missingFields.push("número de cuotas");
 	if (!opp.tasaInteres) missingFields.push("tasa de interés");
 	if (!opp.cuotaMensual) missingFields.push("cuota mensual");
-	if (!opp.diaPagoMensual) missingFields.push("día de pago mensual");
 
 	const seguro = opp.seguro ? Number.parseFloat(opp.seguro) : undefined;
-	const gps = opp.gps ? Number.parseFloat(opp.gps) : undefined;
-	const reserva = opp.reserva ? Number.parseFloat(opp.reserva) : undefined;
 
 	if (seguro === undefined || seguro === null || seguro <= 0) {
 		missingFields.push("seguro (debe ser mayor a 0)");
-	}
-	if (gps === undefined || gps === null || gps <= 0) {
-		missingFields.push("GPS (debe ser mayor a 0)");
-	}
-	if (reserva === undefined || reserva === null || reserva <= 0) {
-		missingFields.push("reserva (debe ser mayor a 0)");
 	}
 	if (!opp.categoria) missingFields.push("categoría del crédito");
 	if (!opp.nit) missingFields.push("NIT del cliente");

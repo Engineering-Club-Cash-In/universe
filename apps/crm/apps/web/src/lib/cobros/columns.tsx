@@ -19,6 +19,7 @@ export type ContratoCobranza = {
 	fechaProximoPago: string | null;
 	diasHastaPago: number | null; // Calculado: días hasta el próximo pago (null si no hay fecha definida)
 	numeroCredito: string | null;
+	cuotaMensual: string | null;
 };
 
 function getEstadoBadge(estado: string) {
@@ -105,6 +106,25 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 					Cliente
 					<ArrowUpDown className="ml-2 h-4 w-4" />
 				</Button>
+			);
+		},
+		cell: ({ row }) => {
+			return (
+				<div className="w-[350px] whitespace-normal font-medium" style={{ wordBreak: 'break-word' }}>
+					{row.getValue("clienteNombre")}
+				</div>
+			);
+		},
+	},
+	{
+		accessorKey: "numeroCredito",
+		header: "No. Crédito",
+		cell: ({ row }) => {
+			const numero = row.getValue("numeroCredito") as string | null;
+			return (
+				<div className="w-[180px] whitespace-normal font-mono text-sm" style={{ wordBreak: 'break-all' }}>
+					{numero || "-"}
+				</div>
 			);
 		},
 	},

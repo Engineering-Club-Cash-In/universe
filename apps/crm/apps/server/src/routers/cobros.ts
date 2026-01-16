@@ -132,104 +132,121 @@ async function obtenerTodosLosCreditosCarteraBack(params: {
 
 export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
-	getDashboardStats: cobrosProcedure.handler(async ({ context }) => {
-		// Si la integración con Cartera-Back está habilitada, calcular stats desde Cartera-Back
-		if (isCarteraBackEnabled()) {
-			try {
-				// Usar mes=0 para obtener TODOS los créditos sin filtrar por mes
-				// (el backend de cartera-back trata mes=0 como "sin filtro de fecha")
-				const mes = 0;
-				const anio = new Date().getFullYear();
+	getDashboardStats: cobrosProcedure
+		.input(
+			z.object({
+				emailCobrador: z.string().optional(),
+			}).optional(),
+		)
+		.handler(async ({ input, context }) => {
+			// Si la integración con Cartera-Back está habilitada, usar el endpoint de stats
+			if (isCarteraBackEnabled()) {
+        try {
+          console.log(
+            `[Cobros] Obteniendo stats desde Cartera-Back endpoint /stats${input?.emailCobrador ? `?email=${input.emailCobrador}` : ""}`
+          );
 
-				console.log(
-					`[Cobros] Calculando stats desde Cartera-Back: mes=${mes} (todos), anio=${anio}`,
-				);
+          // Usar el nuevo endpoint de stats de cartera-back
+          const statsResponse = await carteraBackClient.getStats({
+            email: input?.emailCobrador,
+          });
 
-				// Obtener todos los créditos de Cartera-Back de todos los estados
-				const creditosResponse = await obtenerTodosLosCreditosCarteraBack({
-					mes,
-					anio,
-					page: 1,
-					perPage: 10000, // Obtener todos para calcular stats
-				});
+          // Mapear la respuesta del nuevo formato al formato esperado por el frontend
+          const embudoStats = {
+            al_dia: { totalCases: 0, montoTotal: "0" },
+            mora_30: { totalCases: 0, montoTotal: "0" },
+            mora_60: { totalCases: 0, montoTotal: "0" },
+            mora_90: { totalCases: 0, montoTotal: "0" },
+            mora_120: { totalCases: 0, montoTotal: "0" },
+            pagado: { totalCases: 0, montoTotal: "0" },
+            incobrable: { totalCases: 0, montoTotal: "0" },
+            completado: { totalCases: 0, montoTotal: "0" },
+          };
 
-				if (!creditosResponse || !creditosResponse.data) {
-					throw new Error("Estructura de respuesta inválida");
-				}
+          // Mapear porCuotasAtrasadas a estados de mora
+          // 0 cuotas = al_dia, 1 = mora_30, 2 = mora_60, 3 = mora_90, 4+ = mora_120
+          if (statsResponse.porCuotasAtrasadas) {
+            for (const [cuotas, bucket] of Object.entries(
+              statsResponse.porCuotasAtrasadas
+            )) {
+              const numCuotas = Number.parseInt(cuotas, 10);
+              let estadoMora: keyof typeof embudoStats;
 
-				// Procesar estadísticas para el embudo
-				const embudoStats = {
-					al_dia: { totalCases: 0, montoTotal: "0" },
-					mora_30: { totalCases: 0, montoTotal: "0" },
-					mora_60: { totalCases: 0, montoTotal: "0" },
-					mora_90: { totalCases: 0, montoTotal: "0" },
-					mora_120: { totalCases: 0, montoTotal: "0" },
-					pagado: { totalCases: 0, montoTotal: "0" },
-					incobrable: { totalCases: 0, montoTotal: "0" },
-					completado: { totalCases: 0, montoTotal: "0" },
-				};
+              if (numCuotas === 0) {
+                estadoMora = "al_dia";
+              } else if (numCuotas === 1) {
+                estadoMora = "mora_30";
+              } else if (numCuotas === 2) {
+                estadoMora = "mora_60";
+              } else if (numCuotas === 3) {
+                estadoMora = "mora_90";
+              } else {
+                estadoMora = "mora_120";
+              }
 
-				// Contar créditos por estado de mora
-				for (const credito of creditosResponse.data) {
-					// Acceder a los datos anidados correctamente
-					const statusCredit = credito.creditos.statusCredit;
-					const cuotasAtrasadas = credito.mora?.cuotas_atrasadas ?? 0;
-					const montoMora = Number(credito.mora?.monto_mora ?? 0);
+              embudoStats[estadoMora].totalCases += bucket.cantidad;
+              const currentMonto = Number(embudoStats[estadoMora].montoTotal);
+              embudoStats[estadoMora].montoTotal = (
+                currentMonto + Number(bucket.sumaMora || 0)
+              ).toString();
+            }
+          }
 
-					// NOTA: Usamos aproximación (30 días por cuota) porque /getAllCredits
-					// NO retorna las fechas de vencimiento de las cuotas individuales.
-					// Solo /credito retorna el array completo con fechas para cálculo exacto.
-					const diasMora = cuotasAtrasadas * 30;
+          // Mapear porEstado (cancelado, incobrable)
+          if (statsResponse.porEstado) {
+            if (statsResponse.porEstado.cancelado) {
+              embudoStats.completado.totalCases =
+                statsResponse.porEstado.cancelado.cantidad;
+              embudoStats.completado.montoTotal =
+                statsResponse.porEstado.cancelado.sumaMora || "0";
+            }
+            if (statsResponse.porEstado.incobrable) {
+              embudoStats.incobrable.totalCases =
+                statsResponse.porEstado.incobrable.cantidad;
+              embudoStats.incobrable.montoTotal =
+                statsResponse.porEstado.incobrable.sumaMora || "0";
+            }
+          }
 
-					// Determinar estado de mora
-					let estadoMora: keyof typeof embudoStats;
-					if (statusCredit === "CANCELADO") {
-						estadoMora = "completado";
-					} else if (statusCredit === "INCOBRABLE") {
-						estadoMora = "incobrable";
-					} else if (diasMora === 0) {
-						estadoMora = "al_dia";
-					} else if (diasMora <= 30) {
-						estadoMora = "mora_30";
-					} else if (diasMora <= 60) {
-						estadoMora = "mora_60";
-					} else if (diasMora <= 90) {
-						estadoMora = "mora_90";
-					} else {
-						estadoMora = "mora_120";
-					}
+          // Calcular total de casos con mora (cuotas atrasadas > 0)
+          const totalCasosConMora = Object.entries(
+            statsResponse.porCuotasAtrasadas || {}
+          )
+            .filter(([cuotas]) => Number.parseInt(cuotas, 10) > 0)
+            .reduce((sum, [_, bucket]) => sum + bucket.cantidad, 0);
 
-					embudoStats[estadoMora].totalCases += 1;
-					const currentMonto = Number(embudoStats[estadoMora].montoTotal);
-					embudoStats[estadoMora].montoTotal = (
-						currentMonto + montoMora
-					).toString();
-				}
+          console.log(
+            "[Cobros] Stats obtenidas desde endpoint /stats:",
+            embudoStats
+          );
 
-				console.log(
-					"[Cobros] Stats calculadas desde Cartera-Back:",
-					embudoStats,
-				);
+          // Contactos realizados hoy
+          const contactosHoy = await db
+            .select({ count: count() })
+            .from(contactosCobros)
+            .where(
+              gte(
+                contactosCobros.fechaContacto,
+                new Date(new Date().setHours(0, 0, 0, 0))
+              )
+            );
 
-				return {
-					estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
-						estadoMora: estado,
-						...data,
-					})),
-					totalCasosAsignados: creditosResponse.data.filter((c) => {
-						const cuotasAtrasadas = c.mora?.cuotas_atrasadas ?? 0;
-						return cuotasAtrasadas > 0;
-					}).length,
-					contactosHoy: 0, // No disponible en Cartera-Back
-				};
-			} catch (error) {
-				console.error(
-					"[Cobros] Error calculando stats desde Cartera-Back:",
-					error,
-				);
-				// Fallback a datos locales
-			}
-		}
+          return {
+            estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
+              estadoMora: estado,
+              ...data,
+            })),
+            totalCasosAsignados: totalCasosConMora,
+            contactosHoy: contactosHoy[0]?.count || 0,
+          };
+        } catch (error) {
+          console.error(
+            "[Cobros] Error obteniendo stats desde Cartera-Back:",
+            error
+          );
+          // Fallback a datos locales
+        }
+      }
 
 		// Fallback: Calcular stats desde la base de datos local
 		const estatusStats = await db
@@ -452,7 +469,7 @@ export const cobrosRouter = {
 							let vehiculoMarca = "-";
 							let vehiculoModelo = "-";
 							let vehiculoYear: number | null = null;
-							let vehiculoPlaca = numeroSifco;
+							let vehiculoPlaca = "-";
 
 							if (numeroSifco) {
 								const [oportunidad] = await db
@@ -472,7 +489,7 @@ export const cobrosRouter = {
 									vehiculoMarca = oportunidad.marca || "-";
 									vehiculoModelo = oportunidad.modelo || "-";
 									vehiculoYear = oportunidad.year;
-									vehiculoPlaca = oportunidad.placa || numeroSifco;
+									vehiculoPlaca = oportunidad.placa || "";
 								}
 							}
 

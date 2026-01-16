@@ -1,24 +1,201 @@
 import os
 import pandas as pd
 import requests
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 import json
+from datetime import datetime
 
 # ============================================
 # 🔧 CONFIGURACIÓN
 # ============================================
 CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
-
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
 HOJAS_A_PROCESAR = [   
     "Diciembre 2025", 
+    "Enero 2026",
+    "Febrero 2026",
 ]
 
 # 🔥 MODO PRUEBA
 MODO_PRUEBA = False
 LIMITE_CREDITOS_PRUEBA = 2
+
+# 🎯 UMBRAL DE SIMILITUD PARA PREGUNTAR
+UMBRAL_PREGUNTAR = 70.0  # Si < 70%, pregunta al usuario
+
+# 📁 ARCHIVO DE DECISIONES GUARDADAS
+ARCHIVO_DECISIONES = "decisiones_inversionistas.json"
+
+# 📝 ARCHIVO DE LOGS DETALLADOS
+ARCHIVO_LOG = f"proceso_excel_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+# ============================================
+# 📝 SISTEMA DE LOGS
+# ============================================
+class Logger:
+    def __init__(self, archivo: str):
+        self.archivo = archivo
+        self.nivel_indentacion = 0
+    
+    def log(self, mensaje: str, nivel: str = "INFO", indent: int = 0):
+        """Log con timestamp y formato"""
+        timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        indentacion = "  " * (self.nivel_indentacion + indent)
+        linea = f"[{timestamp}] [{nivel:5}] {indentacion}{mensaje}"
+        
+        print(linea)
+        
+        try:
+            with open(self.archivo, 'a', encoding='utf-8') as f:
+                f.write(linea + "\n")
+        except:
+            pass
+    
+    def separador(self, char: str = "=", longitud: int = 70):
+        """Línea separadora"""
+        linea = char * longitud
+        print(linea)
+        try:
+            with open(self.archivo, 'a', encoding='utf-8') as f:
+                f.write(linea + "\n")
+        except:
+            pass
+    
+    def titulo(self, texto: str, emoji: str = "🔥"):
+        """Título destacado"""
+        self.separador()
+        self.log(f"{emoji} {texto}", "INFO")
+        self.separador()
+    
+    def subtitulo(self, texto: str, emoji: str = "📋"):
+        """Subtítulo"""
+        self.log(f"{emoji} {texto}", "INFO")
+    
+    def debug(self, mensaje: str, indent: int = 0):
+        """Log de debug"""
+        self.log(mensaje, "DEBUG", indent)
+    
+    def info(self, mensaje: str, indent: int = 0):
+        """Log de info"""
+        self.log(mensaje, "INFO", indent)
+    
+    def warning(self, mensaje: str, indent: int = 0):
+        """Log de warning"""
+        self.log(mensaje, "WARN", indent)
+    
+    def error(self, mensaje: str, indent: int = 0):
+        """Log de error"""
+        self.log(mensaje, "ERROR", indent)
+    
+    def success(self, mensaje: str, indent: int = 0):
+        """Log de éxito"""
+        self.log(mensaje, "OK", indent)
+    
+    def indent(self):
+        """Aumentar indentación"""
+        self.nivel_indentacion += 1
+    
+    def dedent(self):
+        """Reducir indentación"""
+        self.nivel_indentacion = max(0, self.nivel_indentacion - 1)
+
+# Instancia global del logger
+logger = Logger(ARCHIVO_LOG)
+
+# ============================================
+# 💾 CARGAR/GUARDAR DECISIONES
+# ============================================
+
+def cargar_decisiones() -> Dict[str, int]:
+    """Carga decisiones previas del usuario"""
+    if os.path.exists(ARCHIVO_DECISIONES):
+        try:
+            with open(ARCHIVO_DECISIONES, 'r', encoding='utf-8') as f:
+                decisiones = json.load(f)
+                logger.info(f"💾 Decisiones cargadas: {len(decisiones)} inversionistas")
+                return decisiones
+        except Exception as e:
+            logger.error(f"Error cargando decisiones: {e}")
+            return {}
+    return {}
+
+def guardar_decision(nombre_excel: str, inversionista_id: int, decisiones: Dict[str, int]):
+    """Guarda una decisión del usuario"""
+    decisiones[nombre_excel.lower().strip()] = inversionista_id
+    
+    try:
+        with open(ARCHIVO_DECISIONES, 'w', encoding='utf-8') as f:
+            json.dump(decisiones, f, ensure_ascii=False, indent=2)
+        logger.success(f"💾 Decisión guardada: '{nombre_excel}' → ID {inversionista_id}", indent=1)
+    except Exception as e:
+        logger.error(f"No se pudo guardar decisión: {e}", indent=1)
+
+# ============================================
+# 🎨 FUNCIÓN PARA MOSTRAR CANDIDATOS
+# ============================================
+
+def mostrar_candidatos_y_preguntar(
+    nombre_buscado: str,
+    candidatos: List[Dict[str, Any]],
+    credito_sifco: str,
+    cliente: str
+) -> Optional[int]:
+    """
+    Muestra los candidatos al usuario y le pregunta cuál elegir
+    Retorna el inversionista_id elegido o None
+    """
+    logger.separador("=")
+    logger.info("❓ MATCH DUDOSO - Necesito tu ayuda, jefe")
+    logger.separador("=")
+    logger.info(f"📋 Crédito: {credito_sifco}")
+    logger.info(f"👤 Cliente: {cliente}")
+    logger.info(f"🔍 Buscando: \"{nombre_buscado}\"")
+    logger.info(f"\n📊 Candidatos encontrados:\n")
+    
+    # Mostrar candidatos numerados
+    for idx, candidato in enumerate(candidatos, 1):
+        similitud = candidato.get('similitud', 0)
+        nombre = candidato.get('nombre', 'N/A')
+        inv_id = candidato.get('inversionista_id', 'N/A')
+        
+        # Emojis según similitud
+        if similitud >= 60:
+            emoji = "🟡"
+        elif similitud >= 40:
+            emoji = "🟠"
+        else:
+            emoji = "🔴"
+        
+        print(f"   {emoji} {idx}. [{similitud:.1f}%] {nombre}")
+        print(f"      └─ ID: {inv_id}\n")
+    
+    print(f"   0️⃣  . Ninguno sirve (SKIP este inversionista)")
+    print(f"   ➕ N. Crear nuevo inversionista con este nombre")
+    logger.separador("=")
+    
+    while True:
+        respuesta = input("\n👉 Elegí una opción (número): ").strip()
+        
+        if respuesta == '0':
+            logger.info("⏭️  Usuario eligió SKIP")
+            return None
+        
+        if respuesta.upper() == 'N':
+            logger.info(f"➕ Usuario eligió CREAR NUEVO: \"{nombre_buscado}\"")
+            return -1  # Señal especial para crear nuevo
+        
+        try:
+            opcion = int(respuesta)
+            if 1 <= opcion <= len(candidatos):
+                elegido = candidatos[opcion - 1]
+                logger.success(f"✅ Usuario eligió: {elegido['nombre']} (ID: {elegido['inversionista_id']})")
+                return elegido['inversionista_id']
+            else:
+                logger.warning(f"❌ Opción inválida: {respuesta}")
+        except ValueError:
+            logger.warning(f"❌ Entrada inválida: {respuesta}")
 
 # ============================================
 # 🗺️ MAPEO DE COLUMNAS EXCEL → API
@@ -116,68 +293,90 @@ def convertir_valor(nombre_campo: str, valor: Any) -> Any:
     return str(valor).strip() if isinstance(valor, (int, float)) else str(valor).strip()
 
 # ============================================
-# 🎯 DETECTAR POOLS RAROS
+# 🎯 DETECTAR POOLS RAROS (MEJORADO CON LOGS)
 # ============================================
-def detectar_pools_raros(df: pd.DataFrame, col_credito: str, col_nombre: str, col_formato: str) -> List[str]:
+def detectar_pools_raros(
+    df: pd.DataFrame, 
+    col_credito: str, 
+    col_nombre: str, 
+    col_numero: str, 
+    col_formato: str = None  # Opcional ahora
+) -> Dict[str, List[str]]:
     """
-    Retorna lista de números de crédito que son POOLS RAROS
+    Pool raro = MISMO CLIENTE + MISMO # + SIN variaciones (_2, _3)
+    NO importa si está marcado como "pool" o no
     """
-    print(f"\n🔍 Detectando pools raros...")
+    logger.subtitulo("🔍 DETECTANDO POOLS RAROS", "🔍")
     
-    # Filtrar solo pools
-    df_pools = df[
-        df[col_formato].astype(str).str.lower().str.strip().str.contains('pool', na=False)
-    ]
+    # Validar columnas necesarias
+    if not col_numero:
+        logger.warning("⚠️ No se encontró columna #, no se pueden detectar pools")
+        return {}
     
-    if len(df_pools) == 0:
-        print(f"   ℹ️  No hay pools marcados como 'pool' en esta hoja")
-        return []
+    logger.info("Criterio: MISMO CLIENTE + MISMO # + sin variaciones")
     
-    # Agrupar por cliente
-    clientes_agrupados = defaultdict(list)
+    # 🔥 NO filtrar por "pool" en formato, analizar TODAS las filas
+    logger.info("\n🔎 Analizando TODAS las filas sin filtro de formato...")
     
-    for idx, row in df_pools.iterrows():
+    # Agrupar por CLIENTE + NÚMERO
+    grupos = defaultdict(list)
+    registros_analizados = 0
+    
+    for idx, row in df.iterrows():
         credito_raw = str(row[col_credito]).strip()
+        
+        # Validar crédito
         if not credito_raw or credito_raw == 'nan':
             continue
         
-        nombre_cliente = str(row[col_nombre]).strip()
-        clientes_agrupados[nombre_cliente].append(credito_raw)
-    
-    # Detectar pools raros
-    creditos_pool_raro = []
-    
-    for cliente, creditos in clientes_agrupados.items():
-        # Separar base y variaciones
-        creditos_base = [c for c in creditos if '_' not in c]
-        creditos_variaciones = [c for c in creditos if '_' in c]
-        
-        if len(creditos_base) < 2:
+        # 🔥 IGNORAR VARIACIONES (esas son pools normales)
+        if '_' in credito_raw:
             continue
         
-        # Verificar que ningún base tenga variación
-        bases_con_variacion = []
-        for base in creditos_base:
-            tiene_variacion = any(
-                var.startswith(base + '_')
-                for var in creditos_variaciones
-            )
-            if tiene_variacion:
-                bases_con_variacion.append(base)
+        nombre_cliente = str(row[col_nombre]).strip()
+        numero = str(row[col_numero]).strip()
         
-        # Si NO tiene variaciones = POOL RARO
-        if len(bases_con_variacion) == 0:
-            print(f"   ✅ POOL RARO detectado: {cliente} → {len(creditos_base)} créditos sin variaciones")
-            for cred in creditos_base:
-                print(f"      - {cred}")
-            creditos_pool_raro.extend(creditos_base)
+        # Validar número
+        if not numero or numero == 'nan' or numero == '':
+            continue
+        
+        # Crear clave única: cliente||numero
+        clave = f"{nombre_cliente}||{numero}"
+        grupos[clave].append(credito_raw)
+        registros_analizados += 1
     
-    if len(creditos_pool_raro) == 0:
-        print(f"   ✅ No se encontraron pools raros")
+    logger.success(f"✅ Registros analizados: {registros_analizados}")
+    logger.info(f"✅ Grupos únicos (cliente+#): {len(grupos)}")
+    
+    # Detectar pools raros (grupos con 2+ créditos)
+    pools_raros_por_cliente = {}
+    
+    logger.indent()
+    for clave, creditos in grupos.items():
+        if len(creditos) < 2:
+            continue  # No es pool raro
+        
+        cliente, numero = clave.split('||')
+        
+        logger.warning(f"\n🔥 POOL RARO DETECTADO:")
+        logger.warning(f"   Cliente: {cliente}", indent=1)
+        logger.warning(f"   # (cuota): {numero}", indent=1)
+        logger.warning(f"   Cantidad: {len(creditos)} créditos", indent=1)
+        logger.warning(f"   Créditos:", indent=1)
+        
+        for cred in creditos:
+            logger.warning(f"     • {cred}", indent=1)
+        
+        pools_raros_por_cliente[clave] = creditos
+    
+    logger.dedent()
+    
+    if len(pools_raros_por_cliente) == 0:
+        logger.success("\n✅ No se encontraron pools raros")
     else:
-        print(f"   🔥 Total pools raros: {len(creditos_pool_raro)} créditos")
+        logger.warning(f"\n🔥 Total pools raros: {len(pools_raros_por_cliente)} grupos")
     
-    return creditos_pool_raro
+    return pools_raros_por_cliente
 
 # ============================================
 # 🔍 VALIDAR PORCENTAJES
@@ -236,18 +435,18 @@ def leer_hoja_excel(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Lee una hoja específica del Excel y agrupa filas por crédito.
-    Detecta pools raros y los convierte automáticamente.
-    🔥 EVITA DUPLICAR INVERSIONISTAS EN POOLS RAROS
+    🔥 NORMALIZA todos los pools (normales y raros) al creditoBase
     """
-    print(f"\n{'='*70}")
-    print(f"📄 Procesando hoja: {nombre_hoja}")
-    print(f"{'='*70}")
+    logger.titulo(f"PROCESANDO HOJA: {nombre_hoja}")
     
     try:
         # Leer Excel sin headers primero para buscarlos
+        logger.info("📖 Leyendo archivo Excel...")
         df_raw = pd.read_excel(archivo_path, sheet_name=nombre_hoja, header=None)
+        logger.success(f"✅ Archivo leído: {len(df_raw)} filas")
         
         # Buscar fila de headers
+        logger.info("\n🔍 Buscando fila de headers...")
         header_row = None
         for idx, row in df_raw.iterrows():
             if idx > 20:
@@ -255,22 +454,26 @@ def leer_hoja_excel(
             row_str = ' '.join(str(cell).lower() for cell in row if pd.notna(cell))
             if 'credito' in row_str or 'sifco' in row_str:
                 header_row = idx
-                print(f"✅ Headers encontrados en fila {idx}")
+                logger.success(f"✅ Headers encontrados en fila {idx}")
                 break
         
         if header_row is None:
-            print(f"⚠️ No se encontraron headers en la hoja {nombre_hoja}")
+            logger.error(f"❌ No se encontraron headers en la hoja {nombre_hoja}")
             return {}
         
         # Leer con headers correctos
         df = pd.read_excel(archivo_path, sheet_name=nombre_hoja, header=header_row)
         df.columns = df.columns.str.strip()
         
-        print(f"✅ Columnas encontradas: {len(df.columns)}")
+        logger.success(f"✅ DataFrame cargado: {len(df.columns)} columnas, {len(df)} filas")
         
         # Buscar columnas clave
+        logger.info("\n🔍 Buscando columnas clave...")
+        logger.indent()
+        
         col_credito = None
         col_nombre = None
+        col_numero = None
         col_formato = None
         col_inversionista = None
         
@@ -279,111 +482,81 @@ def leer_hoja_excel(
             
             if not col_credito and 'credito' in col_normalizado and 'sifco' in col_normalizado:
                 col_credito = col
-                print(f"✅ Columna crédito: '{col}'")
+                logger.success(f"✅ Columna crédito SIFCO: '{col}'")
             
             if not col_nombre and 'nombre' in col_normalizado and 'formato' not in col_normalizado and 'inversionista' not in col_normalizado:
                 col_nombre = col
-                print(f"✅ Columna nombre: '{col}'")
+                logger.success(f"✅ Columna nombre/cliente: '{col}'")
+            
+            if not col_numero and col_normalizado == '' and col == '#':
+                col_numero = col
+                logger.success(f"✅ Columna número (#): '{col}'")
             
             if not col_formato and 'formato' in col_normalizado and 'credito' in col_normalizado:
                 col_formato = col
-                print(f"✅ Columna formato: '{col}'")
+                logger.success(f"✅ Columna formato crédito: '{col}'")
             
             if not col_inversionista and 'inversionista' in col_normalizado and 'porcentaje' not in col_normalizado and 'cuota' not in col_normalizado and 'iva' not in col_normalizado:
                 col_inversionista = col
-                print(f"✅ Columna inversionista: '{col}'")
+                logger.success(f"✅ Columna inversionista: '{col}'")
         
+        logger.dedent()
+        
+        # Validar columnas críticas
         if not col_credito:
-            print(f"❌ No se encontró columna de CréditoSIFCO")
+            logger.error("❌ CRÍTICO: No se encontró columna de CréditoSIFCO")
             return {}
         
         if not col_nombre:
-            print(f"⚠️ No se encontró columna de Nombre/Cliente")
+            logger.warning("⚠️ No se encontró columna de Nombre/Cliente")
+        
+        if not col_numero:
+            logger.warning("⚠️ No se encontró columna de Número (#)")
+            logger.warning("   Esto impedirá detectar pools raros")
         
         if not col_formato:
-            print(f"⚠️ No se encontró columna de Formato crédito")
+            logger.warning("⚠️ No se encontró columna de Formato crédito")
+            logger.warning("   Esto impedirá detectar pools raros")
         
         if not col_inversionista:
-            print(f"⚠️ No se encontró columna de Inversionista")
+            logger.warning("⚠️ No se encontró columna de Inversionista")
         
         # Limpiar DataFrame
+        logger.info("\n🧹 Limpiando datos...")
         df_clean = df.dropna(subset=[col_credito])
         df_clean = df_clean[
             ~df_clean[col_credito].astype(str).str.lower().str.contains('total|suma|promedio', na=False)
         ]
         df_clean = df_clean.fillna('')
         
-        print(f"✅ Filas válidas encontradas: {len(df_clean)}")
+        logger.success(f"✅ Datos limpios: {len(df_clean)} filas válidas")
         
-        # 🔥 DETECTAR POOLS RAROS (si existe columna formato)
-        creditos_pool_raro = []
-        if col_formato:
-            creditos_pool_raro = detectar_pools_raros(df_clean, col_credito, col_nombre, col_formato)
-        
-        # 🆕 MAPEAR CRÉDITOS POR CLIENTE (para pools raros)
-        clientes_creditos = defaultdict(list)
-        mapeo_variaciones = {}
-        
-        if creditos_pool_raro:
-            print(f"\n🔧 Creando mapeo de variaciones para pools raros...")
-            
-            for idx, row in df_clean.iterrows():
-                numero_credito_raw = str(row[col_credito]).strip()
-                
-                if numero_credito_raw not in creditos_pool_raro:
-                    continue
-                
-                cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
-                inversionista = str(row[col_inversionista]).strip() if col_inversionista and row[col_inversionista] else ""
-                
-                # 🔥 Clave única: credito + inversionista (para evitar duplicados)
-                clave_unica = f"{numero_credito_raw}||{inversionista}"
-                
-                if clave_unica not in clientes_creditos[cliente]:
-                    clientes_creditos[cliente].append(clave_unica)
-            
-            # Crear mapeo de variaciones
-            for cliente, claves in clientes_creditos.items():
-                # Extraer solo los créditos únicos
-                creditos_unicos = list(set([c.split('||')[0] for c in claves]))
-                creditos_ordenados = sorted(creditos_unicos)
-                
-                print(f"\n   🔧 Cliente: {cliente}")
-                print(f"      Créditos pool raro: {creditos_ordenados}")
-                
-                # 🔥 IMPORTANTE: Crear variaciones ÚNICAS por crédito + inversionista
-                inversionistas_por_credito = defaultdict(int)
-                
-                for clave in claves:
-                    credito_raw, inversionista = clave.split('||')
-                    
-                    # Si es el primer crédito Y el primer inversionista → sin variación
-                    if credito_raw == creditos_ordenados[0] and inversionistas_por_credito[credito_raw] == 0:
-                        mapeo_variaciones[clave] = credito_raw
-                        print(f"      ✅ Base: {credito_raw} (Inv: {inversionista[:20]}...)")
-                    else:
-                        # Calcular índice de variación basado en el número de inversionistas ya procesados
-                        idx_variacion = sum(1 for k in mapeo_variaciones.keys() if k.startswith(credito_raw + '||'))
-                        variacion = f"{credito_raw}_{idx_variacion + 1}"
-                        mapeo_variaciones[clave] = variacion
-                        print(f"      🔄 {credito_raw} → {variacion} (Inv: {inversionista[:20]}...)")
-                    
-                    inversionistas_por_credito[credito_raw] += 1
-            
-            print(f"\n{'─'*70}\n")
+        # 🔥 DETECTAR POOLS RAROS
+        pools_raros = {}
+        if col_formato and col_numero:
+            pools_raros = detectar_pools_raros(df_clean, col_credito, col_nombre, col_numero, col_formato)
+        else:
+            logger.warning("\n⚠️ SALTANDO DETECCIÓN DE POOLS RAROS (faltan columnas)")
         
         # 🎯 AGRUPAR FILAS
+        logger.subtitulo("🔄 AGRUPANDO FILAS POR CRÉDITO", "🔄")
+        logger.indent()
+        
         creditos_data = {}
         warnings_globales = []
+        
+        filas_procesadas = 0
+        filas_skipped = 0
         
         for idx, row in df_clean.iterrows():
             numero_credito_raw = str(row[col_credito]).strip()
             
             if not numero_credito_raw or numero_credito_raw == '':
+                filas_skipped += 1
                 continue
             
             cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
-            inversionista = str(row[col_inversionista]).strip() if col_inversionista and row[col_inversionista] else ""
+            numero = str(row[col_numero]).strip() if col_numero and row[col_numero] else ""
             
             # Convertir fila con mapeo
             fila_dict = {}
@@ -396,26 +569,40 @@ def leer_hoja_excel(
             validacion = validar_porcentajes(fila_dict, numero_credito_raw)
             if not validacion['valido']:
                 warnings_globales.extend(validacion['warnings'])
-                print(f"\n⚠️ Warnings para {numero_credito_raw}:")
-                for warning in validacion['warnings']:
-                    print(f"   {warning}")
             
             # Usar fila corregida
             fila_dict = validacion['fila_corregida']
             
-            # 🔥 DETERMINAR EL CRÉDITO FINAL
-            clave_unica = f"{numero_credito_raw}||{inversionista}"
+            # ============================================
+            # 🔥 DETERMINAR AGRUPACIÓN Y NORMALIZACIÓN
+            # ============================================
             
-            if clave_unica in mapeo_variaciones:
-                # Es un pool raro, usar el mapeo
-                numero_credito_final = mapeo_variaciones[clave_unica]
-                numero_credito_base = numero_credito_final.split('_')[0]
-            else:
-                # No es pool raro, usar lógica normal
-                numero_credito_final = numero_credito_raw
+            # Caso 1: Pool normal (ya tiene _2, _3, etc.)
+            if '_' in numero_credito_raw:
                 numero_credito_base = numero_credito_raw.split('_')[0]
+                numero_credito_final = numero_credito_base  # 🔥 Normalizar
+                
+                logger.debug(f"🟢 Pool normal: {numero_credito_raw} → Base: {numero_credito_base}")
             
-            # Agrupar por base
+            # Caso 2: Pool raro (mismo # mismo cliente)
+            else:
+                # 🔥 Buscar por clave única (cliente + número)
+                clave_pool = f"{cliente}||{numero}" if numero else None
+                
+                if clave_pool and clave_pool in pools_raros and numero_credito_raw in pools_raros[clave_pool]:
+                    creditos_del_pool = pools_raros[clave_pool]
+                    numero_credito_base = creditos_del_pool[0]  # Primer crédito como base
+                    numero_credito_final = creditos_del_pool[0]  # 🔥 TODOS usan el primero
+                    
+                    logger.warning(f"🟡 Pool raro: {numero_credito_raw} → Base: {numero_credito_base}")
+                else:
+                    # Crédito individual
+                    numero_credito_base = numero_credito_raw
+                    numero_credito_final = numero_credito_raw
+                    
+                    logger.debug(f"🔵 Individual: {numero_credito_raw}")
+            
+            # Crear/actualizar grupo
             if numero_credito_base not in creditos_data:
                 creditos_data[numero_credito_base] = {
                     'creditoBase': numero_credito_base,
@@ -423,14 +610,20 @@ def leer_hoja_excel(
                     'filas': []
                 }
             
-            # 🔥 SOBRESCRIBIR el CreditoSIFCO con el número final (puede tener variación)
+            # 🔥 Agregar fila con CreditoSIFCO normalizado
             fila_dict['CreditoSIFCO'] = numero_credito_final
-            
             creditos_data[numero_credito_base]['filas'].append(fila_dict)
+            
+            filas_procesadas += 1
         
-        print(f"✅ Créditos únicos agrupados: {len(creditos_data)}")
+        logger.dedent()
         
-        # Mostrar estadísticas
+        logger.success(f"\n✅ AGRUPACIÓN COMPLETADA:")
+        logger.info(f"   • Filas procesadas: {filas_procesadas}", indent=1)
+        logger.info(f"   • Filas ignoradas: {filas_skipped}", indent=1)
+        logger.info(f"   • Créditos únicos: {len(creditos_data)}", indent=1)
+        
+        # Estadísticas de agrupación
         pools_normales = 0
         pools_raros_convertidos = 0
         individuales = 0
@@ -438,48 +631,54 @@ def leer_hoja_excel(
         for credito_key, credito_data in creditos_data.items():
             num_filas = len(credito_data['filas'])
             
-            # Contar cuántas filas tienen variaciones
-            filas_con_variacion = sum(1 for f in credito_data['filas'] if '_' in str(f.get('CreditoSIFCO', '')))
-            
             if num_filas > 1:
-                # Ver si alguna fila era pool raro
-                es_pool_raro_convertido = any(
-                    str(f.get('CreditoSIFCO', '')).split('_')[0] in creditos_pool_raro
-                    for f in credito_data['filas']
-                )
+                # Verificar si era pool raro
+                cliente_credito = credito_data['cliente']
                 
-                if es_pool_raro_convertido:
+                # Buscar en pools raros
+                es_pool_raro = False
+                for clave_pool in pools_raros.keys():
+                    if cliente_credito in clave_pool and credito_key in pools_raros[clave_pool]:
+                        es_pool_raro = True
+                        break
+                
+                if es_pool_raro:
                     pools_raros_convertidos += 1
                 else:
                     pools_normales += 1
             else:
                 individuales += 1
         
-        print(f"\n📊 Estadísticas:")
-        print(f"   🔵 Créditos individuales: {individuales}")
-        print(f"   🟢 Pools normales (con _1, _2): {pools_normales}")
-        print(f"   🟡 Pools raros convertidos: {pools_raros_convertidos}")
+        logger.info(f"\n📊 ESTADÍSTICAS:")
+        logger.info(f"   🔵 Créditos individuales: {individuales}", indent=1)
+        logger.info(f"   🟢 Pools normales: {pools_normales}", indent=1)
+        logger.info(f"   🟡 Pools raros normalizados: {pools_raros_convertidos}", indent=1)
         
         if warnings_globales:
-            print(f"\n⚠️ Total de warnings: {len(warnings_globales)}")
+            logger.warning(f"\n⚠️ Total de warnings: {len(warnings_globales)}")
         
         # Mostrar ejemplos
-        print(f"\n📋 Primeros 3 créditos:")
-        for credito_key, credito_data in list(creditos_data.items())[:3]:
-            creditos_en_pool = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
-            inversionistas_en_pool = set(f.get('Inversionista', 'N/A') for f in credito_data['filas'])
-            print(f"   📋 {credito_data['creditoBase']}: {credito_data['cliente']}")
-            print(f"      Filas: {len(credito_data['filas'])}")
-            print(f"      Créditos: {', '.join(sorted(creditos_en_pool))}")
-            print(f"      Inversionistas: {', '.join(sorted(inversionistas_en_pool))}")
+        logger.info(f"\n📋 PRIMEROS 5 CRÉDITOS AGRUPADOS:")
+        logger.indent()
         
-        if len(creditos_data) > 3:
-            print(f"   ... y {len(creditos_data) - 3} créditos más")
+        for credito_key, credito_data in list(creditos_data.items())[:5]:
+            creditos_en_filas = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
+            inversionistas_en_pool = set(f.get('Inversionista', 'N/A') for f in credito_data['filas'])
+            
+            logger.info(f"📋 {credito_data['creditoBase']}: {credito_data['cliente']}")
+            logger.info(f"   Filas: {len(credito_data['filas'])}", indent=1)
+            logger.info(f"   CreditoSIFCO en filas: {', '.join(sorted(creditos_en_filas))}", indent=1)
+            logger.info(f"   Inversionistas: {', '.join(sorted(inversionistas_en_pool))}", indent=1)
+        
+        logger.dedent()
+        
+        if len(creditos_data) > 5:
+            logger.info(f"... y {len(creditos_data) - 5} créditos más\n")
         
         return creditos_data
         
     except Exception as e:
-        print(f"❌ Error leyendo hoja {nombre_hoja}: {e}")
+        logger.error(f"❌ Error leyendo hoja {nombre_hoja}: {e}")
         import traceback
         traceback.print_exc()
         return {}
@@ -488,29 +687,51 @@ def leer_hoja_excel(
 # 📡 FUNCIÓN PARA ENVIAR A API
 # ============================================
 def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dict:
-    """Envía un crédito agrupado al endpoint de Elysia"""
+    """Envía un crédito agrupado al endpoint de Elysia con soporte interactivo"""
     
-    print(f"\n   🚀 Enviando crédito a API...")
-    print(f"      - Crédito: {credito_data['creditoBase']}")
-    print(f"      - Cliente: {credito_data['cliente']}")
-    print(f"      - Filas: {len(credito_data['filas'])}")
+    logger.subtitulo(f"🚀 ENVIANDO A API: {credito_data['creditoBase']}", "🚀")
+    logger.indent()
+    
+    logger.info(f"Cliente: {credito_data['cliente']}")
+    logger.info(f"Filas: {len(credito_data['filas'])}")
     
     # Mostrar inversionistas únicos
     inversionistas_unicos = set(f.get('Inversionista', 'N/A') for f in credito_data['filas'])
-    print(f"      - Inversionistas únicos: {len(inversionistas_unicos)}")
+    logger.info(f"Inversionistas únicos: {len(inversionistas_unicos)}")
     for inv in sorted(inversionistas_unicos):
-        print(f"         • {inv}")
+        logger.info(f"  • {inv}", indent=1)
     
-    # Mostrar si tiene variaciones
-    creditos_en_pool = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
-    if len(creditos_en_pool) > 1:
-        print(f"      - Pool con: {', '.join(sorted(creditos_en_pool))}")
+    # Mostrar CreditoSIFCO únicos
+    creditos_sifco = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
+    if len(creditos_sifco) == 1:
+        logger.info(f"CreditoSIFCO: {list(creditos_sifco)[0]}")
+    else:
+        logger.warning(f"⚠️ CreditoSIFCO múltiples: {', '.join(sorted(creditos_sifco))}")
+    
+    # 🔥 CARGAR DECISIONES PREVIAS
+    decisiones = cargar_decisiones()
+    
+    # 🔥 INYECTAR DECISIONES DEL USUARIO EN LAS FILAS
+    for fila in credito_data['filas']:
+        nombre_inv = str(fila.get('Inversionista', '')).strip()
+        if not nombre_inv:
+            continue
+        
+        # Buscar si hay decisión guardada
+        clave = nombre_inv.lower().strip()
+        if clave in decisiones:
+            inv_id = decisiones[clave]
+            logger.success(f"✅ Usando decisión guardada: \"{nombre_inv}\" → ID {inv_id}")
+            fila['_decision_usuario'] = inv_id
     
     payload = {
-        "credito": credito_data
+        "credito": credito_data,
+        "modo_interactivo": True,
+        "umbral_similitud": UMBRAL_PREGUNTAR
     }
     
     try:
+        logger.info("\n📡 Enviando request...")
         response = requests.post(
             api_endpoint,
             json=payload,
@@ -518,48 +739,99 @@ def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dic
             timeout=120
         )
         
-        print(f"\n   📡 Status Code: {response.status_code}")
+        logger.info(f"Status Code: {response.status_code}")
         
         if response.status_code != 200:
-            print(f"   ❌ Response Text: {response.text[:500]}")
+            logger.error(f"Response: {response.text[:500]}")
         
         response.raise_for_status()
         resultado = response.json()
         
-        print(f"   ✅ Respuesta de API:")
-        print(f"      - Success: {resultado.get('success', False)}")
+        logger.success(f"✅ Respuesta recibida")
+        logger.info(f"Success: {resultado.get('success', False)}")
         
-        # Mostrar campos relevantes según el tipo de respuesta
+        # 🔥 PROCESAR CONSULTAS INTERACTIVAS
+        consultas = resultado.get('consultas_interactivas', [])
+        if consultas:
+            logger.warning(f"\n❓ El backend tiene {len(consultas)} dudas...")
+            
+            decisiones_usuario = []
+            
+            for consulta in consultas:
+                nombre_buscado = consulta.get('nombre_excel', '')
+                candidatos = consulta.get('candidatos', [])
+                credito_sifco = consulta.get('credito_sifco', '')
+                
+                # Preguntar al usuario
+                decision = mostrar_candidatos_y_preguntar(
+                    nombre_buscado,
+                    candidatos,
+                    credito_sifco,
+                    credito_data['cliente']
+                )
+                
+                if decision is not None:
+                    # Guardar decisión
+                    guardar_decision(nombre_buscado, decision, decisiones)
+                    
+                    # Agregar a payload
+                    decisiones_usuario.append({
+                        'nombre_excel': nombre_buscado,
+                        'credito_sifco': credito_sifco,
+                        'decision': decision
+                    })
+            
+            if decisiones_usuario:
+                # Reenviar payload con decisiones
+                logger.info("\n🔄 Reenviando con decisiones del usuario...")
+                payload['decisiones_usuario'] = decisiones_usuario
+                
+                response = requests.post(
+                    api_endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=120
+                )
+                resultado = response.json()
+                logger.success("✅ Request final completado")
+        
+        # Mostrar resultado final
         if 'status' in resultado:
-            print(f"      - Status: {resultado.get('status', 'N/A')}")
+            logger.info(f"Status: {resultado.get('status', 'N/A')}")
         
         if not resultado.get('success'):
-            print(f"      - Error: {resultado.get('error', 'N/A')}")
+            logger.error(f"Error: {resultado.get('error', 'N/A')}")
         else:
             if 'credito_id' in resultado:
-                print(f"      - Crédito ID: {resultado.get('credito_id', 'N/A')}")
+                logger.success(f"Crédito ID: {resultado.get('credito_id', 'N/A')}")
             if 'inversionistas_procesados' in resultado:
-                print(f"      - Inversionistas procesados: {resultado.get('inversionistas_procesados', 'N/A')}")
+                logger.success(f"Inversionistas procesados: {resultado.get('inversionistas_procesados', 'N/A')}")
             if 'inversionistas_no_encontrados' in resultado:
                 no_encontrados = resultado.get('inversionistas_no_encontrados', [])
                 if no_encontrados:
-                    print(f"      - ⚠️ No encontrados: {', '.join(no_encontrados)}")
+                    logger.warning(f"⚠️ No encontrados: {', '.join(no_encontrados)}")
         
+        logger.dedent()
         return resultado
         
     except requests.exceptions.ConnectionError:
-        print(f"   ❌ API no disponible - ¿Está corriendo el backend en puerto 7000?")
+        logger.error("❌ API no disponible")
+        logger.error("   ¿Está corriendo el backend en puerto 7000?")
+        logger.dedent()
         return {"success": False, "status": "error_conexion", "error": "API no disponible"}
     except requests.exceptions.Timeout:
-        print(f"   ❌ Timeout - La API tardó mucho en responder")
+        logger.error("❌ Timeout - La API tardó mucho en responder")
+        logger.dedent()
         return {"success": False, "status": "timeout", "error": "Timeout"}
     except requests.exceptions.HTTPError as e:
-        print(f"   ❌ Error HTTP: {e}")
+        logger.error(f"❌ Error HTTP: {e}")
+        logger.dedent()
         return {"success": False, "status": "error_http", "error": str(e)}
     except Exception as e:
-        print(f"   ❌ Error inesperado: {e}")
+        logger.error(f"❌ Error inesperado: {e}")
         import traceback
         traceback.print_exc()
+        logger.dedent()
         return {"success": False, "status": "error_general", "error": str(e)}
 
 # ============================================
@@ -568,34 +840,33 @@ def enviar_credito_a_api(credito_data: Dict[str, Any], api_endpoint: str) -> Dic
 def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
     modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🔥 MODO COMPLETO"
     
-    print(f"\n{'='*70}")
-    print(f"{modo_texto} - {modo_nombre}")
-    print(f"{'='*70}")
-    print(f"📂 Carpeta: {CARPETA_EXCELS}")
-    print(f"📄 Archivo: {ARCHIVO_EXCEL}")
-    print(f"🔗 API: {api_endpoint}")
-    print(f"📅 Hojas a procesar: {len(HOJAS_A_PROCESAR)}")
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"📅 Hojas a procesar: {len(HOJAS_A_PROCESAR)}")
+    logger.info(f"🎯 Umbral similitud: {UMBRAL_PREGUNTAR}%")
     
     if MODO_PRUEBA:
-        print(f"⚡ Límite por hoja: {LIMITE_CREDITOS_PRUEBA} crédito(s)")
+        logger.warning(f"⚡ Límite por hoja: {LIMITE_CREDITOS_PRUEBA} crédito(s)")
     
-    print(f"{'='*70}\n")
+    logger.separador()
     
     archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
     
     if not os.path.exists(archivo_path):
-        print(f"❌ Archivo no encontrado: {archivo_path}")
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
         return
     
     try:
         xls = pd.ExcelFile(archivo_path)
         hojas_disponibles = xls.sheet_names
-        print(f"📋 Hojas disponibles en el archivo:")
+        logger.info(f"📋 Hojas disponibles en el archivo:")
         for hoja in hojas_disponibles:
-            print(f"   - {hoja}")
-        print()
+            logger.info(f"   - {hoja}")
+        logger.info("")
     except Exception as e:
-        print(f"❌ Error leyendo archivo: {e}")
+        logger.error(f"❌ Error leyendo archivo: {e}")
         return
     
     stats_globales = {
@@ -609,13 +880,13 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
     
     for nombre_hoja in HOJAS_A_PROCESAR:
         if nombre_hoja not in hojas_disponibles:
-            print(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
+            logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
             continue
         
         creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
         
         if not creditos_data:
-            print(f"⚠️ No se encontraron datos en la hoja {nombre_hoja}")
+            logger.warning(f"⚠️ No se encontraron datos en la hoja {nombre_hoja}")
             continue
         
         stats_globales['hojas_procesadas'] += 1
@@ -623,11 +894,10 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
         creditos_a_procesar = list(creditos_data.values())
         if MODO_PRUEBA:
             creditos_a_procesar = creditos_a_procesar[:LIMITE_CREDITOS_PRUEBA]
-            print(f"\n🧪 MODO PRUEBA: Procesando solo {len(creditos_a_procesar)} crédito(s)")
+            logger.warning(f"\n🧪 MODO PRUEBA: Procesando solo {len(creditos_a_procesar)} crédito(s)")
         
         for credito_data in creditos_a_procesar:
-            print(f"\n{'─'*70}")
-            print(f"📋 Procesando: {credito_data['creditoBase']} - {credito_data['cliente']}")
+            logger.separador("─")
             
             resultado = enviar_credito_a_api(credito_data, api_endpoint)
             
@@ -653,22 +923,21 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
             else:
                 stats_globales['creditos_fallidos'] += 1
             
-            print(f"{'─'*70}")
+            logger.separador("─")
     
-    print(f"\n{'='*70}")
-    print(f"🎉 RESUMEN FINAL")
-    print(f"{'='*70}")
-    print(f"📊 Hojas procesadas: {stats_globales['hojas_procesadas']}")
-    print(f"📋 Créditos procesados: {stats_globales['creditos_procesados']}")
-    print(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
-    print(f"   ⏭️  No encontrados: {stats_globales['creditos_no_encontrados']}")
-    print(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL")
+    logger.info(f"📊 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"📋 Créditos procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.info(f"   ⏭️  No encontrados: {stats_globales['creditos_no_encontrados']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
     
     # Mostrar inversionistas no encontrados
     if stats_globales['inversionistas_no_encontrados']:
-        print(f"\n{'='*70}")
-        print(f"⚠️  INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
-        print(f"{'='*70}")
+        logger.separador()
+        logger.warning(f"⚠️  INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        logger.separador()
         
         # Agrupar por inversionista
         por_inversionista = defaultdict(list)
@@ -679,21 +948,20 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
             })
         
         for inversionista, creditos in sorted(por_inversionista.items()):
-            print(f"\n❌ {inversionista}")
+            logger.warning(f"\n❌ {inversionista}")
             for cred in creditos:
-                print(f"   - {cred['credito']} ({cred['cliente']})")
+                logger.warning(f"   - {cred['credito']} ({cred['cliente']})")
     
-    print(f"{'='*70}\n")
+    logger.separador()
+    logger.success(f"\n✅ Logs guardados en: {ARCHIVO_LOG}")
 
 # ============================================
 # 🎯 MENÚ PRINCIPAL
 # ============================================
 def mostrar_menu():
     """Muestra el menú de opciones y retorna la selección del usuario"""
-    print(f"\n{'='*70}")
-    print("🔥 PROCESADOR DE EXCEL - CASH-IN")
-    print(f"{'='*70}")
-    print("\n📋 Seleccioná el modo de procesamiento:\n")
+    logger.titulo("PROCESADOR DE EXCEL - CASH-IN")
+    logger.info("\n📋 Seleccioná el modo de procesamiento:\n")
     print("   1️⃣  Procesar CRÉDITOS COMPLETOS (con SIFCO + Inversionistas)")
     print("      └─ Endpoint: /processUniqueCredit")
     print("      └─ Consulta SIFCO, crea/actualiza crédito e inversionistas\n")
@@ -701,38 +969,47 @@ def mostrar_menu():
     print("      └─ Endpoint: /processInvestorsOnly")
     print("      └─ NO toca SIFCO, solo actualiza inversionistas del crédito\n")
     print("   0️⃣  Salir\n")
-    print(f"{'='*70}")
+    logger.separador()
     
     while True:
-        opcion = input("\n👉 Ingresá tu opción (1/2/0): ").strip()
+        respuesta = input("\n👉 Ingresá tu opción (1/2/0): ").strip()
         
-        if opcion in ['1', '2', '0']:
-            return opcion
+        if respuesta in ['1', '2', '0']:
+            logger.info(f"Usuario seleccionó opción: {respuesta}")
+            return respuesta
         else:
-            print("❌ Opción inválida. Por favor ingresá 1, 2 o 0.")
+            logger.warning("❌ Opción inválida")
 
 # ============================================
 # 🎯 EJECUTAR
 # ============================================
 if __name__ == "__main__":
-    print("🔥 Procesador Unificado - Pools Normales y Raros")
-    print("⚠️  Asegurate que tu backend Elysia esté corriendo en el puerto 7000\n")
+    logger.titulo("🔥 PROCESADOR UNIFICADO - POOLS NORMALES Y RAROS")
+    logger.warning("⚠️  Asegurate que tu backend Elysia esté corriendo en el puerto 7000\n")
     
     if MODO_PRUEBA:
-        print(f"🧪 MODO PRUEBA ACTIVADO")
-        print(f"   - Solo se procesará {LIMITE_CREDITOS_PRUEBA} crédito(s) por hoja")
-        print(f"   - Para procesar todos, cambiá MODO_PRUEBA = False en el código\n")
+        logger.warning(f"🧪 MODO PRUEBA ACTIVADO")
+        logger.warning(f"   - Solo se procesará {LIMITE_CREDITOS_PRUEBA} crédito(s) por hoja")
+        logger.warning(f"   - Para procesar todos, cambiá MODO_PRUEBA = False en el código\n")
+    
+    # Mostrar info de decisiones guardadas
+    decisiones = cargar_decisiones()
+    if decisiones:
+        logger.info(f"💾 Decisiones guardadas: {len(decisiones)} inversionistas")
+        logger.info(f"   (Se usarán automáticamente cuando aparezcan de nuevo)\n")
+    
+    logger.success(f"📝 Los logs se guardarán en: {ARCHIVO_LOG}\n")
     
     try:
         while True:
             opcion = mostrar_menu()
             
             if opcion == '0':
-                print("\n👋 ¡Hasta luego!")
+                logger.info("\n👋 ¡Hasta luego!")
                 break
             
             elif opcion == '1':
-                print("\n✅ Seleccionaste: PROCESAR CRÉDITOS COMPLETOS")
+                logger.success("\n✅ Modo seleccionado: CRÉDITOS COMPLETOS")
                 api_endpoint = "http://localhost:7000/processUniqueCredit"
                 modo_nombre = "Créditos Completos (SIFCO + Inversionistas)"
                 
@@ -742,26 +1019,30 @@ if __name__ == "__main__":
                 input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
             
             elif opcion == '2':
-                print("\n✅ Seleccionaste: PROCESAR SOLO INVERSIONISTAS")
+                logger.success("\n✅ Modo seleccionado: SOLO INVERSIONISTAS")
                 api_endpoint = "http://localhost:7000/processInvestorsOnly"
                 modo_nombre = "Solo Inversionistas (sin SIFCO)"
                 
-                print("\n⚠️  IMPORTANTE:")
-                print("   - Los créditos DEBEN existir en la base de datos")
-                print("   - Solo se actualizarán los inversionistas")
-                print("   - NO se consultará SIFCO\n")
+                logger.warning("\n⚠️  IMPORTANTE:")
+                logger.warning("   - Los créditos DEBEN existir en la base de datos")
+                logger.warning("   - Solo se actualizarán los inversionistas")
+                logger.warning("   - NO se consultará SIFCO\n")
                 
                 confirmacion = input("¿Estás seguro de continuar? (s/n): ").strip().lower()
                 
                 if confirmacion == 's':
+                    logger.info("Usuario confirmó operación")
                     procesar_multiples_hojas(api_endpoint, modo_nombre)
                     input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
                 else:
-                    print("\n❌ Operación cancelada")
+                    logger.warning("\n❌ Operación cancelada por el usuario")
             
     except KeyboardInterrupt:
-        print("\n\n⚠️ Proceso interrumpido por el usuario")
+        logger.warning("\n\n⚠️ Proceso interrumpido por el usuario (Ctrl+C)")
     except Exception as e:
-        print(f"\n❌ Error fatal: {e}")
+        logger.error(f"\n❌ Error fatal: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        logger.separador()
+        logger.success(f"📝 Logs completos guardados en: {ARCHIVO_LOG}")

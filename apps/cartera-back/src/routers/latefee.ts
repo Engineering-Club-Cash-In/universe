@@ -6,7 +6,7 @@ import { authMiddleware } from "./midleware";
 import { createMora, updateMora, procesarMoras, condonarMora, getCreditosWithMoras, getCondonacionesMora, condonarTodasLasMoras } from "../controllers/latefee";
 
 export const morasRouter = new Elysia()
-  .use(authMiddleware)
+ 
 
   /**
    * Crear una mora manualmente
@@ -173,4 +173,32 @@ export const morasRouter = new Elysia()
     motivo: t.String(),
     usuario_email: t.String(),
   })
-})
+}) .post(
+    "/procesar",
+    async ({ body }) => {
+      try {
+        console.log("🔥 ========== PROCESANDO MORAS MANUALMENTE ==========");
+        
+        await procesarMoras();
+        
+        return {
+          success: true,
+          message: "Moras procesadas exitosamente"
+        };
+      } catch (error: any) {
+        console.error("❌ Error procesando moras:", error);
+        return {
+          success: false,
+          error: error.message || "Error desconocido",
+          message: "Error al procesar moras"
+        };
+      }
+    },
+    {
+      detail: {
+        tags: ["Moras"],
+        summary: "Procesar moras manualmente",
+        description: "Procesa todas las cuotas vencidas y genera/actualiza los registros de mora para los créditos correspondientes"
+      }
+    }
+  );

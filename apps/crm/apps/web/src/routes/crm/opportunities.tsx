@@ -143,9 +143,6 @@ function DraggableOpportunityCard({
 							!opportunity.numeroCuotas ||
 							!opportunity.tasaInteres ||
 							!opportunity.cuotaMensual ||
-							!opportunity.diaPagoMensual ||
-							!opportunity.seguro ||
-							!opportunity.gps ||
 							!opportunity.nit ||
 							!opportunity.categoria);
 

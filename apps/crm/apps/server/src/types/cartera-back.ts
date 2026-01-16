@@ -577,11 +577,14 @@ export interface PagoDetalle {
 
 export interface CarteraStatsBucket {
 	cantidad: number;
-	sumaCuotaMensual: string;
+	porcentaje: string;
+	sumaCapital: string;
 	sumaMora: string;
 }
 
 export interface CarteraStatsResponse {
+	totalCreditos: number;
+	efectividad: string;
 	porCuotasAtrasadas: {
 		[key: string]: CarteraStatsBucket; // "0", "1", "2", "3", "4"+
 	};

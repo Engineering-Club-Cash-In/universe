@@ -2180,11 +2180,14 @@ const updateInstallments = async ({
 
 interface CreditStats {
   cantidad: number;
-  sumaCuotaMensual: string;
+  porcentaje: string;
+  sumaCapital: string;
   sumaMora: string;
 }
 
 interface CreditStatsResponse {
+  totalCreditos: number;
+  efectividad: string; // Porcentaje de créditos SIN cuotas atrasadas
   porCuotasAtrasadas: {
     "0": CreditStats;
     "1": CreditStats;
@@ -2221,13 +2224,30 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     }
   }
 
+  // Primero obtener el total de créditos activos para calcular porcentajes
+  const baseConditionsTotal = [
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
+  ];
+  if (asesorId) {
+    baseConditionsTotal.push(eq(creditos.asesor_id, asesorId));
+  }
+
+  const totalResult = await db
+    .select({
+      total: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+    })
+    .from(creditos)
+    .where(and(...baseConditionsTotal));
+
+  const totalCreditosActivos = totalResult[0]?.total || 0;
+
   // Estadísticas por cuotas atrasadas (0, 1, 2, 3, 4) - Solo créditos ACTIVOS o MOROSOS
   const statsPerCuotasAtrasadas: Record<string, CreditStats> = {
-    "0": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
-    "1": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
-    "2": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
-    "3": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
-    "4": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    "0": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "1": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "2": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "3": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    "4": { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
   };
 
   // Consulta para créditos activos/morosos con sus moras
@@ -2239,11 +2259,13 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     baseConditionsActive.push(eq(creditos.asesor_id, asesorId));
   }
 
+  let creditosSinAtraso = 0;
+
   for (const cuotasNum of [0, 1, 2, 3, 4]) {
     const result = await db
       .select({
         cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
-        sumaCuotaMensual: sql<string>`COALESCE(SUM(${creditos.cuota}), 0)::text`,
+        sumaCapital: sql<string>`COALESCE(SUM(${creditos.capital}), 0)::text`,
         sumaMora: sql<string>`COALESCE(SUM(CASE WHEN ${moras_credito.activa} = true THEN ${moras_credito.monto_mora} ELSE 0 END), 0)::text`,
       })
       .from(creditos)
@@ -2261,18 +2283,50 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
         )
       );
 
+    const cantidad = result[0]?.cantidad || 0;
+    const porcentaje = totalCreditosActivos > 0 
+      ? ((cantidad / totalCreditosActivos) * 100).toFixed(2) 
+      : "0";
+
+    if (cuotasNum === 0) {
+      creditosSinAtraso = cantidad;
+    }
+
     statsPerCuotasAtrasadas[cuotasNum.toString()] = {
-      cantidad: result[0]?.cantidad || 0,
-      sumaCuotaMensual: result[0]?.sumaCuotaMensual || "0",
+      cantidad,
+      porcentaje,
+      sumaCapital: result[0]?.sumaCapital || "0",
       sumaMora: result[0]?.sumaMora || "0",
     };
   }
 
+  // Calcular efectividad: porcentaje de créditos SIN cuotas atrasadas
+  const efectividad = totalCreditosActivos > 0 
+    ? ((creditosSinAtraso / totalCreditosActivos) * 100).toFixed(2) 
+    : "0";
+
   // Estadísticas por estado (CANCELADO, INCOBRABLE)
   const statsPerEstado = {
-    cancelado: { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
-    incobrable: { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    cancelado: { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
+    incobrable: { cantidad: 0, porcentaje: "0", sumaCapital: "0", sumaMora: "0" },
   };
+
+  // Obtener total de créditos cancelados + incobrables para sus porcentajes
+  const baseConditionsStatusTotal = [
+    inArray(creditos.statusCredit, ["CANCELADO", "INCOBRABLE"]),
+  ];
+  if (asesorId) {
+    baseConditionsStatusTotal.push(eq(creditos.asesor_id, asesorId));
+  }
+
+  const totalStatusResult = await db
+    .select({
+      total: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+    })
+    .from(creditos)
+    .where(and(...baseConditionsStatusTotal));
+
+  const totalCreditosStatus = totalStatusResult[0]?.total || 0;
 
   for (const estado of ["CANCELADO", "INCOBRABLE"] as const) {
     const baseConditionsStatus = [eq(creditos.statusCredit, estado)];
@@ -2284,7 +2338,7 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     const result = await db
       .select({
         cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
-        sumaCuotaMensual: sql<string>`COALESCE(SUM(${creditos.cuota}), 0)::text`,
+        sumaCapital: sql<string>`COALESCE(SUM(${creditos.capital}), 0)::text`,
         sumaMora: sql<string>`COALESCE(SUM(CASE WHEN ${moras_credito.activa} = true THEN ${moras_credito.monto_mora} ELSE 0 END), 0)::text`,
       })
       .from(creditos)
@@ -2297,10 +2351,16 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
       )
       .where(and(...baseConditionsStatus));
 
+    const cantidad = result[0]?.cantidad || 0;
+    const porcentaje = totalCreditosStatus > 0 
+      ? ((cantidad / totalCreditosStatus) * 100).toFixed(2) 
+      : "0";
+
     const key = estado.toLowerCase() as "cancelado" | "incobrable";
     statsPerEstado[key] = {
-      cantidad: result[0]?.cantidad || 0,
-      sumaCuotaMensual: result[0]?.sumaCuotaMensual || "0",
+      cantidad,
+      porcentaje,
+      sumaCapital: result[0]?.sumaCapital || "0",
       sumaMora: result[0]?.sumaMora || "0",
     };
   }
@@ -2308,6 +2368,8 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
   console.log(`📊 Estadísticas obtenidas exitosamente`);
 
   return {
+    totalCreditos: totalCreditosActivos,
+    efectividad,
     porCuotasAtrasadas: statsPerCuotasAtrasadas as CreditStatsResponse["porCuotasAtrasadas"],
     porEstado: statsPerEstado,
   };

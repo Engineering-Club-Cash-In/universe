@@ -71,8 +71,15 @@ function RouteComponent() {
 		return () => clearTimeout(timer);
 	}, [filterValue]);
 
+	const userRole = session?.user.role;
+
 	const dashboardStats = useQuery({
-		...orpc.getCobrosDashboardStats.queryOptions(),
+		...orpc.getCobrosDashboardStats.queryOptions({
+			input: {
+				emailCobrador:
+					userRole !== ROLES.ADMIN ? session?.user?.email : undefined,
+			},
+		}),
 		enabled: !!session,
 	});
 
@@ -98,8 +105,6 @@ function RouteComponent() {
 				return undefined;
 		}
 	}, [filtroTemporal]);
-
-	const userRole = session?.user.role;
 
 	const todosLosCreditos = useQuery({
 		...orpc.getTodosLosCreditos.queryOptions({

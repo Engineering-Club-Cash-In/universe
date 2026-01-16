@@ -2173,3 +2173,142 @@ const updateInstallments = async ({
   console.log(`   💰 Nueva cuota: Q${nueva_cuota}`);
   // Aquí va tu implementación existente
 };
+
+// ========================================
+// ESTADÍSTICAS DE CRÉDITOS
+// ========================================
+
+interface CreditStats {
+  cantidad: number;
+  sumaCuotaMensual: string;
+  sumaMora: string;
+}
+
+interface CreditStatsResponse {
+  porCuotasAtrasadas: {
+    "0": CreditStats;
+    "1": CreditStats;
+    "2": CreditStats;
+    "3": CreditStats;
+    "4": CreditStats;
+  };
+  porEstado: {
+    cancelado: CreditStats;
+    incobrable: CreditStats;
+  };
+}
+
+export const getCreditStats = async (email?: string): Promise<CreditStatsResponse> => {
+  console.log(`📊 Obteniendo estadísticas de créditos...`);
+  if (email) {
+    console.log(`   🔍 Filtrando por asesor con email: ${email}`);
+  }
+
+  // Obtener el asesor_id si se proporciona email
+  let asesorId: number | null = null;
+  if (email) {
+    const platformUser = await db
+      .select({ asesor_id: platform_users.asesor_id })
+      .from(platform_users)
+      .where(eq(platform_users.email, email))
+      .limit(1);
+
+    if (platformUser.length > 0 && platformUser[0].asesor_id) {
+      asesorId = platformUser[0].asesor_id;
+      console.log(`   ✅ Asesor encontrado con ID: ${asesorId}`);
+    } else {
+      console.log(`   ⚠️ No se encontró asesor con email: ${email}`);
+    }
+  }
+
+  // Estadísticas por cuotas atrasadas (0, 1, 2, 3, 4) - Solo créditos ACTIVOS o MOROSOS
+  const statsPerCuotasAtrasadas: Record<string, CreditStats> = {
+    "0": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    "1": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    "2": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    "3": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    "4": { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+  };
+
+  // Consulta para créditos activos/morosos con sus moras
+  const baseConditionsActive = [
+    inArray(creditos.statusCredit, ["ACTIVO", "MOROSO", "EN_CONVENIO"]),
+  ];
+
+  if (asesorId) {
+    baseConditionsActive.push(eq(creditos.asesor_id, asesorId));
+  }
+
+  for (const cuotasNum of [0, 1, 2, 3, 4]) {
+    const result = await db
+      .select({
+        cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+        sumaCuotaMensual: sql<string>`COALESCE(SUM(${creditos.cuota}), 0)::text`,
+        sumaMora: sql<string>`COALESCE(SUM(CASE WHEN ${moras_credito.activa} = true THEN ${moras_credito.monto_mora} ELSE 0 END), 0)::text`,
+      })
+      .from(creditos)
+      .leftJoin(
+        moras_credito,
+        and(
+          eq(creditos.credito_id, moras_credito.credito_id),
+          eq(moras_credito.activa, true)
+        )
+      )
+      .where(
+        and(
+          ...baseConditionsActive,
+          sql`COALESCE(${moras_credito.cuotas_atrasadas}, 0) = ${cuotasNum}`
+        )
+      );
+
+    statsPerCuotasAtrasadas[cuotasNum.toString()] = {
+      cantidad: result[0]?.cantidad || 0,
+      sumaCuotaMensual: result[0]?.sumaCuotaMensual || "0",
+      sumaMora: result[0]?.sumaMora || "0",
+    };
+  }
+
+  // Estadísticas por estado (CANCELADO, INCOBRABLE)
+  const statsPerEstado = {
+    cancelado: { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+    incobrable: { cantidad: 0, sumaCuotaMensual: "0", sumaMora: "0" },
+  };
+
+  for (const estado of ["CANCELADO", "INCOBRABLE"] as const) {
+    const baseConditionsStatus = [eq(creditos.statusCredit, estado)];
+
+    if (asesorId) {
+      baseConditionsStatus.push(eq(creditos.asesor_id, asesorId));
+    }
+
+    const result = await db
+      .select({
+        cantidad: sql<number>`COUNT(DISTINCT ${creditos.credito_id})::int`,
+        sumaCuotaMensual: sql<string>`COALESCE(SUM(${creditos.cuota}), 0)::text`,
+        sumaMora: sql<string>`COALESCE(SUM(CASE WHEN ${moras_credito.activa} = true THEN ${moras_credito.monto_mora} ELSE 0 END), 0)::text`,
+      })
+      .from(creditos)
+      .leftJoin(
+        moras_credito,
+        and(
+          eq(creditos.credito_id, moras_credito.credito_id),
+          eq(moras_credito.activa, true)
+        )
+      )
+      .where(and(...baseConditionsStatus));
+
+    const key = estado.toLowerCase() as "cancelado" | "incobrable";
+    statsPerEstado[key] = {
+      cantidad: result[0]?.cantidad || 0,
+      sumaCuotaMensual: result[0]?.sumaCuotaMensual || "0",
+      sumaMora: result[0]?.sumaMora || "0",
+    };
+  }
+
+  console.log(`📊 Estadísticas obtenidas exitosamente`);
+
+  return {
+    porCuotasAtrasadas: statsPerCuotasAtrasadas as CreditStatsResponse["porCuotasAtrasadas"],
+    porEstado: statsPerEstado,
+  };
+};

@@ -632,6 +632,29 @@ export class CarteraBackClient {
 	}
 
 	// ========================================================================
+	// STATS (ESTADÍSTICAS)
+	// ========================================================================
+
+	async getStats(params: { email?: string } = {}): Promise<{
+		porCuotasAtrasadas: { [key: string]: { cantidad: number; sumaCuotaMensual: string; sumaMora: string } };
+		porEstado: { cancelado?: { cantidad: number; sumaCuotaMensual: string; sumaMora: string }; incobrable?: { cantidad: number; sumaCuotaMensual: string; sumaMora: string } };
+	}> {
+		const queryParams = new URLSearchParams({
+			...(params.email && { email: params.email }),
+		});
+
+		const url = params.email ? `/stats?${queryParams}` : "/stats";
+
+		// Este endpoint retorna directamente el objeto de stats
+		const response = await this.request<{
+			porCuotasAtrasadas: { [key: string]: { cantidad: number; sumaCuotaMensual: string; sumaMora: string } };
+			porEstado: { cancelado?: { cantidad: number; sumaCuotaMensual: string; sumaMora: string }; incobrable?: { cantidad: number; sumaCuotaMensual: string; sumaMora: string } };
+		}>(url, { method: "GET" }, true);
+
+		return response;
+	}
+
+	// ========================================================================
 	// CACHE MANAGEMENT
 	// ========================================================================
 

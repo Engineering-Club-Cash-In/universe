@@ -138,6 +138,33 @@ export const quotations = pgTable("quotations", {
 		scale: 2,
 	}).default("0"), // Verificación de dirección
 
+	// Gastos extra para detalle de crédito (descuentos iniciales)
+	// Estos son los valores que se muestran en la tabla de gastos del cotizador
+	extraGpsCost: decimal("extra_gps_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // GPS como descuento inicial
+	extraInsuranceCost: decimal("extra_insurance_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Seguro como descuento inicial
+	extraMembershipCost: decimal("extra_membership_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Membresía como descuento inicial
+	extraAdminCost: decimal("extra_admin_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("600"), // Gastos administrativos base (Q600)
+	interestCost: decimal("interest_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Intereses anticipados calculados
+	vehicleTransferCost: decimal("vehicle_transfer_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Traspaso de vehículo (diferente de transferCost)
+
 	// Valores calculados
 	amountToFinance: decimal("amount_to_finance", {
 		precision: 12,

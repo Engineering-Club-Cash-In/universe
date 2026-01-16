@@ -13,7 +13,7 @@ import {
 	Target,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -212,6 +212,8 @@ interface ExtraCostFieldConfig {
 	creditType: CreditTypeFilter;
 	section: "comision" | "otros" | "abogado";
 	computed?: boolean; // Si es true, el campo se calcula automáticamente y no es editable
+	defaultActive?: boolean; // Si es true, el campo está activo por defecto
+	defaultValue?: number; // Valor por defecto al activar el campo
 }
 
 const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
@@ -258,6 +260,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "extraInsuranceCost",
 		creditType: "all",
 		section: "comision",
+		defaultActive: true,
 	},
 	{
 		name: "extraMembership",
@@ -266,6 +269,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "extraMembershipCost",
 		creditType: "all",
 		section: "comision",
+		defaultActive: true,
 	},
 	{
 		name: "extraAdmin",
@@ -274,6 +278,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "extraAdminCost",
 		creditType: "all",
 		section: "comision",
+		defaultActive: true,
 	},
 	{
 		name: "interest",
@@ -292,6 +297,8 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "appointmentCost",
 		creditType: "autocompra",
 		section: "otros",
+		defaultActive: true,
+		defaultValue: 150,
 	},
 	{
 		name: "fines",
@@ -324,6 +331,8 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "addressVerificationCost",
 		creditType: "autocompra",
 		section: "otros",
+		defaultActive: true,
+		defaultValue: 395,
 	},
 	{
 		name: "circulationTax",
@@ -348,6 +357,8 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "mobileGuaranteeCost",
 		creditType: "all",
 		section: "otros",
+		defaultActive: true,
+		defaultValue: 400,
 	},
 	// Sección: Gastos de Abogado
 	{
@@ -357,6 +368,7 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		valueField: "leasingContractCost",
 		creditType: "all",
 		section: "abogado",
+		defaultValue: 400,
 	},
 	{
 		name: "collectionAuth",
@@ -409,10 +421,14 @@ function ExtraCostsTable({
 	const [activeFields, setActiveFields] = useState<Record<string, boolean>>(() => {
 		const active: Record<string, boolean> = {};
 		for (const field of EXTRA_COST_FIELDS) {
-			active[field.name] = field.computed ?? field.section === "comision";
+			// Activo por defecto si: es computed, o tiene defaultActive: true
+			active[field.name] = field.computed ?? field.defaultActive ?? false;
 		}
 		return active;
 	});
+
+	// Guardar valores originales antes de desactivar (para restaurar al reactivar)
+	const storedValuesRef = useRef<Record<string, number>>({});
 
 	// Sincronizar valores computed desde el form (royalty, intereses, etc.)
 	useEffect(() => {
@@ -472,11 +488,36 @@ function ExtraCostsTable({
 	const handleToggleField = (field: ExtraCostFieldConfig, checked: boolean) => {
 		setActiveFields((prev) => ({ ...prev, [field.name]: checked }));
 		if (!checked) {
+			// Guardar valor actual antes de desactivar
+			const currentValue = localValues[field.name] || 0;
+			if (currentValue > 0) {
+				storedValuesRef.current[field.name] = currentValue;
+			}
 			setLocalValues(prev => ({ ...prev, [field.name]: 0 }));
 			onFieldChange(field.valueField, 0);
 			if (field.percentageField) {
+				const currentPct = localValues[`${field.name}-pct`] || 0;
+				if (currentPct > 0) {
+					storedValuesRef.current[`${field.name}-pct`] = currentPct;
+				}
 				setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: 0 }));
 				onFieldChange(field.percentageField, 0);
+			}
+		} else {
+			// Restaurar valor: primero stored, luego defaultValue, luego form value
+			const storedValue = storedValuesRef.current[field.name];
+			const restoreValue = storedValue ?? field.defaultValue ?? (Number(values[field.valueField]) || 0);
+			if (restoreValue > 0) {
+				setLocalValues(prev => ({ ...prev, [field.name]: restoreValue }));
+				onFieldChange(field.valueField, restoreValue);
+			}
+			if (field.percentageField) {
+				const storedPct = storedValuesRef.current[`${field.name}-pct`];
+				const restorePct = storedPct ?? (Number(values[field.percentageField]) || 0);
+				if (restorePct > 0) {
+					setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: restorePct }));
+					onFieldChange(field.percentageField, restorePct);
+				}
 			}
 		}
 	};
@@ -771,7 +812,7 @@ function QuoterPage() {
 			circulationTaxCost: 0,
 			vehicleTransferCost: 0,
 			mobileGuaranteeCost: 400,
-			leasingContractCost: 0,
+			leasingContractCost: 400,
 			collectionAuthCost: 0,
 			legalCost: 0,
 			// Gastos específicos de Autocompras
@@ -863,17 +904,22 @@ function QuoterPage() {
 				vehicleType: vehicleType as any,
 			});
 
-			const insuranceCost = Math.round(result.insuranceCost * 100) / 100;
-			const membershipCost = Math.round(result.membershipCost * 100) / 100;
+			const baseInsuranceCost = Math.round(result.baseInsuranceCost * 100) / 100;
+			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
+
+			// El seguro total para cálculos es: base + (membresía - GPS)
+			const GPS_COST = 148.2;
+			const netMembershipCost = Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+			const insuranceCost = Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
 			quoterForm.setFieldValue("insuranceCost", insuranceCost);
-			quoterForm.setFieldValue("membershipCost", membershipCost);
+			// membershipCost para resumen de arriba = neto (sin GPS)
+			quoterForm.setFieldValue("membershipCost", netMembershipCost);
 
-			// Calcular valores iniciales para gastos extra (editables)
-			// Seguro INREXSA = seguro - membresía
-			quoterForm.setFieldValue("extraInsuranceCost", insuranceCost - membershipCost);
-			// Membresía extra = membresía
-			quoterForm.setFieldValue("extraMembershipCost", membershipCost);
+			// Valores para la tabla de gastos extra (valores crudos de la tabla)
+			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+			// Membresía extra = valor crudo de la tabla
+			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
 
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);
@@ -966,6 +1012,10 @@ function QuoterPage() {
 		quoterForm.setFieldValue("vehicleLine", vehicle.model);
 		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
 
+		// Establecer el tipo de vehículo si viene de la oportunidad
+		const vehicleTypeToUse = (vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) || "particular";
+		quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
+
 		// Obtener la inspección más reciente para el marketValue
 		try {
 			const inspection = await client.getLatestInspectionByVehicleId({
@@ -983,8 +1033,8 @@ function QuoterPage() {
 				const downPayment = Math.round(numericValue * 0.2);
 				quoterForm.setFieldValue("downPayment", downPayment);
 
-				// Actualizar seguro y membresía
-				updateInsuranceCost(numericValue, quoterForm.state.values.vehicleType);
+				// Actualizar seguro y membresía con el tipo de vehículo correcto
+				updateInsuranceCost(numericValue, vehicleTypeToUse);
 			}
 		} catch (error) {
 			console.error("Error al obtener inspección del vehículo:", error);

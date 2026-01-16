@@ -353,25 +353,12 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{(() => {
-								const totalCasos = stats.reduce(
-									(sum, s) => sum + s.totalCases,
-									0,
-								);
-								const casosRecuperados =
-									(stats.find((s) => s.estadoMora === "pagado")?.totalCases ||
-										0) +
-									(stats.find((s) => s.estadoMora === "completado")
-										?.totalCases || 0);
-								const efectividad =
-									totalCasos > 0
-										? Math.round((casosRecuperados / totalCasos) * 100)
-										: 0;
-								return `${efectividad}%`;
-							})()}
+							{dashboardStats.data?.efectividad
+								? `${Number.parseFloat(dashboardStats.data.efectividad).toFixed(2)}%`
+								: "0%"}
 						</div>
 						<p className="text-muted-foreground text-xs">
-							Tasa de recuperación mensual
+							Tasa de recuperación
 						</p>
 					</CardContent>
 				</Card>
@@ -432,6 +419,8 @@ function RouteComponent() {
 							) || {
 								totalCases: 0,
 								montoTotal: "0",
+								sumaCapital: "0",
+								porcentaje: "0",
 							};
 							const maxCasos = Math.max(...stats.map((s) => s.totalCases), 1);
 							const porcentaje = (estadoStats.totalCases / maxCasos) * 100;
@@ -465,7 +454,7 @@ function RouteComponent() {
 															color: porcentaje > 60 ? "white" : "#1f2937",
 														}}
 													>
-														{estadoStats.totalCases} casos
+														{estadoStats.totalCases} casos - {Number.parseFloat(estadoStats.porcentaje || "0").toFixed(2)}% del total
 													</span>
 												</div>
 											) : (
@@ -479,14 +468,29 @@ function RouteComponent() {
 														}}
 													/>
 													<span className="ml-2 whitespace-nowrap font-semibold text-muted-foreground text-sm">
-														{estadoStats.totalCases} casos
+														{estadoStats.totalCases} casos - {Number.parseFloat(estadoStats.porcentaje || "0").toFixed(2)}% del total
 													</span>
 												</div>
 											)}
 										</div>
 									</div>
-									<div className="w-32 shrink-0 text-right font-medium text-sm">
-										Q{Number(estadoStats.montoTotal || 0).toLocaleString()}
+									<div className="flex w-52 shrink-0 flex-col gap-1 text-right text-sm">
+										<div className="flex items-center justify-end gap-2">
+											<span className="text-muted-foreground text-xs">
+												Mora:
+											</span>
+											<span className="font-medium">
+												Q{Number(estadoStats.montoTotal || 0).toLocaleString()}
+											</span>
+										</div>
+										<div className="flex items-center justify-end gap-2">
+											<span className="text-muted-foreground text-xs">
+												Capital:
+											</span>
+											<span className="font-medium">
+												Q{Number(estadoStats.sumaCapital || 0).toLocaleString()}
+											</span>
+										</div>
 									</div>
 								</div>
 							);

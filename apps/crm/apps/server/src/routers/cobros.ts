@@ -151,73 +151,62 @@ export const cobrosRouter = {
             email: input?.emailCobrador,
           });
 
-          // Mapear la respuesta del nuevo formato al formato esperado por el frontend
-          const embudoStats = {
-            al_dia: { totalCases: 0, montoTotal: "0" },
-            mora_30: { totalCases: 0, montoTotal: "0" },
-            mora_60: { totalCases: 0, montoTotal: "0" },
-            mora_90: { totalCases: 0, montoTotal: "0" },
-            mora_120: { totalCases: 0, montoTotal: "0" },
-            pagado: { totalCases: 0, montoTotal: "0" },
-            incobrable: { totalCases: 0, montoTotal: "0" },
-            completado: { totalCases: 0, montoTotal: "0" },
-          };
-
-          // Mapear porCuotasAtrasadas a estados de mora
-          // 0 cuotas = al_dia, 1 = mora_30, 2 = mora_60, 3 = mora_90, 4+ = mora_120
-          if (statsResponse.porCuotasAtrasadas) {
-            for (const [cuotas, bucket] of Object.entries(
-              statsResponse.porCuotasAtrasadas
-            )) {
-              const numCuotas = Number.parseInt(cuotas, 10);
-              let estadoMora: keyof typeof embudoStats;
-
-              if (numCuotas === 0) {
-                estadoMora = "al_dia";
-              } else if (numCuotas === 1) {
-                estadoMora = "mora_30";
-              } else if (numCuotas === 2) {
-                estadoMora = "mora_60";
-              } else if (numCuotas === 3) {
-                estadoMora = "mora_90";
-              } else {
-                estadoMora = "mora_120";
-              }
-
-              embudoStats[estadoMora].totalCases += bucket.cantidad;
-              const currentMonto = Number(embudoStats[estadoMora].montoTotal);
-              embudoStats[estadoMora].montoTotal = (
-                currentMonto + Number(bucket.sumaMora || 0)
-              ).toString();
-            }
-          }
-
-          // Mapear porEstado (cancelado, incobrable)
-          if (statsResponse.porEstado) {
-            if (statsResponse.porEstado.cancelado) {
-              embudoStats.completado.totalCases =
-                statsResponse.porEstado.cancelado.cantidad;
-              embudoStats.completado.montoTotal =
-                statsResponse.porEstado.cancelado.sumaMora || "0";
-            }
-            if (statsResponse.porEstado.incobrable) {
-              embudoStats.incobrable.totalCases =
-                statsResponse.porEstado.incobrable.cantidad;
-              embudoStats.incobrable.montoTotal =
-                statsResponse.porEstado.incobrable.sumaMora || "0";
-            }
-          }
-
-          // Calcular total de casos con mora (cuotas atrasadas > 0)
-          const totalCasosConMora = Object.entries(
-            statsResponse.porCuotasAtrasadas || {}
-          )
-            .filter(([cuotas]) => Number.parseInt(cuotas, 10) > 0)
-            .reduce((sum, [_, bucket]) => sum + bucket.cantidad, 0);
+          // Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
+          const estatusStats = [
+            {
+              estadoMora: "al_dia",
+              totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["0"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["0"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["0"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_30",
+              totalCases: statsResponse.porCuotasAtrasadas["1"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["1"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["1"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["1"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_60",
+              totalCases: statsResponse.porCuotasAtrasadas["2"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["2"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["2"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["2"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_90",
+              totalCases: statsResponse.porCuotasAtrasadas["3"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["3"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["3"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["3"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "mora_120",
+              totalCases: statsResponse.porCuotasAtrasadas["4"]?.cantidad || 0,
+              montoTotal: statsResponse.porCuotasAtrasadas["4"]?.sumaMora || "0",
+              sumaCapital: statsResponse.porCuotasAtrasadas["4"]?.sumaCapital || "0",
+              porcentaje: statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
+            },
+            {
+              estadoMora: "completado",
+              totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
+              montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
+              sumaCapital: statsResponse.porEstado.cancelado?.sumaCapital || "0",
+              porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
+            },
+            {
+              estadoMora: "incobrable",
+              totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
+              montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
+              sumaCapital: statsResponse.porEstado.incobrable?.sumaCapital || "0",
+              porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
+            },
+          ];
 
           console.log(
             "[Cobros] Stats obtenidas desde endpoint /stats:",
-            embudoStats
+            estatusStats
           );
 
           // Contactos realizados hoy
@@ -232,11 +221,9 @@ export const cobrosRouter = {
             );
 
           return {
-            estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
-              estadoMora: estado,
-              ...data,
-            })),
-            totalCasosAsignados: totalCasosConMora,
+            estatusStats,
+            totalCasosAsignados: statsResponse.totalCreditos,
+            efectividad: statsResponse.efectividad,
             contactosHoy: contactosHoy[0]?.count || 0,
           };
         } catch (error) {
@@ -265,14 +252,14 @@ export const cobrosRouter = {
 
 		// Procesar estadísticas para el embudo
 		const embudoStats = {
-			al_dia: { totalCases: 0, montoTotal: "0" },
-			mora_30: { totalCases: 0, montoTotal: "0" },
-			mora_60: { totalCases: 0, montoTotal: "0" },
-			mora_90: { totalCases: 0, montoTotal: "0" },
-			mora_120: { totalCases: 0, montoTotal: "0" },
-			pagado: { totalCases: 0, montoTotal: "0" },
-			incobrable: { totalCases: 0, montoTotal: "0" },
-			completado: { totalCases: 0, montoTotal: "0" },
+			al_dia: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_30: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_60: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_90: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			mora_120: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			pagado: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			incobrable: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
+			completado: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
 		};
 
 		estatusStats.forEach((stat) => {
@@ -335,6 +322,7 @@ export const cobrosRouter = {
 				...data,
 			})),
 			totalCasosAsignados: casosAsignados[0]?.count || 0,
+			efectividad: "0",
 			contactosHoy: contactosHoy[0]?.count || 0,
 		};
 	}),

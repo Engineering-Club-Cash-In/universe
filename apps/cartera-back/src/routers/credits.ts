@@ -1069,14 +1069,20 @@ export const creditRouter = new Elysia()
       description: `
         Obtiene estadísticas agregadas de los créditos, incluyendo:
         
+        **Campos generales:**
+        - totalCreditos: Total de créditos activos/morosos/en convenio
+        - efectividad: Porcentaje de créditos SIN cuotas atrasadas
+        
         **Por cuotas atrasadas (0, 1, 2, 3, 4):**
         - Cantidad de créditos
-        - Suma de cuota mensual
+        - Porcentaje respecto al total
+        - Suma del capital
         - Suma de mora
         
         **Por estado (Cancelado, Incobrable):**
         - Cantidad de créditos
-        - Suma de cuota mensual
+        - Porcentaje respecto al total de cancelados+incobrables
+        - Suma del capital
         - Suma de mora (si aplica)
         
         **Filtro opcional:**
@@ -1087,42 +1093,51 @@ export const creditRouter = new Elysia()
     },
     response: {
       200: t.Object({
+        totalCreditos: t.Number(),
+        efectividad: t.String(),
         porCuotasAtrasadas: t.Object({
           "0": t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
           "1": t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
           "2": t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
           "3": t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
           "4": t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
         }),
         porEstado: t.Object({
           cancelado: t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
           incobrable: t.Object({
             cantidad: t.Number(),
-            sumaCuotaMensual: t.String(),
+            porcentaje: t.String(),
+            sumaCapital: t.String(),
             sumaMora: t.String(),
           }),
         }),

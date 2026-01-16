@@ -341,7 +341,7 @@ export async function procesarMoras() {
       console.log(`[DEBUG] Credit capital: ${capital.toString()}`);
 
       // Calculate mora = capital × percentage × overdue installments
-      const porcentaje = new Big("0.012"); // 1.2% mensual
+      const porcentaje = new Big("0.0112"); // 1.2% mensual
       const moraNueva = capital.times(porcentaje).times(cuotasAtrasadas);
       console.log(`[DEBUG] New mora calculated: ${moraNueva.toString()}`);
 

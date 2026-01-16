@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
 import puppeteer from "puppeteer";
+import { promises as fs } from "fs";
 import {
   GetObjectCommand,
   PutObjectCommand,
@@ -35,10 +36,10 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import { ajustarCuotasConSIFCO, updateAllInstallments, updateCredit } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit } from "../controllers/updateCredit";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
-import { db } from "../database";
+import { db } from "../database"; 
 
 const MontoAdicionalSchema = z.object({
   concepto: z.string().min(1, "concepto requerido"),
@@ -913,146 +914,8 @@ export const creditRouter = new Elysia()
       error: String(error) 
     };
   }
-}) .post(
-    "/ajustar-cuotas-sifco",
-    async ({ body, set }) => {
-      try {
-        const { numero_credito_sifco, cuota_real_actual } = body;
+})  // 🔥 Endpoint simple: ruta quemada, solo llamar
 
-        console.log(`📨 Solicitud de ajuste de cuotas:`);
-        console.log(`   Crédito: ${numero_credito_sifco}`);
-        console.log(`   Cuota actual: ${cuota_real_actual}`);
-
-        // Validaciones
-        if (!numero_credito_sifco || !cuota_real_actual) {
-          set.status = 400;
-          return {
-            success: false,
-            message: "Faltan parámetros requeridos: numero_credito_sifco y cuota_real_actual",
-          };
-        }
-
-        if (cuota_real_actual < 1) {
-          set.status = 400;
-          return {
-            success: false,
-            message: "cuota_real_actual debe ser mayor o igual a 1",
-          };
-        }
-
-        // Ejecutar ajuste
-        await ajustarCuotasConSIFCO({
-          numero_credito_sifco,
-          cuota_real_actual,
-        });
-
-        set.status = 200;
-        return {
-          success: true,
-          message: `Cuotas ajustadas correctamente para el crédito ${numero_credito_sifco}`,
-          data: {
-            numero_credito_sifco,
-            cuota_real_actual,
-            cuotas_historicas: cuota_real_actual - 1,
-          },
-        };
-      } catch (error: any) {
-        console.error("❌ Error en ajustar-cuotas-sifco:", error);
-
-        // Manejar errores específicos
-        if (error.message?.includes("no encontrado")) {
-          set.status = 404;
-          return {
-            success: false,
-            message: error.message,
-            error: "CREDIT_NOT_FOUND",
-          };
-        }
-
-        if (error.message?.includes("SIFCO")) {
-          set.status = 502;
-          return {
-            success: false,
-            message: "Error al consultar SIFCO",
-            error: error.message,
-          };
-        }
-
-        // Error genérico
-        set.status = 500;
-        return {
-          success: false,
-          message: "Error al ajustar cuotas",
-          error: error.message || "Unknown error",
-        };
-      }
-    },
-    {
-      body: t.Object({
-        numero_credito_sifco: t.String({
-          minLength: 1,
-          description: "Número de crédito SIFCO",
-          examples: ["01010101001040"],
-        }),
-        cuota_real_actual: t.Number({
-          minimum: 1,
-          description: "Número de la cuota actual (la que está por pagar)",
-          examples: [19],
-        }),
-      }),
-      detail: {
-        summary: "Ajustar cuotas históricas con datos de SIFCO",
-        description: `
-          Ajusta las cuotas de un crédito basándose en los datos reales de SIFCO.
-          
-          **Proceso:**
-          1. Consulta el estado de cuenta en SIFCO
-          2. Obtiene el capital inicial del primer pago
-          3. Calcula amortización correcta para todas las cuotas
-          4. Actualiza cuotas PAGADAS con abonos reales
-          5. Actualiza cuotas PENDIENTES solo con restantes
-          6. Renumera las cuotas pendientes
-          
-          **Parámetros:**
-          - \`numero_credito_sifco\`: Número del crédito en SIFCO
-          - \`cuota_real_actual\`: Cuota que está por pagar (ej: 19)
-          
-          **Ejemplo:** Si mandás cuota_real_actual = 19, se marcarán como pagadas las cuotas 1-18.
-        `,
-        tags: ["Créditos", "SIFCO"],
-      },
-      response: {
-        200: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-          data: t.Object({
-            numero_credito_sifco: t.String(),
-            cuota_real_actual: t.Number(),
-            cuotas_historicas: t.Number(),
-          }),
-        }),
-        400: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-        }),
-        404: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-          error: t.String(),
-        }),
-        502: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-          error: t.String(),
-        }),
-        500: t.Object({
-          success: t.Boolean(),
-          message: t.String(),
-          error: t.String(),
-        }),
-      },
-    }
-  )
   // ========================================
   // ENDPOINT: ESTADÍSTICAS DE CRÉDITOS
   // ========================================
@@ -1143,4 +1006,4 @@ export const creditRouter = new Elysia()
         }),
       }),
     },
-  });
+  })  

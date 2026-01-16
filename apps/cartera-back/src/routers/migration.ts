@@ -8,8 +8,21 @@ import { authMiddleware } from "./midleware";
 import { listarCreditosConDetalle, procesarCreditoIndividual } from "../migration/migrationCredits";
 import z from "zod";
 import { procesarCreditosMora } from "../migration/migrationLateFee";
-import { liquidarCuotasPorUsuario } from "../controllers/liquidateInvestor";
+import {  liquidarCuotasBatchInteligente } from "../controllers/liquidateInvestor";
 import { procesarInversionistasSoloExcel } from "../controllers/migrateInvestor";
+
+const LiquidacionBatchItemSchema = t.Object({
+  nombre_usuario: t.String({ minLength: 1 }),
+  cuota_mes: t.String({ minLength: 1 }),
+  capital: t.Number({ minimum: 0 }),
+  meses_en_credito: t.Optional(t.Union([t.Number(), t.Null()])),  // 🔥 NUEVO CAMPO OPCIONAL
+  porcentaje_inversor: t.Optional(t.Number())  // 🔥 NUEVO CAMPO OPCIONAL
+});
+
+const LiquidacionBatchSchema = t.Object({
+  nombre_inversionista: t.String({ minLength: 1 }),
+  liquidaciones: t.Array(LiquidacionBatchItemSchema, { minItems: 1 })
+});
 // ✅ Schema para sync de pagos desde SIFCO (param opcional)
 const syncCreditPaymentsSchema = z.object({
   numero_credito_sifco: z.string().min(1).optional(),
@@ -347,163 +360,7 @@ export const sifcoRouter = new Elysia()
     },
   }
 )
-.post(
-    "/liquidar-cuotas",
-    async ({ body, set }) => {
-      try {
-        console.log("[liquidar-cuotas] Iniciando liquidación...");
-        console.log("[liquidar-cuotas] Body recibido:", JSON.stringify(body, null, 2));
-
-        let { nombre_usuario, cuota_mes, capital, nombre_inversionista } = body;
-
-        // 🔥 VALIDACIONES BÁSICAS
-        if (!nombre_usuario || nombre_usuario.trim() === '') {
-          set.status = 400;
-          return {
-            success: false,
-            message: "❌ nombre_usuario es requerido",
-            error: "Nombre de usuario vacío"
-          };
-        }
-
-        if (!cuota_mes || cuota_mes.trim() === '') {
-          set.status = 400;
-          return {
-            success: false,
-            message: "❌ cuota_mes es requerido",
-            error: "Cuota mes vacía"
-          };
-        }
-
-        // 🔥 VALIDAR CAPITAL (CRÍTICO)
-        if (capital === undefined || capital === null) {
-          console.error(`❌ Capital no recibido. Body:`, body);
-          set.status = 400;
-          return {
-            success: false,
-            message: "❌ capital es requerido",
-            error: "Capital no enviado"
-          };
-        }
-
-        // 🔥 CONVERTIR CAPITAL A NÚMERO SI VIENE COMO STRING
-        let capitalNumerico: number;
-        try {
-          capitalNumerico = typeof capital === 'string' ? parseFloat(capital) : capital;
-        } catch (err) {
-          set.status = 400;
-          return {
-            success: false,
-            message: "❌ capital debe ser un número válido",
-            error: "Capital inválido"
-          };
-        }
-
-        // 🆕 VALIDAR QUE CAPITAL SEA >= 0 (AHORA ACEPTA 0)
-        if (isNaN(capitalNumerico) || capitalNumerico < 0) {
-          console.error(`❌ Capital inválido: ${capital} (tipo: ${typeof capital}, parseado: ${capitalNumerico})`);
-          set.status = 400;
-          return {
-            success: false,
-            message: `❌ El capital debe ser mayor o igual a 0 (recibido: ${capital})`,
-            error: "Capital inválido"
-          };
-        }
-
-        // 🆕 LOG SI EL CAPITAL ES 0
-        if (capitalNumerico === 0) {
-          console.log(`⚠️ Capital en 0 para ${nombre_usuario} - Se procesará con valores en 0`);
-        } else {
-          console.log(`✅ Capital válido recibido: ${capitalNumerico}`);
-        }
-
-        if (!nombre_inversionista || nombre_inversionista.trim() === '') {
-          set.status = 400;
-          return {
-            success: false,
-            message: "❌ nombre_inversionista es requerido",
-            error: "Nombre de inversionista vacío"
-          };
-        }
-
-        // 🆕 NORMALIZAR FORMATO DE MES
-        cuota_mes = cuota_mes.trim();
-        
-        // Si tiene formato "nov.25" o "nov25" (sin espacio), agregar espacio
-        if (/^[a-zA-Z]{3}\.?\d{2,4}$/.test(cuota_mes)) {
-          const match = cuota_mes.match(/^([a-zA-Z]{3})\.?(\d{2,4})$/);
-          if (match) {
-            const mesOriginal = cuota_mes;
-            cuota_mes = `${match[1]}. ${match[2]}`;
-            console.log(`🔧 Formato de mes corregido: "${mesOriginal}" → "${cuota_mes}"`);
-          }
-        }
-
-        // Validar formato básico del mes
-        if (cuota_mes.length < 4) {
-          set.status = 400;
-          return {
-            success: false,
-            message: "❌ cuota_mes debe tener formato válido (ej: 'oct. 25')",
-            error: "Formato de mes inválido"
-          };
-        }
-
-        // 🔥 LLAMAR AL SERVICIO CON LOS 4 PARÁMETROS
-        const resultado = await liquidarCuotasPorUsuario({
-          nombre_usuario,
-          cuota_mes,
-          capital: capitalNumerico, // 🔥 CONVERTIDO A NÚMERO
-          nombre_inversionista,
-        });
-
-        if (resultado.success) {
-          set.status = 200;
-          return resultado;
-        } else {
-          set.status = 400;
-          return resultado;
-        }
-      } catch (error: any) {
-        console.error("[ERROR] /liquidar-cuotas:", error?.message || error);
-        console.error("[ERROR] Stack:", error?.stack);
-        set.status = 500;
-        return {
-          success: false,
-          message: "Error al procesar liquidación de cuotas",
-          error: error?.message ?? String(error),
-          stack: error?.stack
-        };
-      }
-    },
-    {
-      detail: {
-        summary: "Liquida cuotas de créditos con capital e inversionista",
-        tags: ["Liquidaciones"],
-        description: "Busca la cuota que vence en el mes especificado, marca como liquidadas todas las cuotas hasta esa, y actualiza el capital del inversionista en ese crédito. Acepta capital = 0.",
-      },
-      body: t.Object({
-        nombre_usuario: t.String({
-          description: "Nombre del usuario (búsqueda flexible)",
-          examples: ["Christopher Miguel", "Fernando Alfonso", "Juan Pérez"],
-        }),
-        cuota_mes: t.String({
-          description: "Mes y año de la cuota a liquidar. Acepta formatos: 'oct. 25', 'oct.25', 'oct 25'",
-          examples: ["oct. 25", "ago. 25", "sep. 25", "nov. 24", "nov.25"],
-          pattern: "^[a-zA-Z]{3}\\.?\\s*\\d{2,4}$",
-        }),
-        capital: t.Number({
-          description: "Capital a aplicar al inversionista (puede ser 0 para actualizar con valores en 0)",
-          examples: [55938.46, 42109.69, 103310.43, 0],
-          minimum: 0, // 🆕 CAMBIO: Ahora acepta desde 0
-        }),
-        nombre_inversionista: t.String({
-          description: "Nombre del inversionista (búsqueda flexible)",
-          examples: ["Anna Lisseth Lorenzo Rodas", "Alexa Nahomy Caballero Pinto", "Alexander Kachler"],
-        }),
-      }),
-    }
-  ).post(
+ .post(
   "/pagos-inversionistas/v2",
   async ({ body }) => {
     const { numeroCredito, inversionistasData } = body;
@@ -628,8 +485,33 @@ export const sifcoRouter = new Elysia()
       console.log(`\n📥 ========== RECIBIENDO SOLICITUD ==========`);
       console.log(`📋 Crédito: ${body.credito.creditoBase}`);
       console.log(`👥 Filas: ${body.credito.filas.length}`);
+      
+      // 🔥 NUEVO: Detectar modo interactivo
+      const modoInteractivo = body.modo_interactivo ?? false;
+      const umbralSimilitud = body.umbral_similitud ?? 70;
+      const decisionesUsuario = body.decisiones_usuario ?? [];
+      
+      if (modoInteractivo) {
+        console.log(`🎯 Modo interactivo activado (umbral: ${umbralSimilitud}%)`);
+      }
+      
+      if (decisionesUsuario.length > 0) {
+        console.log(`👤 Decisiones del usuario recibidas: ${decisionesUsuario.length}`);
+        decisionesUsuario.forEach((d: any) => {
+          console.log(`   - ${d.nombre_excel} → ID ${d.decision}`);
+        });
+      }
 
-      const resultado = await procesarInversionistasSoloExcel(body.credito);
+      const resultado = await procesarInversionistasSoloExcel(body.credito, {
+        modo_interactivo: modoInteractivo,
+        umbral_similitud: umbralSimilitud,
+      });
+
+      // 🔥 Si requiere input del usuario, retornar 200 con requires_user_input
+      if (resultado.requires_user_input) {
+        console.log(`\n❓ Esperando decisiones del usuario...`);
+        return resultado;
+      }
 
       if (!resultado.success) {
         set.status = 400;
@@ -654,11 +536,127 @@ export const sifcoRouter = new Elysia()
         cliente: t.String(),
         filas: t.Array(t.Any()),
       }),
+      // 🔥 NUEVOS CAMPOS OPCIONALES
+      modo_interactivo: t.Optional(t.Boolean()),
+      umbral_similitud: t.Optional(t.Number()),
+      decisiones_usuario: t.Optional(t.Array(t.Object({
+        nombre_excel: t.String(),
+        credito_sifco: t.String(),
+        decision: t.Number(), // inversionista_id o -1 para crear nuevo
+      }))),
     }),
     detail: {
-      summary: "Procesar inversionistas desde Excel",
-      description: "Recibe datos de Excel, busca el crédito en BD, borra inversionistas viejos e inserta los nuevos",
+      summary: "Procesar inversionistas desde Excel (con modo interactivo)",
+      description: `
+        Recibe datos de Excel, busca el crédito en BD, borra inversionistas viejos e inserta los nuevos.
+        
+        **Modo Interactivo:**
+        - Si modo_interactivo = true, matches con similitud < umbral_similitud retornarán consultas_interactivas
+        - El cliente debe responder con decisiones_usuario en un segundo request
+        - Las decisiones se aplicarán automáticamente
+        
+        **Flujo:**
+        1. Primer request: { credito: {...}, modo_interactivo: true, umbral_similitud: 70 }
+        2. Si hay dudas, respuesta: { requires_user_input: true, consultas_interactivas: [...] }
+        3. Usuario elige opciones en Python
+        4. Segundo request: { credito: {...}, decisiones_usuario: [{nombre_excel, credito_sifco, decision}] }
+        5. Respuesta final: { success: true, inversionistas_procesados: X }
+      `,
       tags: ["Inversionistas"],
     },
+  }
+).post(
+  "/liquidar-cuotas-batch-inteligente",
+  async ({ body, set }) => {
+    try {
+      console.log("🔥 ========== REQUEST RECIBIDO ==========");
+      console.log(`👤 Inversionista: ${body.nombre_inversionista}`);
+      console.log(`📊 Total liquidaciones: ${body.liquidaciones.length}`);
+
+      if (!body.liquidaciones || body.liquidaciones.length === 0) {
+        set.status = 400;
+        return {
+          success: false,
+          error: "Debe proporcionar al menos una liquidación",
+          exitosos: 0,
+          fallidos: 0,
+          agregados: 0,
+          actualizados: 0,
+          eliminados: 0
+        };
+      }
+
+      const resultado = await liquidarCuotasBatchInteligente(body);
+
+      if (!resultado.success) {
+        set.status = 400;
+        return resultado;
+      }
+
+      return resultado;
+
+    } catch (error) {
+      console.error("❌ Error en endpoint batch inteligente:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Error desconocido",
+        exitosos: 0,
+        fallidos: 0,
+        agregados: 0,
+        actualizados: 0,
+        eliminados: 0
+      };
+    }
+  },
+  {
+    body: t.Object({
+      nombre_inversionista: t.String(),
+      liquidaciones: t.Array(
+        t.Object({
+          nombre_usuario: t.String(),
+          cuota_mes: t.String(),
+          capital: t.Number(),
+          meses_en_credito: t.Optional(t.Union([t.Number(), t.Null()])),
+          porcentaje_inversor: t.Optional(t.Number()), // 🔥 NUEVO
+        })
+      ),
+    }),
+    detail: {
+      tags: ["Liquidaciones"],
+      summary: "Liquidar cuotas en batch inteligente con sync",
+      description: `
+        Procesa múltiples liquidaciones para un inversionista específico.
+        
+        **Características:**
+        - Crea relaciones nuevas automáticamente si no existen
+        - Actualiza relaciones existentes con el nuevo capital
+        - Elimina relaciones huérfanas (que ya no están en el Excel)
+        - Procesa TODOS los créditos sin importar el mes
+        
+        **Campos opcionales:**
+        - meses_en_credito: Número de meses que lleva el crédito (informativo)
+        - porcentaje_inversor: % de participación del inversionista (ej: 1.20 para 1.20%)
+          - Si se proporciona, se usa ese porcentaje
+          - Si no se proporciona, usa default 72% inversor / 28% cash-in
+          - El restante se calcula automáticamente para cash-in
+        
+        **Ejemplo de uso:**
+        \`\`\`json
+        {
+          "nombre_inversionista": "Juan Pérez",
+          "liquidaciones": [
+            {
+              "nombre_usuario": "María García",
+              "cuota_mes": "nov. 25",
+              "capital": 50000.00,
+              "meses_en_credito": 3,
+              "porcentaje_inversor": 1.20
+            }
+          ]
+        }
+        \`\`\`
+      `,
+    }
   }
 );

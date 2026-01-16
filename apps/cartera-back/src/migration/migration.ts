@@ -458,6 +458,7 @@ export async function mapEstadoCuentaToPagosBig(
       deudatotal: true,
       porcentaje_interes: true,
       gps: true,
+      fecha_creacion: true, // 👈 Para determinar día de vencimiento
     },
   });
 
@@ -472,15 +473,33 @@ export async function mapEstadoCuentaToPagosBig(
     deudatotal: credito?.deudatotal,
     porcentaje_interes: credito?.porcentaje_interes,
     gps: credito?.gps,
+    fecha_creacion: credito?.fecha_creacion,
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // 2️⃣ EXTRACCIÓN DE DATOS DE RESPUESTA
+  // 2️⃣ DETERMINAR DÍA DE VENCIMIENTO
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n┌─────────────────────────────────────────────────────────────"
   );
-  console.log("│ 2️⃣ EXTRAYENDO DATOS DE RESPUESTA WS");
+  console.log("│ 2️⃣ DETERMINANDO DÍA DE VENCIMIENTO");
+  console.log("└─────────────────────────────────────────────────────────────");
+
+  const fechaDesembolso = new Date(credito!.fecha_creacion);
+  const diaDesembolso = fechaDesembolso.getDate();
+  const diaVencimiento = diaDesembolso > 15 ? 30 : 15;
+
+  console.log(`   📌 Fecha desembolso: ${fechaDesembolso.toISOString().split("T")[0]}`);
+  console.log(`   📌 Día del desembolso: ${diaDesembolso}`);
+  console.log(`   🎯 Día de vencimiento para cuotas: ${diaVencimiento}`);
+
+  // ═══════════════════════════════════════════════════════════════
+  // 3️⃣ EXTRACCIÓN DE DATOS DE RESPUESTA
+  // ═══════════════════════════════════════════════════════════════
+  console.log(
+    "\n┌─────────────────────────────────────────────────────────────"
+  );
+  console.log("│ 3️⃣ EXTRAYENDO DATOS DE RESPUESTA WS");
   console.log("└─────────────────────────────────────────────────────────────");
 
   const cuotas = resp?.ConsultaResultado?.PlanPagos_Cuotas ?? [];
@@ -505,39 +524,38 @@ export async function mapEstadoCuentaToPagosBig(
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // 3️⃣ LIMPIEZA DE DATOS PREVIOS
+  // 4️⃣ LIMPIEZA DE DATOS PREVIOS
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n┌─────────────────────────────────────────────────────────────"
   );
-  console.log("│ 3️⃣ LIMPIANDO DATOS PREVIOS");
+  console.log("│ 4️⃣ LIMPIANDO DATOS PREVIOS");
   console.log("└─────────────────────────────────────────────────────────────");
 
   await db.transaction(async (tx) => {
     console.log("  🗑️  Eliminando pagos previos...");
-    // Más simple y directo
     await tx
       .delete(pagos_credito)
       .where(eq(pagos_credito.credito_id, creditoId));
-
-    await tx
-      .delete(cuotas_credito)
-      .where(eq(cuotas_credito.credito_id, creditoId));
     console.log("  ✅ Pagos eliminados");
 
     console.log("  🗑️  Eliminando cuotas previas...");
+    await tx
+      .delete(cuotas_credito)
+      .where(eq(cuotas_credito.credito_id, creditoId));
+    console.log("  ✅ Cuotas eliminadas");
   });
 
   console.log(`✅ Limpieza completada para crédito_id=${creditoId}`);
 
   // ═══════════════════════════════════════════════════════════════
-  // 4️⃣ PROCESAMIENTO DE CUOTA 0 (PAGO INICIAL)
+  // 5️⃣ PROCESAMIENTO DE CUOTA 0 (PAGO INICIAL)
   // ═══════════════════════════════════════════════════════════════
   if (primeraTransaccion) {
     console.log(
       "\n┌─────────────────────────────────────────────────────────────"
     );
-    console.log("│ 4️⃣ PROCESANDO CUOTA 0 (PAGO INICIAL)");
+    console.log("│ 5️⃣ PROCESANDO CUOTA 0 (PAGO INICIAL)");
     console.log(
       "└─────────────────────────────────────────────────────────────"
     );
@@ -624,7 +642,7 @@ export async function mapEstadoCuentaToPagosBig(
       cuota: credito?.cuota?.toString() ?? "0.00",
       cuota_interes: cuota_interes?.toString() ?? "0.00",
       cuota_id: cuota0[0]?.cuota_id ?? null,
-      fecha_pago: new Date(primeraTransaccion.CrMoFeTrx),
+      fecha_pago: new Date(primeraTransaccion.CrMoFeTrx), // 👈 Cuota 0 siempre está pagada
       abono_capital: "0.00",
       abono_interes: cuota_interes.toString() ?? "0.00",
       abono_iva_12: iva_12.toString() ?? "0.00",
@@ -691,23 +709,29 @@ export async function mapEstadoCuentaToPagosBig(
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // 5️⃣ PREPARACIÓN DE CUOTAS PARA INSERCIÓN BATCH
+  // 6️⃣ PREPARACIÓN DE CUOTAS PARA INSERCIÓN BATCH
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n┌─────────────────────────────────────────────────────────────"
   );
-  console.log("│ 5️⃣ PREPARANDO CUOTAS PARA BATCH INSERT");
+  console.log("│ 6️⃣ PREPARANDO CUOTAS PARA BATCH INSERT");
   console.log("└─────────────────────────────────────────────────────────────");
 
   const cuotasParaInsertar = cuotas.map((c, idx) => {
     const numeroCuota = Number(c.InteresNumeroCuota ?? 0);
     const isPagado = c.CapitalPagado === "S" && c.InteresPagado === "S";
 
+    // 📅 Ajustar fecha de vencimiento según día de corte
+    const fechaOriginal = new Date(c.Fecha);
+    const fechaVencimiento = new Date(fechaOriginal);
+    fechaVencimiento.setDate(diaVencimiento);
+
     if (idx < 3 || idx >= cuotas.length - 2) {
       console.log(`\n  📋 Cuota ${idx + 1}/${cuotas.length}:`);
       console.log(`    • InteresNumeroCuota: ${c.InteresNumeroCuota}`);
       console.log(`    • Número cuota calculado: ${numeroCuota}`);
-      console.log(`    • Fecha: ${c.Fecha}`);
+      console.log(`    • Fecha original SIFCO: ${c.Fecha}`);
+      console.log(`    • Fecha vencimiento ajustada: ${fechaVencimiento.toISOString().split("T")[0]}`);
       console.log(`    • CapitalPagado: ${c.CapitalPagado}`);
       console.log(`    • InteresPagado: ${c.InteresPagado}`);
       console.log(`    • isPagado: ${isPagado}`);
@@ -718,7 +742,7 @@ export async function mapEstadoCuentaToPagosBig(
     return {
       credito_id: creditoId,
       numero_cuota: numeroCuota,
-      fecha_vencimiento: new Date(c.Fecha).toISOString(),
+      fecha_vencimiento: fechaVencimiento.toISOString(), // 👈 Fecha ajustada al día de corte
       pagado: isPagado,
     };
   });
@@ -728,12 +752,12 @@ export async function mapEstadoCuentaToPagosBig(
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // 6️⃣ INSERCIÓN BATCH DE CUOTAS
+  // 7️⃣ INSERCIÓN BATCH DE CUOTAS
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n┌─────────────────────────────────────────────────────────────"
   );
-  console.log("│ 6️⃣ INSERTANDO CUOTAS EN BATCH");
+  console.log("│ 7️⃣ INSERTANDO CUOTAS EN BATCH");
   console.log("└─────────────────────────────────────────────────────────────");
 
   const cuotasInsertadas = await db
@@ -752,12 +776,12 @@ export async function mapEstadoCuentaToPagosBig(
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // 7️⃣ PREPARACIÓN DE PAGOS
+  // 8️⃣ PREPARACIÓN DE PAGOS
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n┌─────────────────────────────────────────────────────────────"
   );
-  console.log("│ 7️⃣ PREPARANDO PAGOS PARA BATCH INSERT");
+  console.log("│ 8️⃣ PREPARANDO PAGOS PARA BATCH INSERT");
   console.log("└─────────────────────────────────────────────────────────────");
 
   const seguroDb = toBig(credito?.seguro_10_cuotas ?? 0);
@@ -867,9 +891,15 @@ export async function mapEstadoCuentaToPagosBig(
 
     const isPagado = c.CapitalPagado === "S" && c.InteresPagado === "S";
 
+    // 📅 Calcular fecha de vencimiento ajustada para el pago
+    const fechaOriginal = new Date(c.Fecha);
+    const fechaVencimientoPago = new Date(fechaOriginal);
+    fechaVencimientoPago.setDate(diaVencimiento);
+
     if (idx < 3 || idx >= cuotas.length - 2) {
       console.log(`    • isPagado: ${isPagado}`);
       console.log(`    • Mes: ${mesNombre}`);
+      console.log(`    • Fecha pago: ${isPagado ? fechaVencimientoPago.toISOString().split("T")[0] : "null"}`);
       console.log(
         `    • Validation Status: ${isPagado ? "validated" : "no_required"}`
       );
@@ -880,7 +910,7 @@ export async function mapEstadoCuentaToPagosBig(
       credito_id: creditoId,
       cuota_interes: abonoInteres.toString(),
       cuota: credito?.cuota?.toString() || "0.00",
-      fecha_pago: isPagado ? new Date(c.Fecha) : null,
+      fecha_pago: isPagado ? fechaVencimientoPago : null, // 👈 Solo si está pagada
       abono_capital: abonoCapital.toString(),
       abono_interes: abonoInteres.toString(),
       abono_iva_12: abonoIva12.toString(),
@@ -891,7 +921,7 @@ export async function mapEstadoCuentaToPagosBig(
       pago_del_mes: pagoDelMes.toString(),
       llamada: "",
       monto_boleta: isPagado ? pagoDelMes.toString() : "0.00",
-      fecha_vencimiento: new Date(c.Fecha).toISOString(),
+      fecha_vencimiento: fechaVencimientoPago.toISOString(), // 👈 Fecha ajustada
       renuevo_o_nuevo: "",
       capital_restante: isPagado ? "0.00" : capital_restante_big.toString(),
       interes_restante: isPagado ? "0.00" : interes_restante_big.toString(),
@@ -931,12 +961,12 @@ export async function mapEstadoCuentaToPagosBig(
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // 8️⃣ INSERCIÓN BATCH DE PAGOS
+  // 9️⃣ INSERCIÓN BATCH DE PAGOS
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n┌─────────────────────────────────────────────────────────────"
   );
-  console.log("│ 8️⃣ INSERTANDO PAGOS EN BATCH");
+  console.log("│ 9️⃣ INSERTANDO PAGOS EN BATCH");
   console.log("└─────────────────────────────────────────────────────────────");
 
   const pagosDB = await db
@@ -957,7 +987,7 @@ export async function mapEstadoCuentaToPagosBig(
   });
 
   // ═══════════════════════════════════════════════════════════════
-  // 9️⃣ RESUMEN FINAL
+  // 🔟 RESUMEN FINAL
   // ═══════════════════════════════════════════════════════════════
   console.log(
     "\n╔══════════════════════════════════════════════════════════════"
@@ -971,6 +1001,7 @@ export async function mapEstadoCuentaToPagosBig(
   console.log(`║   • Cuotas procesadas: ${cuotasInsertadas.length}`);
   console.log(`║   • Pagos insertados: ${pagosDB.length}`);
   console.log(`║   • Cuota 0 creada: ${primeraTransaccion ? "Sí" : "No"}`);
+  console.log(`║   • Día de vencimiento: ${diaVencimiento}`);
 
   const pagados = pagosDB.filter((p) => p.pagado).length;
   const pendientes = pagosDB.filter((p) => !p.pagado).length;

@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { getRenapData } from "@/functions/getRenapInfo";
 import { db } from "../db";
+import { otpController } from "./otp";
 
 /**
  * Controller: getRenapInfoController
@@ -596,7 +597,13 @@ export const validateMagicUrlController = async (dpi: string) => {
  * @param dpi - The lead's DPI to search for.
  * @returns true if liveness_validated = true, otherwise false.
  */
-export async function hasPassedLiveness(dpi: string): Promise<boolean> {
+export async function hasPassedLiveness(
+	dpi: string, 
+	phoneNumber: string
+): Promise<{
+	passed: boolean;
+	otpResponse?: Awaited<ReturnType<typeof otpController.sendOTP>>;
+}> {
 	const result = await db
 		.select({ livenessValidated: leads.livenessValidated })
 		.from(leads)
@@ -604,10 +611,20 @@ export async function hasPassedLiveness(dpi: string): Promise<boolean> {
 		.limit(1);
 
 	if (result.length === 0) {
-		return false; // No lead found with this DPI
+		return { passed: false }; // No lead found with this DPI
 	}
 
-	return result[0].livenessValidated;
+	if (!result[0].livenessValidated) {
+		return { passed: false };
+	}
+
+	// 🔥 Si ya pasó liveness, generamos el OTP automáticamente
+	const otpResponse = await otpController.sendOTP(dpi, phoneNumber);
+
+	return {
+		passed: true,
+		otpResponse,
+	};
 }
 /**
  * 📄 Controller: getOnlyRenapInfoController

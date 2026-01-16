@@ -352,69 +352,93 @@ const membresias_pago = toBigExcel(obtenerMembresias(excelRow), 0);
 export async function procesarCreditoIndividual(credito: CreditoAgrupado) {
   try {
     console.log(`🔎 Procesando crédito ${credito.creditoBase}...`);
-    console.log(`📋 Cliente: ${credito.cliente}`);
-    console.log(`👥 Inversionistas: ${credito.filas.length}`);
     
-    // 1️⃣ Consultar detalle en SIFCO
-    const detalle = await consultarPrestamoDetalle(credito.creditoBase);
+    // 🔥 Obtener todos los CreditoSIFCO únicos de las filas
+    const creditosUnicos = [...new Set(
+      credito.filas.map(f => f.CreditoSIFCO)
+    )];
     
-    // 🔥 Si no hay detalle en SIFCO
-    if (!detalle) {
-      console.warn(`⏭️ ${credito.creditoBase} - no disponible en SIFCO`);
-      return {
-        success: false,
-        creditoBase: credito.creditoBase,
+    console.log(`📋 Variaciones detectadas: ${creditosUnicos.length}`);
+    creditosUnicos.forEach(c => console.log(`   • ${c}`));
+    
+    const resultados = [];
+    
+    // 🔥 Procesar CADA variación por separado
+    for (const creditoSifco of creditosUnicos) {
+      console.log(`\n🔎 Consultando SIFCO: ${creditoSifco}`);
+      
+      const detalle = await consultarPrestamoDetalle(creditoSifco);
+      
+      if (!detalle) {
+        console.warn(`⏭️ ${creditoSifco} - no disponible en SIFCO`);
+        resultados.push({
+          success: false,
+          creditoSifco,
+          status: "no_encontrado"
+        });
+        continue;
+      }
+      
+      // Filtrar filas que corresponden a ESTA variación
+      const filasDeEstaVariacion = credito.filas.filter(
+        f => f.CreditoSIFCO === creditoSifco
+      );
+      
+      console.log(`👥 Inversionistas para ${creditoSifco}: ${filasDeEstaVariacion.length}`);
+      
+      // Crear un "sub-grupo" para esta variación
+      const subGrupo: CreditoAgrupado = {
+        creditoBase: creditoSifco,  // 🔥 Usar la variación, no el base
         cliente: credito.cliente,
-        status: "no_encontrado",
-        error: "No disponible en SIFCO o timeout",
-        detalle: null,
-        dbRow: null
+        filas: filasDeEstaVariacion
       };
+      
+      try {
+        const dbRow = await mapExcelToCredito(detalle, subGrupo);
+        const status = 
+          new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
+            ? "insertado"
+            : "actualizado";
+        
+        console.log(`✅ Crédito ${creditoSifco} ${status} (ID: ${dbRow.credito_id})`);
+        
+        resultados.push({
+          success: true,
+          creditoSifco,
+          status,
+          credito_id: dbRow.credito_id
+        });
+        
+      } catch (err: any) {
+        console.error(`❌ Error al insertar ${creditoSifco}:`, err.message);
+        resultados.push({
+          success: false,
+          creditoSifco,
+          status: "fallido",
+          error: err.message
+        });
+      }
     }
     
-    // 2️⃣ Mapear y guardar en DB
-    try {
-      const dbRow = await mapExcelToCredito(detalle, credito);
-      const status = 
-        new Date().getTime() - dbRow.fecha_creacion.getTime() < 60000
-          ? "insertado"
-          : "actualizado";
-      
-      console.log(`✅ Crédito ${credito.creditoBase} ${status} (ID: ${dbRow.credito_id})`);
-      
-      return {
-        success: true,
-        creditoBase: credito.creditoBase,
-        cliente: credito.cliente,
-        status,
-        detalle,
-        dbRow,
-        credito_id: dbRow.credito_id
-      };
-      
-    } catch (err: any) {
-      console.error(`❌ Error al insertar ${credito.creditoBase}:`, err.message);
-      return {
-        success: false,
-        creditoBase: credito.creditoBase,
-        cliente: credito.cliente,
-        status: "fallido",
-        error: String(err?.message || err),
-        detalle,
-        dbRow: null
-      };
-    }
+    // Resumen final
+    const exitosos = resultados.filter(r => r.success).length;
+    
+    return {
+      success: exitosos > 0,
+      creditoBase: credito.creditoBase,
+      cliente: credito.cliente,
+      variaciones_procesadas: creditosUnicos.length,
+      exitosos,
+      fallidos: resultados.length - exitosos,
+      detalles: resultados
+    };
     
   } catch (err: any) {
-    console.error(`❌ Error general con ${credito.creditoBase}:`, err.message);
+    console.error(`❌ Error general:`, err.message);
     return {
       success: false,
       creditoBase: credito.creditoBase,
-      cliente: credito.cliente,
-      status: "fallido",
-      error: String(err?.message || err),
-      detalle: null,
-      dbRow: null
+      error: err.message
     };
   }
 }

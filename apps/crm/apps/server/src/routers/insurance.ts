@@ -13,9 +13,7 @@ import { publicProcedure } from "../lib/orpc";
 async function getInsuranceCost(
 	insuredAmount: number,
 	vehicleType: string,
-): Promise<{ insuranceCost: number; membershipCost: number }> {
-	const GPS_COST = 148.2;
-
+): Promise<{ baseInsuranceCost: number; membershipCost: number }> {
 	// Buscar el registro más cercano (VLOOKUP con aproximación)
 	const [result] = await db
 		.select()
@@ -33,19 +31,16 @@ async function getInsuranceCost(
 			.limit(1);
 
 		const membershipFromTable = Number(minResult?.membership || 0);
-		const membershipCost = membershipFromTable - GPS_COST;
 		const baseInsurance = Number(minResult?.inrexsa || 0);
-		const insuranceCost = baseInsurance + membershipCost;
 
 		return {
-			insuranceCost: Math.round(insuranceCost * 100) / 100,
-			membershipCost: Math.round(membershipCost * 100) / 100,
+			baseInsuranceCost: Math.round(baseInsurance * 100) / 100,
+			membershipCost: Math.round(membershipFromTable * 100) / 100,
 		};
 	}
 
-	// Calcular membresía: VLOOKUP columna 5 - GPS
+	// Membresía: valor crudo de la tabla (sin restar GPS)
 	const membershipFromTable = Number(result.membership);
-	const membershipCost = membershipFromTable - GPS_COST;
 
 	// Determinar qué columna usar según el tipo de vehículo para el seguro base
 	let baseInsurance = 0;
@@ -67,12 +62,9 @@ async function getInsuranceCost(
 			baseInsurance = Number(result.inrexsa);
 	}
 
-	// Seguro = base + membresía (según fórmula del Excel)
-	const insuranceCost = baseInsurance + membershipCost;
-
 	return {
-		insuranceCost: Math.round(insuranceCost * 100) / 100,
-		membershipCost: Math.round(membershipCost * 100) / 100,
+		baseInsuranceCost: Math.round(baseInsurance * 100) / 100,
+		membershipCost: Math.round(membershipFromTable * 100) / 100,
 	};
 }
 

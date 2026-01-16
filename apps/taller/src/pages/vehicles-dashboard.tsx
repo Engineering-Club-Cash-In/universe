@@ -23,7 +23,8 @@ import {
   Hash,
 } from "lucide-react";
 import { getVehicleStatistics, getVehicleById } from "../services/vehicles";
-import { vehiclesApi } from "../utils/orpc";
+import { vehiclesApi, client } from "../utils/orpc";
+import { toast } from "sonner";
 import type { Vehicle, VehicleInspection, VehiclePhoto, InspectionChecklistItem } from "../../../crm/apps/server/src/db/schema/vehicles";
 
 // Type for what the getAll endpoint returns
@@ -292,6 +293,18 @@ export default function VehiclesDashboard() {
   const [pageSize] = useState(10);
   const [totalVehicles, setTotalVehicles] = useState(0);
   const [isModalLoading, setIsModalLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Edit form state
+  const [editForm, setEditForm] = useState({
+    vehicleRating: "",
+    status: "",
+    marketValue: "",
+    suggestedCommercialValue: "",
+    currentConditionValue: "",
+    testDrive: "",
+    inspectionResult: "",
+  });
 
   // Debounce search term
   useEffect(() => {
@@ -399,21 +412,20 @@ export default function VehiclesDashboard() {
     setIsModalLoading(true);
     setActiveTab("details");
 
+    // Initialize edit form with current values
+    setEditForm({
+      vehicleRating: vehicle.vehicleRating,
+      status: vehicle.status,
+      marketValue: vehicle.marketValue,
+      suggestedCommercialValue: vehicle.suggestedCommercialValue,
+      currentConditionValue: vehicle.currentConditionValue,
+      testDrive: vehicle.testDrive,
+      inspectionResult: vehicle.inspectionResult,
+    });
+
     try {
       const result = await getVehicleById(vehicle.id);
       if (result.success && result.data) {
-        // Transform the full data if necessary, or just use it.
-        // The modal uses selectedVehicle which is DashboardVehicle.
-        // But it also accesses properties that might be on the full object.
-        // Let's see what the modal uses. It uses vehicle.inspections, vehicle.photos etc.
-        // DashboardVehicle has some of these but flattened.
-        // The modal code does: const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle?.id);
-        // We need to update rawVehiclesData or store the full vehicle separately.
-        // Better: store the full vehicle in a new state or update selectedVehicle to be the full type.
-        // But selectedVehicle is typed as DashboardVehicle.
-        // Let's update rawVehiclesData with the fetched vehicle to keep compatibility with existing modal code
-        // that looks up rawVehiclesData.
-
         setRawVehiclesData(prev => {
           const index = prev.findIndex(v => v.id === vehicle.id);
           if (index >= 0) {
@@ -424,14 +436,72 @@ export default function VehiclesDashboard() {
           return [...prev, result.data as any];
         });
 
-        // Also re-transform to update the dashboard view of it (e.g. if status changed)
         const transformed = transformVehicleData(result.data as any);
         setSelectedVehicle(transformed);
+
+        // Update edit form with fresh data
+        setEditForm({
+          vehicleRating: transformed.vehicleRating,
+          status: transformed.status,
+          marketValue: transformed.marketValue,
+          suggestedCommercialValue: transformed.suggestedCommercialValue,
+          currentConditionValue: transformed.currentConditionValue,
+          testDrive: transformed.testDrive,
+          inspectionResult: transformed.inspectionResult,
+        });
       }
     } catch (error) {
       console.error("Error loading vehicle details:", error);
     } finally {
       setIsModalLoading(false);
+    }
+  };
+
+  const handleSaveChanges = async () => {
+    if (!selectedVehicle) return;
+
+    setIsSaving(true);
+    try {
+      await vehiclesApi.update(selectedVehicle.id, {
+        status: editForm.status as "pending" | "available" | "sold" | "maintenance" | "auction",
+      });
+
+      // Get the raw vehicle to update its inspection
+      const rawVehicle = rawVehiclesData.find(v => v.id === selectedVehicle.id);
+      const inspectionId = rawVehicle?.inspections?.[0]?.id;
+
+      if (inspectionId) {
+        // Update the inspection data via the API
+        await client.updateVehicleInspection({
+          id: inspectionId,
+          data: {
+            vehicleRating: editForm.vehicleRating,
+            marketValue: editForm.marketValue,
+            suggestedCommercialValue: editForm.suggestedCommercialValue,
+            currentConditionValue: editForm.currentConditionValue,
+            testDrive: editForm.testDrive === "Sí",
+            inspectionResult: editForm.inspectionResult,
+            status: editForm.status as "pending" | "auction" | "approved" | "rejected",
+          },
+        });
+      }
+
+      // Update local state
+      setSelectedVehicle(prev => prev ? {
+        ...prev,
+        ...editForm,
+      } : null);
+
+      // Refresh the vehicles list
+      await loadVehicles();
+
+      toast.success("Cambios guardados correctamente");
+      setActiveTab("details");
+    } catch (error) {
+      console.error("Error saving changes:", error);
+      toast.error("Error al guardar los cambios");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -1436,7 +1506,10 @@ export default function VehiclesDashboard() {
                         <Label htmlFor="vehicleRating">
                           Calificación del vehículo
                         </Label>
-                        <Select defaultValue={selectedVehicle.vehicleRating}>
+                        <Select
+                          value={editForm.vehicleRating}
+                          onValueChange={(value) => setEditForm(prev => ({ ...prev, vehicleRating: value }))}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Seleccionar calificación" />
                           </SelectTrigger>
@@ -1449,7 +1522,10 @@ export default function VehiclesDashboard() {
 
                       <div className="space-y-2">
                         <Label htmlFor="status">Estado</Label>
-                        <Select defaultValue={selectedVehicle.status}>
+                        <Select
+                          value={editForm.status}
+                          onValueChange={(value) => setEditForm(prev => ({ ...prev, status: value }))}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Seleccionar estado" />
                           </SelectTrigger>
@@ -1465,7 +1541,8 @@ export default function VehiclesDashboard() {
                         <Label htmlFor="marketValue">Valor de mercado</Label>
                         <Input
                           id="marketValue"
-                          defaultValue={selectedVehicle.marketValue}
+                          value={editForm.marketValue}
+                          onChange={(e) => setEditForm(prev => ({ ...prev, marketValue: e.target.value }))}
                           type="number"
                         />
                       </div>
@@ -1476,7 +1553,8 @@ export default function VehiclesDashboard() {
                         </Label>
                         <Input
                           id="suggestedCommercialValue"
-                          defaultValue={selectedVehicle.suggestedCommercialValue}
+                          value={editForm.suggestedCommercialValue}
+                          onChange={(e) => setEditForm(prev => ({ ...prev, suggestedCommercialValue: e.target.value }))}
                           type="number"
                         />
                       </div>
@@ -1487,14 +1565,18 @@ export default function VehiclesDashboard() {
                         </Label>
                         <Input
                           id="currentConditionValue"
-                          defaultValue={selectedVehicle.currentConditionValue}
+                          value={editForm.currentConditionValue}
+                          onChange={(e) => setEditForm(prev => ({ ...prev, currentConditionValue: e.target.value }))}
                           type="number"
                         />
                       </div>
 
                       <div className="space-y-2">
                         <Label htmlFor="testDrive">Prueba de manejo</Label>
-                        <Select defaultValue={selectedVehicle.testDrive}>
+                        <Select
+                          value={editForm.testDrive}
+                          onValueChange={(value) => setEditForm(prev => ({ ...prev, testDrive: value }))}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Seleccionar" />
                           </SelectTrigger>
@@ -1512,24 +1594,26 @@ export default function VehiclesDashboard() {
                       </Label>
                       <Textarea
                         id="inspectionResult"
-                        defaultValue={selectedVehicle.inspectionResult}
+                        value={editForm.inspectionResult}
+                        onChange={(e) => setEditForm(prev => ({ ...prev, inspectionResult: e.target.value }))}
                         rows={5}
                       />
                     </div>
                   </div>
                 )}
                 <DialogFooter className="pt-4">
-                  <Button variant="outline" onClick={() => setActiveTab("details")}>
+                  <Button variant="outline" onClick={() => setActiveTab("details")} disabled={isSaving}>
                     Cancelar
                   </Button>
-                  <Button
-                    onClick={() => {
-                      // Here would be the logic to save the changes
-                      setIsDetailsOpen(false);
-                      // Show a success message
-                    }}
-                  >
-                    Guardar cambios
+                  <Button onClick={handleSaveChanges} disabled={isSaving}>
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Guardando...
+                      </>
+                    ) : (
+                      "Guardar cambios"
+                    )}
                   </Button>
                 </DialogFooter>
               </TabsContent>

@@ -184,8 +184,8 @@ export const quotationsRouter = {
 					: (input.vehicleValue - input.downPayment) * (input.royaltyPercentage / 100);
 
 			// Costos que se financian (NO incluyen seguro ni GPS)
-			const financedCosts =
-				input.transferCost + input.adminCost + input.membershipCost;
+			// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
+			const financedCosts = input.transferCost + input.adminCost;
 
 			const totalFinanced = amountToFinance + financedCosts;
 

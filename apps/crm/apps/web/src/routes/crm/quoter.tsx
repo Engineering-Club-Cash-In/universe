@@ -13,9 +13,10 @@ import {
 	Target,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -155,6 +156,523 @@ function generateAmortizationTable(
 	return table;
 }
 
+// Tipo para los valores del formulario de cotización
+interface QuotationFormValues {
+	opportunityId: string;
+	vehicleId: string;
+	creditType: "autocompra" | "sobre_vehiculo";
+	vehicleBrand: string;
+	vehicleLine: string;
+	vehicleModel: string;
+	vehicleType: "particular" | "uber" | "pickup" | "nuevo" | "panel" | "camion" | "microbus";
+	vehicleValue: number;
+	insuredAmount: number;
+	downPayment: number;
+	termMonths: number;
+	interestRate: number;
+	insuranceCost: number;
+	gpsCost: number;
+	transferCost: number;
+	adminCost: number;
+	membershipCost: number;
+	freelanceCost: number;
+	freelancePercentage: number;
+	royalty: number;
+	royaltyPercentage: number;
+	inspectionCost: number;
+	finesCost: number;
+	keyCopyCost: number;
+	keyCopyDiffCost: number;
+	circulationTaxCost: number;
+	vehicleTransferCost: number;
+	mobileGuaranteeCost: number;
+	leasingContractCost: number;
+	collectionAuthCost: number;
+	legalCost: number;
+	appointmentCost: number;
+	addressVerificationCost: number;
+	interestCost: number;
+	// Gastos extra (separados de los principales)
+	extraGpsCost: number;
+	extraInsuranceCost: number;
+	extraMembershipCost: number;
+	extraAdminCost: number;
+}
+
+// Configuración de campos de gastos extra
+type ExtraCostFieldType = "percentage" | "fixed";
+type CreditTypeFilter = "all" | "autocompra" | "sobre_vehiculo";
+
+interface ExtraCostFieldConfig {
+	name: string;
+	label: string;
+	type: ExtraCostFieldType;
+	percentageField?: keyof QuotationFormValues; // Campo del form para el porcentaje (si aplica)
+	valueField: keyof QuotationFormValues; // Campo del form para el valor
+	creditType: CreditTypeFilter;
+	section: "comision" | "otros" | "abogado";
+	computed?: boolean; // Si es true, el campo se calcula automáticamente y no es editable
+	defaultActive?: boolean; // Si es true, el campo está activo por defecto
+	defaultValue?: number; // Valor por defecto al activar el campo
+}
+
+const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
+	// Sección: Comisión y Gastos de Registro
+	{
+		name: "royalty",
+		label: "Royalty",
+		type: "percentage",
+		percentageField: "royaltyPercentage",
+		valueField: "royalty",
+		creditType: "all",
+		section: "comision",
+		computed: true,
+	},
+	{
+		name: "freelance",
+		label: "Free Lance",
+		type: "percentage",
+		percentageField: "freelancePercentage",
+		valueField: "freelanceCost",
+		creditType: "all",
+		section: "comision",
+	},
+	{
+		name: "inspection",
+		label: "Inspección",
+		type: "fixed",
+		valueField: "inspectionCost",
+		creditType: "all",
+		section: "comision",
+	},
+	{
+		name: "extraGps",
+		label: "GPS",
+		type: "fixed",
+		valueField: "extraGpsCost",
+		creditType: "all",
+		section: "comision",
+	},
+	{
+		name: "extraInsurance",
+		label: "Seguro INREXSA",
+		type: "fixed",
+		valueField: "extraInsuranceCost",
+		creditType: "all",
+		section: "comision",
+		defaultActive: true,
+	},
+	{
+		name: "extraMembership",
+		label: "Membresía",
+		type: "fixed",
+		valueField: "extraMembershipCost",
+		creditType: "all",
+		section: "comision",
+		defaultActive: true,
+	},
+	{
+		name: "extraAdmin",
+		label: "Gastos Administrativos",
+		type: "fixed",
+		valueField: "extraAdminCost",
+		creditType: "all",
+		section: "comision",
+		defaultActive: true,
+	},
+	{
+		name: "interest",
+		label: "Intereses",
+		type: "fixed",
+		valueField: "interestCost",
+		creditType: "all",
+		section: "comision",
+		computed: true,
+	},
+	// Sección: Otros Descuentos
+	{
+		name: "appointment",
+		label: "Nombramiento",
+		type: "fixed",
+		valueField: "appointmentCost",
+		creditType: "autocompra",
+		section: "otros",
+		defaultActive: true,
+		defaultValue: 150,
+	},
+	{
+		name: "fines",
+		label: "Multas",
+		type: "fixed",
+		valueField: "finesCost",
+		creditType: "all",
+		section: "otros",
+	},
+	{
+		name: "keyCopy",
+		label: "Copia de llave",
+		type: "fixed",
+		valueField: "keyCopyCost",
+		creditType: "all",
+		section: "otros",
+	},
+	{
+		name: "keyCopyDiff",
+		label: "Diferencia copia llave",
+		type: "fixed",
+		valueField: "keyCopyDiffCost",
+		creditType: "all",
+		section: "otros",
+	},
+	{
+		name: "addressVerification",
+		label: "Verificación de dirección",
+		type: "fixed",
+		valueField: "addressVerificationCost",
+		creditType: "autocompra",
+		section: "otros",
+		defaultActive: true,
+		defaultValue: 395,
+	},
+	{
+		name: "circulationTax",
+		label: "Impuesto circulación",
+		type: "fixed",
+		valueField: "circulationTaxCost",
+		creditType: "all",
+		section: "otros",
+	},
+	{
+		name: "vehicleTransfer",
+		label: "Traspaso de vehículo",
+		type: "fixed",
+		valueField: "vehicleTransferCost",
+		creditType: "all",
+		section: "otros",
+	},
+	{
+		name: "mobileGuarantee",
+		label: "Garantía mobiliaria",
+		type: "fixed",
+		valueField: "mobileGuaranteeCost",
+		creditType: "all",
+		section: "otros",
+		defaultActive: true,
+		defaultValue: 400,
+	},
+	// Sección: Gastos de Abogado
+	{
+		name: "leasingContract",
+		label: "Contrato Leasing",
+		type: "fixed",
+		valueField: "leasingContractCost",
+		creditType: "all",
+		section: "abogado",
+		defaultValue: 400,
+	},
+	{
+		name: "collectionAuth",
+		label: "Auténtica contrato cobranza",
+		type: "fixed",
+		valueField: "collectionAuthCost",
+		creditType: "all",
+		section: "abogado",
+	},
+	{
+		name: "legal",
+		label: "Gastos legales",
+		type: "fixed",
+		valueField: "legalCost",
+		creditType: "all",
+		section: "abogado",
+	},
+];
+
+// Componente para la tabla de gastos extra
+function ExtraCostsTable({
+	values,
+	totalFinanced,
+	creditType,
+	onFieldChange,
+}: {
+	values: QuotationFormValues;
+	totalFinanced: number;
+	creditType: "autocompra" | "sobre_vehiculo";
+	onFieldChange: (field: keyof QuotationFormValues, value: number) => void;
+}) {
+	// Filtrar campos según el tipo de crédito
+	const visibleFields = EXTRA_COST_FIELDS.filter(
+		(field) => field.creditType === "all" || field.creditType === creditType,
+	);
+
+	// Estado local para TODOS los valores de esta sección
+	const [localValues, setLocalValues] = useState<Record<string, number>>(() => {
+		const initial: Record<string, number> = {};
+		for (const field of EXTRA_COST_FIELDS) {
+			initial[field.name] = Math.round((Number(values[field.valueField]) || 0) * 100) / 100;
+			if (field.percentageField) {
+				initial[`${field.name}-pct`] = Math.round((Number(values[field.percentageField]) || 0) * 100) / 100;
+			}
+		}
+		return initial;
+	});
+
+	// Estado para campos activos
+	const [activeFields, setActiveFields] = useState<Record<string, boolean>>(() => {
+		const active: Record<string, boolean> = {};
+		for (const field of EXTRA_COST_FIELDS) {
+			// Activo por defecto si: es computed, o tiene defaultActive: true
+			active[field.name] = field.computed ?? field.defaultActive ?? false;
+		}
+		return active;
+	});
+
+	// Guardar valores originales antes de desactivar (para restaurar al reactivar)
+	const storedValuesRef = useRef<Record<string, number>>({});
+
+	// Sincronizar valores computed desde el form (royalty, intereses, etc.)
+	useEffect(() => {
+		const updates: Record<string, number> = {};
+		for (const field of EXTRA_COST_FIELDS) {
+			if (field.computed) {
+				const formValue = Math.round((Number(values[field.valueField]) || 0) * 100) / 100;
+				if (localValues[field.name] !== formValue) {
+					updates[field.name] = formValue;
+				}
+				if (field.percentageField) {
+					const pctValue = Math.round((Number(values[field.percentageField]) || 0) * 100) / 100;
+					if (localValues[`${field.name}-pct`] !== pctValue) {
+						updates[`${field.name}-pct`] = pctValue;
+					}
+				}
+			}
+		}
+		// También sincronizar extraInsuranceCost y extraMembershipCost cuando vienen del form
+		const extraInsurance = Math.round((Number(values.extraInsuranceCost) || 0) * 100) / 100;
+		const extraMembership = Math.round((Number(values.extraMembershipCost) || 0) * 100) / 100;
+		if (extraInsurance > 0 && localValues.extraInsurance === 0) {
+			updates.extraInsurance = extraInsurance;
+		}
+		if (extraMembership > 0 && localValues.extraMembership === 0) {
+			updates.extraMembership = extraMembership;
+		}
+
+		if (Object.keys(updates).length > 0) {
+			setLocalValues(prev => ({ ...prev, ...updates }));
+		}
+	}, [values.royalty, values.interestCost, values.royaltyPercentage, values.extraInsuranceCost, values.extraMembershipCost]);
+
+	const isFieldActive = (field: ExtraCostFieldConfig) => {
+		if (field.computed) return true;
+		return activeFields[field.name] ?? false;
+	};
+
+	// Agrupar por sección
+	const sections = {
+		comision: visibleFields.filter((f) => f.section === "comision"),
+		otros: visibleFields.filter((f) => f.section === "otros"),
+		abogado: visibleFields.filter((f) => f.section === "abogado"),
+	};
+
+	const sectionLabels = {
+		comision: "Comisión y Gastos de Registro",
+		otros: "Otros Descuentos",
+		abogado: "Gastos de Abogado",
+	};
+
+	const calculateFromPercentage = (percentage: number) => {
+		if (!percentage || totalFinanced <= 0) return 0;
+		return Math.ceil(totalFinanced * (percentage / 100));
+	};
+
+	const handleToggleField = (field: ExtraCostFieldConfig, checked: boolean) => {
+		setActiveFields((prev) => ({ ...prev, [field.name]: checked }));
+		if (!checked) {
+			// Guardar valor actual antes de desactivar
+			const currentValue = localValues[field.name] || 0;
+			if (currentValue > 0) {
+				storedValuesRef.current[field.name] = currentValue;
+			}
+			setLocalValues(prev => ({ ...prev, [field.name]: 0 }));
+			onFieldChange(field.valueField, 0);
+			if (field.percentageField) {
+				const currentPct = localValues[`${field.name}-pct`] || 0;
+				if (currentPct > 0) {
+					storedValuesRef.current[`${field.name}-pct`] = currentPct;
+				}
+				setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: 0 }));
+				onFieldChange(field.percentageField, 0);
+			}
+		} else {
+			// Restaurar valor: primero stored, luego defaultValue, luego form value
+			const storedValue = storedValuesRef.current[field.name];
+			const restoreValue = storedValue ?? field.defaultValue ?? (Number(values[field.valueField]) || 0);
+			if (restoreValue > 0) {
+				setLocalValues(prev => ({ ...prev, [field.name]: restoreValue }));
+				onFieldChange(field.valueField, restoreValue);
+			}
+			if (field.percentageField) {
+				const storedPct = storedValuesRef.current[`${field.name}-pct`];
+				const restorePct = storedPct ?? (Number(values[field.percentageField]) || 0);
+				if (restorePct > 0) {
+					setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: restorePct }));
+					onFieldChange(field.percentageField, restorePct);
+				}
+			}
+		}
+	};
+
+	const handleValueChange = (field: ExtraCostFieldConfig, newValue: number) => {
+		const rounded = Math.round(newValue * 100) / 100;
+		setLocalValues(prev => ({ ...prev, [field.name]: rounded }));
+		onFieldChange(field.valueField, rounded);
+	};
+
+	const handlePercentageChange = (field: ExtraCostFieldConfig, newPercentage: number) => {
+		const rounded = Math.round(newPercentage * 100) / 100;
+		setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: rounded }));
+		onFieldChange(field.percentageField!, rounded);
+		const calculatedValue = calculateFromPercentage(rounded);
+		setLocalValues(prev => ({ ...prev, [field.name]: calculatedValue }));
+		onFieldChange(field.valueField, calculatedValue);
+	};
+
+	const renderField = (field: ExtraCostFieldConfig) => {
+		const value = localValues[field.name] ?? 0;
+		const isActive = isFieldActive(field);
+		const percentageValue = localValues[`${field.name}-pct`] ?? 0;
+		const isComputed = field.computed ?? false;
+
+		const formatValue = (v: number) => v.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+		return (
+			<TableRow key={field.name} className={!isActive ? "opacity-50" : ""}>
+				<TableCell className="w-10 text-center">
+					<Checkbox
+						checked={isActive}
+						onCheckedChange={(checked) => handleToggleField(field, checked === true)}
+						disabled={isComputed}
+						className={`border-2 border-gray-400 ${isComputed ? "opacity-50" : "cursor-pointer hover:border-primary"}`}
+					/>
+				</TableCell>
+				<TableCell className="font-medium">{field.label}</TableCell>
+				<TableCell className="w-28">
+					{field.type === "percentage" && field.percentageField ? (
+						<div className="flex items-center gap-1">
+							{isComputed ? (
+								<span className="h-8 w-16 flex items-center justify-end text-sm bg-gray-100 rounded px-2">
+									{percentageValue.toFixed(2)}
+								</span>
+							) : (
+								<Input
+									type="number"
+									step="0.01"
+									value={percentageValue}
+									onChange={(e) => handlePercentageChange(field, parseFloat(e.target.value) || 0)}
+									placeholder="0"
+									className="h-8 w-16 text-right text-sm border-2 border-gray-400"
+								/>
+							)}
+							<span className="text-muted-foreground text-xs">%</span>
+						</div>
+					) : (
+						<span className="text-muted-foreground text-xs">-</span>
+					)}
+				</TableCell>
+				<TableCell className="w-32">
+					{isComputed ? (
+						<span className="h-8 w-full flex items-center justify-end text-sm bg-gray-100 rounded px-2 border-2 border-gray-300">
+							{formatValue(value)}
+						</span>
+					) : (
+						<Input
+							type="number"
+							step="0.01"
+							value={value}
+							onChange={(e) => handleValueChange(field, parseFloat(e.target.value) || 0)}
+							placeholder="0"
+							className="h-8 text-right text-sm border-2 border-gray-400"
+						/>
+					)}
+				</TableCell>
+			</TableRow>
+		);
+	};
+
+	// Calcular subtotales usando estado local
+	const calculateSectionSubtotal = (sectionFields: ExtraCostFieldConfig[]) => {
+		return sectionFields.reduce((sum, field) => {
+			const isActive = isFieldActive(field);
+			if (!isActive) return sum;
+			return sum + (localValues[field.name] ?? 0);
+		}, 0);
+	};
+
+	const subtotals = {
+		comision: calculateSectionSubtotal(sections.comision),
+		otros: calculateSectionSubtotal(sections.otros),
+		abogado: calculateSectionSubtotal(sections.abogado),
+	};
+
+	const total = subtotals.comision + subtotals.otros + subtotals.abogado;
+
+	const formatCurrency = (value: number) =>
+		`Q ${value.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+	return (
+		<div className="space-y-6">
+			{(Object.keys(sections) as Array<keyof typeof sections>).map(
+				(sectionKey) => {
+					const sectionFields = sections[sectionKey];
+					if (sectionFields.length === 0) return null;
+
+					return (
+						<div key={sectionKey}>
+							<h4 className="mb-2 font-semibold text-sm text-muted-foreground">
+								{sectionLabels[sectionKey]}
+							</h4>
+							<div className="rounded-lg border">
+								<Table>
+									<TableHeader>
+										<TableRow>
+											<TableHead className="w-10 text-center">Activo</TableHead>
+											<TableHead>Concepto</TableHead>
+											<TableHead className="w-28">%</TableHead>
+											<TableHead className="w-32 text-right">Valor (Q)</TableHead>
+										</TableRow>
+									</TableHeader>
+									<TableBody>
+										{sectionFields.map((field) => renderField(field))}
+										{/* Subtotal de la sección */}
+										<TableRow className="bg-muted/50 font-semibold">
+											<TableCell colSpan={3} className="text-right">
+												Subtotal {sectionLabels[sectionKey]}:
+											</TableCell>
+											<TableCell className="text-right">
+												{formatCurrency(subtotals[sectionKey])}
+											</TableCell>
+										</TableRow>
+									</TableBody>
+								</Table>
+							</div>
+						</div>
+					);
+				},
+			)}
+
+			{/* Total general */}
+			<div className="rounded-lg border-2 border-primary bg-primary/5 p-4">
+				<div className="flex items-center justify-between">
+					<span className="font-bold text-lg">Total Gastos Adicionales:</span>
+					<span className="font-bold text-xl text-primary">
+						{formatCurrency(total)}
+					</span>
+				</div>
+			</div>
+		</div>
+	);
+}
+
 function QuoterPage() {
 	const { data: session } = authClient.useSession();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
@@ -279,7 +797,7 @@ function QuoterPage() {
 			interestRate: 1.5,
 			insuranceCost: 0,
 			gpsCost: 148.2,
-			transferCost: 1950,
+			transferCost: 545, // 395 + 150 según Excel
 			adminCost: 0,
 			membershipCost: 0,
 			// Gastos adicionales para detalle de crédito
@@ -292,13 +810,21 @@ function QuoterPage() {
 			keyCopyCost: 0,
 			keyCopyDiffCost: 0,
 			circulationTaxCost: 0,
-			mobileGuaranteeCost: 0,
-			leasingContractCost: 0,
+			vehicleTransferCost: 0,
+			mobileGuaranteeCost: 400,
+			leasingContractCost: 400,
 			collectionAuthCost: 0,
 			legalCost: 0,
 			// Gastos específicos de Autocompras
-			appointmentCost: 0,
-			addressVerificationCost: 0,
+			appointmentCost: 150,
+			addressVerificationCost: 395,
+			// Interés calculado automáticamente
+			interestCost: 0,
+			// Gastos extra (separados de los principales)
+			extraGpsCost: 0,
+			extraInsuranceCost: 0,
+			extraMembershipCost: 0,
+			extraAdminCost: 600,
 		},
 		onSubmit: async ({ value }) => {
 			createQuotationMutation.mutate({
@@ -346,6 +872,25 @@ function QuoterPage() {
 		}
 	}, [initialOpportunityId]);
 
+	// Auto-recalcular cuando cambien los valores relevantes del formulario
+	useEffect(() => {
+		const values = quoterForm.state.values;
+		// Solo recalcular si hay valores básicos
+		if (values.vehicleValue > 0 && values.downPayment > 0) {
+			recalculate();
+		}
+	}, [
+		quoterForm.state.values.vehicleValue,
+		quoterForm.state.values.downPayment,
+		quoterForm.state.values.insuranceCost,
+		quoterForm.state.values.gpsCost,
+		quoterForm.state.values.transferCost,
+		quoterForm.state.values.membershipCost,
+		quoterForm.state.values.interestRate,
+		quoterForm.state.values.termMonths,
+		quoterForm.state.values.royaltyPercentage,
+	]);
+
 	// Obtener costo de seguro automáticamente
 	const updateInsuranceCost = async (
 		insuredAmount: number,
@@ -359,14 +904,22 @@ function QuoterPage() {
 				vehicleType: vehicleType as any,
 			});
 
-			quoterForm.setFieldValue(
-				"insuranceCost",
-				Math.round(result.insuranceCost * 100) / 100,
-			);
-			quoterForm.setFieldValue(
-				"membershipCost",
-				Math.round(result.membershipCost * 100) / 100,
-			);
+			const baseInsuranceCost = Math.round(result.baseInsuranceCost * 100) / 100;
+			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
+
+			// El seguro total para cálculos es: base + (membresía - GPS)
+			const GPS_COST = 148.2;
+			const netMembershipCost = Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+			const insuranceCost = Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+
+			quoterForm.setFieldValue("insuranceCost", insuranceCost);
+			// membershipCost para resumen de arriba = neto (sin GPS)
+			quoterForm.setFieldValue("membershipCost", netMembershipCost);
+
+			// Valores para la tabla de gastos extra (valores crudos de la tabla)
+			quoterForm.setFieldValue("extraInsuranceCost", baseInsuranceCost);
+			// Membresía extra = valor crudo de la tabla
+			quoterForm.setFieldValue("extraMembershipCost", rawMembershipCost);
 
 			// Recalcular después de actualizar
 			setTimeout(() => recalculate(), 100);
@@ -386,23 +939,28 @@ function QuoterPage() {
 		const transferCost = Number(values.transferCost);
 		const membershipCost = Number(values.membershipCost);
 
-		// Calcular Gastos Administrativos según Excel
-		// B22 = Monto a financiar + Traspaso + 1400 + GPS + Seguro
-		const b22 = amountToFinance + transferCost + 1400 + gpsCost + insuranceCost;
+		// Calcular B22 según Excel
+		// B22 = Monto a financiar + Traspaso + 400 + 400 + 600 + GPS + Seguro
+		const b22 = amountToFinance + transferCost + 400 + 400 + 600 + gpsCost + insuranceCost;
 
-		// Gastos Admin = 400 + ROUNDUP(B22*4%,0) + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro
-		const royalty = Math.ceil(b22 * 0.04); // 4% redondeado hacia arriba (para gastos admin)
-		const extraCost = Math.ceil(b22 * 0.0178) + gpsCost + insuranceCost; // 1.78% + GPS + Seguro
-		const adminCost = 400 + royalty + 400 + 600 + extraCost;
+		// Royalty = 4% de B22 redondeado hacia arriba
+		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
+		const calculatedRoyalty = Math.ceil(b22 * (royaltyPercentage / 100));
+		quoterForm.setFieldValue("royalty", calculatedRoyalty);
+
+		// Interés = ROUNDUP(B22 * 1.78%)
+		const calculatedInterest = Math.ceil(b22 * 0.0178);
+		quoterForm.setFieldValue("interestCost", calculatedInterest);
+
+		// Nota: extraInsuranceCost y extraMembershipCost se calculan en updateInsuranceCost()
+		// para que sean editables y no se sobrescriban en cada recálculo
+
+		// Gastos Admin = 400 + Royalty + 400 + 600 + ROUNDUP(B22*1.78%,0) + GPS + Seguro
+		const extraCost = calculatedInterest + gpsCost + insuranceCost;
+		const adminCost = 400 + calculatedRoyalty + 400 + 600 + extraCost;
 
 		// Actualizar el campo de gastos administrativos
 		quoterForm.setFieldValue("adminCost", Math.round(adminCost * 100) / 100);
-
-		// Calcular royalty: 4% del monto total a financiar (monto a financiar + gastos administrativos + traspaso)
-		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
-		const baseForRoyalty = amountToFinance + adminCost + transferCost;
-		const calculatedRoyalty = baseForRoyalty * (royaltyPercentage / 100);
-		quoterForm.setFieldValue("royalty", Math.round(calculatedRoyalty * 100) / 100);
 
 		// Costos que se financian (NO incluyen seguro ni GPS)
 		// La membresía ya está incluida en adminCost, no se debe agregar de nuevo
@@ -454,6 +1012,10 @@ function QuoterPage() {
 		quoterForm.setFieldValue("vehicleLine", vehicle.model);
 		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
 
+		// Establecer el tipo de vehículo si viene de la oportunidad
+		const vehicleTypeToUse = (vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) || "particular";
+		quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
+
 		// Obtener la inspección más reciente para el marketValue
 		try {
 			const inspection = await client.getLatestInspectionByVehicleId({
@@ -471,8 +1033,8 @@ function QuoterPage() {
 				const downPayment = Math.round(numericValue * 0.2);
 				quoterForm.setFieldValue("downPayment", downPayment);
 
-				// Actualizar seguro y membresía
-				updateInsuranceCost(numericValue, quoterForm.state.values.vehicleType);
+				// Actualizar seguro y membresía con el tipo de vehículo correcto
+				updateInsuranceCost(numericValue, vehicleTypeToUse);
 			}
 		} catch (error) {
 			console.error("Error al obtener inspección del vehículo:", error);
@@ -1083,302 +1645,18 @@ function QuoterPage() {
 							<CardHeader>
 								<CardTitle>Gastos Adicionales (Detalle de Crédito)</CardTitle>
 								<CardDescription>
-									Gastos opcionales para el detalle de crédito sobre vehículo
+									Gastos opcionales que se descuentan del monto a desembolsar
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
-								<div className="grid gap-4 md:grid-cols-4">
-									<quoterForm.Field name="royalty">
-										{(field) => (
-											<div>
-												<div className="mb-2 flex items-center justify-between">
-													<Label htmlFor={field.name}>Royalty</Label>
-													<span className="text-muted-foreground text-xs">
-														{quoterForm.state.values.royaltyPercentage}% del
-														monto total a financiar
-													</span>
-												</div>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-													disabled
-													className="bg-muted"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="freelanceCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Free lance
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="freelancePercentage">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Free lance (%)
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="inspectionCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Inspección
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="finesCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Multas
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="keyCopyCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Copia de llave
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="keyCopyDiffCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Diferencia copia llave
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="circulationTaxCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Impuesto circulación
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="mobileGuaranteeCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Garantía mobiliaria
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="leasingContractCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Contrato Leasing
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="collectionAuthCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Auténtica contrato cobranza
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									<quoterForm.Field name="legalCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Gastos legales
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) =>
-														field.handleChange(Number(e.target.value) || 0)
-													}
-													placeholder="0"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
-
-									{/* Campos específicos de Autocompras */}
-									{quoterForm.state.values.creditType === "autocompra" && (
-										<>
-											<quoterForm.Field name="appointmentCost">
-												{(field) => (
-													<div>
-														<Label htmlFor={field.name} className="mb-2">
-															Nombramiento
-														</Label>
-														<Input
-															id={field.name}
-															type="number"
-															step="0.01"
-															value={field.state.value || ""}
-															onChange={(e) =>
-																field.handleChange(Number(e.target.value) || 0)
-															}
-															placeholder="0"
-														/>
-													</div>
-												)}
-											</quoterForm.Field>
-
-											<quoterForm.Field name="addressVerificationCost">
-												{(field) => (
-													<div>
-														<Label htmlFor={field.name} className="mb-2">
-															Verificación de dirección
-														</Label>
-														<Input
-															id={field.name}
-															type="number"
-															step="0.01"
-															value={field.state.value || ""}
-															onChange={(e) =>
-																field.handleChange(Number(e.target.value) || 0)
-															}
-															placeholder="0"
-														/>
-													</div>
-												)}
-											</quoterForm.Field>
-										</>
-									)}
-								</div>
+								<ExtraCostsTable
+									values={quoterForm.state.values as QuotationFormValues}
+									totalFinanced={calculatedValues.totalFinanced}
+									creditType={quoterForm.state.values.creditType}
+									onFieldChange={(field, value) =>
+										quoterForm.setFieldValue(field, value)
+									}
+								/>
 							</CardContent>
 						</Card>
 

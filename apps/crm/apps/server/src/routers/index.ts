@@ -86,6 +86,7 @@ export const appRouter = {
 	getVehicles: vehiclesRouter.getAll,
 	getVehicleById: vehiclesRouter.getById,
 	createVehicle: vehiclesRouter.create,
+	createNewVehicle: vehiclesRouter.createNewVehicle,
 	updateVehicle: vehiclesRouter.update,
 	deleteVehicle: vehiclesRouter.delete,
 	searchVehicles: vehiclesRouter.search,

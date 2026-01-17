@@ -25,6 +25,10 @@ import {
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
+import {
+	formatMissingFields,
+	getMissingFields,
+} from "../lib/vehicle-helpers";
 
 // ============================================================================
 // CONSTANTS
@@ -548,6 +552,34 @@ export async function closeOpportunity(
 				success: false,
 				error: `No se puede cerrar la oportunidad. Faltan los siguientes datos: ${missingFields.join(", ")}`,
 			};
+		}
+
+		// Validate vehicle data completeness for new vehicles
+		if (opportunity.vehicleId) {
+			const [vehicleData] = await db
+				.select({
+					isNew: vehicles.isNew,
+					vinNumber: vehicles.vinNumber,
+					licensePlate: vehicles.licensePlate,
+					origin: vehicles.origin,
+					fuelType: vehicles.fuelType,
+					transmission: vehicles.transmission,
+				})
+				.from(vehicles)
+				.where(eq(vehicles.id, opportunity.vehicleId))
+				.limit(1);
+
+			if (vehicleData?.isNew) {
+				const missingVehicleFields = getMissingFields(vehicleData);
+				if (missingVehicleFields.length > 0) {
+					console.log("[CloseOpportunity] Missing vehicle fields for new vehicle:", missingVehicleFields);
+					return {
+						success: false,
+						error: `El vehículo nuevo no tiene todos los datos completos. Faltan: ${formatMissingFields(missingVehicleFields)}`,
+					};
+				}
+				console.log("[CloseOpportunity] New vehicle data is complete");
+			}
 		}
 
 		// Get lead data

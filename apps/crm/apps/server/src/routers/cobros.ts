@@ -16,7 +16,8 @@ import {
 } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { adminProcedure, cobrosProcedure, o } from "../lib/orpc";
+import { adminProcedure, cobrosProcedure, cobrosSupervisorProcedure, o } from "../lib/orpc";
+import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
 	createPagoInCarteraBack,
@@ -561,8 +562,8 @@ export const cobrosRouter = {
 				);
 			}
 
-			// Si no es admin, solo ver casos asignados
-			if (context.userRole !== "admin") {
+			// Si no es admin o supervisor de cobros, solo ver casos asignados
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
 				conditions.push(eq(casosCobros.responsableCobros, context.userId));
 			}
 
@@ -613,13 +614,12 @@ export const cobrosRouter = {
 	getCasoCobroById: cobrosProcedure
 		.input(z.object({ id: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
-			const whereClause =
-				context.userRole === "admin"
-					? eq(casosCobros.id, input.id)
-					: and(
-							eq(casosCobros.id, input.id),
-							eq(casosCobros.responsableCobros, context.userId),
-						);
+			const whereClause = PERMISSIONS.canViewAllCasosCobros(context.userRole)
+				? eq(casosCobros.id, input.id)
+				: and(
+						eq(casosCobros.id, input.id),
+						eq(casosCobros.responsableCobros, context.userId),
+					);
 
 			const caso = await db
 				.select({
@@ -680,7 +680,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Verificar que el usuario tenga acceso al caso
-			if (context.userRole !== "admin") {
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
 				const caso = await db
 					.select()
 					.from(casosCobros)
@@ -730,7 +730,7 @@ export const cobrosRouter = {
 		)
 		.handler(async ({ input, context }) => {
 			// Verificar acceso al caso
-			if (context.userRole !== "admin") {
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
 				const caso = await db
 					.select()
 					.from(casosCobros)
@@ -792,8 +792,8 @@ export const cobrosRouter = {
 			}),
 		)
 		.handler(async ({ input, context }) => {
-			// Solo admin o usuario asignado pueden crear convenios
-			if (context.userRole !== "admin") {
+			// Solo admin, supervisor de cobros o usuario asignado pueden crear convenios
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
 				const caso = await db
 					.select()
 					.from(casosCobros)
@@ -828,7 +828,7 @@ export const cobrosRouter = {
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Verificar acceso
-			if (context.userRole !== "admin") {
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
 				const caso = await db
 					.select()
 					.from(casosCobros)
@@ -868,7 +868,7 @@ export const cobrosRouter = {
 		}),
 
 	// Asignar responsable de cobros
-	asignarResponsableCobros: adminProcedure
+	asignarResponsableCobros: cobrosSupervisorProcedure
 		.input(
 			z.object({
 				casoCobroId: z.string().uuid(),
@@ -887,8 +887,14 @@ export const cobrosRouter = {
 				throw new Error("Usuario no encontrado");
 			}
 
-			if (responsable[0].role !== "cobros" && responsable[0].role !== "admin") {
-				throw new Error("El usuario debe tener rol de cobros o admin");
+			if (
+				responsable[0].role !== "cobros" &&
+				responsable[0].role !== "cobros_supervisor" &&
+				responsable[0].role !== "admin"
+			) {
+				throw new Error(
+					"El usuario debe tener rol de cobros, supervisor de cobros o admin",
+				);
 			}
 
 			const casoActualizado = await db
@@ -904,7 +910,7 @@ export const cobrosRouter = {
 		}),
 
 	// Obtener usuarios con rol de cobros para asignación
-	getUsuariosCobros: adminProcedure.handler(async () => {
+	getUsuariosCobros: cobrosSupervisorProcedure.handler(async () => {
 		const usuarios = await db
 			.select({
 				id: user.id,
@@ -913,7 +919,13 @@ export const cobrosRouter = {
 				role: user.role,
 			})
 			.from(user)
-			.where(or(eq(user.role, "cobros"), eq(user.role, "admin")))
+			.where(
+				or(
+					eq(user.role, "cobros"),
+					eq(user.role, "cobros_supervisor"),
+					eq(user.role, "admin"),
+				),
+			)
 			.orderBy(asc(user.name));
 
 		return usuarios;
@@ -938,12 +950,12 @@ export const cobrosRouter = {
 				console.log("🔐 Verificando permisos:", {
 					esAdmin: context.userRole === "admin",
 					esCobros: context.userRole === "cobros",
+					esCobrosSupervisor: context.userRole === "cobros_supervisor",
 					usuarioActual: context.userId,
-					tienePermiso:
-						context.userRole === "admin" || context.userRole === "cobros",
+					tienePermiso: PERMISSIONS.canAccessCobros(context.userRole),
 				});
 
-				if (context.userRole !== "admin" && context.userRole !== "cobros") {
+				if (!PERMISSIONS.canAccessCobros(context.userRole)) {
 					console.error("❌ Sin permisos para ver historial");
 					throw new Error("No tienes permiso para ver este historial");
 				}
@@ -1031,7 +1043,7 @@ export const cobrosRouter = {
 		.input(z.object({ casoCobroId: z.string().uuid() }))
 		.handler(async ({ input, context }) => {
 			// Verificar acceso
-			if (context.userRole !== "admin") {
+			if (!PERMISSIONS.canViewAllCasosCobros(context.userRole)) {
 				const caso = await db
 					.select()
 					.from(casosCobros)
@@ -1082,13 +1094,12 @@ export const cobrosRouter = {
 		.handler(async ({ input, context }) => {
 			if (input.tipo === "caso") {
 				// Es un caso de cobros
-				const whereClause =
-					context.userRole === "admin"
-						? eq(casosCobros.id, input.id)
-						: and(
-								eq(casosCobros.id, input.id),
-								eq(casosCobros.responsableCobros, context.userId),
-							);
+				const whereClause = PERMISSIONS.canViewAllCasosCobros(context.userRole)
+					? eq(casosCobros.id, input.id)
+					: and(
+							eq(casosCobros.id, input.id),
+							eq(casosCobros.responsableCobros, context.userId),
+						);
 
 				const caso = await db
 					.select({
@@ -1690,8 +1701,8 @@ export const cobrosRouter = {
 	// SINCRONIZACIÓN DE CASOS DE COBROS
 	// ========================================================================
 
-	// Ejecutar sincronización de casos de cobros (admin only)
-	sincronizarCasosCobros: adminProcedure
+	// Ejecutar sincronización de casos de cobros (admin y supervisor de cobros)
+	sincronizarCasosCobros: cobrosSupervisorProcedure
 		.input(
 			z.object({
 				mes: z.number().min(0).max(12).optional(), // 0 = todos los meses
@@ -1722,7 +1733,7 @@ export const cobrosRouter = {
 		}),
 
 	// Obtener historial de sincronizaciones recientes
-	getHistorialSincronizaciones: adminProcedure
+	getHistorialSincronizaciones: cobrosSupervisorProcedure
 		.input(
 			z.object({
 				limit: z.number().min(1).max(100).optional().default(10),

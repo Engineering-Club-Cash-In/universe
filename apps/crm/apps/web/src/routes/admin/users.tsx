@@ -99,6 +99,7 @@ function RouteComponent() {
 			| "sales_supervisor"
 			| "analyst"
 			| "cobros"
+			| "cobros_supervisor"
 			| "juridico";
 		banned: boolean | null;
 		emailVerified: boolean;

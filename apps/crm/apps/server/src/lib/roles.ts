@@ -7,6 +7,7 @@ export const ROLES = {
 	SALES_SUPERVISOR: "sales_supervisor",
 	ANALYST: "analyst",
 	COBROS: "cobros",
+	COBROS_SUPERVISOR: "cobros_supervisor",
 	JURIDICO: "juridico",
 } as const;
 
@@ -38,6 +39,11 @@ export const ROLE_CONFIG = {
 		label: "Cobros",
 		color: "bg-green-100 text-green-800",
 		icon: "DollarSign" as const,
+	},
+	[ROLES.COBROS_SUPERVISOR]: {
+		label: "Supervisor de Cobros",
+		color: "bg-cyan-100 text-cyan-800",
+		icon: "UserCheck" as const,
 	},
 	[ROLES.JURIDICO]: {
 		label: "Jurídico",
@@ -100,13 +106,26 @@ export const PERMISSIONS = {
 
 	// Cobros Module Access
 	canAccessCobros: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.COBROS,
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
 
 	canManagePayments: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.COBROS,
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR,
 
 	canViewPaymentReports: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.COBROS || role === ROLES.ANALYST,
+		role === ROLES.ADMIN ||
+		role === ROLES.COBROS ||
+		role === ROLES.COBROS_SUPERVISOR ||
+		role === ROLES.ANALYST,
+
+	canAssignCobros: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
+
+	canViewAllCasosCobros: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.COBROS_SUPERVISOR,
 
 	// WhatsApp Module Access
 	canAccessWhatsApp: (role: UserRole | string): boolean =>

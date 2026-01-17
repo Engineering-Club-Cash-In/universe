@@ -321,7 +321,7 @@ export const vehiclesRouter = {
 			};
 		}),
 
-	// Create new vehicle
+	// Create new vehicle (used vehicles - all fields required)
 	create: protectedProcedure
 		.input(
 			z.object({
@@ -341,12 +341,50 @@ export const vehiclesRouter = {
 				transmission: z.string(),
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
+				isNew: z.boolean().optional().default(false),
 			}),
 		)
 		.handler(async ({ input }) => {
 			const [newVehicle] = await db
 				.insert(vehicles)
 				.values(input as NewVehicle)
+				.returning();
+
+			return newVehicle;
+		}),
+
+	// Create new vehicle (for brand new vehicles from dealer - minimal required fields)
+	createNewVehicle: protectedProcedure
+		.input(
+			z.object({
+				// Campos básicos requeridos (conocidos desde proforma)
+				make: z.string(),
+				model: z.string(),
+				year: z.number(),
+				color: z.string(),
+				vehicleType: z.string(),
+				// Campos opcionales (llegan después del dealer)
+				licensePlate: z.string().optional(),
+				vinNumber: z.string().optional(),
+				milesMileage: z.number().nullable().optional(),
+				kmMileage: z.number().optional().default(0),
+				origin: z.string().optional(),
+				cylinders: z.string().optional(),
+				engineCC: z.string().optional(),
+				fuelType: z.string().optional(),
+				transmission: z.string().optional(),
+				companyId: z.string().nullable().optional(),
+				status: z.string().optional().default("pending"),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [newVehicle] = await db
+				.insert(vehicles)
+				.values({
+					...input,
+					isNew: true, // Siempre es vehículo nuevo
+					kmMileage: input.kmMileage ?? 0, // Default 0 para nuevos
+				} as NewVehicle)
 				.returning();
 
 			return newVehicle;
@@ -361,18 +399,19 @@ export const vehiclesRouter = {
 					make: z.string().optional(),
 					model: z.string().optional(),
 					year: z.number().optional(),
-					licensePlate: z.string().optional(),
-					vinNumber: z.string().optional(),
+					licensePlate: z.string().nullable().optional(),
+					vinNumber: z.string().nullable().optional(),
 					color: z.string().optional(),
 					vehicleType: z.string().optional(),
 					milesMileage: z.number().nullable().optional(),
 					kmMileage: z.number().optional(),
-					origin: z.string().optional(),
-					cylinders: z.string().optional(),
-					engineCC: z.string().optional(),
-					fuelType: z.string().optional(),
-					transmission: z.string().optional(),
+					origin: z.string().nullable().optional(),
+					cylinders: z.string().nullable().optional(),
+					engineCC: z.string().nullable().optional(),
+					fuelType: z.string().nullable().optional(),
+					transmission: z.string().nullable().optional(),
 					companyId: z.string().nullable().optional(),
+					isNew: z.boolean().optional(),
 					status: z
 						.enum(["pending", "available", "sold", "maintenance", "auction"])
 						.optional(),

@@ -36,6 +36,11 @@ import {
 	validateFile,
 } from "../lib/storage";
 import { closeOpportunity } from "../services/close-opportunity";
+import {
+	getMissingFields,
+	getMissingFieldsForContracts,
+	formatMissingFields,
+} from "../lib/vehicle-helpers";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -709,6 +714,9 @@ export const crmRouter = {
 					vehicleType: vehicles.vehicleType,
 					kmMileage: vehicles.kmMileage,
 					status: vehicles.status,
+					isNew: vehicles.isNew,
+					fuelType: vehicles.fuelType,
+					transmission: vehicles.transmission,
 				},
 			};
 
@@ -942,6 +950,46 @@ export const crmRouter = {
 					}
 				}
 
+				// Validaciones para vehículos nuevos en transiciones de stage
+				if (currentOpportunity[0].vehicleId && toPercentage >= 90) {
+					const vehicleForValidation = await db
+						.select({
+							isNew: vehicles.isNew,
+							vinNumber: vehicles.vinNumber,
+							licensePlate: vehicles.licensePlate,
+							origin: vehicles.origin,
+							fuelType: vehicles.fuelType,
+							transmission: vehicles.transmission,
+						})
+						.from(vehicles)
+						.where(eq(vehicles.id, currentOpportunity[0].vehicleId))
+						.limit(1);
+
+					if (vehicleForValidation[0]?.isNew) {
+						// Transición a 90%: Requerir VIN mínimo para contratos
+						if (toPercentage >= 90 && toPercentage < 100) {
+							const missingForContracts = getMissingFieldsForContracts(
+								vehicleForValidation[0],
+							);
+							if (missingForContracts.length > 0) {
+								throw new ORPCError("BAD_REQUEST", {
+									message: `Para avanzar a etapa 90% (contratos), el vehículo nuevo debe tener: ${formatMissingFields(missingForContracts)}`,
+								});
+							}
+						}
+
+						// Transición a 100%: Requerir datos completos
+						if (toPercentage === 100) {
+							const missingFields = getMissingFields(vehicleForValidation[0]);
+							if (missingFields.length > 0) {
+								throw new ORPCError("BAD_REQUEST", {
+									message: `Para completar la oportunidad (100%), el vehículo nuevo debe tener datos completos. Faltan: ${formatMissingFields(missingFields)}`,
+								});
+							}
+						}
+					}
+				}
+
 				// Validate disbursement approval when moving from 90% to 100%
 				if (fromPercentage === 90 && toPercentage === 100) {
 					// Check if disbursement has been approved via checklist
@@ -1162,21 +1210,33 @@ export const crmRouter = {
 					throw new Error("La oportunidad debe tener un tipo de crédito");
 				}
 
-				// Validar inspección del vehículo
-				const inspection = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opportunity[0].vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
+				// Obtener datos del vehículo para verificar si es nuevo
+				const vehicleData = await db
+					.select({ isNew: vehicles.isNew })
+					.from(vehicles)
+					.where(eq(vehicles.id, opportunity[0].vehicleId))
 					.limit(1);
 
-				if (!inspection || inspection.length === 0) {
-					throw new Error("El vehículo debe tener una inspección aprobada");
+				const isNewVehicle = vehicleData[0]?.isNew ?? false;
+
+				// Validar inspección del vehículo (solo para vehículos usados)
+				if (!isNewVehicle) {
+					const inspection = await db
+						.select()
+						.from(vehicleInspections)
+						.where(
+							and(
+								eq(vehicleInspections.vehicleId, opportunity[0].vehicleId),
+								eq(vehicleInspections.status, "approved"),
+							),
+						)
+						.limit(1);
+
+					if (!inspection || inspection.length === 0) {
+						throw new Error("El vehículo debe tener una inspección aprobada");
+					}
 				}
+				// Vehículos nuevos no requieren inspección
 
 				// Validar documentos requeridos según tipo de cliente
 				const clientType = opportunity[0].clientType || "individual";
@@ -1244,9 +1304,11 @@ export const crmRouter = {
 					opportunityId: input.opportunityId,
 					validatedBy: context.userId,
 					allDocumentsPresent: true,
-					vehicleInspected: true,
+					vehicleInspected: !isNewVehicle, // Vehículos nuevos no requieren inspección
 					missingDocuments: [],
-					notes: "Validación automática al aprobar análisis",
+					notes: isNewVehicle
+						? "Validación automática al aprobar análisis (vehículo nuevo - sin inspección)"
+						: "Validación automática al aprobar análisis",
 				});
 			}
 

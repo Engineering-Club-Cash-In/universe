@@ -69,23 +69,29 @@ export const vehicleVendors = pgTable("vehicle_vendors", {
 // Vehicles table
 export const vehicles = pgTable("vehicles", {
 	id: uuid("id").defaultRandom().primaryKey(),
-	// Basic vehicle info
+
+	// Flag para vehículos nuevos (no requieren inspección, datos pueden completarse después)
+	isNew: boolean("is_new").notNull().default(false),
+
+	// Basic vehicle info (siempre requeridos - conocidos desde proforma)
 	make: text("make").notNull(),
 	model: text("model").notNull(),
 	year: integer("year").notNull(),
-	licensePlate: text("license_plate").notNull().unique(),
-	vinNumber: text("vin_number").notNull().unique(),
 	color: text("color").notNull(),
 	vehicleType: text("vehicle_type").notNull(), // Sedan, SUV, Pickup, etc.
 
-	// Technical details
+	// Identificación del vehículo (opcionales para nuevos - llegan después del dealer)
+	licensePlate: text("license_plate").unique(), // Opcional para nuevos
+	vinNumber: text("vin_number").unique(), // Opcional para nuevos
+
+	// Technical details (opcionales para nuevos)
 	milesMileage: integer("miles_mileage"),
-	kmMileage: integer("km_mileage").notNull(),
-	origin: text("origin").notNull(), // Nacional, Importado
-	cylinders: text("cylinders").notNull(),
-	engineCC: text("engine_cc").notNull(),
-	fuelType: text("fuel_type").notNull(), // Gasolina, Diesel, Eléctrico, Híbrido
-	transmission: text("transmission").notNull(), // Automático, Manual
+	kmMileage: integer("km_mileage").default(0), // Default 0 para nuevos
+	origin: text("origin"), // Opcional para nuevos
+	cylinders: text("cylinders"), // Opcional para nuevos
+	engineCC: text("engine_cc"), // Opcional para nuevos
+	fuelType: text("fuel_type"), // Opcional para nuevos
+	transmission: text("transmission"), // Opcional para nuevos
 
 	// Status
 	status: vehicleStatusEnum("status").notNull().default("pending"),

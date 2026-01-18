@@ -631,16 +631,19 @@ app.post("/info/validate-otp", async (c) => {
 });
 app.post("/info/check-liveness", async (c) => {
 	const body = await c.req.json();
-	const { dpi, phoneNumber } = body as { dpi?: string; phoneNumber?: string };
+	const { dpi, phoneNumber } = body as { dpi?: string; phoneNumber?: string | number };
 
 	// Validaciones de formato
 	if (!dpi) {
 		return c.json({ success: false, message: "DPI is required" }, 400);
 	}
 
-	if (!phoneNumber) {
+	if (!phoneNumber && phoneNumber !== 0) {
 		return c.json({ success: false, message: "Phone number is required" }, 400);
 	}
+
+	// Convertir phoneNumber a string si viene como número
+	const phoneNumberStr = String(phoneNumber);
 
 	if (!/^\d{13}$/.test(dpi)) {
 		return c.json(
@@ -652,18 +655,18 @@ app.post("/info/check-liveness", async (c) => {
 		);
 	}
 
-	if (!/^\d{8}$/.test(phoneNumber)) {
+	if (!/^\d{8,11}$/.test(phoneNumberStr)) {
 		return c.json(
 			{
 				success: false,
-				message: "Número de teléfono debe tener 8 dígitos",
+				message: "Número de teléfono debe tener entre 8 y 11 dígitos",
 			},
 			400,
 		);
 	}
 
 	// 🔥 Verificar liveness y generar OTP si pasó
-	const livenessResult = await hasPassedLiveness(dpi, phoneNumber);
+	const livenessResult = await hasPassedLiveness(dpi, phoneNumberStr);
 
 	if (!livenessResult.passed) {
 		return c.json(

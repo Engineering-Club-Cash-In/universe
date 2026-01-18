@@ -1,6 +1,13 @@
 import { eq, and, lte, gte, sql, desc } from "drizzle-orm";
 import { db } from "../database";
-import { usuarios, creditos, cuotas_credito, inversionistas, creditos_inversionistas, boletasPagoInversionista } from "../database/db";
+import {
+  usuarios,
+  creditos,
+  cuotas_credito,
+  inversionistas,
+  creditos_inversionistas,
+  boletasPagoInversionista,
+} from "../database/db";
 import Big from "big.js";
 import fs from "fs"; // 🆕 Para escribir logs
 import path from "path/win32";
@@ -42,44 +49,52 @@ interface ResultadoCredito {
     fecha_vencimiento: string;
   }>;
 }
-const CREAR_RELACIONES_AUTOMATICAMENTE = false;  
+const CREAR_RELACIONES_AUTOMATICAMENTE = true;
 // 🔥 FUNCIÓN HELPER PARA NORMALIZAR PORCENTAJES
 function normalizarPorcentaje(valor: string | number | null | undefined): Big {
   const num = new Big(valor || 0);
-  
+
   // Si es menor a 1, ya está en formato decimal (0.20 = 20%)
   if (num.lt(1)) {
-    console.log(`      🔧 Porcentaje ya en decimal: ${valor} → ${num.toString()}`);
+    console.log(
+      `      🔧 Porcentaje ya en decimal: ${valor} → ${num.toString()}`
+    );
     return num; // Ya está como 0.20, usar directo
   }
-  
+
   // Si es >= 1, está como entero (20 = 20%), dividir entre 100
   const decimal = num.div(100);
-  console.log(`      🔧 Porcentaje convertido: ${valor} → ${decimal.toString()}`);
+  console.log(
+    `      🔧 Porcentaje convertido: ${valor} → ${decimal.toString()}`
+  );
   return decimal;
 }
- 
+
 // 🆕 FUNCIÓN PARA ESCRIBIR LOG DE ADVERTENCIAS
-function escribirLogAdvertencias(tipo: 'ADVERTENCIA' | 'ERROR' | 'RELACION_CREADA', mensaje: string, data?: any) {
+function escribirLogAdvertencias(
+  tipo: "ADVERTENCIA" | "ERROR" | "RELACION_CREADA",
+  mensaje: string,
+  data?: any
+) {
   const timestamp = new Date().toISOString();
   const logEntry = {
     timestamp,
     tipo,
     mensaje,
-    data: data || null
+    data: data || null,
   };
-  
-  const logLine = `[${timestamp}] ${tipo}: ${mensaje}\n${data ? JSON.stringify(data, null, 2) : ''}\n${'='.repeat(80)}\n`;
-  
+
+  const logLine = `[${timestamp}] ${tipo}: ${mensaje}\n${data ? JSON.stringify(data, null, 2) : ""}\n${"=".repeat(80)}\n`;
+
   // 🔥 Escribir en archivo de log
-  const logPath = './logs/liquidacion_advertencias.log';
-  
+  const logPath = "./logs/liquidacion_advertencias.log";
+
   try {
     // Crear carpeta logs si no existe
-    if (!fs.existsSync('./logs')) {
-      fs.mkdirSync('./logs', { recursive: true });
+    if (!fs.existsSync("./logs")) {
+      fs.mkdirSync("./logs", { recursive: true });
     }
-    
+
     fs.appendFileSync(logPath, logLine);
     console.log(`   📝 Log escrito en: ${logPath}`);
   } catch (err) {
@@ -90,9 +105,9 @@ function escribirLogAdvertencias(tipo: 'ADVERTENCIA' | 'ERROR' | 'RELACION_CREAD
 // 🧹 NORMALIZAR FORMATO DE MES - ULTRA PERMISIVO
 function normalizarCuotaMes(cuota_mes: string): string {
   console.log(`   🔧 Normalizando mes: "${cuota_mes}"`);
-  
+
   let normalizado = cuota_mes.trim();
-  
+
   // 🆕 1. Si tiene formato "nov.25" o "nov25" sin espacio, agregar espacio
   if (/^[a-zA-Z]{3}\.?\d{2,4}$/.test(normalizado)) {
     const match = normalizado.match(/^([a-zA-Z]{3})\.?(\d{2,4})$/);
@@ -101,91 +116,107 @@ function normalizarCuotaMes(cuota_mes: string): string {
       console.log(`   🔧 Agregado espacio: "${normalizado}"`);
     }
   }
-  
+
   // 2. Remover puntos extras al final
-  normalizado = normalizado.replace(/\.+$/g, '');
-  
+  normalizado = normalizado.replace(/\.+$/g, "");
+
   // 3. Convertir año de 4 dígitos a 2
-  normalizado = normalizado.replace(/\b2025\b/g, '25');
-  normalizado = normalizado.replace(/\b2024\b/g, '24');
-  normalizado = normalizado.replace(/\b2023\b/g, '23');
-  normalizado = normalizado.replace(/\b2022\b/g, '22');
-  normalizado = normalizado.replace(/\b2021\b/g, '21');
-  normalizado = normalizado.replace(/\b2020\b/g, '20');
-  
+  normalizado = normalizado.replace(/\b2025\b/g, "25");
+  normalizado = normalizado.replace(/\b2024\b/g, "24");
+  normalizado = normalizado.replace(/\b2023\b/g, "23");
+  normalizado = normalizado.replace(/\b2022\b/g, "22");
+  normalizado = normalizado.replace(/\b2021\b/g, "21");
+  normalizado = normalizado.replace(/\b2020\b/g, "20");
+
   // 4. Casos especiales: múltiples meses (ej: "ago. 25 y sep. 25")
-  if (normalizado.includes(' y ')) {
+  if (normalizado.includes(" y ")) {
     console.log(`   ⚠️ Múltiples meses detectados, tomando el último`);
-    const meses = normalizado.split(' y ').map(m => m.trim());
+    const meses = normalizado.split(" y ").map((m) => m.trim());
     normalizado = meses[meses.length - 1];
     console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
   }
-  
+
   // 5. Si tiene múltiples meses separados por comas
-  if (normalizado.includes(',')) {
+  if (normalizado.includes(",")) {
     console.log(`   ⚠️ Múltiples meses con coma, tomando el último`);
-    const meses = normalizado.split(',').map(m => m.trim());
+    const meses = normalizado.split(",").map((m) => m.trim());
     normalizado = meses[meses.length - 1];
     console.log(`   ✅ Mes seleccionado: "${normalizado}"`);
   }
-  
+
   // 6. Limpiar espacios múltiples
-  normalizado = normalizado.replace(/\s+/g, ' ');
-  
+  normalizado = normalizado.replace(/\s+/g, " ");
+
   // 7. Asegurar que tiene punto después del mes
   const partes = normalizado.split(/\s+/);
   if (partes.length === 2) {
-    let mes = partes[0].toLowerCase().replace('.', '');
+    let mes = partes[0].toLowerCase().replace(".", "");
     const año = partes[1];
-    
+
     // Mapeo de meses en español
-    const mesesValidos = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 
-                          'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
-    
+    const mesesValidos = [
+      "ene",
+      "feb",
+      "mar",
+      "abr",
+      "may",
+      "jun",
+      "jul",
+      "ago",
+      "sep",
+      "oct",
+      "nov",
+      "dic",
+    ];
+
     // Si el mes tiene más de 3 letras, tomar solo las primeras 3
     if (mes.length > 3) {
       mes = mes.substring(0, 3);
     }
-    
+
     if (mesesValidos.includes(mes)) {
       normalizado = `${mes}. ${año}`;
     }
   }
-  
+
   console.log(`   ✅ Resultado normalizado: "${normalizado}"`);
   return normalizado;
 }
 
 // 🔍 BÚSQUEDA ULTRA PERMISIVA DE USUARIO
+// 🔍 BÚSQUEDA ULTRA PERMISIVA DE USUARIO
+// 🔍 BÚSQUEDA ULTRA PERMISIVA DE USUARIO
 async function buscarUsuarioPermisivo(nombre_usuario: string) {
   console.log(`\n🔍 ========== BÚSQUEDA PERMISIVA DE USUARIO ==========`);
   console.log(`   📝 Buscando: "${nombre_usuario}"`);
-  
+
   // Limpiar el nombre de entrada
   const nombreLimpio = nombre_usuario
     .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[áàäâã]/gi, 'a')
-    .replace(/[éèëê]/gi, 'e')
-    .replace(/[íìïî]/gi, 'i')
-    .replace(/[óòöôõ]/gi, 'o')
-    .replace(/[úùüû]/gi, 'u')
-    .replace(/ñ/gi, 'n');
-  
+    .replace(/\s+/g, " ")
+    .replace(/[áàäâã]/gi, "a")
+    .replace(/[éèëê]/gi, "e")
+    .replace(/[íìïî]/gi, "i")
+    .replace(/[óòöôõ]/gi, "o")
+    .replace(/[úùüû]/gi, "u")
+    .replace(/ñ/gi, "n");
+
   console.log(`   🧹 Nombre limpio: "${nombreLimpio}"`);
-  
+
   // ESTRATEGIA 1: Búsqueda exacta (case insensitive)
   console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
   let usuarios_encontrados = await db
     .select()
     .from(usuarios)
     .where(sql`LOWER(${usuarios.nombre}) = LOWER(${nombreLimpio})`);
-  
+
   if (usuarios_encontrados.length > 0) {
-    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta`);
+    console.log(
+      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta`
+    );
     return usuarios_encontrados;
   }
-  
+
   // ESTRATEGIA 1.5: Búsqueda exacta con tildes normalizadas
   console.log(`   🎯 Estrategia 1.5: Búsqueda exacta sin tildes...`);
   usuarios_encontrados = await db
@@ -193,115 +224,225 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
     .from(usuarios)
     .where(
       sql`LOWER(
-        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
             ${usuarios.nombre},
             'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'),
-          'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u')
+          'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u'), 'ñ', 'n')
       ) = LOWER(${nombreLimpio})`
     );
-  
+
   if (usuarios_encontrados.length > 0) {
-    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta sin tildes`);
+    console.log(
+      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta sin tildes`
+    );
     return usuarios_encontrados;
   }
-  
-  // ESTRATEGIA 2: Búsqueda CONTAINS - nombre completo
-  console.log(`   🎯 Estrategia 2: Búsqueda con LIKE (contiene)...`);
+
+  // ESTRATEGIA 1.75: 🆕 Búsqueda donde nombre del Excel está AL INICIO del nombre de BD (para mancomunados)
+  console.log(
+    `   🎯 Estrategia 1.75: Búsqueda al inicio del nombre (para mancomunados)...`
+  );
   usuarios_encontrados = await db
     .select()
     .from(usuarios)
-    .where(sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + nombreLimpio + '%'})`);
-  
+    .where(
+      sql`LOWER(
+        REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+          REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(
+            ${usuarios.nombre},
+            'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'),
+          'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u'), 'ñ', 'n')
+      ) LIKE LOWER(${nombreLimpio + "%"})`
+    );
+
   if (usuarios_encontrados.length > 0) {
-    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con LIKE`);
-    
-    // FILTRAR: Buscar el que más se parezca
-    const usuariosConScore = usuarios_encontrados.map(u => {
-      const nombreBD = u.nombre.toLowerCase();
+    console.log(
+      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda al inicio`
+    );
+
+    // Si encontró solo uno, retornar inmediatamente
+    if (usuarios_encontrados.length === 1) {
+      console.log(
+        `   ✅ Usuario único encontrado: ${usuarios_encontrados[0].nombre}`
+      );
+      return usuarios_encontrados;
+    }
+
+    // Si encontró varios, calcular score de similitud
+    const usuariosConScore = usuarios_encontrados.map((u) => {
+      const nombreBD = u.nombre
+        .toLowerCase()
+        .replace(/[áàäâã]/gi, "a")
+        .replace(/[éèëê]/gi, "e")
+        .replace(/[íìïî]/gi, "i")
+        .replace(/[óòöôõ]/gi, "o")
+        .replace(/[úùüû]/gi, "u")
+        .replace(/ñ/gi, "n");
+
       const nombreBuscado = nombreLimpio.toLowerCase();
-      
-      const palabrasBuscadas = nombreBuscado.split(' ').filter(p => p.length > 2);
-      const palabrasEncontradas = palabrasBuscadas.filter(palabra => 
-        nombreBD.includes(palabra)
-      ).length;
-      const scoreCoincidencia = palabrasEncontradas / palabrasBuscadas.length;
-      
+
+      // Score alto si el nombre completo del Excel coincide exactamente al inicio
+      const coincideAlInicio = nombreBD.startsWith(nombreBuscado);
+      const scoreInicio = coincideAlInicio ? 1 : 0;
+
+      // Score por longitud similar
       const diffLongitud = Math.abs(nombreBD.length - nombreBuscado.length);
-      const scoreLongitud = 1 - (diffLongitud / Math.max(nombreBD.length, nombreBuscado.length));
-      
-      const scoreInicio = nombreBD.startsWith(nombreBuscado.split(' ')[0].toLowerCase()) ? 1 : 0;
-      
-      const scoreTotal = (scoreCoincidencia * 0.5) + (scoreLongitud * 0.3) + (scoreInicio * 0.2);
-      
-      return {
-        ...u,
-        score: scoreTotal,
-        scoreCoincidencia,
-        scoreLongitud,
-        scoreInicio
-      };
+      const scoreLongitud =
+        1 - diffLongitud / Math.max(nombreBD.length, nombreBuscado.length);
+
+      // Score total (priorizar inicio exacto)
+      const scoreTotal = scoreInicio * 0.7 + scoreLongitud * 0.3;
+
+      return { ...u, score: scoreTotal };
     });
-    
+
     usuariosConScore.sort((a, b) => b.score - a.score);
-    
+
     console.log(`   📊 Usuarios ordenados por score:`);
     usuariosConScore.forEach((u, idx) => {
-      console.log(`      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`);
+      console.log(
+        `      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`
+      );
     });
-    
-    if (usuariosConScore[0].score >= 0.6) {
-      console.log(`   ✅ Usuario con mejor score (${usuariosConScore[0].score.toFixed(2)}): ${usuariosConScore[0].nombre}`);
+
+    // Si el mejor tiene score alto, retornar solo ese
+    if (usuariosConScore[0].score >= 0.7) {
+      console.log(
+        `   ✅ Usuario con mejor score: ${usuariosConScore[0].nombre}`
+      );
       return [usuariosConScore[0]];
     }
-    
-    return usuariosConScore.slice(0, 3).map(u => ({
+
+    // Retornar los top 3
+    return usuariosConScore.slice(0, 3).map((u) => ({
       usuario_id: u.usuario_id,
       nombre: u.nombre,
       nit: u.nit,
       categoria: u.categoria,
       como_se_entero: u.como_se_entero,
-      saldo_a_favor: u.saldo_a_favor
+      saldo_a_favor: u.saldo_a_favor,
     }));
   }
-  
+
+  // ESTRATEGIA 2: Búsqueda CONTAINS - nombre completo
+  console.log(`   🎯 Estrategia 2: Búsqueda con LIKE (contiene)...`);
+  usuarios_encontrados = await db
+    .select()
+    .from(usuarios)
+    .where(
+      sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + nombreLimpio + "%"})`
+    );
+
+  if (usuarios_encontrados.length > 0) {
+    console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con LIKE`);
+
+    // FILTRAR: Buscar el que más se parezca
+    const usuariosConScore = usuarios_encontrados.map((u) => {
+      const nombreBD = u.nombre.toLowerCase();
+      const nombreBuscado = nombreLimpio.toLowerCase();
+
+      const palabrasBuscadas = nombreBuscado
+        .split(" ")
+        .filter((p) => p.length > 2);
+      const palabrasEncontradas = palabrasBuscadas.filter((palabra) =>
+        nombreBD.includes(palabra)
+      ).length;
+      const scoreCoincidencia = palabrasEncontradas / palabrasBuscadas.length;
+
+      const diffLongitud = Math.abs(nombreBD.length - nombreBuscado.length);
+      const scoreLongitud =
+        1 - diffLongitud / Math.max(nombreBD.length, nombreBuscado.length);
+
+      const scoreInicio = nombreBD.startsWith(
+        nombreBuscado.split(" ")[0].toLowerCase()
+      )
+        ? 1
+        : 0;
+
+      const scoreTotal =
+        scoreCoincidencia * 0.5 + scoreLongitud * 0.3 + scoreInicio * 0.2;
+
+      return {
+        ...u,
+        score: scoreTotal,
+        scoreCoincidencia,
+        scoreLongitud,
+        scoreInicio,
+      };
+    });
+
+    usuariosConScore.sort((a, b) => b.score - a.score);
+
+    console.log(`   📊 Usuarios ordenados por score:`);
+    usuariosConScore.forEach((u, idx) => {
+      console.log(
+        `      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`
+      );
+    });
+
+    if (usuariosConScore[0].score >= 0.6) {
+      console.log(
+        `   ✅ Usuario con mejor score (${usuariosConScore[0].score.toFixed(2)}): ${usuariosConScore[0].nombre}`
+      );
+      return [usuariosConScore[0]];
+    }
+
+    return usuariosConScore.slice(0, 3).map((u) => ({
+      usuario_id: u.usuario_id,
+      nombre: u.nombre,
+      nit: u.nit,
+      categoria: u.categoria,
+      como_se_entero: u.como_se_entero,
+      saldo_a_favor: u.saldo_a_favor,
+    }));
+  }
+
   // ESTRATEGIA 3: Búsqueda por partes del nombre (primer y último apellido)
   console.log(`   🎯 Estrategia 3: Búsqueda por partes del nombre...`);
-  const palabras = nombreLimpio.split(' ').filter(p => p.length > 2);
-  
+  const palabras = nombreLimpio.split(" ").filter((p) => p.length > 2);
+
   if (palabras.length >= 2) {
     const primeraPalabra = palabras[0];
     const ultimaPalabra = palabras[palabras.length - 1];
-    
+
     console.log(`   🔍 Buscando con: "${primeraPalabra}" Y "${ultimaPalabra}"`);
-    
+
     usuarios_encontrados = await db
       .select()
       .from(usuarios)
       .where(
         and(
-          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + primeraPalabra + '%'})`,
-          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + ultimaPalabra + '%'})`
+          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + primeraPalabra + "%"})`,
+          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + ultimaPalabra + "%"})`
         )
       );
-    
+
     if (usuarios_encontrados.length > 0) {
-      console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda por partes`);
+      console.log(
+        `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda por partes`
+      );
       return usuarios_encontrados;
     }
   }
-  
+
   // ESTRATEGIA 4: Búsqueda con similitud (si PostgreSQL tiene la extensión pg_trgm)
   console.log(`   🎯 Estrategia 4: Búsqueda con similitud...`);
   try {
     usuarios_encontrados = await db
       .select()
       .from(usuarios)
-      .where(sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) > 0.3`)
-      .orderBy(sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) DESC`);
-    
+      .where(
+        sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) > 0.3`
+      )
+      .orderBy(
+        sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) DESC`
+      );
+
     if (usuarios_encontrados.length > 0) {
-      console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con similitud`);
+      console.log(
+        `   ✅ Encontrados ${usuarios_encontrados.length} con similitud`
+      );
       usuarios_encontrados.forEach((u, idx) => {
         console.log(`      ${idx + 1}. ${u.nombre}`);
       });
@@ -310,24 +451,26 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
   } catch (error) {
     console.log(`   ⚠️ Extensión pg_trgm no disponible, saltando...`);
   }
-  
+
   // ESTRATEGIA 5: Buscar cualquier palabra del nombre
   console.log(`   🎯 Estrategia 5: Búsqueda con cualquier palabra...`);
   for (const palabra of palabras) {
     if (palabra.length < 3) continue;
-    
+
     console.log(`   🔍 Probando con: "${palabra}"`);
     usuarios_encontrados = await db
       .select()
       .from(usuarios)
-      .where(sql`LOWER(${usuarios.nombre}) LIKE LOWER(${'%' + palabra + '%'})`);
-    
+      .where(sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + palabra + "%"})`);
+
     if (usuarios_encontrados.length > 0 && usuarios_encontrados.length < 10) {
-      console.log(`   ✅ Encontrados ${usuarios_encontrados.length} con palabra "${palabra}"`);
+      console.log(
+        `   ✅ Encontrados ${usuarios_encontrados.length} con palabra "${palabra}"`
+      );
       return usuarios_encontrados;
     }
   }
-  
+
   console.log(`   ❌ No se encontró ningún usuario`);
   return [];
 }
@@ -336,32 +479,34 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
 async function buscarInversionistaPermisivo(nombre_inversionista: string) {
   console.log(`\n🔍 ========== BÚSQUEDA PERMISIVA DE INVERSIONISTA ==========`);
   console.log(`   📝 Buscando: "${nombre_inversionista}"`);
-  
+
   // Limpiar el nombre de entrada
   const nombreLimpio = nombre_inversionista
     .trim()
-    .replace(/\s+/g, ' ')
-    .replace(/[áàäâã]/gi, 'a')
-    .replace(/[éèëê]/gi, 'e')
-    .replace(/[íìïî]/gi, 'i')
-    .replace(/[óòöôõ]/gi, 'o')
-    .replace(/[úùüû]/gi, 'u')
-    .replace(/ñ/gi, 'n');
-  
+    .replace(/\s+/g, " ")
+    .replace(/[áàäâã]/gi, "a")
+    .replace(/[éèëê]/gi, "e")
+    .replace(/[íìïî]/gi, "i")
+    .replace(/[óòöôõ]/gi, "o")
+    .replace(/[úùüû]/gi, "u")
+    .replace(/ñ/gi, "n");
+
   console.log(`   🧹 Nombre limpio: "${nombreLimpio}"`);
-  
+
   // ESTRATEGIA 1: Búsqueda exacta (case insensitive)
   console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
   let inversionistas_encontrados = await db
     .select()
     .from(inversionistas)
     .where(sql`LOWER(${inversionistas.nombre}) = LOWER(${nombreLimpio})`);
-  
+
   if (inversionistas_encontrados.length > 0) {
-    console.log(`   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta`);
+    console.log(
+      `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta`
+    );
     return inversionistas_encontrados;
   }
-  
+
   // ESTRATEGIA 1.5: Búsqueda exacta sin tildes
   console.log(`   🎯 Estrategia 1.5: Búsqueda exacta sin tildes...`);
   inversionistas_encontrados = await db
@@ -376,105 +521,140 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
           'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u')
       ) = LOWER(${nombreLimpio})`
     );
-  
+
   if (inversionistas_encontrados.length > 0) {
-    console.log(`   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta sin tildes`);
+    console.log(
+      `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta sin tildes`
+    );
     return inversionistas_encontrados;
   }
-  
+
   // ESTRATEGIA 2: Búsqueda CONTAINS
   console.log(`   🎯 Estrategia 2: Búsqueda con LIKE (contiene)...`);
   inversionistas_encontrados = await db
     .select()
     .from(inversionistas)
-    .where(sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${'%' + nombreLimpio + '%'})`);
-  
+    .where(
+      sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + nombreLimpio + "%"})`
+    );
+
   if (inversionistas_encontrados.length > 0) {
-    console.log(`   ✅ Encontrados ${inversionistas_encontrados.length} con LIKE`);
-    
+    console.log(
+      `   ✅ Encontrados ${inversionistas_encontrados.length} con LIKE`
+    );
+
     // Calcular score de similitud
-    const inversionistasConScore = inversionistas_encontrados.map(inv => {
+    const inversionistasConScore = inversionistas_encontrados.map((inv) => {
       const nombreBD = inv.nombre.toLowerCase();
       const nombreBuscado = nombreLimpio.toLowerCase();
-      
-      const palabrasBuscadas = nombreBuscado.split(' ').filter(p => p.length > 2);
-      const palabrasEncontradas = palabrasBuscadas.filter(palabra => 
+
+      const palabrasBuscadas = nombreBuscado
+        .split(" ")
+        .filter((p) => p.length > 2);
+      const palabrasEncontradas = palabrasBuscadas.filter((palabra) =>
         nombreBD.includes(palabra)
       ).length;
       const scoreCoincidencia = palabrasEncontradas / palabrasBuscadas.length;
-      
+
       const diffLongitud = Math.abs(nombreBD.length - nombreBuscado.length);
-      const scoreLongitud = 1 - (diffLongitud / Math.max(nombreBD.length, nombreBuscado.length));
-      
-      const scoreInicio = nombreBD.startsWith(nombreBuscado.split(' ')[0].toLowerCase()) ? 1 : 0;
-      
-      const scoreTotal = (scoreCoincidencia * 0.5) + (scoreLongitud * 0.3) + (scoreInicio * 0.2);
-      
+      const scoreLongitud =
+        1 - diffLongitud / Math.max(nombreBD.length, nombreBuscado.length);
+
+      const scoreInicio = nombreBD.startsWith(
+        nombreBuscado.split(" ")[0].toLowerCase()
+      )
+        ? 1
+        : 0;
+
+      const scoreTotal =
+        scoreCoincidencia * 0.5 + scoreLongitud * 0.3 + scoreInicio * 0.2;
+
       return { ...inv, score: scoreTotal };
     });
-    
+
     inversionistasConScore.sort((a, b) => b.score - a.score);
-    
+
     console.log(`   📊 Inversionistas ordenados por score:`);
     inversionistasConScore.forEach((inv, idx) => {
-      console.log(`      ${idx + 1}. ${inv.nombre} (score: ${inv.score.toFixed(2)})`);
+      console.log(
+        `      ${idx + 1}. ${inv.nombre} (score: ${inv.score.toFixed(2)})`
+      );
     });
-    
+
     if (inversionistasConScore[0].score >= 0.6) {
-      console.log(`   ✅ Inversionista con mejor score: ${inversionistasConScore[0].nombre}`);
+      console.log(
+        `   ✅ Inversionista con mejor score: ${inversionistasConScore[0].nombre}`
+      );
       return [inversionistasConScore[0]];
     }
-    
-    return inversionistasConScore.slice(0, 3).map(inv => ({
+
+    return inversionistasConScore.slice(0, 3).map((inv) => ({
       inversionista_id: inv.inversionista_id,
-      nombre: inv.nombre
+      nombre: inv.nombre,
     }));
   }
-  
+
   // ESTRATEGIA 3: Búsqueda por partes del nombre
   console.log(`   🎯 Estrategia 3: Búsqueda por partes del nombre...`);
-  const palabras = nombreLimpio.split(' ').filter(p => p.length > 2);
-  
+  const palabras = nombreLimpio.split(" ").filter((p) => p.length > 2);
+
   if (palabras.length >= 2) {
     const primeraPalabra = palabras[0];
     const ultimaPalabra = palabras[palabras.length - 1];
-    
+
     console.log(`   🔍 Buscando con: "${primeraPalabra}" Y "${ultimaPalabra}"`);
-    
+
     inversionistas_encontrados = await db
       .select()
       .from(inversionistas)
       .where(
         and(
-          sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${'%' + primeraPalabra + '%'})`,
-          sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${'%' + ultimaPalabra + '%'})`
+          sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + primeraPalabra + "%"})`,
+          sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + ultimaPalabra + "%"})`
         )
       );
-    
+
     if (inversionistas_encontrados.length > 0) {
-      console.log(`   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda por partes`);
+      console.log(
+        `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda por partes`
+      );
       return inversionistas_encontrados;
     }
   }
-  
+
   console.log(`   ❌ No se encontró ningún inversionista`);
   return [];
 }
 
 // 📅 Función helper para convertir "oct. 25" a rango de fechas
-function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; mesDescriptivo: string } {
-  const cleanInput = cuota_mes.trim().toLowerCase().replace(/\./g, '');
-  
+function obtenerRangoDelMes(cuota_mes: string): {
+  inicio: string;
+  fin: string;
+  mesDescriptivo: string;
+} {
+  const cleanInput = cuota_mes.trim().toLowerCase().replace(/\./g, "");
+
   const mesesMap: { [key: string]: number } = {
-    'ene': 0, 'feb': 1, 'mar': 2, 'abr': 3,
-    'may': 4, 'jun': 5, 'jul': 6, 'ago': 7,
-    'sep': 8, 'oct': 9, 'nov': 10, 'dic': 11,
+    ene: 0,
+    feb: 1,
+    mar: 2,
+    abr: 3,
+    may: 4,
+    jun: 5,
+    jul: 6,
+    ago: 7,
+    sep: 8,
+    oct: 9,
+    nov: 10,
+    dic: 11,
   };
 
   const partes = cleanInput.split(/\s+/);
-  
+
   if (partes.length !== 2) {
-    throw new Error(`Formato inválido: "${cuota_mes}". Esperado: "mes. año" (ej: "oct. 25")`);
+    throw new Error(
+      `Formato inválido: "${cuota_mes}". Esperado: "mes. año" (ej: "oct. 25")`
+    );
   }
 
   const mesTexto = partes[0];
@@ -485,9 +665,11 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
   }
 
   const mesNumero = mesesMap[mesTexto];
-  
+
   if (mesNumero === undefined) {
-    throw new Error(`Mes no reconocido: "${mesTexto}". Use formato de 3 letras (ej: "oct", "ago")`);
+    throw new Error(
+      `Mes no reconocido: "${mesTexto}". Use formato de 3 letras (ej: "oct", "ago")`
+    );
   }
 
   const primerDia = new Date(anio, mesNumero, 1);
@@ -496,10 +678,12 @@ function obtenerRangoDelMes(cuota_mes: string): { inicio: string; fin: string; m
   return {
     inicio: primerDia.toISOString().slice(0, 10),
     fin: ultimoDia.toISOString().slice(0, 10),
-    mesDescriptivo: primerDia.toLocaleString('es-GT', { month: 'long', year: 'numeric' })
+    mesDescriptivo: primerDia.toLocaleString("es-GT", {
+      month: "long",
+      year: "numeric",
+    }),
   };
 }
-
 
 const guardarRelacionesFallidas = async (
   relacionesFallidas: RelacionFallida[],
@@ -523,20 +707,25 @@ const guardarRelacionesFallidas = async (
       timestamp: new Date().toISOString(),
       usuario: {
         nombre: usuario.nombre,
-        usuario_id: usuario.usuario_id
+        usuario_id: usuario.usuario_id,
       },
       inversionista_buscado: {
         nombre: inversionista.nombre,
-        inversionista_id: inversionista.inversionista_id
+        inversionista_id: inversionista.inversionista_id,
       },
       capital: capital,
       mes: mes,
       total_creditos_fallidos: relacionesFallidas.length,
       relaciones_fallidas: relacionesFallidas,
       resumen: {
-        creditos_sin_relacion: relacionesFallidas.filter(r => r.razon === "No existe la relación").length,
-        total_inversionistas_alternativos: relacionesFallidas.reduce((sum, r) => sum + r.inversionistas_existentes.length, 0)
-      }
+        creditos_sin_relacion: relacionesFallidas.filter(
+          (r) => r.razon === "No existe la relación"
+        ).length,
+        total_inversionistas_alternativos: relacionesFallidas.reduce(
+          (sum, r) => sum + r.inversionistas_existentes.length,
+          0
+        ),
+      },
     };
 
     fs.writeFileSync(filePath, JSON.stringify(logData, null, 2), "utf-8");
@@ -557,647 +746,426 @@ const guardarRelacionesFallidas = async (
 // 🔥 ENDPOINT PRINCIPAL
 // ========================================
 
-export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
-  try {
-    console.log("🔥 ========== INICIANDO LIQUIDACIÓN DE CUOTAS ==========");
-    console.log(`🔧 MODO CREAR RELACIONES: ${CREAR_RELACIONES_AUTOMATICAMENTE ? 'ACTIVADO ✅' : 'DESACTIVADO ❌'}`);
-    console.log("📝 Input original:", JSON.stringify(input, null, 2));
+interface LiquidarCuotasPorCreditoInput {
+  credito_id: number;
+  inversionista_id: number;
+  cuota_mes: string;
+  capital: number;
+  porcentaje_inversor: number;
+}
 
-    // 🆕 VALIDAR INPUT ANTES DE PROCESAR
-    if (!input.nombre_usuario || input.nombre_usuario.trim() === '') {
-      const errorMsg = "❌ El nombre del usuario es requerido";
+export async function liquidarCuotasPorCredito(
+  input: LiquidarCuotasPorCreditoInput
+) {
+  try {
+    console.log("🔥 ========== INICIANDO LIQUIDACIÓN POR CRÉDITO ==========");
+    console.log(
+      `🔧 MODO CREAR RELACIONES: ${CREAR_RELACIONES_AUTOMATICAMENTE ? "ACTIVADO ✅" : "DESACTIVADO ❌"}`
+    );
+    console.log("📝 Input:", JSON.stringify(input, null, 2));
+
+    // 🆕 VALIDAR INPUT
+    if (!input.credito_id) {
+      const errorMsg = "❌ El ID del crédito es requerido";
       console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, { input });
+      return { success: false, message: errorMsg, error: "credito_id vacío" };
+    }
+
+    if (!input.inversionista_id) {
+      const errorMsg = "❌ El ID del inversionista es requerido";
+      console.error(errorMsg);
       return {
         success: false,
-        data: null,
         message: errorMsg,
-        error: "Nombre de usuario vacío"
+        error: "inversionista_id vacío",
       };
     }
 
-    if (!input.cuota_mes || input.cuota_mes.trim() === '') {
+    if (!input.cuota_mes || input.cuota_mes.trim() === "") {
       const errorMsg = "❌ La cuota mes es requerida";
       console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, { input });
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "Cuota mes vacía"
-      };
+      return { success: false, message: errorMsg, error: "cuota_mes vacía" };
     }
 
     if (!input.capital || input.capital <= 0) {
       const errorMsg = "❌ El capital debe ser mayor a 0";
       console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, { input });
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "Capital inválido"
-      };
+      return { success: false, message: errorMsg, error: "capital inválido" };
     }
 
-    if (!input.nombre_inversionista || input.nombre_inversionista.trim() === '') {
-      const errorMsg = "❌ El nombre del inversionista es requerido";
-      console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, { input });
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "Nombre de inversionista vacío"
-      };
-    }
-
-    // 🧹 NORMALIZAR INPUT CON TRY-CATCH
+    // 🧹 NORMALIZAR MES
     let cuota_mes_normalizada: string;
     try {
       cuota_mes_normalizada = normalizarCuotaMes(input.cuota_mes);
     } catch (err) {
-      const errorMsg = `❌ Formato de mes inválido: "${input.cuota_mes}". Use formato "mes. año" (ej: "oct. 25")`;
+      const errorMsg = `❌ Formato de mes inválido: "${input.cuota_mes}"`;
       console.error(errorMsg, err);
-      escribirLogAdvertencias('ERROR', errorMsg, { input_recibido: input.cuota_mes, error: err });
       return {
         success: false,
-        data: null,
         message: errorMsg,
         error: err instanceof Error ? err.message : String(err),
-        input_recibido: input.cuota_mes
       };
     }
 
-    const nombre_usuario = input.nombre_usuario;
-    const nombre_inversionista = input.nombre_inversionista;
     const capitalTotal = new Big(input.capital);
 
-    console.log(`💰 Capital total recibido: ${capitalTotal.toString()}`);
-    console.log(`👤 Inversionista buscado: "${nombre_inversionista}"`);
+    console.log(`💰 Capital total: ${capitalTotal.toString()}`);
+    console.log(`🆔 Crédito ID: ${input.credito_id}`);
+    console.log(`👤 Inversionista ID: ${input.inversionista_id}`);
 
-    // ============================================
-    // 1️⃣ BUSCAR USUARIO CON BÚSQUEDA ULTRA PERMISIVA
-    // ============================================
-    const usuariosEncontrados = await buscarUsuarioPermisivo(nombre_usuario);
-
-    if (usuariosEncontrados.length === 0) {
-      const errorMsg = `❌ No se encontró ningún usuario con nombre: "${nombre_usuario}"`;
-      console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, { nombre_buscado: nombre_usuario });
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "Usuario no encontrado en la base de datos",
-        nombre_buscado: nombre_usuario,
-        sugerencia: "Verificá que el nombre esté escrito correctamente (tildes, mayúsculas, etc.)"
-      };
+    // 🆕 MOSTRAR PORCENTAJE SI EXISTE
+    if (
+      input.porcentaje_inversor !== undefined &&
+      input.porcentaje_inversor !== null
+    ) {
+      console.log(`📊 % Inversor: ${input.porcentaje_inversor}%`);
     }
 
-    let usuario;
-
-    if (usuariosEncontrados.length > 1) {
-      console.log("⚠️ Múltiples usuarios encontrados:");
-      usuariosEncontrados.forEach((u, idx) => {
-        console.log(`   ${idx + 1}. ${u.nombre} (ID: ${u.usuario_id})`);
-      });
-      
-      const matchExacto = usuariosEncontrados.find(
-        u => u.nombre.trim().toLowerCase() === nombre_usuario.trim().toLowerCase()
-      );
-      
-      if (matchExacto) {
-        console.log(`✅ MATCH EXACTO ENCONTRADO: ${matchExacto.nombre}`);
-        usuario = matchExacto;
-      } else if (usuariosEncontrados.length <= 10) {
-        console.log(`⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${usuariosEncontrados[0].nombre}`);
-        usuario = usuariosEncontrados[0];
-        
-        escribirLogAdvertencias('ADVERTENCIA', 'Múltiples usuarios encontrados, se tomó el primero', {
-          nombre_buscado: nombre_usuario,
-          usuario_seleccionado: usuariosEncontrados[0].nombre,
-          otros_encontrados: usuariosEncontrados.slice(1, 5).map(u => u.nombre)
-        });
-      } else {
-        const errorMsg = `❌ Se encontraron ${usuariosEncontrados.length} usuarios con nombres similares y ninguno coincide exactamente`;
-        console.error(errorMsg);
-        escribirLogAdvertencias('ERROR', errorMsg, {
-          nombre_buscado: nombre_usuario,
-          usuarios_encontrados: usuariosEncontrados.slice(0, 10).map(u => u.nombre)
-        });
-        return {
-          success: false,
-          data: null,
-          message: errorMsg,
-          error: "Múltiples usuarios encontrados sin match exacto",
-          nombre_buscado: nombre_usuario,
-          usuarios_encontrados: usuariosEncontrados.slice(0, 10).map(u => u.nombre),
-          sugerencia: "Especificá el nombre COMPLETO Y EXACTO del usuario"
-        };
-      }
-    } else {
-      usuario = usuariosEncontrados[0];
-    }
-
-    console.log(
-      "✅ Usuario seleccionado:",
-      usuario.nombre,
-      `(ID: ${usuario.usuario_id})`
-    );
-
     // ============================================
-    // 2️⃣ BUSCAR INVERSIONISTA CON BÚSQUEDA ULTRA PERMISIVA
+    // 1️⃣ BUSCAR CRÉDITO DIRECTO POR ID
     // ============================================
-    const inversionistasEncontrados = await buscarInversionistaPermisivo(nombre_inversionista);
+    console.log(`\n🔍 Buscando crédito por ID: ${input.credito_id}...`);
 
-    if (inversionistasEncontrados.length === 0) {
-      const errorMsg = `❌ No se encontró ningún inversionista con nombre: "${nombre_inversionista}"`;
-      console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, { nombre_buscado: nombre_inversionista });
-      return {
-        success: false,
-        data: null,
-        message: errorMsg,
-        error: "Inversionista no encontrado en la base de datos",
-        nombre_buscado: nombre_inversionista,
-        sugerencia: "Verificá que el nombre del inversionista esté correcto"
-      };
-    }
-
-    let inversionista;
-
-    if (inversionistasEncontrados.length > 1) {
-      console.log("⚠️ Múltiples inversionistas encontrados:");
-      inversionistasEncontrados.forEach((inv, idx) => {
-        console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
-      });
-      
-      const matchExacto = inversionistasEncontrados.find(
-        inv => inv.nombre.trim().toLowerCase() === nombre_inversionista.trim().toLowerCase()
-      );
-      
-      if (matchExacto) {
-        console.log(`✅ MATCH EXACTO ENCONTRADO: ${matchExacto.nombre}`);
-        inversionista = matchExacto;
-      } else if (inversionistasEncontrados.length <= 10) {
-        console.log(`⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${inversionistasEncontrados[0].nombre}`);
-        inversionista = inversionistasEncontrados[0];
-        
-        escribirLogAdvertencias('ADVERTENCIA', 'Múltiples inversionistas encontrados, se tomó el primero', {
-          nombre_buscado: nombre_inversionista,
-          inversionista_seleccionado: inversionistasEncontrados[0].nombre,
-          otros_encontrados: inversionistasEncontrados.slice(1, 5).map(inv => inv.nombre)
-        });
-      } else {
-        const errorMsg = `❌ Se encontraron ${inversionistasEncontrados.length} inversionistas con nombres similares`;
-        console.error(errorMsg);
-        escribirLogAdvertencias('ERROR', errorMsg, {
-          nombre_buscado: nombre_inversionista,
-          inversionistas_encontrados: inversionistasEncontrados.slice(0, 10).map(inv => inv.nombre)
-        });
-        return {
-          success: false,
-          data: null,
-          message: errorMsg,
-          error: "Múltiples inversionistas encontrados sin match exacto",
-          nombre_buscado: nombre_inversionista,
-          inversionistas_encontrados: inversionistasEncontrados.slice(0, 10).map(inv => inv.nombre),
-          sugerencia: "Especificá el nombre COMPLETO Y EXACTO del inversionista"
-        };
-      }
-    } else {
-      inversionista = inversionistasEncontrados[0];
-    }
-
-    console.log(
-      "✅ Inversionista seleccionado:",
-      inversionista.nombre,
-      `(ID: ${inversionista.inversionista_id})`
-    );
-
-    // ============================================
-    // 3️⃣ BUSCAR CRÉDITOS DEL USUARIO
-    // ============================================
-    console.log("✅ Paso 3: Buscando créditos del usuario...");
-
-    const creditosUsuario = await db
+    const creditoResult = await db
       .select()
       .from(creditos)
-      .where(eq(creditos.usuario_id, usuario.usuario_id));
+      .where(eq(creditos.credito_id, input.credito_id))
+      .limit(1);
 
-    console.log(`✅ ${creditosUsuario.length} créditos encontrados`);
-
-    if (creditosUsuario.length === 0) {
-      const errorMsg = `❌ El usuario "${usuario.nombre}" no tiene créditos registrados`;
+    if (creditoResult.length === 0) {
+      const errorMsg = `❌ No se encontró el crédito con ID: ${input.credito_id}`;
       console.error(errorMsg);
-      escribirLogAdvertencias('ERROR', errorMsg, {
-        usuario_id: usuario.usuario_id,
-        nombre: usuario.nombre
-      });
       return {
         success: false,
-        data: null,
         message: errorMsg,
-        error: "Usuario sin créditos",
-        usuario: {
-          usuario_id: usuario.usuario_id,
-          nombre: usuario.nombre
-        },
-        sugerencia: "Verificá que los créditos estén cargados en la base de datos"
+        error: "Crédito no encontrado",
       };
     }
 
+    const credito = creditoResult[0];
+    console.log(`✅ Crédito encontrado: ${credito.numero_credito_sifco}`);
+
     // ============================================
-    // 4️⃣ RESETEAR TODAS LAS CUOTAS DEL USUARIO
+    // 2️⃣ BUSCAR INVERSIONISTA DIRECTO POR ID
+    // ============================================
+    console.log(
+      `\n🔍 Buscando inversionista por ID: ${input.inversionista_id}...`
+    );
+
+    const inversionistaResult = await db
+      .select()
+      .from(inversionistas)
+      .where(eq(inversionistas.inversionista_id, input.inversionista_id))
+      .limit(1);
+
+    if (inversionistaResult.length === 0) {
+      const errorMsg = `❌ No se encontró el inversionista con ID: ${input.inversionista_id}`;
+      console.error(errorMsg);
+      return {
+        success: false,
+        message: errorMsg,
+        error: "Inversionista no encontrado",
+      };
+    }
+
+    const inversionista = inversionistaResult[0];
+    console.log(`✅ Inversionista encontrado: ${inversionista.nombre}`);
+
+    // ============================================
+    // 3️⃣ RESETEAR CUOTAS DEL CRÉDITO
     // ============================================
     console.log("\n🔄 ========== RESETEANDO CUOTAS ==========");
-    let totalCuotasReseteadas = 0;
-    
-    for (const credito of creditosUsuario) {
-      console.log(`   🔄 Reseteando cuotas del crédito ${credito.numero_credito_sifco}...`);
-      
-      const cuotasReseteadas = await db
-        .update(cuotas_credito)
-        .set({
-          liquidado_inversionistas: false,
-          fecha_liquidacion_inversionistas: null,
-        })
-        .where(eq(cuotas_credito.credito_id, credito.credito_id))
-        .returning();
 
-      console.log(`   ✅ ${cuotasReseteadas.length} cuotas reseteadas`);
-      totalCuotasReseteadas += cuotasReseteadas.length;
-    }
-    
-    console.log(`✅ Total cuotas reseteadas: ${totalCuotasReseteadas}`);
-    console.log("========================================\n");
+    const cuotasReseteadas = await db
+      .update(cuotas_credito)
+      .set({
+        liquidado_inversionistas: false,
+        fecha_liquidacion_inversionistas: null,
+      })
+      .where(eq(cuotas_credito.credito_id, credito.credito_id))
+      .returning();
+
+    console.log(`✅ ${cuotasReseteadas.length} cuotas reseteadas`);
 
     // ============================================
-    // 5️⃣ CALCULAR RANGO DEL MES CON TRY-CATCH
+    // 4️⃣ CALCULAR RANGO DEL MES
     // ============================================
     let rangoMes;
     try {
       rangoMes = obtenerRangoDelMes(cuota_mes_normalizada);
       console.log(`\n📅 ========== RANGO CALCULADO ==========`);
-      console.log(`   Input original: "${input.cuota_mes}"`);
       console.log(`   Normalizado: "${cuota_mes_normalizada}"`);
       console.log(`   Mes descriptivo: ${rangoMes.mesDescriptivo}`);
-      console.log(`   Rango inicio: ${rangoMes.inicio}`);
-      console.log(`   Rango fin: ${rangoMes.fin}`);
+      console.log(`   Rango: ${rangoMes.inicio} - ${rangoMes.fin}`);
       console.log(`========================================\n`);
     } catch (err) {
       const errorMsg = `❌ Error al procesar el mes: "${input.cuota_mes}"`;
       console.error(errorMsg, err);
-      escribirLogAdvertencias('ERROR', errorMsg, {
-        cuota_mes_recibida: input.cuota_mes,
-        cuota_mes_normalizada: cuota_mes_normalizada,
-        error: err
-      });
       return {
         success: false,
-        data: null,
         message: errorMsg,
         error: err instanceof Error ? err.message : String(err),
-        cuota_mes_recibida: input.cuota_mes,
-        cuota_mes_normalizada: cuota_mes_normalizada,
-        sugerencia: "Use formato 'mes. año' (ej: 'oct. 25', 'sep. 2025')"
       };
     }
 
     // ============================================
-    // 6️⃣ PROCESAR CADA CRÉDITO
+    // 5️⃣ BUSCAR CUOTA DEL MES
     // ============================================
-    const resultadosPorCredito: ResultadoCredito[] = [];
-    const relacionesFallidas: RelacionFallida[] = [];
-    let creditosSinCuotas = 0;
-    let totalInversionistasActualizados = 0;
-    let totalRelacionesCreadas = 0;
-    const advertencias: string[] = [];
+    console.log(`\n🔍 BUSCANDO cuota que vence en ${cuota_mes_normalizada}...`);
 
-    for (const credito of creditosUsuario) {
-      console.log(`\n💳 ========== CRÉDITO: ${credito.numero_credito_sifco} ==========`);
-      console.log(`   📅 Plazo: ${credito.plazo} meses`);
-      console.log(`   🆔 ID: ${credito.credito_id}`);
+    const cuotaDelMes = await db
+      .select()
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credito.credito_id),
+          gte(cuotas_credito.fecha_vencimiento, rangoMes.inicio),
+          lte(cuotas_credito.fecha_vencimiento, rangoMes.fin),
+          gte(cuotas_credito.numero_cuota, 0)
+        )
+      )
+      .orderBy(cuotas_credito.numero_cuota);
 
-      // 🔍 PRIMERO: Ver TODAS las cuotas del crédito
-      console.log(`\n   📋 LISTANDO TODAS LAS CUOTAS DEL CRÉDITO:`);
-      const todasLasCuotas = await db
-        .select()
-        .from(cuotas_credito)
-        .where(eq(cuotas_credito.credito_id, credito.credito_id))
-        .orderBy(cuotas_credito.numero_cuota);
+    console.log(`📊 Cuotas encontradas: ${cuotaDelMes.length}`);
 
-      console.log(`   Total cuotas en BD: ${todasLasCuotas.length}`);
-      
-      if (todasLasCuotas.length > 15) {
-        todasLasCuotas.slice(0, 10).forEach((c, idx) => {
-          const liquidado = c.liquidado_inversionistas ? '✅ LIQ' : '❌ NO LIQ';
-          console.log(
-            `      ${idx + 1}. Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento} | ${liquidado}`
-          );
-        });
-        console.log(`      ... (${todasLasCuotas.length - 15} cuotas más) ...`);
-        todasLasCuotas.slice(-5).forEach((c, idx) => {
-          const liquidado = c.liquidado_inversionistas ? '✅ LIQ' : '❌ NO LIQ';
-          const numero = todasLasCuotas.length - 5 + idx + 1;
-          console.log(
-            `      ${numero}. Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento} | ${liquidado}`
-          );
-        });
-      } else {
-        todasLasCuotas.forEach((c, idx) => {
-          const liquidado = c.liquidado_inversionistas ? '✅ LIQ' : '❌ NO LIQ';
-          console.log(
-            `      ${idx + 1}. Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento} | ${liquidado}`
-          );
-        });
-      }
+    let numeroCuotaALiquidar = 0;
+    let cuotasLiquidadas = 0;
+
+    if (cuotaDelMes.length === 0) {
+      console.log(`⚠️ No hay cuota que venza en ${cuota_mes_normalizada}`);
+    } else {
+      const cuotaEncontrada = cuotaDelMes[0];
+      numeroCuotaALiquidar = cuotaEncontrada.numero_cuota;
+
+      console.log(`✅ CUOTA SELECCIONADA: #${numeroCuotaALiquidar}`);
+      console.log(`   Vence: ${cuotaEncontrada.fecha_vencimiento}`);
 
       // ============================================
-      // 7️⃣ BUSCAR LA CUOTA QUE COINCIDE CON EL MES
+      // 6️⃣ LIQUIDAR HASTA ESA CUOTA
       // ============================================
-      console.log(`\n   🔍 BUSCANDO cuota que vence en ${cuota_mes_normalizada}...`);
-      console.log(`   🔍 Buscando entre ${rangoMes.inicio} y ${rangoMes.fin}`);
-
-      const cuotaDelMes = await db
-        .select()
-        .from(cuotas_credito)
+      const resultado = await db
+        .update(cuotas_credito)
+        .set({
+          liquidado_inversionistas: true,
+          fecha_liquidacion_inversionistas: new Date(),
+        })
         .where(
           and(
             eq(cuotas_credito.credito_id, credito.credito_id),
-            gte(cuotas_credito.fecha_vencimiento, rangoMes.inicio),
-            lte(cuotas_credito.fecha_vencimiento, rangoMes.fin)
+            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
           )
         )
-        .orderBy(cuotas_credito.numero_cuota);
+        .returning();
 
-      console.log(`   📊 Cuotas encontradas en el rango: ${cuotaDelMes.length}`);
+      cuotasLiquidadas = resultado.length;
+      console.log(`✅ ${cuotasLiquidadas} cuotas liquidadas`);
+    }
 
-      let numeroCuotaALiquidar = 0;
-      let cuotasLiquidadas = 0;
+    // ============================================
+    // 7️⃣ BUSCAR RELACIÓN INVERSIONISTA
+    // ============================================
+    console.log(`\n👥 ========== BUSCANDO RELACIÓN INVERSIONISTA ==========`);
 
-      if (cuotaDelMes.length === 0) {
-        const advertencia = `⚠️ Crédito ${credito.numero_credito_sifco}: No hay cuota que venza en ${cuota_mes_normalizada}`;
-        console.log(`   ${advertencia}`);
-        advertencias.push(advertencia);
-        
-        escribirLogAdvertencias('ADVERTENCIA', advertencia, {
-          credito_id: credito.credito_id,
-          numero_credito: credito.numero_credito_sifco,
-          mes_buscado: cuota_mes_normalizada,
-          rango_busqueda: `${rangoMes.inicio} - ${rangoMes.fin}`
-        });
-        
-        creditosSinCuotas++;
-      } else {
-        console.log(`   🎯 Cuotas que coinciden con ${cuota_mes_normalizada}:`);
-        cuotaDelMes.forEach((c) => {
-          console.log(`      - Cuota #${c.numero_cuota} | Vence: ${c.fecha_vencimiento}`);
-        });
-
-        const cuotaEncontrada = cuotaDelMes[0];
-        numeroCuotaALiquidar = cuotaEncontrada.numero_cuota;
-
-        console.log(`\n   ✅ CUOTA SELECCIONADA: #${numeroCuotaALiquidar}`);
-        console.log(`      Vence: ${cuotaEncontrada.fecha_vencimiento}`);
-        console.log(`      Liquidado: ${cuotaEncontrada.liquidado_inversionistas ? 'SÍ' : 'NO'}`);
-        console.log(`\n   📊 LIQUIDANDO cuotas desde 1 hasta ${numeroCuotaALiquidar}...`);
-
-        // ============================================
-        // 8️⃣ LIQUIDAR HASTA ESA CUOTA
-        // ============================================
-        const resultado = await db
-          .update(cuotas_credito)
-          .set({
-            liquidado_inversionistas: true,
-            fecha_liquidacion_inversionistas: new Date(),
-          })
-          .where(
-            and(
-              eq(cuotas_credito.credito_id, credito.credito_id),
-              lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
-            )
+    const relacionInversionista = await db
+      .select()
+      .from(creditos_inversionistas)
+      .where(
+        and(
+          eq(creditos_inversionistas.credito_id, credito.credito_id),
+          eq(
+            creditos_inversionistas.inversionista_id,
+            inversionista.inversionista_id
           )
-          .returning();
+        )
+      );
 
-        cuotasLiquidadas = resultado.length;
-        console.log(`   ✅ ${cuotasLiquidadas} cuotas ACTUALIZADAS\n`);
-      }
+    let relacionCreada = false;
+    let inversionistasActualizados = 0;
 
-      // ============================================
-      // 🆕 9️⃣ BUSCAR Y VALIDAR RELACIÓN INVERSIONISTA
-      // ============================================
-      console.log(`\n   👥 ========== BUSCANDO INVERSIONISTA EN ESTE CRÉDITO ==========`);
-      
-      const relacionInversionista = await db
-        .select()
-        .from(creditos_inversionistas)
-        .innerJoin(creditos, eq(creditos.credito_id, creditos_inversionistas.credito_id))
-        .where(
-          and(
-            eq(creditos_inversionistas.credito_id, credito.credito_id),
-            eq(creditos_inversionistas.inversionista_id, inversionista.inversionista_id)
-          )
+    // 🔥 SI NO EXISTE LA RELACIÓN
+    if (relacionInversionista.length === 0) {
+      console.log(`❌ Relación no existe`);
+
+      if (CREAR_RELACIONES_AUTOMATICAMENTE) {
+        console.log(`\n🔥 ========== CREANDO RELACIÓN ==========`);
+
+        const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(
+          100
         );
 
-      // 🔥 VALIDAR SI EXISTE LA RELACIÓN
-      if (relacionInversionista.length === 0) {
-        const errorMsg = `❌ Crédito ${credito.numero_credito_sifco}: El inversionista "${inversionista.nombre}" NO participa en este crédito`;
-        console.error(`   ${errorMsg}`);
-        
-        // 🆕 BUSCAR QUÉ INVERSIONISTAS SÍ PARTICIPAN EN ESTE CRÉDITO
-        console.log(`\n   🔍 Inversionistas que SÍ participan en este crédito:`);
-        
-        const inversionistasDelCredito = await db
-          .select({
-            inversionista_id: inversionistas.inversionista_id,
-            nombre: inversionistas.nombre,
-            monto_aportado: creditos_inversionistas.monto_aportado
-          })
-          .from(creditos_inversionistas)
-          .innerJoin(inversionistas, eq(inversionistas.inversionista_id, creditos_inversionistas.inversionista_id))
-          .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
-        
-        if (inversionistasDelCredito.length === 0) {
-          console.log(`   ℹ️  Este crédito NO tiene inversionistas asociados`);
-        } else {
-          inversionistasDelCredito.forEach((inv, idx) => {
-            console.log(`   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id}) - Aportado: Q${inv.monto_aportado}`);
-          });
-        }
-        
-        // 🔥 SI ESTÁ ACTIVADO, CREAR LA RELACIÓN AUTOMÁTICAMENTE
-        if (CREAR_RELACIONES_AUTOMATICAMENTE) {
-          console.log(`\n   🔥 ========== CREANDO RELACIÓN AUTOMÁTICAMENTE ==========`);
-          
-          const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(100);
-          const cuotaInteres = capitalTotal.times(porcentajeInteres);
-          
-          // 🔥 Valores por defecto (28% Cash-In / 72% Inversionista)
-          const porcentajeCashIn = 28;
-          const porcentajeInversionista = 72;
-          
-          const montoInversionista = cuotaInteres.times(porcentajeInversionista).div(100).toFixed(2);
-          const montoCashIn = cuotaInteres.times(porcentajeCashIn).div(100).toFixed(2);
-          const ivaInversionista = new Big(montoInversionista).times(0.12).toFixed(2);
-          const ivaCashIn = new Big(montoCashIn).times(0.12).toFixed(2);
-          
-          console.log(`      💰 Capital: ${capitalTotal.toFixed(2)}`);
-          console.log(`      📊 % Interés crédito: ${porcentajeInteres.times(100).toString()}%`);
-          console.log(`      💵 Cuota interés: ${cuotaInteres.toFixed(2)}`);
-          console.log(`      📊 % Cash In: ${porcentajeCashIn}% (por defecto)`);
-          console.log(`      📊 % Inversionista: ${porcentajeInversionista}% (por defecto)`);
-          console.log(`      💵 Monto inversionista: ${montoInversionista}`);
-          console.log(`      💵 Monto cash_in: ${montoCashIn}`);
-          console.log(`      📄 IVA inversionista: ${ivaInversionista}`);
-          console.log(`      📄 IVA cash_in: ${ivaCashIn}`);
-          
-          // 🔥 INSERTAR EN BD
-          await db
-            .insert(creditos_inversionistas)
-            .values({
-              credito_id: credito.credito_id,
-              inversionista_id: inversionista.inversionista_id,
-              monto_aportado: capitalTotal.toFixed(2),
-              porcentaje_cash_in: porcentajeCashIn.toString(),
-              porcentaje_participacion_inversionista: porcentajeInversionista.toString(),
-              cuota_inversionista: "0",
-              monto_inversionista: montoInversionista,
-              monto_cash_in: montoCashIn,
-              iva_inversionista: ivaInversionista,
-              iva_cash_in: ivaCashIn
-            });
-          
-          console.log(`      ✅ RELACIÓN CREADA CON ÉXITO`);
-          totalInversionistasActualizados++;
-          totalRelacionesCreadas++;
-          
-          // 🆕 ESCRIBIR LOG DE RELACIÓN CREADA
-          escribirLogAdvertencias('RELACION_CREADA', 
-            `Se creó automáticamente la relación inversionista-crédito`, 
-            {
-              usuario: usuario.nombre,
-              usuario_id: usuario.usuario_id,
-              inversionista: inversionista.nombre,
-              inversionista_id: inversionista.inversionista_id,
-              credito: credito.numero_credito_sifco,
-              credito_id: credito.credito_id,
-              capital: capitalTotal.toString(),
-              porcentaje_cash_in: porcentajeCashIn,
-              porcentaje_inversionista: porcentajeInversionista,
-              monto_inversionista: montoInversionista,
-              monto_cash_in: montoCashIn,
-              iva_inversionista: ivaInversionista,
-              iva_cash_in: ivaCashIn,
-              mes: rangoMes.mesDescriptivo
-            }
+        // 🔥 CALCULAR CUOTA DEL INVERSIONISTA
+        const cuotaTotal = new Big(credito.cuota || 0);
+        const porcentajeParticipacion = capitalTotal
+          .div(new Big(credito.capital))
+          .times(100);
+        const cuotaInversionista = cuotaTotal
+          .minus(credito.seguro_10_cuotas)
+          .minus(credito.membresias_pago)
+          .times(porcentajeParticipacion.div(100))
+          .round(2);
+
+        console.log(`   💰 Capital total crédito: ${credito.capital}`);
+        console.log(`   💰 Capital aportado: ${capitalTotal.toFixed(2)}`);
+        console.log(
+          `   📊 % Participación: ${porcentajeParticipacion.toFixed(2)}%`
+        );
+        console.log(
+          `   💵 Cuota inversionista: ${cuotaInversionista.toFixed(2)}`
+        );
+
+        const cuotaInteres = capitalTotal.times(porcentajeInteres);
+
+        // 🔥 USAR PORCENTAJE DEL EXCEL O DEFAULT
+        let porcentajeInversionista: number;
+        let porcentajeCashIn: number;
+
+        if (
+          input.porcentaje_inversor !== undefined &&
+          input.porcentaje_inversor !== null
+        ) {
+          porcentajeInversionista = input.porcentaje_inversor;
+          porcentajeCashIn = 100 - porcentajeInversionista;
+          console.log(
+            `   📊 % Inversor (del Excel): ${porcentajeInversionista}%`
           );
-          
-          resultadosPorCredito.push({
-            credito_id: credito.credito_id,
-            numero_credito: credito.numero_credito_sifco,
-            cuota_encontrada: numeroCuotaALiquidar || null,
-            cuotas_liquidadas: cuotasLiquidadas,
-            inversionistas_actualizados: 1,
-            relacion_creada: true,
-            advertencia: "Relación inversionista-crédito creada automáticamente (28/72)",
-            cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
-              .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
-              .map(c => ({
-                numero_cuota: c.numero_cuota,
-                fecha_vencimiento: c.fecha_vencimiento
-              })) : []
-          });
-          
-          continue;
+          console.log(`   📊 % Cash-In (calculado): ${porcentajeCashIn}%`);
+        } else {
+          // Valores por defecto
+          porcentajeCashIn = 28;
+          porcentajeInversionista = 72;
+          console.log(
+            `   📊 % Inversor (default): ${porcentajeInversionista}%`
+          );
+          console.log(`   📊 % Cash-In (default): ${porcentajeCashIn}%`);
         }
-        
-        // 🆕 SI NO ESTÁ ACTIVADO, GUARDAR EN RELACIONES FALLIDAS
-        relacionesFallidas.push({
-          credito: credito.numero_credito_sifco,
+
+        const montoInversionista = cuotaInteres
+          .times(porcentajeInversionista)
+          .div(100)
+          .toFixed(2);
+        const montoCashIn = cuotaInteres
+          .times(porcentajeCashIn)
+          .div(100)
+          .toFixed(2);
+        const ivaInversionista = new Big(montoInversionista)
+          .times(0.12)
+          .toFixed(2);
+        const ivaCashIn = new Big(montoCashIn).times(0.12).toFixed(2);
+
+        // 🔥 INSERTAR
+        await db.insert(creditos_inversionistas).values({
           credito_id: credito.credito_id,
-          inversionista_buscado: inversionista.nombre,
           inversionista_id: inversionista.inversionista_id,
-          capital_intentado: capitalTotal.toString(),
-          razon: "No existe la relación",
-          inversionistas_existentes: inversionistasDelCredito.map(inv => ({
-            nombre: inv.nombre,
-            inversionista_id: inv.inversionista_id,
-            monto_aportado: inv.monto_aportado
-          }))
+          monto_aportado: capitalTotal.toFixed(2),
+          porcentaje_cash_in: porcentajeCashIn.toString(),
+          porcentaje_participacion_inversionista:
+            porcentajeInversionista.toString(),
+          cuota_inversionista: cuotaInversionista.toString(),
+          monto_inversionista: montoInversionista,
+          monto_cash_in: montoCashIn,
+          iva_inversionista: ivaInversionista,
+          iva_cash_in: ivaCashIn,
         });
-        
-        advertencias.push(errorMsg);
-        
-        resultadosPorCredito.push({
-          credito_id: credito.credito_id,
-          numero_credito: credito.numero_credito_sifco,
-          cuota_encontrada: numeroCuotaALiquidar || null,
-          cuotas_liquidadas: 0,
-          inversionistas_actualizados: 0,
-          relacion_creada: false,
-          error: errorMsg,
-          inversionistas_existentes: inversionistasDelCredito.map(inv => inv.nombre)
-        });
-        
-        continue; // 🔥 SALTAR ESTE CRÉDITO
+
+        console.log(`✅ RELACIÓN CREADA`);
+        relacionCreada = true;
+        inversionistasActualizados = 1;
+      } else {
+        console.log(`❌ Modo crear relaciones DESACTIVADO`);
+        return {
+          success: false,
+          message: "Relación no existe y modo crear está desactivado",
+          error: "Sin relación inversionista-crédito",
+        };
+      }
+    } else {
+      // ✅ SI EXISTE LA RELACIÓN - ACTUALIZAR
+      const relacion = relacionInversionista[0];
+
+      console.log(`✅ RELACIÓN ENCONTRADA`);
+      console.log(`   Monto aportado ANTERIOR: ${relacion.monto_aportado}`);
+
+      // ============================================
+      // 8️⃣ RECALCULAR TODO
+      // ============================================
+      console.log(`\n🧮 ========== RECALCULANDO MONTOS ==========`);
+
+      // 🔥 RECALCULAR CUOTA DEL INVERSIONISTA
+      const cuotaTotal = new Big(credito.cuota || 0);
+      const porcentajeParticipacion = capitalTotal
+        .div(new Big(credito.capital))
+        .times(100);
+      const nuevaCuotaInversionista = new Big(relacion.cuota_inversionista);
+
+      console.log(`   💰 NUEVO Monto aportado: ${capitalTotal.toFixed(2)}`);
+      console.log(
+        `   📊 % Participación: ${porcentajeParticipacion.toFixed(2)}%`
+      );
+      console.log(
+        `   💵 NUEVA Cuota inversionista: ${nuevaCuotaInversionista.toFixed(2)}`
+      );
+
+      // 🔥 USAR PORCENTAJE DEL EXCEL O EL QUE YA EXISTE EN BD
+      let porcentajeCashIn: Big;
+      let porcentajeInversionista: Big;
+
+      if (
+        input.porcentaje_inversor !== undefined &&
+        input.porcentaje_inversor !== null
+      ) {
+        porcentajeInversionista = new Big(input.porcentaje_inversor);
+        porcentajeCashIn = new Big(100).minus(porcentajeInversionista);
+        console.log(
+          `   📊 % Inversor (del Excel): ${porcentajeInversionista.toFixed(2)}%`
+        );
+        console.log(
+          `   📊 % Cash-In (calculado): ${porcentajeCashIn.toFixed(2)}%`
+        );
+      } else {
+        porcentajeCashIn = normalizarPorcentaje(relacion.porcentaje_cash_in);
+        porcentajeInversionista = normalizarPorcentaje(
+          relacion.porcentaje_participacion_inversionista
+        );
+        console.log(
+          `   📊 % Inversor (de BD): ${porcentajeInversionista.toFixed(2)}%`
+        );
+        console.log(`   📊 % Cash-In (de BD): ${porcentajeCashIn.toFixed(2)}%`);
       }
 
-      // ✅ SI SÍ EXISTE LA RELACIÓN - ACTUALIZAR
-      const relacion = relacionInversionista[0].creditos_inversionistas;
-      
-      console.log(`   ✅ INVERSIONISTA ENCONTRADO EN ESTE CRÉDITO`);
-      console.log(`      Monto aportado ANTERIOR: ${relacion.monto_aportado}`);
-      console.log(`      % Cash In: ${relacion.porcentaje_cash_in}%`);
-      console.log(`      % Inversionista: ${relacion.porcentaje_participacion_inversionista}%`);
-      console.log(`      Cuota inversionista: ${relacion.cuota_inversionista}`);
+      const interes = new Big(credito.porcentaje_interes || 0).div(100);
 
-      // ============================================
-      // 🆕 🔟 RECALCULAR TODO CON EL NUEVO CAPITAL
-      // ============================================
-      console.log(`\n   🧮 ========== RECALCULANDO MONTOS ==========`);
-      
-      const nuevoMontoAportado = capitalTotal;
-      
-      console.log(`      💰 NUEVO Monto aportado: ${nuevoMontoAportado.toFixed(2)}`);
-      
-      const porcentajeCashIn = normalizarPorcentaje(relacion.porcentaje_cash_in);
-      const porcentajeInversionista = normalizarPorcentaje(relacion.porcentaje_participacion_inversionista);
+      const cuotaInteres = capitalTotal.times(interes);
+      const nuevoMontoInversionista = cuotaInteres
+        .times(porcentajeInversionista)
+        .div(100)
+        .toFixed(2);
+      const nuevoMontoCashIn = cuotaInteres
+        .times(porcentajeCashIn)
+        .div(100)
+        .toFixed(2);
 
-      const interes = new Big(relacionInversionista[0].creditos.porcentaje_interes || 0).div(100);
-      
-      console.log(`      📊 % Cash In: ${porcentajeCashIn.times(100).toString()}%`);
-      console.log(`      📊 % Inversionista: ${porcentajeInversionista.times(100).toString()}%`);
-      console.log(`      📊 % Interés: ${interes.times(100).toString()}%`);
-      
-      const cuotaInteres = nuevoMontoAportado.times(interes);
-      
-      console.log(`      💵 Cuota interés total: ${cuotaInteres.toFixed(2)}`);
-      
-      const nuevoMontoInversionista = cuotaInteres.times(porcentajeInversionista).toFixed(2);
-      const nuevoMontoCashIn = cuotaInteres.times(porcentajeCashIn).toFixed(2);
-      
-      console.log(`      💵 Monto inversionista: ${nuevoMontoInversionista}`);
-      console.log(`      💵 Monto cash_in: ${nuevoMontoCashIn}`);
-      
-      const nuevoIvaInversionista = Number(nuevoMontoInversionista) > 0
-        ? new Big(nuevoMontoInversionista).times(0.12).toFixed(2)
-        : "0.00";
-      
-      const nuevoIvaCashIn = Number(nuevoMontoCashIn) > 0
-        ? new Big(nuevoMontoCashIn).times(0.12).toFixed(2)
-        : "0.00";
-      
-      console.log(`      📄 IVA inversionista: ${nuevoIvaInversionista}`);
-      console.log(`      📄 IVA cash_in: ${nuevoIvaCashIn}`);
-      
-      console.log(`\n      💾 ACTUALIZANDO EN BD...`);
-      
+      const nuevoIvaInversionista =
+        Number(nuevoMontoInversionista) > 0
+          ? new Big(nuevoMontoInversionista).times(0.12).toFixed(2)
+          : "0.00";
+
+      const nuevoIvaCashIn =
+        Number(nuevoMontoCashIn) > 0
+          ? new Big(nuevoMontoCashIn).times(0.12).toFixed(2)
+          : "0.00";
+
+      console.log(`   💵 Monto inversionista: ${nuevoMontoInversionista}`);
+      console.log(`   💵 Monto cash_in: ${nuevoMontoCashIn}`);
+
+      // 🔥 ACTUALIZAR
       await db
         .update(creditos_inversionistas)
         .set({
-          monto_aportado: nuevoMontoAportado.toFixed(2),
+          monto_aportado: capitalTotal.toFixed(2),
+          porcentaje_cash_in: porcentajeCashIn.toFixed(2),
+          porcentaje_participacion_inversionista:
+            porcentajeInversionista.toFixed(2),
+          cuota_inversionista: nuevaCuotaInversionista.toString(),
           monto_inversionista: nuevoMontoInversionista,
           monto_cash_in: nuevoMontoCashIn,
           iva_inversionista: nuevoIvaInversionista,
@@ -1207,130 +1175,55 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
         .where(
           and(
             eq(creditos_inversionistas.credito_id, credito.credito_id),
-            eq(creditos_inversionistas.inversionista_id, inversionista.inversionista_id)
+            eq(
+              creditos_inversionistas.inversionista_id,
+              inversionista.inversionista_id
+            )
           )
         );
-      
-      console.log(`      ✅ INVERSIONISTA ACTUALIZADO`);
-      totalInversionistasActualizados++;
 
-      resultadosPorCredito.push({
-        credito_id: credito.credito_id,
-        numero_credito: credito.numero_credito_sifco,
-        cuota_encontrada: numeroCuotaALiquidar || null,
-        cuotas_liquidadas: cuotasLiquidadas,
-        inversionistas_actualizados: 1,
-        relacion_creada: false,
-        advertencia: cuotasLiquidadas === 0 ? "No había cuota para liquidar en este mes, pero el inversionista fue actualizado" : undefined,
-        cuotas_actualizadas: cuotasLiquidadas > 0 ? todasLasCuotas
-          .filter(c => c.numero_cuota <= numeroCuotaALiquidar)
-          .map(c => ({
-            numero_cuota: c.numero_cuota,
-            fecha_vencimiento: c.fecha_vencimiento
-          })) : []
-      });
+      console.log(`✅ RELACIÓN ACTUALIZADA`);
+      inversionistasActualizados = 1;
     }
 
     // ============================================
-    // 🆕 GUARDAR LOG DE RELACIONES FALLIDAS
-    // ============================================
-    let logFilePath = null;
-    if (relacionesFallidas.length > 0) {
-      console.log(`\n🔥 ========== RELACIONES FALLIDAS DETECTADAS ==========`);
-      console.log(`   Total créditos con relaciones faltantes: ${relacionesFallidas.length}`);
-      
-      relacionesFallidas.forEach((relFallida, idx) => {
-        console.log(`\n   ${idx + 1}. Crédito: ${relFallida.credito}`);
-        console.log(`      Inversionista buscado: ${relFallida.inversionista_buscado}`);
-        console.log(`      Capital: Q${relFallida.capital_intentado}`);
-        console.log(`      Inversionistas existentes en este crédito:`);
-        
-        if (relFallida.inversionistas_existentes.length === 0) {
-          console.log(`         - (ninguno)`);
-        } else {
-          relFallida.inversionistas_existentes.forEach(inv => {
-            console.log(`         - ${inv.nombre} (Q${inv.monto_aportado})`);
-          });
-        }
-      });
-      
-      logFilePath = await guardarRelacionesFallidas(
-        relacionesFallidas,
-        usuario,
-        inversionista,
-        capitalTotal.toString(),
-        rangoMes.mesDescriptivo
-      );
-    }
-
-    // ============================================
-    // 1️⃣1️⃣ RESPUESTA FINAL
+    // 9️⃣ RESPUESTA FINAL
     // ============================================
     console.log("\n🎉 ========== LIQUIDACIÓN COMPLETADA ==========");
-    console.log(`✅ Usuario: ${usuario.nombre}`);
+    console.log(`✅ Crédito: ${credito.numero_credito_sifco}`);
     console.log(`✅ Inversionista: ${inversionista.nombre}`);
-    console.log(`✅ Créditos procesados: ${creditosUsuario.length}`);
-    console.log(`✅ Cuotas reseteadas inicialmente: ${totalCuotasReseteadas}`);
-    console.log(`✅ Mes buscado: ${rangoMes.mesDescriptivo}`);
+    console.log(`✅ Cuotas reseteadas: ${cuotasReseteadas.length}`);
+    console.log(`✅ Cuotas liquidadas: ${cuotasLiquidadas}`);
     console.log(`💰 Capital aplicado: ${capitalTotal.toString()}`);
-    console.log(`👥 Inversionistas actualizados: ${totalInversionistasActualizados}`);
-    console.log(`🔥 Relaciones creadas: ${totalRelacionesCreadas}`);
-    console.log(`❌ Relaciones fallidas: ${relacionesFallidas.length}`);
-    console.log(`⚠️ Créditos sin cuotas para este mes: ${creditosSinCuotas}`);
-
-    if (advertencias.length > 0) {
-      console.log(`\n⚠️ ========== ADVERTENCIAS ==========`);
-      advertencias.forEach(adv => console.log(`   ${adv}`));
-      console.log(`======================================`);
-    }
-
-    const totalCuotasLiquidadas = resultadosPorCredito.reduce(
-      (sum, r) => sum + (r.cuotas_liquidadas || 0), 0
-    );
-
-    console.log(`✅ Total cuotas liquidadas: ${totalCuotasLiquidadas}`);
+    console.log(`🔥 Relación creada: ${relacionCreada ? "SÍ" : "NO"}`);
 
     return {
       success: true,
       data: {
-        usuario: {
-          usuario_id: usuario.usuario_id,
-          nombre: usuario.nombre,
+        credito: {
+          credito_id: credito.credito_id,
+          numero_credito: credito.numero_credito_sifco,
         },
         inversionista: {
           inversionista_id: inversionista.inversionista_id,
           nombre: inversionista.nombre,
         },
         capital_aplicado: capitalTotal.toString(),
-        creditos_procesados: creditosUsuario.length,
-        creditos_sin_cuotas: creditosSinCuotas,
-        cuotas_reseteadas: totalCuotasReseteadas,
-        inversionistas_actualizados: totalInversionistasActualizados,
-        relaciones_creadas: totalRelacionesCreadas,
-        relaciones_fallidas: relacionesFallidas.length,
-        cuota_mes_original: input.cuota_mes,
+        cuotas_reseteadas: cuotasReseteadas.length,
+        cuotas_liquidadas: cuotasLiquidadas,
+        inversionistas_actualizados: inversionistasActualizados,
+        relacion_creada: relacionCreada,
         cuota_mes_normalizada: cuota_mes_normalizada,
         rango_liquidado: rangoMes,
-        total_cuotas_liquidadas: totalCuotasLiquidadas,
-        advertencias: advertencias,
-        log_file: logFilePath,
-        detalle_por_credito: resultadosPorCredito,
-        detalle_relaciones_fallidas: relacionesFallidas,
       },
-      message: `Liquidación completada para ${usuario.nombre} - Inversionista: ${inversionista.nombre} - Mes: ${rangoMes.mesDescriptivo} - Capital: Q${capitalTotal.toString()}${totalRelacionesCreadas > 0 ? ` (${totalRelacionesCreadas} relación${totalRelacionesCreadas > 1 ? 'es' : ''} creada${totalRelacionesCreadas > 1 ? 's' : ''})` : ''}${relacionesFallidas.length > 0 ? ` (${relacionesFallidas.length} relación${relacionesFallidas.length > 1 ? 'es' : ''} fallida${relacionesFallidas.length > 1 ? 's' : ''})` : ''}${advertencias.length > 0 ? ` (${advertencias.length} advertencia${advertencias.length > 1 ? 's' : ''})` : ''}`,
+      message: `Liquidación completada - Crédito: ${credito.numero_credito_sifco} - Inversionista: ${inversionista.nombre}${relacionCreada ? " (relación creada)" : ""}`,
     };
   } catch (error) {
-    console.error("❌ Error en liquidación de cuotas:", error);
-    escribirLogAdvertencias('ERROR', 'Error fatal en liquidación', {
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
-    });
+    console.error("❌ Error en liquidación por crédito:", error);
     return {
       success: false,
-      data: null,
-      message: `❌ Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+      message: `❌ Error inesperado: ${error instanceof Error ? error.message : "Error desconocido"}`,
       error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
     };
   }
 }
@@ -1341,20 +1234,22 @@ export async function liquidarCuotasPorUsuario(input: LiquidarCuotasInput) {
  */
 const prepararURLsBoletas = (url_boletas: string[]): string[] => {
   const r2BaseUrl = import.meta.env.URL_PUBLIC_R2; // https://pub-xxx.r2.dev/payments-receipts/
-  
+
   if (!r2BaseUrl) {
-    throw new Error("URL_PUBLIC_R2 no está configurado en las variables de entorno");
+    throw new Error(
+      "URL_PUBLIC_R2 no está configurado en las variables de entorno"
+    );
   }
-  
+
   return url_boletas.map((filename) => {
     // Limpiar cualquier slash que venga
-    const cleanFilename = filename.trim().replace(/^\/+/, '');
-    
+    const cleanFilename = filename.trim().replace(/^\/+/, "");
+
     // Asegurar que el base URL termina con /
-    const baseUrlWithSlash = r2BaseUrl.endsWith("/") 
-      ? r2BaseUrl 
+    const baseUrlWithSlash = r2BaseUrl.endsWith("/")
+      ? r2BaseUrl
       : `${r2BaseUrl}/`;
-    
+
     // Simplemente pegar el filename
     return `${baseUrlWithSlash}${cleanFilename}`;
   });
@@ -1396,9 +1291,7 @@ export async function createBoleta(
     });
 
     // 1️⃣ Validar que el inversionista existe
-    console.log(
-      `\n🔍 Validando inversionista ID: ${data.inversionista_id}...`
-    );
+    console.log(`\n🔍 Validando inversionista ID: ${data.inversionista_id}...`);
     const [inversionista] = await db
       .select({
         inversionista_id: inversionistas.inversionista_id,
@@ -1466,10 +1359,12 @@ export async function createBoleta(
       .returning();
 
     console.log(`\n✅ ========== BOLETA CREADA EXITOSAMENTE ==========`);
-    console.log("📄 Detalles:"); 
+    console.log("📄 Detalles:");
     console.log(`   Inversionista: ${inversionista.nombre}`);
     console.log(`   URL: ${nuevaBoleta.boleta_url}`);
-    console.log(`   Monto: ${nuevaBoleta.monto_boleta ? `Q${nuevaBoleta.monto_boleta}` : "No especificado"}`);
+    console.log(
+      `   Monto: ${nuevaBoleta.monto_boleta ? `Q${nuevaBoleta.monto_boleta}` : "No especificado"}`
+    );
     console.log(`   Estado: ${nuevaBoleta.estado}`);
     console.log(`   Fecha: ${nuevaBoleta.fecha_subida}`);
     console.log(`✅ ========== FIN ==========\n`);
@@ -1508,7 +1403,10 @@ export async function getBoletaById(boleta_id: number) {
       .from(boletasPagoInversionista)
       .innerJoin(
         inversionistas,
-        eq(boletasPagoInversionista.inversionista_id, inversionistas.inversionista_id)
+        eq(
+          boletasPagoInversionista.inversionista_id,
+          inversionistas.inversionista_id
+        )
       )
       .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
       .limit(1);
@@ -1539,16 +1437,19 @@ export async function getAllBoletas(filters?: {
 
     // Construir condiciones
     const conditions: any[] = [];
-    
+
     if (filters?.inversionista_id) {
-      conditions.push(eq(boletasPagoInversionista.inversionista_id, filters.inversionista_id));
+      conditions.push(
+        eq(boletasPagoInversionista.inversionista_id, filters.inversionista_id)
+      );
     }
-    
+
     if (filters?.estado) {
       conditions.push(eq(boletasPagoInversionista.estado, filters.estado));
     }
 
-    const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
+    const whereCondition =
+      conditions.length > 0 ? and(...conditions) : undefined;
 
     // Query
     const boletas = await db
@@ -1559,7 +1460,10 @@ export async function getAllBoletas(filters?: {
       .from(boletasPagoInversionista)
       .innerJoin(
         inversionistas,
-        eq(boletasPagoInversionista.inversionista_id, inversionistas.inversionista_id)
+        eq(
+          boletasPagoInversionista.inversionista_id,
+          inversionistas.inversionista_id
+        )
       )
       .where(whereCondition)
       .orderBy(desc(boletasPagoInversionista.fecha_subida))
@@ -1579,7 +1483,9 @@ export async function getAllBoletas(filters?: {
 // ============================================
 export async function getBoletasPendientes(inversionista_id?: number) {
   try {
-    console.log(`📋 Obteniendo boletas PENDIENTES${inversionista_id ? ` para inversionista ${inversionista_id}` : ''}`);
+    console.log(
+      `📋 Obteniendo boletas PENDIENTES${inversionista_id ? ` para inversionista ${inversionista_id}` : ""}`
+    );
 
     return await getAllBoletas({
       inversionista_id,
@@ -1700,7 +1606,9 @@ export async function deleteBoleta(boleta_id: number) {
 
     // 2️⃣ Verificar que NO esté PROCESADA
     if (boletaExiste[0].estado === "PROCESADO") {
-      throw new Error(`No se puede eliminar una boleta PROCESADA. Boleta ID: ${boleta_id}`);
+      throw new Error(
+        `No se puede eliminar una boleta PROCESADA. Boleta ID: ${boleta_id}`
+      );
     }
 
     // 3️⃣ Eliminar
@@ -1722,13 +1630,18 @@ export async function deleteBoleta(boleta_id: number) {
 // ============================================
 export async function getBoletasStats(inversionista_id?: number) {
   try {
-    console.log(`📊 Obteniendo estadísticas de boletas${inversionista_id ? ` para inversionista ${inversionista_id}` : ''}`);
+    console.log(
+      `📊 Obteniendo estadísticas de boletas${inversionista_id ? ` para inversionista ${inversionista_id}` : ""}`
+    );
 
     const conditions: any[] = [];
     if (inversionista_id) {
-      conditions.push(eq(boletasPagoInversionista.inversionista_id, inversionista_id));
+      conditions.push(
+        eq(boletasPagoInversionista.inversionista_id, inversionista_id)
+      );
     }
-    const whereCondition = conditions.length > 0 ? and(...conditions) : undefined;
+    const whereCondition =
+      conditions.length > 0 ? and(...conditions) : undefined;
 
     const todasBoletas = await db
       .select()
@@ -1737,13 +1650,13 @@ export async function getBoletasStats(inversionista_id?: number) {
 
     const stats = {
       total: todasBoletas.length,
-      pendientes: todasBoletas.filter(b => b.estado === "PENDIENTE").length,
-      procesadas: todasBoletas.filter(b => b.estado === "PROCESADO").length,
+      pendientes: todasBoletas.filter((b) => b.estado === "PENDIENTE").length,
+      procesadas: todasBoletas.filter((b) => b.estado === "PROCESADO").length,
       monto_total_pendiente: todasBoletas
-        .filter(b => b.estado === "PENDIENTE")
+        .filter((b) => b.estado === "PENDIENTE")
         .reduce((sum, b) => sum + Number(b.monto_boleta || 0), 0),
       monto_total_procesado: todasBoletas
-        .filter(b => b.estado === "PROCESADO")
+        .filter((b) => b.estado === "PROCESADO")
         .reduce((sum, b) => sum + Number(b.monto_boleta || 0), 0),
     };
 
@@ -1752,5 +1665,504 @@ export async function getBoletasStats(inversionista_id?: number) {
   } catch (error) {
     console.error("❌ Error obteniendo estadísticas:", error);
     throw error;
+  }
+}
+
+interface LiquidacionBatchItem {
+  nombre_usuario: string;
+  cuota_mes: string;
+  capital: number;
+}
+
+interface LiquidacionBatchInput {
+  nombre_inversionista: string;
+  liquidaciones: LiquidacionBatchItem[];
+}
+
+interface ResultadoLiquidacion {
+  nombre_usuario: string;
+  cuota_mes: string;
+  capital: number;
+  success: boolean;
+  data?: any;
+  message?: string;
+  error?: string;
+}
+
+// ============================================
+// 🔥 FUNCIÓN BATCH INTELIGENTE CON SYNC
+// ============================================
+
+interface LiquidacionBatchItem {
+  nombre_usuario: string;
+  cuota_mes: string;
+  capital: number;
+  meses_en_credito?: number | null;
+  porcentaje_inversor: number; // 🔥 NUEVO CAMPO OPCIONAL
+}
+
+interface LiquidacionBatchInput {
+  nombre_inversionista: string;
+  liquidaciones: LiquidacionBatchItem[];
+}
+export async function liquidarCuotasBatchInteligente(
+  input: LiquidacionBatchInput
+) {
+  try {
+    console.log(
+      "🔥 ========== INICIANDO LIQUIDACIÓN BATCH INTELIGENTE =========="
+    );
+    console.log(`👤 Inversionista: ${input.nombre_inversionista}`);
+    console.log(`📊 Total liquidaciones: ${input.liquidaciones.length}`);
+
+    const { nombre_inversionista, liquidaciones } = input;
+
+    // ============================================
+    // 1️⃣ BUSCAR INVERSIONISTA UNA SOLA VEZ
+    // ============================================
+    console.log(`\n🔍 Buscando inversionista: "${nombre_inversionista}"...`);
+
+    const inversionistasEncontrados =
+      await buscarInversionistaPermisivo(nombre_inversionista);
+
+    if (inversionistasEncontrados.length === 0) {
+      const errorMsg = `❌ Inversionista "${nombre_inversionista}" no encontrado`;
+      console.error(errorMsg);
+
+      return {
+        success: false,
+        error: errorMsg,
+        total_procesados: 0,
+        exitosos: 0,
+        fallidos: liquidaciones.length,
+        agregados: 0,
+        actualizados: 0,
+        eliminados: 0,
+      };
+    }
+
+    let inversionista;
+
+    if (inversionistasEncontrados.length > 1) {
+      console.log("⚠️ Múltiples inversionistas encontrados:");
+      inversionistasEncontrados.forEach((inv, idx) => {
+        console.log(
+          `   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`
+        );
+      });
+
+      const matchExacto = inversionistasEncontrados.find(
+        (inv) =>
+          inv.nombre.trim().toLowerCase() ===
+          nombre_inversionista.trim().toLowerCase()
+      );
+
+      if (matchExacto) {
+        console.log(`✅ MATCH EXACTO: ${matchExacto.nombre}`);
+        inversionista = matchExacto;
+      } else {
+        console.log(
+          `⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${inversionistasEncontrados[0].nombre}`
+        );
+        inversionista = inversionistasEncontrados[0];
+      }
+    } else {
+      inversionista = inversionistasEncontrados[0];
+    }
+
+    console.log(
+      `✅ Inversionista seleccionado: ${inversionista.nombre} (ID: ${inversionista.inversionista_id})`
+    );
+
+    // ============================================
+    // 🔥 2️⃣ OBTENER TODAS LAS RELACIONES DEL INVERSIONISTA
+    // ============================================
+    console.log(`\n📊 ========== OBTENIENDO RELACIONES ACTUALES ==========`);
+
+    const relacionesActuales = await db
+      .select({
+        credito_inversionista_id: creditos_inversionistas.id,
+        credito_id: creditos_inversionistas.credito_id,
+        monto_aportado: creditos_inversionistas.monto_aportado,
+        usuario_nombre: usuarios.nombre,
+        usuario_id: usuarios.usuario_id,
+        numero_credito: creditos.numero_credito_sifco,
+      })
+      .from(creditos_inversionistas)
+      .innerJoin(
+        creditos,
+        eq(creditos.credito_id, creditos_inversionistas.credito_id)
+      )
+      .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
+      .where(
+        eq(
+          creditos_inversionistas.inversionista_id,
+          inversionista.inversionista_id
+        )
+      );
+
+    console.log(`📊 Relaciones actuales en BD: ${relacionesActuales.length}`);
+
+    // 🔥 FUNCIÓN HELPER PARA NORMALIZAR NOMBRES
+    const normalizarNombre = (nombre: string): string => {
+      return nombre
+        .toLowerCase()
+        .trim()
+        .replace(/\s+/g, " ")
+        .replace(/[áàäâã]/gi, "a")
+        .replace(/[éèëê]/gi, "e")
+        .replace(/[íìïî]/gi, "i")
+        .replace(/[óòöôõ]/gi, "o")
+        .replace(/[úùüû]/gi, "u")
+        .replace(/ñ/gi, "n");
+    };
+
+    // 🔥 CREAR DOS MAPS:
+    // 1. Por CREDITO_ID (para tracking de eliminaciones)
+    const mapRelacionesPorCredito = new Map(
+      relacionesActuales.map((r) => [r.credito_id, r])
+    );
+
+    // 2. Por USUARIO (puede tener múltiples créditos) - Array de relaciones
+    const mapRelacionesPorUsuario = new Map<
+      string,
+      typeof relacionesActuales
+    >();
+
+    relacionesActuales.forEach((r) => {
+      // 🆕 NORMALIZAR el nombre igual que en la búsqueda
+      const nombreNormalizado = normalizarNombre(r.usuario_nombre);
+
+      // 🆕 TAMBIÉN intentar con la primera parte (antes del "/")
+      const nombrePrincipal = nombreNormalizado.split("/")[0].trim();
+
+      // Agregar con el nombre completo normalizado
+      if (!mapRelacionesPorUsuario.has(nombreNormalizado)) {
+        mapRelacionesPorUsuario.set(nombreNormalizado, []);
+      }
+      mapRelacionesPorUsuario.get(nombreNormalizado)!.push(r);
+
+      // 🆕 TAMBIÉN agregar con el nombre principal (antes del "/") si es diferente
+      if (nombrePrincipal !== nombreNormalizado && nombrePrincipal.length > 0) {
+        if (!mapRelacionesPorUsuario.has(nombrePrincipal)) {
+          mapRelacionesPorUsuario.set(nombrePrincipal, []);
+        }
+        mapRelacionesPorUsuario.get(nombrePrincipal)!.push(r);
+      }
+    });
+
+    console.log(`📊 Map por crédito: ${mapRelacionesPorCredito.size} créditos`);
+    console.log(
+      `📊 Map por usuario: ${mapRelacionesPorUsuario.size} keys únicas`
+    );
+
+    // 🔥 Mostrar desglose si hay usuarios con múltiples créditos
+    const usuariosRevisados = new Set<string>();
+    for (const [nombreKey, relaciones] of mapRelacionesPorUsuario) {
+      // Evitar duplicados (porque agregamos tanto nombre completo como nombre principal)
+      const nombreOriginal = relaciones[0].usuario_nombre;
+      if (usuariosRevisados.has(nombreOriginal)) continue;
+      usuariosRevisados.add(nombreOriginal);
+
+      if (relaciones.length > 1) {
+        console.log(`   👤 ${nombreOriginal}: ${relaciones.length} créditos`);
+        relaciones.forEach((rel) => {
+          console.log(
+            `      - Crédito ${rel.numero_credito} (ID: ${rel.credito_id}) - Q${rel.monto_aportado}`
+          );
+        });
+      }
+    }
+
+    // ============================================
+    // 3️⃣ PROCESAR CADA LIQUIDACIÓN
+    // ============================================
+    const resultados: any[] = [];
+    const creditosProcesados = new Set<number>(); // 🔥 TRACKING de créditos procesados
+    let exitosos = 0;
+    let fallidos = 0;
+    let agregados = 0;
+    let actualizados = 0;
+
+    console.log(`\n📋 ========== PROCESANDO LIQUIDACIONES ==========`);
+
+    for (let i = 0; i < liquidaciones.length; i++) {
+      const liquidacion = liquidaciones[i];
+
+      // 🔥 NORMALIZAR el nombre de búsqueda
+      const nombreKeyBusqueda = normalizarNombre(liquidacion.nombre_usuario);
+
+      const indicadorPorcentaje = liquidacion.porcentaje_inversor
+        ? ` 📊 ${liquidacion.porcentaje_inversor}%`
+        : "";
+      console.log(
+        `\n[${i + 1}/${liquidaciones.length}] 👤 ${liquidacion.nombre_usuario} - 📅 ${liquidacion.cuota_mes} - 💰 Q${liquidacion.capital.toFixed(2)} ${liquidacion.meses_en_credito === 1 ? "🆕 (MES 1)" : ""}${indicadorPorcentaje}`
+      );
+
+      // 🔥 BUSCAR EN LAS RELACIONES EXISTENTES POR NOMBRE DE USUARIO NORMALIZADO
+      const relacionesUsuario =
+        mapRelacionesPorUsuario.get(nombreKeyBusqueda) || [];
+
+      try {
+        if (relacionesUsuario.length > 0) {
+          // ✅ ENCONTRAMOS AL USUARIO EN LAS RELACIONES EXISTENTES
+          console.log(
+            `   ✅ Usuario encontrado en relaciones (${relacionesUsuario.length} crédito${relacionesUsuario.length > 1 ? "s" : ""})`
+          );
+
+          // 🎯 Estrategia: usar el PRIMER crédito
+          const relacionExistente = relacionesUsuario[0];
+
+          if (relacionesUsuario.length > 1) {
+            console.log(`   ⚠️ Usuario tiene múltiples créditos, usando:`);
+            relacionesUsuario.forEach((rel, idx) => {
+              const marca = idx === 0 ? "👉" : "  ";
+              console.log(
+                `      ${marca} Crédito ${rel.numero_credito} (ID: ${rel.credito_id}) - Q${rel.monto_aportado}`
+              );
+            });
+          } else {
+            console.log(
+              `   📋 Crédito: ${relacionExistente.numero_credito} (ID: ${relacionExistente.credito_id})`
+            );
+          }
+
+          // 🔥 MARCAR COMO PROCESADO
+          creditosProcesados.add(relacionExistente.credito_id);
+
+          // 🔥 LIQUIDAR
+          const resultado = await liquidarCuotasPorCredito({
+            credito_id: relacionExistente.credito_id,
+            inversionista_id: inversionista.inversionista_id,
+            cuota_mes: liquidacion.cuota_mes,
+            capital: liquidacion.capital,
+            porcentaje_inversor: liquidacion.porcentaje_inversor,
+          });
+
+          if (resultado.success) {
+            exitosos++;
+            if (resultado.data?.relacion_creada) {
+              agregados++;
+              console.log(`   ➕ Relación creada`);
+            } else {
+              actualizados++;
+              console.log(`   🔄 Relación actualizada`);
+            }
+          } else {
+            fallidos++;
+            console.log(`   ❌ Falló: ${resultado.message}`);
+          }
+
+          resultados.push({
+            nombre_usuario: liquidacion.nombre_usuario,
+            cuota_mes: liquidacion.cuota_mes,
+            capital: liquidacion.capital,
+            credito_id: relacionExistente.credito_id,
+            numero_credito: relacionExistente.numero_credito,
+            meses_en_credito: liquidacion.meses_en_credito,
+            porcentaje_inversor: liquidacion.porcentaje_inversor,
+            ...resultado,
+          });
+        } else {
+          // ❌ NO ENCONTRAMOS AL USUARIO EN LAS RELACIONES EXISTENTES
+          console.log(
+            `   ⚠️ Usuario NO tiene relación con ${inversionista.nombre}`
+          );
+          console.log(`   🔍 Buscando usuario en sistema...`);
+
+          // 🔥 BUSCAR USUARIO EN LA BASE DE DATOS
+          const usuariosEncontrados = await buscarUsuarioPermisivo(
+            liquidacion.nombre_usuario
+          );
+
+          if (usuariosEncontrados.length === 0) {
+            fallidos++;
+            console.log(`   ❌ Usuario no encontrado en sistema`);
+            resultados.push({
+              nombre_usuario: liquidacion.nombre_usuario,
+              cuota_mes: liquidacion.cuota_mes,
+              capital: liquidacion.capital,
+              meses_en_credito: liquidacion.meses_en_credito,
+              porcentaje_inversor: liquidacion.porcentaje_inversor,
+              success: false,
+              error: "Usuario no encontrado en sistema",
+            });
+            continue;
+          }
+
+          const usuario = usuariosEncontrados[0];
+          console.log(
+            `   ✅ Usuario encontrado: ${usuario.nombre} (ID: ${usuario.usuario_id})`
+          );
+
+          // 🔥 BUSCAR CRÉDITOS DEL USUARIO
+          const creditosUsuario = await db
+            .select()
+            .from(creditos)
+            .where(eq(creditos.usuario_id, usuario.usuario_id));
+
+          if (creditosUsuario.length === 0) {
+            fallidos++;
+            console.log(`   ❌ Usuario no tiene créditos`);
+            resultados.push({
+              nombre_usuario: liquidacion.nombre_usuario,
+              cuota_mes: liquidacion.cuota_mes,
+              capital: liquidacion.capital,
+              meses_en_credito: liquidacion.meses_en_credito,
+              porcentaje_inversor: liquidacion.porcentaje_inversor,
+              success: false,
+              error: "Usuario sin créditos",
+            });
+            continue;
+          }
+
+          // 🎯 Tomar el primer crédito (o el más reciente)
+          const creditoParaUsar = creditosUsuario[0];
+          console.log(`   📋 Créditos disponibles: ${creditosUsuario.length}`);
+          console.log(
+            `   👉 Usando crédito: ${creditoParaUsar.numero_credito_sifco} (ID: ${creditoParaUsar.credito_id})`
+          );
+
+          // 🔥 MARCAR COMO PROCESADO
+          creditosProcesados.add(creditoParaUsar.credito_id);
+
+          // 🔥 LIQUIDAR (esto creará o actualizará la relación)
+          const resultado = await liquidarCuotasPorCredito({
+            credito_id: creditoParaUsar.credito_id,
+            inversionista_id: inversionista.inversionista_id,
+            cuota_mes: liquidacion.cuota_mes,
+            capital: liquidacion.capital,
+            porcentaje_inversor: liquidacion.porcentaje_inversor,
+          });
+
+          if (resultado.success) {
+            exitosos++;
+            if (resultado.data?.relacion_creada) {
+              agregados++;
+              console.log(`   ➕ Nueva relación creada`);
+            } else {
+              actualizados++;
+              console.log(`   🔄 Relación actualizada`);
+            }
+          } else {
+            fallidos++;
+            console.log(`   ❌ Falló: ${resultado.message}`);
+          }
+
+          resultados.push({
+            nombre_usuario: liquidacion.nombre_usuario,
+            cuota_mes: liquidacion.cuota_mes,
+            capital: liquidacion.capital,
+            credito_id: creditoParaUsar.credito_id,
+            numero_credito: creditoParaUsar.numero_credito_sifco,
+            meses_en_credito: liquidacion.meses_en_credito,
+            porcentaje_inversor: liquidacion.porcentaje_inversor,
+            ...resultado,
+          });
+        }
+      } catch (error) {
+        fallidos++;
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`   ❌ Error: ${errorMsg}`);
+
+        resultados.push({
+          nombre_usuario: liquidacion.nombre_usuario,
+          cuota_mes: liquidacion.cuota_mes,
+          capital: liquidacion.capital,
+          meses_en_credito: liquidacion.meses_en_credito,
+          porcentaje_inversor: liquidacion.porcentaje_inversor,
+          success: false,
+          error: errorMsg,
+        });
+      }
+    }
+
+    // ============================================
+    // 🆕 4️⃣ ELIMINAR RELACIONES HUÉRFANAS (por credito_id)
+    // ============================================
+    console.log(`\n🧹 ========== LIMPIANDO RELACIONES HUÉRFANAS ==========`);
+    console.log(
+      `   📊 Créditos procesados en Excel: ${creditosProcesados.size}`
+    );
+    console.log(`   📊 Créditos en BD: ${mapRelacionesPorCredito.size}`);
+
+    let eliminados = 0;
+    const relacionesEliminadas: any[] = [];
+
+    // 🔥 Iterar sobre TODOS los créditos en BD
+    for (const [creditoId, relacion] of mapRelacionesPorCredito) {
+      // Si el crédito NO fue procesado en el Excel, eliminar la relación
+      if (!creditosProcesados.has(creditoId)) {
+        console.log(`\n   ➖ ELIMINANDO relación huérfana:`);
+        console.log(`      Usuario: ${relacion.usuario_nombre}`);
+        console.log(
+          `      Crédito: ${relacion.numero_credito} (ID: ${creditoId})`
+        );
+        console.log(`      Monto aportado: Q${relacion.monto_aportado}`);
+
+        await db
+          .delete(creditos_inversionistas)
+          .where(
+            eq(creditos_inversionistas.id, relacion.credito_inversionista_id)
+          );
+
+        eliminados++;
+
+        relacionesEliminadas.push({
+          usuario: relacion.usuario_nombre,
+          credito: relacion.numero_credito,
+          credito_id: creditoId,
+          monto_aportado: relacion.monto_aportado,
+        });
+
+        console.log(`      ✅ Relación eliminada`);
+      }
+    }
+
+    if (eliminados === 0) {
+      console.log(`   ✅ No hay relaciones huérfanas para eliminar`);
+    } else {
+      console.log(`\n   🗑️  Total relaciones eliminadas: ${eliminados}`);
+    }
+
+    // ============================================
+    // 5️⃣ RESUMEN FINAL
+    // ============================================
+    console.log(`\n🎉 ========== BATCH INTELIGENTE COMPLETADO ==========`);
+    console.log(`✅ Exitosos: ${exitosos}`);
+    console.log(`❌ Fallidos: ${fallidos}`);
+    console.log(`➕ Agregados (nuevas relaciones): ${agregados}`);
+    console.log(`🔄 Actualizados (relaciones existentes): ${actualizados}`);
+    console.log(`➖ Eliminados (relaciones huérfanas): ${eliminados}`);
+    console.log(`📊 Total procesados: ${liquidaciones.length}`);
+    console.log(`=========================================\n`);
+
+    return {
+      success: true,
+      inversionista: {
+        inversionista_id: inversionista.inversionista_id,
+        nombre: inversionista.nombre,
+      },
+      total_procesados: liquidaciones.length,
+      exitosos,
+      fallidos,
+      agregados,
+      actualizados,
+      eliminados,
+      relaciones_eliminadas: relacionesEliminadas,
+      resultados,
+    };
+  } catch (error) {
+    console.error("❌ Error en batch inteligente:", error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+      total_procesados: input.liquidaciones.length,
+      exitosos: 0,
+      fallidos: input.liquidaciones.length,
+      agregados: 0,
+      actualizados: 0,
+      eliminados: 0,
+    };
   }
 }

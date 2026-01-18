@@ -1509,14 +1509,7 @@ export async function obtenerCreditosConPagosPendientes(
           `📅 Crédito ${credito.creditoId}, Cuota ${numeroCuota}: fecha_vencimiento = ${fechaVencimiento}`
         );
 
-        // 🚫 VALIDACIÓN: Si la cuota es del MES ACTUAL o FUTURA, ignorar este crédito
-        if (fechaVencimiento >= rangoMesActual.inicio) {
-          console.log(
-            `⚠️ Crédito ${credito.creditoId}, Cuota ${numeroCuota}: Es del mes actual o futura (${fechaVencimiento}), se IGNORA`
-          );
-          return null;
-        }
-
+      
         console.log(
           `✅ Crédito ${credito.creditoId}, Cuota ${numeroCuota}: Es de mes anterior (${fechaVencimiento}), se PROCESA`
         );

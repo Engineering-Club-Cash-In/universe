@@ -1687,32 +1687,150 @@ export const findOrCreateInvestor = async (
   nombre: string,
   emite_factura: boolean = true
 ) => {
-  // 1. Buscar inversionista por nombre con LIKE
-  const existingInvestor = await db
+  console.log(`🔍 Buscando/creando inversionista: "${nombre}"`);
+  
+  // 🧹 NORMALIZAR nombre
+  const nombreNormalizado = nombre.trim();
+  const nombreLower = nombreNormalizado.toLowerCase();
+  
+  // 1️⃣ BÚSQUEDA EXACTA (case insensitive)
+  console.log(`   🎯 Estrategia 1: Búsqueda exacta...`);
+  const exactMatch = await db
     .select()
     .from(inversionistas)
-    .where(like(inversionistas.nombre, `%${nombre}%`))
+    .where(sql`LOWER(TRIM(${inversionistas.nombre})) = ${nombreLower}`)
     .limit(1);
 
-  if (existingInvestor.length > 0) {
-    return existingInvestor[0];
+  if (exactMatch.length > 0) {
+    console.log(`   ✅ Inversionista encontrado (exacto): ${exactMatch[0].nombre} (ID: ${exactMatch[0].inversionista_id})`);
+    return exactMatch[0];
   }
 
-  // 2. Si no existe, crear inversionista con defaults
+  // 2️⃣ BÚSQUEDA SIN TILDES
+  console.log(`   🎯 Estrategia 2: Búsqueda sin tildes...`);
+  const nombreSinTildes = nombreNormalizado
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  
+  const withoutAccents = await db
+    .select()
+    .from(inversionistas)
+    .where(
+      sql`LOWER(
+        TRIM(
+          translate(
+            ${inversionistas.nombre}, 
+            'áéíóúÁÉÍÓÚñÑ', 
+            'aeiouAEIOUnN'
+          )
+        )
+      ) = ${nombreSinTildes}`
+    )
+    .limit(1);
+
+  if (withoutAccents.length > 0) {
+    console.log(`   ✅ Inversionista encontrado (sin tildes): ${withoutAccents[0].nombre} (ID: ${withoutAccents[0].inversionista_id})`);
+    return withoutAccents[0];
+  }
+
+  // 3️⃣ BÚSQUEDA "COMIENZA CON" - Para nombres con apellidos extras
+  console.log(`   🎯 Estrategia 3: Búsqueda "comienza con"...`);
+  
+  // 🔥 BUSCAR SI ALGÚN NOMBRE EN BD ESTÁ CONTENIDO EN EL NOMBRE DEL EXCEL
+  // Ejemplo: Si en BD hay "Ana Lucia Salvatierra" y en Excel "Ana Lucia Salvatierra Mayen"
+  //          debería encontrar el de BD porque "Ana Lucia Salvatierra" está contenido
+  
+  const allInvestors = await db
+    .select()
+    .from(inversionistas);
+  
+  // Buscar si el nombre del Excel COMIENZA con algún nombre de BD
+  const startsWithMatch = allInvestors.find(inv => {
+    const invNombreLower = inv.nombre.toLowerCase().trim();
+    const nombreLowerTrim = nombreLower.trim();
+    
+    // Si el nombre de BD está contenido al inicio del nombre del Excel
+    return nombreLowerTrim.startsWith(invNombreLower) && nombreLowerTrim.length > invNombreLower.length;
+  });
+
+  if (startsWithMatch) {
+    console.log(`   ✅ Inversionista encontrado (nombre base): ${startsWithMatch.nombre} (ID: ${startsWithMatch.inversionista_id})`);
+    console.log(`   ℹ️  "${nombreNormalizado}" coincide con "${startsWithMatch.nombre}"`);
+    return startsWithMatch;
+  }
+
+  // 4️⃣ BÚSQUEDA INVERSA - Si en BD hay un nombre más largo
+  console.log(`   🎯 Estrategia 4: Búsqueda inversa (nombre más largo en BD)...`);
+  
+  const containsMatch = allInvestors.find(inv => {
+    const invNombreLower = inv.nombre.toLowerCase().trim();
+    const nombreLowerTrim = nombreLower.trim();
+    
+    // Si el nombre del Excel está contenido al inicio del nombre de BD
+    return invNombreLower.startsWith(nombreLowerTrim) && invNombreLower.length > nombreLowerTrim.length;
+  });
+
+  if (containsMatch) {
+    console.log(`   ✅ Inversionista encontrado (nombre completo en BD): ${containsMatch.nombre} (ID: ${containsMatch.inversionista_id})`);
+    console.log(`   ℹ️  "${nombreNormalizado}" es parte de "${containsMatch.nombre}"`);
+    return containsMatch;
+  }
+
+  // 5️⃣ BÚSQUEDA POR PALABRAS CLAVE (más restrictiva)
+  console.log(`   🎯 Estrategia 5: Búsqueda por palabras clave...`);
+  
+  // Dividir en palabras (ignorar palabras muy cortas como "de", "la", etc.)
+  const palabras = nombreNormalizado
+    .split(/\s+/)
+    .filter(p => p.length > 2 && !['del', 'de', 'la', 'los', 'las'].includes(p.toLowerCase()));
+  
+  if (palabras.length >= 2) { // Solo si tiene al menos 2 palabras significativas
+    // Buscar inversionistas que tengan TODAS las palabras importantes
+    const wordMatches = allInvestors.filter(inv => {
+      const invWords = inv.nombre.toLowerCase().split(/\s+/);
+      // Verificar que TODAS las palabras del Excel estén en el nombre de BD
+      return palabras.every(palabra => 
+        invWords.some(w => w.includes(palabra.toLowerCase()))
+      );
+    });
+
+    if (wordMatches.length === 1) {
+      console.log(`   ✅ Inversionista encontrado (por palabras): ${wordMatches[0].nombre} (ID: ${wordMatches[0].inversionista_id})`);
+      return wordMatches[0];
+    } else if (wordMatches.length > 1) {
+      console.log(`   ⚠️ Múltiples matches (${wordMatches.length}):`);
+      wordMatches.forEach((inv, idx) => {
+        console.log(`      ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`);
+      });
+      
+      // 🔥 Usar el que tenga el nombre más corto (más probable que sea el base)
+      const shortest = wordMatches.reduce((prev, curr) => 
+        prev.nombre.length < curr.nombre.length ? prev : curr
+      );
+      
+      console.log(`   ✅ Usando el más corto: ${shortest.nombre} (ID: ${shortest.inversionista_id})`);
+      return shortest;
+    }
+  }
+
+  // 6️⃣ NO EXISTE → CREAR NUEVO
+  console.log(`   ➕ Inversionista no encontrado, creando nuevo...`);
+  
   const [newInvestor] = await db
     .insert(inversionistas)
     .values({
-      nombre, // Usar el nombre como está definido en el schema
-      emite_factura, // Usar emite_factura como está definido en el schema
+      nombre: nombreNormalizado,
+      emite_factura,
       banco_id: null,
       tipo_cuenta: null,
       numero_cuenta: null,
     })
     .returning();
 
+  console.log(`   ✅ Inversionista creado: ${newInvestor.nombre} (ID: ${newInvestor.inversionista_id})`);
   return newInvestor;
 };
-
 export const updateInvestor = async ({ body, set }: any) => {
   try {
     // Permitir un solo objeto o un arreglo

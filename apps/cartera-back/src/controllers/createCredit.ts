@@ -347,7 +347,10 @@ const creditosInversionistasData: InversionistaData[] = creditData.inversionista
   console.log(`   - % Participación: ${porcentajeParticipacion.toFixed(2)}%`);
   
   // 🔥 CALCULAR CUOTA DEL INVERSIONISTA (% participación * cuota total)
-  const cuotaInversionista = cuotaTotal.times(porcentajeParticipacion.div(100)).round(2);
+  const cuotaInversionista = cuotaTotal .minus(creditDataForInsert.membresias_pago)
+  .minus(creditDataForInsert.seguro_10_cuotas)
+  .times(porcentajeParticipacion.div(100))
+  .round(2);
   
   console.log(`   - Cuota calculada: Q${cuotaInversionista.toFixed(2)}`);
   

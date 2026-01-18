@@ -1,5 +1,5 @@
 import Big from "big.js";
-import { eq, and, inArray, asc } from "drizzle-orm";
+import { eq, and, inArray, asc, gt, lte } from "drizzle-orm";
 import { db } from "../database";
 import {
   creditos,
@@ -381,7 +381,9 @@ const updateInvestors = async (
   inversionistas: CreditUpdateData["inversionistas"],
   updateFields: any,
   current: any,
-  numero_credito_sifco?: string
+  numero_credito_sifco: string,
+  seguro: number,
+  membresias: number
 ): Promise<void> => {
   if (inversionistas.length === 0) return;
 
@@ -412,7 +414,11 @@ const updateInvestors = async (
     console.log(`   - % Participación: ${porcentajeParticipacion.toFixed(2)}%`);
     
     // 🔥 CALCULAR CUOTA DEL INVERSIONISTA (% participación * cuota total)
-    const cuotaInversionista = cuotaTotal.times(porcentajeParticipacion.div(100)).round(2);
+const cuotaInversionista = cuotaTotal
+  .minus(seguro)
+  .times(porcentajeParticipacion.div(100))
+  .round(2);
+  
     
     console.log(`   - Cuota calculada: Q${cuotaInversionista.toFixed(2)}`);
 
@@ -649,7 +655,9 @@ export const updateCredit = async ({ body, set }: any) => {
       inversionistas,
       updateFields,
       current,
-      numero_credito_sifco
+      numero_credito_sifco ?? current.numero_credito_sifco,
+      Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
+      Number(updateFields.membresias_pago ?? current.membresias_pago)
     );
 
     set.status = 200;
@@ -758,259 +766,4 @@ export const updateAllInstallments = async ({
     console.error("\n❌ Error crítico en updateAllInstallments:", error);
     throw error;
   }
-};
-interface AjustarCuotasConSIFCOParams {
-  numero_credito_sifco: string;
-  cuota_real_actual: number;
-}
-interface AjustarCuotasConSIFCOParams {
-  numero_credito_sifco: string;
-  cuota_real_actual: number;
-}
-
-export const ajustarCuotasConSIFCO = async ({
-  numero_credito_sifco,
-  cuota_real_actual,
-}: AjustarCuotasConSIFCOParams): Promise<void> => {
-  console.log(
-    `\n🔧 Ajustando cuotas del crédito ${numero_credito_sifco} con datos de SIFCO`
-  );
-
-  // 1️⃣ Obtener crédito local
-  const creditoResult = await db
-    .select({
-      credito_id: creditos.credito_id,
-      plazo: creditos.plazo,
-      fecha_desembolso: creditos.fecha_creacion,
-      cuota: creditos.cuota,
-      porcentaje_interes: creditos.porcentaje_interes,
-      cuota_interes: creditos.cuota_interes,
-      seguro_10_cuotas: creditos.seguro_10_cuotas,
-      gps: creditos.gps,
-      membresias_pago: creditos.membresias_pago,
-    })
-    .from(creditos)
-    .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
-    .limit(1);
-
-  const credito = creditoResult[0];
-  if (!credito) throw new Error("Crédito no encontrado");
-
-  // 2️⃣ Consultar estado de cuenta en SIFCO
-  console.log(`\n📡 Consultando estado de cuenta en SIFCO...`);
-  const estadoCuenta =
-    await consultarEstadoCuentaPrestamo(numero_credito_sifco);
-
-  if (!estadoCuenta || !estadoCuenta.ConsultaResultado) {
-    throw new Error("No se pudo obtener el estado de cuenta de SIFCO");
-  }
-
-  const { EstadoCuenta_Transacciones } = estadoCuenta.ConsultaResultado;
-
-  // 3️⃣ Obtener SOLO el primer pago para obtener el SaldoCapital inicial
-  const primerPago = EstadoCuenta_Transacciones.filter(
-    (trx) =>
-      trx.CrMoTrxDes?.toUpperCase().includes("PAGO") &&
-      parseFloat(trx.CapitalPagado || "0") > 0
-  ).sort(
-    (a, b) => new Date(a.CrMoFeTrx).getTime() - new Date(b.CrMoFeTrx).getTime()
-  )[0]; // 👈 Solo el primero
-
-  if (!primerPago) {
-    throw new Error("No se encontraron pagos en SIFCO");
-  }
-
-  // 🔥 CAPITAL INICIAL desde SIFCO
-  const capitalInicial = new Big(primerPago.SaldoCapital || "0").plus(
-    primerPago.CapitalPagado || "0"
-  ); // SaldoCapital + lo que pagó = capital antes del pago
-
-  console.log(`💰 Capital inicial detectado: Q${capitalInicial}`);
-
-  // 4️⃣ Obtener TODAS las cuotas del crédito
-  const todasLasCuotas = await db
-    .select()
-    .from(cuotas_credito)
-    .where(eq(cuotas_credito.credito_id, credito.credito_id))
-    .orderBy(asc(cuotas_credito.numero_cuota));
-
-  // 5️⃣ Obtener TODOS los pagos
-  const todosLosPagos = await db
-    .select()
-    .from(pagos_credito)
-    .where(eq(pagos_credito.credito_id, credito.credito_id))
-    .orderBy(asc(pagos_credito.cuota_id));
-
-  // Mapear pagos por cuota_id
-  const pagosPorCuotaId = new Map(todosLosPagos.map((p) => [p.cuota_id, p]));
-
-  // 6️⃣ Pre-calcular constantes
-  const seguroFijoPorMes = new Big(credito.seguro_10_cuotas ?? 0);
-  const gpsFijoPorMes = new Big(credito.gps ?? 0);
-  const membresiasFijoPorMes = new Big(credito.membresias_pago ?? 0);
-  const porcentajeInteres = new Big(credito.porcentaje_interes ?? 0).div(100);
-  const cuotaMensual = new Big(credito.cuota);
-  const cuotaInteresCredito = credito.cuota_interes;
-
-  // Capital en memoria
-  let capitalEnMemoria = capitalInicial;
-
-  console.log(`\n🔄 Procesando ${todasLasCuotas.length} cuotas...`);
-
-  await db.transaction(async (tx) => {
-    // 7️⃣ Procesar cada cuota
-    for (let i = 0; i < todasLasCuotas.length; i++) {
-      const cuota = todasLasCuotas[i];
-      const pago = pagosPorCuotaId.get(cuota.cuota_id);
-
-      if (!pago) {
-        console.log(
-          `   ⚠️ No se encontró pago para cuota #${cuota.numero_cuota}`
-        );
-        continue;
-      }
-
-      const numeroCuota = cuota.numero_cuota;
-      const esCuotaPagada = numeroCuota < cuota_real_actual; // 👈 Cuotas antes de la actual
-
-      // Cálculos del mes
-      const interesMes = capitalEnMemoria.times(porcentajeInteres).round(2);
-      const ivaMes = interesMes.times(0.12).round(2);
-
-      // Abono a capital
-      const montosExtras = interesMes
-        .plus(ivaMes)
-        .plus(seguroFijoPorMes)
-        .plus(gpsFijoPorMes)
-        .plus(membresiasFijoPorMes);
-      const abonoCapital = cuotaMensual.minus(montosExtras);
-
-      // Actualizar capital en memoria
-      capitalEnMemoria = capitalEnMemoria.minus(abonoCapital);
-      if (capitalEnMemoria.lt(0)) capitalEnMemoria = new Big(0);
-
-      if (esCuotaPagada) {
-        // 🔥 CUOTAS PAGADAS (históricas) → Actualizar con ABONOS
-        console.log(
-          `   ✅ Cuota #${numeroCuota} (PAGADA) - Capital restante: Q${capitalEnMemoria}`
-        );
-
-        // Actualizar la cuota como pagada
-        await tx
-          .update(cuotas_credito)
-          .set({
-            pagado: true,
-            liquidado_inversionistas: true,
-            fecha_liquidacion_inversionistas: new Date(),
-          })
-          .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
-
-        // Actualizar el pago con ABONOS
-        const fechaPago = new Date(credito.fecha_desembolso);
-        fechaPago.setMonth(fechaPago.getMonth() + numeroCuota); // 👈 Suma meses según la cuota
-
-        const montoBoletaCalculado = abonoCapital
-          .plus(interesMes)
-          .plus(ivaMes)
-          .plus(seguroFijoPorMes)
-          .plus(gpsFijoPorMes)
-          .plus(membresiasFijoPorMes); // 👈 Suma de todos los abonos
-
-        await tx
-          .update(pagos_credito)
-          .set({
-            cuota: cuotaMensual.toString(),
-            cuota_interes: cuotaInteresCredito,
-            pago_del_mes: cuotaMensual.toString(),
-
-            // 🔥 ABONOS (lo que SE PAGÓ)
-            abono_capital: abonoCapital.round(2).toString(),
-            abono_interes: interesMes.toString(),
-            abono_iva_12: ivaMes.toString(),
-            abono_seguro: seguroFijoPorMes.toString(),
-            abono_gps: gpsFijoPorMes.toString(),
-
-            // RESTANTES (lo que QUEDA)
-            capital_restante: capitalEnMemoria.round(2).toString(),
-            interes_restante: "0", // Ya se pagó
-            iva_12_restante: "0", // Ya se pagó
-            seguro_restante: "0",
-            gps_restante: "0",
-            total_restante: capitalEnMemoria.round(2).toString(),
-
-            membresias: membresiasFijoPorMes.toString(),
-            membresias_pago: membresiasFijoPorMes.toString(),
-            membresias_mes: membresiasFijoPorMes.toString(),
-
-            // 🔥 NUEVOS CAMPOS
-            monto_boleta: montoBoletaCalculado.round(2).toString(), // 👈 Suma de abonos
-            fecha_pago: fechaPago, // 👈 Fecha incrementada mes a mes
-
-            pagado: true,
-            validationStatus: "no_required",
-            registerBy: "SIFCO_IMPORT",
-          })
-          .where(eq(pagos_credito.pago_id, pago.pago_id));
-      } else {
-        // 🔥 CUOTAS PENDIENTES → Solo actualizar RESTANTES (sin tocar abonos)
-        console.log(
-          `   📋 Cuota #${numeroCuota} (PENDIENTE) - Capital restante: Q${capitalEnMemoria}`
-        );
-
-        await tx
-          .update(pagos_credito)
-          .set({
-            cuota: cuotaMensual.toString(),
-            cuota_interes: cuotaInteresCredito,
-            pago_del_mes: cuotaMensual.toString(),
-
-            // NO tocar abonos (quedan en NULL o 0)
-
-            // Solo actualizar RESTANTES
-            capital_restante: capitalEnMemoria.round(2).toString(),
-            interes_restante: interesMes.toString(),
-            iva_12_restante: ivaMes.toString(),
-            seguro_restante: seguroFijoPorMes.toString(),
-            gps_restante: gpsFijoPorMes.toString(),
-            total_restante: capitalEnMemoria.round(2).toString(),
-
-            membresias: membresiasFijoPorMes.toString(),
-            membresias_pago: membresiasFijoPorMes.toString(),
-            membresias_mes: membresiasFijoPorMes.toString(),
-          })
-          .where(eq(pagos_credito.pago_id, pago.pago_id));
-      }
-    }
-
-    // 8️⃣ Renumerar las cuotas pendientes
-    const cuotasPendientes = todasLasCuotas.filter(
-      (c) => c.numero_cuota >= cuota_real_actual
-    );
-
-    if (cuotasPendientes.length > 0) {
-      console.log(
-        `\n🔄 Renumerando ${cuotasPendientes.length} cuotas pendientes...`
-      );
-
-      for (let i = 0; i < cuotasPendientes.length; i++) {
-        const cuota = cuotasPendientes[i];
-        const nuevoNumero = cuota_real_actual + i;
-
-        await tx
-          .update(cuotas_credito)
-          .set({ numero_cuota: nuevoNumero })
-          .where(eq(cuotas_credito.cuota_id, cuota.cuota_id));
-
-        console.log(`   ✅ Cuota #${cuota.numero_cuota} → #${nuevoNumero}`);
-      }
-    }
-  });
-
-  console.log(`\n🎉 Ajuste completado!`);
-  console.log(`📊 Resumen:`);
-  console.log(`   💰 Capital inicial: Q${capitalInicial}`);
-  console.log(`   ✅ Cuotas pagadas actualizadas: ${cuota_real_actual - 1}`);
-  console.log(
-    `   📋 Cuotas pendientes actualizadas: ${todasLasCuotas.length - (cuota_real_actual - 1)}`
-  );
 };

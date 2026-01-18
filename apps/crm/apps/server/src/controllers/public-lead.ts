@@ -1,9 +1,123 @@
-import { asc, eq, or } from "drizzle-orm";
+import { asc, count, eq, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
 import { getRenapInfoController } from "./bot";
+
+/**
+ * Encuentra al usuario de ventas con menos oportunidades asignadas.
+ * Si hay empate, retorna el primero encontrado.
+ * Si no hay usuarios de ventas, retorna null.
+ */
+async function getSalesUserWithLeastOpportunities() {
+  // Obtener todos los usuarios de ventas activos (no baneados)
+  const salesUsers = await db
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    })
+    .from(user)
+    .where(eq(user.role, "sales"));
+
+  if (salesUsers.length === 0) {
+    return null;
+  }
+
+  // Contar oportunidades por usuario
+  const opportunityCounts = await db
+    .select({
+      assignedTo: opportunities.assignedTo,
+      count: count(opportunities.id),
+    })
+    .from(opportunities)
+    .where(eq(opportunities.status, "open"))
+    .groupBy(opportunities.assignedTo);
+
+  // Crear un mapa de conteos
+  const countMap = new Map<string, number>();
+  for (const oc of opportunityCounts) {
+    if (oc.assignedTo) {
+      countMap.set(oc.assignedTo, oc.count);
+    }
+  }
+
+  // Encontrar el usuario de ventas con menos oportunidades
+  let minUser = salesUsers[0];
+  let minCount = countMap.get(minUser.id) ?? 0;
+
+  for (const salesUser of salesUsers) {
+    const userCount = countMap.get(salesUser.id) ?? 0;
+    if (userCount < minCount) {
+      minCount = userCount;
+      minUser = salesUser;
+    }
+  }
+
+  return minUser;
+}
+
+/**
+ * Encuentra al usuario de ventas con menos leads asignados.
+ * Si hay empate, retorna el primero encontrado.
+ * Si no hay usuarios de ventas, retorna null.
+ */
+async function getSalesUserWithLeastLeads() {
+  // Obtener todos los usuarios de ventas activos (no baneados)
+  const salesUsers = await db
+    .select({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    })
+    .from(user)
+    .where(eq(user.role, "sales"));
+
+  if (salesUsers.length === 0) {
+    return null;
+  }
+
+  // Contar leads por usuario (solo leads activos, no convertidos)
+  const leadCounts = await db
+    .select({
+      assignedTo: leads.assignedTo,
+      count: count(leads.id),
+    })
+    .from(leads)
+    .where(
+      or(
+        eq(leads.status, "new"),
+        eq(leads.status, "contacted"),
+        eq(leads.status, "qualified")
+      )
+    )
+    .groupBy(leads.assignedTo);
+
+  // Crear un mapa de conteos
+  const countMap = new Map<string, number>();
+  for (const lc of leadCounts) {
+    if (lc.assignedTo) {
+      countMap.set(lc.assignedTo, lc.count);
+    }
+  }
+
+  // Encontrar el usuario de ventas con menos leads
+  let minUser = salesUsers[0];
+  let minCount = countMap.get(minUser.id) ?? 0;
+
+  for (const salesUser of salesUsers) {
+    const userCount = countMap.get(salesUser.id) ?? 0;
+    if (userCount < minCount) {
+      minCount = userCount;
+      minUser = salesUser;
+    }
+  }
+
+  return minUser;
+}
 
 /**
  * Crea una nueva oportunidad vinculada a un lead
@@ -87,18 +201,14 @@ export async function createPublicLead(c: Context) {
     if (existingLead.length > 0) {
       const lead = existingLead[0];
 
-      // Get first admin user to assign the opportunity
-      const [systemUser] = await db
-        .select()
-        .from(user)
-        .where(eq(user.role, "admin"))
-        .limit(1);
+      // Obtener usuario de ventas con menos oportunidades asignadas
+      const salesUserForOpportunity = await getSalesUserWithLeastOpportunities();
 
-      if (!systemUser) {
+      if (!salesUserForOpportunity) {
         return c.json(
           {
             success: false,
-            error: "No hay usuario administrador disponible",
+            error: "No hay usuario de ventas disponible para asignar",
           },
           500
         );
@@ -111,7 +221,7 @@ export async function createPublicLead(c: Context) {
           lead.id,
           lead.firstName,
           lead.lastName,
-          systemUser.id,
+          salesUserForOpportunity.id,
           body.notes ?? "",
           body.source || lead.source || "website",
           body.loanPurpose
@@ -154,18 +264,27 @@ export async function createPublicLead(c: Context) {
       );
     }
 
-    // Get first admin user to assign the lead
-    const [systemUser] = await db
-      .select()
-      .from(user)
-      .where(eq(user.role, "admin"))
-      .limit(1);
+    // Obtener usuario de ventas con menos leads asignados
+    const salesUserForLead = await getSalesUserWithLeastLeads();
 
-    if (!systemUser) {
+    if (!salesUserForLead) {
       return c.json(
         {
           success: false,
-          error: "No hay usuario administrador disponible",
+          error: "No hay usuario de ventas disponible para asignar",
+        },
+        500
+      );
+    }
+
+    // Obtener usuario de ventas con menos oportunidades para la oportunidad
+    const salesUserForOpportunity = await getSalesUserWithLeastOpportunities();
+
+    if (!salesUserForOpportunity) {
+      return c.json(
+        {
+          success: false,
+          error: "No hay usuario de ventas disponible para asignar oportunidad",
         },
         500
       );
@@ -195,8 +314,8 @@ export async function createPublicLead(c: Context) {
         notes: body.notes,
         source: body.source || "website",
         status: "new",
-        assignedTo: systemUser.id,
-        createdBy: systemUser.id,
+        assignedTo: salesUserForLead.id,
+        createdBy: salesUserForLead.id,
         updatedAt: new Date(),
       })
       .returning();
@@ -212,7 +331,7 @@ export async function createPublicLead(c: Context) {
       newLead.id,
       newLead.firstName,
       newLead.lastName,
-      systemUser.id,
+      salesUserForOpportunity.id,
       body.notes ?? "",
       body.source || "website",
       body.loanPurpose

@@ -1,15 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Page } from "@/components";
-import { SearchAll } from "@/features/Marketplace/SearchAll";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/marketplace/search/")({
-  component: RouteComponent,
+  beforeLoad: () => {
+    throw redirect({ to: "/" });
+  },
+  component: () => null,
 });
-
-function RouteComponent() {
-  return (
-    <Page>
-      <SearchAll />
-    </Page>
-  );
-}

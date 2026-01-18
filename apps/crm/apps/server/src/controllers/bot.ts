@@ -1,6 +1,6 @@
 // controllers/renapController.ts
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import {
 	leads,
 	legalDocuments,
@@ -565,13 +565,13 @@ export const validateMagicUrlController = async (dpi: string) => {
 	}
 
 	// Buscar magic URL asociado al lead con ese DPI
-	const [magicUrl] = await db
-		.select()
-		.from(magicUrls)
-		.innerJoin(leads, eq(magicUrls.leadId, leads.id))
-		.where(eq(leads.dpi, dpi))
-		.limit(1);
-
+const [magicUrl] = await db
+	.select()
+	.from(magicUrls)
+	.innerJoin(leads, eq(magicUrls.leadId, leads.id))
+	.where(eq(leads.dpi, dpi))
+	.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
+	.limit(1);
 	if (!magicUrl) {
 		return { success: false, message: "No magic URL found for this DPI" };
 	}

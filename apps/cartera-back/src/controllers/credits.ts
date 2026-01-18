@@ -414,6 +414,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasAtrasadas: cuotasAtrasadas,
       cuotasPagadas, // Todas las cuotas pagadas
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+      mora:moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0
           ? {

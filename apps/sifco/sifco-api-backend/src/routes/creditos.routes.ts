@@ -102,53 +102,103 @@ export async function handleCreditosRoute(request: Request, path: string[]): Pro
           const plazoEncontrado = planPagosCuotas.length;
           const cuotasPorCrear = credito.plazoCompleto - plazoEncontrado;
           
-          // Buscar la cuota de diciembre 2025 (formato fecha: YYYY-MM-DD)
-          const cuotaDic2025 = planPagosCuotas.find(cuota => {
-            const fecha = cuota.Fecha;
-            // Verificar que sea diciembre 2025 (mes 12, año 2025)
-            if (fecha) {
-              const [year, month] = fecha.split('-');
-              return year === '2025' && month === '12';
+          // Si la cuota esperada es 0, buscar enero 2026 en lugar de diciembre 2025
+          if (credito.cuotaEsperadaDic2025 === 0) {
+            // Buscar cuota de enero 2026
+            const cuotaEne2026 = planPagosCuotas.find(cuota => {
+              const fecha = cuota.Fecha;
+              if (fecha) {
+                const [year, month] = fecha.split('-');
+                return year === '2026' && month === '01';
+              }
+              return false;
+            });
+
+            if (!cuotaEne2026) {
+              discrepancias.push({
+                numeroPrestamo: credito.numeroPrestamo,
+                cuotaEsperada: 1,
+                cuotaEncontrada: null,
+                fechaCuota: null,
+                plazoCompleto: credito.plazoCompleto,
+                plazoEncontrado: plazoEncontrado,
+                cuotasPorCrear: cuotasPorCrear,
+                error: 'No se encontró cuota para enero 2026'
+              });
+              continue;
             }
-            return false;
-          });
 
-          if (!cuotaDic2025) {
-            discrepancias.push({
-              numeroPrestamo: credito.numeroPrestamo,
-              cuotaEsperada: credito.cuotaEsperadaDic2025,
-              cuotaEncontrada: null,
-              fechaCuota: null,
-              plazoCompleto: credito.plazoCompleto,
-              plazoEncontrado: plazoEncontrado,
-              cuotasPorCrear: cuotasPorCrear,
-              error: 'No se encontró cuota para diciembre 2025'
-            });
-            continue;
-          }
-
-          const cuotaEncontrada = cuotaDic2025.CapitalNumeroCuota;
-
-          // Comparar con la cuota esperada
-          if (cuotaEncontrada === credito.cuotaEsperadaDic2025) {
-            resultadosExitosos.push({
-              numeroPrestamo: credito.numeroPrestamo,
-              cuotaEsperada: credito.cuotaEsperadaDic2025,
-              cuotaEncontrada: cuotaEncontrada,
-              plazoCompleto: credito.plazoCompleto,
-              plazoEncontrado: plazoEncontrado,
-              cuotasPorCrear: cuotasPorCrear
-            });
+            // La cuota de enero 2026 debe ser la cuota número 1
+            const numeroCuota = cuotaEne2026.CapitalNumeroCuota;
+            if (numeroCuota === 1) {
+              resultadosExitosos.push({
+                numeroPrestamo: credito.numeroPrestamo,
+                cuotaEsperada: 1,
+                cuotaEncontrada: numeroCuota,
+                plazoCompleto: credito.plazoCompleto,
+                plazoEncontrado: plazoEncontrado,
+                cuotasPorCrear: cuotasPorCrear
+              });
+            } else {
+              discrepancias.push({
+                numeroPrestamo: credito.numeroPrestamo,
+                cuotaEsperada: 1,
+                cuotaEncontrada: numeroCuota,
+                fechaCuota: cuotaEne2026.Fecha,
+                plazoCompleto: credito.plazoCompleto,
+                plazoEncontrado: plazoEncontrado,
+                cuotasPorCrear: cuotasPorCrear,
+                error: `Se esperaba cuota 1 en enero 2026, se encontró cuota ${numeroCuota}`
+              });
+            }
           } else {
-            discrepancias.push({
-              numeroPrestamo: credito.numeroPrestamo,
-              cuotaEsperada: credito.cuotaEsperadaDic2025,
-              cuotaEncontrada: cuotaEncontrada,
-              fechaCuota: cuotaDic2025.Fecha,
-              plazoCompleto: credito.plazoCompleto,
-              plazoEncontrado: plazoEncontrado,
-              cuotasPorCrear: cuotasPorCrear
+            // Lógica original para diciembre 2025
+            const cuotaDic2025 = planPagosCuotas.find(cuota => {
+              const fecha = cuota.Fecha;
+              if (fecha) {
+                const [year, month] = fecha.split('-');
+                return year === '2025' && month === '12';
+              }
+              return false;
             });
+
+            if (!cuotaDic2025) {
+              discrepancias.push({
+                numeroPrestamo: credito.numeroPrestamo,
+                cuotaEsperada: credito.cuotaEsperadaDic2025,
+                cuotaEncontrada: null,
+                fechaCuota: null,
+                plazoCompleto: credito.plazoCompleto,
+                plazoEncontrado: plazoEncontrado,
+                cuotasPorCrear: cuotasPorCrear,
+                error: 'No se encontró cuota para diciembre 2025'
+              });
+              continue;
+            }
+
+            const cuotaEncontrada = cuotaDic2025.CapitalNumeroCuota;
+
+            // Comparar con la cuota esperada
+            if (cuotaEncontrada === credito.cuotaEsperadaDic2025) {
+              resultadosExitosos.push({
+                numeroPrestamo: credito.numeroPrestamo,
+                cuotaEsperada: credito.cuotaEsperadaDic2025,
+                cuotaEncontrada: cuotaEncontrada,
+                plazoCompleto: credito.plazoCompleto,
+                plazoEncontrado: plazoEncontrado,
+                cuotasPorCrear: cuotasPorCrear
+              });
+            } else {
+              discrepancias.push({
+                numeroPrestamo: credito.numeroPrestamo,
+                cuotaEsperada: credito.cuotaEsperadaDic2025,
+                cuotaEncontrada: cuotaEncontrada,
+                fechaCuota: cuotaDic2025.Fecha,
+                plazoCompleto: credito.plazoCompleto,
+                plazoEncontrado: plazoEncontrado,
+                cuotasPorCrear: cuotasPorCrear
+              });
+            }
           }
 
         } catch (err: any) {

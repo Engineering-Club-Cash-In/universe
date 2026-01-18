@@ -1,0 +1,412 @@
+=== VERIFICACIÓN DE CUOTAS DICIEMBRE 2025 ===
+Fecha de ejecución: 14/1/2026, 16:34:37
+Total de créditos verificados: 87
+Coincidencias: 8
+Discrepancias: 79
+
+=== DISCREPANCIAS ===
+
+Préstamo: 01010214108510
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-26
+
+Préstamo: 01010214103370
+  Cuota esperada (txt): 42
+  Cuota encontrada (SIFCO): 41
+  Fecha cuota: 2025-12-08
+
+Préstamo: 01010214107830
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010214106610
+  Cuota esperada (txt): 28
+  Cuota encontrada (SIFCO): 27
+  Fecha cuota: 2025-12-05
+
+Préstamo: 01010214108690
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-07
+
+Préstamo: 01010214108710
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-08
+
+Préstamo: 01010214107550
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-13
+
+Préstamo: 01010214107600
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-15
+
+Préstamo: 01010214109130
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-06
+
+Préstamo: 01010214106590
+  Cuota esperada (txt): 28
+  Cuota encontrada (SIFCO): 27
+  Fecha cuota: 2025-12-01
+
+Préstamo: 01010214106670
+  Cuota esperada (txt): 28
+  Cuota encontrada (SIFCO): 27
+  Fecha cuota: 2025-12-08
+
+Préstamo: 01010214108090
+  Cuota esperada (txt): 25
+  Cuota encontrada (SIFCO): 24
+  Fecha cuota: 2025-12-19
+
+Préstamo: 01010214107570
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-14
+
+Préstamo: 01010214103700
+  Cuota esperada (txt): 41
+  Cuota encontrada (SIFCO): 40
+  Fecha cuota: 2025-12-23
+
+Préstamo: 01010214106130
+  Cuota esperada (txt): 30
+  Cuota encontrada (SIFCO): 29
+  Fecha cuota: 2025-12-18
+
+Préstamo: 01010214109400
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-26
+
+Préstamo: 01010214104570
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 35
+  Fecha cuota: 2025-12-10
+
+Préstamo: 01010214108230
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-04
+
+Préstamo: 01010214107540
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-10
+
+Préstamo: 01010214109310
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-21
+
+Préstamo: 01010214117710
+  Cuota esperada (txt): 51
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-16
+
+Préstamo: 01010214108790
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-14
+
+Préstamo: 01010214106020
+  Cuota esperada (txt): 30
+  Cuota encontrada (SIFCO): 29
+  Fecha cuota: 2025-12-11
+
+Préstamo: 01010214107450
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-03
+
+Préstamo: 01010214109010
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-27
+
+Préstamo: 01010214105220
+  Cuota esperada (txt): 33
+  Cuota encontrada (SIFCO): 32
+  Fecha cuota: 2025-12-04
+
+Préstamo: 01010214109200
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-11
+
+Préstamo: 01010214107920
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 24
+  Fecha cuota: 2025-12-03
+
+Préstamo: 01010214117590
+  Cuota esperada (txt): 31
+  Cuota encontrada (SIFCO): 7
+  Fecha cuota: 2025-12-14
+
+Préstamo: 01010214108470
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-25
+
+Préstamo: 01010214103090
+  Cuota esperada (txt): 44
+  Cuota encontrada (SIFCO): 43
+  Fecha cuota: 2025-12-27
+
+Préstamo: 01010214117650
+  Cuota esperada (txt): 43
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-17
+
+Préstamo: 01010214107260
+  Cuota esperada (txt): 27
+  Cuota encontrada (SIFCO): 26
+  Fecha cuota: 2025-12-24
+
+Préstamo: 01010214107440
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-03
+
+Préstamo: 01010214103670
+  Cuota esperada (txt): 41
+  Cuota encontrada (SIFCO): 40
+  Fecha cuota: 2025-12-19
+
+Préstamo: 01010214118320
+  Cuota esperada (txt): 37
+  Cuota encontrada (SIFCO): 6
+  Fecha cuota: 2025-12-15
+
+Préstamo: 01010214105820
+  Cuota esperada (txt): 31
+  Cuota encontrada (SIFCO): 30
+  Fecha cuota: 2025-12-09
+
+Préstamo: 01010214107660
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-20
+
+Préstamo: 01010214109020
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010214107860
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-29
+
+Préstamo: 01010214105770
+  Cuota esperada (txt): 31
+  Cuota encontrada (SIFCO): 30
+  Fecha cuota: 2025-12-07
+
+Préstamo: 01010202102180
+  Cuota esperada (txt): 48
+  Cuota encontrada (SIFCO): 47
+  Fecha cuota: 2025-12-24
+
+Préstamo: 01010214108490
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-25
+
+Préstamo: 01010214104240
+  Cuota esperada (txt): 38
+  Cuota encontrada (SIFCO): 37
+  Fecha cuota: 2025-12-11
+
+Préstamo: 01010214106530
+  Cuota esperada (txt): 29
+  Cuota encontrada (SIFCO): 28
+  Fecha cuota: 2025-12-30
+
+Préstamo: 01010214106110
+  Cuota esperada (txt): 30
+  Cuota encontrada (SIFCO): 29
+  Fecha cuota: 2025-12-14
+
+Préstamo: 01010214109170
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-08
+
+Préstamo: 01010214108620
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010202117910
+  Cuota esperada (txt): 49
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-30
+
+Préstamo: 01010214107840
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-29
+
+Préstamo: 01010214107790
+  Cuota esperada (txt): 26
+  Cuota encontrada (SIFCO): 25
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010214109410
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-26
+
+Préstamo: 01010214108410
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-23
+
+Préstamo: 01010214106510
+  Cuota esperada (txt): 29
+  Cuota encontrada (SIFCO): 28
+  Fecha cuota: 2025-12-29
+
+Préstamo: 01010214108760
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-12
+
+Préstamo: 01010214103920
+  Cuota esperada (txt): 40
+  Cuota encontrada (SIFCO): 39
+  Fecha cuota: 2025-12-29
+
+Préstamo: 01010214109040
+  Cuota esperada (txt): 23
+  Cuota encontrada (SIFCO): 22
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010202117820
+  Cuota esperada (txt): 50
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-17
+
+Préstamo: 01010214107360
+  Cuota esperada (txt): 27
+  Cuota encontrada (SIFCO): 26
+  Fecha cuota: 2025-12-30
+
+Préstamo: 01010214107210
+  Cuota esperada (txt): 36
+  Cuota encontrada (SIFCO): 32
+  Fecha cuota: 2025-12-27
+
+Préstamo: 01010214107200
+  Cuota esperada (txt): 36
+  Cuota encontrada (SIFCO): 32
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010202102050
+  Cuota esperada (txt): 48
+  Cuota encontrada (SIFCO): 47
+  Fecha cuota: 2025-12-10
+
+Préstamo: 01010214117640
+  Cuota esperada (txt): 39
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-04
+
+Préstamo: 01010214108420
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-23
+
+Préstamo: 01010214104530
+  Cuota esperada (txt): 37
+  Cuota encontrada (SIFCO): 36
+  Fecha cuota: 2025-12-20
+
+Préstamo: 01010214109270
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-20
+
+Préstamo: 01010214109360
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-26
+
+Préstamo: 01010202117700
+  Cuota esperada (txt): 49
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-21
+
+Préstamo: 01010214105520
+  Cuota esperada (txt): 32
+  Cuota encontrada (SIFCO): 31
+  Fecha cuota: 2025-12-15
+
+Préstamo: 01010214106400
+  Cuota esperada (txt): 29
+  Cuota encontrada (SIFCO): 28
+  Fecha cuota: 2025-12-11
+
+Préstamo: 01010214109280
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-20
+
+Préstamo: 01010214105880
+  Cuota esperada (txt): 31
+  Cuota encontrada (SIFCO): 30
+  Fecha cuota: 2025-12-16
+
+Préstamo: 01010214107410
+  Cuota esperada (txt): 27
+  Cuota encontrada (SIFCO): 26
+  Fecha cuota: 2025-12-30
+
+Préstamo: 01010214103290
+  Cuota esperada (txt): 43
+  Cuota encontrada (SIFCO): 42
+  Fecha cuota: 2025-12-29
+
+Préstamo: 01010214108000
+  Cuota esperada (txt): 27
+  Cuota encontrada (SIFCO): 26
+  Fecha cuota: 2025-12-06
+
+Préstamo: 01010214108560
+  Cuota esperada (txt): 24
+  Cuota encontrada (SIFCO): 23
+  Fecha cuota: 2025-12-28
+
+Préstamo: 01010202102090
+  Cuota esperada (txt): 48
+  Cuota encontrada (SIFCO): 47
+  Fecha cuota: 2025-12-12
+
+Préstamo: 01010214103540
+  Cuota esperada (txt): 42
+  Cuota encontrada (SIFCO): 41
+  Fecha cuota: 2025-12-25
+
+Préstamo: 01010214109350
+  Cuota esperada (txt): 22
+  Cuota encontrada (SIFCO): 21
+  Fecha cuota: 2025-12-26
+
+=== COINCIDENCIAS ===
+Préstamo: 01010214109660 - Cuota: 20 ✓
+Préstamo: 01010214109580 - Cuota: 20 ✓
+Préstamo: 01010214109590 - Cuota: 20 ✓
+Préstamo: 01010214109570 - Cuota: 20 ✓
+Préstamo: 01010214109510 - Cuota: 20 ✓
+Préstamo: 01010214109670 - Cuota: 20 ✓
+Préstamo: 01010214109630 - Cuota: 20 ✓
+Préstamo: 01010214109620 - Cuota: 20 ✓

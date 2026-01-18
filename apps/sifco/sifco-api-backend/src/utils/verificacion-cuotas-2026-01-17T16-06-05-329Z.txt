@@ -1,0 +1,1630 @@
+=== VERIFICACIÓN DE CUOTAS DICIEMBRE 2025 ===
+Fecha de ejecución: 17/1/2026, 10:06:05
+Total de créditos verificados: 824
+Coincidencias: 720
+Discrepancias: 104
+
+=== DISCREPANCIAS ===
+
+Préstamo: 01010214117370
+  Cuota esperada (txt): 14
+  Cuota encontrada (SIFCO): 7
+  Fecha cuota: 2025-12-15
+  Plazo completo: 84
+  Plazo encontrado: 77
+  Cuotas por crear: 7
+
+Préstamo: 01010214115220
+  Cuota esperada (txt): 13
+  Cuota encontrada (SIFCO): 11
+  Fecha cuota: 2025-12-15
+  Plazo completo: 60
+  Plazo encontrado: 58
+  Cuotas por crear: 2
+
+Préstamo: 01010214116880
+  Cuota esperada (txt): 10
+  Cuota encontrada (SIFCO): 9
+  Fecha cuota: 2025-12-15
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214114750
+  Cuota esperada (txt): 16
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 56
+  Cuotas por crear: 4
+
+Préstamo: 01010214114800
+  Cuota esperada (txt): 14
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 84
+  Plazo encontrado: 82
+  Cuotas por crear: 2
+
+Préstamo: 01010214115700
+  Cuota esperada (txt): 11
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214113010
+  Cuota esperada (txt): 19
+  Cuota encontrada (SIFCO): 16
+  Fecha cuota: 2025-12-30
+  Plazo completo: 48
+  Plazo encontrado: 45
+  Cuotas por crear: 3
+
+Préstamo: 01010214113000
+  Cuota esperada (txt): 19
+  Cuota encontrada (SIFCO): 16
+  Fecha cuota: 2025-12-30
+  Plazo completo: 48
+  Plazo encontrado: 45
+  Cuotas por crear: 3
+
+Préstamo: 01010214112970
+  Cuota esperada (txt): 19
+  Cuota encontrada (SIFCO): 16
+  Fecha cuota: 2025-12-30
+  Plazo completo: 48
+  Plazo encontrado: 45
+  Cuotas por crear: 3
+
+Préstamo: 01010214115710
+  Cuota esperada (txt): 12
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-28
+  Plazo completo: 60
+  Plazo encontrado: 58
+  Cuotas por crear: 2
+
+Préstamo: 01010411301780
+  Cuota esperada (txt): 19
+  Cuota encontrada (SIFCO): 0
+  Fecha cuota: 2025-12-02
+  Plazo completo: 12
+  Plazo encontrado: 30
+  Cuotas por crear: -18
+
+Préstamo: 01010214116980
+  Cuota esperada (txt): 11
+  Cuota encontrada (SIFCO): 9
+  Fecha cuota: 2025-12-30
+  Plazo completo: 84
+  Plazo encontrado: 82
+  Cuotas por crear: 2
+
+Préstamo: 01010214115720
+  Cuota esperada (txt): 11
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-28
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214115860
+  Cuota esperada (txt): 13
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-30
+  Plazo completo: 84
+  Plazo encontrado: 81
+  Cuotas por crear: 3
+
+Préstamo: 01010214115340
+  Cuota esperada (txt): 13
+  Cuota encontrada (SIFCO): 11
+  Fecha cuota: 2025-12-28
+  Plazo completo: 84
+  Plazo encontrado: 82
+  Cuotas por crear: 2
+
+Préstamo: 01010214114730
+  Cuota esperada (txt): 15
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 57
+  Cuotas por crear: 3
+
+Préstamo: 01010214121150
+  Cuota esperada (txt): 3
+  Cuota encontrada (SIFCO): 2
+  Fecha cuota: 2025-12-30
+  Plazo completo: 36
+  Plazo encontrado: 35
+  Cuotas por crear: 1
+
+Préstamo: 01010214115330
+  Cuota esperada (txt): 19
+  Cuota encontrada (SIFCO): 11
+  Fecha cuota: 2025-12-28
+  Plazo completo: 60
+  Plazo encontrado: 52
+  Cuotas por crear: 8
+
+Préstamo: 01010214115730
+  Cuota esperada (txt): 12
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 58
+  Cuotas por crear: 2
+
+Préstamo: 01010214120720
+  Cuota esperada (txt): 1
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214116870
+  Cuota esperada (txt): 10
+  Cuota encontrada (SIFCO): 9
+  Fecha cuota: 2025-12-15
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214119370
+  Cuota esperada (txt): 10
+  Cuota encontrada (SIFCO): 3
+  Fecha cuota: 2025-12-30
+  Plazo completo: 48
+  Plazo encontrado: 48
+  Cuotas por crear: 0
+
+Préstamo: 01010214114710
+  Cuota esperada (txt): 14
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 58
+  Cuotas por crear: 2
+
+Préstamo: 01010214120940
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214120950
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214120960
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214120970
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214120980
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214120990
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 18
+  Plazo encontrado: 18
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121010
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121030
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010202121050
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121170
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121180
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121190
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121200
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214118230
+  Cuota esperada (txt): 8
+  Cuota encontrada (SIFCO): 7
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214119730
+  Cuota esperada (txt): 2
+  Cuota encontrada (SIFCO): 1
+  Fecha cuota: 2025-12-15
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+
+Préstamo: 01010214121210
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121220
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121230
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121240
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121250
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121260
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121320
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121330
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121340
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121350
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121360
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121370
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214115740
+  Cuota esperada (txt): 11
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214117900
+  Cuota esperada (txt): 15
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-30
+  Plazo completo: 84
+  Plazo encontrado: 77
+  Cuotas por crear: 7
+
+Préstamo: 01010214121380
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121390
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121400
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121410
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121420
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121430
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121440
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121450
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121460
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121470
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121480
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121490
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121500
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121510
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121520
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121530
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 24
+  Plazo encontrado: 24
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121540
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121550
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 24
+  Plazo encontrado: 24
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121560
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121570
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 36
+  Plazo encontrado: 36
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121580
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 41
+  Plazo encontrado: 41
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121590
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121600
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 24
+  Plazo encontrado: 24
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121610
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121620
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121630
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121640
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010101001470
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 12
+  Plazo encontrado: 12
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010202121650
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121660
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121670
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121680
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121690
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121700
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121710
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121720
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121730
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121740
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121750
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121760
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121770
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214121780
+  Cuota esperada (txt): 0
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 60
+  Cuotas por crear: 0
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214114780
+  Cuota esperada (txt): 13
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214111360
+  Cuota esperada (txt): 16
+  Cuota encontrada (SIFCO): N/A
+  Fecha cuota: N/A
+  Plazo completo: 60
+  Plazo encontrado: 1
+  Cuotas por crear: 59
+  Error: No se encontró cuota para diciembre 2025
+
+Préstamo: 01010214115850
+  Cuota esperada (txt): 17
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 53
+  Cuotas por crear: 7
+
+Préstamo: 01010214114940
+  Cuota esperada (txt): 11
+  Cuota encontrada (SIFCO): 10
+  Fecha cuota: 2025-12-30
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+
+Préstamo: 01010214114770
+  Cuota esperada (txt): 13
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 59
+  Cuotas por crear: 1
+
+Préstamo: 01010214117460
+  Cuota esperada (txt): 17
+  Cuota encontrada (SIFCO): 8
+  Fecha cuota: 2025-12-28
+  Plazo completo: 60
+  Plazo encontrado: 35
+  Cuotas por crear: 25
+
+Préstamo: 01010214114700
+  Cuota esperada (txt): 15
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 36
+  Plazo encontrado: 33
+  Cuotas por crear: 3
+
+Préstamo: 01010214114720
+  Cuota esperada (txt): 15
+  Cuota encontrada (SIFCO): 12
+  Fecha cuota: 2025-12-30
+  Plazo completo: 60
+  Plazo encontrado: 57
+  Cuotas por crear: 3
+
+Préstamo: 01010214118350
+  Cuota esperada (txt): 4
+  Cuota encontrada (SIFCO): 5
+  Fecha cuota: 2025-12-15
+  Plazo completo: 84
+  Plazo encontrado: 84
+  Cuotas por crear: 0
+
+Préstamo: 01010214111110
+  Cuota esperada (txt): 18
+  Cuota encontrada (SIFCO): 19
+  Fecha cuota: 2025-12-07
+  Plazo completo: 48
+  Plazo encontrado: 48
+  Cuotas por crear: 0
+
+=== COINCIDENCIAS ===
+Préstamo: 01010214111550 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 47, Por crear: 13)
+Préstamo: 01010214118310 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112480 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116440 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115100 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118340 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119300 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119720 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114530 - Cuota: 12 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214119780 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119860 - Cuota: 2 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214113660 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110990 - Cuota: 17 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214113740 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117300 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111460 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111540 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119650 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116200 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119670 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118770 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214115110 - Cuota: 10 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115590 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 79, Por crear: 5)
+Préstamo: 01010214111190 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115640 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119880 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113680 - Cuota: 12 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214117110 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202115520 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111890 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117120 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115160 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118930 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116210 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118020 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119820 - Cuota: 2 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115980 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 83, Por crear: 1)
+Préstamo: 01010214116160 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119060 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119710 - Cuota: 2 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214118950 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119870 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116240 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119410 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119760 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116330 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112510 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119920 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118720 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119290 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116000 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 81, Por crear: 3)
+Préstamo: 01010214113150 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117970 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118980 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116320 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117920 - Cuota: 6 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214111850 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112470 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111810 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 54, Por crear: 6)
+Préstamo: 01010214115530 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214115180 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114580 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113650 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119810 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116260 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115570 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116180 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111900 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202114470 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113670 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118990 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214112460 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116070 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116150 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118270 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119030 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113600 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112420 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116920 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119230 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119840 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119260 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111840 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119280 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119220 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118750 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116380 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113160 - Cuota: 13 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214115540 - Cuota: 9 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115560 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116220 - Cuota: 8 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214115580 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 56, Por crear: 4)
+Préstamo: 01010214116340 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202118850 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119830 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118880 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112490 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116010 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119800 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116270 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112360 - Cuota: 14 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214113120 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118250 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119380 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116130 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112350 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116120 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115620 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214111860 - Cuota: 15 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214118280 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112450 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119320 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113730 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119630 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119680 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112390 - Cuota: 14 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115970 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118900 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119620 - Cuota: 2 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214119250 - Cuota: 3 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113710 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115200 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119180 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119740 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115630 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116110 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116300 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214112440 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119960 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117930 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116770 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111490 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111380 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113610 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119330 - Cuota: 3 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116100 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111880 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118210 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117950 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113700 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118290 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111350 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113690 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118970 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116370 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202119900 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202119900:2 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112850 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119770 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118860 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214117080 - Cuota: 7 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214120260 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118710 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214117150 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119790 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111870 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 59, Por crear: 1)
+Préstamo: 01010214113630 - Cuota: 12 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214111640 - Cuota: 16 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119050 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214117130 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111730 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120200 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202117140 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202112880 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120140 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119640 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116020 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116190 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118890 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118150 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120350 - Cuota: 1 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214120360 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120370 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120380 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120390 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120450 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120410 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120420 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120430 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120440 - Cuota: 1 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214120460 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120470 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120480 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120490 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120500 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120510 - Cuota: 1 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214120520 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120530 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120580 - Cuota: 1 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214120550 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120560 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120570 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120590 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120600 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120610 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113270 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110380 - Cuota: 18 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214116280 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119530 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119610 - Cuota: 3 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214120300 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120310 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202118830 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116890 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120080 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114870 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111320 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112590 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119910 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114950 - Cuota: 11 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214109700 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115990 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119140 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115470 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120030 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115800 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114680 - Cuota: 11 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214115290 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110020 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114660 - Cuota: 11 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119490 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111050 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118160 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202119470 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 30, Por crear: 30)
+Préstamo: 01010214116690 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111170 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111610 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 59, Por crear: 1)
+Préstamo: 01010214111750 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114760 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110580 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 56, Por crear: 4)
+Préstamo: 01010214116530 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113220 - Cuota: 13 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214115940 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214110400 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113510 - Cuota: 13 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114970 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110720 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202117440 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113800 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115400 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111980 - Cuota: 15 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113490 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118190 - Cuota: 6 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214110120 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118680 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116550 - Cuota: 8 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214119500 - Cuota: 3 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214110450 - Cuota: 18 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214109990 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116090 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111010 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114930 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118430 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109840 - Cuota: 19 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214116390 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114010 - Cuota: 12 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114650 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117260 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115410 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110670 - Cuota: 18 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214115840 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111130 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109870 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120220 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119980 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120020 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118040 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113450 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110260 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118080 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120290 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110240 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120160 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111630 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117720 - Cuota: 7 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118540 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120090 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116680 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120150 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111020 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114670 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110820 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119570 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114020 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119100 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112380 - Cuota: 15 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214117220 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113970 - Cuota: 12 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214116850 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214111970 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111340 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119540 - Cuota: 3 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202117190 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114690 - Cuota: 11 ✓ (Plazo completo: 84, Plazo encontrado: 83, Por crear: 1)
+Préstamo: 01010202115000 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112060 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119990 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111780 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112600 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118170 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116910 - Cuota: 8 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214110270 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119940 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110410 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116730 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110600 - Cuota: 18 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214109960 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 33, Por crear: 27)
+Préstamo: 01010214113480 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111000 - Cuota: 17 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214118420 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117390 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114040 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111040 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120010 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114380 - Cuota: 12 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113440 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112130 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112770 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120280 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214115360 - Cuota: 10 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214116840 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118650 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118380 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114080 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 57, Por crear: 3)
+Préstamo: 01010214115930 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115250 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110540 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114560 - Cuota: 11 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115880 - Cuota: 10 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214110850 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110500 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202115010 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117790 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120000 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111820 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113520 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112120 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114070 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110430 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112030 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120050 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119270 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116720 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117240 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116650 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119560 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119580 - Cuota: 3 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214112830 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115830 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117510 - Cuota: 7 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214119970 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116660 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 57, Por crear: 3)
+Préstamo: 01010214115770 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120330 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114060 - Cuota: 12 ✓ (Plazo completo: 48, Plazo encontrado: 46, Por crear: 2)
+Préstamo: 01010214119550 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116670 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118360 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113330 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115370 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110520 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110660 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119070 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120320 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113960 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111950 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118550 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111070 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116940 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110330 - Cuota: 19 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214118500 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118440 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119160 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116590 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115750 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 82, Por crear: 2)
+Préstamo: 01010214115020 - Cuota: 10 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214118660 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214110800 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112670 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111100 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111590 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117050 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117270 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113320 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118630 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116140 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119090 - Cuota: 4 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214118700 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117320 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113550 - Cuota: 13 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214110320 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120070 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113210 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119950 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118330 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117310 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112550 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119520 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116600 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202115450 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117860 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114830 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115420 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120060 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214110690 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118570 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115950 - Cuota: 9 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115280 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202114360 - Cuota: 12 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214112500 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115890 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116430 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111600 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119170 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109920 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110840 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115050 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114000 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116540 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116950 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111720 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120640 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120620 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202120630 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120650 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120660 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120670 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202120680 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120690 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120710 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120730 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120750 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120760 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120770 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120780 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120790 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120800 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120810 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120820 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120830 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120840 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120850 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120860 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120870 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120880 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120890 - Cuota: 1 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214120900 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120910 - Cuota: 1 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120920 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120930 - Cuota: 1 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119390 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110150 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110160 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114820 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118180 - Cuota: 6 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116830 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112630 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112540 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112640 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116230 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119450 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109910 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119080 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120100 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114610 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111520 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112610 - Cuota: 14 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214114540 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120270 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113770 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110280 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119460 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110730 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112760 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116620 - Cuota: 9 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214112180 - Cuota: 15 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214110070 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120340 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214110640 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110360 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119150 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117760 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117250 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116350 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111650 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115170 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112720 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116520 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117330 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116780 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110010 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117280 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110710 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113350 - Cuota: 13 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214111930 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110140 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115190 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112050 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118580 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116250 - Cuota: 8 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214120210 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119930 - Cuota: 2 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214110530 - Cuota: 18 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214120110 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202112730 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118370 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115600 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116060 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214115660 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118640 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214112200 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116750 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114550 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119010 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116580 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111800 - Cuota: 15 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214109900 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 48, Por crear: 12)
+Préstamo: 01010214116930 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119240 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114400 - Cuota: 12 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214119510 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116360 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113560 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 56, Por crear: 4)
+Préstamo: 01010214112860 - Cuota: 13 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214117170 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119000 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214111670 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119890 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110950 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113530 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115150 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118530 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214119200 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111790 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120130 - Cuota: 2 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214113290 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111310 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113140 - Cuota: 13 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214112920 - Cuota: 13 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214119660 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112370 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 59, Por crear: 1)
+Préstamo: 01010214119020 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116080 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214120240 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214112690 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117000 - Cuota: 9 ✓ (Plazo completo: 82, Plazo encontrado: 82, Por crear: 0)
+Préstamo: 01010407301690 - Cuota: 14 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214117070 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117090 - Cuota: 7 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214116970 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118140 - Cuota: 6 ✓ (Plazo completo: 40, Plazo encontrado: 40, Por crear: 0)
+Préstamo: 01010214120230 - Cuota: 2 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214120120 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202112790 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116450 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118940 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116400 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118670 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202110040 - Cuota: 19 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214119110 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214118870 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113930 - Cuota: 12 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214111280 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111240 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117740 - Cuota: 7 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214112700 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119340 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115650 - Cuota: 9 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214118840 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113060 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113790 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110440 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118100 - Cuota: 6 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214117530 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115550 - Cuota: 9 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214119480 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116610 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111290 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118960 - Cuota: 4 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214119430 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202115090 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 49, Por crear: 11)
+Préstamo: 01010214118220 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110480 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118070 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114420 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116760 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111560 - Cuota: 16 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214110700 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111940 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111180 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118050 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118400 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113590 - Cuota: 12 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214120190 - Cuota: 2 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116700 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114590 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112220 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116290 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117430 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118060 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116990 - Cuota: 8 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010202111080 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 56, Por crear: 4)
+Préstamo: 01010214119120 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119130 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117160 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110770 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115460 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112820 - Cuota: 14 ✓ (Plazo completo: 84, Plazo encontrado: 80, Por crear: 4)
+Préstamo: 01010214118690 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117480 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117500 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111530 - Cuota: 16 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010202118910 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110370 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116420 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110620 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113720 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118560 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119210 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119310 - Cuota: 3 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119440 - Cuota: 3 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214111990 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117230 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110050 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 59, Por crear: 1)
+Préstamo: 01010214114390 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114840 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118520 - Cuota: 5 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115480 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114960 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111910 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109690 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111030 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112780 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112710 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109680 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110590 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118510 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116410 - Cuota: 8 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214110090 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110550 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214119190 - Cuota: 4 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202117350 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114480 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112410 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111330 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118760 - Cuota: 4 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214116310 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118300 - Cuota: 5 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214113640 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115870 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111480 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115810 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114450 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110030 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202110610 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117870 - Cuota: 7 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114890 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113170 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116640 - Cuota: 8 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010202115900 - Cuota: 9 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214117200 - Cuota: 7 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214115320 - Cuota: 10 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214110460 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117290 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115690 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115040 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110980 - Cuota: 18 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214112660 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117030 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113570 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118600 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111620 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110130 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112580 - Cuota: 14 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115510 - Cuota: 10 ✓ (Plazo completo: 24, Plazo encontrado: 24, Por crear: 0)
+Préstamo: 01010214115210 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118260 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118390 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110180 - Cuota: 19 ✓ (Plazo completo: 40, Plazo encontrado: 40, Por crear: 0)
+Préstamo: 01010214114410 - Cuota: 12 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112800 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214118610 - Cuota: 5 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116560 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214109770 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111230 - Cuota: 17 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214116500 - Cuota: 9 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214117340 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117180 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114920 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110780 - Cuota: 18 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010202110300 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 55, Por crear: 5)
+Préstamo: 01010214111710 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110470 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110890 - Cuota: 17 ✓ (Plazo completo: 60, Plazo encontrado: 57, Por crear: 3)
+Préstamo: 01010202114630 - Cuota: 11 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214118200 - Cuota: 6 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116570 - Cuota: 8 ✓ (Plazo completo: 36, Plazo encontrado: 36, Por crear: 0)
+Préstamo: 01010214109830 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214114810 - Cuota: 11 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117450 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115960 - Cuota: 9 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010202113400 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214117540 - Cuota: 7 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116710 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110960 - Cuota: 17 ✓ (Plazo completo: 48, Plazo encontrado: 48, Por crear: 0)
+Préstamo: 01010214109740 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113430 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01030214130110 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214115380 - Cuota: 10 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214112000 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116050 - Cuota: 8 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110650 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214116040 - Cuota: 10 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214114860 - Cuota: 11 ✓ (Plazo completo: 84, Plazo encontrado: 84, Por crear: 0)
+Préstamo: 01010214109800 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214113540 - Cuota: 13 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111920 - Cuota: 15 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214111580 - Cuota: 16 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110630 - Cuota: 18 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)
+Préstamo: 01010214110080 - Cuota: 19 ✓ (Plazo completo: 60, Plazo encontrado: 60, Por crear: 0)

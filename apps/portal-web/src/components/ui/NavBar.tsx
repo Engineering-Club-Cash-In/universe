@@ -27,7 +27,7 @@ export const NavBar = () => {
 
   const defaultNavItems = [
     { label: "Solicita tu crédito", href: "/credit" },
-    { label: "Autos en venta", href: "/marketplace" },
+    { label: "Autos en venta", href: "/marketplace", disabled: true },
     { label: "Vendemos tu auto", href: "/sell" },
     {
       label: "Invierte con nosotros",
@@ -144,9 +144,15 @@ export const NavBar = () => {
                     |
                   </span>
                 )}
-                <Link href={item.href} className={item.className}>
-                  {item.label}
-                </Link>
+                {item.disabled ? (
+                  <span className="text-light/40 cursor-not-allowed">
+                    {item.label}
+                  </span>
+                ) : (
+                  <Link href={item.href} className={item.className}>
+                    {item.label}
+                  </Link>
+                )}
               </div>
             ))}
           </div>
@@ -274,13 +280,19 @@ export const NavBar = () => {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                 >
-                  <Link
-                    href={item.href}
-                    className={`text-2xl font-medium text-light hover:text-primary transition-colors ${item.className || ""}`}
-                    onClick={closeMobileMenu}
-                  >
-                    {item.label}
-                  </Link>
+                  {item.disabled ? (
+                    <span className="text-2xl font-medium text-light/40 cursor-not-allowed">
+                      {item.label}
+                    </span>
+                  ) : (
+                    <Link
+                      href={item.href}
+                      className={`text-2xl font-medium text-light hover:text-primary transition-colors ${item.className || ""}`}
+                      onClick={closeMobileMenu}
+                    >
+                      {item.label}
+                    </Link>
+                  )}
                 </motion.div>
               ))}
 

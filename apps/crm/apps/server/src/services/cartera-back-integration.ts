@@ -8,7 +8,6 @@ import { db } from "../db";
 import {
 	carteraBackReferences,
 	carteraBackSyncLog,
-	type NewCarteraBackReference,
 	type NewCarteraBackSyncLog,
 	type NewPagoReference,
 	pagoReferences,

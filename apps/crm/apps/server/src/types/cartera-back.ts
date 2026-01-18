@@ -211,6 +211,7 @@ export interface CreditoDirectoResponse {
 	cuotasPendientes: CarteraCuotaCredito[];
 	cuotasAtrasadas: CarteraCuotaCredito[];
 	moraActual: string; // decimal viene como string
+	mora?: CarteraMoraCredito | null;
 }
 
 export interface UpdateCreditoInput {

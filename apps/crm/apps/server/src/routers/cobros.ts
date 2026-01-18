@@ -971,15 +971,33 @@ export const cobrosRouter = {
 							input.numeroSifco,
 						);
 
-						// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
-						const todasLasCuotas = [
+						const cuotasCombinadas = [
 							...(creditoCompleto.cuotasPagadas || []),
 							...(creditoCompleto.cuotasPendientes || []),
 							...(creditoCompleto.cuotasAtrasadas || []),
-						].sort((a, b) => a.numero_cuota - b.numero_cuota);
+						];
+
+						// Eliminar duplicados basándose en numero_cuota
+						// Prioridad: pagadas > atrasadas > pendientes
+						const cuotasUnicas = new Map<number, any>();
+						
+						for (const cuota of cuotasCombinadas) {
+							const numeroCuota = cuota.numero_cuota;
+							const existente = cuotasUnicas.get(numeroCuota);
+							
+							if (!existente) {
+								cuotasUnicas.set(numeroCuota, cuota);
+							} else {
+								// Si la nueva cuota está pagada, reemplaza la existente
+								// Si ambas están pagadas o ninguna, mantiene la primera
+								if (cuota.pagado && !existente.pagado) {
+									cuotasUnicas.set(numeroCuota, cuota);
+								}
+							}
+						}
 
 						// Mapear a estructura esperada por frontend
-						return todasLasCuotas.map((cuota) => {
+						return Array.from(cuotasUnicas.values()).sort((a, b) => a.numero_cuota - b.numero_cuota).map((cuota) => {
 							const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
 							const montoPagadoReal =
 								cuota.pagado && cuota.monto_boleta
@@ -1402,13 +1420,13 @@ export const cobrosRouter = {
 						throw new Error("Usuario no autenticado");
 					}
 
-					const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
-					const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
-					// Calcular días de mora exactos usando la fecha de vencimiento
+					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
 					const diasMora = calcularDiasMoraExactos(
 						creditoCompleto.cuotasAtrasadas || [],
 					);
-					const montoEnMora = cuotaMensual * cuotasAtrasadas;
+					const montoEnMora = creditoCompleto.moraActual ?
+					 				Number(creditoCompleto.moraActual) :
+									0
 
 					let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
 					if (diasMora > 0 && diasMora <= 30) estadoMora = "mora_30";

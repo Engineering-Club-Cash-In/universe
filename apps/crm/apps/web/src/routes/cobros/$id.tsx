@@ -101,7 +101,7 @@ function RouteComponent() {
 	// Estados de paginación
 	const [contactosPage, setContactosPage] = useState(1);
 	const [cuotasPage, setCuotasPage] = useState(1);
-	const ITEMS_PER_PAGE = 5; // Reducido a 5 para testing, cambia a 10 en producción
+	const ITEMS_PER_PAGE = 10;
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
@@ -536,7 +536,7 @@ function RouteComponent() {
 												(cuotasPage - 1) * ITEMS_PER_PAGE,
 												cuotasPage * ITEMS_PER_PAGE,
 											)
-											.map((cuota: any) => {
+											.map((cuota) => {
 												const estadoBadge = getEstadoBadge(cuota.estadoMora);
 												const esPagada = cuota.estadoMora === "pagado";
 												const tieneMora = Number(cuota.montoMora) > 0;

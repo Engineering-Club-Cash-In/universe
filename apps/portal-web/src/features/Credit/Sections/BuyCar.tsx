@@ -6,7 +6,7 @@ const urlImage = import.meta.env.VITE_IMAGE_URL;
 
 export const BuyCar = () => {
   // URL de la imagen de fondo - puedes cambiarla aquí
-  const imageUrl = urlImage + "/car1.jpg";
+  const imageUrl = urlImage + "/credit_car1.jpg";
 
   const isMobile = useIsMobile();
 

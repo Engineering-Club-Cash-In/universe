@@ -11,7 +11,7 @@ import { ModalChatBot } from "@/components";
 const imageUrl = import.meta.env.VITE_IMAGE_URL;
 
 export const GetMoney = () => {
-  const imageSrc = `${imageUrl}/car2.png`;
+  const imageSrc = `${imageUrl}/credit_car2.jpg`;
   const { isModalOpen, setIsModalOpen, optionsCredit } = useModalOptionsCall();
   const isMobile = useIsMobile();
 

@@ -35,7 +35,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         user,
         isAuthenticated: !!user,
         isLoading,
-        token: data?.session.token || null,
+        token: data?.session?.token || null,
       }}
     >
       {children}

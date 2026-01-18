@@ -7,6 +7,7 @@ import {
   getPagosConInversionistas,
 } from "../controllers/payments"; 
 import { z } from "zod";
+import { promises as fs } from "fs";
 import { mapPagosPorCreditos } from "../migration/migration";
 import { authMiddleware } from "./midleware";
 import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../controllers/reports";
@@ -15,6 +16,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../database";
 import { pagos_credito } from "../database/db";
 import { reversePayment } from "../controllers/reversePayment";
+import { ajustarCuotasConSIFCO, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -72,7 +74,7 @@ export const paymentRouter = new Elysia()
     return { message: "Error consultando pagos", error: String(error) };
   }
 })
-  .use(authMiddleware)
+ 
 
   .get("/payments", async ({ query, set }) => {
     const { mes, anio, page, perPage, numero_credito_sifco } = query;
@@ -395,6 +397,252 @@ export const paymentRouter = new Elysia()
       cuentaEmpresaId: t.String(),
     }),
   }
-)
+)  .post("/procesar-discrepancias", async () => {
+    // 👇 Ruta quemada
+    const rutaArchivo = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosMenor20.json";
+
+    console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
+
+    // Leer el archivo
+    const contenido = await fs.readFile(rutaArchivo, "utf-8");
+    const jsonData = JSON.parse(contenido);
+
+    if (!jsonData.data || !jsonData.data.detalleDiscrepancias) {
+      throw new Error("JSON inválido: falta 'data.detalleDiscrepancias'");
+    }
+
+    const discrepancias = jsonData.data.detalleDiscrepancias;
+
+    console.log(`\n🚀 Procesando ${discrepancias.length} créditos desde archivo...`);
+
+    const resultados = [];
+    const errores = [];
+
+    for (const discrepancia of discrepancias) {
+      const {
+        numeroPrestamo,
+        cuotaEsperada,
+        cuotaEncontrada,
+        fechaCuota,
+        plazoCompleto,
+        plazoEncontrado,
+        cuotasPorCrear,
+      } = discrepancia;
+
+      try {
+        console.log(`\n📌 Procesando crédito: ${numeroPrestamo}`);
+
+        await ajustarCuotasConSIFCO({
+          numero_credito_sifco: numeroPrestamo,
+          cuota_esperada: cuotaEsperada,
+          cuota_encontrada: cuotaEncontrada,
+          fecha_cuota: fechaCuota,
+          plazo_completo: plazoCompleto,
+          plazo_encontrado: plazoEncontrado,
+          cuotas_por_crear: cuotasPorCrear,
+        });
+
+        resultados.push({
+          numeroPrestamo,
+          status: "success",
+          mensaje: `Ajustado correctamente: ${cuotasPorCrear} cuotas creadas`,
+        });
+
+        console.log(`   ✅ Crédito ${numeroPrestamo} ajustado exitosamente`);
+      } catch (error: any) {
+        console.error(`   ❌ Error en crédito ${numeroPrestamo}:`, error.message);
+
+        errores.push({
+          numeroPrestamo,
+          status: "error",
+          mensaje: error.message,
+        });
+      }
+    }
+
+    console.log(`\n🎉 Proceso completado!`);
+    console.log(`   ✅ Exitosos: ${resultados.length}`);
+    console.log(`   ❌ Errores: ${errores.length}`);
+
+    return {
+      success: true,
+      totalProcesados: discrepancias.length,
+      exitosos: resultados.length,
+      errores: errores.length,
+      resultados,
+      detalleErrores: errores,
+    };
+  })
+
+  // 🔍 Endpoint para probar UN SOLO crédito (por si acaso)
+  .post(
+    "/ajustar-credito",
+    async ({ body }) => {
+      const {
+        numero_credito_sifco,
+        cuota_esperada,
+        cuota_encontrada,
+        fecha_cuota,
+        plazo_completo,
+        plazo_encontrado,
+        cuotas_por_crear,
+      } = body;
+
+      await ajustarCuotasConSIFCO({
+        numero_credito_sifco,
+        cuota_esperada,
+        cuota_encontrada,
+        fecha_cuota,
+        plazo_completo,
+        plazo_encontrado,
+        cuotas_por_crear,
+      });
+
+      return {
+        success: true,
+        mensaje: `Crédito ${numero_credito_sifco} ajustado correctamente`,
+      };
+    },
+    {
+      body: t.Object({
+        numero_credito_sifco: t.String(),
+        cuota_esperada: t.Number(),
+        cuota_encontrada: t.Number(),
+        fecha_cuota: t.String(),
+        plazo_completo: t.Number(),
+        plazo_encontrado: t.Number(),
+        cuotas_por_crear: t.Number(),
+      }),
+    }
+  )  .post("/procesar-desde-archivo", async () => {
+    // 👇 Ruta quemada al archivo JSON
+    const rutaArchivo = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\pagosSIFCO.json";
+
+    console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
+
+    try {
+      // Leer el archivo
+      const contenido = await fs.readFile(rutaArchivo, "utf-8");
+      const jsonData = JSON.parse(contenido);
+
+      console.log(`📦 JSON leído exitosamente`);
+      console.log(`📊 Total de elementos en el JSON: ${jsonData.length}`);
+
+      // Procesar los pagos
+      await procesarPagosSIFCODesdeJSON(jsonData);
+
+      return {
+        success: true,
+        message: "Pagos procesados exitosamente desde archivo",
+        archivo: rutaArchivo,
+        total_creditos: jsonData.length,
+      };
+    } catch (error: any) {
+      console.error("❌ Error leyendo o procesando archivo:", error);
+      
+      return {
+        success: false,
+        message: `Error: ${error.message}`,
+        archivo: rutaArchivo,
+      };
+    }
+  }, {
+    detail: {
+      tags: ["SIFCO Pagos"],
+      summary: "Procesar pagos desde archivo JSON",
+      description: "Lee un archivo JSON desde el sistema y procesa los pagos automáticamente",
+    },
+  })
+
+  // 📤 POST - Procesar pagos desde JSON en el body (alternativa)
+.post(
+    "/procesar-pagos",
+    async ({ set }) => {
+      // 👇 Ruta quemada directamente aquí
+      const rutaArchivo = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
+
+      console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
+
+      try {
+        // Leer el archivo
+        const contenido = await fs.readFile(rutaArchivo, "utf-8");
+        const jsonData = JSON.parse(contenido);
+
+        console.log(`📦 JSON leído exitosamente`);
+        console.log(`📊 Total de elementos en el JSON: ${jsonData.length}`);
+
+        // Procesar los pagos
+        await procesarPagosSIFCODesdeJSON(jsonData);
+
+        return {
+          success: true,
+          message: "Pagos procesados exitosamente desde archivo",
+          archivo: rutaArchivo,
+          total_creditos: jsonData.length,
+        };
+      } catch (error: any) {
+        console.error("❌ Error leyendo o procesando archivo:", error);
+        set.status = 500;
+        
+        return {
+          success: false,
+          message: `Error: ${error.message}`,
+          archivo: rutaArchivo,
+        };
+      }
+    },
+    {
+      detail: {
+        tags: ["SIFCO Pagos"],
+        summary: "Procesar pagos desde archivo JSON",
+        description: "Lee un archivo JSON desde la ruta quemada y procesa los pagos automáticamente",
+      },
+    }
+  )
+
+  // 🔍 POST - Procesar UN SOLO crédito (para testing)
+  .post(
+    "/procesar-uno",
+    async ({ body, set }) => {
+      try {
+        console.log(`\n🎯 Procesando UN crédito: ${body.numeroCredito}`);
+        
+        await procesarPagosSIFCODesdeJSON([body]);
+
+        return {
+          success: true,
+          message: `Crédito ${body.numeroCredito} procesado exitosamente`,
+        };
+      } catch (error) {
+        console.error("❌ Error procesando crédito:", error);
+        set.status = 500;
+        return {
+          success: false,
+          message: error instanceof Error ? error.message : "Error desconocido",
+        };
+      }
+    },
+    {
+      body: t.Object({
+        numeroCredito: t.String(),
+        creditos: t.Array(
+          t.Object({
+            numeroCredito: t.String(),
+            fechaUltimoPago: t.String(),
+            numeroCuota: t.String(),
+            cuota: t.String(),
+            montoBoleta: t.String(),
+            pagado: t.String(),
+          })
+        ),
+      }),
+      detail: {
+        tags: ["SIFCO Pagos"],
+        summary: "Procesar un solo crédito",
+        description: "Para testing - procesa un solo crédito",
+      },
+    }
+  )
+ 
 
  

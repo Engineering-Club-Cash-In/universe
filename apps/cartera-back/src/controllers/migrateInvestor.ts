@@ -17,12 +17,29 @@ interface FilaExcelInversionista {
   PorcentajeCashIn?: number | string;
   PorcentajeInversionista?: number | string;
   Cuota?: number | string;
+  _decision_usuario?: number;
 }
 
 interface CreditoAgrupadoInversionistas {
   creditoBase: string;
   cliente: string;
   filas: FilaExcelInversionista[];
+}
+
+interface DecisionUsuario {
+  nombre_excel: string;
+  credito_sifco: string;
+  decision: number;
+}
+
+interface ConsultaInteractiva {
+  nombre_excel: string;
+  credito_sifco: string;
+  candidatos: Array<{
+    nombre: string;
+    similitud: number;
+    inversionista_id: number;
+  }>;
 }
 
 interface InversionistaNoEncontrado {
@@ -107,10 +124,6 @@ async function guardarCSV(
   }
 }
 
-// ========================================
-// GUARDAR CSV DE ERRORES DE PORCENTAJES
-// ========================================
-
 async function guardarCSVPorcentajes(
   errores: ErrorPorcentaje[],
   filepath: string
@@ -150,6 +163,19 @@ async function guardarCSVPorcentajes(
     throw error;
   }
 }
+
+// ========================================
+// 🔥 NUEVAS FUNCIONES: MANEJO DE PARÉNTESIS
+// ========================================
+
+const extraerNombreDeParentesis = (nombre: string): string | null => {
+  const match = nombre.match(/\(([^)]+)\)/);
+  return match ? match[1].trim() : null;
+};
+
+const removerParentesis = (nombre: string): string => {
+  return nombre.replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+};
 
 // ========================================
 // FUNCIONES AUXILIARES: Normalización y Similitud
@@ -255,7 +281,6 @@ function calcularSimilitud(str1: string, str2: string): number {
   return Math.max(0, similarity);
 }
 
-// 🔥 NUEVA: Similitud por tokens
 const calcularSimilitudTokens = (str1: string, str2: string): number => {
   const tokens1 = extraerPalabrasClave(str1);
   const tokens2 = extraerPalabrasClave(str2);
@@ -283,7 +308,6 @@ const calcularSimilitudTokens = (str1: string, str2: string): number => {
   const totalTokens = Math.max(tokens1.length, tokens2.length);
   let similitud = (matches / totalTokens) * 100;
   
-  // Bonus por tokens importantes
   if (tokens1.length > 0 && tokens2.length > 0) {
     if (calcularLevenshtein(tokens1[0], tokens2[0]) >= 80) {
       similitud += 15;
@@ -300,21 +324,21 @@ const calcularSimilitudTokens = (str1: string, str2: string): number => {
 };
 
 // ========================================
-// BÚSQUEDA INTELIGENTE MEJORADA
+// 🔥 BÚSQUEDA SIMPLE (lógica refactorizada)
 // ========================================
 
-const buscarInversionistaInteligente = async (
+const buscarPorNombreSimple = async (
   nombreBuscado: string,
-  todosInversionistas: Array<{ inversionista_id: number; nombre: string }>
+  todosInversionistas: Array<{ inversionista_id: number; nombre: string }>,
+  umbralSimilitud: number
 ): Promise<{ 
   inversionista_id: number; 
   nombre: string; 
   similitud: number; 
   metodo: string;
   candidatosCercanos?: Array<{ nombre: string; similitud: number; inversionista_id: number }>;
+  requiere_confirmacion?: boolean;
 } | null> => {
-  
-  console.log(`\n   🔍 Buscando match para: "${nombreBuscado}"`);
   
   const nombreNorm = normalizarNombre(nombreBuscado);
   const palabrasClave = extraerPalabrasClave(nombreBuscado);
@@ -331,12 +355,13 @@ const buscarInversionistaInteligente = async (
         inversionista_id: inv.inversionista_id,
         nombre: inv.nombre,
         similitud: 100,
-        metodo: "EXACT"
+        metodo: "EXACT",
+        requiere_confirmacion: false
       };
     }
   }
 
-  // 1️⃣ TOKEN match (⭐ MEJOR PARA "Jose Massis", "Diego Furlan")
+  // 1️⃣ TOKEN match
   console.log(`   📍 Estrategia 1: Similitud por tokens...`);
   
   const candidatosTokens = todosInversionistas
@@ -361,13 +386,24 @@ const buscarInversionistaInteligente = async (
       inversionista_id: c.inversionista_id
     }));
     
-    if (mejor.similitud >= 60) {
+    if (mejor.similitud >= umbralSimilitud) {
       return {
         inversionista_id: mejor.inversionista_id,
         nombre: mejor.nombre,
         similitud: mejor.similitud,
         metodo: "TOKEN",
-        candidatosCercanos
+        candidatosCercanos,
+        requiere_confirmacion: false
+      };
+    } else if (mejor.similitud >= 50) {
+      console.log(`   ⚠️  Match dudoso (${mejor.similitud.toFixed(1)}%), requiere confirmación`);
+      return {
+        inversionista_id: mejor.inversionista_id,
+        nombre: mejor.nombre,
+        similitud: mejor.similitud,
+        metodo: "TOKEN",
+        candidatosCercanos,
+        requiere_confirmacion: true
       };
     }
   }
@@ -416,9 +452,22 @@ const buscarInversionistaInteligente = async (
           }
         }
 
-        if (mejorMatch && mejorMatch.similitud >= 50) {
+        if (mejorMatch && mejorMatch.similitud >= umbralSimilitud) {
           console.log(`   ✅ MEJOR MATCH (LIKE): "${mejorMatch.nombre}" → ${mejorMatch.similitud.toFixed(1)}%`);
-          return { ...mejorMatch, metodo: "LIKE", candidatosCercanos };
+          return { 
+            ...mejorMatch, 
+            metodo: "LIKE", 
+            candidatosCercanos,
+            requiere_confirmacion: false
+          };
+        } else if (mejorMatch && mejorMatch.similitud >= 50) {
+          console.log(`   ⚠️  Match dudoso (${mejorMatch.similitud.toFixed(1)}%), requiere confirmación`);
+          return {
+            ...mejorMatch,
+            metodo: "LIKE",
+            candidatosCercanos,
+            requiere_confirmacion: true
+          };
         }
       }
     } catch (error) {
@@ -462,8 +511,20 @@ const buscarInversionistaInteligente = async (
   candidatosCercanos = topCandidatos.slice(0, 5);
 
   if (mejorMatch) {
-    console.log(`   ✅ MEJOR MATCH (FUZZY): "${mejorMatch.nombre}" → ${mejorMatch.similitud.toFixed(1)}%`);
-    return { ...mejorMatch, metodo: "FUZZY", candidatosCercanos };
+    const requiereConfirmacion = mejorMatch.similitud < umbralSimilitud;
+    
+    if (requiereConfirmacion) {
+      console.log(`   ⚠️  Match dudoso (${mejorMatch.similitud.toFixed(1)}%), requiere confirmación`);
+    } else {
+      console.log(`   ✅ MEJOR MATCH (FUZZY): "${mejorMatch.nombre}" → ${mejorMatch.similitud.toFixed(1)}%`);
+    }
+    
+    return { 
+      ...mejorMatch, 
+      metodo: "FUZZY", 
+      candidatosCercanos,
+      requiere_confirmacion: requiereConfirmacion
+    };
   }
 
   console.log(`   ❌ No se encontró match >= 50%`);
@@ -473,6 +534,58 @@ const buscarInversionistaInteligente = async (
   });
 
   return null;
+};
+
+// ========================================
+// 🔥 BÚSQUEDA INTELIGENTE CON PARÉNTESIS
+// ========================================
+
+const buscarInversionistaInteligente = async (
+  nombreBuscado: string,
+  todosInversionistas: Array<{ inversionista_id: number; nombre: string }>,
+  umbralSimilitud: number = 70
+): Promise<{ 
+  inversionista_id: number; 
+  nombre: string; 
+  similitud: number; 
+  metodo: string;
+  candidatosCercanos?: Array<{ nombre: string; similitud: number; inversionista_id: number }>;
+  requiere_confirmacion?: boolean;
+} | null> => {
+  
+  console.log(`\n   🔍 Buscando match para: "${nombreBuscado}"`);
+  
+  // 🔥 ESTRATEGIA: Si tiene paréntesis, buscar primero el contenido (nombre de persona)
+  const nombreEnParentesis = extraerNombreDeParentesis(nombreBuscado);
+  const nombreSinParentesis = removerParentesis(nombreBuscado);
+  
+  if (nombreEnParentesis) {
+    console.log(`   👤 Nombre en paréntesis detectado: "${nombreEnParentesis}"`);
+    console.log(`   🏢 Nombre sin paréntesis: "${nombreSinParentesis}"`);
+    console.log(`   🎯 Buscando primero por: "${nombreEnParentesis}"`);
+    
+    // 🔥 Buscar primero por el nombre en paréntesis (más específico)
+    const matchPersona = await buscarPorNombreSimple(nombreEnParentesis, todosInversionistas, umbralSimilitud);
+    
+    if (matchPersona) {
+      console.log(`   ✅ Match encontrado por nombre en paréntesis!`);
+      return matchPersona;
+    }
+    
+    console.log(`   ⚠️  No se encontró por nombre en paréntesis, buscando por nombre completo (sin paréntesis)...`);
+    
+    // Si no funciona, buscar por el nombre sin paréntesis (empresa)
+    const matchEmpresa = await buscarPorNombreSimple(nombreSinParentesis, todosInversionistas, umbralSimilitud);
+    
+    if (matchEmpresa) {
+      console.log(`   ✅ Match encontrado por nombre de empresa!`);
+      return matchEmpresa;
+    }
+  }
+  
+  // 🔥 Si no tiene paréntesis o ninguna estrategia funcionó, búsqueda normal
+  console.log(`   🔍 Búsqueda normal para: "${nombreBuscado}"`);
+  return await buscarPorNombreSimple(nombreBuscado, todosInversionistas, umbralSimilitud);
 };
 
 // ========================================
@@ -629,15 +742,29 @@ async function guardarErroresPorcentajes(errores: ErrorPorcentaje[]): Promise<st
     throw error;
   }
 }
-
+const inversionistasFallidos: {
+  nombre: string;
+  razon: string;
+}[] = [];
 // ========================================
-// FUNCIÓN PRINCIPAL
+// 🔥 FUNCIÓN PRINCIPAL CON MODO INTERACTIVO
 // ========================================
 
 export async function procesarInversionistasSoloExcel(
-  creditoAgrupado: CreditoAgrupadoInversionistas
+  creditoAgrupado: CreditoAgrupadoInversionistas,
+  opciones?: {
+    modo_interactivo?: boolean;
+    umbral_similitud?: number;
+    decisiones_usuario?: DecisionUsuario[];
+  }
 ) {
   try {
+    const modoInteractivo = opciones?.modo_interactivo ?? false;
+    const umbralSimilitud = opciones?.umbral_similitud ?? 70;
+    const decisionesUsuario = opciones?.decisiones_usuario ?? [];
+
+    const inversionistasFallidos: { nombre: string; razon: string }[] = [];
+
     console.log("\n🔄 ========== PROCESANDO INVERSIONISTAS DESDE EXCEL ==========");
     console.log(`📋 Crédito Base: ${creditoAgrupado.creditoBase}`);
     console.log(`👤 Cliente: ${creditoAgrupado.cliente}`);
@@ -647,40 +774,32 @@ export async function procesarInversionistasSoloExcel(
       throw new Error(`❌ No se encontraron filas para ${creditoAgrupado.creditoBase}`);
     }
 
+    // ===============================
     // PASO 0: Eliminar duplicados
-    console.log(`\n🔍 Verificando duplicados en el Excel...`);
-    
+    // ===============================
     const filasUnicas = new Map<string, typeof creditoAgrupado.filas[0]>();
     const duplicadosEncontrados: string[] = [];
-    
+
     for (const fila of creditoAgrupado.filas) {
-      const nombreInversionista = String(fila.Inversionista || "").trim();
-      
-      if (!nombreInversionista) {
-        console.warn(`   ⚠️  Fila sin inversionista, saltando...`);
+      const nombre = String(fila.Inversionista || "").trim();
+      if (!nombre) {
+        inversionistasFallidos.push({ nombre: "(vacío)", razon: "Nombre vacío" });
         continue;
       }
-      
-      const claveUnica = nombreInversionista.toLowerCase().replace(/\s+/g, ' ');
-      
-      if (filasUnicas.has(claveUnica)) {
-        duplicadosEncontrados.push(nombreInversionista);
-        console.warn(`   ⚠️  DUPLICADO: "${nombreInversionista}"`);
+
+      const key = nombre.toLowerCase().replace(/\s+/g, " ");
+      if (filasUnicas.has(key)) {
+        duplicadosEncontrados.push(nombre);
       } else {
-        filasUnicas.set(claveUnica, fila);
+        filasUnicas.set(key, fila);
       }
     }
-    
-    const filasLimpias = Array.from(filasUnicas.values());
-    
-    console.log(`\n📊 Resumen de limpieza:`);
-    console.log(`   - Filas originales: ${creditoAgrupado.filas.length}`);
-    console.log(`   - Duplicados removidos: ${duplicadosEncontrados.length}`);
-    console.log(`   - Filas únicas: ${filasLimpias.length}`);
 
+    const filasLimpias = Array.from(filasUnicas.values());
+
+    // ===============================
     // PASO 1: Buscar crédito
-    console.log(`\n🔍 Buscando crédito ${creditoAgrupado.creditoBase}...`);
-    
+    // ===============================
     const [creditoDB] = await db
       .select({
         credito_id: creditos.credito_id,
@@ -693,31 +812,23 @@ export async function procesarInversionistasSoloExcel(
       .limit(1);
 
     if (!creditoDB) {
-      console.error(`❌ Crédito ${creditoAgrupado.creditoBase} NO existe en la BD`);
       return {
         success: false,
-        creditoBase: creditoAgrupado.creditoBase,
-        error: "Crédito no encontrado en base de datos",
-        inversionistas_procesados: 0,
+        error: "Crédito no encontrado",
+        inversionistas_fallidos: inversionistasFallidos,
       };
     }
 
-    console.log(`✅ Crédito encontrado: ID ${creditoDB.credito_id}`);
-    console.log(`   Capital: Q${creditoDB.capital}`);
-    console.log(`   Interés: ${creditoDB.porcentaje_interes}%`);
-
-    // PASO 2: Borrar inversionistas viejos
-    console.log(`\n🗑️  Eliminando inversionistas existentes...`);
-    
+    // ===============================
+    // PASO 2: Limpiar relaciones
+    // ===============================
     const deletedCount = await db
       .delete(creditos_inversionistas)
       .where(eq(creditos_inversionistas.credito_id, creditoDB.credito_id));
 
-    console.log(`✅ ${deletedCount.rowCount ?? 0} inversionistas eliminados`);
-
-    // PASO 3: Cargar inversionistas de BD
-    console.log(`\n📋 Cargando todos los inversionistas de la BD...`);
-    
+    // ===============================
+    // PASO 3: Cargar inversionistas BD
+    // ===============================
     const todosInversionistas = await db
       .select({
         inversionista_id: inversionistas.inversionista_id,
@@ -725,240 +836,107 @@ export async function procesarInversionistasSoloExcel(
       })
       .from(inversionistas);
 
-    console.log(`✅ ${todosInversionistas.length} inversionistas cargados`);
-
-    // PASO 4: Validar porcentajes
-    console.log(`\n🔍 Validando porcentajes...`);
-    
-    let sumaTotal = new Big(0);
-    const porcentajesInfo: Array<{nombre: string, pctCashIn: string, pctInv: string}> = [];
-    
-    for (const fila of filasLimpias) {
-      const nombreInv = String(fila.Inversionista || "").trim();
-      if (!nombreInv) continue;
-      
-      const pctCashIn = toBigExcel(fila.PorcentajeCashIn || 0, "0");
-      const pctInv = toBigExcel(fila.PorcentajeInversionista || 0, "0");
-      sumaTotal = sumaTotal.plus(pctCashIn).plus(pctInv);
-      
-      porcentajesInfo.push({
-        nombre: nombreInv,
-        pctCashIn: pctCashIn.times(100).toFixed(2) + '%',
-        pctInv: pctInv.times(100).toFixed(2) + '%'
-      });
-    }
-    
-    console.log(`\n📊 Porcentajes de inversionistas:`);
-    console.log(`   ${'Inversionista'.padEnd(40)} | % Cash-In | % Inversionista`);
-    console.log(`   ${'-'.repeat(70)}`);
-    porcentajesInfo.forEach(info => {
-      console.log(`   ${info.nombre.padEnd(40)} | ${info.pctCashIn.padStart(9)} | ${info.pctInv.padStart(15)}`);
-    });
-    console.log(`   ${'-'.repeat(70)}`);
-    console.log(`   TOTAL: ${sumaTotal.times(100).toFixed(2)}%`);
-    
-    const diferencia = sumaTotal.minus(1).abs();
-    const erroresPorcentajes: ErrorPorcentaje[] = [];
-    
-    if (diferencia.gt(0.01)) {
-      const razon = sumaTotal.lt(1) 
-        ? `Suma menor a 100% (falta ${diferencia.times(100).toFixed(2)}%)`
-        : `Suma mayor a 100% (sobra ${diferencia.times(100).toFixed(2)}%)`;
-      
-      console.warn(`\n⚠️  WARNING: Los porcentajes no suman 100%`);
-      console.warn(`   Suma actual: ${sumaTotal.times(100).toFixed(2)}%`);
-      console.warn(`   Diferencia: ${diferencia.times(100).toFixed(2)}%`);
-      console.warn(`   Razón: ${razon}`);
-      console.warn(`   → Continuando de todas formas...`);
-      
-      erroresPorcentajes.push({
-        creditoSIFCO: creditoAgrupado.creditoBase,
-        cliente: creditoAgrupado.cliente,
-        inversionistas: porcentajesInfo.map(p => ({
-          nombre: p.nombre,
-          porcentajeCashIn: p.pctCashIn,
-          porcentajeInversionista: p.pctInv
-        })),
-        sumaTotal: sumaTotal.times(100).toFixed(2) + '%',
-        diferencia: diferencia.times(100).toFixed(2) + '%',
-        timestamp: new Date().toISOString(),
-        razon
-      });
-    } else {
-      console.log(`\n✅ Porcentajes validados correctamente (suman ~100%)`);
-    }
-
+    // ===============================
     // PASO 5: Mapear inversionistas
-    console.log(`\n👥 Mapeando inversionistas desde Excel...`);
-    
+    // ===============================
     const inversionistasData = [];
-    const inversionistasNoEncontrados: InversionistaNoEncontrado[] = [];
-    const matchStats = { EXACT: 0, TOKEN: 0, LIKE: 0, FUZZY: 0 };
     const inversionistasYaProcesados = new Set<number>();
 
     for (const fila of filasLimpias) {
-      const nombreInversionista = String(fila.Inversionista || "").trim();
-      
-      if (!nombreInversionista) {
-        console.warn(`   ⚠️  Fila sin nombre de inversionista, saltando...`);
+      const nombre = String(fila.Inversionista || "").trim();
+      if (!nombre) {
+        inversionistasFallidos.push({ nombre: "(vacío)", razon: "Nombre vacío" });
         continue;
       }
 
-      console.log(`\n   📋 Procesando: "${nombreInversionista}"`);
+      let inversionistaId: number | null = null;
 
       const match = await buscarInversionistaInteligente(
-        nombreInversionista,
-        todosInversionistas
+        nombre,
+        todosInversionistas,
+        umbralSimilitud
       );
 
       if (!match) {
-        console.error(`   ❌ No se encontró match`);
-        
-        const candidatosCercanos = todosInversionistas
-          .map(inv => ({
-            nombre: inv.nombre,
-            similitud: Math.max(
-              calcularSimilitud(nombreInversionista, inv.nombre),
-              calcularSimilitudTokens(nombreInversionista, inv.nombre)
-            ),
-            inversionista_id: inv.inversionista_id
-          }))
-          .sort((a, b) => b.similitud - a.similitud)
-          .slice(0, 3);
-        
-        console.log(`   🔍 Candidatos más cercanos:`);
-        candidatosCercanos.forEach((c, idx) => {
-          console.log(`      ${idx + 1}. ${c.nombre} (${c.similitud.toFixed(1)}%) [ID: ${c.inversionista_id}]`);
+        inversionistasFallidos.push({
+          nombre,
+          razon: "No se encontró match en BD",
         });
-        
-        inversionistasNoEncontrados.push({
-          nombreExcel: nombreInversionista,
-          creditoSIFCO: fila.CreditoSIFCO,
-          cliente: creditoAgrupado.cliente,
-          capital: String(fila.Capital || "0"),
-          timestamp: new Date().toISOString(),
-          candidatosCercanos
-        });
-        
         continue;
       }
 
-      if (inversionistasYaProcesados.has(match.inversionista_id)) {
-        console.warn(`   ⚠️  DUPLICADO: ${match.nombre} (ID: ${match.inversionista_id}) ya procesado`);
+      if (match.requiere_confirmacion && modoInteractivo) {
+        inversionistasFallidos.push({
+          nombre,
+          razon: "Requiere confirmación del usuario",
+        });
         continue;
       }
 
-      inversionistasYaProcesados.add(match.inversionista_id);
-      matchStats[match.metodo as keyof typeof matchStats]++;
+      inversionistaId = match.inversionista_id;
 
-      if (match.similitud === 100) {
-        console.log(`   ✅ Match perfecto (${match.metodo}): "${match.nombre}"`);
-      } else {
-        console.log(`   🔍 Match (${match.metodo}) ${match.similitud.toFixed(1)}%: "${match.nombre}"`);
+      if (inversionistasYaProcesados.has(inversionistaId)) {
+        inversionistasFallidos.push({
+          nombre,
+          razon: "Inversionista duplicado en Excel",
+        });
+        continue;
       }
 
-      // Calcular montos
+      inversionistasYaProcesados.add(inversionistaId);
+
+      // Montos
       const montoAportado = toBigExcel(fila.Capital, "0");
       const porcentajeCashIn = toBigExcel(fila.PorcentajeCashIn || 0, "0");
-      const porcentajeInversion = toBigExcel(fila.PorcentajeInversionista || 0, "0");
-      const interes = new Big(creditoDB.porcentaje_interes || 0);
+      const porcentajeInv = toBigExcel(fila.PorcentajeInversionista || 0, "0");
+      const interes = new Big(creditoDB.porcentaje_interes || 0).div(100);
 
-      const newCuotaInteres = montoAportado.times(interes.div(100));
-      const montoInversionista = newCuotaInteres.times(porcentajeInversion).round(2);
-      const montoCashIn = newCuotaInteres.times(porcentajeCashIn).round(2);
-      const ivaInversionista = montoInversionista.gt(0) ? montoInversionista.times(0.12).round(2) : new Big(0);
-      const ivaCashIn = montoCashIn.gt(0) ? montoCashIn.times(0.12).round(2) : new Big(0);
-      const cuotaInv = fila.Cuota ? toBigExcel(fila.Cuota, "0") : new Big(0);
-
-      console.log(`   💰 Monto Aportado: Q${montoAportado}`);
-      console.log(`   📊 % Cash-In: ${porcentajeCashIn.times(100)}% / % Inv: ${porcentajeInversion.times(100)}%`);
-
-      const porcentajeCashInParaBD = porcentajeCashIn.times(100).toString();
-      const porcentajeInversionParaBD = porcentajeInversion.times(100).toString();
+      const cuotaInteres = montoAportado.times(interes);
 
       inversionistasData.push({
         credito_id: creditoDB.credito_id,
-        inversionista_id: match.inversionista_id,
+        inversionista_id: inversionistaId,
         monto_aportado: montoAportado.toFixed(2),
-        porcentaje_cash_in: porcentajeCashInParaBD,
-        porcentaje_participacion_inversionista: porcentajeInversionParaBD,
-        monto_inversionista: montoInversionista.toFixed(2),
-        monto_cash_in: montoCashIn.toFixed(2),
-        iva_inversionista: ivaInversionista.toFixed(2),
-        iva_cash_in: ivaCashIn.toFixed(2),
+        porcentaje_cash_in: porcentajeCashIn.times(100).toFixed(2),
+        porcentaje_participacion_inversionista: porcentajeInv.times(100).toFixed(2),
+        monto_inversionista: cuotaInteres.times(porcentajeInv).toFixed(2),
+        monto_cash_in: cuotaInteres.times(porcentajeCashIn).toFixed(2),
+        iva_inversionista: cuotaInteres.times(porcentajeInv).times(0.12).toFixed(2),
+        iva_cash_in: cuotaInteres.times(porcentajeCashIn).times(0.12).toFixed(2),
         fecha_creacion: new Date(),
-        cuota_inversionista: cuotaInv.toFixed(2),
+        cuota_inversionista: toBigExcel(fila.Cuota || 0, "0").toFixed(2),
       });
     }
 
-    // PASO 6: Estadísticas
-    console.log(`\n📊 ========== ESTADÍSTICAS ==========`);
-    console.log(`   ✅ EXACT: ${matchStats.EXACT}`);
-    console.log(`   ✅ TOKEN: ${matchStats.TOKEN}`);
-    console.log(`   ✅ LIKE: ${matchStats.LIKE}`);
-    console.log(`   ✅ FUZZY: ${matchStats.FUZZY}`);
-    console.log(`   ❌ No encontrados: ${inversionistasNoEncontrados.length}`);
-    console.log(`   🔄 Duplicados removidos: ${duplicadosEncontrados.length}`);
+    // ===============================
+    // PASO FINAL: INSERTAR
+    // ===============================
+    if (inversionistasData.length > 0) {
+      await db.insert(creditos_inversionistas).values(inversionistasData);
+    }
 
-    // PASO 7: Guardar logs
-    let logFilePath = null;
-    let logPorcentajesPath = null;
-    
-    if (inversionistasNoEncontrados.length > 0) {
-      console.warn(`\n⚠️  INVERSIONISTAS NO ENCONTRADOS:`);
-      inversionistasNoEncontrados.forEach((inv) => {
-        console.warn(`   - "${inv.nombreExcel}" (${inv.creditoSIFCO})`);
+    // ===============================
+    // 🔥 LOG FINAL DE FALLIDOS
+    // ===============================
+    if (inversionistasFallidos.length > 0) {
+      console.log("\n❌ ========== INVERSIONISTAS FALLIDOS ==========");
+      inversionistasFallidos.forEach((f, i) => {
+        console.log(` ${i + 1}. ${f.nombre} → ${f.razon}`);
       });
-      logFilePath = await guardarInversionistasNoEncontrados(inversionistasNoEncontrados);
+      console.log("============================================\n");
     }
-    
-    if (erroresPorcentajes.length > 0) {
-      logPorcentajesPath = await guardarErroresPorcentajes(erroresPorcentajes);
-    }
-
-    // PASO 8: Insertar
-    console.log(`\n💾 Insertando ${inversionistasData.length} inversionistas...`);
-    
-    if (inversionistasData.length === 0) {
-      return {
-        success: false,
-        creditoBase: creditoAgrupado.creditoBase,
-        error: "No se encontraron inversionistas válidos",
-        inversionistas_procesados: 0,
-        log_file: logFilePath,
-        log_porcentajes: logPorcentajesPath
-      };
-    }
-
-    await db.insert(creditos_inversionistas).values(inversionistasData);
-
-    console.log(`✅ ${inversionistasData.length} inversionistas insertados`);
-    console.log(`\n✅ ========== PROCESO COMPLETADO ==========\n`);
 
     return {
       success: true,
       creditoBase: creditoAgrupado.creditoBase,
-      cliente: creditoAgrupado.cliente,
       credito_id: creditoDB.credito_id,
-      inversionistas_procesados: inversionistasData.length,
+      inversionistas_insertados: inversionistasData.length,
       inversionistas_eliminados: deletedCount.rowCount ?? 0,
-      inversionistas_no_encontrados: inversionistasNoEncontrados.map(inv => inv.nombreExcel),
+      inversionistas_fallidos: inversionistasFallidos,
       duplicados_removidos: duplicadosEncontrados,
-      match_stats: matchStats,
-      log_file: logFilePath,
-      log_porcentajes: logPorcentajesPath,
-      detalles: inversionistasData.map(inv => ({
-        inversionista_id: inv.inversionista_id,
-        monto_aportado: inv.monto_aportado,
-        porcentaje_cash_in: inv.porcentaje_cash_in,
-        porcentaje_inversionista: inv.porcentaje_participacion_inversionista,
-      })),
     };
-
   } catch (error) {
-    console.error("\n❌ ========== ERROR ==========");
-    console.error(error);
-    console.error("❌ ========== FIN ERROR ==========\n");
+    console.error("❌ ERROR EN PROCESO:", error);
     throw error;
   }
 }

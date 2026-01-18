@@ -629,7 +629,73 @@ app.post("/info/validate-otp", async (c) => {
 	// Si falló la validación, retornar el error
 	return c.json(result, result.status);
 });
+app.post("/info/check-liveness", async (c) => {
+	const body = await c.req.json();
+	const { dpi, phoneNumber } = body as { dpi?: string; phoneNumber?: string };
 
+	// Validaciones de formato
+	if (!dpi) {
+		return c.json({ success: false, message: "DPI is required" }, 400);
+	}
+
+	if (!phoneNumber) {
+		return c.json({ success: false, message: "Phone number is required" }, 400);
+	}
+
+	if (!/^\d{13}$/.test(dpi)) {
+		return c.json(
+			{
+				success: false,
+				message: "DPI debe tener 13 dígitos",
+			},
+			400,
+		);
+	}
+
+	if (!/^\d{8}$/.test(phoneNumber)) {
+		return c.json(
+			{
+				success: false,
+				message: "Número de teléfono debe tener 8 dígitos",
+			},
+			400,
+		);
+	}
+
+	// 🔥 Verificar liveness y generar OTP si pasó
+	const livenessResult = await hasPassedLiveness(dpi, phoneNumber);
+
+	if (!livenessResult.passed) {
+		return c.json(
+			{
+				success: false,
+				message: "Debe completar la validación de vida antes de continuar",
+				livenessValidated: false,
+			},
+			403,
+		);
+	}
+
+	// 🔥 Si pasó liveness, devolver la respuesta del OTP
+	if (livenessResult.otpResponse) {
+		return c.json(
+			{
+				...livenessResult.otpResponse,
+				livenessValidated: true,
+			},
+			livenessResult.otpResponse.status,
+		);
+	}
+
+	// Caso inesperado
+	return c.json(
+		{
+			success: false,
+			message: "Error inesperado al procesar la solicitud",
+		},
+		500,
+	);
+});
 // 🔥 ENDPOINT - Validar OTP con control de intentos
  
 // REST endpoint for public lead creation (for external web forms)

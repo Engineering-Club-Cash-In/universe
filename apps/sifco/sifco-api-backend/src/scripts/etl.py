@@ -17,7 +17,7 @@ COLUMNAS_REQUERIDAS = [
 
 # Orden de meses para procesar (de más reciente a más antiguo)
 ORDEN_MESES = [
-    "Febrero 2026", "Enero 2026", "Diciembre 2025", "Noviembre 2025",
+    "Marzo 2026", "Febrero 2026", "Enero 2026", "Diciembre 2025", "Noviembre 2025",
     "Octubre 2025", "Septiembre 2025", "Agosto 2025", "Julio 2025",
     "Junio 2025", "Mayo 2025", "Abril 2025", "Marzo 2025",
     "Febrero 2025", "Enero 2025", "Diciembre 2024", "Noviembre 2024",
@@ -389,9 +389,67 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
     return resultado
 
 
+def extraer_info_pago_parcial(fila, columnas, hoja):
+    """Extrae información de un pago parcial"""
+    info = {
+        "fecha": hoja,
+        "numeroCuota": "",
+        "montoBoleta": ""
+    }
+
+    columnas_lista = list(columnas)
+
+    # numeroCuota - columna '#' índice 2
+    if len(columnas_lista) > 2 and columnas_lista[2] == '#':
+        val = fila.iloc[2] if hasattr(fila, 'iloc') else fila[columnas_lista[2]]
+        if pd.notna(val):
+            try:
+                info["numeroCuota"] = str(int(float(val)))
+            except (ValueError, TypeError):
+                info["numeroCuota"] = str(val).strip()
+
+    # montoBoleta - columna 'Monto boleta' índice 38
+    if len(columnas_lista) > 38 and columnas_lista[38] == 'Monto boleta':
+        val = fila.iloc[38] if hasattr(fila, 'iloc') else fila[columnas_lista[38]]
+        if pd.notna(val):
+            info["montoBoleta"] = str(val)
+
+    return info
+
+
+def obtener_cuota_y_monto(fila, columnas):
+    """Obtiene los valores de Cuota y Monto boleta de una fila"""
+    columnas_lista = list(columnas)
+    cuota = None
+    monto_boleta = None
+
+    # Cuota - índice 37
+    if len(columnas_lista) > 37 and columnas_lista[37] == 'Cuota':
+        val = fila.iloc[37] if hasattr(fila, 'iloc') else fila[columnas_lista[37]]
+        if pd.notna(val):
+            try:
+                cuota = float(val)
+            except (ValueError, TypeError):
+                pass
+
+    # Monto boleta - índice 38
+    if len(columnas_lista) > 38 and columnas_lista[38] == 'Monto boleta':
+        val = fila.iloc[38] if hasattr(fila, 'iloc') else fila[columnas_lista[38]]
+        if pd.notna(val):
+            try:
+                monto_boleta = float(val)
+            except (ValueError, TypeError):
+                pass
+
+    return cuota, monto_boleta
+
+
 def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito):
     """
-    Versión optimizada que usa cache de hojas
+    Busca última cuota pagada.
+    - Pagada: cuando Cuota == Monto boleta
+    - Pago parcial: cuando Monto boleta > 0 pero != Cuota
+    - Ignorar: cuando Monto boleta es 0, vacío o null
     """
     # Ordenar hojas según ORDEN_MESES
     hojas_ordenadas = []
@@ -402,6 +460,7 @@ def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito
     ultimo_registro_encontrado = None
     hoja_ultimo_registro = None
     columnas_ultimo = None
+    pagos_parciales = []
 
     for hoja in hojas_ordenadas:
         df = hojas_cache.get(hoja)
@@ -428,34 +487,49 @@ def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito
             hoja_ultimo_registro = hoja
             columnas_ultimo = df.columns
 
-            # Verificar si está pagado
-            col_pagado = None
-            for col in df.columns:
-                if 'pagado' in col.lower():
-                    col_pagado = col
-                    break
+            # Obtener Cuota y Monto boleta
+            cuota, monto_boleta = obtener_cuota_y_monto(fila, df.columns)
 
-            if col_pagado and pd.notna(fila.get(col_pagado)):
-                pagado = str(fila[col_pagado]).strip().lower()
-                if pagado == 'si' or pagado == 'sí':
-                    return extraer_info_pago(fila, df.columns, hoja, "Si")
+            # Si monto_boleta es 0, vacío o null → ignorar y seguir buscando
+            if monto_boleta is None or monto_boleta == 0:
+                continue
+
+            # Si Monto boleta >= Cuota → Pagada completa
+            if cuota is not None and monto_boleta >= cuota:
+                # Obtener valor real de la columna Pagado
+                pagado_real = obtener_valor_pagado(fila)
+                info = extraer_info_pago(fila, df.columns, hoja, pagado_real)
+                info["pagosParciales"] = pagos_parciales
+                return info
+
+            # Si 0 < Monto boleta < Cuota → Pago parcial
+            if cuota is not None and monto_boleta > 0 and monto_boleta < cuota:
+                pago_parcial = extraer_info_pago_parcial(fila, df.columns, hoja)
+                pagos_parciales.append(pago_parcial)
+                # Seguir buscando...
+
         else:
             # No encontrado en esta hoja
             if ultimo_registro_encontrado is not None:
-                return extraer_info_pago(
+                info = extraer_info_pago(
                     ultimo_registro_encontrado,
                     columnas_ultimo,
                     hoja_ultimo_registro,
                     obtener_valor_pagado(ultimo_registro_encontrado)
                 )
+                info["pagosParciales"] = pagos_parciales
+                return info
 
+    # Si llegamos aquí, retornar último registro encontrado
     if ultimo_registro_encontrado is not None:
-        return extraer_info_pago(
+        info = extraer_info_pago(
             ultimo_registro_encontrado,
             columnas_ultimo,
             hoja_ultimo_registro,
             obtener_valor_pagado(ultimo_registro_encontrado)
         )
+        info["pagosParciales"] = pagos_parciales
+        return info
 
     return None
 

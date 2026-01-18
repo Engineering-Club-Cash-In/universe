@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -12,7 +12,10 @@ import {
 	Eye,
 	FileText,
 	FolderOpen,
+	Pencil,
+	Plus,
 	Search,
+	Sparkles,
 	Wrench,
 	XCircle,
 } from "lucide-react";
@@ -64,7 +67,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VehicleDocumentUpload } from "@/components/vehicles/VehicleDocumentUpload";
-import { renderInspectionStatusBadge } from "@/lib/vehicle-utils";
+import {
+	renderInspectionStatusBadge,
+	renderNewVehicleBadges,
+} from "@/lib/vehicle-utils";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/vehicles/")({
@@ -75,6 +81,7 @@ export const Route = createFileRoute("/vehicles/")({
 
 function VehiclesDashboard() {
 	const navigate = useNavigate();
+	const queryClient = useQueryClient();
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [filterStatus, setFilterStatus] = useState("all");
@@ -128,6 +135,106 @@ function VehiclesDashboard() {
 
 	const [auctionPrice, setAuctionPrice] = useState<number | null>(null);
 
+	// Estado para crear vehículo nuevo
+	const [isNewVehicleOpen, setIsNewVehicleOpen] = useState(false);
+	const [newVehicleForm, setNewVehicleForm] = useState({
+		make: "",
+		model: "",
+		year: new Date().getFullYear(),
+		color: "",
+		vehicleType: "",
+		// Campos opcionales
+		licensePlate: "",
+		vinNumber: "",
+		origin: "",
+		fuelType: "",
+		transmission: "",
+	});
+
+	const createNewVehicleMutation = useMutation({
+		mutationFn: (data: typeof newVehicleForm) =>
+			client.createNewVehicle({
+				make: data.make,
+				model: data.model,
+				year: data.year,
+				color: data.color,
+				vehicleType: data.vehicleType,
+				licensePlate: data.licensePlate || undefined,
+				vinNumber: data.vinNumber || undefined,
+				origin: data.origin || undefined,
+				fuelType: data.fuelType || undefined,
+				transmission: data.transmission || undefined,
+			}),
+		onSuccess: () => {
+			toast.success("Vehículo nuevo creado exitosamente");
+			queryClient.invalidateQueries({ queryKey: ["getVehicles"] });
+			queryClient.invalidateQueries({ queryKey: ["getVehicleStatistics"] });
+			setIsNewVehicleOpen(false);
+			setNewVehicleForm({
+				make: "",
+				model: "",
+				year: new Date().getFullYear(),
+				color: "",
+				vehicleType: "",
+				licensePlate: "",
+				vinNumber: "",
+				origin: "",
+				fuelType: "",
+				transmission: "",
+			});
+		},
+		onError: (err: any) => {
+			toast.error(err.message || "Error al crear el vehículo");
+		},
+	});
+
+	// Estado para editar vehículo
+	const [isEditVehicleOpen, setIsEditVehicleOpen] = useState(false);
+	const [editVehicleForm, setEditVehicleForm] = useState({
+		id: "",
+		make: "",
+		model: "",
+		year: new Date().getFullYear(),
+		color: "",
+		vehicleType: "",
+		licensePlate: "",
+		vinNumber: "",
+		origin: "",
+		fuelType: "",
+		transmission: "",
+		kmMileage: 0,
+		isNew: false,
+	});
+
+	const updateVehicleMutation = useMutation({
+		mutationFn: (data: typeof editVehicleForm) =>
+			client.updateVehicle({
+				id: data.id,
+				data: {
+					make: data.make,
+					model: data.model,
+					year: data.year,
+					color: data.color,
+					vehicleType: data.vehicleType,
+					licensePlate: data.licensePlate || null,
+					vinNumber: data.vinNumber || null,
+					origin: data.origin || null,
+					fuelType: data.fuelType || null,
+					transmission: data.transmission || null,
+					kmMileage: data.kmMileage,
+				},
+			}),
+		onSuccess: () => {
+			toast.success("Vehículo actualizado exitosamente");
+			queryClient.invalidateQueries({ queryKey: ["getVehicles"] });
+			queryClient.invalidateQueries({ queryKey: ["getVehicleStatistics"] });
+			setIsEditVehicleOpen(false);
+		},
+		onError: (err: any) => {
+			toast.error(err.message || "Error al actualizar el vehículo");
+		},
+	});
+
 	if (isLoading) {
 		return (
 			<div className="flex flex-col gap-4 p-6">
@@ -152,6 +259,10 @@ function VehiclesDashboard() {
 		<div className="flex flex-col gap-4 p-6">
 			<div className="flex w-full items-center justify-between">
 				<h1 className="font-bold text-4xl">Panel de Vehículos</h1>
+				<Button onClick={() => setIsNewVehicleOpen(true)}>
+					<Plus className="mr-2 h-4 w-4" />
+					Nuevo Vehículo
+				</Button>
 			</div>
 
 			{/* Stats Cards */}
@@ -290,7 +401,13 @@ function VehiclesDashboard() {
 																{vehicle.year} - {vehicle.color}
 															</div>
 														</TableCell>
-														<TableCell>{vehicle.licensePlate}</TableCell>
+														<TableCell>
+														{vehicle.licensePlate || (
+															<span className="text-muted-foreground">
+																Sin placa
+															</span>
+														)}
+													</TableCell>
 														<TableCell>
 															{latestInspection ? (
 																<>
@@ -328,11 +445,12 @@ function VehiclesDashboard() {
 														</TableCell>
 														<TableCell>
 															<div className="flex flex-col gap-1">
+																{renderNewVehicleBadges(vehicle)}
 																{latestInspection
 																	? renderInspectionStatusBadge(
 																			latestInspection.status,
 																		)
-																	: renderInspectionStatusBadge("pending")}
+																	: !vehicle.isNew && renderInspectionStatusBadge("pending")}
 																{(vehicle as any).hasPaymentAgreement && (
 																	<Badge
 																		variant="outline"
@@ -387,6 +505,29 @@ function VehiclesDashboard() {
 																	>
 																		<Eye className="mr-2 h-4 w-4" />
 																		Ver detalles completos
+																	</DropdownMenuItem>
+																	<DropdownMenuItem
+																		onClick={() => {
+																			setEditVehicleForm({
+																				id: vehicle.id,
+																				make: vehicle.make || "",
+																				model: vehicle.model || "",
+																				year: vehicle.year || new Date().getFullYear(),
+																				color: vehicle.color || "",
+																				vehicleType: vehicle.vehicleType || "",
+																				licensePlate: vehicle.licensePlate || "",
+																				vinNumber: vehicle.vinNumber || "",
+																				origin: vehicle.origin || "",
+																				fuelType: vehicle.fuelType || "",
+																				transmission: vehicle.transmission || "",
+																				kmMileage: vehicle.kmMileage || 0,
+																				isNew: vehicle.isNew || false,
+																			});
+																			setIsEditVehicleOpen(true);
+																		}}
+																	>
+																		<Pencil className="mr-2 h-4 w-4" />
+																		Editar vehículo
 																	</DropdownMenuItem>
 																	<DropdownMenuSeparator />
 																	<DropdownMenuItem
@@ -1098,6 +1239,437 @@ function VehiclesDashboard() {
 							Cerrar
 						</Button>
 					</DialogFooter>
+				</DialogContent>
+			</Dialog>
+
+			{/* Dialog para crear vehículo nuevo */}
+			<Dialog open={isNewVehicleOpen} onOpenChange={setIsNewVehicleOpen}>
+				<DialogContent className="max-w-2xl">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<Sparkles className="h-5 w-5 text-blue-500" />
+							Registrar Vehículo Nuevo
+						</DialogTitle>
+						<DialogDescription>
+							Ingresa los datos básicos del vehículo nuevo. Los datos adicionales
+							(VIN, placa, etc.) pueden completarse después cuando lleguen del dealer.
+						</DialogDescription>
+					</DialogHeader>
+
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							if (!newVehicleForm.make || !newVehicleForm.model || !newVehicleForm.color || !newVehicleForm.vehicleType) {
+								toast.error("Por favor completa todos los campos requeridos");
+								return;
+							}
+							createNewVehicleMutation.mutate(newVehicleForm);
+						}}
+						className="space-y-6"
+					>
+						{/* Campos Requeridos */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-sm">Información Básica (Requerida)</h4>
+							<div className="grid grid-cols-2 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="make">Marca *</Label>
+									<Input
+										id="make"
+										value={newVehicleForm.make}
+										onChange={(e) =>
+											setNewVehicleForm({ ...newVehicleForm, make: e.target.value })
+										}
+										placeholder="Ej: Toyota"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="model">Modelo/Línea *</Label>
+									<Input
+										id="model"
+										value={newVehicleForm.model}
+										onChange={(e) =>
+											setNewVehicleForm({ ...newVehicleForm, model: e.target.value })
+										}
+										placeholder="Ej: Corolla"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="year">Año *</Label>
+									<Input
+										id="year"
+										type="number"
+										value={newVehicleForm.year}
+										onChange={(e) =>
+											setNewVehicleForm({ ...newVehicleForm, year: parseInt(e.target.value) || new Date().getFullYear() })
+										}
+										min={2000}
+										max={new Date().getFullYear() + 1}
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="color">Color *</Label>
+									<Input
+										id="color"
+										value={newVehicleForm.color}
+										onChange={(e) =>
+											setNewVehicleForm({ ...newVehicleForm, color: e.target.value })
+										}
+										placeholder="Ej: Blanco"
+										required
+									/>
+								</div>
+								<div className="col-span-2 space-y-2">
+									<Label htmlFor="vehicleType">Tipo de Vehículo *</Label>
+									<Select
+										value={newVehicleForm.vehicleType}
+										onValueChange={(value) =>
+											setNewVehicleForm({ ...newVehicleForm, vehicleType: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar tipo" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Sedan">Sedan</SelectItem>
+											<SelectItem value="Hatchback">Hatchback</SelectItem>
+											<SelectItem value="SUV">SUV</SelectItem>
+											<SelectItem value="Pickup">Pickup</SelectItem>
+											<SelectItem value="Minivan">Minivan</SelectItem>
+											<SelectItem value="Deportivo">Deportivo</SelectItem>
+											<SelectItem value="Otro">Otro</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+							</div>
+						</div>
+
+						{/* Campos Opcionales */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-muted-foreground text-sm">
+								Información Adicional (Opcional - puede completarse después)
+							</h4>
+							<div className="grid grid-cols-2 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="licensePlate">Placa</Label>
+									<Input
+										id="licensePlate"
+										value={newVehicleForm.licensePlate}
+										onChange={(e) =>
+											setNewVehicleForm({ ...newVehicleForm, licensePlate: e.target.value })
+										}
+										placeholder="Ej: P-123ABC"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="vinNumber">VIN</Label>
+									<Input
+										id="vinNumber"
+										value={newVehicleForm.vinNumber}
+										onChange={(e) =>
+											setNewVehicleForm({ ...newVehicleForm, vinNumber: e.target.value })
+										}
+										placeholder="Número de identificación"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="origin">Origen</Label>
+									<Select
+										value={newVehicleForm.origin}
+										onValueChange={(value) =>
+											setNewVehicleForm({ ...newVehicleForm, origin: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar origen" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Nacional">Nacional</SelectItem>
+											<SelectItem value="Importado">Importado</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="fuelType">Tipo de Combustible</Label>
+									<Select
+										value={newVehicleForm.fuelType}
+										onValueChange={(value) =>
+											setNewVehicleForm({ ...newVehicleForm, fuelType: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar combustible" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Gasolina">Gasolina</SelectItem>
+											<SelectItem value="Diesel">Diesel</SelectItem>
+											<SelectItem value="Eléctrico">Eléctrico</SelectItem>
+											<SelectItem value="Híbrido">Híbrido</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="col-span-2 space-y-2">
+									<Label htmlFor="transmission">Transmisión</Label>
+									<Select
+										value={newVehicleForm.transmission}
+										onValueChange={(value) =>
+											setNewVehicleForm({ ...newVehicleForm, transmission: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar transmisión" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Automático">Automático</SelectItem>
+											<SelectItem value="Manual">Manual</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+							</div>
+						</div>
+
+						<DialogFooter>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setIsNewVehicleOpen(false)}
+							>
+								Cancelar
+							</Button>
+							<Button type="submit" disabled={createNewVehicleMutation.isPending}>
+								{createNewVehicleMutation.isPending ? "Creando..." : "Crear Vehículo"}
+							</Button>
+						</DialogFooter>
+					</form>
+				</DialogContent>
+			</Dialog>
+
+			{/* Dialog para editar vehículo */}
+			<Dialog open={isEditVehicleOpen} onOpenChange={setIsEditVehicleOpen}>
+				<DialogContent className="max-w-2xl">
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2">
+							<Pencil className="h-5 w-5 text-blue-500" />
+							Editar Vehículo
+							{editVehicleForm.isNew && (
+								<Badge variant="outline" className="ml-2 bg-blue-100 text-blue-800 border-blue-300">
+									<Sparkles className="mr-1 h-3 w-3" />
+									Nuevo
+								</Badge>
+							)}
+						</DialogTitle>
+						<DialogDescription>
+							Modifica los datos del vehículo. {editVehicleForm.isNew && "Completa los datos faltantes del vehículo nuevo."}
+						</DialogDescription>
+					</DialogHeader>
+
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							if (!editVehicleForm.make || !editVehicleForm.model || !editVehicleForm.color || !editVehicleForm.vehicleType) {
+								toast.error("Por favor completa todos los campos requeridos");
+								return;
+							}
+							updateVehicleMutation.mutate(editVehicleForm);
+						}}
+						className="space-y-6"
+					>
+						{/* Campos Principales */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-sm">Información Básica</h4>
+							<div className="grid grid-cols-2 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="edit-make">Marca *</Label>
+									<Input
+										id="edit-make"
+										value={editVehicleForm.make}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, make: e.target.value })
+										}
+										placeholder="Ej: Toyota"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-model">Modelo/Línea *</Label>
+									<Input
+										id="edit-model"
+										value={editVehicleForm.model}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, model: e.target.value })
+										}
+										placeholder="Ej: Corolla"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-year">Año *</Label>
+									<Input
+										id="edit-year"
+										type="number"
+										value={editVehicleForm.year}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, year: parseInt(e.target.value) || new Date().getFullYear() })
+										}
+										min={1990}
+										max={new Date().getFullYear() + 1}
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-color">Color *</Label>
+									<Input
+										id="edit-color"
+										value={editVehicleForm.color}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, color: e.target.value })
+										}
+										placeholder="Ej: Blanco"
+										required
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-vehicleType">Tipo de Vehículo *</Label>
+									<Select
+										value={editVehicleForm.vehicleType}
+										onValueChange={(value) =>
+											setEditVehicleForm({ ...editVehicleForm, vehicleType: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar tipo" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Sedan">Sedan</SelectItem>
+											<SelectItem value="Hatchback">Hatchback</SelectItem>
+											<SelectItem value="SUV">SUV</SelectItem>
+											<SelectItem value="Pickup">Pickup</SelectItem>
+											<SelectItem value="Minivan">Minivan</SelectItem>
+											<SelectItem value="Deportivo">Deportivo</SelectItem>
+											<SelectItem value="Otro">Otro</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-kmMileage">Kilometraje</Label>
+									<Input
+										id="edit-kmMileage"
+										type="number"
+										value={editVehicleForm.kmMileage}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, kmMileage: parseInt(e.target.value) || 0 })
+										}
+										min={0}
+										placeholder="0"
+									/>
+								</div>
+							</div>
+						</div>
+
+						{/* Campos de Identificación */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-sm">
+								Identificación del Vehículo
+								{editVehicleForm.isNew && (
+									<span className="ml-2 font-normal text-amber-600 text-xs">
+										(requeridos para completar la oportunidad)
+									</span>
+								)}
+							</h4>
+							<div className="grid grid-cols-2 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="edit-licensePlate">Placa</Label>
+									<Input
+										id="edit-licensePlate"
+										value={editVehicleForm.licensePlate}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, licensePlate: e.target.value })
+										}
+										placeholder="Ej: P-123ABC"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-vinNumber">VIN</Label>
+									<Input
+										id="edit-vinNumber"
+										value={editVehicleForm.vinNumber}
+										onChange={(e) =>
+											setEditVehicleForm({ ...editVehicleForm, vinNumber: e.target.value })
+										}
+										placeholder="Número de identificación"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-origin">Origen</Label>
+									<Select
+										value={editVehicleForm.origin}
+										onValueChange={(value) =>
+											setEditVehicleForm({ ...editVehicleForm, origin: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar origen" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Nacional">Nacional</SelectItem>
+											<SelectItem value="Importado">Importado</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-fuelType">Tipo de Combustible</Label>
+									<Select
+										value={editVehicleForm.fuelType}
+										onValueChange={(value) =>
+											setEditVehicleForm({ ...editVehicleForm, fuelType: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar combustible" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Gasolina">Gasolina</SelectItem>
+											<SelectItem value="Diesel">Diesel</SelectItem>
+											<SelectItem value="Eléctrico">Eléctrico</SelectItem>
+											<SelectItem value="Híbrido">Híbrido</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="col-span-2 space-y-2">
+									<Label htmlFor="edit-transmission">Transmisión</Label>
+									<Select
+										value={editVehicleForm.transmission}
+										onValueChange={(value) =>
+											setEditVehicleForm({ ...editVehicleForm, transmission: value })
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar transmisión" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Automático">Automático</SelectItem>
+											<SelectItem value="Manual">Manual</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+							</div>
+						</div>
+
+						<DialogFooter>
+							<Button
+								type="button"
+								variant="outline"
+								onClick={() => setIsEditVehicleOpen(false)}
+							>
+								Cancelar
+							</Button>
+							<Button type="submit" disabled={updateVehicleMutation.isPending}>
+								{updateVehicleMutation.isPending ? "Guardando..." : "Guardar Cambios"}
+							</Button>
+						</DialogFooter>
+					</form>
 				</DialogContent>
 			</Dialog>
 		</div>

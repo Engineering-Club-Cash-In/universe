@@ -8,7 +8,6 @@ import {
 	contactosCobros,
 	contratosFinanciamiento,
 	conveniosPago,
-	cuotasPago,
 	estadoContactoEnum,
 	estadoMoraEnum,
 	metodoContactoEnum,
@@ -16,7 +15,7 @@ import {
 } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { adminProcedure, cobrosProcedure, cobrosSupervisorProcedure, o } from "../lib/orpc";
+import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {

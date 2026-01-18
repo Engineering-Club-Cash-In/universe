@@ -1,11 +1,8 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { Page } from '@/components'
-import { SingleCar } from '@/features/Marketplace/SingleCar'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/marketplace/search/$id')({
-  component: RouteComponent,
+  beforeLoad: () => {
+    throw redirect({ to: '/' })
+  },
+  component: () => null,
 })
-
-function RouteComponent() {
-  return <Page><SingleCar /></Page>
-}

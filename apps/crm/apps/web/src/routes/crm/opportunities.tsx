@@ -10,6 +10,7 @@ import {
 	Building,
 	Calculator,
 	Calendar,
+	Car,
 	Clock,
 	ExternalLink,
 	FileSignature,
@@ -70,6 +71,10 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import {
+	getMissingFieldsForNewVehicle,
+	renderNewVehicleBadges,
+} from "@/lib/vehicle-utils";
 import { client, orpc } from "@/utils/orpc";
 
 // Simple draggable opportunity card component
@@ -365,6 +370,10 @@ export interface IOpportunity  {
 			color: string | null;
 			plate: string | null;
 			origin: string | null;
+			isNew: boolean;
+			fuelType: string | null;
+			transmission: string | null;
+			vinNumber: string | null;
 			vendor?: {
 				id: string;
 				name: string;
@@ -1598,7 +1607,7 @@ function RouteComponent() {
 															?.filter((vehicle: any) => isVehicleAvailable(vehicle.status))
 															?.map((vehicle: any) => ({
 																value: vehicle.id,
-																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+																label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
 															})) || []),
 													]}
 													value={field.state.value ?? "none"}
@@ -1961,6 +1970,41 @@ function RouteComponent() {
 														{getLoanPurposeLabel(selectedOpportunity.loanPurpose)}
 													</span>
 												</div>
+											</div>
+										)}
+
+										{/* Vehicle Info */}
+										{selectedOpportunity.vehicle && (
+											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+												<Label className="font-semibold text-muted-foreground text-sm">
+													Vehículo
+												</Label>
+												<div className="flex items-center gap-3">
+													<Car className="h-5 w-5 text-muted-foreground" />
+													<div className="flex flex-col gap-1">
+														<span className="font-medium">
+															{selectedOpportunity.vehicle.year}{" "}
+															{selectedOpportunity.vehicle.make}{" "}
+															{selectedOpportunity.vehicle.model}
+														</span>
+														<span className="text-muted-foreground text-sm">
+															{selectedOpportunity.vehicle.licensePlate || "Sin placa"}
+															{selectedOpportunity.vehicle.color && ` • ${selectedOpportunity.vehicle.color}`}
+														</span>
+													</div>
+												</div>
+												{selectedOpportunity.vehicle.isNew && (
+													<div className="mt-2">
+														{renderNewVehicleBadges(selectedOpportunity.vehicle)}
+													</div>
+												)}
+												{selectedOpportunity.vehicle.isNew &&
+													getMissingFieldsForNewVehicle(selectedOpportunity.vehicle).length > 0 && (
+													<div className="mt-2 text-amber-600 text-sm">
+														<span className="font-medium">Campos pendientes: </span>
+														{getMissingFieldsForNewVehicle(selectedOpportunity.vehicle).join(", ")}
+													</div>
+												)}
 											</div>
 										)}
 									</div>
@@ -2500,12 +2544,12 @@ function RouteComponent() {
 													options={[
 														{ value: "none", label: "Sin vehículo" },
 														...(vehiclesQuery.data?.data
-															?.filter((vehicle: any) => 
+															?.filter((vehicle: any) =>
 																isVehicleAvailable(vehicle.status, selectedOpportunity?.vehicleId, vehicle.id)
 															)
 															?.map((vehicle: any) => ({
 																value: vehicle.id,
-																label: `${vehicle.year} ${vehicle.make} ${vehicle.model} - ${vehicle.licensePlate}`,
+																label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
 															})) || []),
 													]}
 													value={field.state.value || "none"}

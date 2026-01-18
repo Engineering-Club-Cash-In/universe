@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { creditChecks, opportunities, quotations } from "../db/schema";
+import { creditChecks } from "../db/schema";
 import { crmProcedure } from "../lib/orpc";
 import { ROLES } from "../lib/roles";
 

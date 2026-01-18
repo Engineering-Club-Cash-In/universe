@@ -9,7 +9,6 @@ import {
 	vehicles,
 } from "../db/schema";
 import { user } from "../db/schema/auth";
-import { contratosFinanciamiento, cuotasPago } from "../db/schema/cobros";
 import {
 	clients,
 	companies,
@@ -1479,7 +1478,7 @@ export const crmRouter = {
 				opportunityId: z.string().uuid(),
 			}),
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			// Get opportunity
 			const [opportunity] = await db
 				.select({

@@ -1,23 +1,6 @@
 import type { Vehicle } from "../db/schema/vehicles";
 
 /**
- * Campos requeridos para vehículos nuevos antes de cerrar la oportunidad.
- * Estos datos normalmente llegan del dealer después de la venta.
- */
-const REQUIRED_FIELDS_FOR_NEW_VEHICLE = [
-	"vinNumber",
-	"licensePlate",
-	"origin",
-	"fuelType",
-	"transmission",
-] as const;
-
-/**
- * Campos mínimos requeridos para avanzar a etapa 90% (contratos).
- */
-const MINIMUM_FIELDS_FOR_CONTRACTS = ["vinNumber"] as const;
-
-/**
  * Verifica si un vehículo nuevo tiene todos los datos completos
  * necesarios para cerrar la oportunidad (100%).
  *

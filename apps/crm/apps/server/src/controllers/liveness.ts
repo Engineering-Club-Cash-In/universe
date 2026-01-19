@@ -113,7 +113,7 @@ export const livenessController = {
 
 				await db
 					.update(leads)
-					.set({ livenessValidated: true, status: "contacted" })
+					.set({ livenessValidated: true })
 					.where(eq(leads.id, user.leadId));
 			}
 

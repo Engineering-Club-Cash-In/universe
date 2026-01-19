@@ -464,7 +464,7 @@ function RouteComponent() {
 									Agregar Empresa
 								</Button>
 							</DialogTrigger>
-							<DialogContent className="max-w-2xl">
+							<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>Crear Nueva Empresa</DialogTitle>
 								</DialogHeader>
@@ -962,7 +962,7 @@ function RouteComponent() {
 
 			{/* Details Dialog */}
 			<Dialog open={isDetailsDialogOpen} onOpenChange={setIsDetailsDialogOpen}>
-				<DialogContent className="min-w-2xl max-w-3xl">
+				<DialogContent className="max-h-[90vh] min-w-2xl max-w-3xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Detalles de la Empresa</DialogTitle>
 					</DialogHeader>

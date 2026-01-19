@@ -67,7 +67,7 @@ export function MiniAgentCredentialsModal({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[425px]">
+			<DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[425px]">
 				<DialogHeader>
 					<DialogTitle>Configurar credenciales de MiniAgent</DialogTitle>
 					<DialogDescription>

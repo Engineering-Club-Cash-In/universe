@@ -730,7 +730,7 @@ function RouteComponent() {
 		enabled:
 			!!selectedOpportunity?.id &&
 			!!userProfile.data?.role &&
-			PERMISSIONS.canAccessJuridico(userProfile.data.role),
+			PERMISSIONS.canViewOpportunityContracts(userProfile.data.role),
 		queryKey: [
 			"listLegalContractsByOpportunity",
 			selectedOpportunity?.id,
@@ -1448,7 +1448,7 @@ function RouteComponent() {
 								</Button>
 							</DialogTrigger>
 						)}
-					<DialogContent className="max-w-2xl">
+					<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Crear Nueva Oportunidad</DialogTitle>
 						</DialogHeader>
@@ -1982,7 +1982,19 @@ function RouteComponent() {
 												<div className="flex items-center gap-3">
 													<Car className="h-5 w-5 text-muted-foreground" />
 													<div className="flex flex-col gap-1">
-														<span className="font-medium">
+														<span
+															className="cursor-pointer font-medium text-primary hover:underline"
+															onClick={() => {
+																setIsDetailsDialogOpen(false);
+																navigate({
+																	to: "/vehicles",
+																	search: {
+																		vehicleId: selectedOpportunity.vehicle?.id,
+																		inspectionId: undefined,
+																	},
+																});
+															}}
+														>
 															{selectedOpportunity.vehicle.year}{" "}
 															{selectedOpportunity.vehicle.make}{" "}
 															{selectedOpportunity.vehicle.model}
@@ -2030,7 +2042,9 @@ function RouteComponent() {
 
 									{/* Contracts Section */}
 									{userProfile.data?.role &&
-										PERMISSIONS.canAccessJuridico(userProfile.data.role) && (
+										PERMISSIONS.canViewOpportunityContracts(
+											userProfile.data.role,
+										) && (
 											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 												<div className="flex items-center gap-2">
 													<FileSignature className="h-5 w-5 text-muted-foreground" />
@@ -3186,18 +3200,14 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 				<CardContent className="space-y-4">
 					<div className="space-y-2">
 						<Label htmlFor="documentType">Tipo de Documento</Label>
-						<Select value={documentType} onValueChange={setDocumentType}>
-							<SelectTrigger>
-								<SelectValue placeholder="Selecciona un tipo de documento" />
-							</SelectTrigger>
-							<SelectContent>
-								{documentTypeOptions.map((type) => (
-									<SelectItem key={type.value} value={type.value}>
-										{type.label}
-									</SelectItem>
-								))}
-							</SelectContent>
-						</Select>
+						<Combobox
+							options={documentTypeOptions}
+							value={documentType}
+							onChange={setDocumentType}
+							placeholder="Buscar tipo de documento..."
+							width="full"
+							isInModal={true}
+						/>
 					</div>
 
 					<div className="space-y-2">

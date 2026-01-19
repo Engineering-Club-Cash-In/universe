@@ -2002,7 +2002,7 @@ export function CreditDetailView({
 											Agregar Cheque
 										</Button>
 									</DialogTrigger>
-									<DialogContent>
+									<DialogContent className="max-h-[90vh] overflow-y-auto">
 										<DialogHeader>
 											<DialogTitle>Registrar Nuevo Cheque</DialogTitle>
 										</DialogHeader>

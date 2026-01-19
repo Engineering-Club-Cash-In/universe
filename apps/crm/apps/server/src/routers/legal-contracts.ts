@@ -80,6 +80,56 @@ export const legalContractsRouter = {
 			return newContract;
 		}),
 
+	// Actualizar contrato legal existente
+	updateLegalContract: juridicoProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				contractType: z.string().min(1),
+				contractName: z.string().min(1),
+				clientSigningLink: z.string().url().optional().nullable(),
+				representativeSigningLink: z.string().url().optional().nullable(),
+				additionalSigningLinks: z.array(z.string().url()).optional().nullable(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verificar permisos
+			if (!context.canCreateLegalContracts) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para editar contratos",
+				});
+			}
+
+			// Verificar que el contrato existe
+			const [existingContract] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.id))
+				.limit(1);
+
+			if (!existingContract) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Contrato no encontrado",
+				});
+			}
+
+			// Actualizar el contrato
+			const [updatedContract] = await db
+				.update(generatedLegalContracts)
+				.set({
+					contractType: input.contractType,
+					contractName: input.contractName,
+					clientSigningLink: input.clientSigningLink,
+					representativeSigningLink: input.representativeSigningLink,
+					additionalSigningLinks: input.additionalSigningLinks,
+					updatedAt: new Date(),
+				})
+				.where(eq(generatedLegalContracts.id, input.id))
+				.returning();
+
+			return updatedContract;
+		}),
+
 	// Listar contratos por lead
 	listLegalContractsByLead: juridicoProcedure
 		.input(
@@ -135,6 +185,11 @@ export const legalContractsRouter = {
 						dpi: leads.dpi,
 						email: leads.email,
 						phone: leads.phone,
+					},
+					opportunity: {
+						id: opportunities.id,
+						title: opportunities.title,
+						value: opportunities.value,
 					},
 				})
 				.from(generatedLegalContracts)

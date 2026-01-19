@@ -161,7 +161,7 @@ export function VehicleDocumentUpload({
 						Subir Documento
 					</Button>
 				</DialogTrigger>
-				<DialogContent>
+				<DialogContent className="max-h-[90vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Subir Documento del Vehículo</DialogTitle>
 						<DialogDescription>

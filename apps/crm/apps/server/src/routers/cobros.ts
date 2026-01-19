@@ -15,7 +15,11 @@ import {
 } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import {
+	cobrosProcedure,
+	cobrosSupervisorProcedure,
+	crmOrCobrosProcedure,
+} from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -1770,7 +1774,7 @@ export const cobrosRouter = {
 	// ========================================================================
 
 	// Listar todos los inversionistas
-	getInversionistas: cobrosProcedure
+	getInversionistas: crmOrCobrosProcedure
 		.input(
 			z.object({
 				page: z.number().min(1).optional().default(1),
@@ -1958,7 +1962,7 @@ export const cobrosRouter = {
 	// ========================================================================
 
 	// Listar todos los asesores
-	getAsesores: cobrosProcedure
+	getAsesores: crmOrCobrosProcedure
 		.input(
 			z.object({
 				page: z.number().min(1).optional().default(1),

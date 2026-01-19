@@ -105,7 +105,6 @@ export function AnalysisChecklistView({
 				completed,
 			});
 			await refetch();
-			onUpdate?.();
 		} catch (error) {
 			console.error("Error updating verification:", error);
 		}
@@ -122,7 +121,6 @@ export function AnalysisChecklistView({
 				completed,
 			});
 			await refetch();
-			onUpdate?.();
 		} catch (error) {
 			console.error("Error updating vehicle verification:", error);
 		}
@@ -380,7 +378,7 @@ export function AnalysisChecklistView({
 												asChild
 											>
 												<a
-													href={`/crm/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
+													href={`/vehicles?inspectionId=${checklist.sections.vehiculo.inspectionId}`}
 													target="_blank"
 													rel="noopener noreferrer"
 												>

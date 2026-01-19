@@ -19,7 +19,7 @@ import {
 	Wrench,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,6 +98,11 @@ function VehiclesDashboard() {
 	const [page, setPage] = useState(0);
 	const pageSize = 20;
 
+	// Refs to track processed URL params
+	const processedVehicleIdRef = useRef<string | null>(null);
+	const processedInspectionIdRef = useRef<string | null>(null);
+	const prevDetailsOpenRef = useRef(false);
+
 	// Debounce search
 	useEffect(() => {
 		const timer = setTimeout(() => {
@@ -133,42 +138,87 @@ function VehiclesDashboard() {
 	const totalRecords = vehicles?.total || 0;
 	const totalPages = Math.ceil(totalRecords / pageSize);
 
-	// Handle URL search parameters (inspectionId or vehicleId)
-	useEffect(() => {
-		if (!vehiclesList.length) return;
+	// Query to fetch specific vehicle by ID (from URL param)
+	const specificVehicleQuery = useQuery({
+		queryKey: ["getVehicleById", search.vehicleId],
+		queryFn: search.vehicleId
+			? () => client.getVehicleById({ id: search.vehicleId! })
+			: () => Promise.resolve(null),
+		enabled:
+			!!search.vehicleId &&
+			processedVehicleIdRef.current !== search.vehicleId,
+	});
 
-		if (search.inspectionId) {
-			// Find vehicle that has this inspection
-			const vehicleWithInspection = vehiclesList.find((v: any) =>
-				v.inspections?.some((insp: any) => insp.id === search.inspectionId),
-			);
-			if (vehicleWithInspection) {
-				setSelectedVehicle(vehicleWithInspection);
-				setActiveTab("inspections");
-				setIsDetailsOpen(true);
-				// Clear the search params from URL
-				navigate({
-					to: "/vehicles",
-					search: { vehicleId: undefined, inspectionId: undefined },
-					replace: true,
-				});
-			}
-		} else if (search.vehicleId) {
-			// Find vehicle by ID
-			const vehicle = vehiclesList.find((v: any) => v.id === search.vehicleId);
-			if (vehicle) {
-				setSelectedVehicle(vehicle);
-				setActiveTab("general");
-				setIsDetailsOpen(true);
-				// Clear the search params from URL
-				navigate({
-					to: "/vehicles",
-					search: { vehicleId: undefined, inspectionId: undefined },
-					replace: true,
-				});
+	// Query to fetch inspection by ID (to get vehicleId, then fetch vehicle)
+	const specificInspectionQuery = useQuery({
+		queryKey: ["getVehicleInspectionById", search.inspectionId],
+		queryFn: search.inspectionId
+			? () => client.getVehicleInspectionById({ id: search.inspectionId! })
+			: () => Promise.resolve(null),
+		enabled:
+			!!search.inspectionId &&
+			processedInspectionIdRef.current !== search.inspectionId,
+	});
+
+	// Query to fetch vehicle from inspection's vehicleId
+	const vehicleFromInspectionQuery = useQuery({
+		queryKey: ["getVehicleById", specificInspectionQuery.data?.vehicleId],
+		queryFn: specificInspectionQuery.data?.vehicleId
+			? () =>
+					client.getVehicleById({ id: specificInspectionQuery.data!.vehicleId })
+			: () => Promise.resolve(null),
+		enabled:
+			!!specificInspectionQuery.data?.vehicleId &&
+			processedInspectionIdRef.current !== search.inspectionId,
+	});
+
+	// Handle opening details modal from URL param (vehicleId)
+	useEffect(() => {
+		if (
+			search.vehicleId &&
+			specificVehicleQuery.data &&
+			processedVehicleIdRef.current !== search.vehicleId
+		) {
+			setSelectedVehicle(specificVehicleQuery.data);
+			setActiveTab("general");
+			setIsDetailsOpen(true);
+			processedVehicleIdRef.current = search.vehicleId;
+		}
+	}, [search.vehicleId, specificVehicleQuery.data]);
+
+	// Handle opening details modal from URL param (inspectionId)
+	useEffect(() => {
+		if (
+			search.inspectionId &&
+			vehicleFromInspectionQuery.data &&
+			processedInspectionIdRef.current !== search.inspectionId
+		) {
+			setSelectedVehicle(vehicleFromInspectionQuery.data);
+			setActiveTab("inspections");
+			setIsDetailsOpen(true);
+			processedInspectionIdRef.current = search.inspectionId;
+		}
+	}, [search.inspectionId, vehicleFromInspectionQuery.data]);
+
+	// Clear search params when details modal closes
+	useEffect(() => {
+		const wasOpen = prevDetailsOpenRef.current;
+		prevDetailsOpenRef.current = isDetailsOpen;
+
+		if (wasOpen && !isDetailsOpen) {
+			if (processedVehicleIdRef.current || processedInspectionIdRef.current) {
+				processedVehicleIdRef.current = null;
+				processedInspectionIdRef.current = null;
+				if (search.vehicleId || search.inspectionId) {
+					navigate({
+						to: "/vehicles",
+						search: { vehicleId: undefined, inspectionId: undefined },
+						replace: true,
+					});
+				}
 			}
 		}
-	}, [vehiclesList, search.inspectionId, search.vehicleId, navigate]);
+	}, [isDetailsOpen, navigate, search.vehicleId, search.inspectionId]);
 
 	// auction vehicles
 	const [isAuctionOpen, setIsAuctionOpen] = useState(false);

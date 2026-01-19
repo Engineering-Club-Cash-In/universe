@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -75,6 +75,12 @@ import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/vehicles/")({
 	component: VehiclesDashboard,
+	validateSearch: (search: Record<string, unknown>) => {
+		return {
+			vehicleId: search.vehicleId as string | undefined,
+			inspectionId: search.inspectionId as string | undefined,
+		};
+	},
 });
 
 // Nota: renderInspectionStatusBadge ahora se importa desde @/lib/vehicle-utils
@@ -82,6 +88,7 @@ export const Route = createFileRoute("/vehicles/")({
 function VehiclesDashboard() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const search = useSearch({ from: "/vehicles/" });
 	const [searchTerm, setSearchTerm] = useState("");
 	const [debouncedSearch, setDebouncedSearch] = useState("");
 	const [filterStatus, setFilterStatus] = useState("all");
@@ -125,6 +132,44 @@ function VehiclesDashboard() {
 	const vehiclesList = vehicles?.data || [];
 	const totalRecords = vehicles?.total || 0;
 	const totalPages = Math.ceil(totalRecords / pageSize);
+
+	// Handle URL search parameters (inspectionId or vehicleId)
+	useEffect(() => {
+		if (!vehiclesList.length) return;
+
+		if (search.inspectionId) {
+			// Find vehicle that has this inspection
+			const vehicleWithInspection = vehiclesList.find((v: any) =>
+				v.inspections?.some((insp: any) => insp.id === search.inspectionId),
+			);
+			if (vehicleWithInspection) {
+				setSelectedVehicle(vehicleWithInspection);
+				setActiveTab("inspections");
+				setIsDetailsOpen(true);
+				// Clear the search params from URL
+				navigate({
+					to: "/vehicles",
+					search: { vehicleId: undefined, inspectionId: undefined },
+					replace: true,
+				});
+			}
+		} else if (search.vehicleId) {
+			// Find vehicle by ID
+			const vehicle = vehiclesList.find((v: any) => v.id === search.vehicleId);
+			if (vehicle) {
+				setSelectedVehicle(vehicle);
+				setActiveTab("general");
+				setIsDetailsOpen(true);
+				// Clear the search params from URL
+				navigate({
+					to: "/vehicles",
+					search: { vehicleId: undefined, inspectionId: undefined },
+					replace: true,
+				});
+			}
+		}
+	}, [vehiclesList, search.inspectionId, search.vehicleId, navigate]);
+
 	// auction vehicles
 	const [isAuctionOpen, setIsAuctionOpen] = useState(false);
 	const [auctionVehicle, setAuctionVehicle] = useState<any>(null);
@@ -642,7 +687,7 @@ function VehiclesDashboard() {
 				</TabsContent>
 			</Tabs>
 			<Dialog open={isAuctionOpen} onOpenChange={setIsAuctionOpen}>
-				<DialogContent>
+				<DialogContent className="max-h-[90vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Rematar Vehículo</DialogTitle>
 						<DialogDescription>
@@ -1244,7 +1289,7 @@ function VehiclesDashboard() {
 
 			{/* Dialog para crear vehículo nuevo */}
 			<Dialog open={isNewVehicleOpen} onOpenChange={setIsNewVehicleOpen}>
-				<DialogContent className="max-w-2xl">
+				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Sparkles className="h-5 w-5 text-blue-500" />
@@ -1448,7 +1493,7 @@ function VehiclesDashboard() {
 
 			{/* Dialog para editar vehículo */}
 			<Dialog open={isEditVehicleOpen} onOpenChange={setIsEditVehicleOpen}>
-				<DialogContent className="max-w-2xl">
+				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle className="flex items-center gap-2">
 							<Pencil className="h-5 w-5 text-blue-500" />

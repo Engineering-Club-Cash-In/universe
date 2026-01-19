@@ -226,7 +226,7 @@ function VendorsPage() {
 							Nuevo Vendedor
 						</Button>
 					</DialogTrigger>
-					<DialogContent>
+					<DialogContent className="max-h-[90vh] overflow-y-auto">
 						<DialogHeader>
 							<DialogTitle>Crear Nuevo Vendedor</DialogTitle>
 							<DialogDescription>
@@ -503,7 +503,7 @@ function VendorsPage() {
 
 			{/* Edit Dialog */}
 			<Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-				<DialogContent>
+				<DialogContent className="max-h-[90vh] overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Editar Vendedor</DialogTitle>
 						<DialogDescription>

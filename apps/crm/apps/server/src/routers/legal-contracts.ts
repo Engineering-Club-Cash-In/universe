@@ -5,7 +5,11 @@ import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
-import { adminProcedure, juridicoProcedure } from "../lib/orpc";
+import {
+	adminProcedure,
+	juridicoProcedure,
+	viewOpportunityContractsProcedure,
+} from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 
 export const legalContractsRouter = {
@@ -113,8 +117,8 @@ export const legalContractsRouter = {
 			return contracts;
 		}),
 
-	// Listar contratos por oportunidad
-	listLegalContractsByOpportunity: juridicoProcedure
+	// Listar contratos por oportunidad (accesible por CRM y Juridico)
+	listLegalContractsByOpportunity: viewOpportunityContractsProcedure
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),

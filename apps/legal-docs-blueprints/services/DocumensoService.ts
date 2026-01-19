@@ -547,6 +547,71 @@ export class DocumensoService {
       return false;
     }
   }
+
+  /**
+   * Verifica el estado de firma de un documento usando el token del recipient
+   * @param signingToken - El token extraído de la URL de firma (ej: akyMR7PGgJuzddsu0dHsq)
+   * @returns Información sobre el estado de la firma
+   */
+  async checkSigningStatus(signingToken: string): Promise<{
+    isSigned: boolean;
+    recipientEmail?: string;
+    recipientName?: string;
+    documentTitle?: string;
+    signedAt?: string;
+    status: 'PENDING' | 'COMPLETED' | 'ERROR';
+    message: string;
+  }> {
+    try {
+      console.log(`🔍 Verificando estado de firma para token: ${signingToken.substring(0, 10)}...`);
+
+      const signingUrl = `${this.baseUrl.replace('/api/v2-beta', '')}/sign/${signingToken}`;
+      
+      // Verificar si la URL redirige a /complete (indica firma completada)
+      console.log(`🔗 Verificando: ${signingUrl}`);
+      
+      const response = await fetch(signingUrl, {
+        method: 'HEAD',
+        redirect: 'manual',
+      });
+
+      // Si hay redirect a /complete, el documento está firmado
+      if (response.status === 302 || response.status === 301) {
+        const location = response.headers.get('location');
+        if (location?.includes('/complete')) {
+          console.log(`✅ Documento firmado - Redirige a: ${location}`);
+          return {
+            isSigned: true,
+            status: 'COMPLETED',
+            message: '✅ Documento firmado exitosamente',
+          };
+        }
+      }
+
+      // Si retorna 200, está pendiente de firma
+      if (response.status === 200) {
+        return {
+          isSigned: false,
+          status: 'PENDING',
+          message: '⏳ Documento pendiente de firma',
+        };
+      }
+
+      // Cualquier otro status es un error
+      return {
+        isSigned: false,
+        status: 'ERROR',
+        message: 'Token de firma no encontrado o inválido',
+      };
+    } catch (error: any) {
+      console.error('❌ Error al verificar estado de firma:', error.message);
+      return {
+        isSigned: false,
+        status: 'ERROR',
+        message: `Error al verificar: ${error.message}`,
+      };
+    }
+  }
 }
 
 // Exportar instancia singleton

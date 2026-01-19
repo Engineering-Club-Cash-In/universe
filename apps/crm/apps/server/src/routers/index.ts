@@ -132,6 +132,7 @@ export const appRouter = {
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
+	updateLegalContract: legalContractsRouter.updateLegalContract,
 	listLegalContractsByLead: legalContractsRouter.listLegalContractsByLead,
 	listLegalContractsByOpportunity:
 		legalContractsRouter.listLegalContractsByOpportunity,

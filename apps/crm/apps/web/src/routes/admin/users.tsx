@@ -249,7 +249,7 @@ function RouteComponent() {
 									Crear usuario
 								</Button>
 							</DialogTrigger>
-							<DialogContent>
+							<DialogContent className="max-h-[90vh] overflow-y-auto">
 								<DialogHeader>
 									<DialogTitle>Crear nuevo usuario</DialogTitle>
 								</DialogHeader>
@@ -547,7 +547,7 @@ function RouteComponent() {
 
 			{/* Modal de detalles del usuario */}
 			<Dialog open={!!selectedUser} onOpenChange={() => setSelectedUser(null)}>
-				<DialogContent className="max-w-2xl">
+				<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Detalles del Usuario</DialogTitle>
 					</DialogHeader>

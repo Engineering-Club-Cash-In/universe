@@ -393,6 +393,10 @@ export class CarteraBackClient {
 			{ method: "GET" },
 			true, // use cache
 		);
+		console.log(
+			`[CarteraBackClient] getCredito response for ${numeroSifco}:`,
+			JSON.stringify(response, null, 2),
+		);
 		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
 		return response;
 	}

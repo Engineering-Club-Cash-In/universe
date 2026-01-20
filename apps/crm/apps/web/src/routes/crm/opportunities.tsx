@@ -413,6 +413,7 @@ function RouteComponent() {
 	const [debouncedLeadsSearch, setDebouncedLeadsSearch] = useState("");
 	const [vehiclesSearch, setVehiclesSearch] = useState("");
 	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
+	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -798,6 +799,10 @@ function RouteComponent() {
 				leadId:
 					value.leadId && value.leadId !== "none" ? value.leadId : undefined,
 				vehicleId: value.vehicleId || undefined,
+				vendorId:
+					value.vendorId && value.vendorId !== "none"
+						? value.vendorId
+						: undefined,
 				value: value.value || undefined,
 				expectedCloseDate: value.expectedCloseDate || undefined,
 				notes: value.notes || undefined,
@@ -918,6 +923,7 @@ function RouteComponent() {
 			leadId?: string;
 			companyId?: string;
 			vehicleId?: string;
+			vendorId?: string;
 			value?: string;
 			stageId: string;
 			probability?: number;
@@ -949,6 +955,7 @@ function RouteComponent() {
 			leadId?: string;
 			vehicleId?: string | null;
 			creditType?: "autocompra" | "sobre_vehiculo";
+			status?: "open" | "won" | "lost" | "on_hold";
 			value?: string;
 			stageId?: string;
 			probability?: number;
@@ -1216,7 +1223,8 @@ function RouteComponent() {
 				opportunitiesQuery.data?.filter(
 					(opp) =>
 						opp.stage?.id === stage.id &&
-						(stageFilter === "all" || opp.status === stageFilter),
+						(stageFilter === "all" || opp.status === stageFilter) &&
+						(showLostOpportunities || opp.status !== "lost"),
 				) || [];
 
 			const totalValue = stageOpportunities.reduce(
@@ -1429,6 +1437,15 @@ function RouteComponent() {
 							<SelectItem value="on_hold">En Espera</SelectItem>
 						</SelectContent>
 					</Select>
+					<Button
+						variant={showLostOpportunities ? "default" : "outline"}
+						size="sm"
+						onClick={() => setShowLostOpportunities(!showLostOpportunities)}
+						className="gap-2"
+					>
+						<span className="h-2 w-2 rounded-full bg-red-500" />
+						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
+					</Button>
 				</div>
 
 				<Dialog
@@ -1833,12 +1850,48 @@ function RouteComponent() {
 												{selectedOpportunity.title}
 											</h3>
 											<div className="mt-1 flex items-center gap-2">
-												<Badge
-													className={`${getStatusBadgeColor(selectedOpportunity.status)}`}
-													variant="outline"
-												>
-													{getStatusLabel(selectedOpportunity.status)}
-												</Badge>
+												{selectedOpportunity.status === "won" ? (
+													<Badge
+														className={`${getStatusBadgeColor(selectedOpportunity.status)}`}
+														variant="outline"
+													>
+														{getStatusLabel(selectedOpportunity.status)}
+													</Badge>
+												) : (
+													<Select
+														value={selectedOpportunity.status}
+														onValueChange={(value) => {
+															updateOpportunityMutation.mutate({
+																id: selectedOpportunity.id,
+																status: value as "open" | "lost" | "on_hold",
+															});
+														}}
+													>
+														<SelectTrigger className="h-7 w-[130px]">
+															<SelectValue />
+														</SelectTrigger>
+														<SelectContent>
+															<SelectItem value="open">
+																<span className="flex items-center gap-2">
+																	<span className="h-2 w-2 rounded-full bg-blue-500" />
+																	Abierta
+																</span>
+															</SelectItem>
+															<SelectItem value="on_hold">
+																<span className="flex items-center gap-2">
+																	<span className="h-2 w-2 rounded-full bg-yellow-500" />
+																	En espera
+																</span>
+															</SelectItem>
+															<SelectItem value="lost">
+																<span className="flex items-center gap-2">
+																	<span className="h-2 w-2 rounded-full bg-red-500" />
+																	Perdida
+																</span>
+															</SelectItem>
+														</SelectContent>
+													</Select>
+												)}
 												{selectedOpportunity.stage && (
 													<Badge
 														style={{

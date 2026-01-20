@@ -260,21 +260,21 @@ const requireJuridico = o.middleware(async ({ context, next }) => {
 
 const requireTallerOrigin = o.middleware(async ({ context, next }) => {
 	const tallerUrl = process.env.TALLER_URL;
+	const frontUrl = process.env.FRONT_URL;
 
-	if (!tallerUrl) {
+	if (!tallerUrl && !frontUrl) {
 		throw new ORPCError("INTERNAL_SERVER_ERROR", {
-			message: "TALLER_URL not configured",
+			message: "TALLER_URL or FRONT_URL not configured",
 		});
 	}
 
 	const origin = context.headers.get("origin");
 	const referer = context.headers.get("referer");
 
-	// Verificar si la petición viene del taller
+	// Verificar si la petición viene del taller o del front del CRM
 	const isFromTaller =
-		origin === tallerUrl ||
-		referer?.startsWith(tallerUrl) ||
-		referer?.startsWith(`${tallerUrl}/`);
+		(tallerUrl && (origin === tallerUrl || referer?.startsWith(tallerUrl) || referer?.startsWith(`${tallerUrl}/`))) ||
+		(frontUrl && (origin === frontUrl || referer?.startsWith(frontUrl) || referer?.startsWith(`${frontUrl}/`)));
 
 	if (!isFromTaller) {
 		throw new ORPCError("FORBIDDEN", {

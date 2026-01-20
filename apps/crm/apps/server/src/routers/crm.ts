@@ -927,6 +927,8 @@ export const crmRouter = {
 				membresiaPago,
 				direccion,
 				gastosAdministrativos,
+				expectedCloseDate,
+				fechaInicio,
 				...updateData
 			} = input;
 
@@ -1075,12 +1077,12 @@ export const crmRouter = {
 				.set({
 					...updateData,
 					...(assignedTo && { assignedTo }),
-					expectedCloseDate: updateData.expectedCloseDate
-						? new Date(updateData.expectedCloseDate)
-						: undefined,
-					fechaInicio: updateData.fechaInicio
-						? new Date(updateData.fechaInicio)
-						: undefined,
+					...(expectedCloseDate && {
+						expectedCloseDate: new Date(expectedCloseDate),
+					}),
+					...(fechaInicio && {
+						fechaInicio: new Date(fechaInicio),
+					}),
 					// Convert numeric fields to strings for decimal columns
 					...(seguro !== undefined && { seguro: String(seguro) }),
 					...(gps !== undefined && { gps: String(gps) }),

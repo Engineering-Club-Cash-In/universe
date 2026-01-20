@@ -94,11 +94,7 @@ export default function Header() {
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
 									<Button
-										variant={
-											isActive("/crm") || isActive("/vehicles")
-												? "secondary"
-												: "ghost"
-										}
+										variant={isActive("/crm") ? "secondary" : "ghost"}
 										size="sm"
 										className="gap-1"
 									>
@@ -145,20 +141,44 @@ export default function Header() {
 											Cotizador
 										</Link>
 									</DropdownMenuItem>
-									<DropdownMenuSeparator />
 									{userRole && PERMISSIONS.canAccessWhatsApp(userRole) && (
-										<DropdownMenuItem asChild>
-											<Link to="/crm/whatsapp" className="cursor-pointer">
-												<MessageSquare className="mr-2 h-4 w-4" />
-												WhatsApp
-											</Link>
-										</DropdownMenuItem>
+										<>
+											<DropdownMenuSeparator />
+											<DropdownMenuItem asChild>
+												<Link to="/crm/whatsapp" className="cursor-pointer">
+													<MessageSquare className="mr-2 h-4 w-4" />
+													WhatsApp
+												</Link>
+											</DropdownMenuItem>
+										</>
 									)}
-									<DropdownMenuSeparator />
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
+
+						{/* Vehículos Dropdown - Visible para todos los roles */}
+						{session && userRole && PERMISSIONS.canAccessVehicles(userRole) && (
+							<DropdownMenu>
+								<DropdownMenuTrigger asChild>
+									<Button
+										variant={isActive("/vehicles") ? "secondary" : "ghost"}
+										size="sm"
+										className="gap-1"
+									>
+										<Car className="h-4 w-4" />
+										Vehículos
+										<ChevronDown className="h-3 w-3 opacity-50" />
+									</Button>
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="start" className="w-48">
 									<DropdownMenuItem asChild>
-										<Link to="/vehicles" className="cursor-pointer">
+										<Link
+											to="/vehicles"
+											search={{ vehicleId: undefined, inspectionId: undefined }}
+											className="cursor-pointer"
+										>
 											<Car className="mr-2 h-4 w-4" />
-											Vehículos
+											Inventario
 										</Link>
 									</DropdownMenuItem>
 									<DropdownMenuItem asChild>

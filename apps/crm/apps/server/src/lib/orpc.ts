@@ -108,6 +108,38 @@ const requireAnalyst = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireCrmOrCobros = o.middleware(async ({ context, next }) => {
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (
+		!PERMISSIONS.canAccessCRM(userRole) &&
+		!PERMISSIONS.canAccessCobros(userRole)
+	) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "CRM or Cobros access required",
+		});
+	}
+
+	return next({
+		context: {
+			session: context.session,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 const requireCobros = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -164,6 +196,37 @@ const requireCobrosSupervisor = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireViewOpportunityContracts = o.middleware(
+	async ({ context, next }) => {
+		if (!context.session?.user) {
+			throw new ORPCError("UNAUTHORIZED");
+		}
+
+		const userId = context.session.user.id;
+		const userData = await db
+			.select()
+			.from(user)
+			.where(eq(user.id, userId))
+			.limit(1);
+		const userRole = userData[0]?.role;
+
+		if (!PERMISSIONS.canViewOpportunityContracts(userRole)) {
+			throw new ORPCError("FORBIDDEN", {
+				message: "Cannot view opportunity contracts",
+			});
+		}
+
+		return next({
+			context: {
+				session: context.session,
+				user: userData[0],
+				userId,
+				userRole,
+			},
+		});
+	},
+);
+
 const requireJuridico = o.middleware(async ({ context, next }) => {
 	if (!context.session?.user) {
 		throw new ORPCError("UNAUTHORIZED");
@@ -199,7 +262,12 @@ export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
 export const analystProcedure = publicProcedure.use(requireAnalyst);
+export const crmOrCobrosProcedure = publicProcedure.use(requireCrmOrCobros);
 export const cobrosProcedure = publicProcedure.use(requireCobros);
-export const cobrosSupervisorProcedure =
-	publicProcedure.use(requireCobrosSupervisor);
+export const cobrosSupervisorProcedure = publicProcedure.use(
+	requireCobrosSupervisor,
+);
+export const viewOpportunityContractsProcedure = publicProcedure.use(
+	requireViewOpportunityContracts,
+);
 export const juridicoProcedure = publicProcedure.use(requireJuridico);

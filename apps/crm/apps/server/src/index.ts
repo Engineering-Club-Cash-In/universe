@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { RPCHandler } from "@orpc/server/fetch";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -13,6 +14,7 @@ import {
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
+import { otpController } from "./controllers/otp";
 import {
 	getLeadByEmail,
 	getLeadLegalContracts,
@@ -22,14 +24,12 @@ import {
 	validatePortalToken,
 } from "./controllers/portal-lead";
 import { createPublicLead } from "./controllers/public-lead";
+import type { db } from "./db";
+import { otps } from "./db/schema/otp";
 import { auth } from "./lib/auth";
 import { createContext } from "./lib/context";
 import { appRouter } from "./routers/index";
 import externalContractsRouter from "./routes/external-contracts";
-import { otps } from "./db/schema/otp";
-import { and, eq, gt, sql, desc } from "drizzle-orm";
-import type { db } from "./db";
-import { otpController } from "./controllers/otp";
 
 const app = new Hono();
 
@@ -477,8 +477,7 @@ app.post("/info/validate-otp", async (c) => {
 				{
 					success: false,
 					message:
-						estudioResult.error ||
-						"Error al obtener información de Infornet",
+						estudioResult.error || "Error al obtener información de Infornet",
 					tokenValidated: true,
 					infornetError: true,
 				},
@@ -577,8 +576,7 @@ app.post("/info/validate-otp", async (c) => {
 				{
 					success: false,
 					message:
-						estudioResult.error ||
-						"Error al obtener información de Infornet",
+						estudioResult.error || "Error al obtener información de Infornet",
 					tokenValidated: true,
 					infornetError: true,
 				},
@@ -629,9 +627,81 @@ app.post("/info/validate-otp", async (c) => {
 	// Si falló la validación, retornar el error
 	return c.json(result, result.status);
 });
+app.post("/info/check-liveness", async (c) => {
+	const body = await c.req.json();
+	const { dpi, phoneNumber } = body as {
+		dpi?: string;
+		phoneNumber?: string | number;
+	};
 
+	// Validaciones de formato
+	if (!dpi) {
+		return c.json({ success: false, message: "DPI is required" }, 400);
+	}
+
+	if (!phoneNumber && phoneNumber !== 0) {
+		return c.json({ success: false, message: "Phone number is required" }, 400);
+	}
+
+	// Convertir phoneNumber a string si viene como número
+	const phoneNumberStr = String(phoneNumber);
+
+	if (!/^\d{13}$/.test(dpi)) {
+		return c.json(
+			{
+				success: false,
+				message: "DPI debe tener 13 dígitos",
+			},
+			400,
+		);
+	}
+
+	if (!/^\d{8,11}$/.test(phoneNumberStr)) {
+		return c.json(
+			{
+				success: false,
+				message: "Número de teléfono debe tener entre 8 y 11 dígitos",
+			},
+			400,
+		);
+	}
+
+	// 🔥 Verificar liveness y generar OTP si pasó
+	const livenessResult = await hasPassedLiveness(dpi, phoneNumberStr);
+
+	if (!livenessResult.passed) {
+		return c.json(
+			{
+				success: false,
+				message: "Debe completar la validación de vida antes de continuar",
+				livenessValidated: false,
+			},
+			403,
+		);
+	}
+
+	// 🔥 Si pasó liveness, devolver la respuesta del OTP
+	if (livenessResult.otpResponse) {
+		return c.json(
+			{
+				...livenessResult.otpResponse,
+				livenessValidated: true,
+			},
+			livenessResult.otpResponse.status,
+		);
+	}
+
+	// Caso inesperado
+	return c.json(
+		{
+			success: false,
+			message: "Error inesperado al procesar la solicitud",
+		},
+		500,
+	);
+});
 // 🔥 ENDPOINT - Validar OTP con control de intentos
- 
+
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 

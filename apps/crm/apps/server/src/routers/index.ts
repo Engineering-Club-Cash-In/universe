@@ -132,6 +132,7 @@ export const appRouter = {
 
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
+	updateLegalContract: legalContractsRouter.updateLegalContract,
 	listLegalContractsByLead: legalContractsRouter.listLegalContractsByLead,
 	listLegalContractsByOpportunity:
 		legalContractsRouter.listLegalContractsByOpportunity,
@@ -144,6 +145,7 @@ export const appRouter = {
 	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
 	getOpportunitiesForContracts:
 		legalContractsRouter.getOpportunitiesForContracts,
+	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

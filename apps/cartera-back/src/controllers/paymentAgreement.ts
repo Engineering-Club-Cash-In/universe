@@ -237,7 +237,7 @@ export async function createPaymentAgreement(
         monto_pendiente: total_agreement_amount.toString(),
         pagos_realizados: 0,
         pagos_pendientes: number_of_months,
-        activo: false,
+        activo: true,
         completado: false,
         motivo: reason,
         observaciones: observations,

@@ -393,6 +393,10 @@ export class CarteraBackClient {
 			{ method: "GET" },
 			true, // use cache
 		);
+		console.log(
+			`[CarteraBackClient] getCredito response for ${numeroSifco}:`,
+			JSON.stringify(response, null, 2),
+		);
 		if (!response) throw new Error(`Crédito ${numeroSifco} not found`);
 		return response;
 	}
@@ -636,7 +640,9 @@ export class CarteraBackClient {
 	// STATS (ESTADÍSTICAS)
 	// ========================================================================
 
-	async getStats(params: { email?: string } = {}): Promise<CarteraStatsResponse> {
+	async getStats(
+		params: { email?: string } = {},
+	): Promise<CarteraStatsResponse> {
 		const queryParams = new URLSearchParams({
 			...(params.email && { email: params.email }),
 		});
@@ -644,7 +650,11 @@ export class CarteraBackClient {
 		const url = params.email ? `/stats?${queryParams}` : "/stats";
 
 		// Este endpoint retorna directamente el objeto de stats
-		const response = await this.request<CarteraStatsResponse>(url, { method: "GET" }, true);
+		const response = await this.request<CarteraStatsResponse>(
+			url,
+			{ method: "GET" },
+			true,
+		);
 
 		return response;
 	}

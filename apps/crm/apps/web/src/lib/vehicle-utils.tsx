@@ -1,4 +1,10 @@
-import { AlertTriangle, CheckCircle, XCircle, Sparkles, Clock } from "lucide-react";
+import {
+	AlertTriangle,
+	CheckCircle,
+	Clock,
+	Sparkles,
+	XCircle,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
 // Campos requeridos para vehículos nuevos antes de cerrar la oportunidad
@@ -22,7 +28,9 @@ type VehicleForValidation = {
 /**
  * Verifica si un vehículo nuevo tiene todos los datos completos
  */
-export function isNewVehicleDataComplete(vehicle: VehicleForValidation): boolean {
+export function isNewVehicleDataComplete(
+	vehicle: VehicleForValidation,
+): boolean {
 	if (!vehicle.isNew) return true;
 	return !!(
 		vehicle.vinNumber &&
@@ -36,7 +44,9 @@ export function isNewVehicleDataComplete(vehicle: VehicleForValidation): boolean
 /**
  * Obtiene la lista de campos faltantes para un vehículo nuevo
  */
-export function getMissingFieldsForNewVehicle(vehicle: VehicleForValidation): string[] {
+export function getMissingFieldsForNewVehicle(
+	vehicle: VehicleForValidation,
+): string[] {
 	if (!vehicle.isNew) return [];
 
 	const fieldLabels: Record<string, string> = {
@@ -65,7 +75,10 @@ export function renderNewVehicleBadge(isNew: boolean | null | undefined) {
 	if (!isNew) return null;
 
 	return (
-		<Badge variant="outline" className="bg-blue-100 text-blue-800 border-blue-300">
+		<Badge
+			variant="outline"
+			className="border-blue-300 bg-blue-100 text-blue-800"
+		>
 			<Sparkles className="mr-1 h-3 w-3" />
 			Nuevo
 		</Badge>
@@ -83,7 +96,10 @@ export function renderVehicleDataStatusBadge(vehicle: VehicleForValidation) {
 
 	if (isComplete) {
 		return (
-			<Badge variant="outline" className="bg-green-100 text-green-800 border-green-300">
+			<Badge
+				variant="outline"
+				className="border-green-300 bg-green-100 text-green-800"
+			>
 				<CheckCircle className="mr-1 h-3 w-3" />
 				Datos completos
 			</Badge>
@@ -91,7 +107,10 @@ export function renderVehicleDataStatusBadge(vehicle: VehicleForValidation) {
 	}
 
 	return (
-		<Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
+		<Badge
+			variant="outline"
+			className="border-amber-300 bg-amber-100 text-amber-800"
+		>
 			<Clock className="mr-1 h-3 w-3" />
 			Pendiente de datos
 		</Badge>
@@ -105,7 +124,7 @@ export function renderNewVehicleBadges(vehicle: VehicleForValidation) {
 	if (!vehicle.isNew) return null;
 
 	return (
-		<div className="flex gap-1 flex-wrap">
+		<div className="flex flex-wrap gap-1">
 			{renderNewVehicleBadge(vehicle.isNew)}
 			{renderVehicleDataStatusBadge(vehicle)}
 		</div>

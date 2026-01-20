@@ -123,6 +123,47 @@ export async function deleteFileFromR2(key: string): Promise<void> {
 	await r2Client.send(command);
 }
 
+// Subir archivo desde URL a R2 (para documentos del bot)
+export async function uploadFileFromUrlToR2(
+	fileUrl: string,
+	filename: string,
+	opportunityId: string,
+): Promise<{ key: string; url: string; size: number; mimeType: string }> {
+	const key = `opportunities/${opportunityId}/${filename}`;
+
+	// Fetch file from URL
+	const response = await fetch(fileUrl);
+	if (!response.ok) {
+		throw new Error(`Failed to fetch file from URL: ${response.statusText}`);
+	}
+
+	const arrayBuffer = await response.arrayBuffer();
+	const contentType =
+		response.headers.get("content-type") || "application/octet-stream";
+	const size = arrayBuffer.byteLength;
+
+	const command = new PutObjectCommand({
+		Bucket: R2_BUCKET_NAME,
+		Key: key,
+		Body: Buffer.from(arrayBuffer),
+		ContentType: contentType,
+	});
+
+	await r2Client.send(command);
+
+	// Generate signed URL for temporary access (24 hours)
+	const url = await getSignedUrl(
+		r2Client,
+		new GetObjectCommand({
+			Bucket: R2_BUCKET_NAME,
+			Key: key,
+		}),
+		{ expiresIn: 86400 },
+	);
+
+	return { key, url, size, mimeType: contentType };
+}
+
 // Tipos de documentos permitidos
 export const ALLOWED_DOCUMENT_TYPES = [
 	"application/pdf",

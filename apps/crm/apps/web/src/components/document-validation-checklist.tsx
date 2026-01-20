@@ -50,6 +50,31 @@ const documentTypeLabels: Record<string, string> = {
 	pago_impuesto_circulacion: "Pago impuesto de circulación",
 	consulta_sat: "Consulta SAT",
 	consulta_garantias_mobiliarias: "Consulta garantías mobiliarias",
+	// === Verificaciones de Cliente ===
+	usuario_sat_cliente: "Usuario de SAT (Cliente)",
+	rtu_cliente: "RTU (Cliente)",
+	omisos_incumplimientos_cliente: "Omisos e Incumplimientos (Cliente)",
+	infornet: "Infornet",
+	confirmacion_referencias: "Confirmación de Referencias",
+	visita_domiciliar: "Visita Domiciliar",
+	redes_sociales_internet: "Redes Sociales - Internet",
+	// === Verificaciones de Vehículo / Propietario ===
+	usuario_sat_propietario: "Usuario de SAT (Propietario)",
+	rtu_propietario: "RTU (Propietario)",
+	omisos_incumplimientos_propietario: "Omisos e Incumplimientos (Propietario)",
+	garantia_mobiliaria_sat: "Garantía Mobiliaria (SAT)",
+	garantia_mobiliaria_dpi: "Garantía Mobiliaria (DPI Propietario)",
+	garantia_mobiliaria_nit: "Garantía Mobiliaria (NIT Propietario)",
+	garantia_mobiliaria_serie: "Garantía Mobiliaria (SERIE)",
+	multas_vehiculo: "Multas del Vehículo",
+	// === Documentos Etapa 90% (Cierre) ===
+	seguro_vehiculo: "Seguro del Vehículo",
+	inscripcion_garantia_mobiliaria: "Inscripción Garantía Mobiliaria",
+	traspaso: "Traspaso",
+	documentos_firmados_vendedor: "Documentos Firmados por Vendedor",
+	copia_llave: "Copia de Llave",
+	confirmacion_enganche: "Confirmación de Enganche",
+	desembolso: "Desembolso",
 	// Legacy (para compatibilidad)
 	identification: "Identificación (DPI/Pasaporte)",
 	income_proof: "Comprobante de Ingresos",
@@ -58,6 +83,7 @@ const documentTypeLabels: Record<string, string> = {
 	property_deed: "Escrituras de Propiedad",
 	vehicle_title: "Tarjeta de Circulación",
 	credit_report: "Reporte Crediticio",
+	detalle_analisis: "Detalle de Análisis",
 	other: "Otro",
 };
 

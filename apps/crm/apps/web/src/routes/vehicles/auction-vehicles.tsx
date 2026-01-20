@@ -230,7 +230,7 @@ function AuctionsDashboard() {
 
 			{/* Modal de detalles */}
 			<Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-				<DialogContent className="max-w-3xl">
+				<DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Detalles del Remate</DialogTitle>
 						<DialogDescription>

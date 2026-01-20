@@ -50,6 +50,8 @@ const documentTypeLabels: Record<string, string> = {
 	pago_impuesto_circulacion: "Pago impuesto de circulación",
 	consulta_sat: "Consulta SAT",
 	consulta_garantias_mobiliarias: "Consulta garantías mobiliarias",
+	datos_vehiculo_nuevo: "Documentos del vehículo nuevo",
+	cotizacion_vehiculo_nuevo: "Cotización del vehículo nuevo",
 	// === Verificaciones de Cliente ===
 	usuario_sat_cliente: "Usuario de SAT (Cliente)",
 	rtu_cliente: "RTU (Cliente)",
@@ -58,6 +60,7 @@ const documentTypeLabels: Record<string, string> = {
 	confirmacion_referencias: "Confirmación de Referencias",
 	visita_domiciliar: "Visita Domiciliar",
 	redes_sociales_internet: "Redes Sociales - Internet",
+	enganche: "Comprobante de Enganche",
 	// === Verificaciones de Vehículo / Propietario ===
 	usuario_sat_propietario: "Usuario de SAT (Propietario)",
 	rtu_propietario: "RTU (Propietario)",

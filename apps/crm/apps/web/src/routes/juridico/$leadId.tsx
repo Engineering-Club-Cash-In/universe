@@ -5,6 +5,10 @@ import { useState } from "react";
 import { z } from "zod";
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { CreateContractModal } from "@/components/juridico/CreateContractModal";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -36,6 +40,7 @@ function RouteComponent() {
 	} = useJuridicoPermissions();
 
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [contractToEdit, setContractToEdit] = useState<{
 		id: string;
 		contractType: string;
@@ -65,7 +70,17 @@ function RouteComponent() {
 		isLoading: isLoadingContracts,
 		refetch,
 	} = useQuery({
-		...orpc.listLegalContractsByOpportunity.queryOptions({ input: { opportunityId: opportunityId ?? "" } }),
+		...orpc.listLegalContractsByOpportunity.queryOptions({
+			input: { opportunityId: opportunityId ?? "" },
+		}),
+		enabled: canViewLegal && !!opportunityId,
+	});
+
+	// Obtener detalle completo de la oportunidad
+	const { data: opportunitiesData } = useQuery({
+		...orpc.getOpportunities.queryOptions({
+			input: { opportunityId: opportunityId ?? "" },
+		}),
 		enabled: canViewLegal && !!opportunityId,
 	});
 
@@ -102,6 +117,56 @@ function RouteComponent() {
 		}
 	};
 
+	const handleOpenOpportunityModal = () => {
+		setIsOpportunityModalOpen(true);
+	};
+
+	const handleCloseOpportunityModal = (open: boolean) => {
+		setIsOpportunityModalOpen(open);
+	};
+
+	// Obtener datos de la oportunidad desde el endpoint
+	const opportunityData =
+		opportunitiesData && opportunitiesData.length > 0
+			? opportunitiesData[0]
+			: null;
+
+	// Transformar datos de oportunidad para el modal
+	const selectedOpportunity: OpportunityForModal | null = opportunityData
+		? {
+				id: opportunityData.id,
+				title: opportunityData.title,
+				value: opportunityData.value,
+				creditType: opportunityData.creditType,
+				status: opportunityData.status,
+				expectedCloseDate: opportunityData.expectedCloseDate,
+				createdAt: opportunityData.createdAt,
+				lead: opportunityData.lead
+					? {
+							id: opportunityData.lead.id,
+							firstName: opportunityData.lead.firstName,
+							lastName: opportunityData.lead.lastName,
+							dpi: null,
+							email: opportunityData.lead.email,
+							phone: null,
+						}
+					: null,
+				stage: opportunityData.stage,
+				assignedUser: opportunityData.assignedUser,
+				vehicle: opportunityData.vehicle?.id
+					? {
+							id: opportunityData.vehicle.id,
+							make: opportunityData.vehicle.make,
+							model: opportunityData.vehicle.model,
+							year: opportunityData.vehicle.year,
+							licensePlate: opportunityData.vehicle.licensePlate,
+							color: opportunityData.vehicle.color,
+							isNew: opportunityData.vehicle.isNew,
+						}
+					: null,
+			}
+		: null;
+
 	if (isLoading) {
 		return (
 			<div className="container mx-auto flex min-h-[400px] items-center justify-center py-8">
@@ -137,6 +202,16 @@ function RouteComponent() {
 								<p className="text-muted-foreground">
 									DPI: {leadInfo.dpi || "No disponible"}
 								</p>
+							)}
+							{opportunityData && (
+								<Button
+									variant="link"
+									size="sm"
+									className="h-auto p-0 text-primary"
+									onClick={handleOpenOpportunityModal}
+								>
+									Ver detalle de oportunidad →
+								</Button>
 							)}
 						</div>
 					</div>
@@ -203,6 +278,15 @@ function RouteComponent() {
 				preselectedOpportunityId={opportunityId}
 				contractToEdit={contractToEdit || undefined}
 				opportunityInfo={opportunityInfo}
+			/>
+
+			{/* Modal de detalle de oportunidad */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={handleCloseOpportunityModal}
+				opportunity={selectedOpportunity}
+				userRole="juridico"
+				readOnly
 			/>
 		</div>
 	);

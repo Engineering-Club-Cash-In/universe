@@ -648,6 +648,7 @@ export const crmRouter = {
 					search: z.string().optional(),
 					limit: z.number().min(1).max(100).default(50),
 					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					opportunityId: z.string().uuid().optional(),
 				})
 				.optional(),
 		)
@@ -746,6 +747,10 @@ export const crmRouter = {
 			// Lead filter
 			if (leadIdFilter) {
 				conditions.push(eq(opportunities.leadId, leadIdFilter));
+			}
+
+			if (input?.opportunityId) {
+				conditions.push(eq(opportunities.id, input.opportunityId));
 			}
 
 			// Search filter (by title, company name, or lead name)
@@ -2180,74 +2185,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				documentType: z.enum([
-					// Documentos de identificación y personales
-					"dpi",
-					"licencia",
-					"recibo_luz",
-					"recibo_adicional",
-					"formularios",
-					"estados_cuenta_1",
-					"estados_cuenta_2",
-					"estados_cuenta_3",
-					// Documentos comerciales
-					"patente_comercio",
-					"patente_mercantil",
-					// Documentos empresariales (S.A.)
-					"representacion_legal",
-					"constitucion_sociedad",
-					"iva_1",
-					"iva_2",
-					"iva_3",
-					"estado_financiero",
-					"clausula_consentimiento",
-					"minutas",
-					// Documentos de vehículos
-					"tarjeta_circulacion",
-					"titulo_propiedad",
-					"dpi_dueno",
-					"patente_comercio_vehiculo",
-					"representacion_legal_vehiculo",
-					"dpi_representante_legal_vehiculo",
-					"pago_impuesto_circulacion",
-					"consulta_sat",
-					"consulta_garantias_mobiliarias",
-					// Verificaciones de Cliente
-					"usuario_sat_cliente",
-					"rtu_cliente",
-					"omisos_incumplimientos_cliente",
-					"infornet",
-					"confirmacion_referencias",
-					"visita_domiciliar",
-					"redes_sociales_internet",
-					// Verificaciones de Vehículo / Propietario
-					"usuario_sat_propietario",
-					"rtu_propietario",
-					"omisos_incumplimientos_propietario",
-					"garantia_mobiliaria_sat",
-					"garantia_mobiliaria_dpi",
-					"garantia_mobiliaria_nit",
-					"garantia_mobiliaria_serie",
-					"multas_vehiculo",
-					// Documentos Etapa 90% (Cierre)
-					"seguro_vehiculo",
-					"inscripcion_garantia_mobiliaria",
-					"traspaso",
-					"documentos_firmados_vendedor",
-					"copia_llave",
-					"confirmacion_enganche",
-					"desembolso",
-					// Legacy
-					"identification",
-					"income_proof",
-					"bank_statement",
-					"business_license",
-					"property_deed",
-					"vehicle_title",
-					"credit_report",
-					"detalle_analisis",
-					"other",
-				]),
+				documentType: z.enum(documentTypeEnum.enumValues),
 				description: z.string().optional(),
 				file: z.object({
 					name: z.string(),

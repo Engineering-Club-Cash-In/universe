@@ -691,6 +691,7 @@ export const crmRouter = {
 				inversionistas: opportunities.inversionistas,
 				asesorId: opportunities.asesorId,
 				rubros: opportunities.rubros,
+				loanPurpose: opportunities.loanPurpose,
 				company: {
 					id: companies.id,
 					name: companies.name,

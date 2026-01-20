@@ -22,6 +22,7 @@ import {
 	analysisChecklists,
 	disbursementChecklists,
 	documentRequirementsByClientType,
+	documentTypeEnum,
 	documentValidations,
 	opportunityDocuments,
 } from "../db/schema/documents";
@@ -2132,16 +2133,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				documentType: z.enum([
-					"identification",
-					"income_proof",
-					"bank_statement",
-					"business_license",
-					"property_deed",
-					"vehicle_title",
-					"credit_report",
-					"other",
-				]),
+				documentType: z.enum(documentTypeEnum.enumValues),
 				description: z.string().optional(),
 				// En un endpoint real, el archivo vendría como multipart/form-data
 				// Aquí asumimos que ya tenemos los datos del archivo

@@ -404,16 +404,19 @@ function RouteComponent() {
 
 	const updateLeadMutation = useMutation({
 		mutationFn: (input: UpdateLeadInput) => client.updateLead(input),
-		onSuccess: () => {
+		onSuccess: (_data, variables) => {
 			queryClient.invalidateQueries({
 				predicate: (query) =>
 					query.queryKey[0] === "getLeads" ||
 					query.queryKey[0] === "getLeadsStats",
 			});
-			toast.success("Lead actualizado exitosamente");
-			setIsCreateDialogOpen(false);
-			setEditingLead(null);
-			createLeadForm.reset();
+			// Solo mostrar toast y cerrar dialogs si NO es una conversión
+			if (variables.status !== "converted") {
+				toast.success("Lead actualizado exitosamente");
+				setIsCreateDialogOpen(false);
+				setEditingLead(null);
+				createLeadForm.reset();
+			}
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al actualizar el lead");

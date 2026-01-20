@@ -1,5 +1,16 @@
-import { and, count, desc, eq, gte, ilike, isNotNull, not, or, sql } from "drizzle-orm";
 import { ORPCError } from "@orpc/server";
+import {
+	and,
+	count,
+	desc,
+	eq,
+	gte,
+	ilike,
+	isNotNull,
+	not,
+	or,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -35,12 +46,12 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
-import { closeOpportunity } from "../services/close-opportunity";
 import {
+	formatMissingFields,
 	getMissingFields,
 	getMissingFieldsForContracts,
-	formatMissingFields,
 } from "../lib/vehicle-helpers";
+import { closeOpportunity } from "../services/close-opportunity";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -994,9 +1005,7 @@ export const crmRouter = {
 				if (fromPercentage === 90 && toPercentage === 100) {
 					// Check if disbursement has been approved via checklist
 					if (!currentOpportunity[0].disbursementApproved) {
-						console.log(
-							"Disbursement not approved, cannot move to 100% stage",
-						);
+						console.log("Disbursement not approved, cannot move to 100% stage");
 						throw new ORPCError("BAD_REQUEST", {
 							message:
 								"Para completar la oportunidad (100%), el desembolso debe ser aprobado por un analista completando el checklist de desembolso.",
@@ -1161,10 +1170,20 @@ export const crmRouter = {
 						id: companies.id,
 						name: companies.name,
 					},
+					vehicle: {
+						id: vehicles.id,
+						make: vehicles.make,
+						model: vehicles.model,
+						year: vehicles.year,
+						licensePlate: vehicles.licensePlate,
+						color: vehicles.color,
+						isNew: vehicles.isNew,
+					},
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 				.where(eq(opportunities.stageId, analysisStage[0].id))
 				.orderBy(opportunities.createdAt);
 		},
@@ -1444,7 +1463,10 @@ export const crmRouter = {
 			} else {
 				try {
 					const inversionistasParsed = JSON.parse(opportunity.inversionistas);
-					if (!Array.isArray(inversionistasParsed) || inversionistasParsed.length === 0) {
+					if (
+						!Array.isArray(inversionistasParsed) ||
+						inversionistasParsed.length === 0
+					) {
 						camposFaltantes.push("Inversionistas");
 					}
 				} catch {
@@ -1454,7 +1476,7 @@ export const crmRouter = {
 
 			if (camposFaltantes.length > 0) {
 				throw new Error(
-					`Faltan campos requeridos para aprobar: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`
+					`Faltan campos requeridos para aprobar: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
 				);
 			}
 
@@ -1756,7 +1778,10 @@ export const crmRouter = {
 						or(
 							isNotNull(opportunities.numeroSifco),
 							closedStageIds.length > 0
-								? sql`${opportunities.stageId} IN (${sql.join(closedStageIds.map(id => sql`${id}`), sql`, `)})`
+								? sql`${opportunities.stageId} IN (${sql.join(
+										closedStageIds.map((id) => sql`${id}`),
+										sql`, `,
+									)})`
 								: sql`false`,
 						),
 					),
@@ -1777,7 +1802,10 @@ export const crmRouter = {
 
 			// Build conditions for the main query
 			const conditions: any[] = [
-				sql`${leads.id} IN (${sql.join(clientLeadIds.map(id => sql`${id}`), sql`, `)})`,
+				sql`${leads.id} IN (${sql.join(
+					clientLeadIds.map((id) => sql`${id}`),
+					sql`, `,
+				)})`,
 			];
 
 			// Filter by user if not admin
@@ -1847,30 +1875,36 @@ export const crmRouter = {
 
 			// Now get the opportunities for each lead
 			const leadIds = clientLeads.map((l) => l.id);
-			
-			const leadsOpportunities = leadIds.length > 0 
-				? await db
-					.select({
-						id: opportunities.id,
-						title: opportunities.title,
-						leadId: opportunities.leadId,
-						value: opportunities.value,
-						creditType: opportunities.creditType,
-						numeroSifco: opportunities.numeroSifco,
-						status: opportunities.status,
-						createdAt: opportunities.createdAt,
-						stage: {
-							id: salesStages.id,
-							name: salesStages.name,
-							closurePercentage: salesStages.closurePercentage,
-							color: salesStages.color,
-						},
-					})
-					.from(opportunities)
-					.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-					.where(sql`${opportunities.leadId} IN (${sql.join(leadIds.map(id => sql`${id}`), sql`, `)})`)
-					.orderBy(desc(opportunities.createdAt))
-				: [];
+
+			const leadsOpportunities =
+				leadIds.length > 0
+					? await db
+							.select({
+								id: opportunities.id,
+								title: opportunities.title,
+								leadId: opportunities.leadId,
+								value: opportunities.value,
+								creditType: opportunities.creditType,
+								numeroSifco: opportunities.numeroSifco,
+								status: opportunities.status,
+								createdAt: opportunities.createdAt,
+								stage: {
+									id: salesStages.id,
+									name: salesStages.name,
+									closurePercentage: salesStages.closurePercentage,
+									color: salesStages.color,
+								},
+							})
+							.from(opportunities)
+							.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
+							.where(
+								sql`${opportunities.leadId} IN (${sql.join(
+									leadIds.map((id) => sql`${id}`),
+									sql`, `,
+								)})`,
+							)
+							.orderBy(desc(opportunities.createdAt))
+					: [];
 
 			// Group opportunities by lead
 			const opportunitiesByLead = leadsOpportunities.reduce(
@@ -1889,7 +1923,9 @@ export const crmRouter = {
 							status: opp.status,
 							createdAt: opp.createdAt,
 							stage: opp.stage,
-							isClosed: opp.numeroSifco !== null || (opp.stage?.closurePercentage ?? 0) >= 100,
+							isClosed:
+								opp.numeroSifco !== null ||
+								(opp.stage?.closurePercentage ?? 0) >= 100,
 						});
 					}
 					return acc;
@@ -1898,24 +1934,30 @@ export const crmRouter = {
 			);
 
 			// Get credit analysis for each lead
-			const creditAnalysisByLead = leadIds.length > 0
-				? await db
-					.select({
-						leadId: creditAnalysis.leadId,
-						monthlyFixedIncome: creditAnalysis.monthlyFixedIncome,
-						monthlyVariableIncome: creditAnalysis.monthlyVariableIncome,
-						monthlyFixedExpenses: creditAnalysis.monthlyFixedExpenses,
-						monthlyVariableExpenses: creditAnalysis.monthlyVariableExpenses,
-						economicAvailability: creditAnalysis.economicAvailability,
-						minPayment: creditAnalysis.minPayment,
-						maxPayment: creditAnalysis.maxPayment,
-						adjustedPayment: creditAnalysis.adjustedPayment,
-						maxCreditAmount: creditAnalysis.maxCreditAmount,
-						analyzedAt: creditAnalysis.analyzedAt,
-					})
-					.from(creditAnalysis)
-					.where(sql`${creditAnalysis.leadId} IN (${sql.join(leadIds.map(id => sql`${id}`), sql`, `)})`)
-				: [];
+			const creditAnalysisByLead =
+				leadIds.length > 0
+					? await db
+							.select({
+								leadId: creditAnalysis.leadId,
+								monthlyFixedIncome: creditAnalysis.monthlyFixedIncome,
+								monthlyVariableIncome: creditAnalysis.monthlyVariableIncome,
+								monthlyFixedExpenses: creditAnalysis.monthlyFixedExpenses,
+								monthlyVariableExpenses: creditAnalysis.monthlyVariableExpenses,
+								economicAvailability: creditAnalysis.economicAvailability,
+								minPayment: creditAnalysis.minPayment,
+								maxPayment: creditAnalysis.maxPayment,
+								adjustedPayment: creditAnalysis.adjustedPayment,
+								maxCreditAmount: creditAnalysis.maxCreditAmount,
+								analyzedAt: creditAnalysis.analyzedAt,
+							})
+							.from(creditAnalysis)
+							.where(
+								sql`${creditAnalysis.leadId} IN (${sql.join(
+									leadIds.map((id) => sql`${id}`),
+									sql`, `,
+								)})`,
+							)
+					: [];
 
 			// Map credit analysis by lead ID
 			const creditAnalysisMap = creditAnalysisByLead.reduce(
@@ -1925,7 +1967,7 @@ export const crmRouter = {
 					}
 					return acc;
 				},
-				{} as Record<string, typeof creditAnalysisByLead[0]>,
+				{} as Record<string, (typeof creditAnalysisByLead)[0]>,
 			);
 
 			// Combine leads with their opportunities and credit analysis
@@ -1936,10 +1978,15 @@ export const crmRouter = {
 				// Calculate total value from closed opportunities
 				totalClosedValue: (opportunitiesByLead[lead.id] || [])
 					.filter((opp: any) => opp.isClosed)
-					.reduce((sum: number, opp: any) => sum + (Number.parseFloat(opp.value || "0") || 0), 0),
+					.reduce(
+						(sum: number, opp: any) =>
+							sum + (Number.parseFloat(opp.value || "0") || 0),
+						0,
+					),
 				// Count of closed opportunities
-				closedOpportunitiesCount: (opportunitiesByLead[lead.id] || [])
-					.filter((opp: any) => opp.isClosed).length,
+				closedOpportunitiesCount: (opportunitiesByLead[lead.id] || []).filter(
+					(opp: any) => opp.isClosed,
+				).length,
 			}));
 
 			return {
@@ -2133,15 +2180,80 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				documentType: z.enum(documentTypeEnum.enumValues),
+				documentType: z.enum([
+					// Documentos de identificación y personales
+					"dpi",
+					"licencia",
+					"recibo_luz",
+					"recibo_adicional",
+					"formularios",
+					"estados_cuenta_1",
+					"estados_cuenta_2",
+					"estados_cuenta_3",
+					// Documentos comerciales
+					"patente_comercio",
+					"patente_mercantil",
+					// Documentos empresariales (S.A.)
+					"representacion_legal",
+					"constitucion_sociedad",
+					"iva_1",
+					"iva_2",
+					"iva_3",
+					"estado_financiero",
+					"clausula_consentimiento",
+					"minutas",
+					// Documentos de vehículos
+					"tarjeta_circulacion",
+					"titulo_propiedad",
+					"dpi_dueno",
+					"patente_comercio_vehiculo",
+					"representacion_legal_vehiculo",
+					"dpi_representante_legal_vehiculo",
+					"pago_impuesto_circulacion",
+					"consulta_sat",
+					"consulta_garantias_mobiliarias",
+					// Verificaciones de Cliente
+					"usuario_sat_cliente",
+					"rtu_cliente",
+					"omisos_incumplimientos_cliente",
+					"infornet",
+					"confirmacion_referencias",
+					"visita_domiciliar",
+					"redes_sociales_internet",
+					// Verificaciones de Vehículo / Propietario
+					"usuario_sat_propietario",
+					"rtu_propietario",
+					"omisos_incumplimientos_propietario",
+					"garantia_mobiliaria_sat",
+					"garantia_mobiliaria_dpi",
+					"garantia_mobiliaria_nit",
+					"garantia_mobiliaria_serie",
+					"multas_vehiculo",
+					// Documentos Etapa 90% (Cierre)
+					"seguro_vehiculo",
+					"inscripcion_garantia_mobiliaria",
+					"traspaso",
+					"documentos_firmados_vendedor",
+					"copia_llave",
+					"confirmacion_enganche",
+					"desembolso",
+					// Legacy
+					"identification",
+					"income_proof",
+					"bank_statement",
+					"business_license",
+					"property_deed",
+					"vehicle_title",
+					"credit_report",
+					"detalle_analisis",
+					"other",
+				]),
 				description: z.string().optional(),
-				// En un endpoint real, el archivo vendría como multipart/form-data
-				// Aquí asumimos que ya tenemos los datos del archivo
 				file: z.object({
 					name: z.string(),
 					type: z.string(),
 					size: z.number(),
-					data: z.string(), // Base64 o Buffer
+					data: z.string(), // Base64
 				}),
 			}),
 		)
@@ -2157,8 +2269,8 @@ export const crmRouter = {
 				throw new Error("Oportunidad no encontrada");
 			}
 
-			// Solo admin y sales pueden subir documentos
-			if (!["admin", "sales"].includes(context.userRole)) {
+			// Admin, sales y analyst pueden subir documentos
+			if (!["admin", "sales", "analyst"].includes(context.userRole)) {
 				throw new Error("No tienes permiso para subir documentos");
 			}
 
@@ -3360,6 +3472,7 @@ export const crmRouter = {
 				stageId: opportunities.stageId,
 				disbursementApproved: opportunities.disbursementApproved,
 				leadId: opportunities.leadId,
+				vehicleId: opportunities.vehicleId,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
 			})
@@ -3384,6 +3497,35 @@ export const crmRouter = {
 						.where(eq(leads.id, opp.leadId))
 						.limit(1);
 					lead = leadResult;
+				}
+
+				// Get vehicle info
+				let vehicle:
+					| {
+							id: string;
+							make: string;
+							model: string;
+							year: number;
+							licensePlate: string | null;
+							color: string;
+							isNew: boolean;
+					  }
+					| undefined;
+				if (opp.vehicleId) {
+					const [vehicleResult] = await db
+						.select({
+							id: vehicles.id,
+							make: vehicles.make,
+							model: vehicles.model,
+							year: vehicles.year,
+							licensePlate: vehicles.licensePlate,
+							color: vehicles.color,
+							isNew: vehicles.isNew,
+						})
+						.from(vehicles)
+						.where(eq(vehicles.id, opp.vehicleId))
+						.limit(1);
+					vehicle = vehicleResult;
 				}
 
 				// Get checklist status
@@ -3411,6 +3553,7 @@ export const crmRouter = {
 					...opp,
 					leadName: lead ? `${lead.firstName} ${lead.lastName}` : "N/A",
 					leadPhone: lead?.phone,
+					vehicle: vehicle || null,
 					checklistProgress: progress,
 					hasChecklist: !!checklist,
 				};

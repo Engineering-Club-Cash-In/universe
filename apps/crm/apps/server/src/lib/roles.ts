@@ -150,10 +150,13 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
 	canAssignLegalContracts: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+		role === ROLES.ADMIN,
 
 	canDeleteLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN,
+
+	canApproveLegalStage: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
 	// Vehicles Module Access - All roles can access
 	canAccessVehicles: (_role: UserRole | string): boolean => true,

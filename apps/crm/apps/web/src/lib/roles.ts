@@ -99,9 +99,10 @@ export const PERMISSIONS = {
 		role === ROLES.ANALYST,
 	canCreateLegalContracts: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
-	canAssignLegalContracts: (role: string) =>
-		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+	canAssignLegalContracts: (role: string) => role === ROLES.ADMIN,
 	canDeleteLegalContracts: (role: string) => role === ROLES.ADMIN,
+	canApproveLegalStage: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 	// Vehicles Module Access - All roles can access
 	canAccessVehicles: (_role: string) => true,
 } as const;

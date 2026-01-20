@@ -826,13 +826,13 @@ export const validateMagicUrlController = async (dpi: string) => {
 	}
 
 	// Buscar magic URL asociado al lead con ese DPI
-const [magicUrl] = await db
-	.select()
-	.from(magicUrls)
-	.innerJoin(leads, eq(magicUrls.leadId, leads.id))
-	.where(eq(leads.dpi, dpi))
-	.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
-	.limit(1);
+	const [magicUrl] = await db
+		.select()
+		.from(magicUrls)
+		.innerJoin(leads, eq(magicUrls.leadId, leads.id))
+		.where(eq(leads.dpi, dpi))
+		.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
+		.limit(1);
 	if (!magicUrl) {
 		return { success: false, message: "No magic URL found for this DPI" };
 	}
@@ -859,8 +859,8 @@ const [magicUrl] = await db
  * @returns true if liveness_validated = true, otherwise false.
  */
 export async function hasPassedLiveness(
-	dpi: string, 
-	phoneNumber: string
+	dpi: string,
+	phoneNumber: string,
 ): Promise<{
 	passed: boolean;
 	otpResponse?: Awaited<ReturnType<typeof otpController.sendOTP>>;

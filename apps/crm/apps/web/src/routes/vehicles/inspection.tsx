@@ -199,7 +199,10 @@ function VehicleInspectionForm() {
 
 			// Navigate back to vehicles list
 			setTimeout(() => {
-				navigate({ to: "/vehicles", search: { vehicleId: undefined, inspectionId: undefined } });
+				navigate({
+					to: "/vehicles",
+					search: { vehicleId: undefined, inspectionId: undefined },
+				});
 			}, 2000);
 		} catch (error) {
 			toast.error("Error al crear el vehículo");

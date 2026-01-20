@@ -1,9 +1,8 @@
- 
-import { eq, and, gt, desc } from "drizzle-orm";
 import { SMSClient } from "@repo/sms";
-import   { db } from "@/db";
-import   { leads } from "@/db/schema";
-import   { otps } from "@/db/schema/otp";
+import { and, desc, eq, gt } from "drizzle-orm";
+import { db } from "@/db";
+import { leads } from "@/db/schema";
+import { otps } from "@/db/schema/otp";
 
 /**
  * Controller de OTP - Toda la lógica de negocio aquí
@@ -48,22 +47,24 @@ export class OTPController {
 				})
 				.returning();
 
-// 5. Enviar SMS - COMENTADO TEMPORALMENTE
-		// const smsClient = new SMSClient({
-		// 	token: process.env.SMS_TOKEN!,
-		// 	apiKey: parseInt(process.env.SMS_API_KEY!),
-		// });
+			// 5. Enviar SMS - COMENTADO TEMPORALMENTE
+			// const smsClient = new SMSClient({
+			// 	token: process.env.SMS_TOKEN!,
+			// 	apiKey: parseInt(process.env.SMS_API_KEY!),
+			// });
 
-		// const message = `Tu código de verificación es: ${code}. Válido por 5 minutos.`;
+			// const message = `Tu código de verificación es: ${code}. Válido por 5 minutos.`;
 
-		// await smsClient.send({
-		// 	msisdns: [phoneNumber],
-		// 	message,
-		// 	country: "GT",
-		// 	tag: "otp-verification",
-		// });
+			// await smsClient.send({
+			// 	msisdns: [phoneNumber],
+			// 	message,
+			// 	country: "GT",
+			// 	tag: "otp-verification",
+			// });
 
-		console.log(`✅ OTP generado para ${phoneNumber} - DPI: ${dpi} - Código: ${code}`);
+			console.log(
+				`✅ OTP generado para ${phoneNumber} - DPI: ${dpi} - Código: ${code}`,
+			);
 
 			return {
 				success: true,

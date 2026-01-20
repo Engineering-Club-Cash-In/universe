@@ -92,11 +92,16 @@ function RouteComponent() {
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
 
-	// Obtener leads con contratos
-	const { data: leadsWithContracts, isLoading } = useQuery({
-		...orpc.getLeadsWithContracts.queryOptions(),
-		enabled: canViewLegal,
-	});
+	// Obtener oportunidades listas para contratos (90%+)
+	const { data: leadsWithContracts, isLoading} =
+		useQuery({
+			...orpc.getOpportunitiesForContracts.queryOptions({
+				input: { closurePercentages: [90, 100] },
+			}),
+
+			enabled: canViewLegal,
+		});
+
 
 	// Obtener oportunidades listas para contratos (80%+)
 	const { data: opportunitiesForContracts, isLoading: isLoadingOpportunities } =
@@ -122,10 +127,10 @@ function RouteComponent() {
 	// Filtrar leads por búsqueda
 	const filteredLeads = leadsWithContracts?.filter(
 		(lead) =>
-			lead.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.dpi?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-			lead.email?.toLowerCase().includes(searchQuery.toLowerCase()),
+			lead?.lead.firstName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+			lead.lead.lastName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+			lead.lead.dpi?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+			lead.lead.email?.toLowerCase().includes(searchQuery.toLowerCase()),
 	);
 
 	// Filtrar oportunidades por búsqueda
@@ -148,7 +153,9 @@ function RouteComponent() {
 	// Find opportunity data from the list
 	const selectedOpportunityData = opportunitiesForContracts?.find(
 		(opp) => opp.id === selectedOpportunityId,
-	);
+	) || leadsWithContracts?.find(
+		(lead) => lead.id === selectedOpportunityId,
+	)
 
 	// Transform opportunity data for modal
 	const selectedOpportunity: OpportunityForModal | null =
@@ -558,7 +565,8 @@ function RouteComponent() {
 											<TableRow
 												key={lead.id}
 												className="cursor-pointer hover:bg-muted/50"
-												onClick={() => navigate({ to: `/juridico/${lead.id}` })}
+												
+												onClick={() => navigate({ to: `/juridico/${lead.lead.id}?opportunityId=${lead.id}`, })}
 											>
 												<TableCell>
 													<button
@@ -566,20 +574,20 @@ function RouteComponent() {
 														className="cursor-pointer text-left font-medium text-primary hover:underline"
 														onClick={(e) => {
 															e.stopPropagation();
-															handleOpenLeadModal(lead.id);
+															handleOpenOpportunityModal(lead.id);
 														}}
 													>
-														{lead.firstName} {lead.lastName}
+														{lead.lead.firstName} {lead.lead.lastName}
 													</button>
 												</TableCell>
 												<TableCell className="font-mono text-sm">
-													{lead.dpi || "N/A"}
+													{lead.lead.dpi || "N/A"}
 												</TableCell>
 												<TableCell>
 													<div className="text-sm">
-														<div>{lead.email || "Sin email"}</div>
+														<div>{lead.lead.email || "Sin email"}</div>
 														<div className="text-muted-foreground">
-															{lead.phone || "Sin teléfono"}
+															{lead.lead.phone || "Sin teléfono"}
 														</div>
 													</div>
 												</TableCell>
@@ -646,14 +654,6 @@ function RouteComponent() {
 				onOpenChange={handleCloseOpportunityModal}
 				opportunity={selectedOpportunity}
 				userRole="juridico"
-				readOnly
-			/>
-
-			{/* Lead Detail Modal */}
-			<LeadDetailModal
-				open={isLeadModalOpen}
-				onOpenChange={handleCloseLeadModal}
-				lead={selectedLead}
 				readOnly
 			/>
 		</div>

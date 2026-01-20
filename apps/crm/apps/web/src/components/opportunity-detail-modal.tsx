@@ -449,36 +449,36 @@ export function OpportunityDetailModal({
 																: "Cancelado"}
 													</span>
 												</div>
-												{!readOnly && (
-													<div className="flex gap-2">
-														{contract.clientSigningLink && (
-															<Button variant="outline" size="sm" asChild>
-																<a
-																	href={contract.clientSigningLink}
-																	target="_blank"
-																	rel="noopener noreferrer"
-																	className="flex items-center gap-1"
-																>
-																	<ExternalLink className="h-3 w-3" />
-																	Cliente
-																</a>
-															</Button>
-														)}
-														{contract.representativeSigningLink && (
-															<Button variant="outline" size="sm" asChild>
-																<a
-																	href={contract.representativeSigningLink}
-																	target="_blank"
-																	rel="noopener noreferrer"
-																	className="flex items-center gap-1"
-																>
-																	<ExternalLink className="h-3 w-3" />
-																	Rep. Legal
-																</a>
-															</Button>
-														)}
-													</div>
-												)}
+												
+												<div className="flex gap-2">
+													{contract.clientSigningLink && (
+														<Button variant="outline" size="sm" asChild>
+															<a
+																href={contract.clientSigningLink}
+																target="_blank"
+																rel="noopener noreferrer"
+																className="flex items-center gap-1"
+															>
+																<ExternalLink className="h-3 w-3" />
+																Cliente
+															</a>
+														</Button>
+													)}
+													{contract.representativeSigningLink && (
+														<Button variant="outline" size="sm" asChild>
+															<a
+																href={contract.representativeSigningLink}
+																target="_blank"
+																rel="noopener noreferrer"
+																className="flex items-center gap-1"
+															>
+																<ExternalLink className="h-3 w-3" />
+																Rep. Legal
+															</a>
+														</Button>
+													)}
+												</div>
+												
 											</div>
 										))}
 									</div>

@@ -46,6 +46,8 @@ export const documentTypeEnum = pgEnum("document_type", [
 	"pago_impuesto_circulacion", // Comprobante de pago de impuesto de circulación
 	"consulta_sat", // Captura de pantalla de consulta SAT
 	"consulta_garantias_mobiliarias", // Certificación de garantías mobiliarias (RGM)
+	"datos_vehiculo_nuevo", // Documentos del vehículo nuevo (factura, contrato, etc.)
+	"cotizacion_vehiculo_nuevo", // Cotización del vehículo nuevo
 
 	// === VERIFICACIONES DE CLIENTE ===
 	"usuario_sat_cliente", // Usuario de SAT (Cliente)
@@ -55,6 +57,7 @@ export const documentTypeEnum = pgEnum("document_type", [
 	"confirmacion_referencias", // Confirmación de Referencias (Laborales - Personales)
 	"visita_domiciliar", // Visita Domiciliar
 	"redes_sociales_internet", // Redes Sociales - Internet
+	"enganche", // Comprobante de enganche
 
 	// === VERIFICACIONES DE VEHÍCULO / PROPIETARIO ===
 	"usuario_sat_propietario", // Usuario de SAT (Propietario del vehículo)

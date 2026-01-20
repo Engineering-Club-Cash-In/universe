@@ -1,5 +1,5 @@
 import { ORPCError } from "@orpc/server";
-import { and, count, eq, gte, ne } from "drizzle-orm";
+import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
@@ -17,6 +17,7 @@ import {
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import { checkDocumensoSigningStatus } from "../services/documenso-signing";
 
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
@@ -207,7 +208,41 @@ export const legalContractsRouter = {
 				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId))
 				.orderBy(generatedLegalContracts.generatedAt);
 
-			return contracts;
+			// Verificar estado de firma en Documenso para contratos pendientes
+			const contractsWithUpdatedStatus = await Promise.all(
+				contracts.map(async (contractData) => {
+					// Solo verificar si el contrato está pendiente y tiene link de firma del cliente
+					if (
+						contractData.contract.status === "pending" &&
+						contractData.contract.clientSigningLink
+					) {
+						const signingStatus = await checkDocumensoSigningStatus(
+							contractData.contract.clientSigningLink,
+						);
+
+						// Si está firmado, actualizar en la base de datos
+						if (signingStatus.isSigned) {
+							const [updatedContract] = await db
+								.update(generatedLegalContracts)
+								.set({
+									status: "signed",
+									updatedAt: new Date(),
+								})
+								.where(eq(generatedLegalContracts.id, contractData.contract.id))
+								.returning();
+
+							return {
+								...contractData,
+								contract: updatedContract,
+							};
+						}
+					}
+
+					return contractData;
+				}),
+			);
+
+			return contractsWithUpdatedStatus;
 		}),
 
 	// Obtener detalle de un contrato
@@ -455,17 +490,19 @@ export const legalContractsRouter = {
 		return leadsWithCounts;
 	}),
 
-	// Get opportunities ready for contracts (exactly at 80% - pending legal approval)
+	// Get opportunities ready for contracts (at specified percentages - pending legal approval)
 	getOpportunitiesForContracts: juridicoProcedure
 		.input(
 			z
 				.object({
-					closurePercentage: z.number().min(0).max(100).optional(),
+					closurePercentages: z
+						.array(z.number().min(0).max(100))
+						.optional(),
 				})
 				.optional(),
 		)
 		.handler(async ({ input, context: _ }) => {
-			const targetPercentage = input?.closurePercentage ?? 80;
+			const targetPercentages = input?.closurePercentages ?? [80];
 
 			const opportunitiesList = await db
 				.select({
@@ -512,7 +549,7 @@ export const legalContractsRouter = {
 				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 				.where(
 					and(
-						eq(salesStages.closurePercentage, targetPercentage),
+						inArray(salesStages.closurePercentage, targetPercentages),
 						ne(opportunities.status, "won"),
 						ne(opportunities.status, "lost"),
 					),
@@ -527,8 +564,21 @@ export const legalContractsRouter = {
 						.from(generatedLegalContracts)
 						.where(eq(generatedLegalContracts.opportunityId, opp.id));
 
+					// Obtener el contrato más reciente
+					const [latestContract] = await db
+						.select({
+							generatedAt: generatedLegalContracts.generatedAt,
+							contractName: generatedLegalContracts.contractName,
+						})
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.opportunityId, opp.id))
+						.orderBy(generatedLegalContracts.generatedAt)
+						.limit(1);
+
 					return {
 						...opp,
+						latestContractDate: latestContract?.generatedAt,
+					     latestContractName: latestContract?.contractName,
 						contractCount: Number(contractCount),
 					};
 				}),

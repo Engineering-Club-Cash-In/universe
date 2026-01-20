@@ -63,7 +63,9 @@ export const PERMISSIONS = {
 
 	// Analysis Module Access
 	canAccessAnalysis: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.ANALYST,
+		role === ROLES.ADMIN ||
+		role === ROLES.ANALYST ||
+		role === ROLES.SALES_SUPERVISOR,
 
 	// Admin Module Access
 	canAccessAdmin: (role: UserRole | string): boolean => role === ROLES.ADMIN,

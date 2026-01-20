@@ -43,7 +43,7 @@ export const PERMISSIONS = {
 	canAccessCRM: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.SALES || role === ROLES.ANALYST,
 	canAccessAnalysis: (role: string) =>
-		role === ROLES.ADMIN || role === ROLES.ANALYST,
+		role === ROLES.ADMIN || role === ROLES.ANALYST || role === "sales_supervisor",
 	canAccessAdmin: (role: string) => role === ROLES.ADMIN,
 	canCreateCompanies: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.SALES,

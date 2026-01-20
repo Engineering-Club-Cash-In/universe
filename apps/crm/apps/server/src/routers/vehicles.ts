@@ -1226,8 +1226,8 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 				throw new Error("Vehículo no encontrado");
 			}
 
-			// Admin, sales and analyst can upload documents
-			if (!["admin", "sales", "analyst"].includes(context.userRole)) {
+			// Admin, sales, sales_supervisor and analyst can upload documents
+			if (!["admin", "sales", "sales_supervisor", "analyst"].includes(context.userRole)) {
 				throw new Error("No tienes permiso para subir documentos");
 			}
 

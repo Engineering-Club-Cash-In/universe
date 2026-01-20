@@ -22,7 +22,7 @@ import {
 	mapOCRToVehicleForm,
 	vehicleRegistrationOCRSchema,
 } from "../lib/ocr-schema";
-import { crmProcedure, protectedProcedure, publicProcedure } from "../lib/orpc";
+import { crmProcedure, protectedProcedure, publicProcedure, tallerProcedure } from "../lib/orpc";
 import {
 	deleteFileFromR2,
 	generateUniqueFilename,
@@ -273,7 +273,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get vehicle by ID with all related data
-	getById: protectedProcedure
+	getById: tallerProcedure
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			const [vehicle] = await db
@@ -391,7 +391,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Update vehicle
-	update: protectedProcedure
+	update: tallerProcedure
 		.input(
 			z.object({
 				id: z.string(),

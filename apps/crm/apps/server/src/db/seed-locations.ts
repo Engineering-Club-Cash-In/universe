@@ -1,7 +1,7 @@
-import { parse } from "csv-parse/sync";
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parse } from "csv-parse/sync";
 import { db } from "./index";
 import { guatemalaLocations } from "./schema/locations";
 
@@ -12,7 +12,10 @@ async function seedLocations() {
 	console.log("Cargando ubicaciones de Guatemala...");
 
 	try {
-		const csvPath = resolve(__dirname, "../../../../temp/guatemala_locations.csv");
+		const csvPath = resolve(
+			__dirname,
+			"../../../../temp/guatemala_locations.csv",
+		);
 		const csvContent = readFileSync(csvPath, "utf-8");
 
 		// El CSV tiene columnas duplicadas "nombre", usamos parse sin columns
@@ -37,10 +40,7 @@ async function seedLocations() {
 
 		for (let i = 0; i < locationsToInsert.length; i += batchSize) {
 			const batch = locationsToInsert.slice(i, i + batchSize);
-			await db
-				.insert(guatemalaLocations)
-				.values(batch)
-				.onConflictDoNothing();
+			await db.insert(guatemalaLocations).values(batch).onConflictDoNothing();
 			inserted += batch.length;
 			console.log(`Insertados ${inserted}/${locationsToInsert.length}`);
 		}

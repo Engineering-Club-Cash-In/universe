@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate, useSearch } from "@tanstack/react-router";
+import {
+	createFileRoute,
+	useNavigate,
+	useSearch,
+} from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
@@ -19,7 +23,7 @@ import {
 	Wrench,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -98,6 +102,11 @@ function VehiclesDashboard() {
 	const [page, setPage] = useState(0);
 	const pageSize = 20;
 
+	// Refs to track processed URL params
+	const processedVehicleIdRef = useRef<string | null>(null);
+	const processedInspectionIdRef = useRef<string | null>(null);
+	const prevDetailsOpenRef = useRef(false);
+
 	// Debounce search
 	useEffect(() => {
 		const timer = setTimeout(() => {
@@ -133,42 +142,86 @@ function VehiclesDashboard() {
 	const totalRecords = vehicles?.total || 0;
 	const totalPages = Math.ceil(totalRecords / pageSize);
 
-	// Handle URL search parameters (inspectionId or vehicleId)
-	useEffect(() => {
-		if (!vehiclesList.length) return;
+	// Query to fetch specific vehicle by ID (from URL param)
+	const specificVehicleQuery = useQuery({
+		queryKey: ["getVehicleById", search.vehicleId],
+		queryFn: search.vehicleId
+			? () => client.getVehicleById({ id: search.vehicleId! })
+			: () => Promise.resolve(null),
+		enabled:
+			!!search.vehicleId && processedVehicleIdRef.current !== search.vehicleId,
+	});
 
-		if (search.inspectionId) {
-			// Find vehicle that has this inspection
-			const vehicleWithInspection = vehiclesList.find((v: any) =>
-				v.inspections?.some((insp: any) => insp.id === search.inspectionId),
-			);
-			if (vehicleWithInspection) {
-				setSelectedVehicle(vehicleWithInspection);
-				setActiveTab("inspections");
-				setIsDetailsOpen(true);
-				// Clear the search params from URL
-				navigate({
-					to: "/vehicles",
-					search: { vehicleId: undefined, inspectionId: undefined },
-					replace: true,
-				});
-			}
-		} else if (search.vehicleId) {
-			// Find vehicle by ID
-			const vehicle = vehiclesList.find((v: any) => v.id === search.vehicleId);
-			if (vehicle) {
-				setSelectedVehicle(vehicle);
-				setActiveTab("general");
-				setIsDetailsOpen(true);
-				// Clear the search params from URL
-				navigate({
-					to: "/vehicles",
-					search: { vehicleId: undefined, inspectionId: undefined },
-					replace: true,
-				});
+	// Query to fetch inspection by ID (to get vehicleId, then fetch vehicle)
+	const specificInspectionQuery = useQuery({
+		queryKey: ["getVehicleInspectionById", search.inspectionId],
+		queryFn: search.inspectionId
+			? () => client.getVehicleInspectionById({ id: search.inspectionId! })
+			: () => Promise.resolve(null),
+		enabled:
+			!!search.inspectionId &&
+			processedInspectionIdRef.current !== search.inspectionId,
+	});
+
+	// Query to fetch vehicle from inspection's vehicleId
+	const vehicleFromInspectionQuery = useQuery({
+		queryKey: ["getVehicleById", specificInspectionQuery.data?.vehicleId],
+		queryFn: specificInspectionQuery.data?.vehicleId
+			? () =>
+					client.getVehicleById({ id: specificInspectionQuery.data!.vehicleId })
+			: () => Promise.resolve(null),
+		enabled:
+			!!specificInspectionQuery.data?.vehicleId &&
+			processedInspectionIdRef.current !== search.inspectionId,
+	});
+
+	// Handle opening details modal from URL param (vehicleId)
+	useEffect(() => {
+		if (
+			search.vehicleId &&
+			specificVehicleQuery.data &&
+			processedVehicleIdRef.current !== search.vehicleId
+		) {
+			setSelectedVehicle(specificVehicleQuery.data);
+			setActiveTab("general");
+			setIsDetailsOpen(true);
+			processedVehicleIdRef.current = search.vehicleId;
+		}
+	}, [search.vehicleId, specificVehicleQuery.data]);
+
+	// Handle opening details modal from URL param (inspectionId)
+	useEffect(() => {
+		if (
+			search.inspectionId &&
+			vehicleFromInspectionQuery.data &&
+			processedInspectionIdRef.current !== search.inspectionId
+		) {
+			setSelectedVehicle(vehicleFromInspectionQuery.data);
+			setActiveTab("inspections");
+			setIsDetailsOpen(true);
+			processedInspectionIdRef.current = search.inspectionId;
+		}
+	}, [search.inspectionId, vehicleFromInspectionQuery.data]);
+
+	// Clear search params when details modal closes
+	useEffect(() => {
+		const wasOpen = prevDetailsOpenRef.current;
+		prevDetailsOpenRef.current = isDetailsOpen;
+
+		if (wasOpen && !isDetailsOpen) {
+			if (processedVehicleIdRef.current || processedInspectionIdRef.current) {
+				processedVehicleIdRef.current = null;
+				processedInspectionIdRef.current = null;
+				if (search.vehicleId || search.inspectionId) {
+					navigate({
+						to: "/vehicles",
+						search: { vehicleId: undefined, inspectionId: undefined },
+						replace: true,
+					});
+				}
 			}
 		}
-	}, [vehiclesList, search.inspectionId, search.vehicleId, navigate]);
+	}, [isDetailsOpen, navigate, search.vehicleId, search.inspectionId]);
 
 	// auction vehicles
 	const [isAuctionOpen, setIsAuctionOpen] = useState(false);
@@ -447,12 +500,12 @@ function VehiclesDashboard() {
 															</div>
 														</TableCell>
 														<TableCell>
-														{vehicle.licensePlate || (
-															<span className="text-muted-foreground">
-																Sin placa
-															</span>
-														)}
-													</TableCell>
+															{vehicle.licensePlate || (
+																<span className="text-muted-foreground">
+																	Sin placa
+																</span>
+															)}
+														</TableCell>
 														<TableCell>
 															{latestInspection ? (
 																<>
@@ -495,7 +548,8 @@ function VehiclesDashboard() {
 																	? renderInspectionStatusBadge(
 																			latestInspection.status,
 																		)
-																	: !vehicle.isNew && renderInspectionStatusBadge("pending")}
+																	: !vehicle.isNew &&
+																		renderInspectionStatusBadge("pending")}
 																{(vehicle as any).hasPaymentAgreement && (
 																	<Badge
 																		variant="outline"
@@ -557,14 +611,18 @@ function VehiclesDashboard() {
 																				id: vehicle.id,
 																				make: vehicle.make || "",
 																				model: vehicle.model || "",
-																				year: vehicle.year || new Date().getFullYear(),
+																				year:
+																					vehicle.year ||
+																					new Date().getFullYear(),
 																				color: vehicle.color || "",
 																				vehicleType: vehicle.vehicleType || "",
-																				licensePlate: vehicle.licensePlate || "",
+																				licensePlate:
+																					vehicle.licensePlate || "",
 																				vinNumber: vehicle.vinNumber || "",
 																				origin: vehicle.origin || "",
 																				fuelType: vehicle.fuelType || "",
-																				transmission: vehicle.transmission || "",
+																				transmission:
+																					vehicle.transmission || "",
 																				kmMileage: vehicle.kmMileage || 0,
 																				isNew: vehicle.isNew || false,
 																			});
@@ -1296,15 +1354,21 @@ function VehiclesDashboard() {
 							Registrar Vehículo Nuevo
 						</DialogTitle>
 						<DialogDescription>
-							Ingresa los datos básicos del vehículo nuevo. Los datos adicionales
-							(VIN, placa, etc.) pueden completarse después cuando lleguen del dealer.
+							Ingresa los datos básicos del vehículo nuevo. Los datos
+							adicionales (VIN, placa, etc.) pueden completarse después cuando
+							lleguen del dealer.
 						</DialogDescription>
 					</DialogHeader>
 
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
-							if (!newVehicleForm.make || !newVehicleForm.model || !newVehicleForm.color || !newVehicleForm.vehicleType) {
+							if (
+								!newVehicleForm.make ||
+								!newVehicleForm.model ||
+								!newVehicleForm.color ||
+								!newVehicleForm.vehicleType
+							) {
 								toast.error("Por favor completa todos los campos requeridos");
 								return;
 							}
@@ -1314,7 +1378,9 @@ function VehiclesDashboard() {
 					>
 						{/* Campos Requeridos */}
 						<div className="space-y-4">
-							<h4 className="font-medium text-sm">Información Básica (Requerida)</h4>
+							<h4 className="font-medium text-sm">
+								Información Básica (Requerida)
+							</h4>
 							<div className="grid grid-cols-2 gap-4">
 								<div className="space-y-2">
 									<Label htmlFor="make">Marca *</Label>
@@ -1322,7 +1388,10 @@ function VehiclesDashboard() {
 										id="make"
 										value={newVehicleForm.make}
 										onChange={(e) =>
-											setNewVehicleForm({ ...newVehicleForm, make: e.target.value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												make: e.target.value,
+											})
 										}
 										placeholder="Ej: Toyota"
 										required
@@ -1334,7 +1403,10 @@ function VehiclesDashboard() {
 										id="model"
 										value={newVehicleForm.model}
 										onChange={(e) =>
-											setNewVehicleForm({ ...newVehicleForm, model: e.target.value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												model: e.target.value,
+											})
 										}
 										placeholder="Ej: Corolla"
 										required
@@ -1347,7 +1419,12 @@ function VehiclesDashboard() {
 										type="number"
 										value={newVehicleForm.year}
 										onChange={(e) =>
-											setNewVehicleForm({ ...newVehicleForm, year: parseInt(e.target.value) || new Date().getFullYear() })
+											setNewVehicleForm({
+												...newVehicleForm,
+												year:
+													Number.parseInt(e.target.value) ||
+													new Date().getFullYear(),
+											})
 										}
 										min={2000}
 										max={new Date().getFullYear() + 1}
@@ -1360,7 +1437,10 @@ function VehiclesDashboard() {
 										id="color"
 										value={newVehicleForm.color}
 										onChange={(e) =>
-											setNewVehicleForm({ ...newVehicleForm, color: e.target.value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												color: e.target.value,
+											})
 										}
 										placeholder="Ej: Blanco"
 										required
@@ -1371,7 +1451,10 @@ function VehiclesDashboard() {
 									<Select
 										value={newVehicleForm.vehicleType}
 										onValueChange={(value) =>
-											setNewVehicleForm({ ...newVehicleForm, vehicleType: value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												vehicleType: value,
+											})
 										}
 									>
 										<SelectTrigger>
@@ -1403,7 +1486,10 @@ function VehiclesDashboard() {
 										id="licensePlate"
 										value={newVehicleForm.licensePlate}
 										onChange={(e) =>
-											setNewVehicleForm({ ...newVehicleForm, licensePlate: e.target.value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												licensePlate: e.target.value,
+											})
 										}
 										placeholder="Ej: P-123ABC"
 									/>
@@ -1414,7 +1500,10 @@ function VehiclesDashboard() {
 										id="vinNumber"
 										value={newVehicleForm.vinNumber}
 										onChange={(e) =>
-											setNewVehicleForm({ ...newVehicleForm, vinNumber: e.target.value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												vinNumber: e.target.value,
+											})
 										}
 										placeholder="Número de identificación"
 									/>
@@ -1460,7 +1549,10 @@ function VehiclesDashboard() {
 									<Select
 										value={newVehicleForm.transmission}
 										onValueChange={(value) =>
-											setNewVehicleForm({ ...newVehicleForm, transmission: value })
+											setNewVehicleForm({
+												...newVehicleForm,
+												transmission: value,
+											})
 										}
 									>
 										<SelectTrigger>
@@ -1483,8 +1575,13 @@ function VehiclesDashboard() {
 							>
 								Cancelar
 							</Button>
-							<Button type="submit" disabled={createNewVehicleMutation.isPending}>
-								{createNewVehicleMutation.isPending ? "Creando..." : "Crear Vehículo"}
+							<Button
+								type="submit"
+								disabled={createNewVehicleMutation.isPending}
+							>
+								{createNewVehicleMutation.isPending
+									? "Creando..."
+									: "Crear Vehículo"}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -1499,21 +1596,31 @@ function VehiclesDashboard() {
 							<Pencil className="h-5 w-5 text-blue-500" />
 							Editar Vehículo
 							{editVehicleForm.isNew && (
-								<Badge variant="outline" className="ml-2 bg-blue-100 text-blue-800 border-blue-300">
+								<Badge
+									variant="outline"
+									className="ml-2 border-blue-300 bg-blue-100 text-blue-800"
+								>
 									<Sparkles className="mr-1 h-3 w-3" />
 									Nuevo
 								</Badge>
 							)}
 						</DialogTitle>
 						<DialogDescription>
-							Modifica los datos del vehículo. {editVehicleForm.isNew && "Completa los datos faltantes del vehículo nuevo."}
+							Modifica los datos del vehículo.{" "}
+							{editVehicleForm.isNew &&
+								"Completa los datos faltantes del vehículo nuevo."}
 						</DialogDescription>
 					</DialogHeader>
 
 					<form
 						onSubmit={(e) => {
 							e.preventDefault();
-							if (!editVehicleForm.make || !editVehicleForm.model || !editVehicleForm.color || !editVehicleForm.vehicleType) {
+							if (
+								!editVehicleForm.make ||
+								!editVehicleForm.model ||
+								!editVehicleForm.color ||
+								!editVehicleForm.vehicleType
+							) {
 								toast.error("Por favor completa todos los campos requeridos");
 								return;
 							}
@@ -1531,7 +1638,10 @@ function VehiclesDashboard() {
 										id="edit-make"
 										value={editVehicleForm.make}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, make: e.target.value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												make: e.target.value,
+											})
 										}
 										placeholder="Ej: Toyota"
 										required
@@ -1543,7 +1653,10 @@ function VehiclesDashboard() {
 										id="edit-model"
 										value={editVehicleForm.model}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, model: e.target.value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												model: e.target.value,
+											})
 										}
 										placeholder="Ej: Corolla"
 										required
@@ -1556,7 +1669,12 @@ function VehiclesDashboard() {
 										type="number"
 										value={editVehicleForm.year}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, year: parseInt(e.target.value) || new Date().getFullYear() })
+											setEditVehicleForm({
+												...editVehicleForm,
+												year:
+													Number.parseInt(e.target.value) ||
+													new Date().getFullYear(),
+											})
 										}
 										min={1990}
 										max={new Date().getFullYear() + 1}
@@ -1569,7 +1687,10 @@ function VehiclesDashboard() {
 										id="edit-color"
 										value={editVehicleForm.color}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, color: e.target.value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												color: e.target.value,
+											})
 										}
 										placeholder="Ej: Blanco"
 										required
@@ -1580,7 +1701,10 @@ function VehiclesDashboard() {
 									<Select
 										value={editVehicleForm.vehicleType}
 										onValueChange={(value) =>
-											setEditVehicleForm({ ...editVehicleForm, vehicleType: value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												vehicleType: value,
+											})
 										}
 									>
 										<SelectTrigger>
@@ -1604,7 +1728,10 @@ function VehiclesDashboard() {
 										type="number"
 										value={editVehicleForm.kmMileage}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, kmMileage: parseInt(e.target.value) || 0 })
+											setEditVehicleForm({
+												...editVehicleForm,
+												kmMileage: Number.parseInt(e.target.value) || 0,
+											})
 										}
 										min={0}
 										placeholder="0"
@@ -1630,7 +1757,10 @@ function VehiclesDashboard() {
 										id="edit-licensePlate"
 										value={editVehicleForm.licensePlate}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, licensePlate: e.target.value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												licensePlate: e.target.value,
+											})
 										}
 										placeholder="Ej: P-123ABC"
 									/>
@@ -1641,7 +1771,10 @@ function VehiclesDashboard() {
 										id="edit-vinNumber"
 										value={editVehicleForm.vinNumber}
 										onChange={(e) =>
-											setEditVehicleForm({ ...editVehicleForm, vinNumber: e.target.value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												vinNumber: e.target.value,
+											})
 										}
 										placeholder="Número de identificación"
 									/>
@@ -1668,7 +1801,10 @@ function VehiclesDashboard() {
 									<Select
 										value={editVehicleForm.fuelType}
 										onValueChange={(value) =>
-											setEditVehicleForm({ ...editVehicleForm, fuelType: value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												fuelType: value,
+											})
 										}
 									>
 										<SelectTrigger>
@@ -1687,7 +1823,10 @@ function VehiclesDashboard() {
 									<Select
 										value={editVehicleForm.transmission}
 										onValueChange={(value) =>
-											setEditVehicleForm({ ...editVehicleForm, transmission: value })
+											setEditVehicleForm({
+												...editVehicleForm,
+												transmission: value,
+											})
 										}
 									>
 										<SelectTrigger>
@@ -1711,7 +1850,9 @@ function VehiclesDashboard() {
 								Cancelar
 							</Button>
 							<Button type="submit" disabled={updateVehicleMutation.isPending}>
-								{updateVehicleMutation.isPending ? "Guardando..." : "Guardar Cambios"}
+								{updateVehicleMutation.isPending
+									? "Guardando..."
+									: "Guardar Cambios"}
 							</Button>
 						</DialogFooter>
 					</form>

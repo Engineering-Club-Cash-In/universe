@@ -640,7 +640,9 @@ export class CarteraBackClient {
 	// STATS (ESTADÍSTICAS)
 	// ========================================================================
 
-	async getStats(params: { email?: string } = {}): Promise<CarteraStatsResponse> {
+	async getStats(
+		params: { email?: string } = {},
+	): Promise<CarteraStatsResponse> {
 		const queryParams = new URLSearchParams({
 			...(params.email && { email: params.email }),
 		});
@@ -648,7 +650,11 @@ export class CarteraBackClient {
 		const url = params.email ? `/stats?${queryParams}` : "/stats";
 
 		// Este endpoint retorna directamente el objeto de stats
-		const response = await this.request<CarteraStatsResponse>(url, { method: "GET" }, true);
+		const response = await this.request<CarteraStatsResponse>(
+			url,
+			{ method: "GET" },
+			true,
+		);
 
 		return response;
 	}

@@ -53,8 +53,8 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { client } from "@/utils/orpc";
 import type { IOpportunity } from "@/routes/crm/opportunities";
+import { client } from "@/utils/orpc";
 
 // Tipos de categorías de crédito
 type CreditCategory =
@@ -192,14 +192,18 @@ export function CreditDetailView({
 }: CreditDetailViewProps) {
 	const queryClient = useQueryClient();
 	const [isAddCheckOpen, setIsAddCheckOpen] = useState(false);
-	const [porcentajeInversionista, setPorcentajeInversionista] = useState(DEFAULT_INVESTOR_PERCENTAGE);
+	const [porcentajeInversionista, setPorcentajeInversionista] = useState(
+		DEFAULT_INVESTOR_PERCENTAGE,
+	);
 
 	// Estados para campos editables del crédito
 	const [isEditing, setIsEditing] = useState(false);
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editCategoria, setEditCategoria] = useState<CreditCategory>("");
 	const [editNit, setEditNit] = useState<string>("");
-	const [editInversionistas, setEditInversionistas] = useState<SelectedInversionista[]>([]);
+	const [editInversionistas, setEditInversionistas] = useState<
+		SelectedInversionista[]
+	>([]);
 	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
 
 	// Inicializar valores desde opportunity
@@ -218,11 +222,13 @@ export function CreditDetailView({
 		setEditNit(opportunity.nit || "");
 		setEditCategoria((opportunity.categoria as CreditCategory) || "");
 		setEditDiaPagoMensual(opportunity.diaPagoMensual || 15);
-		
+
 		// Parsear inversionistas existentes
 		if (opportunity.inversionistas) {
 			try {
-				const parsed = JSON.parse(opportunity.inversionistas) as SelectedInversionista[];
+				const parsed = JSON.parse(
+					opportunity.inversionistas,
+				) as SelectedInversionista[];
 				setEditInversionistas(parsed);
 			} catch {
 				setEditInversionistas([]);
@@ -249,7 +255,9 @@ export function CreditDetailView({
 	const vehicleInspectionQuery = useQuery({
 		queryKey: ["getLatestInspectionByVehicleId", opportunity.vehicle?.id],
 		queryFn: () =>
-			client.getLatestInspectionByVehicleId({ vehicleId: opportunity.vehicle!.id }),
+			client.getLatestInspectionByVehicleId({
+				vehicleId: opportunity.vehicle!.id,
+			}),
 		enabled: !!opportunity.vehicle?.id,
 	});
 
@@ -317,64 +325,136 @@ export function CreditDetailView({
 			// Campos de la cotización que se guardan en la oportunidad
 			const cuotaMensual = quotation?.monthlyPayment || "0";
 			const tasaMensualValue = quotation?.interestRate || "0";
-			const seguroValue = Number.parseFloat(quotation?.extraInsuranceCost || "0");
+			const seguroValue = Number.parseFloat(
+				quotation?.extraInsuranceCost || "0",
+			);
 			const gpsValue = Number.parseFloat(quotation?.extraGpsCost || "0");
 			const royaltyValue = Number.parseFloat(quotation?.royalty || "0");
 			const royaltyPercentageValue = quotation?.royaltyPercentage || "4.0";
-			const membresiaValue = Number.parseFloat(quotation?.extraMembershipCost || "0");
+			const membresiaValue = Number.parseFloat(
+				quotation?.extraMembershipCost || "0",
+			);
 			const numeroCuotasValue = quotation?.termMonths || 0;
-			const gastosAdminValue = Number.parseFloat(quotation?.extraAdminCost || "0");
+			const gastosAdminValue = Number.parseFloat(
+				quotation?.extraAdminCost || "0",
+			);
 			const finalValue = quotation?.totalFinanced || opportunity.value || "0";
 			const reservaValue = DEFAULT_RESERVA + seguroValue;
 
 			// Construir rubros desde los "Otros Descuentos" de la cotización
 			const rubrosArray: { nombre_rubro: string; monto: number }[] = [];
-			
+
 			const nombramiento = Number.parseFloat(quotation?.appointmentCost || "0");
-			if (nombramiento > 0) rubrosArray.push({ nombre_rubro: "Nombramiento", monto: nombramiento });
-			
+			if (nombramiento > 0)
+				rubrosArray.push({ nombre_rubro: "Nombramiento", monto: nombramiento });
+
 			const multasValue = Number.parseFloat(quotation?.finesCost || "0");
-			if (multasValue > 0) rubrosArray.push({ nombre_rubro: "Multas", monto: multasValue });
-			
+			if (multasValue > 0)
+				rubrosArray.push({ nombre_rubro: "Multas", monto: multasValue });
+
 			const copiaLlaveValue = Number.parseFloat(quotation?.keyCopyCost || "0");
-			if (copiaLlaveValue > 0) rubrosArray.push({ nombre_rubro: "Copia de llave", monto: copiaLlaveValue });
-			
-			const diferenciaCopiaLlaveValue = Number.parseFloat(quotation?.keyCopyDiffCost || "0");
-			if (diferenciaCopiaLlaveValue > 0) rubrosArray.push({ nombre_rubro: "Diferencia copia llave", monto: diferenciaCopiaLlaveValue });
-			
-			const verificacionDireccionValue = Number.parseFloat(quotation?.addressVerificationCost || "0");
-			if (verificacionDireccionValue > 0) rubrosArray.push({ nombre_rubro: "Verificación de dirección", monto: verificacionDireccionValue });
-			
-			const impuestoCirculacionValue = Number.parseFloat(quotation?.circulationTaxCost || "0");
-			if (impuestoCirculacionValue > 0) rubrosArray.push({ nombre_rubro: "Impuesto de circulación", monto: impuestoCirculacionValue });
-			
+			if (copiaLlaveValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Copia de llave",
+					monto: copiaLlaveValue,
+				});
+
+			const diferenciaCopiaLlaveValue = Number.parseFloat(
+				quotation?.keyCopyDiffCost || "0",
+			);
+			if (diferenciaCopiaLlaveValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Diferencia copia llave",
+					monto: diferenciaCopiaLlaveValue,
+				});
+
+			const verificacionDireccionValue = Number.parseFloat(
+				quotation?.addressVerificationCost || "0",
+			);
+			if (verificacionDireccionValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Verificación de dirección",
+					monto: verificacionDireccionValue,
+				});
+
+			const impuestoCirculacionValue = Number.parseFloat(
+				quotation?.circulationTaxCost || "0",
+			);
+			if (impuestoCirculacionValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Impuesto de circulación",
+					monto: impuestoCirculacionValue,
+				});
+
 			const traspasoValue = Number.parseFloat(quotation?.transferCost || "0");
-			if (traspasoValue > 0) rubrosArray.push({ nombre_rubro: "Traspaso", monto: traspasoValue });
-			
-			const garantiaMobiliariaValue = Number.parseFloat(quotation?.mobileGuaranteeCost || "0");
-			if (garantiaMobiliariaValue > 0) rubrosArray.push({ nombre_rubro: "Garantía mobiliaria", monto: garantiaMobiliariaValue });
-			
-			const contratoLeasingValue = Number.parseFloat(quotation?.leasingContractCost || "0");
-			if (contratoLeasingValue > 0) rubrosArray.push({ nombre_rubro: "Contrato Leasing", monto: contratoLeasingValue });
-			
-			const autenticaContratoValue = Number.parseFloat(quotation?.collectionAuthCost || "0");
-			if (autenticaContratoValue > 0) rubrosArray.push({ nombre_rubro: "Auténtica contrato cobranza", monto: autenticaContratoValue });
-			
+			if (traspasoValue > 0)
+				rubrosArray.push({ nombre_rubro: "Traspaso", monto: traspasoValue });
+
+			const garantiaMobiliariaValue = Number.parseFloat(
+				quotation?.mobileGuaranteeCost || "0",
+			);
+			if (garantiaMobiliariaValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Garantía mobiliaria",
+					monto: garantiaMobiliariaValue,
+				});
+
+			const contratoLeasingValue = Number.parseFloat(
+				quotation?.leasingContractCost || "0",
+			);
+			if (contratoLeasingValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Contrato Leasing",
+					monto: contratoLeasingValue,
+				});
+
+			const autenticaContratoValue = Number.parseFloat(
+				quotation?.collectionAuthCost || "0",
+			);
+			if (autenticaContratoValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Auténtica contrato cobranza",
+					monto: autenticaContratoValue,
+				});
+
 			const gastosLegalesValue = Number.parseFloat(quotation?.legalCost || "0");
-			if (gastosLegalesValue > 0) rubrosArray.push({ nombre_rubro: "Gastos legales", monto: gastosLegalesValue });
-			
+			if (gastosLegalesValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Gastos legales",
+					monto: gastosLegalesValue,
+				});
+
 			const freelanceValue = Number.parseFloat(quotation?.freelanceCost || "0");
-			if (freelanceValue > 0) rubrosArray.push({ nombre_rubro: "Free lance", monto: freelanceValue });
-			
-			const inspeccionValue = Number.parseFloat(quotation?.inspectionCost || "0");
-			if (inspeccionValue > 0) rubrosArray.push({ nombre_rubro: "Inspección", monto: inspeccionValue });
+			if (freelanceValue > 0)
+				rubrosArray.push({ nombre_rubro: "Free lance", monto: freelanceValue });
 
-			const appointmentValue = Number.parseFloat(quotation?.appointmentCost || "0");
-			if (appointmentValue > 0) rubrosArray.push({ nombre_rubro: "Nombramiento", monto: appointmentValue });
+			const inspeccionValue = Number.parseFloat(
+				quotation?.inspectionCost || "0",
+			);
+			if (inspeccionValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Inspección",
+					monto: inspeccionValue,
+				});
 
-			const addressVerificationValue = Number.parseFloat(quotation?.addressVerificationCost || "0");
-			if (addressVerificationValue > 0) rubrosArray.push({ nombre_rubro: "Verificación de dirección", monto: addressVerificationValue });
-			
+			const appointmentValue = Number.parseFloat(
+				quotation?.appointmentCost || "0",
+			);
+			if (appointmentValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Nombramiento",
+					monto: appointmentValue,
+				});
+
+			const addressVerificationValue = Number.parseFloat(
+				quotation?.addressVerificationCost || "0",
+			);
+			if (addressVerificationValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Verificación de dirección",
+					monto: addressVerificationValue,
+				});
+
 			return client.updateOpportunity({
 				id: opportunityId,
 				// Campos editables directamente
@@ -413,7 +493,7 @@ export function CreditDetailView({
 	// Validar campos requeridos antes de aprobar
 	const validateRequiredFields = (): string[] => {
 		const camposFaltantes: string[] = [];
-		
+
 		if (!editCategoria && !opportunity.categoria) {
 			camposFaltantes.push("Categoría");
 		}
@@ -426,14 +506,16 @@ export function CreditDetailView({
 		if (!editDiaPagoMensual && !opportunity.diaPagoMensual) {
 			camposFaltantes.push("Día de pago mensual");
 		}
-		
+
 		// Validar inversionistas
 		let inversionistasToValidate: SelectedInversionista[] = [];
 		if (editInversionistas.length > 0) {
 			inversionistasToValidate = editInversionistas;
 		} else {
 			try {
-				const parsed = opportunity.inversionistas ? JSON.parse(opportunity.inversionistas) : [];
+				const parsed = opportunity.inversionistas
+					? JSON.parse(opportunity.inversionistas)
+					: [];
 				if (Array.isArray(parsed) && parsed.length > 0) {
 					inversionistasToValidate = parsed;
 				} else {
@@ -443,23 +525,23 @@ export function CreditDetailView({
 				camposFaltantes.push("Inversionistas");
 			}
 		}
-		
+
 		// Validar que la suma de montos aportados = amountToFinance (capital)
 		if (inversionistasToValidate.length > 0 && quotation?.totalFinanced) {
 			const totalAportado = inversionistasToValidate.reduce(
 				(sum, inv) => sum + (inv.monto_aportado || 0),
-				0
+				0,
 			);
 			const capitalCredito = Number.parseFloat(quotation.totalFinanced);
-			
+
 			// Permitir una pequeña diferencia por redondeo (1 centavo)
 			if (Math.abs(totalAportado - capitalCredito) > 0.01) {
 				camposFaltantes.push(
-					`La suma de montos aportados (Q${totalAportado.toLocaleString()}) debe ser igual al capital del crédito (Q${capitalCredito.toLocaleString()})`
+					`La suma de montos aportados (Q${totalAportado.toLocaleString()}) debe ser igual al capital del crédito (Q${capitalCredito.toLocaleString()})`,
 				);
 			}
 		}
-		
+
 		return camposFaltantes;
 	};
 
@@ -469,25 +551,29 @@ export function CreditDetailView({
 			const camposFaltantes = validateRequiredFields();
 			if (camposFaltantes.length > 0) {
 				throw new Error(
-					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`
+					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
 				);
 			}
-			
+
 			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
-			if (quotation?.totalFinanced && (Number(quotation?.totalFinanced) !== Number(opportunity.value)))  {
+			if (
+				quotation?.totalFinanced &&
+				Number(quotation?.totalFinanced) !== Number(opportunity.value)
+			) {
 				await client.updateOpportunity({
 					id: opportunityId,
 					value: quotation.totalFinanced,
 				});
 			}
-			
-			
+
 			return client.approveCreditDetail({ opportunityId });
 		},
 		onSuccess: () => {
 			toast.success("Detalle de crédito aprobado correctamente");
 			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
-			queryClient.invalidateQueries({ queryKey: ["getCreditDetailApprovalStatus", opportunityId] });
+			queryClient.invalidateQueries({
+				queryKey: ["getCreditDetailApprovalStatus", opportunityId],
+			});
 		},
 		onError: (error) => {
 			toast.error(`Error al aprobar: ${error.message}`);
@@ -532,7 +618,9 @@ export function CreditDetailView({
 	});
 
 	// Calcular valores derivados
-	const montoTotalFinanciar = Number.parseFloat(quotation?.totalFinanced || "0");
+	const montoTotalFinanciar = Number.parseFloat(
+		quotation?.totalFinanced || "0",
+	);
 	const montoFinanciar = Number.parseFloat(quotation?.amountToFinance || "0");
 	const tasaMensual = Number.parseFloat(quotation?.interestRate || "0");
 	const tasaInteres = tasaMensual * 12;
@@ -831,7 +919,9 @@ export function CreditDetailView({
 												className="mt-1"
 											/>
 										) : (
-											<p className="font-medium">{editNit || opportunity.nit || "N/A"}</p>
+											<p className="font-medium">
+												{editNit || opportunity.nit || "N/A"}
+											</p>
 										)}
 									</div>
 									<div>
@@ -841,17 +931,25 @@ export function CreditDetailView({
 										{isEditing ? (
 											<Select
 												value={editCategoria}
-												onValueChange={(value) => setEditCategoria(value as CreditCategory)}
+												onValueChange={(value) =>
+													setEditCategoria(value as CreditCategory)
+												}
 											>
 												<SelectTrigger className="mt-1">
 													<SelectValue placeholder="Seleccionar categoría" />
 												</SelectTrigger>
 												<SelectContent>
 													<SelectItem value="Contraseña">Contraseña</SelectItem>
-													<SelectItem value="CV Vehículo">CV Vehículo</SelectItem>
-													<SelectItem value="CV Vehículo nuevo">CV Vehículo nuevo</SelectItem>
+													<SelectItem value="CV Vehículo">
+														CV Vehículo
+													</SelectItem>
+													<SelectItem value="CV Vehículo nuevo">
+														CV Vehículo nuevo
+													</SelectItem>
 													<SelectItem value="Fiduciario">Fiduciario</SelectItem>
-													<SelectItem value="Hipotecario">Hipotecario</SelectItem>
+													<SelectItem value="Hipotecario">
+														Hipotecario
+													</SelectItem>
 													<SelectItem value="Vehículo">Vehículo</SelectItem>
 												</SelectContent>
 											</Select>
@@ -892,13 +990,16 @@ export function CreditDetailView({
 												min={1}
 												max={31}
 												value={editDiaPagoMensual}
-												onChange={(e) => setEditDiaPagoMensual(Number(e.target.value) || 15)}
+												onChange={(e) =>
+													setEditDiaPagoMensual(Number(e.target.value) || 15)
+												}
 												placeholder="15"
 												className="mt-1"
 											/>
 										) : (
 											<p className="font-medium">
-												Día {editDiaPagoMensual || opportunity.diaPagoMensual || 15}
+												Día{" "}
+												{editDiaPagoMensual || opportunity.diaPagoMensual || 15}
 											</p>
 										)}
 									</div>
@@ -922,7 +1023,9 @@ export function CreditDetailView({
 										<Label className="text-muted-foreground text-xs">
 											Placas
 										</Label>
-										<p className="font-medium">{vehiculo?.licensePlate || "N/A"}</p>
+										<p className="font-medium">
+											{vehiculo?.licensePlate || "N/A"}
+										</p>
 									</div>
 									<div>
 										<Label className="text-muted-foreground text-xs">
@@ -992,9 +1095,7 @@ export function CreditDetailView({
 										<Label className="text-muted-foreground text-xs">
 											Plazo
 										</Label>
-										<p className="font-medium">
-											{numeroCuotas || "N/A"} meses
-										</p>
+										<p className="font-medium">{numeroCuotas || "N/A"} meses</p>
 									</div>
 									<div>
 										<Label className="text-muted-foreground text-xs">
@@ -1028,9 +1129,14 @@ export function CreditDetailView({
 											type="number"
 											min={0}
 											max={100}
-											value={porcentajeInversionista === 0 ? "" : porcentajeInversionista}
+											value={
+												porcentajeInversionista === 0
+													? ""
+													: porcentajeInversionista
+											}
 											onChange={(e) => {
-												const value = e.target.value === "" ? 0 : Number(e.target.value);
+												const value =
+													e.target.value === "" ? 0 : Number(e.target.value);
 												setPorcentajeInversionista(isNaN(value) ? 0 : value);
 											}}
 											className="h-8 w-20 text-sm"
@@ -1113,9 +1219,11 @@ export function CreditDetailView({
 																{
 																	inversionista_id: 0,
 																	nombre: "",
-																	porcentaje_participacion: porcentajeInversionista,
+																	porcentaje_participacion:
+																		porcentajeInversionista,
 																	monto_aportado: 0,
-																	porcentaje_cash_in: 100 - porcentajeInversionista,
+																	porcentaje_cash_in:
+																		100 - porcentajeInversionista,
 																},
 															]);
 														}}
@@ -1142,23 +1250,39 @@ export function CreditDetailView({
 																		{/* Fila 1: Inversionista + Preview porcentajes + Eliminar */}
 																		<div className="flex items-start gap-3">
 																			<div className="flex-1">
-																				<Label className="text-xs">Inversionista</Label>
+																				<Label className="text-xs">
+																					Inversionista
+																				</Label>
 																				<Combobox
-																					value={inv.inversionista_id > 0 ? inv.inversionista_id.toString() : null}
+																					value={
+																						inv.inversionista_id > 0
+																							? inv.inversionista_id.toString()
+																							: null
+																					}
 																					onChange={(value) => {
-																						const newInv = [...editInversionistas];
-																						const selectedInv = inversionistasQuery.data?.inversionistas?.find(
-																							(i) => i.inversionistaId.toString() === value
-																						);
-																						newInv[index].inversionista_id = Number.parseInt(value || "0");
-																						newInv[index].nombre = selectedInv?.nombre || "";
+																						const newInv = [
+																							...editInversionistas,
+																						];
+																						const selectedInv =
+																							inversionistasQuery.data?.inversionistas?.find(
+																								(i) =>
+																									i.inversionistaId.toString() ===
+																									value,
+																							);
+																						newInv[index].inversionista_id =
+																							Number.parseInt(value || "0");
+																						newInv[index].nombre =
+																							selectedInv?.nombre || "";
 																						setEditInversionistas(newInv);
 																					}}
 																					options={
-																						inversionistasQuery.data?.inversionistas?.map((investor) => ({
-																							label: investor.nombre,
-																							value: investor.inversionistaId.toString(),
-																						})) || []
+																						inversionistasQuery.data?.inversionistas?.map(
+																							(investor) => ({
+																								label: investor.nombre,
+																								value:
+																									investor.inversionistaId.toString(),
+																							}),
+																						) || []
 																					}
 																					placeholder="Seleccionar..."
 																					width="full"
@@ -1166,17 +1290,29 @@ export function CreditDetailView({
 																				/>
 																				{/* Preview de porcentajes debajo del inversionista */}
 																				<div className="mt-2 flex items-center gap-4 text-muted-foreground text-xs">
-																					<span>Participación: <span className="font-medium text-foreground">{inv.porcentaje_participacion}%</span></span>
-																					<span>Cash In: <span className="font-medium text-foreground">{inv.porcentaje_cash_in}%</span></span>
+																					<span>
+																						Participación:{" "}
+																						<span className="font-medium text-foreground">
+																							{inv.porcentaje_participacion}%
+																						</span>
+																					</span>
+																					<span>
+																						Cash In:{" "}
+																						<span className="font-medium text-foreground">
+																							{inv.porcentaje_cash_in}%
+																						</span>
+																					</span>
 																				</div>
 																			</div>
 																			<Button
 																				type="button"
 																				variant="destructive"
 																				size="icon"
-																				className="h-8 w-8 shrink-0 mt-5"
+																				className="mt-5 h-8 w-8 shrink-0"
 																				onClick={() => {
-																					const newInv = [...editInversionistas];
+																					const newInv = [
+																						...editInversionistas,
+																					];
 																					newInv.splice(index, 1);
 																					setEditInversionistas(newInv);
 																				}}
@@ -1187,15 +1323,29 @@ export function CreditDetailView({
 																		{/* Fila 2: Monto Aportado (destacado) + Porcentajes editables */}
 																		<div className="grid grid-cols-3 gap-3">
 																			<div>
-																				<Label className="text-xs font-semibold text-primary">Monto Aportado (Q) *</Label>
+																				<Label className="font-semibold text-primary text-xs">
+																					Monto Aportado (Q) *
+																				</Label>
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.monto_aportado === 0 ? "" : inv.monto_aportado}
+																					value={
+																						inv.monto_aportado === 0
+																							? ""
+																							: inv.monto_aportado
+																					}
 																					onChange={(e) => {
-																						const newInv = [...editInversionistas];
-																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
-																						newInv[index].monto_aportado = isNaN(value) ? 0 : value;
+																						const newInv = [
+																							...editInversionistas,
+																						];
+																						const value =
+																							e.target.value === ""
+																								? 0
+																								: Number.parseFloat(
+																										e.target.value,
+																									);
+																						newInv[index].monto_aportado =
+																							isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
 																					placeholder="0.00"
@@ -1203,31 +1353,63 @@ export function CreditDetailView({
 																				/>
 																			</div>
 																			<div>
-																				<Label className="text-xs">% Participación</Label>
+																				<Label className="text-xs">
+																					% Participación
+																				</Label>
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.porcentaje_participacion === 0 ? "" : inv.porcentaje_participacion}
+																					value={
+																						inv.porcentaje_participacion === 0
+																							? ""
+																							: inv.porcentaje_participacion
+																					}
 																					onChange={(e) => {
-																						const newInv = [...editInversionistas];
-																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
-																						newInv[index].porcentaje_participacion = isNaN(value) ? 0 : value;
+																						const newInv = [
+																							...editInversionistas,
+																						];
+																						const value =
+																							e.target.value === ""
+																								? 0
+																								: Number.parseFloat(
+																										e.target.value,
+																									);
+																						newInv[
+																							index
+																						].porcentaje_participacion = isNaN(
+																							value,
+																						)
+																							? 0
+																							: value;
 																						setEditInversionistas(newInv);
 																					}}
-																					placeholder="0"	
-
+																					placeholder="0"
 																				/>
 																			</div>
 																			<div>
-																				<Label className="text-xs">% Cash In</Label>
+																				<Label className="text-xs">
+																					% Cash In
+																				</Label>
 																				<Input
 																					type="number"
 																					step="0.01"
-																					value={inv.porcentaje_cash_in === 0 ? "" : inv.porcentaje_cash_in}
+																					value={
+																						inv.porcentaje_cash_in === 0
+																							? ""
+																							: inv.porcentaje_cash_in
+																					}
 																					onChange={(e) => {
-																						const newInv = [...editInversionistas];
-																						const value = e.target.value === "" ? 0 : Number.parseFloat(e.target.value);
-																						newInv[index].porcentaje_cash_in = isNaN(value) ? 0 : value;
+																						const newInv = [
+																							...editInversionistas,
+																						];
+																						const value =
+																							e.target.value === ""
+																								? 0
+																								: Number.parseFloat(
+																										e.target.value,
+																									);
+																						newInv[index].porcentaje_cash_in =
+																							isNaN(value) ? 0 : value;
 																						setEditInversionistas(newInv);
 																					}}
 																					placeholder="0"
@@ -1238,14 +1420,22 @@ export function CreditDetailView({
 																) : (
 																	<div className="flex items-center gap-3">
 																		<div className="flex-1">
-																			<p className="font-medium">{inv.nombre}</p>
+																			<p className="font-medium">
+																				{inv.nombre}
+																			</p>
 																			<p className="text-muted-foreground text-xs">
-																				Participación: {inv.porcentaje_participacion}% • Cash In: {inv.porcentaje_cash_in}%
+																				Participación:{" "}
+																				{inv.porcentaje_participacion}% • Cash
+																				In: {inv.porcentaje_cash_in}%
 																			</p>
 																		</div>
 																		<div className="text-right">
-																			<p className="text-muted-foreground text-xs">Monto Aportado</p>
-																			<p className="font-bold text-primary text-lg">{formatCurrency(inv.monto_aportado)}</p>
+																			<p className="text-muted-foreground text-xs">
+																				Monto Aportado
+																			</p>
+																			<p className="font-bold text-lg text-primary">
+																				{formatCurrency(inv.monto_aportado)}
+																			</p>
 																		</div>
 																	</div>
 																)}
@@ -1380,7 +1570,9 @@ export function CreditDetailView({
 												<TableCell>Gastos Administrativos</TableCell>
 												<TableCell className="text-center">
 													<Badge
-														variant={gastosAdminBase > 0 ? "default" : "outline"}
+														variant={
+															gastosAdminBase > 0 ? "default" : "outline"
+														}
 														className="text-xs"
 													>
 														{gastosAdminBase > 0 ? "SI" : "NO"}
@@ -1771,63 +1963,63 @@ export function CreditDetailView({
 								</div>
 							</div>
 
-						{/* Botones de acción al final */}
-						{!creditDetailApprovalQuery.data?.approved && (
-							<div className="flex items-center justify-end gap-3 border-t pt-4">
-								{isEditing ? (
-									<>
-										<Button
-											size="sm"
-											variant="outline"
-											onClick={() => setIsEditing(false)}
-										>
-											Cancelar
-										</Button>
-										<Button
-											size="sm"
-											variant="default"
-											onClick={() => saveCreditDetailsMutation.mutate()}
-											disabled={saveCreditDetailsMutation.isPending}
-										>
-											<Save className="mr-1 h-3 w-3" />
-											{saveCreditDetailsMutation.isPending
-												? "Guardando..."
-												: "Guardar Cambios"}
-										</Button>
-									</>
-								) : (
-									<>
-										<Button
-											size="sm"
-											variant="outline"
-											onClick={() => setIsEditing(true)}
-										>
-											<Edit2 className="mr-1 h-3 w-3" />
-											Editar
-										</Button>
-										{canApprove && (
+							{/* Botones de acción al final */}
+							{!creditDetailApprovalQuery.data?.approved && (
+								<div className="flex items-center justify-end gap-3 border-t pt-4">
+									{isEditing ? (
+										<>
+											<Button
+												size="sm"
+												variant="outline"
+												onClick={() => setIsEditing(false)}
+											>
+												Cancelar
+											</Button>
 											<Button
 												size="sm"
 												variant="default"
-												onClick={() => approveCreditDetailMutation.mutate()}
-												disabled={approveCreditDetailMutation.isPending}
+												onClick={() => saveCreditDetailsMutation.mutate()}
+												disabled={saveCreditDetailsMutation.isPending}
 											>
-												<CheckCircle className="mr-1 h-3 w-3" />
-												{approveCreditDetailMutation.isPending
-													? "Aprobando..."
-													: "Aprobar Detalle"}
+												<Save className="mr-1 h-3 w-3" />
+												{saveCreditDetailsMutation.isPending
+													? "Guardando..."
+													: "Guardar Cambios"}
 											</Button>
-										)}
-									</>
-								)}
-							</div>
-						)}
-					</CardContent>
-				</Card>
-			</TabsContent>
+										</>
+									) : (
+										<>
+											<Button
+												size="sm"
+												variant="outline"
+												onClick={() => setIsEditing(true)}
+											>
+												<Edit2 className="mr-1 h-3 w-3" />
+												Editar
+											</Button>
+											{canApprove && (
+												<Button
+													size="sm"
+													variant="default"
+													onClick={() => approveCreditDetailMutation.mutate()}
+													disabled={approveCreditDetailMutation.isPending}
+												>
+													<CheckCircle className="mr-1 h-3 w-3" />
+													{approveCreditDetailMutation.isPending
+														? "Aprobando..."
+														: "Aprobar Detalle"}
+												</Button>
+											)}
+										</>
+									)}
+								</div>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
 
-			{/* TAB 2: Detalle Cliente */}
-			<TabsContent value="cliente" className="mt-4 space-y-4">
+				{/* TAB 2: Detalle Cliente */}
+				<TabsContent value="cliente" className="mt-4 space-y-4">
 					<Card>
 						<CardHeader className="pb-3">
 							<CardTitle className="flex items-center gap-2 text-lg">

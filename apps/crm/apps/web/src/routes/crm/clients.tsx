@@ -5,6 +5,7 @@ import {
 	Banknote,
 	Briefcase,
 	Calendar,
+	Car,
 	CheckCircle2,
 	ChevronLeft,
 	ChevronRight,
@@ -17,7 +18,6 @@ import {
 	Phone,
 	Search,
 	User,
-	Car,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
@@ -322,7 +322,9 @@ function RouteComponent() {
 								.reduce((sum, c) => sum + (c.totalClosedValue || 0), 0)
 								.toLocaleString()}
 						</div>
-						<p className="text-muted-foreground text-xs">En créditos cerrados</p>
+						<p className="text-muted-foreground text-xs">
+							En créditos cerrados
+						</p>
 					</CardContent>
 				</Card>
 			</div>
@@ -430,7 +432,8 @@ function RouteComponent() {
 																	variant="secondary"
 																	className="bg-green-100 text-green-800"
 																>
-																	{clientData.closedOpportunitiesCount} cerrada(s)
+																	{clientData.closedOpportunitiesCount}{" "}
+																	cerrada(s)
 																</Badge>
 																{clientData.opportunities.length >
 																	clientData.closedOpportunitiesCount && (
@@ -458,7 +461,10 @@ function RouteComponent() {
 																		)}
 																		<span>{opp.title}</span>
 																		{opp.numeroSifco && (
-																			<Badge variant="outline" className="text-xs">
+																			<Badge
+																				variant="outline"
+																				className="text-xs"
+																			>
 																				Crédito: {opp.numeroSifco}
 																			</Badge>
 																		)}
@@ -611,7 +617,9 @@ function RouteComponent() {
 											<Label className="font-medium text-muted-foreground text-sm">
 												Dependientes
 											</Label>
-											<p className="text-sm">{selectedClient.dependents || 0}</p>
+											<p className="text-sm">
+												{selectedClient.dependents || 0}
+											</p>
 										</div>
 										<div>
 											<Label className="font-medium text-muted-foreground text-sm">
@@ -779,7 +787,8 @@ function RouteComponent() {
 													<span className="font-medium">
 														{selectedClient.creditAnalysis.monthlyFixedIncome
 															? formatCurrency(
-																	selectedClient.creditAnalysis.monthlyFixedIncome,
+																	selectedClient.creditAnalysis
+																		.monthlyFixedIncome,
 																)
 															: "-"}
 													</span>
@@ -791,19 +800,20 @@ function RouteComponent() {
 													<span className="font-medium">
 														{selectedClient.creditAnalysis.monthlyVariableIncome
 															? formatCurrency(
-																	selectedClient.creditAnalysis.monthlyVariableIncome,
+																	selectedClient.creditAnalysis
+																		.monthlyVariableIncome,
 																)
 															: "-"}
 													</span>
 												</div>
 												<div className="border-t pt-2">
 													<div className="flex justify-between">
-														<span className="font-medium">
-															Total Ingresos:
-														</span>
+														<span className="font-medium">Total Ingresos:</span>
 														<span className="font-bold text-green-600">
-															{selectedClient.creditAnalysis.monthlyFixedIncome ||
-															selectedClient.creditAnalysis.monthlyVariableIncome
+															{selectedClient.creditAnalysis
+																.monthlyFixedIncome ||
+															selectedClient.creditAnalysis
+																.monthlyVariableIncome
 																? formatCurrency(
 																		Number(
 																			selectedClient.creditAnalysis
@@ -833,7 +843,8 @@ function RouteComponent() {
 													<span className="font-medium">
 														{selectedClient.creditAnalysis.monthlyFixedExpenses
 															? formatCurrency(
-																	selectedClient.creditAnalysis.monthlyFixedExpenses,
+																	selectedClient.creditAnalysis
+																		.monthlyFixedExpenses,
 																)
 															: "-"}
 													</span>
@@ -843,9 +854,11 @@ function RouteComponent() {
 														Gastos Variables:
 													</span>
 													<span className="font-medium">
-														{selectedClient.creditAnalysis.monthlyVariableExpenses
+														{selectedClient.creditAnalysis
+															.monthlyVariableExpenses
 															? formatCurrency(
-																	selectedClient.creditAnalysis.monthlyVariableExpenses,
+																	selectedClient.creditAnalysis
+																		.monthlyVariableExpenses,
 																)
 															: "-"}
 													</span>
@@ -854,8 +867,10 @@ function RouteComponent() {
 													<div className="flex justify-between">
 														<span className="font-medium">Total Gastos:</span>
 														<span className="font-bold text-red-600">
-															{selectedClient.creditAnalysis.monthlyFixedExpenses ||
-															selectedClient.creditAnalysis.monthlyVariableExpenses
+															{selectedClient.creditAnalysis
+																.monthlyFixedExpenses ||
+															selectedClient.creditAnalysis
+																.monthlyVariableExpenses
 																? formatCurrency(
 																		Number(
 																			selectedClient.creditAnalysis
@@ -888,7 +903,8 @@ function RouteComponent() {
 											<span className="font-bold text-2xl text-blue-600">
 												{selectedClient.creditAnalysis.economicAvailability
 													? formatCurrency(
-															selectedClient.creditAnalysis.economicAvailability,
+															selectedClient.creditAnalysis
+																.economicAvailability,
 														)
 													: "-"}
 											</span>
@@ -897,9 +913,7 @@ function RouteComponent() {
 
 									{/* Payment Capacity */}
 									<div className="space-y-4">
-										<h4 className="font-medium text-base">
-											Capacidad de Pago
-										</h4>
+										<h4 className="font-medium text-base">Capacidad de Pago</h4>
 										<div className="grid grid-cols-4 gap-4">
 											<div className="rounded-lg border p-4 text-center">
 												<Label className="text-muted-foreground text-xs">
@@ -955,7 +969,9 @@ function RouteComponent() {
 									{/* Analysis Date */}
 									<div className="text-right text-muted-foreground text-sm">
 										Análisis realizado:{" "}
-										{formatGuatemalaDate(selectedClient.creditAnalysis.analyzedAt)}
+										{formatGuatemalaDate(
+											selectedClient.creditAnalysis.analyzedAt,
+										)}
 									</div>
 								</div>
 							) : (
@@ -992,7 +1008,7 @@ function RouteComponent() {
 									<Label className="text-muted-foreground text-xs">
 										Valor Total Cerrado
 									</Label>
-									<p className="mt-1 font-bold text-xl text-purple-600">
+									<p className="mt-1 font-bold text-purple-600 text-xl">
 										{formatCurrency(selectedClient.totalClosedValue)}
 									</p>
 								</div>
@@ -1030,7 +1046,8 @@ function RouteComponent() {
 																	color: "#fff",
 																}}
 															>
-																{opp.stage.name} ({opp.stage.closurePercentage}%)
+																{opp.stage.name} ({opp.stage.closurePercentage}
+																%)
 															</Badge>
 														)}
 														{opp.isClosed && (

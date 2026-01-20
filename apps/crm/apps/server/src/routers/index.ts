@@ -145,6 +145,7 @@ export const appRouter = {
 	getLeadsWithContracts: legalContractsRouter.getLeadsWithContracts,
 	getOpportunitiesForContracts:
 		legalContractsRouter.getOpportunitiesForContracts,
+	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

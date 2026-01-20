@@ -3,8 +3,14 @@ import { and, count, eq, gte, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
-import { leads, opportunities, salesStages } from "../db/schema/crm";
+import {
+	leads,
+	opportunities,
+	opportunityStageHistory,
+	salesStages,
+} from "../db/schema/crm";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import { vehicles } from "../db/schema/vehicles";
 import {
 	adminProcedure,
 	juridicoProcedure,
@@ -449,17 +455,17 @@ export const legalContractsRouter = {
 		return leadsWithCounts;
 	}),
 
-	// Get opportunities ready for contracts (closure percentage >= 80%)
+	// Get opportunities ready for contracts (exactly at 80% - pending legal approval)
 	getOpportunitiesForContracts: juridicoProcedure
 		.input(
 			z
 				.object({
-					minClosurePercentage: z.number().min(0).max(100).optional(),
+					closurePercentage: z.number().min(0).max(100).optional(),
 				})
 				.optional(),
 		)
 		.handler(async ({ input, context: _ }) => {
-			const minPercentage = input?.minClosurePercentage ?? 80;
+			const targetPercentage = input?.closurePercentage ?? 80;
 
 			const opportunitiesList = await db
 				.select({
@@ -489,19 +495,29 @@ export const legalContractsRouter = {
 						id: user.id,
 						name: user.name,
 					},
+					vehicle: {
+						id: vehicles.id,
+						make: vehicles.make,
+						model: vehicles.model,
+						year: vehicles.year,
+						licensePlate: vehicles.licensePlate,
+						color: vehicles.color,
+						isNew: vehicles.isNew,
+					},
 				})
 				.from(opportunities)
 				.innerJoin(leads, eq(opportunities.leadId, leads.id))
 				.innerJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.leftJoin(user, eq(opportunities.assignedTo, user.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 				.where(
 					and(
-						gte(salesStages.closurePercentage, minPercentage),
+						eq(salesStages.closurePercentage, targetPercentage),
 						ne(opportunities.status, "won"),
 						ne(opportunities.status, "lost"),
 					),
 				)
-				.orderBy(salesStages.closurePercentage);
+				.orderBy(opportunities.createdAt);
 
 			// For each opportunity, get the contract count
 			const opportunitiesWithContractCount = await Promise.all(
@@ -519,5 +535,103 @@ export const legalContractsRouter = {
 			);
 
 			return opportunitiesWithContractCount;
+		}),
+
+	// Aprobar oportunidad desde jurídico (mover a 90%)
+	approveOpportunityLegal: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verificar permisos
+			if (!PERMISSIONS.canApproveLegalStage(context.userRole)) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para aprobar oportunidades",
+				});
+			}
+
+			// Obtener la oportunidad con su etapa actual
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					stageId: opportunities.stageId,
+					leadId: opportunities.leadId,
+					title: opportunities.title,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Verificar que la oportunidad está en 80%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 80) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `La oportunidad debe estar en la etapa del 80% para ser aprobada. Actualmente está en ${currentStage?.closurePercentage || 0}%`,
+				});
+			}
+
+			// Verificar que hay al menos un contrato asociado a la oportunidad
+			const [{ count: contractCount }] = await db
+				.select({ count: count() })
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.opportunityId, input.opportunityId));
+
+			if (Number(contractCount) === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"Debe haber al menos un contrato asociado a la oportunidad para aprobarla",
+				});
+			}
+
+			// Obtener la etapa del 90%
+			const [targetStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 90))
+				.limit(1);
+
+			if (!targetStage) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró la etapa del 90%",
+				});
+			}
+
+			// Actualizar la oportunidad a 90%
+			await db
+				.update(opportunities)
+				.set({
+					stageId: targetStage.id,
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			// Registrar en el historial de etapas
+			await db.insert(opportunityStageHistory).values({
+				opportunityId: input.opportunityId,
+				fromStageId: opportunity.stageId,
+				toStageId: targetStage.id,
+				changedBy: context.userId,
+				reason: "Aprobación legal - Contratos adjuntados",
+			});
+
+			return {
+				success: true,
+				message: "Oportunidad aprobada y movida a la etapa del 90%",
+				newStageId: targetStage.id,
+				newStageName: targetStage.name,
+			};
 		}),
 };

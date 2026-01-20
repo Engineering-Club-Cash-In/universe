@@ -928,6 +928,7 @@ function RouteComponent() {
 			expectedCloseDate?: string;
 			assignedTo?: string;
 			notes?: string;
+			vendorId?: string;
 		}) => client.createOpportunity(input),
 		onSuccess: () => {
 			queryClient.invalidateQueries({

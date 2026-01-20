@@ -798,6 +798,10 @@ function RouteComponent() {
 				leadId:
 					value.leadId && value.leadId !== "none" ? value.leadId : undefined,
 				vehicleId: value.vehicleId || undefined,
+				vendorId:
+					value.vendorId && value.vendorId !== "none"
+						? value.vendorId
+						: undefined,
 				value: value.value || undefined,
 				expectedCloseDate: value.expectedCloseDate || undefined,
 				notes: value.notes || undefined,

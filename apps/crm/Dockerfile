@@ -9,8 +9,9 @@ ENV VITE_FRONTEND_URL=https://crm.s3.devteamatcci.site
 
 RUN npm install -g bun
 
-# Copiamos el paquete infornet (requerido por el lockfile del workspace)
+# Copiamos los paquetes locales (requeridos por el lockfile del workspace)
 COPY packages/infornet ./packages/infornet
+COPY packages/sms ./packages/sms
 
 # Copiamos el workspace CRM completo
 COPY apps/crm ./apps/crm

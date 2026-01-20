@@ -193,6 +193,7 @@ interface QuotationFormValues {
 	circulationTaxCost: number;
 	vehicleTransferCost: number;
 	mobileGuaranteeCost: number;
+	licensePlatesCost: number;
 	leasingContractCost: number;
 	collectionAuthCost: number;
 	legalCost: number;
@@ -366,6 +367,14 @@ const EXTRA_COST_FIELDS: ExtraCostFieldConfig[] = [
 		section: "otros",
 		defaultActive: true,
 		defaultValue: 400,
+	},
+	{
+		name: "licensePlates",
+		label: "Placas",
+		type: "fixed",
+		valueField: "licensePlatesCost",
+		creditType: "all",
+		section: "otros",
 	},
 	// Sección: Gastos de Abogado
 	{
@@ -859,6 +868,7 @@ function QuoterPage() {
 			circulationTaxCost: 0,
 			vehicleTransferCost: 0,
 			mobileGuaranteeCost: 400,
+			licensePlatesCost: 0,
 			leasingContractCost: 400,
 			collectionAuthCost: 0,
 			legalCost: 0,

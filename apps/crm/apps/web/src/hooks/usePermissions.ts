@@ -9,20 +9,26 @@ import { orpc } from "@/utils/orpc";
  * @returns Objeto con los permisos del usuario (canView, canCreate, canAssign, canDelete)
  */
 export function useJuridicoPermissions() {
-	const { data: session, isPending } = authClient.useSession();
-	const { data: userProfile } = useQuery({
+	const { data: session, isPending: isSessionPending } =
+		authClient.useSession();
+	const { data: userProfile, isLoading: isProfileLoading } = useQuery({
 		...orpc.getUserProfile.queryOptions(),
 		enabled: !!session?.user?.id,
 	});
 
 	const userRole = userProfile?.role || "";
 
+	// Está cargando si: la sesión está pendiente, O si hay sesión pero el perfil aún no carga
+	const isLoading =
+		isSessionPending || (!!session?.user?.id && isProfileLoading);
+
 	return {
 		canViewLegal: PERMISSIONS.canAccessJuridico(userRole),
 		canCreateLegal: PERMISSIONS.canCreateLegalContracts(userRole),
 		canAssignLegal: PERMISSIONS.canAssignLegalContracts(userRole),
 		canDeleteLegal: PERMISSIONS.canDeleteLegalContracts(userRole),
-		isLoading: isPending,
+		canApproveLegalStage: PERMISSIONS.canApproveLegalStage(userRole),
+		isLoading,
 		userRole,
 	};
 }

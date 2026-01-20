@@ -274,7 +274,10 @@ export const opportunities = pgTable("opportunities", {
 	asesorId: integer("asesor_id"), // Advisor ID from cartera-back
 	numeroSifco: text("numero_sifco"), // SIFCO credit number
 	rubros: text("rubros"), // JSON string with expense items (rubros)
-	gastosAdministrativos: decimal("gastos_administrativos", { precision: 12, scale: 2 }), // Administrative expenses (for "otros" in cartera-back)
+	gastosAdministrativos: decimal("gastos_administrativos", {
+		precision: 12,
+		scale: 2,
+	}), // Administrative expenses (for "otros" in cartera-back)
 
 	// Credit Detail Approval (40% → 50%)
 	creditDetailApproved: boolean("credit_detail_approved").default(false),

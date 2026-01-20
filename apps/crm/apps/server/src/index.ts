@@ -224,8 +224,8 @@ app.post("/api/upload-opportunity-document", async (c) => {
 			return c.json({ error: "Oportunidad no encontrada" }, 404);
 		}
 
-		// Only admin and sales can upload documents
-		if (!["admin", "sales", "analyst"].includes(userRole)) {
+		// Only admin, sales, sales_supervisor and analyst can upload documents
+		if (!["admin", "sales", "sales_supervisor", "analyst"].includes(userRole)) {
 			return c.json({ error: "No tienes permiso para subir documentos" }, 403);
 		}
 

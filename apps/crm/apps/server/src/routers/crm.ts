@@ -2210,8 +2210,8 @@ export const crmRouter = {
 				throw new Error("Oportunidad no encontrada");
 			}
 
-			// Admin, sales y analyst pueden subir documentos
-			if (!["admin", "sales", "analyst"].includes(context.userRole)) {
+			// Admin, sales, sales_supervisor y analyst pueden subir documentos
+			if (!["admin", "sales", "sales_supervisor", "analyst"].includes(context.userRole)) {
 				throw new Error("No tienes permiso para subir documentos");
 			}
 

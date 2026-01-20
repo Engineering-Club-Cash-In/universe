@@ -52,6 +52,7 @@ import {
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { closeOpportunity } from "../services/close-opportunity";
+import { updateChecklistForClientDocument } from "@/lib/checklist";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -2263,6 +2264,14 @@ export const crmRouter = {
 					filePath: key,
 				})
 				.returning();
+
+			await updateChecklistForClientDocument(
+				input.opportunityId,
+				input.documentType,
+				newDocument.id,
+				!!opportunity[0]?.vehicleId,
+				opportunity[0]?.vehicleId || undefined,
+			);
 
 			return newDocument;
 		}),

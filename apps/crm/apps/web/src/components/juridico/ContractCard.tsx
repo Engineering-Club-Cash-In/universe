@@ -94,10 +94,10 @@ export function ContractCard({
 
 	return (
 		<Card className="overflow-hidden">
-			<CardHeader className="bg-linear-to-r from-amber-50 to-white pb-4">
+			<CardHeader className="bg-linear-to-r  to-white ">
 				<div className="flex items-start justify-between gap-3">
 					<div className="flex items-start gap-3 flex-1">
-						<div className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 shrink-0">
+						<div className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg  shrink-0">
 							<FileText className="h-5 w-5 text-amber-600" />
 						</div>
 						<div className="flex-1 min-w-0">
@@ -129,7 +129,7 @@ export function ContractCard({
 				</div>
 			</CardHeader>
 
-			<CardContent className="space-y-4 pt-6">
+			<CardContent className="space-y-4 ">
 				{/* Tipo de contrato */}
 				<div>
 					<p className="font-medium text-muted-foreground text-sm">

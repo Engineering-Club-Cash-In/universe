@@ -47,6 +47,8 @@ const documentCategories = {
 		"pago_impuesto_circulacion",
 		"consulta_sat",
 		"consulta_garantias_mobiliarias",
+		"datos_vehiculo_nuevo",
+		"cotizacion_vehiculo_nuevo"
 	],
 	"Verificaciones del Cliente": [
 		"usuario_sat_cliente",
@@ -56,6 +58,7 @@ const documentCategories = {
 		"confirmacion_referencias",
 		"visita_domiciliar",
 		"redes_sociales_internet",
+		"enganche"
 	],
 	"Verificaciones del Vehículo / Propietario": [
 		"usuario_sat_propietario",

@@ -184,8 +184,8 @@ export const crmRouter = {
 				conditions.push(eq(leads.id, id));
 			}
 
-			// Role-based filter: sales can only see their own leads
-			if (context.userRole !== "admin") {
+			// Role-based filter: admin and sales_supervisor can see all, others only their own
+			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
@@ -332,7 +332,7 @@ export const crmRouter = {
 	getLeadsStats: crmProcedure.handler(async ({ context }) => {
 		// Build role-based condition
 		const roleCondition =
-			context.userRole !== "admin"
+			context.userRole !== "admin" && context.userRole !== "sales_supervisor"
 				? eq(leads.assignedTo, context.userId)
 				: undefined;
 
@@ -771,8 +771,8 @@ export const crmRouter = {
 				conditions.push(not(eq(opportunities.status, input.notStatus)));
 			}
 
-			// Role-based filter: non-admin can only see their own opportunities
-			if (context.userRole !== "admin") {
+			// Role-based filter: admin and sales_supervisor can see all, others only their own
+			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
 				conditions.push(eq(opportunities.assignedTo, context.userId));
 			}
 
@@ -1645,8 +1645,8 @@ export const crmRouter = {
 			const { limit, offset, search, status } = input;
 			const conditions: any[] = [];
 
-			// Filter by user if not admin
-			if (context.userRole !== "admin") {
+			// Filter by user if not admin/sales_supervisor
+			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
 				conditions.push(eq(clients.assignedTo, context.userId));
 			}
 
@@ -1718,8 +1718,8 @@ export const crmRouter = {
 	getClientsStats: crmProcedure.handler(async ({ context }) => {
 		const conditions: any[] = [];
 
-		// Filter by user if not admin
-		if (context.userRole !== "admin") {
+		// Filter by user if not admin/sales_supervisor
+		if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
 			conditions.push(eq(clients.assignedTo, context.userId));
 		}
 
@@ -1815,8 +1815,8 @@ export const crmRouter = {
 				)})`,
 			];
 
-			// Filter by user if not admin
-			if (context.userRole !== "admin") {
+			// Filter by user if not admin/sales_supervisor
+			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
@@ -2346,21 +2346,37 @@ export const crmRouter = {
 				// 2. Validar inspección del vehículo (solo si hay vehículo asociado)
 				let vehicleInspected = false;
 				let inspectionStatus = "pending";
+				let isNewVehicle = false;
 				if (opp.vehicleId) {
-					const inspection = await db
-						.select()
-						.from(vehicleInspections)
-						.where(
-							and(
-								eq(vehicleInspections.vehicleId, opp.vehicleId),
-								eq(vehicleInspections.status, "approved"),
-							),
-						)
+					// Obtener info del vehículo para verificar si es nuevo
+					const [vehicleData] = await db
+						.select({ isNew: vehicles.isNew })
+						.from(vehicles)
+						.where(eq(vehicles.id, opp.vehicleId))
 						.limit(1);
 
-					vehicleInspected = inspection.length > 0;
-					if (inspection.length > 0) {
-						inspectionStatus = inspection[0].status;
+					isNewVehicle = vehicleData?.isNew ?? false;
+
+					// Vehículos nuevos no requieren inspección
+					if (isNewVehicle) {
+						vehicleInspected = true;
+						inspectionStatus = "not_required";
+					} else {
+						const inspection = await db
+							.select()
+							.from(vehicleInspections)
+							.where(
+								and(
+									eq(vehicleInspections.vehicleId, opp.vehicleId),
+									eq(vehicleInspections.status, "approved"),
+								),
+							)
+							.limit(1);
+
+						vehicleInspected = inspection.length > 0;
+						if (inspection.length > 0) {
+							inspectionStatus = inspection[0].status;
+						}
 					}
 				}
 
@@ -2510,21 +2526,26 @@ export const crmRouter = {
 				if (vehicle) {
 					vehicleOwnerType = vehicle.ownerType;
 
-					// Check inspection
-					const [inspection] = await db
-						.select()
-						.from(vehicleInspections)
-						.where(
-							and(
-								eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-								eq(vehicleInspections.status, "approved"),
-							),
-						)
-						.limit(1);
-
-					if (inspection) {
+					// Vehículos nuevos no requieren inspección
+					if (vehicle.isNew) {
 						vehicleInspected = true;
-						inspectionId = inspection.id;
+					} else {
+						// Check inspection solo para vehículos usados
+						const [inspection] = await db
+							.select()
+							.from(vehicleInspections)
+							.where(
+								and(
+									eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+									eq(vehicleInspections.status, "approved"),
+								),
+							)
+							.limit(1);
+
+						if (inspection) {
+							vehicleInspected = true;
+							inspectionId = inspection.id;
+						}
 					}
 				}
 			}

@@ -922,6 +922,7 @@ function RouteComponent() {
 			leadId?: string;
 			companyId?: string;
 			vehicleId?: string;
+			vendorId?: string;
 			value?: string;
 			stageId: string;
 			probability?: number;

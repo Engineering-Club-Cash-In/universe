@@ -15,20 +15,13 @@ import {
 	vehicles,
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
-import {
-	clients,
-	leads,
-	opportunities,
-} from "../db/schema/crm";
+import { clients, leads, opportunities } from "../db/schema/crm";
+import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import {
 	type CreateCreditoResult,
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
-import {
-	formatMissingFields,
-	getMissingFields,
-} from "../lib/vehicle-helpers";
 
 // ============================================================================
 // CONSTANTS
@@ -193,18 +186,26 @@ function transformInversionistasForCartera(
  * Safely parses and validates inversionistas JSON string
  * @returns Validated array of inversionistas or null if invalid
  */
-function parseInversionistas(jsonString: string | null): InversionistaCRM[] | null {
+function parseInversionistas(
+	jsonString: string | null,
+): InversionistaCRM[] | null {
 	if (!jsonString) return null;
 	try {
 		const parsed = JSON.parse(jsonString);
 		const result = inversionistasArraySchema.safeParse(parsed);
 		if (!result.success) {
-			console.error("[CloseOpportunity] Invalid inversionistas data:", result.error.message);
+			console.error(
+				"[CloseOpportunity] Invalid inversionistas data:",
+				result.error.message,
+			);
 			return null;
 		}
 		return result.data;
 	} catch (error) {
-		console.error("[CloseOpportunity] Failed to parse inversionistas JSON:", error);
+		console.error(
+			"[CloseOpportunity] Failed to parse inversionistas JSON:",
+			error,
+		);
 		return null;
 	}
 }
@@ -213,13 +214,18 @@ function parseInversionistas(jsonString: string | null): InversionistaCRM[] | nu
  * Safely parses and validates rubros JSON string
  * @returns Validated array of rubros or empty array if invalid
  */
-function parseRubros(jsonString: string | null): z.infer<typeof rubrosArraySchema> {
+function parseRubros(
+	jsonString: string | null,
+): z.infer<typeof rubrosArraySchema> {
 	if (!jsonString) return [];
 	try {
 		const parsed = JSON.parse(jsonString);
 		const result = rubrosArraySchema.safeParse(parsed);
 		if (!result.success) {
-			console.error("[CloseOpportunity] Invalid rubros data:", result.error.message);
+			console.error(
+				"[CloseOpportunity] Invalid rubros data:",
+				result.error.message,
+			);
 			return [];
 		}
 		return result.data;
@@ -263,7 +269,9 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 	// Validate inversionistas using safe parser
 	const inversionistas = parseInversionistas(opp.inversionistas);
 	if (!inversionistas || inversionistas.length === 0) {
-		missingFields.push("inversionistas (debe haber al menos uno con datos válidos)");
+		missingFields.push(
+			"inversionistas (debe haber al menos uno con datos válidos)",
+		);
 	}
 
 	return missingFields;
@@ -277,7 +285,9 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
  * 1. Creates the credit in cartera-back
  * All data comes from the opportunity, only numeroSifco is generated here
  */
-async function createCredit(params: CreateCreditParams): Promise<CreateCreditResult> {
+async function createCredit(
+	params: CreateCreditParams,
+): Promise<CreateCreditResult> {
 	const { opportunity, lead, numeroSifco, userId } = params;
 
 	if (!isCarteraBackEnabled()) {
@@ -295,16 +305,26 @@ async function createCredit(params: CreateCreditParams): Promise<CreateCreditRes
 			.where(eq(renapInfo.dpi, lead.dpi ?? ""))
 			.limit(1);
 
-		console.log(`[CloseOpportunity] Renap info found: ${renapInfoData ? "YES" : "NO"}`);
+		console.log(
+			`[CloseOpportunity] Renap info found: ${renapInfoData ? "YES" : "NO"}`,
+		);
 
 		// Parse all values from opportunity
-		const seguro = opportunity.seguro ? Number.parseFloat(opportunity.seguro) : undefined;
-		const gps = opportunity.gps ? Number.parseFloat(opportunity.gps) : undefined;
-		const royalti = opportunity.royalti ? Number.parseFloat(opportunity.royalti) : undefined;
+		const seguro = opportunity.seguro
+			? Number.parseFloat(opportunity.seguro)
+			: undefined;
+		const gps = opportunity.gps
+			? Number.parseFloat(opportunity.gps)
+			: undefined;
+		const royalti = opportunity.royalti
+			? Number.parseFloat(opportunity.royalti)
+			: undefined;
 		const porcentajeRoyalti = opportunity.porcentajeRoyalti
 			? Number.parseFloat(opportunity.porcentajeRoyalti)
 			: undefined;
-		const reserva = opportunity.reserva ? Number.parseFloat(opportunity.reserva) : undefined;
+		const reserva = opportunity.reserva
+			? Number.parseFloat(opportunity.reserva)
+			: undefined;
 		const membresiaPago = opportunity.membresiaPago
 			? Number.parseFloat(opportunity.membresiaPago)
 			: undefined;
@@ -359,7 +379,9 @@ async function createCredit(params: CreateCreditParams): Promise<CreateCreditRes
 			};
 		}
 
-		console.log(`[CloseOpportunity] ✓ Credit successfully created: ${numeroSifco}`);
+		console.log(
+			`[CloseOpportunity] ✓ Credit successfully created: ${numeroSifco}`,
+		);
 		return { success: true, creditoResult };
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
@@ -372,7 +394,9 @@ async function createCredit(params: CreateCreditParams): Promise<CreateCreditRes
  * 2. Completes the client flow: creates/gets client, creates contract, stores reference
  * Uses transaction context for atomic operations
  */
-async function completeClient(params: CompleteClientParams): Promise<CompleteClientResult> {
+async function completeClient(
+	params: CompleteClientParams,
+): Promise<CompleteClientResult> {
 	const { opportunity, lead, numeroSifco, creditoResult, userId, tx } = params;
 
 	console.log("[CloseOpportunity] Completing client flow...");
@@ -396,7 +420,10 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 		} else {
 			// Ensure we have required fields for client creation
 			if (!opportunity.assignedTo) {
-				return { success: false, error: "No se puede crear el cliente sin un usuario asignado" };
+				return {
+					success: false,
+					error: "No se puede crear el cliente sin un usuario asignado",
+				};
 			}
 
 			// Create new client
@@ -464,7 +491,7 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 		if (isCarteraBackEnabled() && creditoResult) {
 			const syncNote = creditoResult.success
 				? `\n✓ Sincronizado con cartera-back: ${numeroSifco}`
-				: `\n⚠ Error sincronizando con cartera-back`;
+				: "\n⚠ Error sincronizando con cartera-back";
 
 			await tx
 				.update(contratosFinanciamiento)
@@ -482,7 +509,9 @@ async function completeClient(params: CompleteClientParams): Promise<CompleteCli
 		};
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error);
-		console.error(`[CloseOpportunity] Error completing client: ${errorMessage}`);
+		console.error(
+			`[CloseOpportunity] Error completing client: ${errorMessage}`,
+		);
 		return { success: false, error: errorMessage };
 	}
 }
@@ -503,7 +532,9 @@ export async function closeOpportunity(
 ): Promise<CloseOpportunityResult> {
 	const { opportunityId, userId } = params;
 
-	console.log(`[CloseOpportunity] Starting close process for opportunity: ${opportunityId}`);
+	console.log(
+		`[CloseOpportunity] Starting close process for opportunity: ${opportunityId}`,
+	);
 
 	try {
 		// Get current opportunity
@@ -572,7 +603,10 @@ export async function closeOpportunity(
 			if (vehicleData?.isNew) {
 				const missingVehicleFields = getMissingFields(vehicleData);
 				if (missingVehicleFields.length > 0) {
-					console.log("[CloseOpportunity] Missing vehicle fields for new vehicle:", missingVehicleFields);
+					console.log(
+						"[CloseOpportunity] Missing vehicle fields for new vehicle:",
+						missingVehicleFields,
+					);
 					return {
 						success: false,
 						error: `El vehículo nuevo no tiene todos los datos completos. Faltan: ${formatMissingFields(missingVehicleFields)}`,
@@ -584,7 +618,10 @@ export async function closeOpportunity(
 
 		// Get lead data
 		if (!opportunity.leadId) {
-			return { success: false, error: "No se puede crear el contrato sin un lead asociado" };
+			return {
+				success: false,
+				error: "No se puede crear el contrato sin un lead asociado",
+			};
 		}
 
 		const [lead] = await db
@@ -623,7 +660,8 @@ export async function closeOpportunity(
 		if (!creditResult.success) {
 			return {
 				success: false,
-				error: creditResult.error || "Error al crear el crédito en cartera-back",
+				error:
+					creditResult.error || "Error al crear el crédito en cartera-back",
 			};
 		}
 
@@ -641,7 +679,9 @@ export async function closeOpportunity(
 			});
 
 			if (!clientResult.success) {
-				throw new Error(clientResult.error || "Error al completar el flujo de cliente");
+				throw new Error(
+					clientResult.error || "Error al completar el flujo de cliente",
+				);
 			}
 
 			// Update opportunity with numeroSifco and mark as won
@@ -664,7 +704,9 @@ export async function closeOpportunity(
 						updatedAt: new Date(),
 					})
 					.where(eq(vehicles.id, opportunity.vehicleId));
-				console.log(`[CloseOpportunity] ✓ Vehicle ${opportunity.vehicleId} marked as sold`);
+				console.log(
+					`[CloseOpportunity] ✓ Vehicle ${opportunity.vehicleId} marked as sold`,
+				);
 			}
 
 			return {
@@ -673,7 +715,9 @@ export async function closeOpportunity(
 			};
 		});
 
-		console.log(`[CloseOpportunity] ✓ Opportunity closed successfully: ${opportunityId}`);
+		console.log(
+			`[CloseOpportunity] ✓ Opportunity closed successfully: ${opportunityId}`,
+		);
 
 		return {
 			success: true,

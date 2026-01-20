@@ -110,7 +110,10 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		},
 		cell: ({ row }) => {
 			return (
-				<div className="w-[350px] whitespace-normal font-medium" style={{ wordBreak: 'break-word' }}>
+				<div
+					className="w-[350px] whitespace-normal font-medium"
+					style={{ wordBreak: "break-word" }}
+				>
 					{row.getValue("clienteNombre")}
 				</div>
 			);
@@ -122,7 +125,10 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 		cell: ({ row }) => {
 			const numero = row.getValue("numeroCredito") as string | null;
 			return (
-				<div className="w-[180px] whitespace-normal font-mono text-sm" style={{ wordBreak: 'break-all' }}>
+				<div
+					className="w-[180px] whitespace-normal font-mono text-sm"
+					style={{ wordBreak: "break-all" }}
+				>
 					{numero || "-"}
 				</div>
 			);

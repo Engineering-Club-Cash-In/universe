@@ -1,7 +1,6 @@
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { z } from "zod";
 import {
 	Calculator,
 	Eye,
@@ -15,8 +14,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -25,6 +24,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import {
 	Dialog,
@@ -164,7 +164,14 @@ interface QuotationFormValues {
 	vehicleBrand: string;
 	vehicleLine: string;
 	vehicleModel: string;
-	vehicleType: "particular" | "uber" | "pickup" | "nuevo" | "panel" | "camion" | "microbus";
+	vehicleType:
+		| "particular"
+		| "uber"
+		| "pickup"
+		| "nuevo"
+		| "panel"
+		| "camion"
+		| "microbus";
 	vehicleValue: number;
 	insuredAmount: number;
 	downPayment: number;
@@ -409,23 +416,27 @@ function ExtraCostsTable({
 	const [localValues, setLocalValues] = useState<Record<string, number>>(() => {
 		const initial: Record<string, number> = {};
 		for (const field of EXTRA_COST_FIELDS) {
-			initial[field.name] = Math.round((Number(values[field.valueField]) || 0) * 100) / 100;
+			initial[field.name] =
+				Math.round((Number(values[field.valueField]) || 0) * 100) / 100;
 			if (field.percentageField) {
-				initial[`${field.name}-pct`] = Math.round((Number(values[field.percentageField]) || 0) * 100) / 100;
+				initial[`${field.name}-pct`] =
+					Math.round((Number(values[field.percentageField]) || 0) * 100) / 100;
 			}
 		}
 		return initial;
 	});
 
 	// Estado para campos activos
-	const [activeFields, setActiveFields] = useState<Record<string, boolean>>(() => {
-		const active: Record<string, boolean> = {};
-		for (const field of EXTRA_COST_FIELDS) {
-			// Activo por defecto si: es computed, o tiene defaultActive: true
-			active[field.name] = field.computed ?? field.defaultActive ?? false;
-		}
-		return active;
-	});
+	const [activeFields, setActiveFields] = useState<Record<string, boolean>>(
+		() => {
+			const active: Record<string, boolean> = {};
+			for (const field of EXTRA_COST_FIELDS) {
+				// Activo por defecto si: es computed, o tiene defaultActive: true
+				active[field.name] = field.computed ?? field.defaultActive ?? false;
+			}
+			return active;
+		},
+	);
 
 	// Guardar valores originales antes de desactivar (para restaurar al reactivar)
 	const storedValuesRef = useRef<Record<string, number>>({});
@@ -435,12 +446,15 @@ function ExtraCostsTable({
 		const updates: Record<string, number> = {};
 		for (const field of EXTRA_COST_FIELDS) {
 			if (field.computed) {
-				const formValue = Math.round((Number(values[field.valueField]) || 0) * 100) / 100;
+				const formValue =
+					Math.round((Number(values[field.valueField]) || 0) * 100) / 100;
 				if (localValues[field.name] !== formValue) {
 					updates[field.name] = formValue;
 				}
 				if (field.percentageField) {
-					const pctValue = Math.round((Number(values[field.percentageField]) || 0) * 100) / 100;
+					const pctValue =
+						Math.round((Number(values[field.percentageField]) || 0) * 100) /
+						100;
 					if (localValues[`${field.name}-pct`] !== pctValue) {
 						updates[`${field.name}-pct`] = pctValue;
 					}
@@ -448,8 +462,10 @@ function ExtraCostsTable({
 			}
 		}
 		// También sincronizar extraInsuranceCost y extraMembershipCost cuando vienen del form
-		const extraInsurance = Math.round((Number(values.extraInsuranceCost) || 0) * 100) / 100;
-		const extraMembership = Math.round((Number(values.extraMembershipCost) || 0) * 100) / 100;
+		const extraInsurance =
+			Math.round((Number(values.extraInsuranceCost) || 0) * 100) / 100;
+		const extraMembership =
+			Math.round((Number(values.extraMembershipCost) || 0) * 100) / 100;
 		if (extraInsurance > 0 && localValues.extraInsurance === 0) {
 			updates.extraInsurance = extraInsurance;
 		}
@@ -458,9 +474,15 @@ function ExtraCostsTable({
 		}
 
 		if (Object.keys(updates).length > 0) {
-			setLocalValues(prev => ({ ...prev, ...updates }));
+			setLocalValues((prev) => ({ ...prev, ...updates }));
 		}
-	}, [values.royalty, values.interestCost, values.royaltyPercentage, values.extraInsuranceCost, values.extraMembershipCost]);
+	}, [
+		values.royalty,
+		values.interestCost,
+		values.royaltyPercentage,
+		values.extraInsuranceCost,
+		values.extraMembershipCost,
+	]);
 
 	const isFieldActive = (field: ExtraCostFieldConfig) => {
 		if (field.computed) return true;
@@ -493,29 +515,36 @@ function ExtraCostsTable({
 			if (currentValue > 0) {
 				storedValuesRef.current[field.name] = currentValue;
 			}
-			setLocalValues(prev => ({ ...prev, [field.name]: 0 }));
+			setLocalValues((prev) => ({ ...prev, [field.name]: 0 }));
 			onFieldChange(field.valueField, 0);
 			if (field.percentageField) {
 				const currentPct = localValues[`${field.name}-pct`] || 0;
 				if (currentPct > 0) {
 					storedValuesRef.current[`${field.name}-pct`] = currentPct;
 				}
-				setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: 0 }));
+				setLocalValues((prev) => ({ ...prev, [`${field.name}-pct`]: 0 }));
 				onFieldChange(field.percentageField, 0);
 			}
 		} else {
 			// Restaurar valor: primero stored, luego defaultValue, luego form value
 			const storedValue = storedValuesRef.current[field.name];
-			const restoreValue = storedValue ?? field.defaultValue ?? (Number(values[field.valueField]) || 0);
+			const restoreValue =
+				storedValue ??
+				field.defaultValue ??
+				(Number(values[field.valueField]) || 0);
 			if (restoreValue > 0) {
-				setLocalValues(prev => ({ ...prev, [field.name]: restoreValue }));
+				setLocalValues((prev) => ({ ...prev, [field.name]: restoreValue }));
 				onFieldChange(field.valueField, restoreValue);
 			}
 			if (field.percentageField) {
 				const storedPct = storedValuesRef.current[`${field.name}-pct`];
-				const restorePct = storedPct ?? (Number(values[field.percentageField]) || 0);
+				const restorePct =
+					storedPct ?? (Number(values[field.percentageField]) || 0);
 				if (restorePct > 0) {
-					setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: restorePct }));
+					setLocalValues((prev) => ({
+						...prev,
+						[`${field.name}-pct`]: restorePct,
+					}));
 					onFieldChange(field.percentageField, restorePct);
 				}
 			}
@@ -524,16 +553,19 @@ function ExtraCostsTable({
 
 	const handleValueChange = (field: ExtraCostFieldConfig, newValue: number) => {
 		const rounded = Math.round(newValue * 100) / 100;
-		setLocalValues(prev => ({ ...prev, [field.name]: rounded }));
+		setLocalValues((prev) => ({ ...prev, [field.name]: rounded }));
 		onFieldChange(field.valueField, rounded);
 	};
 
-	const handlePercentageChange = (field: ExtraCostFieldConfig, newPercentage: number) => {
+	const handlePercentageChange = (
+		field: ExtraCostFieldConfig,
+		newPercentage: number,
+	) => {
 		const rounded = Math.round(newPercentage * 100) / 100;
-		setLocalValues(prev => ({ ...prev, [`${field.name}-pct`]: rounded }));
+		setLocalValues((prev) => ({ ...prev, [`${field.name}-pct`]: rounded }));
 		onFieldChange(field.percentageField!, rounded);
 		const calculatedValue = calculateFromPercentage(rounded);
-		setLocalValues(prev => ({ ...prev, [field.name]: calculatedValue }));
+		setLocalValues((prev) => ({ ...prev, [field.name]: calculatedValue }));
 		onFieldChange(field.valueField, calculatedValue);
 	};
 
@@ -543,14 +575,20 @@ function ExtraCostsTable({
 		const percentageValue = localValues[`${field.name}-pct`] ?? 0;
 		const isComputed = field.computed ?? false;
 
-		const formatValue = (v: number) => v.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+		const formatValue = (v: number) =>
+			v.toLocaleString("es-GT", {
+				minimumFractionDigits: 2,
+				maximumFractionDigits: 2,
+			});
 
 		return (
 			<TableRow key={field.name} className={!isActive ? "opacity-50" : ""}>
 				<TableCell className="w-10 text-center">
 					<Checkbox
 						checked={isActive}
-						onCheckedChange={(checked) => handleToggleField(field, checked === true)}
+						onCheckedChange={(checked) =>
+							handleToggleField(field, checked === true)
+						}
 						disabled={isComputed}
 						className={`border-2 border-gray-400 ${isComputed ? "opacity-50" : "cursor-pointer hover:border-primary"}`}
 					/>
@@ -560,7 +598,7 @@ function ExtraCostsTable({
 					{field.type === "percentage" && field.percentageField ? (
 						<div className="flex items-center gap-1">
 							{isComputed ? (
-								<span className="h-8 w-16 flex items-center justify-end text-sm bg-gray-100 rounded px-2">
+								<span className="flex h-8 w-16 items-center justify-end rounded bg-gray-100 px-2 text-sm">
 									{percentageValue.toFixed(2)}
 								</span>
 							) : (
@@ -568,9 +606,14 @@ function ExtraCostsTable({
 									type="number"
 									step="0.01"
 									value={percentageValue}
-									onChange={(e) => handlePercentageChange(field, parseFloat(e.target.value) || 0)}
+									onChange={(e) =>
+										handlePercentageChange(
+											field,
+											Number.parseFloat(e.target.value) || 0,
+										)
+									}
 									placeholder="0"
-									className="h-8 w-16 text-right text-sm border-2 border-gray-400"
+									className="h-8 w-16 border-2 border-gray-400 text-right text-sm"
 								/>
 							)}
 							<span className="text-muted-foreground text-xs">%</span>
@@ -581,7 +624,7 @@ function ExtraCostsTable({
 				</TableCell>
 				<TableCell className="w-32">
 					{isComputed ? (
-						<span className="h-8 w-full flex items-center justify-end text-sm bg-gray-100 rounded px-2 border-2 border-gray-300">
+						<span className="flex h-8 w-full items-center justify-end rounded border-2 border-gray-300 bg-gray-100 px-2 text-sm">
 							{formatValue(value)}
 						</span>
 					) : (
@@ -589,9 +632,11 @@ function ExtraCostsTable({
 							type="number"
 							step="0.01"
 							value={value}
-							onChange={(e) => handleValueChange(field, parseFloat(e.target.value) || 0)}
+							onChange={(e) =>
+								handleValueChange(field, Number.parseFloat(e.target.value) || 0)
+							}
 							placeholder="0"
-							className="h-8 text-right text-sm border-2 border-gray-400"
+							className="h-8 border-2 border-gray-400 text-right text-sm"
 						/>
 					)}
 				</TableCell>
@@ -628,7 +673,7 @@ function ExtraCostsTable({
 
 					return (
 						<div key={sectionKey}>
-							<h4 className="mb-2 font-semibold text-sm text-muted-foreground">
+							<h4 className="mb-2 font-semibold text-muted-foreground text-sm">
 								{sectionLabels[sectionKey]}
 							</h4>
 							<div className="rounded-lg border">
@@ -638,7 +683,9 @@ function ExtraCostsTable({
 											<TableHead className="w-10 text-center">Activo</TableHead>
 											<TableHead>Concepto</TableHead>
 											<TableHead className="w-28">%</TableHead>
-											<TableHead className="w-32 text-right">Valor (Q)</TableHead>
+											<TableHead className="w-32 text-right">
+												Valor (Q)
+											</TableHead>
 										</TableRow>
 									</TableHeader>
 									<TableBody>
@@ -664,7 +711,7 @@ function ExtraCostsTable({
 			<div className="rounded-lg border-2 border-primary bg-primary/5 p-4">
 				<div className="flex items-center justify-between">
 					<span className="font-bold text-lg">Total Gastos Adicionales:</span>
-					<span className="font-bold text-xl text-primary">
+					<span className="font-bold text-primary text-xl">
 						{formatCurrency(total)}
 					</span>
 				</div>
@@ -731,7 +778,7 @@ function QuoterPage() {
 			client.getOpportunities({
 				limit: 50,
 				search: debouncedOpportunitiesSearch || undefined,
-				notStatus: "won"
+				notStatus: "won",
 			}),
 		enabled: !!session,
 	});
@@ -911,13 +958,16 @@ function QuoterPage() {
 				vehicleType: vehicleType as any,
 			});
 
-			const baseInsuranceCost = Math.round(result.baseInsuranceCost * 100) / 100;
+			const baseInsuranceCost =
+				Math.round(result.baseInsuranceCost * 100) / 100;
 			const rawMembershipCost = Math.round(result.membershipCost * 100) / 100;
 
 			// El seguro total para cálculos es: base + (membresía - GPS)
 			const GPS_COST = 148.2;
-			const netMembershipCost = Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
-			const insuranceCost = Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
+			const netMembershipCost =
+				Math.round((rawMembershipCost - GPS_COST) * 100) / 100;
+			const insuranceCost =
+				Math.round((baseInsuranceCost + netMembershipCost) * 100) / 100;
 
 			quoterForm.setFieldValue("insuranceCost", insuranceCost);
 			// membershipCost para resumen de arriba = neto (sin GPS)
@@ -948,7 +998,14 @@ function QuoterPage() {
 
 		// Calcular B22 según Excel
 		// B22 = Monto a financiar + Traspaso + 400 + 400 + 600 + GPS + Seguro
-		const b22 = amountToFinance + transferCost + 400 + 400 + 600 + gpsCost + insuranceCost;
+		const b22 =
+			amountToFinance +
+			transferCost +
+			400 +
+			400 +
+			600 +
+			gpsCost +
+			insuranceCost;
 
 		// Royalty = 4% de B22 redondeado hacia arriba
 		const royaltyPercentage = Number(values.royaltyPercentage) || 4.0;
@@ -1020,7 +1077,9 @@ function QuoterPage() {
 		quoterForm.setFieldValue("vehicleModel", vehicle.year.toString());
 
 		// Establecer el tipo de vehículo si viene de la oportunidad
-		const vehicleTypeToUse = (vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) || "particular";
+		const vehicleTypeToUse =
+			(vehicle.vehicleType as typeof quoterForm.state.values.vehicleType) ||
+			"particular";
 		quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
 
 		// Obtener la inspección más reciente para el marketValue
@@ -1090,16 +1149,29 @@ function QuoterPage() {
 		}
 
 		const values = quoterForm.state.values;
+		// Calculate down payment percentage
+		const downPaymentPercentage =
+			values.vehicleValue > 0
+				? (values.downPayment / values.vehicleValue) * 100
+				: 0;
+
 		const quotationData = {
 			vehicleBrand: values.vehicleBrand,
 			vehicleLine: values.vehicleLine,
 			vehicleModel: values.vehicleModel,
 			vehicleValue: values.vehicleValue,
 			downPayment: values.downPayment,
+			downPaymentPercentage: downPaymentPercentage,
+			amountToFinance: calculatedValues.amountToFinance,
 			totalFinanced: calculatedValues.totalFinanced,
 			monthlyPayment: calculatedValues.monthlyPayment,
 			termMonths: values.termMonths,
 			interestRate: values.interestRate,
+			insuranceCost: values.insuranceCost,
+			gpsCost: values.gpsCost,
+			transferCost: values.transferCost,
+			adminCost: values.adminCost,
+			membershipCost: values.membershipCost,
 			amortizationTable: amortizationTable,
 		};
 
@@ -1208,11 +1280,14 @@ function QuoterPage() {
 								{/* Selector de Tipo de Crédito */}
 								<quoterForm.Field name="creditType">
 									{(field) => {
-										const hasOpportunity = !!quoterForm.state.values.opportunityId;
+										const hasOpportunity =
+											!!quoterForm.state.values.opportunityId;
 										const selectedOpp = opportunitiesQuery.data?.find(
-											(opp: any) => opp.id === quoterForm.state.values.opportunityId,
+											(opp: any) =>
+												opp.id === quoterForm.state.values.opportunityId,
 										);
-										const isDisabled = hasOpportunity && !!selectedOpp?.creditType;
+										const isDisabled =
+											hasOpportunity && !!selectedOpp?.creditType;
 
 										return (
 											<div>
@@ -1222,7 +1297,9 @@ function QuoterPage() {
 												<Select
 													value={field.state.value}
 													onValueChange={(value) =>
-														field.handleChange(value as "autocompra" | "sobre_vehiculo")
+														field.handleChange(
+															value as "autocompra" | "sobre_vehiculo",
+														)
 													}
 													disabled={isDisabled}
 												>
@@ -1230,7 +1307,9 @@ function QuoterPage() {
 														<SelectValue placeholder="Seleccionar tipo..." />
 													</SelectTrigger>
 													<SelectContent>
-														<SelectItem value="autocompra">Autocompra</SelectItem>
+														<SelectItem value="autocompra">
+															Autocompra
+														</SelectItem>
 														<SelectItem value="sobre_vehiculo">
 															Sobre Vehículo
 														</SelectItem>
@@ -1941,10 +2020,17 @@ function QuotationDetailDialog({
 			vehicleModel: quotation.vehicleModel,
 			vehicleValue: Number(quotation.vehicleValue),
 			downPayment: Number(quotation.downPayment),
+			downPaymentPercentage: Number(quotation.downPaymentPercentage || 0),
+			amountToFinance: Number(quotation.amountToFinance || 0),
 			totalFinanced: Number(quotation.totalFinanced),
 			monthlyPayment: Number(quotation.monthlyPayment),
 			termMonths: quotation.termMonths,
 			interestRate: Number(quotation.interestRate),
+			insuranceCost: Number(quotation.insuranceCost || 0),
+			gpsCost: Number(quotation.gpsCost || 0),
+			transferCost: Number(quotation.transferCost || 0),
+			adminCost: Number(quotation.adminCost || 0),
+			membershipCost: Number(quotation.membershipCost || 0),
 			amortizationTable: quotation.amortizationTable.map((row: any) => ({
 				period: row.period,
 				initialBalance: row.initialBalance,

@@ -1,19 +1,32 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import {
 	Banknote,
+	CheckCircle,
 	FileSignature,
 	FileText,
 	Loader2,
+	MoreHorizontal,
 	Scale,
 	Search,
+	Settings,
 	Target,
 	User,
 } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import {
+	LeadDetailModal,
+	type LeadForModal,
+} from "@/components/lead-detail-modal";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
 	Card,
 	CardContent,
@@ -21,6 +34,12 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@/components/ui/card";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
 	Table,
@@ -32,7 +51,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
-import { orpc } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/")({
 	component: RouteComponent,
@@ -40,10 +59,38 @@ export const Route = createFileRoute("/juridico/")({
 
 function RouteComponent() {
 	const navigate = Route.useNavigate();
-	const { canViewLegal, isLoading: isLoadingPermissions } =
-		useJuridicoPermissions();
+	const queryClient = useQueryClient();
+	const {
+		canViewLegal,
+		canApproveLegalStage,
+		isLoading: isLoadingPermissions,
+	} = useJuridicoPermissions();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [opportunitiesSearchQuery, setOpportunitiesSearchQuery] = useState("");
+
+	// Mutación para aprobar oportunidad (mover a 90%)
+	const approveMutation = useMutation({
+		mutationFn: async (opportunityId: string) => {
+			return await client.approveOpportunityLegal({ opportunityId });
+		},
+		onSuccess: (data) => {
+			toast.success(data.message);
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunitiesForContracts"],
+			});
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al aprobar la oportunidad");
+		},
+	});
+
+	// Modal states
+	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
+		string | null
+	>(null);
+	const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
 
 	// Obtener leads con contratos
 	const { data: leadsWithContracts, isLoading } = useQuery({
@@ -57,6 +104,14 @@ function RouteComponent() {
 			...orpc.getOpportunitiesForContracts.queryOptions(),
 			enabled: canViewLegal,
 		});
+
+	// Query para obtener el lead completo cuando se selecciona
+	const selectedLeadQuery = useQuery({
+		queryKey: ["getLeadById", selectedLeadId],
+		queryFn: () =>
+			selectedLeadId ? client.getLeadById({ leadId: selectedLeadId }) : null,
+		enabled: !!selectedLeadId && isLeadModalOpen,
+	});
 
 	// Redireccionar si no tiene permisos
 	if (!isLoadingPermissions && !canViewLegal) {
@@ -89,6 +144,89 @@ function RouteComponent() {
 				?.toLowerCase()
 				.includes(opportunitiesSearchQuery.toLowerCase()),
 	);
+
+	// Find opportunity data from the list
+	const selectedOpportunityData = opportunitiesForContracts?.find(
+		(opp) => opp.id === selectedOpportunityId,
+	);
+
+	// Transform opportunity data for modal
+	const selectedOpportunity: OpportunityForModal | null =
+		selectedOpportunityData
+			? {
+					id: selectedOpportunityData.id,
+					title: selectedOpportunityData.title,
+					value: selectedOpportunityData.value,
+					creditType: selectedOpportunityData.creditType,
+					status: selectedOpportunityData.status,
+					expectedCloseDate: selectedOpportunityData.expectedCloseDate,
+					createdAt: selectedOpportunityData.createdAt,
+					lead: selectedOpportunityData.lead
+						? {
+								id: selectedOpportunityData.lead.id,
+								firstName: selectedOpportunityData.lead.firstName,
+								lastName: selectedOpportunityData.lead.lastName,
+								dpi: selectedOpportunityData.lead.dpi,
+								email: selectedOpportunityData.lead.email,
+								phone: selectedOpportunityData.lead.phone,
+							}
+						: null,
+					stage: selectedOpportunityData.stage,
+					assignedUser: selectedOpportunityData.assignedUser,
+					vehicle: selectedOpportunityData.vehicle?.id
+						? {
+								id: selectedOpportunityData.vehicle.id,
+								make: selectedOpportunityData.vehicle.make,
+								model: selectedOpportunityData.vehicle.model,
+								year: selectedOpportunityData.vehicle.year,
+								licensePlate: selectedOpportunityData.vehicle.licensePlate,
+								color: selectedOpportunityData.vehicle.color,
+								isNew: selectedOpportunityData.vehicle.isNew,
+							}
+						: null,
+				}
+			: null;
+
+	// Transform lead data for modal (using available fields from getLeadById)
+	const selectedLead: LeadForModal | null = selectedLeadQuery.data
+		? {
+				id: selectedLeadQuery.data.id,
+				firstName: selectedLeadQuery.data.firstName,
+				lastName: selectedLeadQuery.data.lastName,
+				email: selectedLeadQuery.data.email,
+				phone: selectedLeadQuery.data.phone,
+				dpi: selectedLeadQuery.data.dpi,
+				source: selectedLeadQuery.data.source,
+				status: selectedLeadQuery.data.status,
+				createdAt: selectedLeadQuery.data.createdAt,
+				company: selectedLeadQuery.data.company,
+				assignedUser: selectedLeadQuery.data.assignedUser,
+			}
+		: null;
+
+	const handleOpenOpportunityModal = (opportunityId: string) => {
+		setSelectedOpportunityId(opportunityId);
+		setIsOpportunityModalOpen(true);
+	};
+
+	const handleOpenLeadModal = (leadId: string) => {
+		setSelectedLeadId(leadId);
+		setIsLeadModalOpen(true);
+	};
+
+	const handleCloseOpportunityModal = (open: boolean) => {
+		setIsOpportunityModalOpen(open);
+		if (!open) {
+			setSelectedOpportunityId(null);
+		}
+	};
+
+	const handleCloseLeadModal = (open: boolean) => {
+		setIsLeadModalOpen(open);
+		if (!open) {
+			setSelectedLeadId(null);
+		}
+	};
 
 	return (
 		<div className="container mx-auto space-y-6 py-8">
@@ -241,12 +379,23 @@ function RouteComponent() {
 												key={opp.id}
 												className="cursor-pointer hover:bg-muted/50"
 												onClick={() =>
-													navigate({ to: `/juridico/${opp.lead.id}?opportunityId=${opp.id}` })
+													navigate({
+														to: `/juridico/${opp.lead.id}?opportunityId=${opp.id}`,
+													})
 												}
 											>
 												<TableCell>
 													<div className="text-sm">
-														<div className="font-medium">{opp.title}</div>
+														<button
+															type="button"
+															className="cursor-pointer text-left font-medium text-primary hover:underline"
+															onClick={(e) => {
+																e.stopPropagation();
+																handleOpenOpportunityModal(opp.id);
+															}}
+														>
+															{opp.title}
+														</button>
 														<div className="text-muted-foreground">
 															{opp.creditType === "autocompra"
 																? "Autocompra"
@@ -256,9 +405,16 @@ function RouteComponent() {
 												</TableCell>
 												<TableCell>
 													<div className="text-sm">
-														<div className="font-medium">
+														<button
+															type="button"
+															className="cursor-pointer text-left font-medium text-primary hover:underline"
+															onClick={(e) => {
+																e.stopPropagation();
+																handleOpenLeadModal(opp.lead.id);
+															}}
+														>
 															{opp.lead.firstName} {opp.lead.lastName}
-														</div>
+														</button>
 														<div className="font-mono text-muted-foreground text-xs">
 															{opp.lead.dpi || "Sin DPI"}
 														</div>
@@ -292,15 +448,50 @@ function RouteComponent() {
 													</Badge>
 												</TableCell>
 												<TableCell className="text-right">
-													<Link
-														to="/juridico/$leadId"
-														params={{ leadId: opp.lead.id }}
-														search={{ opportunityId: opp.id }}
-														className="font-medium text-primary text-sm hover:underline"
-														onClick={(e) => e.stopPropagation()}
-													>
-														Gestionar →
-													</Link>
+													<DropdownMenu>
+														<DropdownMenuTrigger asChild>
+															<Button
+																variant="ghost"
+																size="sm"
+																className="h-8 w-8 p-0"
+																onClick={(e) => e.stopPropagation()}
+															>
+																<MoreHorizontal className="h-4 w-4" />
+															</Button>
+														</DropdownMenuTrigger>
+														<DropdownMenuContent align="end">
+															<DropdownMenuItem asChild>
+																<Link
+																	to="/juridico/$leadId"
+																	params={{ leadId: opp.lead.id }}
+																	search={{ opportunityId: opp.id }}
+																	className="cursor-pointer"
+																>
+																	<Settings className="mr-2 h-4 w-4" />
+																	Gestionar
+																</Link>
+															</DropdownMenuItem>
+															{canApproveLegalStage &&
+																opp.stage.closurePercentage === 80 && (
+																	<DropdownMenuItem
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			approveMutation.mutate(opp.id);
+																		}}
+																		disabled={
+																			approveMutation.isPending ||
+																			opp.contractCount === 0
+																		}
+																		className="cursor-pointer"
+																	>
+																		<CheckCircle className="mr-2 h-4 w-4" />
+																		{approveMutation.isPending
+																			? "Aprobando..."
+																			: "Aprobar (→90%)"}
+																	</DropdownMenuItem>
+																)}
+														</DropdownMenuContent>
+													</DropdownMenu>
 												</TableCell>
 											</TableRow>
 										))}
@@ -369,8 +560,17 @@ function RouteComponent() {
 												className="cursor-pointer hover:bg-muted/50"
 												onClick={() => navigate({ to: `/juridico/${lead.id}` })}
 											>
-												<TableCell className="font-medium">
-													{lead.firstName} {lead.lastName}
+												<TableCell>
+													<button
+														type="button"
+														className="cursor-pointer text-left font-medium text-primary hover:underline"
+														onClick={(e) => {
+															e.stopPropagation();
+															handleOpenLeadModal(lead.id);
+														}}
+													>
+														{lead.firstName} {lead.lastName}
+													</button>
 												</TableCell>
 												<TableCell className="font-mono text-sm">
 													{lead.dpi || "N/A"}
@@ -439,6 +639,23 @@ function RouteComponent() {
 					</Card>
 				</TabsContent>
 			</Tabs>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={handleCloseOpportunityModal}
+				opportunity={selectedOpportunity}
+				userRole="juridico"
+				readOnly
+			/>
+
+			{/* Lead Detail Modal */}
+			<LeadDetailModal
+				open={isLeadModalOpen}
+				onOpenChange={handleCloseLeadModal}
+				lead={selectedLead}
+				readOnly
+			/>
 		</div>
 	);
 }

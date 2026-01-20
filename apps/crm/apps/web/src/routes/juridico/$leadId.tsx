@@ -17,9 +17,11 @@ import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
-	validateSearch: z.object({
-		opportunityId: z.string().uuid().optional(),
-	}).optional(),
+	validateSearch: z
+		.object({
+			opportunityId: z.string().uuid().optional(),
+		})
+		.optional(),
 	component: RouteComponent,
 });
 
@@ -52,10 +54,7 @@ function RouteComponent() {
 	const opportunityId = searchParams?.opportunityId;
 
 	// Obtener información del lead
-	const {
-		data: leadInfo,
-		isLoading: isLoadingLead,
-	} = useQuery({
+	const { data: leadInfo, isLoading: isLoadingLead } = useQuery({
 		...orpc.getLeadById.queryOptions({ input: { leadId } }),
 		enabled: canViewLegal && !!leadId,
 	});

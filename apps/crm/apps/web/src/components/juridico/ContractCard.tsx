@@ -12,6 +12,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { OpportunitySelector } from "./OpportunitySelector";
 
 // Contract types mapping
@@ -128,34 +129,15 @@ export function ContractCard({
 				</div>
 			</CardHeader>
 
-			<CardContent className="space-y-3 pt-4">
-				{/* Tipo de contrato y Oportunidad en grid */}
-				<div className="grid gap-3 md:grid-cols-2">
-					{/* Tipo de contrato */}
-					<div>
-						<p className="font-medium text-muted-foreground text-xs mb-1">
-							Tipo de contrato
-						</p>
-						<p className="text-sm">
-							{CONTRACT_TYPES_MAP[contract.contractType] ||
-								contract.contractType}
-						</p>
-					</div>
-
-					{/* Oportunidad asignada */}
-					<div>
-						<p className="mb-1 font-medium text-muted-foreground text-xs">
-							Oportunidad
-						</p>
-						{opportunity ? (
-							<div className="text-sm">
-								{opportunity.title} - Q
-								{Number(opportunity.value || 0).toLocaleString()}
-							</div>
-						) : (
-							<div className="text-muted-foreground text-sm">Sin asignar</div>
-						)}
-					</div>
+			<CardContent className="space-y-4 pt-6">
+				{/* Tipo de contrato */}
+				<div>
+					<p className="font-medium text-muted-foreground text-sm">
+						Tipo de contrato
+					</p>
+					<p className="mt-1 text-sm">
+						{getContractTypeLabel(contract.contractType)}
+					</p>
 				</div>
 
 				{/* Links de documentos - más compacto */}

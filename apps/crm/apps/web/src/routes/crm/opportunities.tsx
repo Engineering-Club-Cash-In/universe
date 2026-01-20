@@ -29,7 +29,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
-import { isVehicleAvailable } from "@/utils/constants";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
@@ -67,6 +66,7 @@ import { authClient } from "@/lib/auth-client";
 import {
 	formatDate,
 	formatGuatemalaDate,
+	getContractTypeLabel,
 	getLoanPurposeLabel,
 	getSourceLabel,
 	getStatusLabel,
@@ -75,6 +75,7 @@ import {
 	getMissingFieldsForNewVehicle,
 	renderNewVehicleBadges,
 } from "@/lib/vehicle-utils";
+import { isVehicleAvailable } from "@/utils/constants";
 import { client, orpc } from "@/utils/orpc";
 
 // Simple draggable opportunity card component
@@ -309,81 +310,88 @@ export const Route = createFileRoute("/crm/opportunities")({
 	}).parse,
 });
 
-
-export interface IOpportunity  {
+export interface IOpportunity {
+	id: string;
+	title: string;
+	value: string | null;
+	tasaInteres: string | null;
+	numeroCuotas: number | null;
+	cuotaMensual: string | null;
+	royalti: string | null;
+	porcentajeRoyalti: string | null;
+	gps: string | null;
+	seguro: string | null;
+	membresiaPago: string | null;
+	nit: string | null;
+	// direccion: string | null;
+	inversionistas: string | null;
+	status: string;
+	source?:
+		| "website"
+		| "referral"
+		| "cold_call"
+		| "email"
+		| "social_media"
+		| "event"
+		| "other"
+		| null;
+	loanPurpose?: "personal" | "business" | null;
+	creditType?: "autocompra" | "sobre_vehiculo" | null;
+	creditDetailApproved?: boolean | null;
+	creditDetailApprovedBy?: string | null;
+	creditDetailApprovedAt?: Date | string | null;
+	stage: any;
+	vehicleId: string | null;
+	expectedCloseDate: Date | string | null;
+	probability: number | null;
+	notes: string | null;
+	createdAt: Date | string;
+	updatedAt: Date | string;
+	asesorId: number | null;
+	fechaInicio: Date | string | null;
+	diaPagoMensual: number | null;
+	categoria: any;
+	reserva: string | null;
+	rubros: string | null;
+	leadId: string | null;
+	company: any;
+	assignedUser: any;
+	lead?: {
 		id: string;
-		title: string;
-		value: string | null;
-		tasaInteres: string | null;
-		numeroCuotas: number | null;
-		cuotaMensual: string | null;
-		royalti: string | null;
-		porcentajeRoyalti: string | null;
-		gps: string | null;
-		seguro: string | null;
-		membresiaPago: string | null;
-		nit: string | null;
-		// direccion: string | null;
-		inversionistas: string | null;
-		status: string;
-		source?: "website" | "referral" | "cold_call" | "email" | "social_media" | "event" | "other" | null;
-		loanPurpose?: "personal" | "business" | null;
-		creditType?: "autocompra" | "sobre_vehiculo" | null;
-		creditDetailApproved?: boolean | null;
-		creditDetailApprovedBy?: string | null;
-		creditDetailApprovedAt?: Date | string | null;
-		stage: any;
-		vehicleId: string | null;
-		expectedCloseDate: Date | string | null;
-		probability: number | null;
-		notes: string | null;
-		createdAt: Date | string;
-		updatedAt: Date | string;
-		asesorId: number | null;
-		fechaInicio: Date | string | null;
-		diaPagoMensual: number | null;
-		categoria: any;
-		reserva: string | null;
-		rubros: string | null;
-		leadId: string | null;
-		company: any;
-		assignedUser: any;
-		lead?: {
+		firstName: string;
+		middleName?: string | null;
+		lastName: string;
+		email?: string | null;
+		secondLastName?: string | null;
+		age?: number | null;
+		departamento?: string | null;
+		municipio?: string | null;
+		direccion?: string | null;
+		zona?: string | null;
+	} | null;
+	vehicle?: {
+		id: string;
+		make: string;
+		model: string;
+		year: string;
+		licensePlate: string | null;
+		color: string | null;
+		plate: string | null;
+		origin: string | null;
+		isNew: boolean;
+		fuelType: string | null;
+		transmission: string | null;
+		vinNumber: string | null;
+		vendor?: {
 			id: string;
-			firstName: string;
-			middleName?: string | null;
-			lastName: string;
-			email?: string | null;
-			secondLastName?: string | null;
-			age?: number | null;
-			departamento?: string | null;
-			municipio?: string | null;
-			direccion?: string | null;
-			zona?: string | null;
+			name: string;
+			phone: string;
+			dpi: string;
+			vendorType: string;
+			companyName: string | null;
 		} | null;
-		vehicle?: {
-			id: string;
-			make: string;
-			model: string;
-			year: string;
-			licensePlate: string | null;
-			color: string | null;
-			plate: string | null;
-			origin: string | null;
-			isNew: boolean;
-			fuelType: string | null;
-			transmission: string | null;
-			vinNumber: string | null;
-			vendor?: {
-				id: string;
-				name: string;
-				phone: string;
-				dpi: string;
-				vendorType: string;
-				companyName: string | null;
-			} | null;
-		} | null;
-	};
+	} | null;
+}
 
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
@@ -394,7 +402,8 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
-	const [selectedOpportunity, setSelectedOpportunity] = useState<IOpportunity | null>(null);
+	const [selectedOpportunity, setSelectedOpportunity] =
+		useState<IOpportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
@@ -1043,7 +1052,7 @@ function RouteComponent() {
 					(opp) => opp.id === variables.id,
 				);
 				if (updatedOpportunity) {
-					// @ts-ignore
+					// @ts-expect-error
 					setSelectedOpportunity(updatedOpportunity);
 				}
 
@@ -1153,7 +1162,7 @@ function RouteComponent() {
 				(opp) => opp.id === search.opportunityId,
 			);
 			if (opportunity) {
-					// @ts-ignore
+				// @ts-expect-error
 				setSelectedOpportunity(opportunity);
 				setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
@@ -1544,21 +1553,15 @@ function RouteComponent() {
 												<Select
 													value={field.state.value}
 													onValueChange={(value) =>
-														field.handleChange(
-															value as "personal" | "business",
-														)
+														field.handleChange(value as "personal" | "business")
 													}
 												>
 													<SelectTrigger className="w-full">
 														<SelectValue placeholder="Seleccionar propósito" />
 													</SelectTrigger>
 													<SelectContent align="start">
-														<SelectItem value="personal">
-															Personal
-														</SelectItem>
-														<SelectItem value="business">
-															Negocio
-														</SelectItem>
+														<SelectItem value="personal">Personal</SelectItem>
+														<SelectItem value="business">Negocio</SelectItem>
 													</SelectContent>
 												</Select>
 											</div>
@@ -1604,7 +1607,9 @@ function RouteComponent() {
 													options={[
 														{ value: "none", label: "Sin vehículo" },
 														...(vehiclesQuery.data?.data
-															?.filter((vehicle: any) => isVehicleAvailable(vehicle.status))
+															?.filter((vehicle: any) =>
+																isVehicleAvailable(vehicle.status),
+															)
 															?.map((vehicle: any) => ({
 																value: vehicle.id,
 																label: `${vehicle.year} ${vehicle.make} ${vehicle.model}${vehicle.licensePlate ? ` - ${vehicle.licensePlate}` : ""}${vehicle.isNew ? " (Nuevo)" : ""}`,
@@ -1967,7 +1972,9 @@ function RouteComponent() {
 												<div className="flex items-center gap-3">
 													<Banknote className="h-5 w-5 text-muted-foreground" />
 													<span className="font-medium">
-														{getLoanPurposeLabel(selectedOpportunity.loanPurpose)}
+														{getLoanPurposeLabel(
+															selectedOpportunity.loanPurpose,
+														)}
 													</span>
 												</div>
 											</div>
@@ -2000,23 +2007,33 @@ function RouteComponent() {
 															{selectedOpportunity.vehicle.model}
 														</span>
 														<span className="text-muted-foreground text-sm">
-															{selectedOpportunity.vehicle.licensePlate || "Sin placa"}
-															{selectedOpportunity.vehicle.color && ` • ${selectedOpportunity.vehicle.color}`}
+															{selectedOpportunity.vehicle.licensePlate ||
+																"Sin placa"}
+															{selectedOpportunity.vehicle.color &&
+																` • ${selectedOpportunity.vehicle.color}`}
 														</span>
 													</div>
 												</div>
 												{selectedOpportunity.vehicle.isNew && (
 													<div className="mt-2">
-														{renderNewVehicleBadges(selectedOpportunity.vehicle)}
+														{renderNewVehicleBadges(
+															selectedOpportunity.vehicle,
+														)}
 													</div>
 												)}
 												{selectedOpportunity.vehicle.isNew &&
-													getMissingFieldsForNewVehicle(selectedOpportunity.vehicle).length > 0 && (
-													<div className="mt-2 text-amber-600 text-sm">
-														<span className="font-medium">Campos pendientes: </span>
-														{getMissingFieldsForNewVehicle(selectedOpportunity.vehicle).join(", ")}
-													</div>
-												)}
+													getMissingFieldsForNewVehicle(
+														selectedOpportunity.vehicle,
+													).length > 0 && (
+														<div className="mt-2 text-amber-600 text-sm">
+															<span className="font-medium">
+																Campos pendientes:{" "}
+															</span>
+															{getMissingFieldsForNewVehicle(
+																selectedOpportunity.vehicle,
+															).join(", ")}
+														</div>
+													)}
 											</div>
 										)}
 									</div>
@@ -2070,7 +2087,10 @@ function RouteComponent() {
 																			{contract.contractName}
 																		</span>
 																		<span className="text-muted-foreground text-xs">
-																			{contract.contractType} •{" "}
+																			{getContractTypeLabel(
+																				contract.contractType,
+																			)}{" "}
+																			•{" "}
 																			{contract.status === "pending"
 																				? "Pendiente"
 																				: contract.status === "signed"
@@ -2342,7 +2362,7 @@ function RouteComponent() {
 										// Si no hay cotización, mostrar mensaje para crear una
 										if (!latestQuotation) {
 											return (
-												<div className="rounded-lg border border-dashed border-orange-300 bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
+												<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
 													<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
 													<h3 className="mb-2 font-semibold text-lg">
 														Se requiere una cotización
@@ -2378,7 +2398,6 @@ function RouteComponent() {
 											/>
 										);
 									})()}
-
 								</TabsContent>
 							</Tabs>
 						)}
@@ -2525,21 +2544,15 @@ function RouteComponent() {
 												<Select
 													value={field.state.value}
 													onValueChange={(value) =>
-														field.handleChange(
-															value as "personal" | "business",
-														)
+														field.handleChange(value as "personal" | "business")
 													}
 												>
 													<SelectTrigger className="w-full">
 														<SelectValue placeholder="Seleccionar propósito" />
 													</SelectTrigger>
 													<SelectContent align="start">
-														<SelectItem value="personal">
-															Personal
-														</SelectItem>
-														<SelectItem value="business">
-															Negocio
-														</SelectItem>
+														<SelectItem value="personal">Personal</SelectItem>
+														<SelectItem value="business">Negocio</SelectItem>
 													</SelectContent>
 												</Select>
 											</div>
@@ -2559,7 +2572,11 @@ function RouteComponent() {
 														{ value: "none", label: "Sin vehículo" },
 														...(vehiclesQuery.data?.data
 															?.filter((vehicle: any) =>
-																isVehicleAvailable(vehicle.status, selectedOpportunity?.vehicleId, vehicle.id)
+																isVehicleAvailable(
+																	vehicle.status,
+																	selectedOpportunity?.vehicleId,
+																	vehicle.id,
+																),
 															)
 															?.map((vehicle: any) => ({
 																value: vehicle.id,
@@ -2580,30 +2597,30 @@ function RouteComponent() {
 									</editOpportunityForm.Field>
 								</div>
 
-									<div>
-								<editOpportunityForm.Field name="stageId">
-									{(field) => (
-										<div className="space-y-2">
-											<Label htmlFor={field.name}>Etapa</Label>
-											<Select
-												value={field.state.value}
-												onValueChange={(value) => field.handleChange(value)}
-											>
-												<SelectTrigger className="w-full">
-													<SelectValue placeholder="Seleccionar etapa" />
-												</SelectTrigger>
-												<SelectContent>
-													{salesStagesQuery.data?.map((stage) => (
-														<SelectItem key={stage.id} value={stage.id}>
-															{stage.name} ({stage.closurePercentage}%)
-														</SelectItem>
-													))}
-												</SelectContent>
-											</Select>
-										</div>
-									)}
-								</editOpportunityForm.Field>
-							</div>
+								<div>
+									<editOpportunityForm.Field name="stageId">
+										{(field) => (
+											<div className="space-y-2">
+												<Label htmlFor={field.name}>Etapa</Label>
+												<Select
+													value={field.state.value}
+													onValueChange={(value) => field.handleChange(value)}
+												>
+													<SelectTrigger className="w-full">
+														<SelectValue placeholder="Seleccionar etapa" />
+													</SelectTrigger>
+													<SelectContent>
+														{salesStagesQuery.data?.map((stage) => (
+															<SelectItem key={stage.id} value={stage.id}>
+																{stage.name} ({stage.closurePercentage}%)
+															</SelectItem>
+														))}
+													</SelectContent>
+												</Select>
+											</div>
+										)}
+									</editOpportunityForm.Field>
+								</div>
 							</div>
 							<div className="grid grid-cols-2 gap-4">
 								<div>
@@ -2683,15 +2700,13 @@ function RouteComponent() {
 												updateOpportunityMutation.isPending
 											}
 										>
-											{state.isSubmitting ||
-											updateOpportunityMutation.isPending
+											{state.isSubmitting || updateOpportunityMutation.isPending
 												? "Actualizando..."
 												: "Actualizar Oportunidad"}
 										</Button>
 									</div>
 								)}
 							</editOpportunityForm.Subscribe>
-
 						</form>
 
 						{/* Notes Timeline */}

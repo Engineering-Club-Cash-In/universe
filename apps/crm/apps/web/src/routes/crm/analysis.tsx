@@ -10,6 +10,14 @@ import {
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
+import {
+	LeadDetailModal,
+	type LeadForModal,
+} from "@/components/lead-detail-modal";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -173,6 +181,14 @@ function AnalysisPage() {
 	const [selectedOpportunityForDocs, setSelectedOpportunityForDocs] =
 		useState<OpportunityForAnalysis | null>(null);
 
+	// Modal states for opportunity and lead detail
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
+	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
+		useState<OpportunityForModal | null>(null);
+	const [selectedLeadForModal, setSelectedLeadForModal] =
+		useState<LeadForModal | null>(null);
+
 	// Check authentication and role
 	useEffect(() => {
 		if (
@@ -214,6 +230,60 @@ function AnalysisPage() {
 	const handleViewDocuments = (opportunity: OpportunityForAnalysis) => {
 		setSelectedOpportunityForDocs(opportunity);
 		setIsDocumentsDialogOpen(true);
+	};
+
+	const handleOpenOpportunityModal = (opportunity: OpportunityForAnalysis) => {
+		setSelectedOpportunityForModal({
+			id: opportunity.id,
+			title: opportunity.title,
+			value: opportunity.value,
+			creditType: null,
+			status: opportunity.status,
+			expectedCloseDate: opportunity.expectedCloseDate,
+			createdAt: opportunity.createdAt,
+			lead: opportunity.lead
+				? {
+						id: opportunity.lead.id,
+						firstName: opportunity.lead.firstName,
+						lastName: opportunity.lead.lastName,
+						dpi: null,
+						email: opportunity.lead.email,
+						phone: opportunity.lead.phone,
+					}
+				: null,
+			stage: null,
+			assignedUser: null,
+			vehicle: opportunity.vehicle
+				? {
+						id: opportunity.vehicle.id,
+						make: opportunity.vehicle.make,
+						model: opportunity.vehicle.model,
+						year: opportunity.vehicle.year,
+						licensePlate: opportunity.vehicle.licensePlate,
+						color: opportunity.vehicle.color,
+						isNew: opportunity.vehicle.isNew,
+					}
+				: null,
+		});
+		setIsOpportunityModalOpen(true);
+	};
+
+	const handleOpenLeadModal = (opportunity: OpportunityForAnalysis) => {
+		if (!opportunity.lead) return;
+		setSelectedLeadForModal({
+			id: opportunity.lead.id,
+			firstName: opportunity.lead.firstName,
+			lastName: opportunity.lead.lastName,
+			email: opportunity.lead.email,
+			phone: opportunity.lead.phone,
+			dpi: null,
+			source: "",
+			status: "",
+			createdAt: new Date(),
+			company: null,
+			assignedUser: null,
+		});
+		setIsLeadModalOpen(true);
 	};
 
 	const handleSubmitApproval = async () => {
@@ -315,15 +385,25 @@ function AnalysisPage() {
 										{opportunities.map((opportunity) => (
 											<TableRow key={opportunity.id}>
 												<TableCell className="font-medium">
-													{opportunity.title}
+													<button
+														type="button"
+														className="cursor-pointer text-left text-primary hover:underline"
+														onClick={() => handleOpenOpportunityModal(opportunity)}
+													>
+														{opportunity.title}
+													</button>
 												</TableCell>
 												<TableCell>
 													{opportunity.lead ? (
 														<div>
-															<p className="font-medium">
+															<button
+																type="button"
+																className="cursor-pointer text-left font-medium text-primary hover:underline"
+																onClick={() => handleOpenLeadModal(opportunity)}
+															>
 																{opportunity.lead.firstName}{" "}
 																{opportunity.lead.lastName}
-															</p>
+															</button>
 															<p className="text-muted-foreground text-sm">
 																{opportunity.lead.email}
 															</p>
@@ -495,6 +575,23 @@ function AnalysisPage() {
 					</div>
 				</DialogContent>
 			</Dialog>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunityForModal}
+				userRole="analyst"
+				readOnly
+			/>
+
+			{/* Lead Detail Modal */}
+			<LeadDetailModal
+				open={isLeadModalOpen}
+				onOpenChange={setIsLeadModalOpen}
+				lead={selectedLeadForModal}
+				readOnly
+			/>
 		</div>
 	);
 }
@@ -504,6 +601,12 @@ function DisbursementSection() {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
 		null,
 	);
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
+		useState<OpportunityForModal | null>(null);
+	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
+	const [selectedLeadForModal, setSelectedLeadForModal] =
+		useState<LeadForModal | null>(null);
 
 	const {
 		data: opportunities,
@@ -513,6 +616,64 @@ function DisbursementSection() {
 		queryKey: ["getOpportunitiesForDisbursement"],
 		queryFn: () => client.getOpportunitiesForDisbursement(),
 	});
+
+	type DisbursementOpportunity = NonNullable<typeof opportunities>[0];
+
+	const handleOpenOpportunityModal = (opp: DisbursementOpportunity) => {
+		setSelectedOpportunityForModal({
+			id: opp.id,
+			title: opp.leadName || "Oportunidad",
+			value: opp.value,
+			creditType: null,
+			status: "open",
+			expectedCloseDate: null,
+			createdAt: opp.createdAt,
+			lead: opp.leadId
+				? {
+						id: opp.leadId,
+						firstName: opp.leadName?.split(" ")[0] || "",
+						lastName: opp.leadName?.split(" ").slice(1).join(" ") || "",
+						dpi: null,
+						email: null,
+						phone: opp.leadPhone,
+					}
+				: null,
+			stage: null,
+			assignedUser: null,
+			vehicle: opp.vehicle
+				? {
+						id: opp.vehicle.id,
+						make: opp.vehicle.make,
+						model: opp.vehicle.model,
+						year: opp.vehicle.year,
+						licensePlate: opp.vehicle.licensePlate,
+						color: opp.vehicle.color,
+						isNew: opp.vehicle.isNew,
+					}
+				: null,
+		});
+		setIsOpportunityModalOpen(true);
+	};
+
+	const handleNavigateToLead = (leadId: string) => {
+		// Find the opportunity with this lead
+		const opp = opportunities?.find((o) => o.leadId === leadId);
+		if (opp) {
+			setSelectedLeadForModal({
+				id: leadId,
+				firstName: opp.leadName?.split(" ")[0] || "",
+				lastName: opp.leadName?.split(" ").slice(1).join(" ") || "",
+				email: null,
+				phone: opp.leadPhone || null,
+				company: null,
+				source: "",
+				status: "qualified",
+				createdAt: opp.createdAt,
+			});
+			setIsOpportunityModalOpen(false);
+			setIsLeadModalOpen(true);
+		}
+	};
 
 	if (isLoading) {
 		return (
@@ -560,7 +721,16 @@ function DisbursementSection() {
 							>
 								<div className="flex items-center justify-between">
 									<div>
-										<p className="font-medium">{opp.leadName}</p>
+										<button
+											type="button"
+											className="cursor-pointer text-left font-medium text-primary hover:underline"
+											onClick={(e) => {
+												e.stopPropagation();
+												handleOpenOpportunityModal(opp);
+											}}
+										>
+											{opp.leadName}
+										</button>
 										<p className="text-muted-foreground text-sm">
 											{opp.leadPhone}
 										</p>
@@ -612,6 +782,24 @@ function DisbursementSection() {
 					</Card>
 				)}
 			</div>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunityForModal}
+				userRole="analyst"
+				readOnly
+				onNavigateToLead={handleNavigateToLead}
+			/>
+
+			{/* Lead Detail Modal */}
+			<LeadDetailModal
+				open={isLeadModalOpen}
+				onOpenChange={setIsLeadModalOpen}
+				lead={selectedLeadForModal}
+				readOnly
+			/>
 		</div>
 	);
 }

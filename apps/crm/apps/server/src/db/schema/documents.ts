@@ -47,6 +47,34 @@ export const documentTypeEnum = pgEnum("document_type", [
 	"consulta_sat", // Captura de pantalla de consulta SAT
 	"consulta_garantias_mobiliarias", // Certificación de garantías mobiliarias (RGM)
 
+	// === VERIFICACIONES DE CLIENTE ===
+	"usuario_sat_cliente", // Usuario de SAT (Cliente)
+	"rtu_cliente", // RTU (Cliente)
+	"omisos_incumplimientos_cliente", // Omisos e Incumplimientos (Cliente)
+	"infornet", // Infornet (PEP, No pago mora, Sin demandas, Si cumple)
+	"confirmacion_referencias", // Confirmación de Referencias (Laborales - Personales)
+	"visita_domiciliar", // Visita Domiciliar
+	"redes_sociales_internet", // Redes Sociales - Internet
+
+	// === VERIFICACIONES DE VEHÍCULO / PROPIETARIO ===
+	"usuario_sat_propietario", // Usuario de SAT (Propietario del vehículo)
+	"rtu_propietario", // RTU (Propietario del Vehículo)
+	"omisos_incumplimientos_propietario", // Omisos e Incumplimientos (Propietario del Vehículo)
+	"garantia_mobiliaria_sat", // Garantía Mobiliaria desde SAT
+	"garantia_mobiliaria_dpi", // Garantía Mobiliaria con DPI del Propietario (desde el Registro)
+	"garantia_mobiliaria_nit", // Garantía Mobiliaria con NIT del Propietario (desde el Registro)
+	"garantia_mobiliaria_serie", // Garantía Mobiliaria con SERIE (desde el Registro)
+	"multas_vehiculo", // Multas del vehículo
+
+	// === DOCUMENTOS ETAPA 90% (CIERRE) ===
+	"seguro_vehiculo", // Asegurar el Vehículo
+	"inscripcion_garantia_mobiliaria", // Inscripción de Garantía Mobiliaria
+	"traspaso", // Traspaso
+	"documentos_firmados_vendedor", // Documentos que firma el vendedor
+	"copia_llave", // Copia de llave
+	"confirmacion_enganche", // Confirmación de Enganche
+	"desembolso", // Desembolso
+
 	// Categorías generales (legacy - mantener por compatibilidad)
 	"identification", // DPI, pasaporte
 	"income_proof", // Comprobantes de ingresos

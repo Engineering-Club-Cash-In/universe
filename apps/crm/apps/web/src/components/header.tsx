@@ -172,7 +172,11 @@ export default function Header() {
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="start" className="w-48">
 									<DropdownMenuItem asChild>
-										<Link to="/vehicles" search={{ vehicleId: undefined, inspectionId: undefined }} className="cursor-pointer">
+										<Link
+											to="/vehicles"
+											search={{ vehicleId: undefined, inspectionId: undefined }}
+											className="cursor-pointer"
+										>
 											<Car className="mr-2 h-4 w-4" />
 											Inventario
 										</Link>

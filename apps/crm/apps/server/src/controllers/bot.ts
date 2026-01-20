@@ -3,16 +3,265 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import {
 	leads,
-	legalDocuments,
 	magicUrls,
 	opportunities,
+	opportunityDocuments,
 	renapInfo,
 	salesStages,
 	user,
 } from "@/db/schema";
+import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
 import { db } from "../db";
 import { otpController } from "./otp";
+import {
+	generateUniqueFilename,
+	uploadFileFromUrlToR2,
+} from "@/lib/storage";
+
+// Type for document type enum
+type DocumentType = (typeof documentTypeEnum.enumValues)[number];
+
+/**
+ * Mapping from bot document fields to document types
+ */
+const BOT_DOCUMENT_TYPE_MAP: Record<string, DocumentType> = {
+	electricity_bill: "recibo_luz",
+	bank_statements: "estados_cuenta_1",
+	bank_statements_2: "estados_cuenta_2",
+	bank_statements_3: "estados_cuenta_3",
+};
+
+/**
+ * Generic function to add or replace documents to open opportunities by DPI
+ *
+ * @param dpi - The lead's DPI to find open opportunities
+ * @param documents - Array of documents to add { type: DocumentType, url: string, filename?: string }
+ * @param uploadedBy - User ID who uploads the documents
+ * @returns Results of the operation
+ */
+export async function addDocumentsToOpenOpportunities(
+	dpi: string,
+	documents: Array<{
+		type: DocumentType;
+		url: string;
+		filename?: string;
+	}>,
+	uploadedBy: string,
+): Promise<{
+	success: boolean;
+	message: string;
+	opportunitiesUpdated?: number;
+	documentsAdded?: number;
+}> {
+	try {
+		console.log(
+			`[DEBUG] addDocumentsToOpenOpportunities for DPI: ${dpi}`,
+		);
+
+		// 1. Find lead by DPI
+		const lead = await db
+			.select()
+			.from(leads)
+			.where(eq(leads.dpi, dpi))
+			.limit(1)
+			.then((results) => results[0] || null);
+
+		if (!lead) {
+			return {
+				success: false,
+				message: `Lead not found with DPI: ${dpi}`,
+			};
+		}
+
+		// 2. Find open opportunities for this lead
+		const openOpportunities = await db
+			.select()
+			.from(opportunities)
+			.where(
+				and(
+					eq(opportunities.leadId, lead.id),
+					eq(opportunities.status, "open"),
+				),
+			);
+
+		if (openOpportunities.length === 0) {
+			return {
+				success: false,
+				message: `No open opportunities found for lead with DPI: ${dpi}`,
+			};
+		}
+
+		console.log(
+			`[DEBUG] Found ${openOpportunities.length} open opportunities for lead ${lead.id}`,
+		);
+
+		let totalDocumentsAdded = 0;
+
+		// 3. For each open opportunity, add/replace documents
+		for (const opportunity of openOpportunities) {
+			for (const doc of documents) {
+				if (!doc.url) continue;
+
+				try {
+					// Generate unique filename
+					const originalName =
+						doc.filename || `${doc.type}_${Date.now()}.pdf`;
+					const uniqueFilename = generateUniqueFilename(originalName);
+
+					// Upload file from URL to R2 (returns size and mimeType)
+					const { key, size, mimeType } = await uploadFileFromUrlToR2(
+						doc.url,
+						uniqueFilename,
+						opportunity.id,
+					);
+
+					// Check if document of this type already exists for this opportunity
+					const existingDoc = await db
+						.select()
+						.from(opportunityDocuments)
+						.where(
+							and(
+								eq(opportunityDocuments.opportunityId, opportunity.id),
+								eq(opportunityDocuments.documentType, doc.type),
+							),
+						)
+						.limit(1)
+						.then((results) => results[0] || null);
+
+					if (existingDoc) {
+						// Update existing document
+						await db
+							.update(opportunityDocuments)
+							.set({
+								filename: uniqueFilename,
+								originalName: originalName,
+								mimeType: mimeType,
+								size: size,
+								filePath: key,
+								uploadedAt: new Date(),
+								uploadedBy: uploadedBy,
+							})
+							.where(eq(opportunityDocuments.id, existingDoc.id));
+						console.log(
+							`[DEBUG] Updated document ${doc.type} for opportunity ${opportunity.id}`,
+						);
+					} else {
+						// Insert new document
+						await db.insert(opportunityDocuments).values({
+							opportunityId: opportunity.id,
+							filename: uniqueFilename,
+							originalName: originalName,
+							mimeType: mimeType,
+							size: size,
+							documentType: doc.type,
+							filePath: key,
+							uploadedBy: uploadedBy,
+							uploadedAt: new Date(),
+						});
+						console.log(
+							`[DEBUG] Inserted document ${doc.type} for opportunity ${opportunity.id}`,
+						);
+					}
+
+					totalDocumentsAdded++;
+				} catch (docError) {
+					console.error(
+						`[ERROR] Failed to process document ${doc.type} for opportunity ${opportunity.id}:`,
+						docError,
+					);
+				}
+			}
+		}
+
+		return {
+			success: true,
+			message: `Documents added/updated successfully`,
+			opportunitiesUpdated: openOpportunities.length,
+			documentsAdded: totalDocumentsAdded,
+		};
+	} catch (error: any) {
+		console.error(`[ERROR] addDocumentsToOpenOpportunities failed:`, error);
+		return {
+			success: false,
+			message: error?.message || "Failed to add documents to opportunities",
+		};
+	}
+}
+
+/**
+ * Helper function to check if open opportunities have specific document types
+ */
+export async function checkDocumentsInOpenOpportunities(
+	dpi: string,
+	documentTypes: DocumentType[],
+): Promise<{
+	success: boolean;
+	hasDocuments: Record<DocumentType, boolean>;
+	message?: string;
+}> {
+	try {
+		// Find lead by DPI
+		const lead = await db
+			.select()
+			.from(leads)
+			.where(eq(leads.dpi, dpi))
+			.limit(1)
+			.then((results) => results[0] || null);
+
+		if (!lead) {
+			return {
+				success: false,
+				hasDocuments: {} as Record<DocumentType, boolean>,
+				message: `Lead not found with DPI: ${dpi}`,
+			};
+		}
+
+		// Find open opportunities
+		const openOpportunities = await db
+			.select()
+			.from(opportunities)
+			.where(
+				and(
+					eq(opportunities.leadId, lead.id),
+					eq(opportunities.status, "open"),
+				),
+			);
+
+		if (openOpportunities.length === 0) {
+			return {
+				success: false,
+				hasDocuments: {} as Record<DocumentType, boolean>,
+				message: `No open opportunities found for lead with DPI: ${dpi}`,
+			};
+		}
+
+		// Get all documents for the first open opportunity (most recent)
+		const docs = await db
+			.select()
+			.from(opportunityDocuments)
+			.where(eq(opportunityDocuments.opportunityId, openOpportunities[0].id));
+
+		const existingTypes = new Set(docs.map((d) => d.documentType));
+		const hasDocuments = {} as Record<DocumentType, boolean>;
+
+		for (const type of documentTypes) {
+			hasDocuments[type] = existingTypes.has(type);
+		}
+
+		return {
+			success: true,
+			hasDocuments,
+		};
+	} catch (error: any) {
+		console.error(`[ERROR] checkDocumentsInOpenOpportunities failed:`, error);
+		return {
+			success: false,
+			hasDocuments: {} as Record<DocumentType, boolean>,
+			message: error?.message || "Failed to check documents",
+		};
+	}
+}
 
 /**
  * Controller: getRenapInfoController
@@ -321,7 +570,7 @@ const MAGIC_URL_BASE = process.env.MAGIC_URL_BASE;
  *
  * - Busca el lead por DPI que tenga status = "new".
  * - Actualiza solo los campos enviados en `data`.
- * - Si se envía algún documento legal, lo inserta en la tabla legal_documents.
+ * - Si se envía algún documento, lo inserta en opportunityDocuments de las oportunidades abiertas.
  * - Crea una oportunidad vinculada al lead.
  */
 export const updateLeadAndCreateOpportunity = async (
@@ -402,44 +651,57 @@ export const updateLeadAndCreateOpportunity = async (
 			.where(eq(leads.id, existingLead.id));
 	}
 
-	// 3. Insertar/actualizar documentos legales si hay alguno
+	// 3. Agregar documentos a las oportunidades abiertas usando la función genérica
 	if (
 		data.electricityBill ||
+		data.bankStatements ||
 		data.bankStatements2 ||
-		data.bankStatements3 ||
-		data.bankStatements
+		data.bankStatements3
 	) {
 		console.log(
-			`[DEBUG] Inserting/updating legal documents for lead ${existingLead.id}`,
+			`[DEBUG] Adding documents to open opportunities for DPI ${dpi}`,
 		);
 
-		const existingDoc = await db
-			.select()
-			.from(legalDocuments)
-			.where(eq(legalDocuments.leadId, existingLead.id))
-			.limit(1)
-			.then((results) => results[0] || null);
+		// Construir array de documentos a agregar
+		const documentsToAdd: Array<{
+			type: DocumentType;
+			url: string;
+			filename?: string;
+		}> = [];
 
-		if (existingDoc) {
-			await db
-				.update(legalDocuments)
-				.set({
-					electricityBill: data.electricityBill ?? existingDoc.electricityBill,
-					bankStatements: data.bankStatements ?? existingDoc.bankStatements,
-					bankStatements2: data.bankStatements2 ?? existingDoc.bankStatements2,
-					bankStatements3: data.bankStatements3 ?? existingDoc.bankStatements3,
-					createdAt: new Date(),
-				})
-				.where(eq(legalDocuments.leadId, existingLead.id));
-		} else {
-			await db.insert(legalDocuments).values({
-				leadId: existingLead.id,
-				electricityBill: data.electricityBill ?? null,
-				bankStatements: data.bankStatements ?? null,
-				bankStatements2: data.bankStatements2 ?? null,
-				bankStatements3: data.bankStatements3 ?? null,
-				createdAt: new Date(),
+		if (data.electricityBill) {
+			documentsToAdd.push({
+				type: "recibo_luz",
+				url: data.electricityBill,
+				filename: "recibo_luz.pdf",
 			});
+		}
+		if (data.bankStatements) {
+			documentsToAdd.push({
+				type: "estados_cuenta_1",
+				url: data.bankStatements,
+				filename: "estado_cuenta_1.pdf",
+			});
+		}
+		if (data.bankStatements2) {
+			documentsToAdd.push({
+				type: "estados_cuenta_2",
+				url: data.bankStatements2,
+				filename: "estado_cuenta_2.pdf",
+			});
+		}
+		if (data.bankStatements3) {
+			documentsToAdd.push({
+				type: "estados_cuenta_3",
+				url: data.bankStatements3,
+				filename: "estado_cuenta_3.pdf",
+			});
+		}
+
+		if (documentsToAdd.length > 0) {
+			// Usar el usuario asignado al lead como uploader
+			const uploadedBy = existingLead.assignedTo;
+			await addDocumentsToOpenOpportunities(dpi, documentsToAdd, uploadedBy);
 		}
 	}
 
@@ -476,7 +738,7 @@ export const updateLeadAndCreateOpportunity = async (
 
 	return {
 		success: true,
-		message: "Lead updated and legal docs saved successfully",
+		message: "Lead updated and documents saved successfully",
 		leadId: existingLead.id,
 		magicUrl: magicUrlValue,
 	};
@@ -511,13 +773,11 @@ export const getLeadProgress = async (phone: string) => {
 
 		console.log(`[DEBUG] Found lead ${lead.id} with status "new"`);
 
-		// 2. Get legal documents (if any)
-		const docs = await db
-			.select()
-			.from(legalDocuments)
-			.where(eq(legalDocuments.leadId, lead.id))
-			.limit(1)
-			.then((res) => res[0] || null);
+		// 2. Get documents from open opportunities
+		const documentCheck = await checkDocumentsInOpenOpportunities(lead.dpi!, [
+			"recibo_luz",
+			"estados_cuenta_1",
+		]);
 
 		const steps: string[] = [];
 		console.log("lead", lead);
@@ -527,8 +787,9 @@ export const getLeadProgress = async (phone: string) => {
 		if (!lead.loanAmount) steps.push("loanAmount");
 		if (!lead.occupation) steps.push("occupation");
 		if (!lead.workTime) steps.push("workTime");
-		if (!docs || !docs.electricityBill) steps.push("electricityBill");
-		if (!docs || !docs.bankStatements) steps.push("bankStatements");
+		if (!documentCheck.hasDocuments?.recibo_luz) steps.push("electricityBill");
+		if (!documentCheck.hasDocuments?.estados_cuenta_1)
+			steps.push("bankStatements");
 
 		// El primer paso pendiente es donde está el usuario
 		const currentStep = steps.length > 0 ? steps[0] : null;
@@ -565,13 +826,13 @@ export const validateMagicUrlController = async (dpi: string) => {
 	}
 
 	// Buscar magic URL asociado al lead con ese DPI
-const [magicUrl] = await db
-	.select()
-	.from(magicUrls)
-	.innerJoin(leads, eq(magicUrls.leadId, leads.id))
-	.where(eq(leads.dpi, dpi))
-	.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
-	.limit(1);
+	const [magicUrl] = await db
+		.select()
+		.from(magicUrls)
+		.innerJoin(leads, eq(magicUrls.leadId, leads.id))
+		.where(eq(leads.dpi, dpi))
+		.orderBy(desc(leads.createdAt)) // Ordenar por el más reciente primero
+		.limit(1);
 	if (!magicUrl) {
 		return { success: false, message: "No magic URL found for this DPI" };
 	}
@@ -598,8 +859,8 @@ const [magicUrl] = await db
  * @returns true if liveness_validated = true, otherwise false.
  */
 export async function hasPassedLiveness(
-	dpi: string, 
-	phoneNumber: string
+	dpi: string,
+	phoneNumber: string,
 ): Promise<{
 	passed: boolean;
 	otpResponse?: Awaited<ReturnType<typeof otpController.sendOTP>>;

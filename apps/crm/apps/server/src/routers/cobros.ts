@@ -15,7 +15,11 @@ import {
 } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
-import { cobrosProcedure, cobrosSupervisorProcedure } from "../lib/orpc";
+import {
+	cobrosProcedure,
+	cobrosSupervisorProcedure,
+	crmOrCobrosProcedure,
+} from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import { carteraBackClient } from "../services/cartera-back-client";
 import {
@@ -134,198 +138,260 @@ export const cobrosRouter = {
 	// Dashboard de cobros - Vista general del embudo
 	getDashboardStats: cobrosProcedure
 		.input(
-			z.object({
-				emailCobrador: z.string().optional(),
-			}).optional(),
+			z
+				.object({
+					emailCobrador: z.string().optional(),
+				})
+				.optional(),
 		)
 		.handler(async ({ input, context }) => {
 			// Si la integración con Cartera-Back está habilitada, usar el endpoint de stats
 			if (isCarteraBackEnabled()) {
-        try {
-          console.log(
-            `[Cobros] Obteniendo stats desde Cartera-Back endpoint /stats${input?.emailCobrador ? `?email=${input.emailCobrador}` : ""}`
-          );
-
-          // Usar el nuevo endpoint de stats de cartera-back
-          const statsResponse = await carteraBackClient.getStats({
-            email: input?.emailCobrador,
-          });
-
-          // Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
-          const estatusStats = [
-            {
-              estadoMora: "al_dia",
-              totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
-              montoTotal: statsResponse.porCuotasAtrasadas["0"]?.sumaMora || "0",
-              sumaCapital: statsResponse.porCuotasAtrasadas["0"]?.sumaCapital || "0",
-              porcentaje: statsResponse.porCuotasAtrasadas["0"]?.porcentaje || "0",
-            },
-            {
-              estadoMora: "mora_30",
-              totalCases: statsResponse.porCuotasAtrasadas["1"]?.cantidad || 0,
-              montoTotal: statsResponse.porCuotasAtrasadas["1"]?.sumaMora || "0",
-              sumaCapital: statsResponse.porCuotasAtrasadas["1"]?.sumaCapital || "0",
-              porcentaje: statsResponse.porCuotasAtrasadas["1"]?.porcentaje || "0",
-            },
-            {
-              estadoMora: "mora_60",
-              totalCases: statsResponse.porCuotasAtrasadas["2"]?.cantidad || 0,
-              montoTotal: statsResponse.porCuotasAtrasadas["2"]?.sumaMora || "0",
-              sumaCapital: statsResponse.porCuotasAtrasadas["2"]?.sumaCapital || "0",
-              porcentaje: statsResponse.porCuotasAtrasadas["2"]?.porcentaje || "0",
-            },
-            {
-              estadoMora: "mora_90",
-              totalCases: statsResponse.porCuotasAtrasadas["3"]?.cantidad || 0,
-              montoTotal: statsResponse.porCuotasAtrasadas["3"]?.sumaMora || "0",
-              sumaCapital: statsResponse.porCuotasAtrasadas["3"]?.sumaCapital || "0",
-              porcentaje: statsResponse.porCuotasAtrasadas["3"]?.porcentaje || "0",
-            },
-            {
-              estadoMora: "mora_120",
-              totalCases: statsResponse.porCuotasAtrasadas["4"]?.cantidad || 0,
-              montoTotal: statsResponse.porCuotasAtrasadas["4"]?.sumaMora || "0",
-              sumaCapital: statsResponse.porCuotasAtrasadas["4"]?.sumaCapital || "0",
-              porcentaje: statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
-            },
-            {
-              estadoMora: "completado",
-              totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
-              montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
-              sumaCapital: statsResponse.porEstado.cancelado?.sumaCapital || "0",
-              porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
-            },
-            {
-              estadoMora: "incobrable",
-              totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
-              montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
-              sumaCapital: statsResponse.porEstado.incobrable?.sumaCapital || "0",
-              porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
-            },
-          ];
-
-          console.log(
-            "[Cobros] Stats obtenidas desde endpoint /stats:",
-            estatusStats
-          );
-
-          // Contactos realizados hoy
-          const contactosHoy = await db
-            .select({ count: count() })
-            .from(contactosCobros)
-            .where(
-              gte(
-                contactosCobros.fechaContacto,
-                new Date(new Date().setHours(0, 0, 0, 0))
-              )
-            );
-
-          return {
-            estatusStats,
-            totalCasosAsignados: statsResponse.totalCreditos,
-            efectividad: statsResponse.efectividad,
-            contactosHoy: contactosHoy[0]?.count || 0,
-          };
-        } catch (error) {
-          console.error(
-            "[Cobros] Error obteniendo stats desde Cartera-Back:",
-            error
-          );
-          // Fallback a datos locales
-        }
-      }
-
-		// Fallback: Calcular stats desde la base de datos local
-		const estatusStats = await db
-			.select({
-				estadoContrato: contratosFinanciamiento.estado,
-				estadoMora: casosCobros.estadoMora,
-				totalCases: count(),
-				montoTotal: sql<string>`COALESCE(SUM(CASE WHEN ${casosCobros.montoEnMora} IS NOT NULL THEN ${casosCobros.montoEnMora} ELSE 0 END), 0)`,
-			})
-			.from(contratosFinanciamiento)
-			.leftJoin(
-				casosCobros,
-				eq(contratosFinanciamiento.id, casosCobros.contratoId),
-			)
-			.groupBy(contratosFinanciamiento.estado, casosCobros.estadoMora);
-
-		// Procesar estadísticas para el embudo
-		const embudoStats = {
-			al_dia: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			mora_30: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			mora_60: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			mora_90: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			mora_120: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			pagado: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			incobrable: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-			completado: { totalCases: 0, montoTotal: "0", sumaCapital: "0", porcentaje: "0" },
-		};
-
-		estatusStats.forEach((stat) => {
-			if (stat.estadoContrato === "completado") {
-				embudoStats.completado.totalCases += stat.totalCases;
-			} else if (
-				stat.estadoContrato === "incobrable" ||
-				stat.estadoContrato === "recuperado"
-			) {
-				// Contratos incobrables y recuperados van al bucket "incobrable"
-				embudoStats.incobrable.totalCases += stat.totalCases;
-				const currentMonto = Number(embudoStats.incobrable.montoTotal);
-				embudoStats.incobrable.montoTotal = (
-					currentMonto + Number(stat.montoTotal)
-				).toString();
-			} else if (stat.estadoContrato === "activo" && !stat.estadoMora) {
-				// Contratos activos sin caso de cobros = al día
-				embudoStats.al_dia.totalCases += stat.totalCases;
-			} else if (stat.estadoMora) {
-				// Casos con estado de mora específico
-				if (stat.estadoMora in embudoStats) {
-					embudoStats[stat.estadoMora as keyof typeof embudoStats].totalCases +=
-						stat.totalCases;
-					const currentMonto = Number(
-						embudoStats[stat.estadoMora as keyof typeof embudoStats].montoTotal,
+				try {
+					console.log(
+						`[Cobros] Obteniendo stats desde Cartera-Back endpoint /stats${input?.emailCobrador ? `?email=${input.emailCobrador}` : ""}`,
 					);
-					embudoStats[stat.estadoMora as keyof typeof embudoStats].montoTotal =
-						(currentMonto + Number(stat.montoTotal)).toString();
+
+					// Usar el nuevo endpoint de stats de cartera-back
+					const statsResponse = await carteraBackClient.getStats({
+						email: input?.emailCobrador,
+					});
+
+					// Mapear cuotas atrasadas a estados de mora - usar datos exactos de cartera
+					const estatusStats = [
+						{
+							estadoMora: "al_dia",
+							totalCases: statsResponse.porCuotasAtrasadas["0"]?.cantidad || 0,
+							montoTotal:
+								statsResponse.porCuotasAtrasadas["0"]?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porCuotasAtrasadas["0"]?.sumaCapital || "0",
+							porcentaje:
+								statsResponse.porCuotasAtrasadas["0"]?.porcentaje || "0",
+						},
+						{
+							estadoMora: "mora_30",
+							totalCases: statsResponse.porCuotasAtrasadas["1"]?.cantidad || 0,
+							montoTotal:
+								statsResponse.porCuotasAtrasadas["1"]?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porCuotasAtrasadas["1"]?.sumaCapital || "0",
+							porcentaje:
+								statsResponse.porCuotasAtrasadas["1"]?.porcentaje || "0",
+						},
+						{
+							estadoMora: "mora_60",
+							totalCases: statsResponse.porCuotasAtrasadas["2"]?.cantidad || 0,
+							montoTotal:
+								statsResponse.porCuotasAtrasadas["2"]?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porCuotasAtrasadas["2"]?.sumaCapital || "0",
+							porcentaje:
+								statsResponse.porCuotasAtrasadas["2"]?.porcentaje || "0",
+						},
+						{
+							estadoMora: "mora_90",
+							totalCases: statsResponse.porCuotasAtrasadas["3"]?.cantidad || 0,
+							montoTotal:
+								statsResponse.porCuotasAtrasadas["3"]?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porCuotasAtrasadas["3"]?.sumaCapital || "0",
+							porcentaje:
+								statsResponse.porCuotasAtrasadas["3"]?.porcentaje || "0",
+						},
+						{
+							estadoMora: "mora_120",
+							totalCases: statsResponse.porCuotasAtrasadas["4"]?.cantidad || 0,
+							montoTotal:
+								statsResponse.porCuotasAtrasadas["4"]?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porCuotasAtrasadas["4"]?.sumaCapital || "0",
+							porcentaje:
+								statsResponse.porCuotasAtrasadas["4"]?.porcentaje || "0",
+						},
+						{
+							estadoMora: "completado",
+							totalCases: statsResponse.porEstado.cancelado?.cantidad || 0,
+							montoTotal: statsResponse.porEstado.cancelado?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porEstado.cancelado?.sumaCapital || "0",
+							porcentaje: statsResponse.porEstado.cancelado?.porcentaje || "0",
+						},
+						{
+							estadoMora: "incobrable",
+							totalCases: statsResponse.porEstado.incobrable?.cantidad || 0,
+							montoTotal: statsResponse.porEstado.incobrable?.sumaMora || "0",
+							sumaCapital:
+								statsResponse.porEstado.incobrable?.sumaCapital || "0",
+							porcentaje: statsResponse.porEstado.incobrable?.porcentaje || "0",
+						},
+					];
+
+					console.log(
+						"[Cobros] Stats obtenidas desde endpoint /stats:",
+						estatusStats,
+					);
+
+					// Contactos realizados hoy
+					const contactosHoy = await db
+						.select({ count: count() })
+						.from(contactosCobros)
+						.where(
+							gte(
+								contactosCobros.fechaContacto,
+								new Date(new Date().setHours(0, 0, 0, 0)),
+							),
+						);
+
+					return {
+						estatusStats,
+						totalCasosAsignados: statsResponse.totalCreditos,
+						efectividad: statsResponse.efectividad,
+						contactosHoy: contactosHoy[0]?.count || 0,
+					};
+				} catch (error) {
+					console.error(
+						"[Cobros] Error obteniendo stats desde Cartera-Back:",
+						error,
+					);
+					// Fallback a datos locales
 				}
 			}
-		});
 
-		// Casos asignados al usuario actual
-		const casosAsignados = await db
-			.select({ count: count() })
-			.from(casosCobros)
-			.where(
-				context.userRole === "admin"
-					? eq(casosCobros.activo, true)
-					: and(
-							eq(casosCobros.activo, true),
-							eq(casosCobros.responsableCobros, context.userId),
-						),
-			);
+			// Fallback: Calcular stats desde la base de datos local
+			const estatusStats = await db
+				.select({
+					estadoContrato: contratosFinanciamiento.estado,
+					estadoMora: casosCobros.estadoMora,
+					totalCases: count(),
+					montoTotal: sql<string>`COALESCE(SUM(CASE WHEN ${casosCobros.montoEnMora} IS NOT NULL THEN ${casosCobros.montoEnMora} ELSE 0 END), 0)`,
+				})
+				.from(contratosFinanciamiento)
+				.leftJoin(
+					casosCobros,
+					eq(contratosFinanciamiento.id, casosCobros.contratoId),
+				)
+				.groupBy(contratosFinanciamiento.estado, casosCobros.estadoMora);
 
-		// Contactos realizados hoy
-		const contactosHoy = await db
-			.select({ count: count() })
-			.from(contactosCobros)
-			.where(
-				gte(
-					contactosCobros.fechaContacto,
-					new Date(new Date().setHours(0, 0, 0, 0)),
-				),
-			);
+			// Procesar estadísticas para el embudo
+			const embudoStats = {
+				al_dia: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				mora_30: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				mora_60: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				mora_90: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				mora_120: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				pagado: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				incobrable: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+				completado: {
+					totalCases: 0,
+					montoTotal: "0",
+					sumaCapital: "0",
+					porcentaje: "0",
+				},
+			};
 
-		return {
-			estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
-				estadoMora: estado,
-				...data,
-			})),
-			totalCasosAsignados: casosAsignados[0]?.count || 0,
-			efectividad: "0",
-			contactosHoy: contactosHoy[0]?.count || 0,
-		};
-	}),
+			estatusStats.forEach((stat) => {
+				if (stat.estadoContrato === "completado") {
+					embudoStats.completado.totalCases += stat.totalCases;
+				} else if (
+					stat.estadoContrato === "incobrable" ||
+					stat.estadoContrato === "recuperado"
+				) {
+					// Contratos incobrables y recuperados van al bucket "incobrable"
+					embudoStats.incobrable.totalCases += stat.totalCases;
+					const currentMonto = Number(embudoStats.incobrable.montoTotal);
+					embudoStats.incobrable.montoTotal = (
+						currentMonto + Number(stat.montoTotal)
+					).toString();
+				} else if (stat.estadoContrato === "activo" && !stat.estadoMora) {
+					// Contratos activos sin caso de cobros = al día
+					embudoStats.al_dia.totalCases += stat.totalCases;
+				} else if (stat.estadoMora) {
+					// Casos con estado de mora específico
+					if (stat.estadoMora in embudoStats) {
+						embudoStats[
+							stat.estadoMora as keyof typeof embudoStats
+						].totalCases += stat.totalCases;
+						const currentMonto = Number(
+							embudoStats[stat.estadoMora as keyof typeof embudoStats]
+								.montoTotal,
+						);
+						embudoStats[
+							stat.estadoMora as keyof typeof embudoStats
+						].montoTotal = (currentMonto + Number(stat.montoTotal)).toString();
+					}
+				}
+			});
+
+			// Casos asignados al usuario actual
+			const casosAsignados = await db
+				.select({ count: count() })
+				.from(casosCobros)
+				.where(
+					context.userRole === "admin"
+						? eq(casosCobros.activo, true)
+						: and(
+								eq(casosCobros.activo, true),
+								eq(casosCobros.responsableCobros, context.userId),
+							),
+				);
+
+			// Contactos realizados hoy
+			const contactosHoy = await db
+				.select({ count: count() })
+				.from(contactosCobros)
+				.where(
+					gte(
+						contactosCobros.fechaContacto,
+						new Date(new Date().setHours(0, 0, 0, 0)),
+					),
+				);
+
+			return {
+				estatusStats: Object.entries(embudoStats).map(([estado, data]) => ({
+					estadoMora: estado,
+					...data,
+				})),
+				totalCasosAsignados: casosAsignados[0]?.count || 0,
+				efectividad: "0",
+				contactosHoy: contactosHoy[0]?.count || 0,
+			};
+		}),
 
 	// Obtener todos los contratos con sus estados (incluyendo al día e incobrables)
 	getTodosLosCreditos: cobrosProcedure
@@ -971,50 +1037,70 @@ export const cobrosRouter = {
 							input.numeroSifco,
 						);
 
-						// Combinar todas las cuotas (pagadas, pendientes, atrasadas)
-						const todasLasCuotas = [
+						const cuotasCombinadas = [
 							...(creditoCompleto.cuotasPagadas || []),
 							...(creditoCompleto.cuotasPendientes || []),
 							...(creditoCompleto.cuotasAtrasadas || []),
-						].sort((a, b) => a.numero_cuota - b.numero_cuota);
+						];
+
+						// Eliminar duplicados basándose en numero_cuota
+						// Prioridad: pagadas > atrasadas > pendientes
+						const cuotasUnicas = new Map<number, any>();
+
+						for (const cuota of cuotasCombinadas) {
+							const numeroCuota = cuota.numero_cuota;
+							const existente = cuotasUnicas.get(numeroCuota);
+
+							if (!existente) {
+								cuotasUnicas.set(numeroCuota, cuota);
+							} else {
+								// Si la nueva cuota está pagada, reemplaza la existente
+								// Si ambas están pagadas o ninguna, mantiene la primera
+								if (cuota.pagado && !existente.pagado) {
+									cuotasUnicas.set(numeroCuota, cuota);
+								}
+							}
+						}
 
 						// Mapear a estructura esperada por frontend
-						return todasLasCuotas.map((cuota) => {
-							const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
-							const montoPagadoReal =
-								cuota.pagado && cuota.monto_boleta
-									? Number(cuota.monto_boleta)
-									: cuota.pagado
-										? Number(creditoCompleto.credito.cuota)
-										: null;
+						return Array.from(cuotasUnicas.values())
+							.sort((a, b) => a.numero_cuota - b.numero_cuota)
+							.map((cuota) => {
+								const montoMora = cuota.pago_mora ? Number(cuota.pago_mora) : 0;
+								const montoPagadoReal =
+									cuota.pagado && cuota.monto_boleta
+										? Number(cuota.monto_boleta)
+										: cuota.pagado
+											? Number(creditoCompleto.credito.cuota)
+											: null;
 
-							return {
-								...cuota,
-								id: cuota.cuota_id.toString(),
-								numeroCuota: cuota.numero_cuota,
-								fechaVencimiento: cuota.fecha_vencimiento,
-								montoCuota: creditoCompleto.credito.cuota,
-								fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
-								montoPagado: montoPagadoReal,
-								montoMora: montoMora.toString(),
-								estadoMora: cuota.pagado ? "pagado" : "pendiente",
-								diasMora: 0,
-								detallesPago: cuota.pagado
-									? {
-											abonoCapital: cuota.abono_capital || "0",
-											abonoInteres: cuota.abono_interes || "0",
-											abonoIva: cuota.abono_iva_12 || "0",
-											abonoSeguro: cuota.abono_seguro || "0",
-											abonoGps: cuota.abono_gps || "0",
-											abonoMembresias: cuota.abono_membresias || "0",
-											pagoMora: cuota.pago_mora || "0",
-											pagoOtros: cuota.pago_otros || "0",
-											capitalRestante: cuota.capital_restante || "0",
-											interesRestante: cuota.interes_restante || "0",
-										}
-									: undefined,
-							};
-						});
+								return {
+									...cuota,
+									id: cuota.cuota_id.toString(),
+									numeroCuota: cuota.numero_cuota,
+									fechaVencimiento: cuota.fecha_vencimiento,
+									montoCuota: creditoCompleto.credito.cuota,
+									fechaPago: cuota.pagado ? cuota.fecha_vencimiento : null,
+									montoPagado: montoPagadoReal,
+									montoMora: montoMora.toString(),
+									estadoMora: cuota.pagado ? "pagado" : "pendiente",
+									diasMora: 0,
+									detallesPago: cuota.pagado
+										? {
+												abonoCapital: cuota.abono_capital || "0",
+												abonoInteres: cuota.abono_interes || "0",
+												abonoIva: cuota.abono_iva_12 || "0",
+												abonoSeguro: cuota.abono_seguro || "0",
+												abonoGps: cuota.abono_gps || "0",
+												abonoMembresias: cuota.abono_membresias || "0",
+												pagoMora: cuota.pago_mora || "0",
+												pagoOtros: cuota.pago_otros || "0",
+												capitalRestante: cuota.capital_restante || "0",
+												interesRestante: cuota.interes_restante || "0",
+											}
+										: undefined,
+								};
+							});
 					} catch (error) {
 						console.warn(
 							`⚠️ No se pudieron obtener cuotas de cartera-back para el contrato ${input.numeroSifco}:`,
@@ -1402,13 +1488,13 @@ export const cobrosRouter = {
 						throw new Error("Usuario no autenticado");
 					}
 
-					const cuotasAtrasadas = creditoCompleto.cuotasAtrasadas?.length || 0;
-					const cuotaMensual = Number(creditoCompleto.credito.cuota ?? 0);
-					// Calcular días de mora exactos usando la fecha de vencimiento
+					const cuotasAtrasadas = creditoCompleto?.mora?.cuotas_atrasadas ?? 0;
 					const diasMora = calcularDiasMoraExactos(
 						creditoCompleto.cuotasAtrasadas || [],
 					);
-					const montoEnMora = cuotaMensual * cuotasAtrasadas;
+					const montoEnMora = creditoCompleto.moraActual
+						? Number(creditoCompleto.moraActual)
+						: 0;
 
 					let estadoMora: (typeof estadoMoraEnum.enumValues)[number] = "al_dia";
 					if (diasMora > 0 && diasMora <= 30) estadoMora = "mora_30";
@@ -1752,7 +1838,7 @@ export const cobrosRouter = {
 	// ========================================================================
 
 	// Listar todos los inversionistas
-	getInversionistas: cobrosProcedure
+	getInversionistas: crmOrCobrosProcedure
 		.input(
 			z.object({
 				page: z.number().min(1).optional().default(1),
@@ -1940,7 +2026,7 @@ export const cobrosRouter = {
 	// ========================================================================
 
 	// Listar todos los asesores
-	getAsesores: cobrosProcedure
+	getAsesores: crmOrCobrosProcedure
 		.input(
 			z.object({
 				page: z.number().min(1).optional().default(1),

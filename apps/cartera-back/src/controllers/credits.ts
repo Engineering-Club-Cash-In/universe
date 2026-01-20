@@ -414,6 +414,7 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
       cuotasAtrasadas: cuotasAtrasadas,
       cuotasPagadas, // Todas las cuotas pagadas
       moraActual: moraActual.length > 0 ? moraActual[0].monto_mora : 0,
+      mora:moraActual.length > 0 ? moraActual[0] : null,
       convenioActivo:
         convenioActivo.length > 0
           ? {
@@ -534,9 +535,9 @@ export async function getCreditosWithUserByMesAnio(
     | "EN_CONVENIO",
   asesor_id?: number,
   nombre_usuario?: string,
-  email_asesor?: string, // 🆕 NUEVO
-  cuotas_atrasadas?: number, // 🆕 NUEVO (>= este número)
-  proximidad_pago?: ProximidadPago // 🆕 NUEVO
+  email_asesor?: string,
+  cuotas_atrasadas?: number,
+  proximidad_pago?: ProximidadPago
 ): Promise<{
   data: CreditoConInfo[];
   page: number;
@@ -547,6 +548,15 @@ export async function getCreditosWithUserByMesAnio(
   console.log(
     `🚀 Fetching credits | mes: ${mes}, anio: ${anio}, page: ${page}, perPage: ${perPage}, estado: ${estado}, numero_credito_sifco: ${numero_credito_sifco}, asesor_id: ${asesor_id}, nombre_usuario: ${nombre_usuario}, email_asesor: ${email_asesor}, cuotas_atrasadas: ${cuotas_atrasadas}, proximidad_pago: ${proximidad_pago}`
   );
+
+  // 🔍 DEBUG: Verificar tipo de dato del número de crédito
+  if (numero_credito_sifco) {
+    console.log('🔍 DEBUG numero_credito_sifco:');
+    console.log('  - Valor:', numero_credito_sifco);
+    console.log('  - Tipo:', typeof numero_credito_sifco);
+    console.log('  - Longitud:', numero_credito_sifco.length);
+    console.log('  - Primer char:', numero_credito_sifco.charAt(0));
+  }
 
   const offset = (page - 1) * perPage;
   const conditions: any[] = [];
@@ -577,12 +587,10 @@ export async function getCreditosWithUserByMesAnio(
     if (estado && estado.length > 0) {
       if (estado === "ACTIVO") {
         console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
-        if (cuotas_atrasadas==0 || cuotas_atrasadas===undefined){
-          
-        conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
-        }else{
-
-        conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`);
+        if (cuotas_atrasadas == 0 || cuotas_atrasadas === undefined) {
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
+        } else {
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`);
         }
       } else {
         console.log(`🔎 Filtrando por estado: ${estado}`);
@@ -600,7 +608,6 @@ export async function getCreditosWithUserByMesAnio(
       conditions.push(sql`${usuarios.nombre} ILIKE ${`%${nombre_usuario}%`}`);
     }
 
-    // 🆕 Filtro por email del asesor
     if (email_asesor && email_asesor.length > 0) {
       console.log(`🔎 Filtrando por email de asesor: ${email_asesor}`);
       conditions.push(
@@ -608,11 +615,13 @@ export async function getCreditosWithUserByMesAnio(
       );
     }
 
-    // 🆕 Filtro por cuotas atrasadas (>= número)
     if (cuotas_atrasadas !== undefined && cuotas_atrasadas > 0) {
       console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
       conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
     }
+
+    // 🔍 DEBUG: Ver todas las condiciones construidas
+    console.log('🔍 DEBUG Total de condiciones:', conditions.length);
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);
   }
@@ -621,6 +630,12 @@ export async function getCreditosWithUserByMesAnio(
 
   let rows: any[] = [];
   try {
+    // 🔍 DEBUG: Query antes de ejecutar
+    console.log('🔍 DEBUG Pre-query:');
+    console.log('  - Tiene whereCondition?', whereCondition !== undefined);
+    console.log('  - Limit:', perPage);
+    console.log('  - Offset:', offset);
+
     // 1️⃣ Buscar créditos + usuarios + asesores + platform_users + moras
     rows = await db
       .select({
@@ -633,12 +648,10 @@ export async function getCreditosWithUserByMesAnio(
       .from(creditos)
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
       .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
-      // 🆕 JOIN a platform_users para filtrar por email
       .leftJoin(
         platform_users,
         eq(asesores.asesor_id, platform_users.asesor_id)
       )
-      // 🆕 JOIN a moras para filtrar por cuotas atrasadas
       .leftJoin(
         moras_credito,
         eq(creditos.credito_id, moras_credito.credito_id)
@@ -649,6 +662,33 @@ export async function getCreditosWithUserByMesAnio(
       .orderBy(desc(creditos.fecha_creacion));
 
     console.log(`📄 Créditos encontrados: ${rows.length}`);
+    
+    // 🔍 DEBUG: Si encontramos rows, mostrar info del primero
+    if (rows.length > 0) {
+      console.log('🔍 DEBUG Primer crédito encontrado:');
+      console.log('  - credito_id:', rows[0].creditos.credito_id);
+      console.log('  - numero_credito_sifco:', rows[0].creditos.numero_credito_sifco);
+      console.log('  - statusCredit:', rows[0].creditos.statusCredit);
+      console.log('  - usuario:', rows[0].usuarios.nombre);
+    } else {
+      console.log('⚠️ DEBUG: No se encontraron créditos con los filtros aplicados');
+      
+      // 🔍 Hacer un query de prueba sin filtros para ver si existen créditos
+      if (numero_credito_sifco) {
+        console.log('🔍 DEBUG: Buscando crédito sin filtros de estado...');
+        const testQuery = await db
+          .select({
+            credito_id: creditos.credito_id,
+            numero: creditos.numero_credito_sifco,
+            estado: creditos.statusCredit,
+          })
+          .from(creditos)
+          .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+          .limit(1);
+        
+        console.log('🔍 DEBUG Resultado de búsqueda sin filtros:', testQuery);
+      }
+    }
   } catch (err) {
     console.error("❌ Error consultando créditos:", err);
   }
@@ -659,19 +699,21 @@ export async function getCreditosWithUserByMesAnio(
 
   // 2️⃣ Rubros
   let rubrosPorCredito: any[] = [];
-  try {
-    rubrosPorCredito = await db
-      .select({
-        credito_id: creditos_rubros_otros.credito_id,
-        nombre_rubro: creditos_rubros_otros.nombre_rubro,
-        monto: creditos_rubros_otros.monto,
-      })
-      .from(creditos_rubros_otros)
-      .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
+  if (creditosIds.length > 0) {
+    try {
+      rubrosPorCredito = await db
+        .select({
+          credito_id: creditos_rubros_otros.credito_id,
+          nombre_rubro: creditos_rubros_otros.nombre_rubro,
+          monto: creditos_rubros_otros.monto,
+        })
+        .from(creditos_rubros_otros)
+        .where(inArray(creditos_rubros_otros.credito_id, creditosIds));
 
-    console.log(`📊 Rubros encontrados: ${rubrosPorCredito.length}`);
-  } catch (err) {
-    console.error("❌ Error consultando rubros:", err);
+      console.log(`📊 Rubros encontrados: ${rubrosPorCredito.length}`);
+    } catch (err) {
+      console.error("❌ Error consultando rubros:", err);
+    }
   }
 
   const rubrosMap = creditosIds.reduce(
@@ -689,38 +731,40 @@ export async function getCreditosWithUserByMesAnio(
 
   // 3️⃣ Inversionistas
   let inversionistasPorCredito: any[] = [];
-  try {
-    inversionistasPorCredito = await db
-      .select({
-        credito_id: creditos_inversionistas.credito_id,
-        inversionista_id: inversionistas.inversionista_id,
-        nombre: inversionistas.nombre,
-        emite_factura: inversionistas.emite_factura,
-        monto_aportado: creditos_inversionistas.monto_aportado,
-        monto_cash_in: creditos_inversionistas.monto_cash_in,
-        monto_inversionista: creditos_inversionistas.monto_inversionista,
-        iva_cash_in: creditos_inversionistas.iva_cash_in,
-        iva_inversionista: creditos_inversionistas.iva_inversionista,
-        porcentaje_participacion_inversionista:
-          creditos_inversionistas.porcentaje_participacion_inversionista,
-        porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
-        cuota_inversionista: creditos_inversionistas.cuota_inversionista,
-      })
-      .from(creditos_inversionistas)
-      .innerJoin(
-        inversionistas,
-        eq(
-          creditos_inversionistas.inversionista_id,
-          inversionistas.inversionista_id
+  if (creditosIds.length > 0) {
+    try {
+      inversionistasPorCredito = await db
+        .select({
+          credito_id: creditos_inversionistas.credito_id,
+          inversionista_id: inversionistas.inversionista_id,
+          nombre: inversionistas.nombre,
+          emite_factura: inversionistas.emite_factura,
+          monto_aportado: creditos_inversionistas.monto_aportado,
+          monto_cash_in: creditos_inversionistas.monto_cash_in,
+          monto_inversionista: creditos_inversionistas.monto_inversionista,
+          iva_cash_in: creditos_inversionistas.iva_cash_in,
+          iva_inversionista: creditos_inversionistas.iva_inversionista,
+          porcentaje_participacion_inversionista:
+            creditos_inversionistas.porcentaje_participacion_inversionista,
+          porcentaje_cash_in: creditos_inversionistas.porcentaje_cash_in,
+          cuota_inversionista: creditos_inversionistas.cuota_inversionista,
+        })
+        .from(creditos_inversionistas)
+        .innerJoin(
+          inversionistas,
+          eq(
+            creditos_inversionistas.inversionista_id,
+            inversionistas.inversionista_id
+          )
         )
-      )
-      .where(inArray(creditos_inversionistas.credito_id, creditosIds));
+        .where(inArray(creditos_inversionistas.credito_id, creditosIds));
 
-    console.log(
-      `👥 Inversionistas encontrados: ${inversionistasPorCredito.length}`
-    );
-  } catch (err) {
-    console.error("❌ Error consultando inversionistas:", err);
+      console.log(
+        `👥 Inversionistas encontrados: ${inversionistasPorCredito.length}`
+      );
+    } catch (err) {
+      console.error("❌ Error consultando inversionistas:", err);
+    }
   }
 
   const inversionistasMap = creditosIds.reduce(
@@ -762,16 +806,13 @@ export async function getCreditosWithUserByMesAnio(
     }
   });
 
-  // 5️⃣ Próximas cuotas con Window Function 🔥
-  // 5️⃣ Próximas cuotas con Window Function 🔥
+  // 5️⃣ Próximas cuotas
   let proximasCuotas: any[] = [];
   try {
     if (creditosIds.length > 0) {
       console.log("🔍 Buscando próximas cuotas...");
       console.log("📅 Fecha de hoy (Guatemala):", hoyStr);
-      console.log("🆔 Buscando para créditos:", creditosIds);
 
-      // 🔥 Usar Drizzle para construir el query
       const cuotasRaw = await db
         .select({
           credito_id: cuotas_credito.credito_id,
@@ -800,7 +841,6 @@ export async function getCreditosWithUserByMesAnio(
         `📅 Cuotas encontradas (antes de filtrar): ${cuotasRaw.length}`
       );
 
-      // 🔥 Filtrar para obtener solo la primera cuota por crédito
       const cuotasPorCredito = new Map<number, any>();
       cuotasRaw.forEach((cuota) => {
         if (!cuotasPorCredito.has(cuota.credito_id)) {
@@ -817,7 +857,6 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error consultando próximas cuotas:", err);
   }
 
-  // Mapear próximas cuotas con proximidad calculada
   const proximasCuotasMap: Record<number, ProximaCuota> = {};
   proximasCuotas.forEach((row: any) => {
     proximasCuotasMap[row.credito_id] = {
@@ -909,7 +948,6 @@ export async function getCreditosWithUserByMesAnio(
         .plus(new Big(mora?.monto_mora ?? 0))
         .toString();
 
-      // 🆕 Próxima cuota
       const proxima_cuota = proximasCuotasMap[row.creditos.credito_id] || null;
 
       return {
@@ -923,7 +961,7 @@ export async function getCreditosWithUserByMesAnio(
         incobrable,
         mora,
         deuda_total_con_mora,
-        proxima_cuota, // 🆕 NUEVO CAMPO
+        proxima_cuota,
       };
     });
     console.log(`✅ Créditos mapeados: ${data.length}`);
@@ -931,7 +969,6 @@ export async function getCreditosWithUserByMesAnio(
     console.error("❌ Error mapeando créditos:", err);
   }
 
-  // 🆕 Filtrar por proximidad de pago si se especifica
   if (proximidad_pago) {
     console.log(`🔎 Filtrando por proximidad de pago: ${proximidad_pago}`);
     data = data.filter(

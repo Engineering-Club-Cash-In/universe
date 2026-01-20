@@ -14,6 +14,7 @@
 		"db:migrate": "drizzle-kit migrate",
 		"db:seed": "bun run src/db/seed.ts",
 		"db:clear": "bun run src/db/clear.ts",
+		"db:migrate-prod": "bun run src/db/migrate-config-to-prod.ts",
 		"push": "bash ./deployServer.sh"
 	},
 	"dependencies": {

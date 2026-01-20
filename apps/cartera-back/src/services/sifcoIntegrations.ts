@@ -158,7 +158,6 @@ export async function consultarEstadoCuentaPrestamo(numeroPrestamo: string) {
   const { data } = await sifcoApi.post<
     ServiceResponse<WSCrEstadoCuentaResponse>
   >("/api/creditos/estado-cuenta", request); 
-  console.log("🧾 Respuesta estado cuenta:", data);
   return data.data; // 👈 devolvemos WSCrEstadoCuentaResponse
 }
 /** ================================

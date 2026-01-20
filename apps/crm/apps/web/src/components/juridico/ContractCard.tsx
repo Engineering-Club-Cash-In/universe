@@ -1,6 +1,6 @@
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { Copy, ExternalLink, FileText } from "lucide-react";
+import { Copy, Edit, ExternalLink, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,25 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
+import { getContractTypeLabel } from "@/lib/crm-formatters";
 import { OpportunitySelector } from "./OpportunitySelector";
+
+// Contract types mapping
+const CONTRACT_TYPES_MAP: Record<string, string> = {
+	solicitud_compra_vehiculo_tercero: "Solicitud Compra Vehiculo Tercero",
+	carta_aceptacion_instalacion_gps: "Carta Aceptacion Instalacion Gps",
+	carta_traspaso_vehiculo_rdbe: "Carta Traspaso Vehiculo Rdbe",
+	descargo_responsabilidades: "Descargo Responsabilidades",
+	cobertura_inrexsa: "Cobertura Inrexsa",
+	reconocimiento_deuda_feb_2025: "Reconocimiento Deuda Feb 2025",
+	carta_carro_nuevo: "Carta Carro Nuevo",
+	contrato_privado_uso_carro_nuevo: "Contrato Privado Uso Carro Nuevo",
+	pagare_unico_libre_protesto: "Pagare Unico Libre Protesto",
+	carta_emision_cheques: "Carta Emision Cheques",
+	garantia_mobiliaria: "Garantia Mobiliaria",
+	declaracion_vendedor: "Declaracion Vendedor",
+	contrato_privado_uso_carro_usado: "Contrato Privado Uso Carro Usado",
+};
 
 interface ContractCardProps {
 	contract: {
@@ -33,6 +51,7 @@ interface ContractCardProps {
 		value: string | null;
 	} | null;
 	onUpdate?: () => void;
+	onEdit?: () => void;
 }
 
 const statusConfig = {
@@ -54,8 +73,9 @@ export function ContractCard({
 	contract,
 	opportunity,
 	onUpdate,
+	onEdit,
 }: ContractCardProps) {
-	const { canAssignLegal } = useJuridicoPermissions();
+	const { canAssignLegal, canCreateLegal } = useJuridicoPermissions();
 
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
@@ -74,25 +94,38 @@ export function ContractCard({
 
 	return (
 		<Card className="overflow-hidden">
-			<CardHeader className="bg-gradient-to-r from-amber-50 to-white">
-				<div className="flex items-start justify-between">
-					<div className="flex items-start gap-3">
-						<div className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100">
+			<CardHeader className="bg-linear-to-r from-amber-50 to-white pb-4">
+				<div className="flex items-start justify-between gap-3">
+					<div className="flex items-start gap-3 flex-1">
+						<div className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg bg-amber-100 shrink-0">
 							<FileText className="h-5 w-5 text-amber-600" />
 						</div>
-						<div className="flex-1">
+						<div className="flex-1 min-w-0">
 							<CardTitle className="text-lg">{contract.contractName}</CardTitle>
 							<CardDescription className="mt-1">
-								Generado el {formattedDate}
+								{formattedDate}
 							</CardDescription>
 						</div>
 					</div>
-					<Badge
-						variant="outline"
-						className={statusConfig[contract.status].color}
-					>
-						{statusConfig[contract.status].label}
-					</Badge>
+					<div className="flex items-center gap-2 shrink-0">
+						<Badge
+							variant="outline"
+							className={statusConfig[contract.status].color}
+						>
+							{statusConfig[contract.status].label}
+						</Badge>
+						{canCreateLegal && onEdit && (
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={onEdit}
+								className="h-8"
+							>
+								<Edit className="mr-1 h-3 w-3" />
+								Editar
+							</Button>
+						)}
+					</div>
 				</div>
 			</CardHeader>
 
@@ -102,56 +135,40 @@ export function ContractCard({
 					<p className="font-medium text-muted-foreground text-sm">
 						Tipo de contrato
 					</p>
-					<p className="mt-1 text-sm">{contract.contractType}</p>
-				</div>
-
-				{/* Asignación de oportunidad */}
-				<div>
-					<p className="mb-2 font-medium text-muted-foreground text-sm">
-						Oportunidad asignada
+					<p className="mt-1 text-sm">
+						{getContractTypeLabel(contract.contractType)}
 					</p>
-					{canAssignLegal ? (
-						<OpportunitySelector
-							contractId={contract.id}
-							leadId={contract.leadId}
-							currentOpportunityId={contract.opportunityId}
-							onAssignSuccess={onUpdate}
-						/>
-					) : opportunity ? (
-						<div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
-							{opportunity.title} - Q
-							{Number(opportunity.value || 0).toLocaleString()}
-						</div>
-					) : (
-						<div className="text-muted-foreground text-sm">Sin asignar</div>
-					)}
 				</div>
 
-				{/* Links de documentos */}
-				<div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
-					<p className="font-medium text-sm">Enlaces de firma</p>
+				{/* Links de documentos - más compacto */}
+				{(contract.clientSigningLink ||
+					contract.representativeSigningLink ||
+					(contract.additionalSigningLinks &&
+						contract.additionalSigningLinks.length > 0)) && (
+					<div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+						<p className="font-medium text-xs text-muted-foreground">
+							Enlaces de firma
+						</p>
 
-					{/* Link del cliente */}
-					{contract.clientSigningLink && (
-						<div className="space-y-2 rounded-md border-blue-500 border-l-4 bg-blue-50/50 p-3">
-							<div className="flex items-center justify-between">
-								<p className="font-medium text-blue-900 text-sm">
-									👤 Link del Cliente
+						{/* Link del cliente */}
+						{contract.clientSigningLink && (
+							<div className="flex items-center justify-between gap-2 rounded border-blue-500 border-l-2 bg-blue-50/50 py-1.5 px-2">
+								<p className="font-medium text-blue-900 text-xs shrink-0">
+									👤 Cliente
 								</p>
-								<div className="flex gap-2">
+								<div className="flex gap-1">
 									<Button
 										size="sm"
-										variant="outline"
-										className="h-8"
+										variant="ghost"
+										className="h-6 px-2"
 										onClick={() => openLink(contract.clientSigningLink!)}
 									>
-										<ExternalLink className="mr-1 h-3 w-3" />
-										Abrir
+										<ExternalLink className="h-3 w-3" />
 									</Button>
 									<Button
 										size="sm"
-										variant="outline"
-										className="h-8"
+										variant="ghost"
+										className="h-6 px-2"
 										onClick={() =>
 											copyToClipboard(
 												contract.clientSigningLink!,
@@ -159,40 +176,33 @@ export function ContractCard({
 											)
 										}
 									>
-										<Copy className="mr-1 h-3 w-3" />
-										Copiar
+										<Copy className="h-3 w-3" />
 									</Button>
 								</div>
 							</div>
-							<p className="truncate font-mono text-blue-700 text-xs">
-								{contract.clientSigningLink}
-							</p>
-						</div>
-					)}
+						)}
 
-					{/* Link del representante */}
-					{contract.representativeSigningLink && (
-						<div className="space-y-2 rounded-md border-green-500 border-l-4 bg-green-50/50 p-3">
-							<div className="flex items-center justify-between">
-								<p className="font-medium text-green-900 text-sm">
-									🏢 Link del Representante
+						{/* Link del representante */}
+						{contract.representativeSigningLink && (
+							<div className="flex items-center justify-between gap-2 rounded border-green-500 border-l-2 bg-green-50/50 py-1.5 px-2">
+								<p className="font-medium text-green-900 text-xs shrink-0">
+									🏢 Representante
 								</p>
-								<div className="flex gap-2">
+								<div className="flex gap-1">
 									<Button
 										size="sm"
-										variant="outline"
-										className="h-8"
+										variant="ghost"
+										className="h-6 px-2"
 										onClick={() =>
 											openLink(contract.representativeSigningLink!)
 										}
 									>
-										<ExternalLink className="mr-1 h-3 w-3" />
-										Abrir
+										<ExternalLink className="h-3 w-3" />
 									</Button>
 									<Button
 										size="sm"
-										variant="outline"
-										className="h-8"
+										variant="ghost"
+										className="h-6 px-2"
 										onClick={() =>
 											copyToClipboard(
 												contract.representativeSigningLink!,
@@ -200,58 +210,47 @@ export function ContractCard({
 											)
 										}
 									>
-										<Copy className="mr-1 h-3 w-3" />
-										Copiar
+										<Copy className="h-3 w-3" />
 									</Button>
 								</div>
 							</div>
-							<p className="truncate font-mono text-green-700 text-xs">
-								{contract.representativeSigningLink}
-							</p>
-						</div>
-					)}
+						)}
 
-					{/* Links adicionales */}
-					{contract.additionalSigningLinks &&
-						contract.additionalSigningLinks.length > 0 &&
-						contract.additionalSigningLinks.map((link, index) => (
-							<div
-								key={index}
-								className="space-y-2 rounded-md border-purple-500 border-l-4 bg-purple-50/50 p-3"
-							>
-								<div className="flex items-center justify-between">
-									<p className="font-medium text-purple-900 text-sm">
-										👥 Link Adicional {index + 1}
+						{/* Links adicionales */}
+						{contract.additionalSigningLinks &&
+							contract.additionalSigningLinks.length > 0 &&
+							contract.additionalSigningLinks.map((link, index) => (
+								<div
+									key={index}
+									className="flex items-center justify-between gap-2 rounded border-purple-500 border-l-2 bg-purple-50/50 py-1.5 px-2"
+								>
+									<p className="font-medium text-purple-900 text-xs shrink-0">
+										👥 Adicional {index + 1}
 									</p>
-									<div className="flex gap-2">
+									<div className="flex gap-1">
 										<Button
 											size="sm"
-											variant="outline"
-											className="h-8"
+											variant="ghost"
+											className="h-6 px-2"
 											onClick={() => openLink(link)}
 										>
-											<ExternalLink className="mr-1 h-3 w-3" />
-											Abrir
+											<ExternalLink className="h-3 w-3" />
 										</Button>
 										<Button
 											size="sm"
-											variant="outline"
-											className="h-8"
+											variant="ghost"
+											className="h-6 px-2"
 											onClick={() =>
 												copyToClipboard(link, `Link adicional ${index + 1}`)
 											}
 										>
-											<Copy className="mr-1 h-3 w-3" />
-											Copiar
+											<Copy className="h-3 w-3" />
 										</Button>
 									</div>
 								</div>
-								<p className="truncate font-mono text-purple-700 text-xs">
-									{link}
-								</p>
-							</div>
-						))}
-				</div>
+							))}
+					</div>
+				)}
 			</CardContent>
 		</Card>
 	);

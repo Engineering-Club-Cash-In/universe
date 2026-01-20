@@ -454,7 +454,11 @@ function RouteComponent() {
 															color: porcentaje > 60 ? "white" : "#1f2937",
 														}}
 													>
-														{estadoStats.totalCases} casos - {Number.parseFloat(estadoStats.porcentaje || "0").toFixed(2)}% del total
+														{estadoStats.totalCases} casos -{" "}
+														{Number.parseFloat(
+															estadoStats.porcentaje || "0",
+														).toFixed(2)}
+														% del total
 													</span>
 												</div>
 											) : (
@@ -468,7 +472,11 @@ function RouteComponent() {
 														}}
 													/>
 													<span className="ml-2 whitespace-nowrap font-semibold text-muted-foreground text-sm">
-														{estadoStats.totalCases} casos - {Number.parseFloat(estadoStats.porcentaje || "0").toFixed(2)}% del total
+														{estadoStats.totalCases} casos -{" "}
+														{Number.parseFloat(
+															estadoStats.porcentaje || "0",
+														).toFixed(2)}
+														% del total
 													</span>
 												</div>
 											)}

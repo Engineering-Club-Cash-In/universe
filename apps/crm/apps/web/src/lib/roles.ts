@@ -44,76 +44,69 @@ export const ROLE_CONFIG = {
 		icon: "UserCheck",
 	},
 	[ROLES.JURIDICO]: {
-		label: "Jurídico",
+		label: "Juridico",
 		color: "bg-amber-100 text-amber-800",
 		icon: "Scale",
 	},
 } as const;
 
-// Permission checks - synced with server
+// Permission checks
 export const PERMISSIONS = {
-	// CRM Module Access
 	canAccessCRM: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST,
-
-	// Analysis Module Access
 	canAccessAnalysis: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.ANALYST ||
 		role === ROLES.SALES_SUPERVISOR,
-
-	// Admin Module Access
 	canAccessAdmin: (role: string) => role === ROLES.ADMIN,
-
-	// Entity Permissions
 	canCreateCompanies: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR,
-
 	canCreateLeads: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR,
-
+	canUpdateLeads: (role: string) =>
+		role === ROLES.ADMIN ||
+		role === ROLES.SALES ||
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
 	canCreateOpportunities: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR,
-
 	canApproveOpportunities: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.ANALYST,
-
-	// Cobros Module Access
 	canAccessCobros: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.COBROS ||
 		role === ROLES.COBROS_SUPERVISOR,
-
-	// WhatsApp Module Access
 	canAccessWhatsApp: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR,
-
-	// Juridico Module Access
+	// Juridico Module Access (menu section)
 	canAccessJuridico: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+	// View contracts in opportunities (for sales to see contract status)
+	canViewOpportunityContracts: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.JURIDICO ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR ||
 		role === ROLES.ANALYST,
-
 	canCreateLegalContracts: (role: string) =>
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
-
-	canAssignLegalContracts: (role: string) =>
-		role === ROLES.ADMIN || role === ROLES.JURIDICO,
-
+	canAssignLegalContracts: (role: string) => role === ROLES.ADMIN,
 	canDeleteLegalContracts: (role: string) => role === ROLES.ADMIN,
+	canApproveLegalStage: (role: string) =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+	// Vehicles Module Access - All roles can access
+	canAccessVehicles: (_role: string) => true,
 } as const;
 
 // Helper functions
@@ -127,12 +120,4 @@ export const getRoleColor = (role: string): string => {
 
 export const getRoleIcon = (role: string): string => {
 	return ROLE_CONFIG[role as UserRole]?.icon || "User";
-};
-
-// Export all roles as an array for iteration
-export const ALL_ROLES = Object.values(ROLES);
-
-// Type guard
-export const isValidRole = (role: string): role is UserRole => {
-	return ALL_ROLES.includes(role as UserRole);
 };

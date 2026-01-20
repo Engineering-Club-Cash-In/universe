@@ -84,7 +84,8 @@ export const PERMISSIONS = {
 	canUpdateLeads: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
-		role === ROLES.SALES_SUPERVISOR,
+		role === ROLES.SALES_SUPERVISOR ||
+		role === ROLES.ANALYST,
 
 	canDeleteLeads: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN || role === ROLES.SALES_SUPERVISOR,
@@ -137,6 +138,10 @@ export const PERMISSIONS = {
 
 	// Juridico Module Access
 	canAccessJuridico: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+
+	// View contracts in opportunities (for sales to see contract status)
+	canViewOpportunityContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN ||
 		role === ROLES.JURIDICO ||
 		role === ROLES.SALES ||
@@ -147,10 +152,16 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN || role === ROLES.JURIDICO,
 
 	canAssignLegalContracts: (role: UserRole | string): boolean =>
-		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+		role === ROLES.ADMIN,
 
 	canDeleteLegalContracts: (role: UserRole | string): boolean =>
 		role === ROLES.ADMIN,
+
+	canApproveLegalStage: (role: UserRole | string): boolean =>
+		role === ROLES.ADMIN || role === ROLES.JURIDICO,
+
+	// Vehicles Module Access - All roles can access
+	canAccessVehicles: (_role: UserRole | string): boolean => true,
 } as const;
 
 // Helper functions

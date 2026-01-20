@@ -112,6 +112,12 @@ function RouteComponent() {
 	const [statusFilter, setStatusFilter] = useState<string>("all");
 	const [page, setPage] = useState(0);
 	const [isEditingCreditAnalysis, setIsEditingCreditAnalysis] = useState(false);
+	const [isConvertDialogOpen, setIsConvertDialogOpen] = useState(false);
+	const [leadToConvert, setLeadToConvert] = useState<Lead | null>(null);
+	const [convertForm, setConvertForm] = useState({
+		title: "",
+		creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
+	});
 	const [creditAnalysisForm, setCreditAnalysisForm] = useState({
 		monthlyFixedIncome: "",
 		monthlyVariableIncome: "",
@@ -244,6 +250,15 @@ function RouteComponent() {
 			!processedLeadIdRef.current &&
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role),
+	});
+
+	// Query para obtener las etapas de ventas (para convertir lead a oportunidad)
+	const salesStagesQuery = useQuery({
+		...orpc.getSalesStages.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role),
+		queryKey: ["getSalesStages", session?.user?.id, userProfile.data?.role],
 	});
 
 	const createLeadForm = useForm({
@@ -420,6 +435,38 @@ function RouteComponent() {
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al actualizar el lead");
+		},
+	});
+
+	// Mutación para crear oportunidad (conversión de lead)
+	const createOpportunityMutation = useMutation({
+		mutationFn: (input: {
+			title: string;
+			leadId: string;
+			creditType: "autocompra" | "sobre_vehiculo";
+			stageId: string;
+		}) => client.createOpportunity(input),
+		onSuccess: () => {
+			// Actualizar el lead a "converted"
+			if (leadToConvert) {
+				updateLeadMutation.mutate({
+					id: leadToConvert.id,
+					status: "converted",
+				});
+			}
+			queryClient.invalidateQueries({
+				predicate: (query) =>
+					query.queryKey[0] === "getLeads" ||
+					query.queryKey[0] === "getLeadsStats" ||
+					query.queryKey[0] === "getOpportunities",
+			});
+			toast.success("Oportunidad creada exitosamente");
+			setIsConvertDialogOpen(false);
+			setLeadToConvert(null);
+			setConvertForm({ title: "", creditType: "autocompra" });
+		},
+		onError: (error: any) => {
+			toast.error(error.message || "Error al crear la oportunidad");
 		},
 	});
 
@@ -1624,9 +1671,10 @@ function RouteComponent() {
 												}
 											>
 												{state.isSubmitting || createLeadMutation.isPending
-													? "Cargando...":
-														editingLead ? "Editar Lead" : "Crear Lead"
-													}
+													? "Cargando..."
+													: editingLead
+														? "Editar Lead"
+														: "Crear Lead"}
 											</Button>
 										)}
 									</createLeadForm.Subscribe>
@@ -1816,9 +1864,14 @@ function RouteComponent() {
 													</DropdownMenuItem>
 													<DropdownMenuSeparator />
 													<DropdownMenuItem
-														onClick={() =>
-															handleStatusChange(lead.id, "converted")
-														}
+														onClick={() => {
+															setLeadToConvert(lead);
+															setConvertForm({
+																title: `Oportunidad - ${lead.firstName} ${lead.lastName}`,
+																creditType: "autocompra",
+															});
+															setIsConvertDialogOpen(true);
+														}}
 														disabled={lead.status === "converted"}
 													>
 														Convertir a Oportunidad
@@ -2850,6 +2903,102 @@ function RouteComponent() {
 								entityId={selectedLead.id}
 								title="Timeline de Notas"
 							/>
+						</div>
+					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Modal de Conversión a Oportunidad */}
+			<Dialog open={isConvertDialogOpen} onOpenChange={setIsConvertDialogOpen}>
+				<DialogContent className="max-h-[90vh] max-w-md overflow-y-auto">
+					<DialogHeader>
+						<DialogTitle>Convertir Lead a Oportunidad</DialogTitle>
+					</DialogHeader>
+					{leadToConvert && (
+						<div className="space-y-4">
+							<div className="rounded-md bg-muted/50 p-3">
+								<p className="font-medium">
+									{leadToConvert.firstName} {leadToConvert.lastName}
+								</p>
+								<p className="text-muted-foreground text-sm">
+									{leadToConvert.email || leadToConvert.phone || "Sin contacto"}
+								</p>
+							</div>
+
+							<div className="space-y-2">
+								<Label htmlFor="convert-title">Título de la Oportunidad</Label>
+								<Input
+									id="convert-title"
+									value={convertForm.title}
+									onChange={(e) =>
+										setConvertForm({ ...convertForm, title: e.target.value })
+									}
+									placeholder="Ej: Crédito vehicular - Juan Pérez"
+								/>
+							</div>
+
+							<div className="space-y-2">
+								<Label htmlFor="convert-creditType">Tipo de Crédito</Label>
+								<Select
+									value={convertForm.creditType}
+									onValueChange={(value) =>
+										setConvertForm({
+											...convertForm,
+											creditType: value as "autocompra" | "sobre_vehiculo",
+										})
+									}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Seleccionar tipo" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="autocompra">Autocompra</SelectItem>
+										<SelectItem value="sobre_vehiculo">
+											Sobre Vehículo
+										</SelectItem>
+									</SelectContent>
+								</Select>
+							</div>
+
+							<div className="flex justify-end gap-2 pt-4">
+								<Button
+									variant="outline"
+									onClick={() => {
+										setIsConvertDialogOpen(false);
+										setLeadToConvert(null);
+									}}
+								>
+									Cancelar
+								</Button>
+								<Button
+									onClick={() => {
+										if (!convertForm.title.trim()) {
+											toast.error("El título es requerido");
+											return;
+										}
+										const initialStage = salesStagesQuery.data?.find(
+											(s) => s.closurePercentage === 1,
+										);
+										if (!initialStage) {
+											toast.error(
+												"No se encontró la etapa inicial. Contacte al administrador.",
+											);
+											return;
+										}
+										createOpportunityMutation.mutate({
+											title: convertForm.title,
+											leadId: leadToConvert.id,
+											creditType: convertForm.creditType,
+											stageId: initialStage.id,
+										});
+									}}
+									disabled={createOpportunityMutation.isPending}
+								>
+									{createOpportunityMutation.isPending
+										? "Creando..."
+										: "Crear Oportunidad"}
+								</Button>
+							</div>
 						</div>
 					)}
 				</DialogContent>

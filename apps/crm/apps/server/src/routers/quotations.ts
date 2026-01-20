@@ -189,7 +189,8 @@ export const quotationsRouter = {
 			const royalty =
 				input.royalty > 0
 					? input.royalty
-					: (input.vehicleValue - input.downPayment) * (input.royaltyPercentage / 100);
+					: (input.vehicleValue - input.downPayment) *
+						(input.royaltyPercentage / 100);
 
 			// Costos que se financian (NO incluyen seguro ni GPS)
 			// La membresía ya está incluida en adminCost, no se debe agregar de nuevo

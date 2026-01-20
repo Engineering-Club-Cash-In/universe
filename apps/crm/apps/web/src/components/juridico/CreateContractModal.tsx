@@ -22,6 +22,61 @@ import {
 } from "@/components/ui/select";
 import { client, orpc } from "@/utils/orpc";
 
+const CONTRACT_TYPES = [
+	{
+		enum: "solicitud_compra_vehiculo_tercero",
+		label: "Solicitud Compra Vehiculo Tercero",
+	},
+	{
+		enum: "carta_aceptacion_instalacion_gps",
+		label: "Carta Aceptacion Instalacion Gps",
+	},
+	{
+		enum: "carta_traspaso_vehiculo_rdbe",
+		label: "Carta Traspaso Vehiculo Rdbe",
+	},
+	{
+		enum: "descargo_responsabilidades",
+		label: "Descargo Responsabilidades",
+	},
+	{
+		enum: "cobertura_inrexsa",
+		label: "Cobertura Inrexsa",
+	},
+	{
+		enum: "reconocimiento_deuda_feb_2025",
+		label: "Reconocimiento Deuda Feb 2025",
+	},
+	{
+		enum: "carta_carro_nuevo",
+		label: "Carta Carro Nuevo",
+	},
+	{
+		enum: "contrato_privado_uso_carro_nuevo",
+		label: "Contrato Privado Uso Carro Nuevo",
+	},
+	{
+		enum: "pagare_unico_libre_protesto",
+		label: "Pagare Unico Libre Protesto",
+	},
+	{
+		enum: "carta_emision_cheques",
+		label: "Carta Emision Cheques",
+	},
+	{
+		enum: "garantia_mobiliaria",
+		label: "Garantia Mobiliaria",
+	},
+	{
+		enum: "declaracion_vendedor",
+		label: "Declaracion Vendedor",
+	},
+	{
+		enum: "contrato_privado_uso_carro_usado",
+		label: "Contrato Privado Uso Carro Usado",
+	},
+] as const;
+
 interface CreateContractModalProps {
 	leadId: string;
 	open: boolean;
@@ -29,6 +84,22 @@ interface CreateContractModalProps {
 	onSuccess?: () => void;
 	/** Pre-select an opportunity when opening the modal */
 	preselectedOpportunityId?: string;
+	/** Contract to edit (if editing) */
+	contractToEdit?: {
+		id: string;
+		contractType: string;
+		contractName: string;
+		clientSigningLink: string | null;
+		representativeSigningLink: string | null;
+		additionalSigningLinks: string[] | null;
+		opportunityId: string | null;
+	};
+	/** Opportunity info (for display when editing) */
+	opportunityInfo?: {
+		id: string;
+		title: string;
+		value: string | null;
+	} | null;
 }
 
 export function CreateContractModal({
@@ -37,27 +108,47 @@ export function CreateContractModal({
 	onOpenChange,
 	onSuccess,
 	preselectedOpportunityId,
+	contractToEdit,
+	opportunityInfo,
 }: CreateContractModalProps) {
+	const isEditing = !!contractToEdit;
+
 	const [formData, setFormData] = useState({
-		contractType: "",
-		contractName: "",
-		clientSigningLink: "",
-		representativeSigningLink: "",
-		additionalSigningLinks: [] as string[],
-		opportunityId: preselectedOpportunityId || "",
+		contractType: contractToEdit?.contractType || "",
+		contractName: contractToEdit?.contractName || "",
+		clientSigningLink: contractToEdit?.clientSigningLink || "",
+		representativeSigningLink:
+			contractToEdit?.representativeSigningLink || "",
+		additionalSigningLinks: contractToEdit?.additionalSigningLinks || ([] as string[]),
+		opportunityId: contractToEdit?.opportunityId || preselectedOpportunityId || "",
 	});
 
 	const [newAdditionalLink, setNewAdditionalLink] = useState("");
 
 	// Actualizar opportunityId cuando cambia preselectedOpportunityId
 	useEffect(() => {
-		if (preselectedOpportunityId) {
+		if (preselectedOpportunityId && !isEditing) {
 			setFormData((prev) => ({
 				...prev,
 				opportunityId: preselectedOpportunityId,
 			}));
 		}
-	}, [preselectedOpportunityId]);
+	}, [preselectedOpportunityId, isEditing]);
+
+	// Actualizar form cuando cambia contractToEdit
+	useEffect(() => {
+		if (contractToEdit) {
+			setFormData({
+				contractType: contractToEdit.contractType,
+				contractName: contractToEdit.contractName,
+				clientSigningLink: contractToEdit.clientSigningLink || "",
+				representativeSigningLink:
+					contractToEdit.representativeSigningLink || "",
+				additionalSigningLinks: contractToEdit.additionalSigningLinks || [],
+				opportunityId: contractToEdit.opportunityId || "",
+			});
+		}
+	}, [contractToEdit]);
 
 	// Query opportunities for this lead
 	const { data: opportunities, isLoading: isLoadingOpportunities } = useQuery({
@@ -67,6 +158,7 @@ export function CreateContractModal({
 
 	const createMutation = useMutation({
 		mutationFn: async (values: {
+			id?: string;
 			leadId: string;
 			contractType: string;
 			contractName: string;
@@ -75,16 +167,34 @@ export function CreateContractModal({
 			additionalSigningLinks?: string[];
 			opportunityId?: string;
 		}) => {
+			if (values.id) {
+				// Editar contrato existente
+				return await client.updateLegalContract({
+					id: values.id,
+					contractType: values.contractType,
+					contractName: values.contractName,
+					clientSigningLink: values.clientSigningLink || null,
+					representativeSigningLink: values.representativeSigningLink || null,
+					additionalSigningLinks: values.additionalSigningLinks || null,
+				});
+			}
+			// Crear nuevo contrato
 			return await client.createLegalContract(values);
 		},
 		onSuccess: () => {
-			toast.success("Contrato registrado exitosamente");
+			toast.success(
+				isEditing
+					? "Contrato actualizado exitosamente"
+					: "Contrato registrado exitosamente",
+			);
 			onSuccess?.();
 			resetForm();
 			onOpenChange(false);
 		},
 		onError: (error: Error) => {
-			toast.error(`Error al registrar contrato: ${error.message}`);
+			toast.error(
+				`Error al ${isEditing ? "actualizar" : "registrar"} contrato: ${error.message}`,
+			);
 		},
 	});
 
@@ -134,12 +244,13 @@ export function CreateContractModal({
 			toast.error("El nombre del contrato es requerido");
 			return;
 		}
-		if (!formData.opportunityId) {
+		if (!formData.opportunityId && !isEditing) {
 			toast.error("Debe seleccionar una oportunidad para asociar el contrato");
 			return;
 		}
 
 		createMutation.mutate({
+			...(isEditing && contractToEdit ? { id: contractToEdit.id } : {}),
 			leadId,
 			contractType: formData.contractType.trim(),
 			contractName: formData.contractName.trim(),
@@ -150,17 +261,21 @@ export function CreateContractModal({
 				formData.additionalSigningLinks.length > 0
 					? formData.additionalSigningLinks
 					: undefined,
-			opportunityId: formData.opportunityId,
+			opportunityId: formData.opportunityId || undefined,
 		});
 	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-w-2xl">
+			<DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
 				<DialogHeader>
-					<DialogTitle>Registrar Nuevo Contrato</DialogTitle>
+					<DialogTitle>
+						{isEditing ? "Editar Contrato" : "Registrar Nuevo Contrato"}
+					</DialogTitle>
 					<DialogDescription>
-						Completa la información del contrato legal generado
+						{isEditing
+							? "Actualiza la información del contrato legal"
+							: "Completa la información del contrato legal generado"}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -171,18 +286,27 @@ export function CreateContractModal({
 							<Label htmlFor="contractType">
 								Tipo de contrato <span className="text-red-500">*</span>
 							</Label>
-							<Input
-								id="contractType"
-								placeholder="ej: contrato_privado_uso_carro_usado"
+							<Select
 								value={formData.contractType}
-								onChange={(e) =>
+								onValueChange={(value) =>
 									setFormData((prev) => ({
 										...prev,
-										contractType: e.target.value,
+										contractType: value,
 									}))
 								}
 								disabled={createMutation.isPending}
-							/>
+							>
+								<SelectTrigger className="w-full">
+									<SelectValue placeholder="Seleccionar tipo de contrato" />
+								</SelectTrigger>
+								<SelectContent>
+									{CONTRACT_TYPES.map((type) => (
+										<SelectItem key={type.enum} value={type.enum}>
+											{type.label}
+										</SelectItem>
+									))}
+								</SelectContent>
+							</Select>
 						</div>
 
 						{/* Nombre del contrato */}
@@ -209,32 +333,43 @@ export function CreateContractModal({
 							<Label htmlFor="opportunityId">
 								Oportunidad Asociada <span className="text-red-500">*</span>
 							</Label>
-							<Select
-								value={formData.opportunityId}
-								onValueChange={(value) =>
-									setFormData((prev) => ({
-										...prev,
-										opportunityId: value === "none" ? "" : value,
-									}))
-								}
-								disabled={createMutation.isPending || isLoadingOpportunities}
-							>
-								<SelectTrigger className="w-full">
-									<SelectValue placeholder="Seleccionar oportunidad" />
-								</SelectTrigger>
-								<SelectContent>
-									<SelectItem value="none">Sin oportunidad</SelectItem>
-									{opportunities?.map((opp) => (
-										<SelectItem key={opp.id} value={opp.id}>
-											{opp.title} - Q
-											{Number.parseFloat(opp.value || "0").toLocaleString()}
-										</SelectItem>
-									))}
-								</SelectContent>
-							</Select>
-							<p className="text-muted-foreground text-xs">
-								El contrato debe estar asociado a una oportunidad
-							</p>
+							{isEditing && opportunityInfo ? (
+								<div className="rounded-md border border-border bg-muted px-3 py-2 text-sm">
+									{opportunityInfo.title} - Q
+									{Number.parseFloat(
+										opportunityInfo.value || "0",
+									).toLocaleString()}
+								</div>
+							) : (
+								<Select
+									value={formData.opportunityId}
+									onValueChange={(value) =>
+										setFormData((prev) => ({
+											...prev,
+											opportunityId: value === "none" ? "" : value,
+										}))
+									}
+									disabled={createMutation.isPending || isLoadingOpportunities}
+								>
+									<SelectTrigger className="w-full">
+										<SelectValue placeholder="Seleccionar oportunidad" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="none">Sin oportunidad</SelectItem>
+										{opportunities?.map((opp) => (
+											<SelectItem key={opp.id} value={opp.id}>
+												{opp.title} - Q
+												{Number.parseFloat(opp.value || "0").toLocaleString()}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							)}
+							{!isEditing && (
+								<p className="text-muted-foreground text-xs">
+									El contrato debe estar asociado a una oportunidad
+								</p>
+							)}
 						</div>
 
 						{/* Link del cliente */}
@@ -345,8 +480,10 @@ export function CreateContractModal({
 							{createMutation.isPending ? (
 								<>
 									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
-									Registrando...
+									{isEditing ? "Actualizando..." : "Registrando..."}
 								</>
+							) : isEditing ? (
+								"Actualizar Contrato"
 							) : (
 								"Registrar Contrato"
 							)}

@@ -17,9 +17,11 @@ import { useJuridicoPermissions } from "@/hooks/usePermissions";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
-	validateSearch: z.object({
-		opportunityId: z.string().uuid().optional(),
-	}).optional(),
+	validateSearch: z
+		.object({
+			opportunityId: z.string().uuid().optional(),
+		})
+		.optional(),
 	component: RouteComponent,
 });
 
@@ -34,13 +36,25 @@ function RouteComponent() {
 	} = useJuridicoPermissions();
 
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+	const [contractToEdit, setContractToEdit] = useState<{
+		id: string;
+		contractType: string;
+		contractName: string;
+		clientSigningLink: string | null;
+		representativeSigningLink: string | null;
+		additionalSigningLinks: string[] | null;
+		opportunityId: string | null;
+	} | null>(null);
+	const [opportunityInfo, setOpportunityInfo] = useState<{
+		id: string;
+		title: string;
+		value: string | null;
+	} | null>(null);
+
 	const opportunityId = searchParams?.opportunityId;
 
 	// Obtener información del lead
-	const {
-		data: leadInfo,
-		isLoading: isLoadingLead,
-	} = useQuery({
+	const { data: leadInfo, isLoading: isLoadingLead } = useQuery({
 		...orpc.getLeadById.queryOptions({ input: { leadId } }),
 		enabled: canViewLegal && !!leadId,
 	});
@@ -51,8 +65,8 @@ function RouteComponent() {
 		isLoading: isLoadingContracts,
 		refetch,
 	} = useQuery({
-		...orpc.listLegalContractsByLead.queryOptions({ input: { leadId } }),
-		enabled: canViewLegal && !!leadId,
+		...orpc.listLegalContractsByOpportunity.queryOptions({ input: { opportunityId: opportunityId ?? "" } }),
+		enabled: canViewLegal && !!opportunityId,
 	});
 
 	// Redireccionar si no tiene permisos
@@ -62,6 +76,31 @@ function RouteComponent() {
 	}
 
 	const isLoading = isLoadingLead || isLoadingContracts;
+
+	const handleEdit = (
+		contract: {
+			id: string;
+			contractType: string;
+			contractName: string;
+			clientSigningLink: string | null;
+			representativeSigningLink: string | null;
+			additionalSigningLinks: string[] | null;
+			opportunityId: string | null;
+		},
+		opportunity?: { id: string; title: string; value: string | null } | null,
+	) => {
+		setContractToEdit(contract);
+		setOpportunityInfo(opportunity || null);
+		setIsCreateModalOpen(true);
+	};
+
+	const handleCloseModal = (open: boolean) => {
+		setIsCreateModalOpen(open);
+		if (!open) {
+			setContractToEdit(null);
+			setOpportunityInfo(null);
+		}
+	};
 
 	if (isLoading) {
 		return (
@@ -147,7 +186,11 @@ function RouteComponent() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<ContractsList contracts={contracts || []} onUpdate={refetch} />
+						<ContractsList
+							contracts={contracts || []}
+							onUpdate={refetch}
+							onEdit={canCreateLegal ? handleEdit : undefined}
+						/>
 				</CardContent>
 			</Card>
 
@@ -155,9 +198,11 @@ function RouteComponent() {
 			<CreateContractModal
 				leadId={leadId}
 				open={isCreateModalOpen}
-				onOpenChange={setIsCreateModalOpen}
+				onOpenChange={handleCloseModal}
 				onSuccess={refetch}
 				preselectedOpportunityId={opportunityId}
+				contractToEdit={contractToEdit || undefined}
+				opportunityInfo={opportunityInfo}
 			/>
 		</div>
 	);

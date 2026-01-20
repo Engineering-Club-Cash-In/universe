@@ -126,3 +126,142 @@ export const formatCurrency = (amount: number | string) => {
 		currency: "GTQ",
 	}).format(Number(amount));
 };
+
+export const getLeadStatusBadgeColor = (status: string) => {
+	switch (status) {
+		case "new":
+			return "bg-blue-100 text-blue-800";
+		case "contacted":
+			return "bg-yellow-100 text-yellow-800";
+		case "qualified":
+			return "bg-green-100 text-green-800";
+		case "unqualified":
+			return "bg-red-100 text-red-800";
+		case "converted":
+			return "bg-purple-100 text-purple-800";
+		default:
+			return "bg-gray-100 text-gray-800";
+	}
+};
+
+export const getOpportunityStatusBadgeColor = (status: string) => {
+	switch (status) {
+		case "open":
+			return "bg-blue-100 text-blue-800";
+		case "won":
+			return "bg-green-100 text-green-800";
+		case "lost":
+			return "bg-red-100 text-red-800";
+		case "on_hold":
+			return "bg-yellow-100 text-yellow-800";
+		default:
+			return "bg-gray-100 text-gray-800";
+	}
+};
+
+export const getDocumentTypeLabel = (documentType: string): string => {
+	const labels: Record<string, string> = {
+		// Documentos de identificación y personales
+		dpi: "DPI",
+		licencia: "Licencia",
+		recibo_luz: "Recibo de luz",
+		recibo_adicional: "Recibo adicional",
+		formularios: "Formularios",
+		// Estados de cuenta
+		estados_cuenta_1: "Estado de cuenta mes 1",
+		estados_cuenta_2: "Estado de cuenta mes 2",
+		estados_cuenta_3: "Estado de cuenta mes 3",
+		// Documentos comerciales
+		patente_comercio: "Patente de comercio",
+		patente_mercantil: "Patente mercantil",
+		// Documentos empresariales (S.A.)
+		representacion_legal: "Representación Legal",
+		constitucion_sociedad: "Constitución de sociedad",
+		iva_1: "Formulario IVA mes 1",
+		iva_2: "Formulario IVA mes 2",
+		iva_3: "Formulario IVA mes 3",
+		estado_financiero: "Estado financiero",
+		clausula_consentimiento: "Cláusula de consentimiento",
+		minutas: "Minutas",
+		// Documentos de vehículos
+		tarjeta_circulacion: "Tarjeta de circulación",
+		titulo_propiedad: "Título de propiedad",
+		dpi_dueno: "DPI del dueño del vehículo",
+		patente_comercio_vehiculo: "Patente comercio (vehículo)",
+		representacion_legal_vehiculo: "Representación legal (vehículo)",
+		dpi_representante_legal_vehiculo: "DPI representante legal (vehículo)",
+		pago_impuesto_circulacion: "Pago impuesto de circulación",
+		consulta_sat: "Consulta SAT",
+		consulta_garantias_mobiliarias: "Consulta garantías mobiliarias",
+		// === Verificaciones de Cliente ===
+		usuario_sat_cliente: "Usuario de SAT (Cliente)",
+		rtu_cliente: "RTU (Cliente)",
+		omisos_incumplimientos_cliente: "Omisos e Incumplimientos (Cliente)",
+		infornet: "Infornet",
+		confirmacion_referencias: "Confirmación de Referencias",
+		visita_domiciliar: "Visita Domiciliar",
+		redes_sociales_internet: "Redes Sociales - Internet",
+		// === Verificaciones de Vehículo / Propietario ===
+		usuario_sat_propietario: "Usuario de SAT (Propietario)",
+		rtu_propietario: "RTU (Propietario)",
+		omisos_incumplimientos_propietario: "Omisos e Incumplimientos (Propietario)",
+		garantia_mobiliaria_sat: "Garantía Mobiliaria (SAT)",
+		garantia_mobiliaria_dpi: "Garantía Mobiliaria (DPI Propietario)",
+		garantia_mobiliaria_nit: "Garantía Mobiliaria (NIT Propietario)",
+		garantia_mobiliaria_serie: "Garantía Mobiliaria (SERIE)",
+		multas_vehiculo: "Multas del Vehículo",
+		// === Documentos Etapa 90% (Cierre) ===
+		seguro_vehiculo: "Seguro del Vehículo",
+		inscripcion_garantia_mobiliaria: "Inscripción Garantía Mobiliaria",
+		traspaso: "Traspaso",
+		documentos_firmados_vendedor: "Documentos Firmados por Vendedor",
+		copia_llave: "Copia de Llave",
+		confirmacion_enganche: "Confirmación de Enganche",
+		desembolso: "Desembolso",
+		// Legacy (para compatibilidad)
+		identification: "Identificación (DPI/Pasaporte)",
+		income_proof: "Comprobante de Ingresos",
+		bank_statement: "Estado de Cuenta Bancario",
+		business_license: "Patente de Comercio",
+		property_deed: "Escrituras de Propiedad",
+		vehicle_title: "Tarjeta de Circulación",
+		credit_report: "Reporte Crediticio",
+		detalle_analisis: "Detalle de Análisis",
+		other: "Otro",
+	};
+
+	if (labels[documentType]) {
+		return labels[documentType];
+	}
+
+	// Fallback: convertir snake_case a Title Case
+	return documentType
+		.split("_")
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+		.join(" ");
+};
+
+export const getContractTypeLabel = (contractType: string) => {
+	// Map for known contract types
+	const knownTypes: Record<string, string> = {
+		solicitud_compra_vehiculo_tercero: "Solicitud Compra Vehículo Tercero",
+		contrato_privado_uso_carro_usado: "Contrato Privado Uso Carro Usado",
+		contrato_privado_uso_carro_nuevo: "Contrato Privado Uso Carro Nuevo",
+		pagare: "Pagaré",
+		carta_notarial: "Carta Notarial",
+		contrato_compraventa: "Contrato Compraventa",
+		contrato_financiamiento: "Contrato Financiamiento",
+		contrato_prenda: "Contrato Prenda",
+	};
+
+	// Check if it's a known type
+	if (knownTypes[contractType]) {
+		return knownTypes[contractType];
+	}
+
+	// Otherwise, convert snake_case to Title Case
+	return contractType
+		.split("_")
+		.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+		.join(" ");
+};

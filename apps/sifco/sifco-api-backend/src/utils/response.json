@@ -1,0 +1,6645 @@
+{
+  "success": true,
+  "data": {
+    "totalCreditos": 824,
+    "coincidencias": 786,
+    "discrepancias": 38,
+    "detalleDiscrepancias": [
+      {
+        "numeroPrestamo": "01010214117370",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 77,
+        "cuotasPorCrear": 7
+      },
+      {
+        "numeroPrestamo": "01010214115220",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 11,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 58,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214116880",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 9,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214114750",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 56,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214114800",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 82,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214115700",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214113010",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 16,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 45,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214113000",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 16,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 45,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214112970",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 16,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 45,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214115710",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 58,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010411301780",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 0,
+        "fechaCuota": "2025-12-02",
+        "plazoCompleto": 12,
+        "plazoEncontrado": 30,
+        "cuotasPorCrear": -18
+      },
+      {
+        "numeroPrestamo": "01010214116980",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 9,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 82,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214115720",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214115860",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 81,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214115340",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 11,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 82,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214114730",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 57,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214121150",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 2,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 35,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214115330",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 11,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 52,
+        "cuotasPorCrear": 8
+      },
+      {
+        "numeroPrestamo": "01010214115730",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 58,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214120720",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": null,
+        "fechaCuota": null,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0,
+        "error": "No se encontró cuota para diciembre 2025"
+      },
+      {
+        "numeroPrestamo": "01010214116870",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 9,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214119370",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 3,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114710",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 58,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214118230",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 7,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214119730",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 1,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115740",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214117900",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 77,
+        "cuotasPorCrear": 7
+      },
+      {
+        "numeroPrestamo": "01010101001470",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 0,
+        "fechaCuota": "2026-01-15",
+        "plazoCompleto": 12,
+        "plazoEncontrado": 12,
+        "cuotasPorCrear": 0,
+        "error": "Se esperaba cuota 1 en enero 2026, se encontró cuota 0"
+      },
+      {
+        "numeroPrestamo": "01010214114780",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214111360",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": null,
+        "fechaCuota": null,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 1,
+        "cuotasPorCrear": 59,
+        "error": "No se encontró cuota para diciembre 2025"
+      },
+      {
+        "numeroPrestamo": "01010214115850",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 53,
+        "cuotasPorCrear": 7
+      },
+      {
+        "numeroPrestamo": "01010214114940",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 10,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114770",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214117460",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 8,
+        "fechaCuota": "2025-12-28",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 35,
+        "cuotasPorCrear": 25
+      },
+      {
+        "numeroPrestamo": "01010214114700",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 36,
+        "plazoEncontrado": 33,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214114720",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 12,
+        "fechaCuota": "2025-12-30",
+        "plazoCompleto": 60,
+        "plazoEncontrado": 57,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214118350",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 5,
+        "fechaCuota": "2025-12-15",
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111110",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 19,
+        "fechaCuota": "2025-12-07",
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      }
+    ],
+    "detalleCoincidencias": [
+      {
+        "numeroPrestamo": "01010214111550",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 47,
+        "cuotasPorCrear": 13
+      },
+      {
+        "numeroPrestamo": "01010214118310",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112480",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116440",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115100",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118340",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119300",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119720",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114530",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119780",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119860",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113660",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110990",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113740",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117300",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111460",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111540",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119650",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116200",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119670",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118770",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115110",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115590",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 79,
+        "cuotasPorCrear": 5
+      },
+      {
+        "numeroPrestamo": "01010214111190",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115640",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119880",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113680",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117110",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202115520",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111890",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117120",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115160",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118930",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116210",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118020",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119820",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115980",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 83,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214116160",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119060",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119710",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118950",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119870",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116240",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119410",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119760",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116330",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112510",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119920",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118720",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119290",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116000",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 81,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214113150",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117970",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118980",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116320",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117920",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111850",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112470",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111810",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 54,
+        "cuotasPorCrear": 6
+      },
+      {
+        "numeroPrestamo": "01010214115530",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115180",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114580",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113650",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119810",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116260",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115570",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116180",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111900",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202114470",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113670",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118990",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112460",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116070",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116150",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118270",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119030",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113600",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112420",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116920",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119230",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119840",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119260",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111840",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119280",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119220",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118750",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116380",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113160",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115540",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115560",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116220",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115580",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 56,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214116340",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202118850",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119830",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118880",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112490",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116010",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119800",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116270",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112360",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113120",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118250",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119380",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116130",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112350",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116120",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115620",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111860",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118280",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112450",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119320",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113730",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119630",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119680",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112390",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115970",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118900",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119620",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119250",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113710",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115200",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119180",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119740",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115630",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116110",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116300",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112440",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119960",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117930",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116770",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111490",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111380",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113610",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119330",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116100",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111880",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118210",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117950",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113700",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118290",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111350",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113690",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118970",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116370",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202119900",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202119900:2",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112850",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119770",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118860",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117080",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120260",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118710",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117150",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119790",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111870",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214113630",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111640",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119050",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117130",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111730",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120200",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117140",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202112880",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120140",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119640",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116020",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116190",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118890",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118150",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120350",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120360",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120370",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120380",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120390",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120450",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120410",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120420",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120430",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120440",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120460",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120470",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120480",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120490",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120500",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120510",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120520",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120530",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120580",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120550",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120560",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120570",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120590",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120600",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120610",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113270",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110380",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116280",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119530",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119610",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120300",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120310",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202118830",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116890",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120080",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114870",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111320",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112590",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119910",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114950",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109700",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115990",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119140",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115470",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120030",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115800",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114680",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115290",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110020",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114660",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119490",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111050",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118160",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202119470",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 30,
+        "cuotasPorCrear": 30
+      },
+      {
+        "numeroPrestamo": "01010214116690",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111170",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111610",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214111750",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114760",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110580",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 56,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214116530",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113220",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115940",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110400",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113510",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114970",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110720",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117440",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113800",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115400",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111980",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113490",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118190",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110120",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118680",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116550",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119500",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110450",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109990",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116090",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111010",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114930",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118430",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109840",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116390",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114010",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114650",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117260",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115410",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110670",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115840",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111130",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109870",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120220",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119980",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120020",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118040",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113450",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110260",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118080",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120290",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110240",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120160",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111630",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117720",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118540",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120090",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116680",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120150",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111020",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114670",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110820",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119570",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114020",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119100",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112380",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117220",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113970",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116850",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111970",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111340",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119540",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117190",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114690",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 83,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010202115000",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112060",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119990",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111780",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112600",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118170",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116910",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110270",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119940",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110410",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116730",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110600",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109960",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 33,
+        "cuotasPorCrear": 27
+      },
+      {
+        "numeroPrestamo": "01010214113480",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111000",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118420",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117390",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114040",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111040",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120010",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114380",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113440",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112130",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112770",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120280",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115360",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116840",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118650",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118380",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114080",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 57,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214115930",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115250",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110540",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114560",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115880",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110850",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110500",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202115010",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117790",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120000",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111820",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113520",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112120",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114070",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110430",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112030",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120050",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119270",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116720",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117240",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116650",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119560",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119580",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112830",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115830",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117510",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119970",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116660",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 57,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010214115770",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120330",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114060",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 46,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214119550",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116670",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118360",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113330",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115370",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110520",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110660",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119070",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120320",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113960",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111950",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118550",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111070",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116940",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110330",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118500",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118440",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119160",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116590",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115750",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 82,
+        "cuotasPorCrear": 2
+      },
+      {
+        "numeroPrestamo": "01010214115020",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118660",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110800",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112670",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111100",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111590",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117050",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117270",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113320",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118630",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116140",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119090",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118700",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117320",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113550",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110320",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120070",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113210",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119950",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118330",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117310",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112550",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119520",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116600",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202115450",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117860",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114830",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115420",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120060",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110690",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118570",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115950",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115280",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202114360",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112500",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115890",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116430",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111600",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119170",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109920",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110840",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115050",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114000",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116540",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116950",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111720",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120640",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120620",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202120630",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120650",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120660",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120670",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202120680",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120690",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120710",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120730",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120750",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120760",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120770",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120780",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120790",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120800",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120810",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120820",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120830",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120840",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120850",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120860",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120870",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120880",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120890",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120900",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120910",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120920",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120930",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119390",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110150",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110160",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114820",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118180",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116830",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112630",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112540",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112640",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116230",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119450",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109910",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119080",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120100",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114610",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111520",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112610",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114540",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120270",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113770",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120940",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120950",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120960",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120970",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120980",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120990",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 18,
+        "plazoEncontrado": 18,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121010",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121030",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202121050",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121170",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121180",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121190",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121200",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110280",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119460",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110730",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112760",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116620",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112180",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110070",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120340",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110640",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110360",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119150",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117760",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117250",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116350",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111650",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115170",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112720",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116520",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117330",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116780",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110010",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117280",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110710",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113350",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111930",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110140",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115190",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112050",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118580",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116250",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120210",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119930",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110530",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120110",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202112730",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118370",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115600",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116060",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115660",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118640",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112200",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116750",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114550",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119010",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116580",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121210",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121220",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121230",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121240",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121250",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121260",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121320",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121330",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121340",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121350",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121360",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121370",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111800",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109900",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 12
+      },
+      {
+        "numeroPrestamo": "01010214116930",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119240",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114400",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119510",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116360",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113560",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 56,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214112860",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117170",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119000",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111670",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119890",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110950",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113530",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115150",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118530",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119200",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111790",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120130",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113290",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111310",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113140",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112920",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119660",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112370",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214119020",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116080",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120240",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112690",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117000",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 82,
+        "plazoEncontrado": 82,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010407301690",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117070",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117090",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116970",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118140",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 40,
+        "plazoEncontrado": 40,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120230",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120120",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121380",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121390",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121400",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121410",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121420",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121430",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121440",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121450",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121460",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121470",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121480",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121490",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121500",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121510",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121520",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121530",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121540",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121550",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121560",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121570",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121580",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 41,
+        "plazoEncontrado": 41,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202112790",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116450",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118940",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116400",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118670",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202110040",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119110",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118870",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113930",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111280",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111240",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117740",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112700",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119340",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115650",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121590",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121600",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121610",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121620",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121630",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121640",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202121650",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121660",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121670",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121680",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121690",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121700",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121710",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118840",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113060",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113790",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110440",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118100",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117530",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121720",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121730",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121740",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121750",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121760",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121770",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214121780",
+        "cuotaEsperada": 1,
+        "cuotaEncontrada": 1,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115550",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119480",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116610",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111290",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118960",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119430",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202115090",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 49,
+        "cuotasPorCrear": 11
+      },
+      {
+        "numeroPrestamo": "01010214118220",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110480",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118070",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114420",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116760",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111560",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110700",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111940",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111180",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118050",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118400",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113590",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214120190",
+        "cuotaEsperada": 2,
+        "cuotaEncontrada": 2,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116700",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114590",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112220",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116290",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117430",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118060",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116990",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202111080",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 56,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214119120",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119130",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117160",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110770",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115460",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112820",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 80,
+        "cuotasPorCrear": 4
+      },
+      {
+        "numeroPrestamo": "01010214118690",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117480",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117500",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111530",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202118910",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110370",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116420",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110620",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113720",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118560",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119210",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119310",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119440",
+        "cuotaEsperada": 3,
+        "cuotaEncontrada": 3,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111990",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117230",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110050",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 59,
+        "cuotasPorCrear": 1
+      },
+      {
+        "numeroPrestamo": "01010214114390",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114840",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118520",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115480",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114960",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111910",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109690",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111030",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112780",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112710",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109680",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110590",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118510",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116410",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110090",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110550",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214119190",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202117350",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114480",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112410",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111330",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118760",
+        "cuotaEsperada": 4,
+        "cuotaEncontrada": 4,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116310",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118300",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113640",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115870",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111480",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115810",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114450",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110030",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202110610",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117870",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114890",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113170",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116640",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202115900",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117200",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115320",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110460",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117290",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115690",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115040",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110980",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112660",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117030",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113570",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118600",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111620",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110130",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112580",
+        "cuotaEsperada": 14,
+        "cuotaEncontrada": 14,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115510",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 24,
+        "plazoEncontrado": 24,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115210",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118260",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118390",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110180",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 40,
+        "plazoEncontrado": 40,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114410",
+        "cuotaEsperada": 12,
+        "cuotaEncontrada": 12,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112800",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118610",
+        "cuotaEsperada": 5,
+        "cuotaEncontrada": 5,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116560",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109770",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111230",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116500",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117340",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117180",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114920",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110780",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202110300",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 55,
+        "cuotasPorCrear": 5
+      },
+      {
+        "numeroPrestamo": "01010214111710",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110470",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110890",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 57,
+        "cuotasPorCrear": 3
+      },
+      {
+        "numeroPrestamo": "01010202114630",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214118200",
+        "cuotaEsperada": 6,
+        "cuotaEncontrada": 6,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116570",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 36,
+        "plazoEncontrado": 36,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109830",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114810",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117450",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115960",
+        "cuotaEsperada": 9,
+        "cuotaEncontrada": 9,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010202113400",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214117540",
+        "cuotaEsperada": 7,
+        "cuotaEncontrada": 7,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116710",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110960",
+        "cuotaEsperada": 17,
+        "cuotaEncontrada": 17,
+        "plazoCompleto": 48,
+        "plazoEncontrado": 48,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109740",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113430",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01030214130110",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214115380",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214112000",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116050",
+        "cuotaEsperada": 8,
+        "cuotaEncontrada": 8,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110650",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214116040",
+        "cuotaEsperada": 10,
+        "cuotaEncontrada": 10,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214114860",
+        "cuotaEsperada": 11,
+        "cuotaEncontrada": 11,
+        "plazoCompleto": 84,
+        "plazoEncontrado": 84,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214109800",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214113540",
+        "cuotaEsperada": 13,
+        "cuotaEncontrada": 13,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111920",
+        "cuotaEsperada": 15,
+        "cuotaEncontrada": 15,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214111580",
+        "cuotaEsperada": 16,
+        "cuotaEncontrada": 16,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110630",
+        "cuotaEsperada": 18,
+        "cuotaEncontrada": 18,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      },
+      {
+        "numeroPrestamo": "01010214110080",
+        "cuotaEsperada": 19,
+        "cuotaEncontrada": 19,
+        "plazoCompleto": 60,
+        "plazoEncontrado": 60,
+        "cuotasPorCrear": 0
+      }
+    ]
+  }
+}

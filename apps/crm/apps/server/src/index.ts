@@ -225,7 +225,7 @@ app.post("/api/upload-opportunity-document", async (c) => {
 		}
 
 		// Only admin and sales can upload documents
-		if (!["admin", "sales"].includes(userRole)) {
+		if (!["admin", "sales", "analyst"].includes(userRole)) {
 			return c.json({ error: "No tienes permiso para subir documentos" }, 403);
 		}
 

@@ -11,6 +11,7 @@ export async function createContext({ context }: CreateContextOptions) {
 	});
 	return {
 		session,
+		headers: context.req.raw.headers,
 	};
 }
 

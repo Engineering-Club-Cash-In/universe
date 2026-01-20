@@ -258,6 +258,35 @@ const requireJuridico = o.middleware(async ({ context, next }) => {
 	});
 });
 
+const requireTallerOrigin = o.middleware(async ({ context, next }) => {
+	const tallerUrl = process.env.TALLER_URL;
+
+	if (!tallerUrl) {
+		throw new ORPCError("INTERNAL_SERVER_ERROR", {
+			message: "TALLER_URL not configured",
+		});
+	}
+
+	const origin = context.headers.get("origin");
+	const referer = context.headers.get("referer");
+
+	// Verificar si la petición viene del taller
+	const isFromTaller =
+		origin === tallerUrl ||
+		referer?.startsWith(tallerUrl) ||
+		referer?.startsWith(`${tallerUrl}/`);
+
+	if (!isFromTaller) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "Access denied - Invalid origin",
+		});
+	}
+
+	return next({
+		context,
+	});
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
@@ -271,3 +300,4 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 	requireViewOpportunityContracts,
 );
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
+export const tallerProcedure = publicProcedure.use(requireTallerOrigin);

@@ -3106,6 +3106,17 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			value: "consulta_garantias_mobiliarias",
 			label: "Consulta garantías mobiliarias",
 		},
+		{
+			value: "datos_vehiculo_nuevo",
+			label: "Datos del vehículo nuevo",
+		},
+		{
+			value: "cotizacion_vehiculo_nuevo",
+			label: "Cotización del vehículo nuevo",
+		},
+		{
+			value: "enganche", label: "Comprobante de enganche",
+		},
 		// Otro
 		{ value: "other", label: "Otro" },
 	];

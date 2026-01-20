@@ -1029,8 +1029,9 @@ export const crmRouter = {
 			}
 
 			// Sales users can only update opportunities assigned to them
+			// Admin and sales_supervisor can update any opportunity
 			const whereClause =
-				context.userRole === "admin"
+				context.userRole === "admin" || context.userRole === "sales_supervisor"
 					? eq(opportunities.id, id)
 					: and(
 							eq(opportunities.id, id),

@@ -118,6 +118,10 @@ export const quotations = pgTable("quotations", {
 		precision: 12,
 		scale: 2,
 	}).default("0"), // Garantía mobiliaria
+	licensePlatesCost: decimal("license_plates_cost", {
+		precision: 12,
+		scale: 2,
+	}).default("0"), // Placas
 	leasingContractCost: decimal("leasing_contract_cost", {
 		precision: 12,
 		scale: 2,

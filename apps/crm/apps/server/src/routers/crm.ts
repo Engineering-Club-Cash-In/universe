@@ -228,7 +228,9 @@ export const crmRouter = {
 				.select({
 					id: leads.id,
 					firstName: leads.firstName,
+					middleName: leads.middleName,
 					lastName: leads.lastName,
+					secondLastName: leads.secondLastName,
 					email: leads.email,
 					phone: leads.phone,
 					age: leads.age,

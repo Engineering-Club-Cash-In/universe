@@ -2864,6 +2864,18 @@ export const crmRouter = {
 					)
 					.limit(1);
 				vehicleInspected = !!inspection;
+				if (!vehicleInspected) {
+						const [vehicle] = await db
+					.select()
+					.from(vehicles)
+					.where(eq(vehicles.id, opportunity.vehicleId))
+					.limit(1);
+
+					if (vehicle?.isNew) {
+						vehicleInspected = true;
+					}
+
+				}
 			}
 
 			// Recalculate vehicle section if exists

@@ -470,16 +470,36 @@ function ExtraCostsTable({
 				}
 			}
 		}
-		// También sincronizar extraInsuranceCost y extraMembershipCost cuando vienen del form
+		// Sincronizar valores del form con el estado local de la tabla
 		const extraInsurance =
 			Math.round((Number(values.extraInsuranceCost) || 0) * 100) / 100;
 		const extraMembership =
 			Math.round((Number(values.extraMembershipCost) || 0) * 100) / 100;
-		if (extraInsurance > 0 && localValues.extraInsurance === 0) {
+		const extraAdmin =
+			Math.round((Number(values.extraAdminCost) || 0) * 100) / 100;
+		const extraGps =
+			Math.round((Number(values.extraGpsCost) || 0) * 100) / 100;
+		const addressVerification =
+			Math.round((Number(values.addressVerificationCost) || 0) * 100) / 100;
+		const appointment =
+			Math.round((Number(values.appointmentCost) || 0) * 100) / 100;
+		if (localValues.extraInsurance !== extraInsurance) {
 			updates.extraInsurance = extraInsurance;
 		}
-		if (extraMembership > 0 && localValues.extraMembership === 0) {
+		if (localValues.extraMembership !== extraMembership) {
 			updates.extraMembership = extraMembership;
+		}
+		if (localValues.extraGps !== extraGps) {
+			updates.extraGps = extraGps;
+		}
+		if (localValues.extraAdmin !== extraAdmin) {
+			updates.extraAdmin = extraAdmin;
+		}
+		if (localValues.addressVerification !== addressVerification) {
+			updates.addressVerification = addressVerification;
+		}
+		if (localValues.appointment !== appointment) {
+			updates.appointment = appointment;
 		}
 
 		if (Object.keys(updates).length > 0) {
@@ -491,6 +511,10 @@ function ExtraCostsTable({
 		values.royaltyPercentage,
 		values.extraInsuranceCost,
 		values.extraMembershipCost,
+		values.extraAdminCost,
+		values.extraGpsCost,
+		values.addressVerificationCost,
+		values.appointmentCost,
 	]);
 
 	const isFieldActive = (field: ExtraCostFieldConfig) => {
@@ -841,7 +865,7 @@ function QuoterPage() {
 		defaultValues: {
 			opportunityId: "",
 			vehicleId: "",
-			creditType: "sobre_vehiculo" as "autocompra" | "sobre_vehiculo",
+			creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 			vehicleBrand: "",
 			vehicleLine: "",
 			vehicleModel: "",
@@ -953,6 +977,8 @@ function QuoterPage() {
 		quoterForm.state.values.interestRate,
 		quoterForm.state.values.termMonths,
 		quoterForm.state.values.royaltyPercentage,
+		quoterForm.state.values.insuredAmount,
+		quoterForm.state.values.vehicleType,
 	]);
 
 	// Obtener costo de seguro automáticamente
@@ -1306,11 +1332,25 @@ function QuoterPage() {
 												</Label>
 												<Select
 													value={field.state.value}
-													onValueChange={(value) =>
+													onValueChange={(value) => {
 														field.handleChange(
 															value as "autocompra" | "sobre_vehiculo",
-														)
-													}
+														);
+														// Actualizar campos específicos según tipo de crédito
+														if (value === "autocompra") {
+															quoterForm.setFieldValue(
+																"addressVerificationCost",
+																395,
+															);
+															quoterForm.setFieldValue("appointmentCost", 150);
+														} else {
+															quoterForm.setFieldValue(
+																"addressVerificationCost",
+																0,
+															);
+															quoterForm.setFieldValue("appointmentCost", 0);
+														}
+													}}
 													disabled={isDisabled}
 												>
 													<SelectTrigger>
@@ -1712,26 +1752,6 @@ function QuoterPage() {
 										)}
 									</quoterForm.Field>
 
-									<quoterForm.Field name="membershipCost">
-										{(field) => (
-											<div>
-												<Label htmlFor={field.name} className="mb-2">
-													Membresía
-												</Label>
-												<Input
-													id={field.name}
-													type="number"
-													step="0.01"
-													value={field.state.value || ""}
-													onChange={(e) => {
-														field.handleChange(Number(e.target.value) || 0);
-														recalculate();
-													}}
-													placeholder="251.53"
-												/>
-											</div>
-										)}
-									</quoterForm.Field>
 								</CardContent>
 							</Card>
 						</div>

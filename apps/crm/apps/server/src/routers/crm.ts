@@ -972,6 +972,42 @@ export const crmRouter = {
 					}
 				}
 
+				// Validaciones para vehículos nuevos en transiciones de stage
+				if (currentOpportunity[0].vehicleId && toPercentage >= 80) {
+					const vehicleForValidation = await db
+						.select({
+							isNew: vehicles.isNew,
+							vinNumber: vehicles.vinNumber,
+							licensePlate: vehicles.licensePlate,
+							origin: vehicles.origin,
+							fuelType: vehicles.fuelType,
+							transmission: vehicles.transmission,
+						})
+						.from(vehicles)
+						.where(eq(vehicles.id, currentOpportunity[0].vehicleId))
+						.limit(1);
+
+					if (vehicleForValidation[0]?.isNew) {
+						// Transición a 100%: Requerir datos completos
+						if (toPercentage === 80) {
+							const missingForContracts = getMissingFieldsForContracts(
+								vehicleForValidation[0],
+							);
+							if (missingForContracts.length > 0) {
+								throw new ORPCError("BAD_REQUEST", {
+									message: `Para avanzar a etapa 90% (contratos), el vehículo nuevo debe tener: ${formatMissingFields(missingForContracts)}`,
+								});
+							}
+							const missingFields = getMissingFields(vehicleForValidation[0]);
+							if (missingFields.length > 0) {
+								throw new ORPCError("BAD_REQUEST", {
+									message: `Para completar la oportunidad (100%), el vehículo nuevo debe tener datos completos. Faltan: ${formatMissingFields(missingFields)}`,
+								});
+							}
+						}
+					}
+				}
+
 				//  en este apartado ya nadie puede mover de 80 a 90 sin aprobacion de analista
 				// Validate document approval when moving from 80% to 90%
 				if (fromPercentage === 80 && toPercentage >= 90) {

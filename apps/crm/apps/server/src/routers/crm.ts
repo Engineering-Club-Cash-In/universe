@@ -1231,11 +1231,18 @@ export const crmRouter = {
 						color: vehicles.color,
 						isNew: vehicles.isNew,
 					},
+					stage: {
+						id: salesStages.id,
+						name: salesStages.name,
+						closurePercentage: salesStages.closurePercentage,
+						color: salesStages.color,
+					},
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
 				.where(eq(opportunities.stageId, analysisStage[0].id))
 				.orderBy(opportunities.createdAt);
 		},
@@ -3580,6 +3587,12 @@ export const crmRouter = {
 					vehicle: vehicle || null,
 					checklistProgress: progress,
 					hasChecklist: !!checklist,
+					stage: {
+						id: stage90.id,
+						name: stage90.name,
+						closurePercentage: stage90.closurePercentage,
+						color: stage90.color,
+					},
 				};
 			}),
 		);

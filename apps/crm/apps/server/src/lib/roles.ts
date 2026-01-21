@@ -42,7 +42,7 @@ export const ROLE_CONFIG = {
 	},
 	[ROLES.COBROS_SUPERVISOR]: {
 		label: "Supervisor de Cobros",
-		color: "bg-cyan-100 text-cyan-800",
+		color: "bg-orange-100 text-orange-800",
 		icon: "UserCheck" as const,
 	},
 	[ROLES.JURIDICO]: {

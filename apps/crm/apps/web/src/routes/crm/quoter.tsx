@@ -470,7 +470,7 @@ function ExtraCostsTable({
 				}
 			}
 		}
-		// Sincronizar valores del form con el estado local de la tabla
+		// Sincronizar valores del form con el estado local de la tabla (solo campos globales)
 		const extraInsurance =
 			Math.round((Number(values.extraInsuranceCost) || 0) * 100) / 100;
 		const extraMembership =
@@ -479,10 +479,6 @@ function ExtraCostsTable({
 			Math.round((Number(values.extraAdminCost) || 0) * 100) / 100;
 		const extraGps =
 			Math.round((Number(values.extraGpsCost) || 0) * 100) / 100;
-		const addressVerification =
-			Math.round((Number(values.addressVerificationCost) || 0) * 100) / 100;
-		const appointment =
-			Math.round((Number(values.appointmentCost) || 0) * 100) / 100;
 		if (localValues.extraInsurance !== extraInsurance) {
 			updates.extraInsurance = extraInsurance;
 		}
@@ -494,12 +490,6 @@ function ExtraCostsTable({
 		}
 		if (localValues.extraAdmin !== extraAdmin) {
 			updates.extraAdmin = extraAdmin;
-		}
-		if (localValues.addressVerification !== addressVerification) {
-			updates.addressVerification = addressVerification;
-		}
-		if (localValues.appointment !== appointment) {
-			updates.appointment = appointment;
 		}
 
 		if (Object.keys(updates).length > 0) {
@@ -513,8 +503,6 @@ function ExtraCostsTable({
 		values.extraMembershipCost,
 		values.extraAdminCost,
 		values.extraGpsCost,
-		values.addressVerificationCost,
-		values.appointmentCost,
 	]);
 
 	const isFieldActive = (field: ExtraCostFieldConfig) => {
@@ -1464,8 +1452,9 @@ function QuoterPage() {
 														field.handleChange(value as any);
 
 														// Actualizar seguro cuando cambia el tipo
+														// Usar getFieldValue para obtener el valor actual (no stale)
 														const insuredAmount =
-															quoterForm.state.values.insuredAmount;
+															quoterForm.getFieldValue("insuredAmount") ?? 0;
 														if (insuredAmount > 0) {
 															updateInsuranceCost(insuredAmount, value);
 														}
@@ -1765,14 +1754,19 @@ function QuoterPage() {
 								</CardDescription>
 							</CardHeader>
 							<CardContent>
-								<ExtraCostsTable
-									values={quoterForm.state.values as QuotationFormValues}
-									totalFinanced={calculatedValues.totalFinanced}
-									creditType={quoterForm.state.values.creditType}
-									onFieldChange={(field, value) =>
-										quoterForm.setFieldValue(field, value)
-									}
-								/>
+								<quoterForm.Field name="creditType">
+									{(creditTypeField) => (
+										<ExtraCostsTable
+											key={creditTypeField.state.value}
+											values={quoterForm.state.values as QuotationFormValues}
+											totalFinanced={calculatedValues.totalFinanced}
+											creditType={creditTypeField.state.value}
+											onFieldChange={(field, value) =>
+												quoterForm.setFieldValue(field, value)
+											}
+										/>
+									)}
+								</quoterForm.Field>
 							</CardContent>
 						</Card>
 
@@ -1872,25 +1866,27 @@ function QuoterPage() {
 												</TableRow>
 											</TableHeader>
 											<TableBody>
-												{amortizationTable.map((row) => (
-													<TableRow key={row.period}>
-														<TableCell className="font-medium">
-															{row.period}
-														</TableCell>
-														<TableCell className="text-right">
-															Q{row.initialBalance.toFixed(2)}
-														</TableCell>
-														<TableCell className="text-right">
-															Q{row.interestPlusVAT.toFixed(2)}
-														</TableCell>
-														<TableCell className="text-right">
-															Q{row.principal.toFixed(2)}
-														</TableCell>
-														<TableCell className="text-right">
-															Q{row.finalBalance.toFixed(2)}
-														</TableCell>
-													</TableRow>
-												))}
+												{amortizationTable
+													.filter((row) => row.period !== 0)
+													.map((row) => (
+														<TableRow key={row.period}>
+															<TableCell className="font-medium">
+																{row.period}
+															</TableCell>
+															<TableCell className="text-right">
+																Q{row.initialBalance.toFixed(2)}
+															</TableCell>
+															<TableCell className="text-right">
+																Q{row.interestPlusVAT.toFixed(2)}
+															</TableCell>
+															<TableCell className="text-right">
+																Q{row.principal.toFixed(2)}
+															</TableCell>
+															<TableCell className="text-right">
+																Q{row.finalBalance.toFixed(2)}
+															</TableCell>
+														</TableRow>
+													))}
 											</TableBody>
 										</Table>
 									</div>
@@ -2180,15 +2176,17 @@ function QuotationDetailDialog({
 									</TableRow>
 								</TableHeader>
 								<TableBody>
-									{quotation.amortizationTable?.map((row: any) => (
-										<TableRow key={row.period}>
-											<TableCell>{row.period}</TableCell>
-											<TableCell>Q{row.initialBalance.toFixed(2)}</TableCell>
-											<TableCell>Q{row.interestPlusVAT.toFixed(2)}</TableCell>
-											<TableCell>Q{row.principal.toFixed(2)}</TableCell>
-											<TableCell>Q{row.finalBalance.toFixed(2)}</TableCell>
-										</TableRow>
-									))}
+									{quotation.amortizationTable
+										?.filter((row: any) => row.period !== 0)
+										.map((row: any) => (
+											<TableRow key={row.period}>
+												<TableCell>{row.period}</TableCell>
+												<TableCell>Q{row.initialBalance.toFixed(2)}</TableCell>
+												<TableCell>Q{row.interestPlusVAT.toFixed(2)}</TableCell>
+												<TableCell>Q{row.principal.toFixed(2)}</TableCell>
+												<TableCell>Q{row.finalBalance.toFixed(2)}</TableCell>
+											</TableRow>
+										))}
 								</TableBody>
 							</Table>
 						</div>

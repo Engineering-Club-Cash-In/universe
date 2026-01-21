@@ -155,13 +155,15 @@ export function generateQuotationPdf(quotation: QuotationData) {
 				"Saldo final",
 			],
 		],
-		body: quotation.amortizationTable.map((row) => [
-			row.period,
-			formatCurrency(row.initialBalance),
-			formatCurrency(row.interestPlusVAT),
-			formatCurrency(row.principal),
-			formatCurrency(row.finalBalance),
-		]),
+		body: quotation.amortizationTable
+			.filter((row) => row.period !== 0)
+			.map((row) => [
+				row.period,
+				formatCurrency(row.initialBalance),
+				formatCurrency(row.interestPlusVAT),
+				formatCurrency(row.principal),
+				formatCurrency(row.finalBalance),
+			]),
 		headStyles: { fillColor: [22, 160, 133] },
 		styles: { halign: "right", fontSize: 9 },
 		columnStyles: { 0: { halign: "center" } },

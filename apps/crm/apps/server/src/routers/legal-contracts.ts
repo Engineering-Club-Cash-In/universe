@@ -18,6 +18,7 @@ import {
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import { checkDocumensoSigningStatus } from "../services/documenso-signing";
+import { closeOpportunity } from "@/services/close-opportunity";
 
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
@@ -643,6 +644,19 @@ export const legalContractsRouter = {
 						"Debe haber al menos un contrato asociado a la oportunidad para aprobarla",
 				});
 			}
+
+			// Close the opportunity (create credit, client, contract)
+			const closeResult = await closeOpportunity({
+				opportunityId: input.opportunityId,
+				userId: context.userId,
+			});
+
+			if (!closeResult.success) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: closeResult.error || "Error al cerrar la oportunidad",
+				});
+			}
+			
 
 			// Obtener la etapa del 90%
 			const [targetStage] = await db

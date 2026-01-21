@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import {
 	LeadDetailModal,
 	type LeadForModal,
@@ -67,6 +68,11 @@ function RouteComponent() {
 	} = useJuridicoPermissions();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [opportunitiesSearchQuery, setOpportunitiesSearchQuery] = useState("");
+	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
+	const [opportunityToApprove, setOpportunityToApprove] = useState<{
+		id: string;
+		title: string;
+	} | null>(null);
 
 	// Mutación para aprobar oportunidad (mover a 90%)
 	const approveMutation = useMutation({
@@ -480,18 +486,17 @@ function RouteComponent() {
 																	<DropdownMenuItem
 																		onClick={(e) => {
 																			e.stopPropagation();
-																			approveMutation.mutate(opp.id);
-																		}}
-																		disabled={
-																			approveMutation.isPending ||
-																			opp.contractCount === 0
-																		}
-																		className="cursor-pointer"
-																	>
-																		<CheckCircle className="mr-2 h-4 w-4" />
-																		{approveMutation.isPending
-																			? "Aprobando..."
-																			: "Aprobar (→90%)"}
+																		setOpportunityToApprove({
+																			id: opp.id,
+																			title: opp.title,
+																		});
+																		setIsApproveModalOpen(true);
+																	}}
+																	disabled={opp.contractCount === 0}
+																	className="cursor-pointer"
+																>
+																	<CheckCircle className="mr-2 h-4 w-4" />
+																	Aprobar (→ 90%)
 																	</DropdownMenuItem>
 																)}
 														</DropdownMenuContent>
@@ -655,6 +660,21 @@ function RouteComponent() {
 				opportunity={selectedOpportunity}
 				userRole="juridico"
 				readOnly
+			/>
+
+			{/* Modal de confirmación para aprobar */}
+			<ApproveOpportunityModal
+				open={isApproveModalOpen}
+				onOpenChange={setIsApproveModalOpen}
+				onConfirm={() => {
+					if (opportunityToApprove) {
+						approveMutation.mutate(opportunityToApprove.id);
+						setIsApproveModalOpen(false);
+						setOpportunityToApprove(null);
+					}
+				}}
+				isLoading={approveMutation.isPending}
+				opportunityTitle={opportunityToApprove?.title}
 			/>
 		</div>
 	);

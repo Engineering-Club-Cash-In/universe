@@ -281,7 +281,7 @@ function RouteComponent() {
 			</div>
 
 			{/* Estadísticas Generales */}
-			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">
@@ -341,6 +341,26 @@ function RouteComponent() {
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Suma de todos los montos en mora
+						</p>
+					</CardContent>
+				</Card>
+
+				<Card>
+					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+						<CardTitle className="font-medium text-sm">
+							Suma Total de Capital
+						</CardTitle>
+						<Banknote className="h-4 w-4 text-muted-foreground" />
+					</CardHeader>
+					<CardContent>
+						<div className="font-bold text-2xl">
+							Q
+							{stats
+								.reduce((sum, s) => sum + Number(s.sumaCapital || 0), 0)
+								.toLocaleString()}
+						</div>
+						<p className="text-muted-foreground text-xs">
+							Suma de todos los capitales
 						</p>
 					</CardContent>
 				</Card>

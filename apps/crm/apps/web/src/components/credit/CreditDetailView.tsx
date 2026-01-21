@@ -809,10 +809,11 @@ export function CreditDetailView({
 	return (
 		<div className="space-y-6">
 			<Tabs defaultValue="interno" className="w-full">
-				<TabsList className="grid w-full grid-cols-3">
+				<TabsList className="grid w-full grid-cols-4">
 					<TabsTrigger value="interno">Detalle Vehículo (Interno)</TabsTrigger>
 					<TabsTrigger value="cliente">Detalle Cliente</TabsTrigger>
 					<TabsTrigger value="cheques">Emisión de Cheques</TabsTrigger>
+					<TabsTrigger value="cotizacion">Cotización</TabsTrigger>
 				</TabsList>
 
 				{/* TAB 1: Detalle Vehículo (Interno) */}
@@ -2588,6 +2589,455 @@ export function CreditDetailView({
 												)}
 											</p>
 										</div>
+									)}
+								</div>
+							)}
+						</CardContent>
+					</Card>
+				</TabsContent>
+
+				{/* TAB 4: Cotización */}
+				<TabsContent value="cotizacion" className="mt-4 space-y-4">
+					<Card>
+						<CardHeader className="pb-3">
+							<CardTitle className="flex items-center gap-2 text-lg">
+								<Calculator className="h-5 w-5" />
+								Cotización
+							</CardTitle>
+							<CardDescription>
+								Detalles de la cotización asociada a esta oportunidad
+							</CardDescription>
+						</CardHeader>
+						<CardContent className="space-y-6">
+							{!quotation ? (
+								<div className="rounded-lg border border-dashed p-8 text-center">
+									<Calculator className="mx-auto h-12 w-12 text-muted-foreground" />
+									<h3 className="mt-4 font-semibold text-lg">
+										Sin cotización
+									</h3>
+									<p className="mt-2 text-muted-foreground text-sm">
+										Esta oportunidad no tiene una cotización asociada.
+									</p>
+								</div>
+							) : (
+								<div className="space-y-6">
+									{/* Estado y Fechas */}
+									<div className="flex items-center justify-between">
+										<div className="flex items-center gap-3">
+											<Badge
+												variant={
+													quotation.status === "accepted"
+														? "default"
+														: quotation.status === "sent"
+															? "secondary"
+															: quotation.status === "rejected"
+																? "destructive"
+																: "outline"
+												}
+											>
+												{quotation.status === "accepted"
+													? "Aceptada"
+													: quotation.status === "sent"
+														? "Enviada"
+														: quotation.status === "rejected"
+															? "Rechazada"
+															: "Borrador"}
+											</Badge>
+										</div>
+										<div className="text-muted-foreground text-sm">
+											Creada: {formatDate(quotation.createdAt)}
+										</div>
+									</div>
+
+									<Separator />
+
+									{/* Información del Vehículo */}
+									<div>
+										<h4 className="mb-3 flex items-center gap-2 font-semibold">
+											<Car className="h-4 w-4" />
+											Vehículo
+										</h4>
+										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Marca
+												</Label>
+												<p className="font-medium">
+													{quotation.vehicleBrand || "-"}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Línea
+												</Label>
+												<p className="font-medium">
+													{quotation.vehicleLine || "-"}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Modelo
+												</Label>
+												<p className="font-medium">
+													{quotation.vehicleModel || "-"}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Tipo
+												</Label>
+												<p className="font-medium">
+													{vehicleTypeLabels[quotation.vehicleType] ||
+														quotation.vehicleType}
+												</p>
+											</div>
+										</div>
+									</div>
+
+									<Separator />
+
+									{/* Términos del Crédito */}
+									<div>
+										<h4 className="mb-3 flex items-center gap-2 font-semibold">
+											<Banknote className="h-4 w-4" />
+											Términos del Crédito
+										</h4>
+										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Valor del Vehículo
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.vehicleValue)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Monto Asegurado
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.insuredAmount)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Enganche
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.downPayment)} (
+													{formatPercent(quotation.downPaymentPercentage)})
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Plazo
+												</Label>
+												<p className="font-medium">
+													{quotation.termMonths} meses
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Tasa de Interés
+												</Label>
+												<p className="font-medium">
+													{formatPercent(quotation.interestRate)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Monto a Financiar
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.amountToFinance)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Total Financiado
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.totalFinanced)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Cuota Mensual
+												</Label>
+												<p className="font-bold text-primary">
+													{formatCurrency(quotation.monthlyPayment)}
+												</p>
+											</div>
+										</div>
+									</div>
+
+									<Separator />
+
+									{/* Costos y Gastos */}
+									<div>
+										<h4 className="mb-3 flex items-center gap-2 font-semibold">
+											<Percent className="h-4 w-4" />
+											Costos del Financiamiento
+										</h4>
+										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Seguro
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.insuranceCost)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													GPS
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.gpsCost)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Traspaso
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.transferCost)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Gastos Administrativos
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.adminCost)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Membresía
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.membershipCost)}
+												</p>
+											</div>
+										</div>
+									</div>
+
+									{/* Otros Gastos (si existen) */}
+									{(quotation.freelanceCost ||
+										quotation.royalty ||
+										quotation.inspectionCost ||
+										quotation.finesCost ||
+										quotation.keyCopyCost ||
+										quotation.circulationTaxCost ||
+										quotation.legalCost) && (
+										<>
+											<Separator />
+											<div>
+												<h4 className="mb-3 flex items-center gap-2 font-semibold">
+													<FileText className="h-4 w-4" />
+													Otros Gastos
+												</h4>
+												<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+													{quotation.freelanceCost &&
+														Number.parseFloat(quotation.freelanceCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Freelance
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.freelanceCost)}
+																</p>
+															</div>
+														)}
+													{quotation.royalty &&
+														Number.parseFloat(quotation.royalty) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Royalty{" "}
+																	{quotation.royaltyPercentage &&
+																		`(${formatPercent(quotation.royaltyPercentage)})`}
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.royalty)}
+																</p>
+															</div>
+														)}
+													{quotation.inspectionCost &&
+														Number.parseFloat(quotation.inspectionCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Inspección
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.inspectionCost)}
+																</p>
+															</div>
+														)}
+													{quotation.finesCost &&
+														Number.parseFloat(quotation.finesCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Multas
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.finesCost)}
+																</p>
+															</div>
+														)}
+													{quotation.keyCopyCost &&
+														Number.parseFloat(quotation.keyCopyCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Copia de Llave
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.keyCopyCost)}
+																</p>
+															</div>
+														)}
+													{quotation.circulationTaxCost &&
+														Number.parseFloat(quotation.circulationTaxCost) >
+															0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Impuesto de Circulación
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.circulationTaxCost)}
+																</p>
+															</div>
+														)}
+													{quotation.legalCost &&
+														Number.parseFloat(quotation.legalCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Gastos Legales
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.legalCost)}
+																</p>
+															</div>
+														)}
+													{quotation.appointmentCost &&
+														Number.parseFloat(quotation.appointmentCost) >
+															0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Nombramiento
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.appointmentCost)}
+																</p>
+															</div>
+														)}
+													{quotation.addressVerificationCost &&
+														Number.parseFloat(
+															quotation.addressVerificationCost,
+														) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Verificación de Dirección
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(
+																		quotation.addressVerificationCost,
+																	)}
+																</p>
+															</div>
+														)}
+												</div>
+											</div>
+										</>
+									)}
+
+									{/* Descuentos Iniciales (si existen) */}
+									{(quotation.extraGpsCost ||
+										quotation.extraInsuranceCost ||
+										quotation.extraMembershipCost ||
+										quotation.extraAdminCost ||
+										quotation.interestCost) && (
+										<>
+											<Separator />
+											<div>
+												<h4 className="mb-3 flex items-center gap-2 font-semibold">
+													<Banknote className="h-4 w-4" />
+													Descuentos Iniciales
+												</h4>
+												<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+													{quotation.extraGpsCost &&
+														Number.parseFloat(quotation.extraGpsCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	GPS (Inicial)
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.extraGpsCost)}
+																</p>
+															</div>
+														)}
+													{quotation.extraInsuranceCost &&
+														Number.parseFloat(quotation.extraInsuranceCost) >
+															0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Seguro (Inicial)
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.extraInsuranceCost)}
+																</p>
+															</div>
+														)}
+													{quotation.extraMembershipCost &&
+														Number.parseFloat(quotation.extraMembershipCost) >
+															0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Membresía (Inicial)
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.extraMembershipCost)}
+																</p>
+															</div>
+														)}
+													{quotation.extraAdminCost &&
+														Number.parseFloat(quotation.extraAdminCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Gastos Admin (Inicial)
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.extraAdminCost)}
+																</p>
+															</div>
+														)}
+													{quotation.interestCost &&
+														Number.parseFloat(quotation.interestCost) > 0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Interés (Inicial)
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.interestCost)}
+																</p>
+															</div>
+														)}
+												</div>
+											</div>
+										</>
+									)}
+
+									{/* Notas */}
+									{quotation.notes && (
+										<>
+											<Separator />
+											<div>
+												<h4 className="mb-3 font-semibold">Notas</h4>
+												<p className="text-muted-foreground text-sm">
+													{quotation.notes}
+												</p>
+											</div>
+										</>
 									)}
 								</div>
 							)}

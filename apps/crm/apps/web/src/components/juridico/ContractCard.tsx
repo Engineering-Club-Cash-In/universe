@@ -94,20 +94,20 @@ export function ContractCard({
 
 	return (
 		<Card className="overflow-hidden">
-			<CardHeader className="bg-linear-to-r  to-white ">
+			<CardHeader className="bg-linear-to-r to-white">
 				<div className="flex items-start justify-between gap-3">
-					<div className="flex items-start gap-3 flex-1">
-						<div className="mt-1 flex h-10 w-10 items-center justify-center rounded-lg  shrink-0">
+					<div className="flex flex-1 items-start gap-3">
+						<div className="mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg">
 							<FileText className="h-5 w-5 text-amber-600" />
 						</div>
-						<div className="flex-1 min-w-0">
+						<div className="min-w-0 flex-1">
 							<CardTitle className="text-lg">{contract.contractName}</CardTitle>
 							<CardDescription className="mt-1">
 								{formattedDate}
 							</CardDescription>
 						</div>
 					</div>
-					<div className="flex items-center gap-2 shrink-0">
+					<div className="flex shrink-0 items-center gap-2">
 						<Badge
 							variant="outline"
 							className={statusConfig[contract.status].color}
@@ -129,7 +129,7 @@ export function ContractCard({
 				</div>
 			</CardHeader>
 
-			<CardContent className="space-y-4 ">
+			<CardContent className="space-y-4">
 				{/* Tipo de contrato */}
 				<div>
 					<p className="font-medium text-muted-foreground text-sm">
@@ -146,14 +146,14 @@ export function ContractCard({
 					(contract.additionalSigningLinks &&
 						contract.additionalSigningLinks.length > 0)) && (
 					<div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-						<p className="font-medium text-xs text-muted-foreground">
+						<p className="font-medium text-muted-foreground text-xs">
 							Enlaces de firma
 						</p>
 
 						{/* Link del cliente */}
 						{contract.clientSigningLink && (
-							<div className="flex items-center justify-between gap-2 rounded border-blue-500 border-l-2 bg-blue-50/50 py-1.5 px-2">
-								<p className="font-medium text-blue-900 text-xs shrink-0">
+							<div className="flex items-center justify-between gap-2 rounded border-blue-500 border-l-2 bg-blue-50/50 px-2 py-1.5">
+								<p className="shrink-0 font-medium text-blue-900 text-xs">
 									👤 Cliente
 								</p>
 								<div className="flex gap-1">
@@ -184,8 +184,8 @@ export function ContractCard({
 
 						{/* Link del representante */}
 						{contract.representativeSigningLink && (
-							<div className="flex items-center justify-between gap-2 rounded border-green-500 border-l-2 bg-green-50/50 py-1.5 px-2">
-								<p className="font-medium text-green-900 text-xs shrink-0">
+							<div className="flex items-center justify-between gap-2 rounded border-green-500 border-l-2 bg-green-50/50 px-2 py-1.5">
+								<p className="shrink-0 font-medium text-green-900 text-xs">
 									🏢 Representante
 								</p>
 								<div className="flex gap-1">
@@ -222,9 +222,9 @@ export function ContractCard({
 							contract.additionalSigningLinks.map((link, index) => (
 								<div
 									key={index}
-									className="flex items-center justify-between gap-2 rounded border-purple-500 border-l-2 bg-purple-50/50 py-1.5 px-2"
+									className="flex items-center justify-between gap-2 rounded border-purple-500 border-l-2 bg-purple-50/50 px-2 py-1.5"
 								>
-									<p className="font-medium text-purple-900 text-xs shrink-0">
+									<p className="shrink-0 font-medium text-purple-900 text-xs">
 										👥 Adicional {index + 1}
 									</p>
 									<div className="flex gap-1">

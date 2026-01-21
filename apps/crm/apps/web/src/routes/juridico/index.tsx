@@ -93,15 +93,13 @@ function RouteComponent() {
 	const [isLeadModalOpen, setIsLeadModalOpen] = useState(false);
 
 	// Obtener oportunidades listas para contratos (90%+)
-	const { data: leadsWithContracts, isLoading} =
-		useQuery({
-			...orpc.getOpportunitiesForContracts.queryOptions({
-				input: { closurePercentages: [90, 100] },
-			}),
+	const { data: leadsWithContracts, isLoading } = useQuery({
+		...orpc.getOpportunitiesForContracts.queryOptions({
+			input: { closurePercentages: [90, 100] },
+		}),
 
-			enabled: canViewLegal,
-		});
-
+		enabled: canViewLegal,
+	});
 
 	// Obtener oportunidades listas para contratos (80%+)
 	const { data: opportunitiesForContracts, isLoading: isLoadingOpportunities } =
@@ -151,11 +149,10 @@ function RouteComponent() {
 	);
 
 	// Find opportunity data from the list
-	const selectedOpportunityData = opportunitiesForContracts?.find(
-		(opp) => opp.id === selectedOpportunityId,
-	) || leadsWithContracts?.find(
-		(lead) => lead.id === selectedOpportunityId,
-	)
+	const selectedOpportunityData =
+		opportunitiesForContracts?.find(
+			(opp) => opp.id === selectedOpportunityId,
+		) || leadsWithContracts?.find((lead) => lead.id === selectedOpportunityId);
 
 	// Transform opportunity data for modal
 	const selectedOpportunity: OpportunityForModal | null =
@@ -354,7 +351,7 @@ function RouteComponent() {
 
 							{/* Barra de búsqueda */}
 							<div className="relative">
-								<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+								<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 								<Input
 									placeholder="Buscar por título, nombre o DPI..."
 									value={opportunitiesSearchQuery}
@@ -534,7 +531,7 @@ function RouteComponent() {
 
 							{/* Barra de búsqueda */}
 							<div className="relative">
-								<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
+								<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 								<Input
 									placeholder="Buscar por nombre, DPI o email..."
 									value={searchQuery}
@@ -565,8 +562,11 @@ function RouteComponent() {
 											<TableRow
 												key={lead.id}
 												className="cursor-pointer hover:bg-muted/50"
-												
-												onClick={() => navigate({ to: `/juridico/${lead.lead.id}?opportunityId=${lead.id}`, })}
+												onClick={() =>
+													navigate({
+														to: `/juridico/${lead.lead.id}?opportunityId=${lead.id}`,
+													})
+												}
 											>
 												<TableCell>
 													<button

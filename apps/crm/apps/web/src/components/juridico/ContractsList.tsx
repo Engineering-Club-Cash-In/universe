@@ -29,7 +29,11 @@ interface ContractsListProps {
 	onEdit?: (contract: Contract, opportunity?: Opportunity | null) => void;
 }
 
-export function ContractsList({ contracts, onUpdate, onEdit }: ContractsListProps) {
+export function ContractsList({
+	contracts,
+	onUpdate,
+	onEdit,
+}: ContractsListProps) {
 	if (contracts.length === 0) {
 		return (
 			<div className="flex flex-col items-center justify-center rounded-lg border border-gray-300 border-dashed py-12 text-center">

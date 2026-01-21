@@ -273,8 +273,14 @@ const requireTallerOrigin = o.middleware(async ({ context, next }) => {
 
 	// Verificar si la petición viene del taller o del front del CRM
 	const isFromTaller =
-		(tallerUrl && (origin === tallerUrl || referer?.startsWith(tallerUrl) || referer?.startsWith(`${tallerUrl}/`))) ||
-		(frontUrl && (origin === frontUrl || referer?.startsWith(frontUrl) || referer?.startsWith(`${frontUrl}/`)));
+		(tallerUrl &&
+			(origin === tallerUrl ||
+				referer?.startsWith(tallerUrl) ||
+				referer?.startsWith(`${tallerUrl}/`))) ||
+		(frontUrl &&
+			(origin === frontUrl ||
+				referer?.startsWith(frontUrl) ||
+				referer?.startsWith(`${frontUrl}/`)));
 
 	if (!isFromTaller) {
 		throw new ORPCError("FORBIDDEN", {

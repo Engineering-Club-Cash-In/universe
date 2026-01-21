@@ -261,11 +261,11 @@ function RouteComponent() {
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-						<ContractsList
-							contracts={contracts || []}
-							onUpdate={refetch}
-							onEdit={canCreateLegal ? handleEdit : undefined}
-						/>
+					<ContractsList
+						contracts={contracts || []}
+						onUpdate={refetch}
+						onEdit={canCreateLegal ? handleEdit : undefined}
+					/>
 				</CardContent>
 			</Card>
 

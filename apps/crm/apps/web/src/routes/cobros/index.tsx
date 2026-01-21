@@ -281,7 +281,7 @@ function RouteComponent() {
 			</div>
 
 			{/* Estadísticas Generales */}
-			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
+			<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
 				<Card>
 					<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 						<CardTitle className="font-medium text-sm">

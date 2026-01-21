@@ -251,7 +251,14 @@ function AnalysisPage() {
 						phone: opportunity.lead.phone,
 					}
 				: null,
-			stage: null,
+			stage: opportunity.stage?.id
+				? {
+						id: opportunity.stage.id,
+						name: opportunity.stage.name,
+						closurePercentage: opportunity.stage.closurePercentage,
+						color: opportunity.stage.color,
+					}
+				: null,
 			assignedUser: null,
 			vehicle: opportunity.vehicle
 				? {
@@ -640,7 +647,14 @@ function DisbursementSection() {
 						phone: opp.leadPhone,
 					}
 				: null,
-			stage: null,
+			stage: opp.stage?.id
+				? {
+						id: opp.stage.id,
+						name: opp.stage.name,
+						closurePercentage: opp.stage.closurePercentage,
+						color: opp.stage.color,
+					}
+				: null,
 			assignedUser: null,
 			vehicle: opp.vehicle
 				? {

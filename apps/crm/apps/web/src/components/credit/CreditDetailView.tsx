@@ -184,6 +184,17 @@ const formatDate = (date: Date | string): string => {
 	});
 };
 
+// Labels para tipo de vehículo
+const vehicleTypeLabels: Record<string, string> = {
+	particular: "Particular",
+	uber: "UBER",
+	pickup: "Pick Up",
+	nuevo: "Nuevo",
+	panel: "Panel",
+	camion: "Camión",
+	microbus: "Microbus",
+};
+
 export function CreditDetailView({
 	opportunityId,
 	userRole,
@@ -583,6 +594,13 @@ export function CreditDetailView({
 	// Verificar si el usuario puede aprobar
 	const canApprove = userRole === "admin" || userRole === "sales_supervisor";
 
+	// Verificar si el usuario puede editar (ventas, análisis, admin - NO jurídico)
+	const canEdit =
+		userRole === "admin" ||
+		userRole === "sales" ||
+		userRole === "sales_supervisor" ||
+		userRole === "analyst";
+
 	// Formulario para agregar cheque
 	const checkForm = useForm({
 		defaultValues: {
@@ -846,14 +864,16 @@ export function CreditDetailView({
 													</Button>
 												</>
 											) : (
-												<Button
-													size="sm"
-													variant="outline"
-													onClick={() => setIsEditing(true)}
-												>
-													<Edit2 className="mr-1 h-3 w-3" />
-													Editar
-												</Button>
+												canEdit && (
+													<Button
+														size="sm"
+														variant="outline"
+														onClick={() => setIsEditing(true)}
+													>
+														<Edit2 className="mr-1 h-3 w-3" />
+														Editar
+													</Button>
+												)
 											)}
 											{canApprove && !isEditing && (
 												<Button
@@ -1038,7 +1058,10 @@ export function CreditDetailView({
 											Valor de Mercado
 										</Label>
 										<p className="font-medium">
-											{formatCurrency(vehicleInspection?.marketValue)}
+											{formatCurrency(
+												vehicleInspection?.marketValue ||
+													quotation?.vehicleValue,
+											)}
 										</p>
 									</div>
 									<div>
@@ -1047,7 +1070,8 @@ export function CreditDetailView({
 										</Label>
 										<p className="font-medium">
 											{formatCurrency(
-												vehicleInspection?.suggestedCommercialValue,
+												vehicleInspection?.suggestedCommercialValue ||
+													quotation?.vehicleValue,
 											)}
 										</p>
 									</div>
@@ -1056,15 +1080,9 @@ export function CreditDetailView({
 											Valor Bancario
 										</Label>
 										<p className="font-medium">
-											{formatCurrency(vehicleInspection?.bankValue)}
-										</p>
-									</div>
-									<div>
-										<Label className="text-muted-foreground text-xs">
-											Capacidad de Pago
-										</Label>
-										<p className="font-medium">
-											{formatCurrency(creditAnalysis?.adjustedPayment)}
+											{formatCurrency(
+												vehicleInspection?.bankValue || quotation?.vehicleValue,
+											)}
 										</p>
 									</div>
 								</div>
@@ -1115,6 +1133,22 @@ export function CreditDetailView({
 										</Label>
 										<p className="font-medium">
 											{formatCurrency(quotation?.monthlyPayment)}
+										</p>
+									</div>
+									<div>
+										<Label className="text-muted-foreground text-xs">
+											Capacidad de Pago Mínima
+										</Label>
+										<p className="font-medium">
+											{formatCurrency(creditAnalysis?.minPayment)}
+										</p>
+									</div>
+									<div>
+										<Label className="text-muted-foreground text-xs">
+											Capacidad de Pago Máxima
+										</Label>
+										<p className="font-medium">
+											{formatCurrency(creditAnalysis?.maxPayment)}
 										</p>
 									</div>
 								</div>
@@ -1852,50 +1886,77 @@ export function CreditDetailView({
 								<div className="rounded-lg border bg-muted/30 p-4">
 									<Table>
 										<TableBody>
+											{/* Sección: Vehículo */}
 											<TableRow>
-												<TableCell className="font-medium">
-													{quotation?.vehicleType || "Vehículo"}
+												<TableCell className="font-bold text-primary">
+													{quotation?.vehicleType
+														? vehicleTypeLabels[quotation.vehicleType] ||
+															quotation.vehicleType
+														: "Vehículo"}
 												</TableCell>
 												<TableCell />
 											</TableRow>
 											<TableRow>
 												<TableCell>Valor Mercado</TableCell>
 												<TableCell className="text-right">
-													{formatCurrency(vehicleInspection?.marketValue)}
+													{formatCurrency(
+														vehicleInspection?.marketValue ||
+															quotation?.vehicleValue,
+													)}
 												</TableCell>
 											</TableRow>
 											<TableRow>
 												<TableCell>Valor Comercial</TableCell>
 												<TableCell className="text-right">
 													{formatCurrency(
-														vehicleInspection?.suggestedCommercialValue,
+														vehicleInspection?.suggestedCommercialValue ||
+															quotation?.vehicleValue,
 													)}
 												</TableCell>
 											</TableRow>
 											<TableRow>
 												<TableCell>Valor Bancario</TableCell>
 												<TableCell className="text-right">
-													{formatCurrency(vehicleInspection?.bankValue)}
+													{formatCurrency(
+														vehicleInspection?.bankValue ||
+															quotation?.vehicleValue,
+													)}
 												</TableCell>
 											</TableRow>
 											<TableRow>
-												<TableCell className="h-2" />
-												<TableCell />
-											</TableRow>
-											<TableRow>
-												<TableCell>Capacidad de Pago</TableCell>
-												<TableCell className="text-right">
-													{formatCurrency(creditAnalysis?.adjustedPayment)}
-												</TableCell>
-											</TableRow>
-											<TableRow>
-												<TableCell>Procedencia del vehículo</TableCell>
+												<TableCell>Procedencia</TableCell>
 												<TableCell className="text-right font-medium">
 													{vehiculo?.origin || "N/A"}
 												</TableCell>
 											</TableRow>
+											{/* Sección: Capacidad de Pago */}
 											<TableRow>
-												<TableCell>Edad solicitante(s)</TableCell>
+												<TableCell className="pt-4 font-bold text-primary">
+													Capacidad de Pago
+												</TableCell>
+												<TableCell />
+											</TableRow>
+											<TableRow>
+												<TableCell>Mínima</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(creditAnalysis?.minPayment)}
+												</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Máxima</TableCell>
+												<TableCell className="text-right">
+													{formatCurrency(creditAnalysis?.maxPayment)}
+												</TableCell>
+											</TableRow>
+											{/* Sección: Solicitante */}
+											<TableRow>
+												<TableCell className="pt-4 font-bold text-primary">
+													Solicitante
+												</TableCell>
+												<TableCell />
+											</TableRow>
+											<TableRow>
+												<TableCell>Edad</TableCell>
 												<TableCell className="text-right">
 													{lead?.age || "N/A"}
 												</TableCell>
@@ -1989,14 +2050,6 @@ export function CreditDetailView({
 										</>
 									) : (
 										<>
-											<Button
-												size="sm"
-												variant="outline"
-												onClick={() => setIsEditing(true)}
-											>
-												<Edit2 className="mr-1 h-3 w-3" />
-												Editar
-											</Button>
 											{canApprove && (
 												<Button
 													size="sm"

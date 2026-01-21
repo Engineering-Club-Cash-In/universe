@@ -1,8 +1,10 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, Loader2, Plus, User } from "lucide-react";
+import { ArrowLeft, CheckCircle, Loader2, Plus, User } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { z } from "zod";
+import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { CreateContractModal } from "@/components/juridico/CreateContractModal";
 import {
@@ -18,7 +20,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { useJuridicoPermissions } from "@/hooks/usePermissions";
-import { orpc } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/juridico/$leadId")({
 	validateSearch: z
@@ -33,14 +35,17 @@ function RouteComponent() {
 	const { leadId } = Route.useParams();
 	const searchParams = Route.useSearch();
 	const navigate = Route.useNavigate();
+	const queryClient = useQueryClient();
 	const {
 		canViewLegal,
 		canCreateLegal,
+		canApproveLegalStage,
 		isLoading: isLoadingPermissions,
 	} = useJuridicoPermissions();
 
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
 	const [contractToEdit, setContractToEdit] = useState<{
 		id: string;
 		contractType: string;
@@ -57,6 +62,24 @@ function RouteComponent() {
 	} | null>(null);
 
 	const opportunityId = searchParams?.opportunityId;
+
+	// Mutación para aprobar oportunidad (mover a 90%)
+	const approveMutation = useMutation({
+		mutationFn: async (opportunityId: string) => {
+			return await client.approveOpportunityLegal({ opportunityId });
+		},
+		onSuccess: (data) => {
+			toast.success(data.message);
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunitiesForContracts"],
+			});
+			// Regresar a la página de jurídico
+			navigate({ to: "/juridico" });
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al aprobar la oportunidad");
+		},
+	});
 
 	// Obtener información del lead
 	const { data: leadInfo, isLoading: isLoadingLead } = useQuery({
@@ -216,12 +239,30 @@ function RouteComponent() {
 						</div>
 					</div>
 
-					{canCreateLegal && (
-						<Button onClick={() => setIsCreateModalOpen(true)}>
-							<Plus className="mr-2 h-4 w-4" />
-							Registrar Contrato
-						</Button>
-					)}
+					<div className="flex gap-2">
+						{canApproveLegalStage &&
+							opportunityData &&
+							opportunityData.stage?.closurePercentage === 80 && (
+								<Button
+									onClick={() => setIsApproveModalOpen(true)}
+									disabled={
+										approveMutation.isPending ||
+										!contracts ||
+										contracts.length === 0
+									}
+									className="bg-green-600 hover:bg-green-700 text-white"
+								>
+									<CheckCircle className="mr-2 h-4 w-4" />
+									Contratos Completados
+								</Button>
+							)}
+						{canCreateLegal && (
+							<Button onClick={() => setIsCreateModalOpen(true)}>
+								<Plus className="mr-2 h-4 w-4" />
+								Registrar Contrato
+							</Button>
+						)}
+					</div>
 				</div>
 			</div>
 
@@ -287,6 +328,20 @@ function RouteComponent() {
 				opportunity={selectedOpportunity}
 				userRole="juridico"
 				readOnly
+			/>
+
+			{/* Modal de confirmación para aprobar */}
+			<ApproveOpportunityModal
+				open={isApproveModalOpen}
+				onOpenChange={setIsApproveModalOpen}
+				onConfirm={() => {
+					if (opportunityId) {
+						approveMutation.mutate(opportunityId);
+						setIsApproveModalOpen(false);
+					}
+				}}
+				isLoading={approveMutation.isPending}
+				opportunityTitle={opportunityData?.title}
 			/>
 		</div>
 	);

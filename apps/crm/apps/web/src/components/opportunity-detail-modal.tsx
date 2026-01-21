@@ -18,7 +18,6 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +38,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 // Type for the opportunity data
@@ -449,7 +449,7 @@ export function OpportunityDetailModal({
 																: "Cancelado"}
 													</span>
 												</div>
-												
+
 												<div className="flex gap-2">
 													{contract.clientSigningLink && (
 														<Button variant="outline" size="sm" asChild>
@@ -478,7 +478,6 @@ export function OpportunityDetailModal({
 														</Button>
 													)}
 												</div>
-												
 											</div>
 										))}
 									</div>

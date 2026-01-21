@@ -27,7 +27,6 @@ import {
 	Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
@@ -71,6 +70,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import { PERMISSIONS } from "@/lib/roles";
 import {
 	getMissingFieldsForNewVehicle,
 	renderNewVehicleBadges,
@@ -3168,7 +3168,8 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			label: "Cotización del vehículo nuevo",
 		},
 		{
-			value: "enganche", label: "Comprobante de enganche",
+			value: "enganche",
+			label: "Comprobante de enganche",
 		},
 		// Otro
 		{ value: "other", label: "Otro" },

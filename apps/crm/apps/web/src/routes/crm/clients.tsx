@@ -20,7 +20,6 @@ import {
 	User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,6 +55,7 @@ import {
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
 import { formatGuatemalaDate } from "@/lib/crm-formatters";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/clients")({

@@ -56,7 +56,8 @@ export const PERMISSIONS = {
 		role === ROLES.ADMIN ||
 		role === ROLES.SALES ||
 		role === ROLES.SALES_SUPERVISOR ||
-		role === ROLES.ANALYST,
+		role === ROLES.ANALYST ||
+		role === ROLES.JURIDICO,
 	canAccessAnalysis: (role: string) =>
 		role === ROLES.ADMIN ||
 		role === ROLES.ANALYST ||

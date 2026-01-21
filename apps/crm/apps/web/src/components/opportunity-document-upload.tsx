@@ -48,7 +48,7 @@ const documentCategories = {
 		"consulta_sat",
 		"consulta_garantias_mobiliarias",
 		"datos_vehiculo_nuevo",
-		"cotizacion_vehiculo_nuevo"
+		"cotizacion_vehiculo_nuevo",
 	],
 	"Verificaciones del Cliente": [
 		"usuario_sat_cliente",
@@ -58,7 +58,7 @@ const documentCategories = {
 		"confirmacion_referencias",
 		"visita_domiciliar",
 		"redes_sociales_internet",
-		"enganche"
+		"enganche",
 	],
 	"Verificaciones del Vehículo / Propietario": [
 		"usuario_sat_propietario",
@@ -93,7 +93,9 @@ export function OpportunityDocumentUpload({
 
 	const queryClient = useQueryClient();
 
-	const uploadedTypes = new Set(documents?.map((d: any) => d.documentType) || []);
+	const uploadedTypes = new Set(
+		documents?.map((d: any) => d.documentType) || [],
+	);
 
 	// Crear opciones para el combobox
 	const documentOptions = useMemo(() => {
@@ -142,7 +144,9 @@ export function OpportunityDocumentUpload({
 			onRefresh();
 			setSelectedFile(null);
 			setDocumentType("");
-			const fileInput = document.getElementById("doc-file-input") as HTMLInputElement;
+			const fileInput = document.getElementById(
+				"doc-file-input",
+			) as HTMLInputElement;
 			if (fileInput) fileInput.value = "";
 		},
 		onError: (error: Error) => {
@@ -216,20 +220,23 @@ export function OpportunityDocumentUpload({
 								type="file"
 								accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls"
 								onChange={handleFileChange}
-								className="h-10 w-full rounded-md border bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium"
+								className="h-10 w-full rounded-md border bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:font-medium file:text-sm"
 							/>
 						</div>
 					</div>
 
 					{selectedFile && (
 						<p className="text-muted-foreground text-xs">
-							Seleccionado: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
+							Seleccionado: {selectedFile.name} (
+							{(selectedFile.size / 1024).toFixed(1)} KB)
 						</p>
 					)}
 
 					<Button
 						onClick={handleUpload}
-						disabled={!selectedFile || !documentType || uploadMutation.isPending}
+						disabled={
+							!selectedFile || !documentType || uploadMutation.isPending
+						}
 						size="sm"
 					>
 						{uploadMutation.isPending ? (
@@ -253,7 +260,9 @@ export function OpportunityDocumentUpload({
 					<FileText className="h-4 w-4 text-muted-foreground" />
 					<h4 className="font-medium text-sm">Documentos Subidos</h4>
 					{documents && documents.length > 0 && (
-						<span className="text-muted-foreground text-xs">({documents.length})</span>
+						<span className="text-muted-foreground text-xs">
+							({documents.length})
+						</span>
 					)}
 				</div>
 
@@ -280,7 +289,11 @@ export function OpportunityDocumentUpload({
 								<div className="flex items-center gap-2">
 									{doc.url && (
 										<Button variant="outline" size="sm" asChild>
-											<a href={doc.url} target="_blank" rel="noopener noreferrer">
+											<a
+												href={doc.url}
+												target="_blank"
+												rel="noopener noreferrer"
+											>
 												Ver
 											</a>
 										</Button>
@@ -299,7 +312,9 @@ export function OpportunityDocumentUpload({
 					</div>
 				) : (
 					<div className="rounded-lg border border-dashed py-8 text-center">
-						<p className="text-muted-foreground text-sm">No hay documentos subidos</p>
+						<p className="text-muted-foreground text-sm">
+							No hay documentos subidos
+						</p>
 					</div>
 				)}
 			</div>

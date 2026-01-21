@@ -12,6 +12,7 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
+import { updateChecklistForClientDocument } from "@/lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -37,6 +38,7 @@ import {
 	documentValidations,
 	opportunityDocuments,
 } from "../db/schema/documents";
+import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -52,7 +54,6 @@ import {
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { closeOpportunity } from "../services/close-opportunity";
-import { updateChecklistForClientDocument } from "@/lib/checklist";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -186,7 +187,10 @@ export const crmRouter = {
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
-			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor"
+			) {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
@@ -774,7 +778,10 @@ export const crmRouter = {
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
-			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor"
+			) {
 				conditions.push(eq(opportunities.assignedTo, context.userId));
 			}
 
@@ -968,6 +975,30 @@ export const crmRouter = {
 						throw new ORPCError("BAD_REQUEST", {
 							message:
 								"Para avanzar de análisis (40%) a la siguiente etapa (50%+), el detalle de crédito debe ser aprobado por un supervisor de ventas.",
+						});
+					}
+				}
+
+				// Validate legal approval when moving from 80% to 90%
+				if (fromPercentage === 80 && toPercentage === 90) {
+					// Only juridico and admin can approve this transition
+					if (!PERMISSIONS.canApproveLegalStage(context.userRole)) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Para avanzar de 80% a 90%, la oportunidad debe ser aprobada por el departamento jurídico.",
+						});
+					}
+
+					// Verify there's at least one contract associated
+					const [{ count: contractCount }] = await db
+						.select({ count: count() })
+						.from(generatedLegalContracts)
+						.where(eq(generatedLegalContracts.opportunityId, id));
+
+					if (Number(contractCount) === 0) {
+						throw new ORPCError("BAD_REQUEST", {
+							message:
+								"Debe haber al menos un contrato asociado a la oportunidad para avanzar a 90%.",
 						});
 					}
 				}
@@ -1651,7 +1682,10 @@ export const crmRouter = {
 			const conditions: any[] = [];
 
 			// Filter by user if not admin/sales_supervisor
-			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor"
+			) {
 				conditions.push(eq(clients.assignedTo, context.userId));
 			}
 
@@ -1724,7 +1758,10 @@ export const crmRouter = {
 		const conditions: any[] = [];
 
 		// Filter by user if not admin/sales_supervisor
-		if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
+		if (
+			context.userRole !== "admin" &&
+			context.userRole !== "sales_supervisor"
+		) {
 			conditions.push(eq(clients.assignedTo, context.userId));
 		}
 
@@ -1821,7 +1858,10 @@ export const crmRouter = {
 			];
 
 			// Filter by user if not admin/sales_supervisor
-			if (context.userRole !== "admin" && context.userRole !== "sales_supervisor") {
+			if (
+				context.userRole !== "admin" &&
+				context.userRole !== "sales_supervisor"
+			) {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
@@ -2215,7 +2255,11 @@ export const crmRouter = {
 			}
 
 			// Admin, sales, sales_supervisor y analyst pueden subir documentos
-			if (!["admin", "sales", "sales_supervisor", "analyst"].includes(context.userRole)) {
+			if (
+				!["admin", "sales", "sales_supervisor", "analyst"].includes(
+					context.userRole,
+				)
+			) {
 				throw new Error("No tienes permiso para subir documentos");
 			}
 
@@ -2869,16 +2913,15 @@ export const crmRouter = {
 					.limit(1);
 				vehicleInspected = !!inspection;
 				if (!vehicleInspected) {
-						const [vehicle] = await db
-					.select()
-					.from(vehicles)
-					.where(eq(vehicles.id, opportunity.vehicleId))
-					.limit(1);
+					const [vehicle] = await db
+						.select()
+						.from(vehicles)
+						.where(eq(vehicles.id, opportunity.vehicleId))
+						.limit(1);
 
 					if (vehicle?.isNew) {
 						vehicleInspected = true;
 					}
-
 				}
 			}
 

@@ -12,9 +12,9 @@
 
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Client } from "pg";
+import { salesStages } from "./schema/crm";
 import { insuranceCosts } from "./schema/insurance";
 import { guatemalaLocations } from "./schema/locations";
-import { salesStages } from "./schema/crm";
 
 const BATCH_SIZE = 100; // Tamaño de lotes para inserciones grandes
 
@@ -62,7 +62,7 @@ async function main() {
 					`   Procesados ${Math.min(i + BATCH_SIZE, insuranceData.length)}/${insuranceData.length}`,
 				);
 			}
-			console.log(`   ✅ insurance_costs migrada exitosamente`);
+			console.log("   ✅ insurance_costs migrada exitosamente");
 		} else {
 			console.log("   ⚠️  No hay datos en insurance_costs para migrar");
 		}
@@ -84,7 +84,7 @@ async function main() {
 					`   Procesados ${Math.min(i + BATCH_SIZE, locationsData.length)}/${locationsData.length}`,
 				);
 			}
-			console.log(`   ✅ guatemala_locations migrada exitosamente`);
+			console.log("   ✅ guatemala_locations migrada exitosamente");
 		} else {
 			console.log("   ⚠️  No hay datos en guatemala_locations para migrar");
 		}
@@ -96,7 +96,7 @@ async function main() {
 
 		if (stagesData.length > 0) {
 			await prodDb.insert(salesStages).values(stagesData).onConflictDoNothing();
-			console.log(`   ✅ sales_stages migrada exitosamente`);
+			console.log("   ✅ sales_stages migrada exitosamente");
 		} else {
 			console.log("   ⚠️  No hay datos en sales_stages para migrar");
 		}
@@ -108,7 +108,9 @@ async function main() {
 		console.log(`   insurance_costs:     ${insuranceData.length} registros`);
 		console.log(`   guatemala_locations: ${locationsData.length} registros`);
 		console.log(`   sales_stages:        ${stagesData.length} registros`);
-		console.log("\nNota: Los registros existentes en producción no fueron modificados.");
+		console.log(
+			"\nNota: Los registros existentes en producción no fueron modificados.",
+		);
 	} catch (error) {
 		console.error("\n❌ Error durante la migración:", error);
 		process.exit(1);

@@ -76,7 +76,11 @@ export function generateQuotationPdf(quotation: QuotationData) {
 	y += 7;
 	doc.text("Enganche:", leftCol, y);
 	doc.text(`${formatCurrency(quotation.downPayment)}`, leftValueCol, y);
-	doc.text(`${quotation.downPaymentPercentage.toFixed(2)}%`, leftValueCol + 30, y);
+	doc.text(
+		`${quotation.downPaymentPercentage.toFixed(2)}%`,
+		leftValueCol + 30,
+		y,
+	);
 
 	y += 7;
 	doc.text("Monto a financiar:", leftCol, y);
@@ -143,7 +147,13 @@ export function generateQuotationPdf(quotation: QuotationData) {
 	autoTable(doc, {
 		startY: y + 25,
 		head: [
-			["Cuota", "Saldo inicial", "Interés + IVA", "Amortización", "Saldo final"],
+			[
+				"Cuota",
+				"Saldo inicial",
+				"Interés + IVA",
+				"Amortización",
+				"Saldo final",
+			],
 		],
 		body: quotation.amortizationTable.map((row) => [
 			row.period,

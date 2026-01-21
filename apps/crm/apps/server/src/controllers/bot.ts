@@ -12,12 +12,9 @@ import {
 } from "@/db/schema";
 import type { documentTypeEnum } from "@/db/schema/documents";
 import { getRenapData } from "@/functions/getRenapInfo";
+import { generateUniqueFilename, uploadFileFromUrlToR2 } from "@/lib/storage";
 import { db } from "../db";
 import { otpController } from "./otp";
-import {
-	generateUniqueFilename,
-	uploadFileFromUrlToR2,
-} from "@/lib/storage";
 
 // Type for document type enum
 type DocumentType = (typeof documentTypeEnum.enumValues)[number];
@@ -55,9 +52,7 @@ export async function addDocumentsToOpenOpportunities(
 	documentsAdded?: number;
 }> {
 	try {
-		console.log(
-			`[DEBUG] addDocumentsToOpenOpportunities for DPI: ${dpi}`,
-		);
+		console.log(`[DEBUG] addDocumentsToOpenOpportunities for DPI: ${dpi}`);
 
 		// 1. Find lead by DPI
 		const lead = await db
@@ -105,8 +100,7 @@ export async function addDocumentsToOpenOpportunities(
 
 				try {
 					// Generate unique filename
-					const originalName =
-						doc.filename || `${doc.type}_${Date.now()}.pdf`;
+					const originalName = doc.filename || `${doc.type}_${Date.now()}.pdf`;
 					const uniqueFilename = generateUniqueFilename(originalName);
 
 					// Upload file from URL to R2 (returns size and mimeType)
@@ -176,12 +170,12 @@ export async function addDocumentsToOpenOpportunities(
 
 		return {
 			success: true,
-			message: `Documents added/updated successfully`,
+			message: "Documents added/updated successfully",
 			opportunitiesUpdated: openOpportunities.length,
 			documentsAdded: totalDocumentsAdded,
 		};
 	} catch (error: any) {
-		console.error(`[ERROR] addDocumentsToOpenOpportunities failed:`, error);
+		console.error("[ERROR] addDocumentsToOpenOpportunities failed:", error);
 		return {
 			success: false,
 			message: error?.message || "Failed to add documents to opportunities",
@@ -254,7 +248,7 @@ export async function checkDocumentsInOpenOpportunities(
 			hasDocuments,
 		};
 	} catch (error: any) {
-		console.error(`[ERROR] checkDocumentsInOpenOpportunities failed:`, error);
+		console.error("[ERROR] checkDocumentsInOpenOpportunities failed:", error);
 		return {
 			success: false,
 			hasDocuments: {} as Record<DocumentType, boolean>,

@@ -780,7 +780,9 @@ export const crmRouter = {
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
 			if (
 				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
+				context.userRole !== "sales_supervisor" &&
+				context.userRole !== "juridico" &&
+				context.userRole !== "analyst"
 			) {
 				conditions.push(eq(opportunities.assignedTo, context.userId));
 			}
@@ -1004,7 +1006,7 @@ export const crmRouter = {
 				}
 
 				// Validaciones para vehículos nuevos en transiciones de stage
-				if (currentOpportunity[0].vehicleId && toPercentage >= 90) {
+				if (currentOpportunity[0].vehicleId && toPercentage >= 80) {
 					const vehicleForValidation = await db
 						.select({
 							isNew: vehicles.isNew,
@@ -1019,8 +1021,8 @@ export const crmRouter = {
 						.limit(1);
 
 					if (vehicleForValidation[0]?.isNew) {
-						// Transición a 90%: Requerir VIN mínimo para contratos
-						if (toPercentage >= 90 && toPercentage < 100) {
+						// Transición a 100%: Requerir datos completos
+						if (toPercentage === 80) {
 							const missingForContracts = getMissingFieldsForContracts(
 								vehicleForValidation[0],
 							);
@@ -1029,10 +1031,6 @@ export const crmRouter = {
 									message: `Para avanzar a etapa 90% (contratos), el vehículo nuevo debe tener: ${formatMissingFields(missingForContracts)}`,
 								});
 							}
-						}
-
-						// Transición a 100%: Requerir datos completos
-						if (toPercentage === 100) {
 							const missingFields = getMissingFields(vehicleForValidation[0]);
 							if (missingFields.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
@@ -1041,6 +1039,17 @@ export const crmRouter = {
 							}
 						}
 					}
+				}
+
+				//  en este apartado ya nadie puede mover de 80 a 90 sin aprobacion de analista
+				// Validate document approval when moving from 80% to 90%
+				if (fromPercentage === 80 && toPercentage >= 90) {
+					console.log("Validating document approval for 80% to 90% stage change");
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Para avanzar de evaluación (80%) a la siguiente etapa (90%+), solo un analista puede realizar este cambio después de aprobar los documentos.",
+					});
+					
 				}
 
 				// Validate disbursement approval when moving from 90% to 100%
@@ -3429,17 +3438,6 @@ export const crmRouter = {
 				});
 			}
 
-			// Close the opportunity (create credit, client, contract)
-			const closeResult = await closeOpportunity({
-				opportunityId: input.opportunityId,
-				userId: context.userId,
-			});
-
-			if (!closeResult.success) {
-				throw new ORPCError("BAD_REQUEST", {
-					message: closeResult.error || "Error al cerrar la oportunidad",
-				});
-			}
 
 			// Update opportunity with approval and move to 100%
 			await db
@@ -3474,9 +3472,6 @@ export const crmRouter = {
 
 			return {
 				success: true,
-				numeroSifco: closeResult.numeroSifco,
-				clientId: closeResult.clientId,
-				contractId: closeResult.contractId,
 			};
 		}),
 

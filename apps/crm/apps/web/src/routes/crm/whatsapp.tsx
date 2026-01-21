@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import {
 	Card,
@@ -12,6 +11,7 @@ import {
 	CardTitle,
 } from "@/components/ui/card";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/whatsapp")({

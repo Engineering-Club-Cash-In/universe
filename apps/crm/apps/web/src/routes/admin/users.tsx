@@ -14,14 +14,6 @@ import {
 	UserCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { UserRole } from "server/src/types/roles";
-import {
-	ALL_ROLES,
-	getRoleColor,
-	getRoleLabel,
-	ROLE_CONFIG,
-	ROLES,
-} from "server/src/types/roles";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -76,6 +68,14 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { authClient } from "@/lib/auth-client";
+import {
+	ALL_ROLES,
+	getRoleColor,
+	getRoleLabel,
+	ROLE_CONFIG,
+	ROLES,
+	type UserRole,
+} from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/admin/users")({

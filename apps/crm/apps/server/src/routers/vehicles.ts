@@ -22,7 +22,12 @@ import {
 	mapOCRToVehicleForm,
 	vehicleRegistrationOCRSchema,
 } from "../lib/ocr-schema";
-import { crmProcedure, protectedProcedure, publicProcedure, tallerProcedure } from "../lib/orpc";
+import {
+	crmProcedure,
+	protectedProcedure,
+	publicProcedure,
+	tallerProcedure,
+} from "../lib/orpc";
 import {
 	deleteFileFromR2,
 	generateUniqueFilename,
@@ -1227,7 +1232,11 @@ Por favor proporciona una valoración detallada en Quetzales para el mercado gua
 			}
 
 			// Admin, sales, sales_supervisor and analyst can upload documents
-			if (!["admin", "sales", "sales_supervisor", "analyst"].includes(context.userRole)) {
+			if (
+				!["admin", "sales", "sales_supervisor", "analyst"].includes(
+					context.userRole,
+				)
+			) {
 				throw new Error("No tienes permiso para subir documentos");
 			}
 

@@ -10,6 +10,8 @@ import {
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
+import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
+import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
 	type LeadForModal,
@@ -18,8 +20,6 @@ import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
 } from "@/components/opportunity-detail-modal";
-import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
-import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -251,7 +251,14 @@ function AnalysisPage() {
 						phone: opportunity.lead.phone,
 					}
 				: null,
-			stage: null,
+			stage: opportunity.stage?.id
+				? {
+						id: opportunity.stage.id,
+						name: opportunity.stage.name,
+						closurePercentage: opportunity.stage.closurePercentage,
+						color: opportunity.stage.color,
+					}
+				: null,
 			assignedUser: null,
 			vehicle: opportunity.vehicle
 				? {
@@ -388,7 +395,9 @@ function AnalysisPage() {
 													<button
 														type="button"
 														className="cursor-pointer text-left text-primary hover:underline"
-														onClick={() => handleOpenOpportunityModal(opportunity)}
+														onClick={() =>
+															handleOpenOpportunityModal(opportunity)
+														}
 													>
 														{opportunity.title}
 													</button>
@@ -638,7 +647,14 @@ function DisbursementSection() {
 						phone: opp.leadPhone,
 					}
 				: null,
-			stage: null,
+			stage: opp.stage?.id
+				? {
+						id: opp.stage.id,
+						name: opp.stage.name,
+						closurePercentage: opp.stage.closurePercentage,
+						color: opp.stage.color,
+					}
+				: null,
 			assignedUser: null,
 			vehicle: opp.vehicle
 				? {

@@ -496,9 +496,7 @@ export const legalContractsRouter = {
 		.input(
 			z
 				.object({
-					closurePercentages: z
-						.array(z.number().min(0).max(100))
-						.optional(),
+					closurePercentages: z.array(z.number().min(0).max(100)).optional(),
 				})
 				.optional(),
 		)
@@ -579,7 +577,7 @@ export const legalContractsRouter = {
 					return {
 						...opp,
 						latestContractDate: latestContract?.generatedAt,
-					     latestContractName: latestContract?.contractName,
+						latestContractName: latestContract?.contractName,
 						contractCount: Number(contractCount),
 					};
 				}),
@@ -673,22 +671,25 @@ export const legalContractsRouter = {
 				});
 			}
 
-			// Actualizar la oportunidad a 90%
-			await db
-				.update(opportunities)
-				.set({
-					stageId: targetStage.id,
-					updatedAt: new Date(),
-				})
-				.where(eq(opportunities.id, input.opportunityId));
+			// Actualizar la oportunidad y registrar historial en una transacción
+			await db.transaction(async (tx) => {
+				// Actualizar la oportunidad a 90%
+				await tx
+					.update(opportunities)
+					.set({
+						stageId: targetStage.id,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
 
-			// Registrar en el historial de etapas
-			await db.insert(opportunityStageHistory).values({
-				opportunityId: input.opportunityId,
-				fromStageId: opportunity.stageId,
-				toStageId: targetStage.id,
-				changedBy: context.userId,
-				reason: "Aprobación legal - Contratos adjuntados",
+				// Registrar en el historial de etapas
+				await tx.insert(opportunityStageHistory).values({
+					opportunityId: input.opportunityId,
+					fromStageId: opportunity.stageId,
+					toStageId: targetStage.id,
+					changedBy: context.userId,
+					reason: "Aprobación legal - Contratos adjuntados",
+				});
 			});
 
 			return {

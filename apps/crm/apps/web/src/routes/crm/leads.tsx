@@ -18,7 +18,6 @@ import {
 	X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
 import { toast } from "sonner";
 import { z } from "zod";
 import { NotesTimeline } from "@/components/notes-timeline";
@@ -76,6 +75,7 @@ import {
 	getStatusLabel,
 	getWorkTimeLabel,
 } from "@/lib/crm-formatters";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/leads")({

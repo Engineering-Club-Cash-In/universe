@@ -18,7 +18,7 @@ import {
 	Users,
 } from "lucide-react";
 import { useState } from "react";
-import { PERMISSIONS } from "server/src/types/roles";
+import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { OpportunityDocumentUpload } from "@/components/opportunity-document-upload";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 // Type for the opportunity data
@@ -192,15 +193,13 @@ export function OpportunityDetailModal({
 					}}
 				>
 					<TabsList
-						className={`grid w-full ${readOnly ? "grid-cols-2" : "grid-cols-4"}`}
+						className={`grid w-full ${readOnly ? "grid-cols-3" : "grid-cols-4"}`}
 					>
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
+						<TabsTrigger value="credit">Crédito</TabsTrigger>
 						{!readOnly && (
-							<>
-								<TabsTrigger value="credit">Credito</TabsTrigger>
-								<TabsTrigger value="history">Historial</TabsTrigger>
-							</>
+							<TabsTrigger value="history">Historial</TabsTrigger>
 						)}
 					</TabsList>
 
@@ -449,7 +448,7 @@ export function OpportunityDetailModal({
 																: "Cancelado"}
 													</span>
 												</div>
-												
+
 												<div className="flex gap-2">
 													{contract.clientSigningLink && (
 														<Button variant="outline" size="sm" asChild>
@@ -478,7 +477,6 @@ export function OpportunityDetailModal({
 														</Button>
 													)}
 												</div>
-												
 											</div>
 										))}
 									</div>
@@ -623,151 +621,148 @@ export function OpportunityDetailModal({
 						/>
 					</TabsContent>
 
-					{!readOnly && (
-						<>
-							<TabsContent value="history" className="mt-6 space-y-4">
-								<div className="space-y-4">
-									<div className="mb-4 flex items-center gap-2">
-										<History className="h-5 w-5 text-muted-foreground" />
-										<h3 className="font-semibold text-lg">
-											Historial de Cambios
-										</h3>
-									</div>
+					<TabsContent value="credit" className="mt-6 space-y-4">
+						{(() => {
+							const showCreditDetail =
+								opportunity.stage &&
+								opportunity.stage.closurePercentage >= 30;
 
-									{isLoadingHistory ? (
-										<div className="flex items-center justify-center py-8">
-											<p className="text-muted-foreground">
-												Cargando historial...
-											</p>
-										</div>
-									) : opportunityHistory.length === 0 ? (
-										<div className="rounded-lg border bg-muted/30 p-4 text-center">
-											<p className="text-muted-foreground">
-												No hay cambios registrados
-											</p>
-										</div>
-									) : (
-										<div className="space-y-3">
-											{opportunityHistory.map((change) => (
-												<div
-													key={change.id}
-													className="rounded-lg border bg-card p-4"
-												>
-													<div className="flex items-start justify-between">
-														<div className="flex-1 space-y-2">
-															<div className="flex items-center gap-2">
-																{change.isOverride && (
+							if (!showCreditDetail) {
+								return (
+									<div className="rounded-lg border border-dashed p-8 text-center">
+										<FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
+										<p className="text-muted-foreground">
+											El detalle de crédito estará disponible cuando la
+											oportunidad alcance el 30% de avance.
+										</p>
+										<p className="mt-2 text-muted-foreground text-sm">
+											Etapa actual: {opportunity.stage?.name || "Sin etapa"}{" "}
+											({opportunity.stage?.closurePercentage || 0}%)
+										</p>
+									</div>
+								);
+							}
+
+							const latestQuotation =
+								opportunityQuotationsQuery.data?.[0] || null;
+
+							if (!latestQuotation) {
+								return (
+									<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
+										<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
+										<h3 className="mb-2 font-semibold text-lg">
+											Se requiere una cotización
+										</h3>
+										<p className="mb-4 text-muted-foreground">
+											Para ver el detalle del crédito, primero debes crear
+											una cotización para esta oportunidad.
+										</p>
+										{onNavigateToQuoter && (
+											<Button
+												onClick={() => onNavigateToQuoter(opportunity.id)}
+											>
+												<Calculator className="mr-2 h-4 w-4" />
+												Crear Cotización
+											</Button>
+										)}
+									</div>
+								);
+							}
+
+							return (
+								<CreditDetailView
+									opportunityId={opportunity.id}
+									userRole={userRole ?? undefined}
+									opportunity={opportunity as any}
+									quotation={latestQuotation}
+								/>
+							);
+						})()}
+					</TabsContent>
+
+					{!readOnly && (
+						<TabsContent value="history" className="mt-6 space-y-4">
+							<div className="space-y-4">
+								<div className="mb-4 flex items-center gap-2">
+									<History className="h-5 w-5 text-muted-foreground" />
+									<h3 className="font-semibold text-lg">
+										Historial de Cambios
+									</h3>
+								</div>
+
+								{isLoadingHistory ? (
+									<div className="flex items-center justify-center py-8">
+										<p className="text-muted-foreground">
+											Cargando historial...
+										</p>
+									</div>
+								) : opportunityHistory.length === 0 ? (
+									<div className="rounded-lg border bg-muted/30 p-4 text-center">
+										<p className="text-muted-foreground">
+											No hay cambios registrados
+										</p>
+									</div>
+								) : (
+									<div className="space-y-3">
+										{opportunityHistory.map((change) => (
+											<div
+												key={change.id}
+												className="rounded-lg border bg-card p-4"
+											>
+												<div className="flex items-start justify-between">
+													<div className="flex-1 space-y-2">
+														<div className="flex items-center gap-2">
+															{change.isOverride && (
+																<Badge
+																	variant="outline"
+																	className="border-orange-300 bg-orange-100 text-orange-700"
+																>
+																	Override
+																</Badge>
+															)}
+															<span className="font-medium">
+																{change.fromStage?.name || "Inicio"} →{" "}
+																{change.toStage?.name}
+															</span>
+														</div>
+														{change.reason && (
+															<p className="text-muted-foreground text-sm">
+																{change.reason}
+															</p>
+														)}
+														<div className="flex items-center gap-4 text-muted-foreground text-xs">
+															<div className="flex items-center gap-1">
+																<Clock className="h-3 w-3" />
+																{new Date(change.changedAt).toLocaleString()}
+															</div>
+															<div className="flex items-center gap-1">
+																<Users className="h-3 w-3" />
+																{change.changedBy?.name ||
+																	"Usuario desconocido"}
+																{change.changedBy?.role && (
 																	<Badge
 																		variant="outline"
-																		className="border-orange-300 bg-orange-100 text-orange-700"
+																		className="ml-1 text-xs"
 																	>
-																		Override
+																		{change.changedBy.role === "admin"
+																			? "Admin"
+																			: change.changedBy.role === "sales"
+																				? "Ventas"
+																				: change.changedBy.role === "analyst"
+																					? "Analista"
+																					: change.changedBy.role}
 																	</Badge>
 																)}
-																<span className="font-medium">
-																	{change.fromStage?.name || "Inicio"} →{" "}
-																	{change.toStage?.name}
-																</span>
-															</div>
-															{change.reason && (
-																<p className="text-muted-foreground text-sm">
-																	{change.reason}
-																</p>
-															)}
-															<div className="flex items-center gap-4 text-muted-foreground text-xs">
-																<div className="flex items-center gap-1">
-																	<Clock className="h-3 w-3" />
-																	{new Date(change.changedAt).toLocaleString()}
-																</div>
-																<div className="flex items-center gap-1">
-																	<Users className="h-3 w-3" />
-																	{change.changedBy?.name ||
-																		"Usuario desconocido"}
-																	{change.changedBy?.role && (
-																		<Badge
-																			variant="outline"
-																			className="ml-1 text-xs"
-																		>
-																			{change.changedBy.role === "admin"
-																				? "Admin"
-																				: change.changedBy.role === "sales"
-																					? "Ventas"
-																					: change.changedBy.role === "analyst"
-																						? "Analista"
-																						: change.changedBy.role}
-																		</Badge>
-																	)}
-																</div>
 															</div>
 														</div>
 													</div>
 												</div>
-											))}
-										</div>
-									)}
-								</div>
-							</TabsContent>
-
-							<TabsContent value="credit" className="mt-6 space-y-4">
-								{(() => {
-									const showCreditDetail =
-										opportunity.stage &&
-										opportunity.stage.closurePercentage >= 40;
-
-									if (!showCreditDetail) {
-										return (
-											<div className="rounded-lg border border-dashed p-8 text-center">
-												<FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-												<p className="text-muted-foreground">
-													El detalle de crédito estará disponible cuando la
-													oportunidad alcance el 40% de avance.
-												</p>
-												<p className="mt-2 text-muted-foreground text-sm">
-													Etapa actual: {opportunity.stage?.name || "Sin etapa"}{" "}
-													({opportunity.stage?.closurePercentage || 0}%)
-												</p>
 											</div>
-										);
-									}
-
-									const latestQuotation =
-										opportunityQuotationsQuery.data?.[0] || null;
-
-									if (!latestQuotation) {
-										return (
-											<div className="rounded-lg border border-orange-300 border-dashed bg-orange-50 p-8 text-center dark:border-orange-800 dark:bg-orange-950/20">
-												<Calculator className="mx-auto mb-4 h-12 w-12 text-orange-500" />
-												<h3 className="mb-2 font-semibold text-lg">
-													Se requiere una cotización
-												</h3>
-												<p className="mb-4 text-muted-foreground">
-													Para ver el detalle del crédito, primero debes crear
-													una cotización para esta oportunidad.
-												</p>
-												{onNavigateToQuoter && (
-													<Button
-														onClick={() => onNavigateToQuoter(opportunity.id)}
-													>
-														<Calculator className="mr-2 h-4 w-4" />
-														Crear Cotización
-													</Button>
-												)}
-											</div>
-										);
-									}
-
-									return (
-										<div className="rounded-lg border border-dashed p-8 text-center">
-											<FileSpreadsheet className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
-											<p className="text-muted-foreground">
-												El detalle de crédito se gestiona desde la página de
-												oportunidades.
-											</p>
-										</div>
-									);
-								})()}
-							</TabsContent>
-						</>
+										))}
+									</div>
+								)}
+							</div>
+						</TabsContent>
 					)}
 				</Tabs>
 			</DialogContent>

@@ -207,7 +207,8 @@ export const getDocumentTypeLabel = (documentType: string): string => {
 		// === Verificaciones de Vehículo / Propietario ===
 		usuario_sat_propietario: "Usuario de SAT (Propietario)",
 		rtu_propietario: "RTU (Propietario)",
-		omisos_incumplimientos_propietario: "Omisos e Incumplimientos (Propietario)",
+		omisos_incumplimientos_propietario:
+			"Omisos e Incumplimientos (Propietario)",
 		garantia_mobiliaria_sat: "Garantía Mobiliaria (SAT)",
 		garantia_mobiliaria_dpi: "Garantía Mobiliaria (DPI Propietario)",
 		garantia_mobiliaria_nit: "Garantía Mobiliaria (NIT Propietario)",

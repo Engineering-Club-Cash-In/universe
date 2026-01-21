@@ -117,10 +117,11 @@ export function CreateContractModal({
 		contractType: contractToEdit?.contractType || "",
 		contractName: contractToEdit?.contractName || "",
 		clientSigningLink: contractToEdit?.clientSigningLink || "",
-		representativeSigningLink:
-			contractToEdit?.representativeSigningLink || "",
-		additionalSigningLinks: contractToEdit?.additionalSigningLinks || ([] as string[]),
-		opportunityId: contractToEdit?.opportunityId || preselectedOpportunityId || "",
+		representativeSigningLink: contractToEdit?.representativeSigningLink || "",
+		additionalSigningLinks:
+			contractToEdit?.additionalSigningLinks || ([] as string[]),
+		opportunityId:
+			contractToEdit?.opportunityId || preselectedOpportunityId || "",
 	});
 
 	const [newAdditionalLink, setNewAdditionalLink] = useState("");

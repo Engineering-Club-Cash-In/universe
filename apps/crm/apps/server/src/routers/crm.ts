@@ -2164,6 +2164,22 @@ export const crmRouter = {
 				totalClients: totalClients?.count || 0,
 			};
 		}
+
+		if (context.userRole === "sales_supervisor") {
+			// Sales Supervisor gets team totals (all sales users' stats)
+			const [totalLeads] = await db.select({ count: count() }).from(leads);
+			const [totalOpportunities] = await db
+				.select({ count: count() })
+				.from(opportunities);
+			const [totalClients] = await db.select({ count: count() }).from(clients);
+
+			return {
+				teamLeads: totalLeads?.count || 0,
+				teamOpportunities: totalOpportunities?.count || 0,
+				teamClients: totalClients?.count || 0,
+			};
+		}
+
 		// Sales users get their own stats
 		const [myLeads] = await db
 			.select({ count: count() })

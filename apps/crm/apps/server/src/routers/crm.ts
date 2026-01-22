@@ -677,6 +677,9 @@ export const crmRouter = {
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
+				// Analysis status for tracking rejection/resubmission
+				analysisStatus: opportunities.analysisStatus,
+				analysisRejectionCount: opportunities.analysisRejectionCount,
 				// Credit terms fields
 				numeroCuotas: opportunities.numeroCuotas,
 				tasaInteres: opportunities.tasaInteres,
@@ -921,6 +924,8 @@ export const crmRouter = {
 				rubros: z.string().optional(), // JSON string with expense items
 				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
 				loanPurpose: z.enum(["personal", "business"]).optional(),
+				// Optimistic locking - prevents race conditions on concurrent updates
+				expectedUpdatedAt: z.string().datetime().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -938,6 +943,7 @@ export const crmRouter = {
 				gastosAdministrativos,
 				expectedCloseDate,
 				fechaInicio,
+				expectedUpdatedAt,
 				...updateData
 			} = input;
 
@@ -1068,15 +1074,56 @@ export const crmRouter = {
 				// is now handled by approveDisbursement via closeOpportunity service
 			}
 
+			// Calculate new analysisStatus based on stage transition
+			let newAnalysisStatus = currentOpportunity[0].analysisStatus;
+
+			if (input.stageId && input.stageId !== currentOpportunity[0].stageId) {
+				const targetStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, input.stageId))
+					.limit(1);
+
+				const currentStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+
+				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
+				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+
+				// If moving TO stage 30% (analysis stage)
+				if (toPercentage === 30 && fromPercentage !== 30) {
+					if (currentOpportunity[0].analysisStatus === "not_applicable") {
+						newAnalysisStatus = "pending";
+					} else if (currentOpportunity[0].analysisStatus === "rejected") {
+						newAnalysisStatus = "resubmitted";
+					} else if (currentOpportunity[0].analysisStatus === "approved") {
+						// Re-analysis of previously approved opportunity
+						newAnalysisStatus = "pending";
+					}
+				}
+			}
+
 			// Sales users can only update opportunities assigned to them
 			// Admin and sales_supervisor can update any opportunity
-			const whereClause =
+			// Include optimistic locking check if expectedUpdatedAt is provided
+			const baseWhereClause =
 				context.userRole === "admin" || context.userRole === "sales_supervisor"
 					? eq(opportunities.id, id)
 					: and(
 							eq(opportunities.id, id),
 							eq(opportunities.assignedTo, context.userId),
 						);
+
+			// Add optimistic locking condition if expectedUpdatedAt is provided
+			const whereClause = expectedUpdatedAt
+				? and(
+						baseWhereClause,
+						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+					)
+				: baseWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -1138,6 +1185,10 @@ export const crmRouter = {
 					...(gastosAdministrativos !== undefined && {
 						gastosAdministrativos: String(gastosAdministrativos),
 					}),
+					// Update analysisStatus if it changed during stage transition
+					...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
+						analysisStatus: newAnalysisStatus,
+					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
 					updatedAt: new Date(),
 				})
@@ -1145,6 +1196,13 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedOpportunity.length === 0) {
+				// If expectedUpdatedAt was provided and no rows updated, it's likely a concurrent modification
+				if (expectedUpdatedAt) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
+					});
+				}
 				throw new Error(
 					"Opportunity not found or you don't have permission to update it",
 				);
@@ -1211,6 +1269,8 @@ export const crmRouter = {
 					notes: opportunities.notes,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
+					analysisStatus: opportunities.analysisStatus,
+					analysisRejectionCount: opportunities.analysisRejectionCount,
 					lead: {
 						id: leads.id,
 						firstName: leads.firstName,
@@ -1255,6 +1315,8 @@ export const crmRouter = {
 				approved: z.boolean(),
 				reason: z.string().optional(),
 				bypassValidation: z.boolean().optional(), // Solo admin puede usar bypass
+				// Optimistic locking - prevents race conditions on concurrent updates
+				expectedUpdatedAt: z.string().datetime().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1262,12 +1324,15 @@ export const crmRouter = {
 			const opportunity = await db
 				.select({
 					id: opportunities.id,
+					updatedAt: opportunities.updatedAt,
 					vehicleId: opportunities.vehicleId,
 					creditType: opportunities.creditType,
 					stageId: opportunities.stageId,
 					notes: opportunities.notes,
 					leadId: opportunities.leadId,
 					clientType: leads.clientType,
+					analysisStatus: opportunities.analysisStatus,
+					analysisRejectionCount: opportunities.analysisRejectionCount,
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -1411,7 +1476,27 @@ export const crmRouter = {
 				throw new Error("Opportunity is not in analysis stage");
 			}
 
-			// Get the next stage
+			// Validate analysisStatus is in a valid state for approval/rejection
+			const validStatusesForReview = ["pending", "resubmitted"];
+			if (!validStatusesForReview.includes(opportunity[0].analysisStatus)) {
+				if (opportunity[0].analysisStatus === "approved") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta oportunidad ya fue aprobada. No se puede aprobar o rechazar nuevamente.",
+					});
+				}
+				if (opportunity[0].analysisStatus === "rejected") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta oportunidad ya fue rechazada y está pendiente de corrección por el vendedor.",
+					});
+				}
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Estado de análisis inválido: ${opportunity[0].analysisStatus}. Solo se pueden revisar oportunidades con estado 'pending' o 'resubmitted'.`,
+				});
+			}
+
+			// Get the next stage (40% - Cierre de propuesta) for approval
 			const nextStage = await db
 				.select()
 				.from(salesStages)
@@ -1422,23 +1507,57 @@ export const crmRouter = {
 				throw new Error("Next stage not found");
 			}
 
-			// Update opportunity stage if approved
-			const newStageId = input.approved
-				? nextStage[0].id
-				: opportunity[0].stageId;
+			// Get the previous stage (20% - Solución y propuesta) for rejection
+			const previousStage = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.name, "Solución y propuesta"))
+				.limit(1);
 
-			if (input.approved || input.reason) {
-				// Update opportunity
-				await db
+			if (!previousStage[0]) {
+				throw new Error("Previous stage (Solución y propuesta) not found");
+			}
+
+			// Determine new stage based on approval/rejection
+			const newStageId = input.approved
+				? nextStage[0].id // 40% - Cierre de propuesta
+				: previousStage[0].id; // 20% - Solución y propuesta (rejection)
+
+			if (input.approved || input.reason || !input.approved) {
+				// Build where clause with optional optimistic locking
+				const whereClause = input.expectedUpdatedAt
+					? and(
+							eq(opportunities.id, input.opportunityId),
+							eq(opportunities.updatedAt, new Date(input.expectedUpdatedAt)),
+						)
+					: eq(opportunities.id, input.opportunityId);
+
+				// Update opportunity with analysisStatus
+				const updatedRows = await db
 					.update(opportunities)
 					.set({
 						stageId: newStageId,
+						analysisStatus: input.approved ? "approved" : "rejected",
+						analysisRejectionCount: input.approved
+							? opportunity[0].analysisRejectionCount
+							: opportunity[0].analysisRejectionCount + 1,
+						lastAnalysisRejectedAt: input.approved ? null : new Date(),
+						lastAnalysisRejectedBy: input.approved ? null : context.userId,
 						notes: input.reason
 							? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
 							: opportunity[0].notes,
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(whereClause)
+					.returning();
+
+				// Check for concurrent modification
+				if (updatedRows.length === 0 && input.expectedUpdatedAt) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
+					});
+				}
 
 				// Record stage history
 				await db.insert(opportunityStageHistory).values({
@@ -1450,7 +1569,7 @@ export const crmRouter = {
 						input.reason ||
 						(input.approved
 							? "Documentación aprobada"
-							: "Documentación rechazada"),
+							: "Documentación rechazada - movida a etapa 20%"),
 					isOverride: false,
 				});
 			}

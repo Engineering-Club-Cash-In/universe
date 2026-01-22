@@ -110,7 +110,7 @@ export const legalContractsRouter = {
 				const { key } = await uploadFileToR2(
 					fileBlob,
 					uniqueFilename,
-					`legal-contracts/${input.leadId}`,
+					`legal-contracts/${input.opportunityId || input.leadId}`,
 				);
 
 				pdfLink = await getFileUrl(key);

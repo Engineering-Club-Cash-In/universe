@@ -20,11 +20,13 @@ import {
 	History,
 	Mail,
 	Plus,
+	RefreshCw,
 	Target,
 	Trash2,
 	TrendingUp,
 	Upload,
 	Users,
+	XCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -160,7 +162,23 @@ function DraggableOpportunityCard({
 						);
 					}
 					return null;
-				})()} {opportunity.expectedCloseDate && (
+				})()}
+				{opportunity.analysisStatus === "rejected" && (
+					<Badge variant="destructive" className="text-xs">
+						<XCircle className="mr-1 h-3 w-3" />
+						Análisis Rechazado
+					</Badge>
+				)}
+				{opportunity.analysisStatus === "resubmitted" && (
+					<Badge
+						variant="outline"
+						className="border-blue-300 bg-blue-50 text-blue-700 text-xs"
+					>
+						<RefreshCw className="mr-1 h-3 w-3" />
+						Reenviado a Análisis
+					</Badge>
+				)}
+				{opportunity.expectedCloseDate && (
 					<div className="flex items-center gap-1 text-muted-foreground text-xs">
 						<Calendar className="h-3 w-3" />
 						{formatDate(opportunity.expectedCloseDate)}

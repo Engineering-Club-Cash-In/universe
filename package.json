@@ -9,7 +9,10 @@
   "scripts": {
     "docker:crm-server": "podman build -f apps/crm/apps/server/Dockerfile -t cci/crm-api .",
     "docker:crm-web": "podman build -f apps/crm/Dockerfile -t cci/crm-web .",
-    "docker:crm": "bun run docker:crm-server && bun run docker:crm-web"
+    "docker:crm": "bun run docker:crm-server && bun run docker:crm-web",
+    "docker:crm-tag": "podman tag cci/crm-api:latest public.ecr.aws/a6w8m2u2/cci/crm-api:latest && podman tag cci/crm-web:latest public.ecr.aws/a6w8m2u2/cci/crm-web:latest",
+    "docker:crm-push": "podman push public.ecr.aws/a6w8m2u2/cci/crm-api:latest && podman push public.ecr.aws/a6w8m2u2/cci/crm-web:latest",
+    "docker:crm-deploy": "bun run docker:crm && bun run docker:crm-tag && bun run docker:crm-push"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",

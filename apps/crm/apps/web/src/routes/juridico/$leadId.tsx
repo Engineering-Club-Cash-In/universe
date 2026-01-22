@@ -53,6 +53,7 @@ function RouteComponent() {
 		clientSigningLink: string | null;
 		representativeSigningLink: string | null;
 		additionalSigningLinks: string[] | null;
+		pdfLink?: string | null;
 		opportunityId: string | null;
 	} | null>(null);
 	const [opportunityInfo, setOpportunityInfo] = useState<{
@@ -123,6 +124,7 @@ function RouteComponent() {
 			clientSigningLink: string | null;
 			representativeSigningLink: string | null;
 			additionalSigningLinks: string[] | null;
+			pdfLink?: string | null;
 			opportunityId: string | null;
 		},
 		opportunity?: { id: string; title: string; value: string | null } | null,

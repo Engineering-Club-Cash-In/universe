@@ -677,6 +677,9 @@ export const crmRouter = {
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
+				// Analysis status for tracking rejection/resubmission
+				analysisStatus: opportunities.analysisStatus,
+				analysisRejectionCount: opportunities.analysisRejectionCount,
 				// Credit terms fields
 				numeroCuotas: opportunities.numeroCuotas,
 				tasaInteres: opportunities.tasaInteres,
@@ -1068,6 +1071,38 @@ export const crmRouter = {
 				// is now handled by approveDisbursement via closeOpportunity service
 			}
 
+			// Calculate new analysisStatus based on stage transition
+			let newAnalysisStatus = currentOpportunity[0].analysisStatus;
+
+			if (input.stageId && input.stageId !== currentOpportunity[0].stageId) {
+				const targetStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, input.stageId))
+					.limit(1);
+
+				const currentStage = await db
+					.select()
+					.from(salesStages)
+					.where(eq(salesStages.id, currentOpportunity[0].stageId))
+					.limit(1);
+
+				const fromPercentage = currentStage[0]?.closurePercentage ?? 0;
+				const toPercentage = targetStage[0]?.closurePercentage ?? 0;
+
+				// If moving TO stage 30% (analysis stage)
+				if (toPercentage === 30 && fromPercentage !== 30) {
+					if (currentOpportunity[0].analysisStatus === "not_applicable") {
+						newAnalysisStatus = "pending";
+					} else if (currentOpportunity[0].analysisStatus === "rejected") {
+						newAnalysisStatus = "resubmitted";
+					} else if (currentOpportunity[0].analysisStatus === "approved") {
+						// Re-analysis of previously approved opportunity
+						newAnalysisStatus = "pending";
+					}
+				}
+			}
+
 			// Sales users can only update opportunities assigned to them
 			// Admin and sales_supervisor can update any opportunity
 			const whereClause =
@@ -1137,6 +1172,10 @@ export const crmRouter = {
 					}),
 					...(gastosAdministrativos !== undefined && {
 						gastosAdministrativos: String(gastosAdministrativos),
+					}),
+					// Update analysisStatus if it changed during stage transition
+					...(newAnalysisStatus !== currentOpportunity[0].analysisStatus && {
+						analysisStatus: newAnalysisStatus,
 					}),
 					...(updateData.status === "won" && { actualCloseDate: new Date() }),
 					updatedAt: new Date(),
@@ -1211,6 +1250,8 @@ export const crmRouter = {
 					notes: opportunities.notes,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
+					analysisStatus: opportunities.analysisStatus,
+					analysisRejectionCount: opportunities.analysisRejectionCount,
 					lead: {
 						id: leads.id,
 						firstName: leads.firstName,
@@ -1268,6 +1309,8 @@ export const crmRouter = {
 					notes: opportunities.notes,
 					leadId: opportunities.leadId,
 					clientType: leads.clientType,
+					analysisStatus: opportunities.analysisStatus,
+					analysisRejectionCount: opportunities.analysisRejectionCount,
 				})
 				.from(opportunities)
 				.leftJoin(leads, eq(opportunities.leadId, leads.id))
@@ -1411,7 +1454,7 @@ export const crmRouter = {
 				throw new Error("Opportunity is not in analysis stage");
 			}
 
-			// Get the next stage
+			// Get the next stage (40% - Cierre de propuesta) for approval
 			const nextStage = await db
 				.select()
 				.from(salesStages)
@@ -1422,17 +1465,34 @@ export const crmRouter = {
 				throw new Error("Next stage not found");
 			}
 
-			// Update opportunity stage if approved
-			const newStageId = input.approved
-				? nextStage[0].id
-				: opportunity[0].stageId;
+			// Get the previous stage (20% - Solución y propuesta) for rejection
+			const previousStage = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.name, "Solución y propuesta"))
+				.limit(1);
 
-			if (input.approved || input.reason) {
-				// Update opportunity
+			if (!previousStage[0]) {
+				throw new Error("Previous stage (Solución y propuesta) not found");
+			}
+
+			// Determine new stage based on approval/rejection
+			const newStageId = input.approved
+				? nextStage[0].id // 40% - Cierre de propuesta
+				: previousStage[0].id; // 20% - Solución y propuesta (rejection)
+
+			if (input.approved || input.reason || !input.approved) {
+				// Update opportunity with analysisStatus
 				await db
 					.update(opportunities)
 					.set({
 						stageId: newStageId,
+						analysisStatus: input.approved ? "approved" : "rejected",
+						analysisRejectionCount: input.approved
+							? opportunity[0].analysisRejectionCount
+							: opportunity[0].analysisRejectionCount + 1,
+						lastAnalysisRejectedAt: input.approved ? null : new Date(),
+						lastAnalysisRejectedBy: input.approved ? null : context.userId,
 						notes: input.reason
 							? `${opportunity[0].notes || ""}\n\n[Análisis ${input.approved ? "Aprobado" : "Rechazado"}]: ${input.reason}`
 							: opportunity[0].notes,
@@ -1450,7 +1510,7 @@ export const crmRouter = {
 						input.reason ||
 						(input.approved
 							? "Documentación aprobada"
-							: "Documentación rechazada"),
+							: "Documentación rechazada - movida a etapa 20%"),
 					isOverride: false,
 				});
 			}

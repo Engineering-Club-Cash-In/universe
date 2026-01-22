@@ -46,8 +46,7 @@ export function useAplicarPago() {
     mutationFn: (pagoId: number) => pagosService.aplicarPago(pagoId),
     
     onSuccess: (data) => {
-      // ✅ Mostrar mensaje de éxito
-      alert(data.message);
+    
 
       // 🔄 Invalidar la caché para refrescar la tabla
       queryClient.invalidateQueries({ 

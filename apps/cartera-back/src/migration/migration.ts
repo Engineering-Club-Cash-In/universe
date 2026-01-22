@@ -679,6 +679,7 @@ export async function mapEstadoCuentaToPagosBig(
       validationStatus: "validated" as const,
       registerBy: "SIFCO_SYNC",
       pagoConvenio: "0",
+      fecha_boleta:new Date(primeraTransaccion.CrMoFeTrx).toISOString()
     };
 
     console.log("\n📝 Insertando pago 0...");
@@ -718,7 +719,7 @@ export async function mapEstadoCuentaToPagosBig(
   console.log("└─────────────────────────────────────────────────────────────");
 
   const cuotasParaInsertar = cuotas.map((c, idx) => {
-    const numeroCuota = Number(c.InteresNumeroCuota ?? 0);
+    const numeroCuota = Number(c.InteresNumeroCuota ?? c.CapitalNumeroCuota);
     const isPagado = c.CapitalPagado === "S" && c.InteresPagado === "S";
 
     // 📅 Ajustar fecha de vencimiento según día de corte
@@ -953,6 +954,7 @@ export async function mapEstadoCuentaToPagosBig(
         : ("no_required" as const),
       registerBy: "SIFCO_SYNC",
       pagoConvenio: "0",
+      fecha_boleta:fechaVencimientoPago.toISOString()
     };
   });
 

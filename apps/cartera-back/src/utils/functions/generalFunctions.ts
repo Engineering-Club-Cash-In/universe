@@ -603,3 +603,10 @@ export function toBigExcel(value: any, fallback: string | number = "0"): Big {
 
   return new Big(str);
 }
+
+
+export const convertirAHoraGuatemala = (fechaString: string): Date => {
+  const fecha = new Date(fechaString);
+  // Guatemala está en UTC-6
+  return new Date(fecha.toLocaleString('en-US', { timeZone: 'America/Guatemala' }));
+};

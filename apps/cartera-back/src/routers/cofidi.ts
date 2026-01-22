@@ -13,408 +13,464 @@ import {
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { NITSoapClient } from "../cofidi/nitGenerator";
+import { SAT_CONFIG, CLUB_CASHIN_CONFIG, COFIDI_CONFIG } from "../utils/functions/const";
 
 function generarIdInternoRandom(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
 }
 
-const SAT_CONFIG = {
-  requestor: "8A454E3F-CEA1-41D8-A13A-A748A4891BBE",
-  user: "8A454E3F-CEA1-41D8-A13A-A748A4891BBE",
-  userName: "TEST",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/webservicefront/factwsfront.asmx",
-  entity: "800000001026",
-};
 
-const COFIDI_CONFIG = {
-  requestor: "8A454E3F-CEA1-41D8-A13A-A748A4891BBE",
-  entity: "800000001026",
-  endpointUrl:
-    "https://portaltest.cofidiguatemala.com:8443/nitfel/consultanit.asmx",
-};
-
-const CLUB_CASHIN_CONFIG = {
-  emisor: {
-    nit: "800000001026", // 👈 ✅ CAMBIAR A NIT DE PRUEBA
-    nombreEmisor: "CUBE INVESTMENTS, S.A.",
-    codigoEstablecimiento: "1",
-    nombreComercial: "CASH-IN",
-    afiliacionIVA: "GEN",
-    direccion: {
-      direccion:
-        "3 AVENIDA Zona 13 COLONIA LOMAS DE PAMPLONA A 13-78, Guatemala, Guatemala",
-      codigoPostal: "01013",
-      municipio: "Guatemala",
-      departamento: "Guatemala",
-      pais: "GT",
-    },
-  },
-  tipoDocumento: "FCAM" as const,
-  codigoMoneda: "GTQ",
-  frases: [
-    {
-      tipoFrase: 1 as const,
-      codigoEscenario: "1", // 👈 ✅ CAMBIAR A ESCENARIO 2
-    },
-  ],
-};
 export const dteController = new Elysia({ prefix: "/api/dte" })
 
   // 🔥 POST - Certificar DTE
-  .post(
-    "/facturar-pago-completo",
-    async ({ body, set }) => {
-      try {
-        const { pago_id, created_by } = body;
+.post(
+  "/facturar-pago-completo",
+  async ({ body, set }) => {
+    try {
+      const { pago_id, created_by } = body;
+const facturasExistentes = await db
+  .select({
+    factura_id: facturas_electronicas.factura_id,
+    status: facturas_electronicas.status,
+    tipo_documento: facturas_electronicas.tipo_documento,
+    serie: facturas_electronicas.serie,
+    numero: facturas_electronicas.numero,
+    uuid: facturas_electronicas.uuid,
+  })
+  .from(facturas_electronicas)
+  .where(
+    and(
+      eq(facturas_electronicas.pago_id, pago_id),
+      eq(facturas_electronicas.status, "ACTIVA") // 👈 Solo ACTIVAS
+    )
+  );
 
-        console.log("🔥 ========== FACTURANDO PAGO COMPLETO ==========");
-        console.log(`📝 Pago ID: ${pago_id} | Usuario: ${created_by || "N/A"}`);
+if (facturasExistentes.length > 0) {
+  console.log("⚠️ Este pago ya tiene facturas activas:", facturasExistentes);
+  set.status = 400;
+  return {
+    success: false,
+    message: "Este pago ya tiene facturas electrónicas activas. No se puede volver a facturar.",
+    facturasExistentes: facturasExistentes.map(f => ({
+      id: f.factura_id,
+      tipo: f.tipo_documento,
+      serie: f.serie,
+      numero: f.numero,
+      uuid: f.uuid,
+      status: f.status
+    }))
+  };
+}
 
-        // ============================================
-        // 1️⃣ OBTENER DATOS COMPLETOS DEL PAGO
-        // ============================================
-        const [pagoData] = await db
-          .select({
-            pago_id: pagos_credito.pago_id,
-            credito_id: pagos_credito.credito_id,
-            monto_boleta: pagos_credito.monto_boleta,
-            fecha_pago: pagos_credito.fecha_pago,
-            fecha_vencimiento: pagos_credito.fecha_vencimiento,
-            validationStatus: pagos_credito.validationStatus,
+      console.log("🔥 ========== FACTURANDO PAGO COMPLETO ==========");
+      console.log(`📝 Pago ID: ${pago_id} | Usuario: ${created_by || "N/A"}`);
 
-            abono_seguro: pagos_credito.abono_seguro,
-            abono_gps: pagos_credito.abono_gps,
-            membresias_pago: pagos_credito.membresias_pago,
-            mora: pagos_credito.mora,
+      // ============================================
+      // 1️⃣ OBTENER DATOS COMPLETOS DEL PAGO
+      // ============================================
+      const [pagoData] = await db
+        .select({
+          pago_id: pagos_credito.pago_id,
+          credito_id: pagos_credito.credito_id,
+          monto_boleta: pagos_credito.monto_boleta,
+          fecha_pago: pagos_credito.fecha_pago,
+          fecha_vencimiento: pagos_credito.fecha_vencimiento,
+          validationStatus: pagos_credito.validationStatus,
 
-            abono_interes: pagos_credito.abono_interes,
-            abono_iva_12: pagos_credito.abono_iva_12,
+          abono_seguro: pagos_credito.abono_seguro,
+          abono_gps: pagos_credito.abono_gps,
+          membresias_pago: pagos_credito.membresias_pago,
+          mora: pagos_credito.mora,
 
-            usuario_id: usuarios.usuario_id,
-            nombre: usuarios.nombre,
-            nit: usuarios.nit,
-            direccion: usuarios.direccion,
-            municipio: usuarios.municipio,
-            departamento: usuarios.departamento,
-            codigo_postal: usuarios.codigo_postal,
-            pais: usuarios.pais,
-          })
-          .from(pagos_credito)
-          .innerJoin(
-            creditos,
-            eq(pagos_credito.credito_id, creditos.credito_id)
-          )
-          .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
-          .where(eq(pagos_credito.pago_id, pago_id));
+          abono_interes: pagos_credito.abono_interes,
+          abono_iva_12: pagos_credito.abono_iva_12,
 
-        if (!pagoData) {
-          set.status = 404;
-          return { success: false, error: "Pago no encontrado" };
-        }
+          usuario_id: usuarios.usuario_id,
+          nombre: usuarios.nombre,
+          nit: usuarios.nit,
+          direccion: usuarios.direccion,
+          municipio: usuarios.municipio,
+          departamento: usuarios.departamento,
+          codigo_postal: usuarios.codigo_postal,
+          pais: usuarios.pais,
+        })
+        .from(pagos_credito)
+        .innerJoin(
+          creditos,
+          eq(pagos_credito.credito_id, creditos.credito_id)
+        )
+        .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
+        .where(eq(pagos_credito.pago_id, pago_id));
 
-        if (pagoData.validationStatus !== "validated") {
-          set.status = 400;
-          console.error(
-            `❌ Pago no validado - Status: ${pagoData.validationStatus}`
-          );
-          return {
-            success: false,
-            error: "El pago debe estar validado antes de facturar",
-            current_status: pagoData.validationStatus,
-            pago_id: pago_id,
-          };
-        }
+      if (!pagoData) {
+        set.status = 404;
+        return { success: false, error: "Pago no encontrado" };
+      }
 
-        console.log(`✅ Pago VALIDADO - Cliente: ${pagoData.nombre}`);
-
-        // ============================================
-        // 2️⃣ OBTENER INVERSIONISTAS DEL PAGO
-        // ============================================
-        const inversionistasDelPago = await db
-          .select({
-            inversionista_id: inversionistas.inversionista_id,
-            nombre: inversionistas.nombre,
-            emite_factura: inversionistas.emite_factura,
-            abono_capital: pagos_credito_inversionistas.abono_capital,
-            abono_interes: pagos_credito_inversionistas.abono_interes,
-            abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
-          })
-          .from(pagos_credito_inversionistas)
-          .innerJoin(
-            inversionistas,
-            eq(
-              pagos_credito_inversionistas.inversionista_id,
-              inversionistas.inversionista_id
-            )
-          )
-          .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
-
-        console.log(
-          `📊 ${inversionistasDelPago.length} inversionistas encontrados`
+      if (pagoData.validationStatus !== "validated") {
+        set.status = 400;
+        console.error(
+          `❌ Pago no validado - Status: ${pagoData.validationStatus}`
         );
-
-        // ============================================
-        // 3️⃣ CONSTRUIR RECEPTOR
-        // ============================================
-        const receptor = {
-          idReceptor: pagoData.nit || "CF",
-          nombreReceptor: pagoData.nombre,
-          direccion: pagoData.direccion
-            ? {
-                direccion: pagoData.direccion,
-                codigoPostal: pagoData.codigo_postal || "01001",
-                municipio: pagoData.municipio || "Guatemala",
-                departamento: pagoData.departamento || "Guatemala",
-                pais: pagoData.pais || "GT",
-              }
-            : undefined,
+        return {
+          success: false,
+          error: "El pago debe estar validado antes de facturar",
+          current_status: pagoData.validationStatus,
+          pago_id: pago_id,
         };
+      }
 
-        const facturasGeneradas = [];
-        const Big = (await import("big.js")).default;
+      console.log(`✅ Pago VALIDADO - Cliente: ${pagoData.nombre}`);
+
+      // ============================================
+      // 2️⃣ OBTENER INVERSIONISTAS DEL PAGO
+      // ============================================
+      const inversionistasDelPago = await db
+        .select({
+          inversionista_id: inversionistas.inversionista_id,
+          nombre: inversionistas.nombre,
+          emite_factura: inversionistas.emite_factura,
+          abono_capital: pagos_credito_inversionistas.abono_capital,
+          abono_interes: pagos_credito_inversionistas.abono_interes,
+          abono_iva_12: pagos_credito_inversionistas.abono_iva_12,
+        })
+        .from(pagos_credito_inversionistas)
+        .innerJoin(
+          inversionistas,
+          eq(
+            pagos_credito_inversionistas.inversionista_id,
+            inversionistas.inversionista_id
+          )
+        )
+        .where(eq(pagos_credito_inversionistas.pago_id, pago_id));
+
+      console.log(
+        `📊 ${inversionistasDelPago.length} inversionistas encontrados`
+      );
+
+      // ============================================
+      // 3️⃣ CONSTRUIR RECEPTOR
+      // ============================================
+      const receptor = {
+        idReceptor: pagoData.nit 
+          ? pagoData.nit.split('/')[0].trim() // 🔥 Tomar solo el primer NIT
+          : "CF",
+        nombreReceptor: pagoData.nombre
+          ? pagoData.nombre.split('/')[0].trim() // 🔥 Tomar solo el primer nombre
+          : pagoData.nombre,
+        direccion: pagoData.direccion
+          ? {
+              direccion: pagoData.direccion,
+              codigoPostal: pagoData.codigo_postal || "01001",
+              municipio: pagoData.municipio || "Guatemala",
+              departamento: pagoData.departamento || "Guatemala",
+              pais: pagoData.pais || "GT",
+            }
+          : undefined,
+      };
+
+      const facturasGeneradas = [];
+      const Big = (await import("big.js")).default;
+      Big.DP = 20;
+      Big.RM = Big.roundHalfUp;
+
+      // ============================================
+      // 🔥 FUNCIÓN HELPER PARA CALCULAR IVA CORRECTO
+      // ============================================
+      const calcularIvaExacto = (totalConIva: number) => {
+        const Big = require("big.js");
         Big.DP = 20;
         Big.RM = Big.roundHalfUp;
 
-        // ============================================
-        // 🔥 FUNCIÓN HELPER PARA CALCULAR IVA CORRECTO
-        // ============================================
-        const calcularIvaExacto = (totalConIva: number) => {
-          const total = new Big(totalConIva);
-
-          // Base = Total / 1.12 (REDONDEADO A 2 DECIMALES)
-          const montoGravable = total.div("1.12").round(2, Big.roundHalfUp);
-
-          // IVA = Total - Base
-          const montoImpuesto = total.minus(montoGravable);
-
-          console.log(`      Total: ${total.toFixed(2)}`);
-          console.log(`      Base: ${montoGravable.toFixed(2)}`);
-          console.log(`      IVA: ${montoImpuesto.toFixed(2)}`);
-          console.log(
-            `      Verificación: ${montoGravable.plus(montoImpuesto).toFixed(2)} = ${total.toFixed(2)}`
-          );
-
-          return {
-            precioUnitario: parseFloat(total.toFixed(2)), // ← 🔥 PRECIO = TOTAL (con IVA)
-            precio: parseFloat(total.toFixed(2)), // ← 🔥 PRECIO = TOTAL (con IVA)
-            montoGravable: parseFloat(montoGravable.toFixed(2)),
-            montoImpuesto: parseFloat(montoImpuesto.toFixed(2)),
-            total: parseFloat(total.toFixed(2)),
-            verificacionCorrecta: montoGravable.plus(montoImpuesto).eq(total),
-          };
-        };
-
-        // ============================================
-        // 4️⃣ FACTURA DE SERVICIOS
-        // ============================================
-        const tieneServicios =
-          (pagoData.abono_seguro && parseFloat(pagoData.abono_seguro) > 0) ||
-          (pagoData.abono_gps && parseFloat(pagoData.abono_gps) > 0) ||
-          (pagoData.membresias_pago &&
-            parseFloat(pagoData.membresias_pago) > 0) ||
-          (pagoData.mora && parseFloat(pagoData.mora) > 0);
-
-        if (tieneServicios) {
-          console.log("\n💼 Generando factura de SERVICIOS...");
-
-          const itemsServicios = [];
-          let numeroLinea = 1;
-          let totalServicios = new Big(0);
-
-          // 🔥 SEGURO
-          if (pagoData.abono_seguro && parseFloat(pagoData.abono_seguro) > 0) {
-            const calc = calcularIvaExacto(parseFloat(pagoData.abono_seguro));
-
-            console.log(`   📦 SEGURO: Q${calc.total}`);
-            console.log(`      Precio: Q${calc.precioUnitario}`);
-            console.log(`      Base: Q${calc.montoGravable}`);
-            console.log(`      IVA: Q${calc.montoImpuesto}`);
-            console.log(`      ✓ Verificación: ${calc.verificacionCorrecta}`);
-
-            itemsServicios.push({
-              numeroLinea: numeroLinea++,
-              bienOServicio: "B",
-              cantidad: 1,
-              unidadMedida: "UND",
-              descripcion: "SEGURO",
-              precioUnitario: calc.precioUnitario, // ← 🔥 USA calc.precioUnitario
-              precio: calc.precio, // ← 🔥 USA calc.precio
-              descuento: 0,
-              impuestos: [
-                {
-                  nombreCorto: "IVA",
-                  codigoUnidadGravable: 1,
-                  montoGravable: calc.montoGravable,
-                  montoImpuesto: calc.montoImpuesto,
-                },
-              ],
-              total: calc.total,
-            });
-
-            totalServicios = totalServicios.plus(calc.total);
-          }
-
-          // 🔥 GPS
-          if (pagoData.abono_gps && parseFloat(pagoData.abono_gps) > 0) {
-            const calc = calcularIvaExacto(parseFloat(pagoData.abono_gps));
-
-            console.log(
-              `   📦 GPS: Q${calc.total} (Precio: Q${calc.precioUnitario}, Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto}, ✓${calc.verificacionCorrecta})`
-            );
-
-            itemsServicios.push({
-              numeroLinea: numeroLinea++,
-              bienOServicio: "B",
-              cantidad: 1,
-              unidadMedida: "UND",
-              descripcion: "GPS",
-              precioUnitario: calc.precioUnitario, // ← 🔥 USA calc.precioUnitario
-              precio: calc.precio, // ← 🔥 USA calc.precio
-              descuento: 0,
-              impuestos: [
-                {
-                  nombreCorto: "IVA",
-                  codigoUnidadGravable: 1,
-                  montoGravable: calc.montoGravable,
-                  montoImpuesto: calc.montoImpuesto,
-                },
-              ],
-              total: calc.total,
-            });
-
-            totalServicios = totalServicios.plus(calc.total);
-          }
-
-          // 🔥 MEMBRESÍA
-          if (
-            pagoData.membresias_pago &&
-            parseFloat(pagoData.membresias_pago) > 0
-          ) {
-            const calc = calcularIvaExacto(
-              parseFloat(pagoData.membresias_pago)
-            );
-
-            console.log(
-              `   📦 MEMBRESÍA: Q${calc.total} (Precio: Q${calc.precioUnitario}, Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto}, ✓${calc.verificacionCorrecta})`
-            );
-
-            itemsServicios.push({
-              numeroLinea: numeroLinea++,
-              bienOServicio: "B",
-              cantidad: 1,
-              unidadMedida: "UND",
-              descripcion: "MEMBRESÍA",
-              precioUnitario: calc.precioUnitario, // ← 🔥 USA calc.precioUnitario
-              precio: calc.precio, // ← 🔥 USA calc.precio
-              descuento: 0,
-              impuestos: [
-                {
-                  nombreCorto: "IVA",
-                  codigoUnidadGravable: 1,
-                  montoGravable: calc.montoGravable,
-                  montoImpuesto: calc.montoImpuesto,
-                },
-              ],
-              total: calc.total,
-            });
-
-            totalServicios = totalServicios.plus(calc.total);
-          }
-
-          // 🔥 MORA
-          if (pagoData.mora && parseFloat(pagoData.mora) > 0) {
-            const calc = calcularIvaExacto(parseFloat(pagoData.mora));
-
-            console.log(
-              `   📦 MORA: Q${calc.total} (Precio: Q${calc.precioUnitario}, Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto}, ✓${calc.verificacionCorrecta})`
-            );
-
-            itemsServicios.push({
-              numeroLinea: numeroLinea++,
-              bienOServicio: "B",
-              cantidad: 1,
-              unidadMedida: "UND",
-              descripcion: "MORA",
-              precioUnitario: calc.precioUnitario, // ← 🔥 USA calc.precioUnitario
-              precio: calc.precio, // ← 🔥 USA calc.precio
-              descuento: 0,
-              impuestos: [
-                {
-                  nombreCorto: "IVA",
-                  codigoUnidadGravable: 1,
-                  montoGravable: calc.montoGravable,
-                  montoImpuesto: calc.montoImpuesto,
-                },
-              ],
-              total: calc.total,
-            });
-
-            totalServicios = totalServicios.plus(calc.total);
-          }
-
-          const fechaVencimiento = pagoData.fecha_vencimiento
-            ? new Date(pagoData.fecha_vencimiento).toISOString().split("T")[0]
-            : pagoData.fecha_pago
-              ? new Date(pagoData.fecha_pago).toISOString().split("T")[0]
-              : new Date().toISOString().split("T")[0];
-
-          const complementosServicios = [
-            {
-              tipo: "cambiario",
-              abonos: [
-                {
-                  numeroAbono: 1,
-                  fechaVencimiento: fechaVencimiento,
-                  montoAbono: parseFloat(totalServicios.toFixed(2)),
-                },
-              ],
-            },
-          ];
-
-          console.log(`   💰 Total servicios: Q${totalServicios.toFixed(2)}`);
-
-          try {
-            const facturaServicios = await certificarFacturaHelper({
-              pago_id,
-              receptor,
-              items: itemsServicios,
-              complementos: complementosServicios,
-              created_by,
-            });
-
-            facturasGeneradas.push({
-              tipo: "SERVICIOS",
-              ...facturaServicios,
-            });
-
-            console.log(
-              `   ✅ Factura servicios: ${facturaServicios.serie}-${facturaServicios.numero}`
-            );
-          } catch (error: any) {
-            console.error(`   ❌ Error factura servicios:`, error.message);
-
-            set.status = 500;
-            return {
-              success: false,
-              error: error.message || "Error al generar factura de servicios",
-              detalles: {
-                tipo_factura: "SERVICIOS",
-                pago_id,
-                error_original: error.stack,
-              },
-            };
-          }
+        const total = new Big(totalConIva);
+        
+        // Calcular base (precio / 1.12)
+        const montoGravable = total.div("1.12").round(2, Big.roundHalfUp);
+        
+        // Calcular IVA desde la base (base * 0.12)
+        const montoImpuesto = montoGravable.times("0.12").round(2, Big.roundHalfUp);
+        
+        // Verificar que base + IVA = total
+        const totalCalculado = montoGravable.plus(montoImpuesto);
+        const diferencia = total.minus(totalCalculado);
+        
+        let montoGravableFinal = montoGravable;
+        
+        // Si hay diferencia de centavos, ajustar la base
+        if (!diferencia.eq(0)) {
+          console.log(`   ⚠️ Ajustando base por diferencia: Q${diferencia.toFixed(2)}`);
+          montoGravableFinal = montoGravable.plus(diferencia);
         }
 
-        // ============================================
-        // 5️⃣ FACTURAS DE INTERESES
-        // ============================================
-        const totalInteresesPago = new Big(pagoData.abono_interes || "0");
-        const totalIvaPago = new Big(pagoData.abono_iva_12 || "0");
+        return {
+          precioUnitario: parseFloat(total.toFixed(2)),
+          precio: parseFloat(total.toFixed(2)),
+          montoGravable: parseFloat(montoGravableFinal.toFixed(2)),
+          montoImpuesto: parseFloat(montoImpuesto.toFixed(2)),
+          total: parseFloat(total.toFixed(2)),
+        };
+      };
 
+      // ============================================
+      // 4️⃣ FACTURA DE MORA (INDEPENDIENTE)
+      // ============================================
+      if (pagoData.mora && parseFloat(pagoData.mora) > 0) {
+        console.log("\n⚠️ Generando factura de MORA...");
+
+        const calcMora = calcularIvaExacto(parseFloat(pagoData.mora));
+
+        console.log(`   📦 MORA: Q${calcMora.total}`);
+        console.log(`      Precio: Q${calcMora.precioUnitario}`);
+        console.log(`      Base: Q${calcMora.montoGravable}`);
+        console.log(`      IVA: Q${calcMora.montoImpuesto}`);
+
+        const itemsMora = [
+          {
+            numeroLinea: 1,
+            bienOServicio: "B",
+            cantidad: 1,
+            unidadMedida: "UND",
+            descripcion: "CARGO POR SERVICIOS MORATORIOS",
+            precioUnitario: calcMora.precioUnitario,
+            precio: calcMora.precio,
+            descuento: 0,
+            impuestos: [
+              {
+                nombreCorto: "IVA",
+                codigoUnidadGravable: 1,
+                montoGravable: calcMora.montoGravable,
+                montoImpuesto: calcMora.montoImpuesto,
+              },
+            ],
+            total: calcMora.total,
+          },
+        ];
+
+        const fechaVencimiento = pagoData.fecha_vencimiento
+          ? new Date(pagoData.fecha_vencimiento).toISOString().split("T")[0]
+          : pagoData.fecha_pago
+            ? new Date(pagoData.fecha_pago).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0];
+
+        const complementosMora = [
+          {
+            tipo: "cambiario",
+            abonos: [
+              {
+                numeroAbono: 1,
+                fechaVencimiento: fechaVencimiento,
+                montoAbono: calcMora.total,
+              },
+            ],
+          },
+        ];
+
+        try {
+          const facturaMora = await certificarFacturaHelper({
+            pago_id,
+            receptor,
+            items: itemsMora,
+            complementos: complementosMora,
+            created_by,
+          });
+
+          facturasGeneradas.push({
+            tipo: "MORA",
+            ...facturaMora,
+          });
+
+          console.log(`   ✅ Factura mora: ${facturaMora.serie}-${facturaMora.numero}`);
+        } catch (error: any) {
+          console.error(`   ❌ Error factura mora:`, error.message);
+
+          set.status = 500;
+          return {
+            success: false,
+            error: error.message || "Error al generar factura de mora",
+            detalles: {
+              tipo_factura: "MORA",
+              pago_id,
+              error_original: error.stack,
+            },
+          };
+        }
+      }
+
+      // ============================================
+      // 5️⃣ FACTURA DE OTROS SERVICIOS (INDEPENDIENTE)
+      // ============================================
+      const tieneOtrosServicios =
+        (pagoData.abono_seguro && parseFloat(pagoData.abono_seguro) > 0) ||
+        (pagoData.abono_gps && parseFloat(pagoData.abono_gps) > 0) ||
+        (pagoData.membresias_pago && parseFloat(pagoData.membresias_pago) > 0);
+
+      if (tieneOtrosServicios) {
+        console.log("\n💼 Generando factura de OTROS SERVICIOS...");
+
+        const itemsOtrosServicios = [];
+        let numeroLinea = 1;
+        let totalOtrosServicios = new Big(0);
+
+        // 🔥 SEGURO
+        if (pagoData.abono_seguro && parseFloat(pagoData.abono_seguro) > 0) {
+          const calc = calcularIvaExacto(parseFloat(pagoData.abono_seguro));
+
+          console.log(`   📦 SEGURO: Q${calc.total}`);
+          console.log(`      Precio: Q${calc.precioUnitario}`);
+          console.log(`      Base: Q${calc.montoGravable}`);
+          console.log(`      IVA: Q${calc.montoImpuesto}`);
+
+          itemsOtrosServicios.push({
+            numeroLinea: numeroLinea++,
+            bienOServicio: "B",
+            cantidad: 1,
+            unidadMedida: "UND",
+            descripcion: "GASTOS VARIOS",
+            precioUnitario: calc.precioUnitario,
+            precio: calc.precio,
+            descuento: 0,
+            impuestos: [
+              {
+                nombreCorto: "IVA",
+                codigoUnidadGravable: 1,
+                montoGravable: calc.montoGravable,
+                montoImpuesto: calc.montoImpuesto,
+              },
+            ],
+            total: calc.total,
+          });
+
+          totalOtrosServicios = totalOtrosServicios.plus(calc.total);
+        }
+
+        // 🔥 GPS
+        if (pagoData.abono_gps && parseFloat(pagoData.abono_gps) > 0) {
+          const calc = calcularIvaExacto(parseFloat(pagoData.abono_gps));
+
+          console.log(
+            `   📦 GPS: Q${calc.total} (Precio: Q${calc.precioUnitario}, Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`
+          );
+
+          itemsOtrosServicios.push({
+            numeroLinea: numeroLinea++,
+            bienOServicio: "B",
+            cantidad: 1,
+            unidadMedida: "UND",
+            descripcion: "GASTOS VARIOS",
+            precioUnitario: calc.precioUnitario,
+            precio: calc.precio,
+            descuento: 0,
+            impuestos: [
+              {
+                nombreCorto: "IVA",
+                codigoUnidadGravable: 1,
+                montoGravable: calc.montoGravable,
+                montoImpuesto: calc.montoImpuesto,
+              },
+            ],
+            total: calc.total,
+          });
+
+          totalOtrosServicios = totalOtrosServicios.plus(calc.total);
+        }
+
+        // 🔥 MEMBRESÍA
+        if (pagoData.membresias_pago && parseFloat(pagoData.membresias_pago) > 0) {
+          const calc = calcularIvaExacto(parseFloat(pagoData.membresias_pago));
+
+          console.log(
+            `   📦 MEMBRESÍA: Q${calc.total} (Precio: Q${calc.precioUnitario}, Base: Q${calc.montoGravable}, IVA: Q${calc.montoImpuesto})`
+          );
+
+          itemsOtrosServicios.push({
+            numeroLinea: numeroLinea++,
+            bienOServicio: "B",
+            cantidad: 1,
+            unidadMedida: "UND",
+            descripcion: "GASTOS VARIOS",
+            precioUnitario: calc.precioUnitario,
+            precio: calc.precio,
+            descuento: 0,
+            impuestos: [
+              {
+                nombreCorto: "IVA",
+                codigoUnidadGravable: 1,
+                montoGravable: calc.montoGravable,
+                montoImpuesto: calc.montoImpuesto,
+              },
+            ],
+            total: calc.total,
+          });
+
+          totalOtrosServicios = totalOtrosServicios.plus(calc.total);
+        }
+
+        const fechaVencimiento = pagoData.fecha_vencimiento
+          ? new Date(pagoData.fecha_vencimiento).toISOString().split("T")[0]
+          : pagoData.fecha_pago
+            ? new Date(pagoData.fecha_pago).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0];
+
+        const complementosOtrosServicios = [
+          {
+            tipo: "cambiario",
+            abonos: [
+              {
+                numeroAbono: 1,
+                fechaVencimiento: fechaVencimiento,
+                montoAbono: parseFloat(totalOtrosServicios.toFixed(2)),
+              },
+            ],
+          },
+        ];
+
+        console.log(`   💰 Total otros servicios: Q${totalOtrosServicios.toFixed(2)}`);
+
+        try {
+          const facturaOtrosServicios = await certificarFacturaHelper({
+            pago_id,
+            receptor,
+            items: itemsOtrosServicios,
+            complementos: complementosOtrosServicios,
+            created_by,
+          });
+
+          facturasGeneradas.push({
+            tipo: "OTROS_SERVICIOS",
+            ...facturaOtrosServicios,
+          });
+
+          console.log(
+            `   ✅ Factura otros servicios: ${facturaOtrosServicios.serie}-${facturaOtrosServicios.numero}`
+          );
+        } catch (error: any) {
+          console.error(`   ❌ Error factura otros servicios:`, error.message);
+
+          set.status = 500;
+          return {
+            success: false,
+            error: error.message || "Error al generar factura de otros servicios",
+            detalles: {
+              tipo_factura: "OTROS_SERVICIOS",
+              pago_id,
+              error_original: error.stack,
+            },
+          };
+        }
+      }
+
+      // ============================================
+      // 6️⃣ FACTURAS DE INTERESES
+      // ============================================
+      const totalInteresesPago = new Big(pagoData.abono_interes || "0");
+      const totalIvaPago = new Big(pagoData.abono_iva_12 || "0");
+
+      // 🔥 SI NO HAY INTERESES EN EL PAGO, NO GENERAMOS NADA
+      if (totalInteresesPago.lte(0)) {
+        console.log("\n⏭️  NO hay intereses en este pago - Saltando facturas de intereses");
+      } else {
         console.log(
           `\n💰 Procesando INTERESES (Total: Q${totalInteresesPago.toFixed(2)} + IVA: Q${totalIvaPago.toFixed(2)})`
         );
@@ -422,33 +478,51 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         let interesesFacturados = new Big(0);
         let ivaFacturado = new Big(0);
 
-        // PASO 1: Facturas individuales
+        // PASO 1: Facturas individuales SOLO para inversionistas que NO emiten factura Y NO son CUBE
         for (const inv of inversionistasDelPago) {
           const esCube = inv.nombre
             .trim()
             .toUpperCase()
             .includes("CUBE INVESTMENTS");
 
-          if (esCube || !inv.emite_factura) {
-            console.log(
-              `   ⏭️  ${inv.nombre} - ${esCube ? "Es CUBE" : "NO factura"}`
-            );
+          // 🔥 SI ES CUBE → va directo al RESTANTE
+          if (esCube) {
+            console.log(`   ⏭️  ${inv.nombre} - Es CUBE (va en RESTANTE)`);
             continue;
           }
 
-          const abonoInteres = inv.abono_interes || "0";
-          const abonoIva = inv.abono_iva_12 || "0";
+          // 🔥 SI EMITE FACTURA → NO generamos factura (él factura por su cuenta)
+          if (inv.emite_factura) {
+            console.log(
+              `   ⏭️  ${inv.nombre} - Emite su propia factura (NO va en RESTANTE)`
+            );
 
-          if (parseFloat(abonoInteres) <= 0) {
+            // 🔥 SUMAMOS porque NO va en RESTANTE
+            const abonoInteres = new Big(inv.abono_interes || "0");
+            const abonoIva = new Big(inv.abono_iva_12 || "0");
+
+            interesesFacturados = interesesFacturados.plus(abonoInteres);
+            ivaFacturado = ivaFacturado.plus(abonoIva);
+
+            continue;
+          }
+
+          // 🔥 SOLO llegamos aquí si: NO es CUBE Y NO emite factura
+          const abonoInteres = new Big(inv.abono_interes || "0");
+          const abonoIva = new Big(inv.abono_iva_12 || "0");
+          const totalInteres = abonoInteres.plus(abonoIva);
+
+          if (totalInteres.lte(0)) {
             console.log(`   ⏭️  ${inv.nombre} - Sin intereses`);
             continue;
           }
 
-          const montoGravable = new Big(abonoInteres);
-          const montoImpuesto = new Big(abonoIva);
-          const totalInteres = montoGravable.plus(montoImpuesto);
+          console.log(
+            `   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)} (GENERAMOS factura individual)`
+          );
 
-          console.log(`   💼 ${inv.nombre}: Q${totalInteres.toFixed(2)}`);
+          // 🔥 USAR calcularIvaExacto para obtener los valores correctos
+          const calc = calcularIvaExacto(parseFloat(totalInteres.toFixed(2)));
 
           const itemsIntereses = [
             {
@@ -456,19 +530,19 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
               bienOServicio: "B",
               cantidad: 1,
               unidadMedida: "UND",
-              descripcion: `INTERESES - ${inv.nombre}`,
-              precioUnitario: parseFloat(totalInteres.toFixed(2)), // ← 🔥 PRECIO = TOTAL
-              precio: parseFloat(totalInteres.toFixed(2)), // ← 🔥 PRECIO = TOTAL
+              descripcion: `CARGO POR SERVICIOS`,
+              precioUnitario: calc.precioUnitario,
+              precio: calc.precio,
               descuento: 0,
               impuestos: [
                 {
                   nombreCorto: "IVA",
                   codigoUnidadGravable: 1,
-                  montoGravable: parseFloat(montoGravable.toFixed(2)),
-                  montoImpuesto: parseFloat(montoImpuesto.toFixed(2)),
+                  montoGravable: calc.montoGravable,
+                  montoImpuesto: calc.montoImpuesto,
                 },
               ],
-              total: parseFloat(totalInteres.toFixed(2)),
+              total: calc.total,
             },
           ];
 
@@ -485,7 +559,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
                 {
                   numeroAbono: 1,
                   fechaVencimiento: fechaVencimiento,
-                  montoAbono: parseFloat(totalInteres.toFixed(2)),
+                  montoAbono: calc.total,
                 },
               ],
             },
@@ -511,8 +585,8 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
               `      ✅ ${facturaIntereses.serie}-${facturaIntereses.numero}`
             );
 
-            interesesFacturados = interesesFacturados.plus(montoGravable);
-            ivaFacturado = ivaFacturado.plus(montoImpuesto);
+            interesesFacturados = interesesFacturados.plus(calc.montoGravable);
+            ivaFacturado = ivaFacturado.plus(calc.montoImpuesto);
           } catch (error: any) {
             console.error(`      ❌ Error: ${error.message}`);
 
@@ -524,19 +598,19 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
           }
         }
 
-        // PASO 2: Calcular RESTANTE
-        const interesesRestantes =
-          totalInteresesPago.minus(interesesFacturados);
+        // PASO 2: Calcular RESTANTE (SOLO CUBE)
+        const interesesRestantes = totalInteresesPago.minus(interesesFacturados);
         const ivaRestante = totalIvaPago.minus(ivaFacturado);
         const totalRestante = interesesRestantes.plus(ivaRestante);
 
-        console.log(
-          `\n   💵 Intereses RESTANTES: Q${totalRestante.toFixed(2)}`
-        );
+        console.log(`\n   💵 Intereses RESTANTES: Q${totalRestante.toFixed(2)}`);
+        console.log(`       (Incluye SOLO: CUBE INVESTMENTS)`);
 
-        // PASO 3: Factura RESTANTE
+        // PASO 3: Factura RESTANTE (SOLO CUBE)
         if (totalRestante.gt(0)) {
-          console.log(`   💼 Generando factura RESTANTE...`);
+          console.log(`   💼 Generando factura RESTANTE (CUBE)...`);
+
+          const calcRestante = calcularIvaExacto(parseFloat(totalRestante.toFixed(2)));
 
           const itemsRestante = [
             {
@@ -544,19 +618,19 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
               bienOServicio: "B",
               cantidad: 1,
               unidadMedida: "UND",
-              descripcion: "INTERESES - OTROS",
-              precioUnitario: parseFloat(totalRestante.toFixed(2)), // ← 🔥 PRECIO = TOTAL
-              precio: parseFloat(totalRestante.toFixed(2)), // ← 🔥 PRECIO = TOTAL
+              descripcion: "CARGO POR SERVICIOS",
+              precioUnitario: calcRestante.precioUnitario,
+              precio: calcRestante.precio,
               descuento: 0,
               impuestos: [
                 {
                   nombreCorto: "IVA",
                   codigoUnidadGravable: 1,
-                  montoGravable: parseFloat(interesesRestantes.toFixed(2)),
-                  montoImpuesto: parseFloat(ivaRestante.toFixed(2)),
+                  montoGravable: calcRestante.montoGravable,
+                  montoImpuesto: calcRestante.montoImpuesto,
                 },
               ],
-              total: parseFloat(totalRestante.toFixed(2)),
+              total: calcRestante.total,
             },
           ];
 
@@ -573,7 +647,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
                 {
                   numeroAbono: 1,
                   fechaVencimiento: fechaVencimiento,
-                  montoAbono: parseFloat(totalRestante.toFixed(2)),
+                  montoAbono: calcRestante.total,
                 },
               ],
             },
@@ -590,7 +664,7 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
 
             facturasGeneradas.push({
               tipo: "INTERESES_RESTANTE",
-              descripcion: "Incluye CUBE INVESTMENTS y otros inversionistas",
+              descripcion: "CARGO POR SERVICIOS",
               ...facturaRestante,
             });
 
@@ -607,66 +681,67 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
             });
           }
         }
+      }
 
-        // ============================================
-        // 6️⃣ RESPUESTA FINAL
-        // ============================================
-        console.log("\n🎉 Facturación completada");
+      // ============================================
+      // 7️⃣ RESPUESTA FINAL
+      // ============================================
+      console.log("\n🎉 Facturación completada");
 
-        const facturasExitosas = facturasGeneradas.filter(
-          (f) => f.tipo !== "ERROR"
-        );
-        const facturasConError = facturasGeneradas.filter(
-          (f) => f.tipo === "ERROR"
-        );
+      const facturasExitosas = facturasGeneradas.filter(
+        (f) => f.tipo !== "ERROR"
+      );
+      const facturasConError = facturasGeneradas.filter(
+        (f) => f.tipo === "ERROR"
+      );
 
-        console.log(
-          `✅ Exitosas: ${facturasExitosas.length} | ❌ Errores: ${facturasConError.length}`
-        );
+      console.log(
+        `✅ Exitosas: ${facturasExitosas.length} | ❌ Errores: ${facturasConError.length}`
+      );
 
-        if (facturasExitosas.length === 0) {
-          set.status = 500;
-          return {
-            success: false,
-            error: "No se pudo generar ninguna factura",
-            errores: facturasConError,
-          };
-        }
-
-        return {
-          success: true,
-          data: {
-            pago_id,
-            cliente: {
-              nombre: pagoData.nombre,
-              nit: pagoData.nit,
-            },
-            total_facturas: facturasExitosas.length,
-            facturas: facturasExitosas,
-            errores: facturasConError.length > 0 ? facturasConError : undefined,
-          },
-          mensaje:
-            facturasConError.length > 0
-              ? `${facturasExitosas.length} factura(s) generada(s) exitosamente, ${facturasConError.length} con errores`
-              : `${facturasExitosas.length} factura(s) generada(s) exitosamente`,
-        };
-      } catch (error) {
-        console.error("❌ Error facturando pago completo:", error);
+      if (facturasExitosas.length === 0) {
         set.status = 500;
         return {
           success: false,
-          error: (error as Error).message,
-          stack: (error as Error).stack,
+          error: "No se pudo generar ninguna factura",
+          errores: facturasConError,
         };
       }
-    },
-    {
-      body: t.Object({
-        pago_id: t.Number(),
-        created_by: t.Optional(t.Number()),
-      }),
+
+      return {
+        success: true,
+        data: {
+          pago_id,
+          cliente: {
+            nombre: pagoData.nombre,
+            nit: pagoData.nit,
+          },
+          total_facturas: facturasExitosas.length,
+          facturas: facturasExitosas,
+          errores: facturasConError.length > 0 ? facturasConError : undefined,
+        },
+        mensaje:
+          facturasConError.length > 0
+            ? `${facturasExitosas.length} factura(s) generada(s) exitosamente, ${facturasConError.length} con errores`
+            : `${facturasExitosas.length} factura(s) generada(s) exitosamente`,
+      };
+    } catch (error) {
+      console.error("❌ Error facturando pago completo:", error);
+      set.status = 500;
+      return {
+        success: false,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+      };
     }
-  )
+  },
+  {
+    body: t.Object({
+      pago_id: t.Number(),
+      created_by: t.Optional(t.Number()),
+    }),
+  }
+)
   // 🔥 GET - Obtener por UUID
 
   // 🔥 GET - Obtener por UUID (COFIDI + BD)
@@ -764,9 +839,14 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
   try {
     const { uuid, motivo, userId } = body;
 
-    console.log('🚫 Anulando DTE con UUID:', uuid);
+    console.log('🚫 ========== INICIANDO ANULACIÓN DE FACTURA ==========');
+    console.log('📝 UUID:', uuid);
+    console.log('📝 Motivo:', motivo);
+    console.log('👤 Usuario ID:', userId);
 
-    // 1️⃣ INNER JOIN: Factura -> Pago -> Crédito -> Usuario
+    // ============================================
+    // 1️⃣ BUSCAR FACTURA COMPLETA CON JOINS
+    // ============================================
     const [facturaCompleta] = await db
       .select({
         // Datos de la factura
@@ -776,13 +856,13 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         factura_numero: facturas_electronicas.numero,
         factura_status: facturas_electronicas.status,
         factura_fecha_emision: facturas_electronicas.fecha_emision,
-        factura_fecha_certificacion: facturas_electronicas.fecha_certificacion, // 🆕
+        factura_fecha_certificacion: facturas_electronicas.fecha_certificacion,
         factura_monto_total: facturas_electronicas.monto_total,
         factura_receptor_nit: facturas_electronicas.receptor_nit,
         factura_receptor_nombre: facturas_electronicas.receptor_nombre,
         factura_fecha_anulacion: facturas_electronicas.fecha_anulacion,
         factura_motivo_anulacion: facturas_electronicas.motivo_anulacion,
-        factura_tipo_documento: facturas_electronicas.tipo_documento, // 🆕
+        factura_tipo_documento: facturas_electronicas.tipo_documento,
         
         // Datos del pago
         pago_id: pagos_credito.pago_id,
@@ -816,13 +896,19 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
       )
       .where(eq(facturas_electronicas.uuid, uuid));
 
+    // ============================================
+    // 2️⃣ VALIDACIONES PREVIAS
+    // ============================================
+    
     // 🔥 VALIDACIÓN: Factura no encontrada
     if (!facturaCompleta) {
       set.status = 404;
       return {
         success: false,
-        mensaje: 'Factura no encontrada en base de datos',
-        error: 'NOT_FOUND'
+        mensaje: 'No se encontró la factura electrónica',
+        error: 'FACTURA_NO_ENCONTRADA',
+        detalle: `No existe una factura con el UUID: ${uuid}`,
+        sugerencia: 'Verifique que el UUID sea correcto'
       };
     }
 
@@ -831,35 +917,91 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
       set.status = 409;
       return {
         success: false,
-        mensaje: 'Esta factura ya está anulada',
-        error: 'ALREADY_VOIDED',
-        data: {
+        mensaje: 'Esta factura ya fue anulada previamente',
+        error: 'FACTURA_YA_ANULADA',
+        detalle: {
           fecha_anulacion: facturaCompleta.factura_fecha_anulacion,
-          motivo_anulacion: facturaCompleta.factura_motivo_anulacion
-        }
+          motivo_anterior: facturaCompleta.factura_motivo_anulacion,
+          serie: facturaCompleta.factura_serie,
+          numero: facturaCompleta.factura_numero
+        },
+        sugerencia: 'No es posible anular una factura que ya está anulada'
       };
     }
 
-    console.log('✅ Factura encontrada en BD:', {
-      factura_id: facturaCompleta.factura_id,
-      uuid: facturaCompleta.factura_uuid,
+    // 🔥 VALIDACIÓN: Verificar período válido para anular
+    const fechaCertificacion = facturaCompleta.factura_fecha_certificacion 
+      ? new Date(facturaCompleta.factura_fecha_certificacion)
+      : new Date(facturaCompleta.factura_fecha_emision);
+    
+    const hoy = new Date();
+    const mesFactura = fechaCertificacion.getMonth();
+    const anioFactura = fechaCertificacion.getFullYear();
+    const mesActual = hoy.getMonth();
+    const anioActual = hoy.getFullYear();
+
+    // SAT Guatemala permite anular hasta el 10 del mes siguiente (aproximado)
+    // Para ser seguros, solo permitimos anular facturas del mes actual
+    const esMismoPeriodo = (anioFactura === anioActual && mesFactura === mesActual);
+
+    if (!esMismoPeriodo) {
+      const nombresMeses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                           'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+      
+      set.status = 422;
+      return {
+        success: false,
+        mensaje: 'No se puede anular esta factura: el período de declaración de IVA ya cerró',
+        error: 'PERIODO_DECLARACION_CERRADO',
+        detalle: {
+          factura_del_periodo: `${nombresMeses[mesFactura]} ${anioFactura}`,
+          periodo_actual: `${nombresMeses[mesActual]} ${anioActual}`,
+          fecha_factura: fechaCertificacion.toISOString().split('T')[0],
+          restriccion_sat: 'Solo se pueden anular facturas del período actual de IVA'
+        },
+        sugerencia: 'Para corregir facturas de períodos cerrados, debe emitir una Nota de Crédito en lugar de anular'
+      };
+    }
+
+    console.log('✅ Factura encontrada y validada');
+    console.log('📋 Detalles:', {
       serie: facturaCompleta.factura_serie,
       numero: facturaCompleta.factura_numero,
-      fecha_emision_bd: facturaCompleta.factura_fecha_emision,
-      fecha_certificacion_bd: facturaCompleta.factura_fecha_certificacion,
-      receptor_nit: facturaCompleta.usuario_nit,
+      tipo: facturaCompleta.factura_tipo_documento,
+      cliente: facturaCompleta.usuario_nombre,
+      monto: facturaCompleta.factura_monto_total
     });
 
-    // 2️⃣ CONSTRUIR XML DE ANULACIÓN - 🔥 USAR FECHA DE CERTIFICACIÓN
-    // La fecha que SAT tiene registrada es la de CERTIFICACIÓN, no la de emisión
-    const fechaEmisionDocumento = facturaCompleta.factura_fecha_certificacion 
-      ? new Date(facturaCompleta.factura_fecha_certificacion).toISOString()
-      : facturaCompleta.factura_fecha_emision
-        ? new Date(facturaCompleta.factura_fecha_emision).toISOString()
-        : new Date().toISOString();
+    // ============================================
+    // 3️⃣ PREPARAR FECHAS PARA XML
+    // ============================================
+    
+    // 🔥 FORMATO SIN MILISEGUNDOS (como SAT lo espera)
+    const formatearFechaSAT = (fecha: Date): string => {
+      const year = fecha.getFullYear();
+  const month = String(fecha.getMonth() + 1).padStart(2, '0');
+  const day = String(fecha.getDate()).padStart(2, '0');
+  const hours = String(fecha.getHours()).padStart(2, '0');
+  const minutes = String(fecha.getMinutes()).padStart(2, '0');
+  const seconds = String(fecha.getSeconds()).padStart(2, '0');
+  
+  return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`;
+    };
 
-    const fechaHoraAnulacion = new Date().toISOString();
+    const fechaEmisionRaw = facturaCompleta.factura_fecha_certificacion || facturaCompleta.factura_fecha_emision;
+    const fechaEmisionDate = new Date(fechaEmisionRaw);
+    const fechaEmisionDocumento = formatearFechaSAT(fechaEmisionDate);
+    const fechaHoraAnulacion = formatearFechaSAT(new Date());
 
+    console.log('🔍 ========== FECHAS PREPARADAS ==========');
+    console.log('📅 Fecha emisión original (BD):', fechaEmisionRaw);
+    console.log('📅 Fecha emisión formateada (XML):', fechaEmisionDocumento);
+    console.log('📅 Fecha/hora anulación (XML):', fechaHoraAnulacion);
+    console.log('📋 Tipo documento:', facturaCompleta.factura_tipo_documento);
+
+    // ============================================
+    // 4️⃣ CONSTRUIR XML DE ANULACIÓN
+    // ============================================
     const xmlAnulacion = `<?xml version="1.0" encoding="UTF-8"?>
 <dte:GTAnulacionDocumento xmlns:dte="http://www.sat.gob.gt/dte/fel/0.1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" Version="0.1" xsi:schemaLocation="http://www.sat.gob.gt/dte/fel/0.1.0 GT_AnulacionDocumento-0.1.0.xsd">
   <dte:SAT>
@@ -877,23 +1019,21 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
 </dte:GTAnulacionDocumento>`;
 
     console.log('📄 XML de anulación construido');
-    console.log('📊 Datos usados:', {
-      uuid: facturaCompleta.factura_uuid,
-      nit_emisor: CLUB_CASHIN_CONFIG.emisor.nit,
-      nit_receptor: facturaCompleta.usuario_nit,
-      fecha_emision_original: facturaCompleta.factura_fecha_emision,
-      fecha_certificacion: facturaCompleta.factura_fecha_certificacion,
-      fecha_usada_en_xml: fechaEmisionDocumento, // 👈 Esta es la que enviamos
-      fecha_hora_anulacion: fechaHoraAnulacion,
-      motivo: motivo
-    });
+    if (process.env.NODE_ENV === 'development') {
+      console.log('📝 XML completo:\n', xmlAnulacion);
+    }
 
-    // 3️⃣ CONVERTIR A BASE64
+    // ============================================
+    // 5️⃣ CONVERTIR A BASE64
+    // ============================================
     const xmlBase64 = Buffer.from(xmlAnulacion, 'utf-8').toString('base64');
-
     console.log('🔐 XML convertido a Base64');
 
-    // 4️⃣ ANULAR EN COFIDI
+    // ============================================
+    // 6️⃣ ANULAR EN COFIDI/SAT
+    // ============================================
+    console.log('📡 Enviando solicitud de anulación a COFIDI...');
+    
     const satClient = new SATClientService(
       {
         requestor: SAT_CONFIG.requestor,
@@ -908,29 +1048,85 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
 
     // 🔥 VALIDACIÓN: Error en COFIDI
     if (!resultado.anulado) {
+      console.error('❌ COFIDI rechazó la anulación');
+      console.error('📋 Respuesta:', resultado);
+      
       set.status = 422;
+      
+      // Identificar tipos de error comunes
+      const descripcionError = resultado.descripcion || resultado.mensaje || '';
+      let mensajeUsuario = 'Error al procesar la anulación en el sistema SAT';
+      let codigoError = 'COFIDI_ERROR';
+      let sugerencia = 'Contacte al administrador del sistema';
+
+      // 🔥 Error de período cerrado
+      if (descripcionError.includes('excede el plazo') || 
+          descripcionError.includes('período de la declaración') ||
+          descripcionError.includes('vencimiento')) {
+        mensajeUsuario = 'No se puede anular: el período de declaración de IVA ya cerró';
+        codigoError = 'PERIODO_IVA_CERRADO';
+        sugerencia = 'Debe emitir una Nota de Crédito en lugar de anular la factura';
+      }
+      
+      // 🔥 Error de documento no encontrado
+      else if (descripcionError.includes('no existe') || 
+               descripcionError.includes('not found') ||
+               descripcionError.includes('No se encontró')) {
+        mensajeUsuario = 'La factura no fue encontrada en el sistema SAT';
+        codigoError = 'FACTURA_NO_EXISTE_SAT';
+        sugerencia = 'Verifique que la factura haya sido certificada correctamente';
+      }
+      
+      // 🔥 Error de documento ya anulado
+      else if (descripcionError.includes('ya anulado') || 
+               descripcionError.includes('already voided') ||
+               descripcionError.includes('ANULADA')) {
+        mensajeUsuario = 'Esta factura ya fue anulada anteriormente en SAT';
+        codigoError = 'YA_ANULADA_EN_SAT';
+        sugerencia = 'Sincronice el estado de la factura con la base de datos';
+      }
+      
+      // 🔥 Error de fecha
+      else if (descripcionError.includes('fecha') || descripcionError.includes('date')) {
+        mensajeUsuario = 'Error en el formato de fecha de la anulación';
+        codigoError = 'ERROR_FORMATO_FECHA';
+        sugerencia = 'Verifique que la fecha de emisión de la factura sea correcta';
+      }
+
       return {
         success: false,
-        mensaje: 'Error al anular en COFIDI',
-        error: 'COFIDI_ERROR',
-        data: {
-          descripcion: resultado.descripcion,
-          processor: resultado.processor,
+        mensaje: mensajeUsuario,
+        error: codigoError,
+        detalle: {
+          descripcion_cofidi: resultado.descripcion,
           mensaje_original: resultado.mensaje,
-          xml_enviado: process.env.NODE_ENV === 'development' ? xmlAnulacion : undefined,
-          // 🆕 Info adicional para debugging
+          processor: resultado.processor,
+          factura: {
+            uuid: uuid,
+            serie: facturaCompleta.factura_serie,
+            numero: facturaCompleta.factura_numero,
+            fecha_emision_usada: fechaEmisionDocumento
+          },
           debug_info: process.env.NODE_ENV === 'development' ? {
             fecha_emision_bd: facturaCompleta.factura_fecha_emision,
             fecha_certificacion_bd: facturaCompleta.factura_fecha_certificacion,
-            fecha_usada: fechaEmisionDocumento,
+            fecha_usada_xml: fechaEmisionDocumento,
+            xml_enviado: xmlAnulacion
           } : undefined
-        }
+        },
+        sugerencia
       };
     }
 
-    console.log('✅ Factura anulada en COFIDI');
+    console.log('✅ Factura anulada exitosamente en COFIDI/SAT');
+    console.log('📋 Respuesta COFIDI:', {
+      descripcion: resultado.descripcion,
+      processor: resultado.processor
+    });
 
-    // 5️⃣ ACTUALIZAR EN BASE DE DATOS
+    // ============================================
+    // 7️⃣ ACTUALIZAR EN BASE DE DATOS
+    // ============================================
     try {
       const [facturaAnulada] = await db
         .update(facturas_electronicas)
@@ -943,17 +1139,21 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
         .where(eq(facturas_electronicas.uuid, uuid))
         .returning();
 
-      console.log('✅ Factura marcada como ANULADA en BD');
+      console.log('✅ Estado de factura actualizado en base de datos');
 
-      // 6️⃣ RESPUESTA EXITOSA
+      // ============================================
+      // 8️⃣ RESPUESTA EXITOSA
+      // ============================================
       set.status = 200;
       return {
         success: true,
+        mensaje: `Factura ${facturaCompleta.factura_serie}-${facturaCompleta.factura_numero} anulada exitosamente`,
         data: {
-          // Datos de COFIDI
-          cofidi: {
+          // Datos de COFIDI/SAT
+          confirmacion_sat: {
             descripcion: resultado.descripcion,
-            processor: resultado.processor
+            processor: resultado.processor,
+            fecha_anulacion: fechaHoraAnulacion
           },
           
           // Datos de la factura anulada
@@ -963,10 +1163,10 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
             numero: facturaAnulada.numero,
             uuid: facturaAnulada.uuid,
             status: facturaAnulada.status,
+            monto_total: facturaAnulada.monto_total,
             fecha_anulacion: facturaAnulada.fecha_anulacion,
             motivo_anulacion: facturaAnulada.motivo_anulacion,
-            anulada_por: facturaAnulada.anulada_por,
-            monto_total: facturaAnulada.monto_total
+            anulada_por: facturaAnulada.anulada_por
           },
 
           // Datos relacionados
@@ -980,77 +1180,99 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
               nit: facturaCompleta.usuario_nit
             }
           }
-        },
-        mensaje: 'Factura anulada exitosamente en COFIDI y BD'
+        }
       };
 
     } catch (dbError: any) {
-      console.error('❌ Error al actualizar BD (factura YA anulada en COFIDI):', dbError);
+      console.error('❌ Error al actualizar base de datos');
+      console.error('⚠️ IMPORTANTE: La factura SÍ fue anulada en SAT/COFIDI');
+      console.error('Error:', dbError);
       
       set.status = 500;
       
-      if (dbError.message?.includes('foreign key constraint')) {
+      // Error de foreign key (userId inválido)
+      if (dbError.message?.includes('foreign key constraint') || 
+          dbError.code === '23503') {
         return {
           success: false,
-          mensaje: 'Error: El usuario especificado no existe en el sistema',
-          error: 'INVALID_USER_ID',
-          warning: '⚠️ IMPORTANTE: La factura SÍ fue anulada en COFIDI, pero no se pudo actualizar en la base de datos',
-          data: {
+          mensaje: 'Error al actualizar la base de datos: usuario no válido',
+          error: 'USUARIO_INVALIDO',
+          advertencia: '⚠️ IMPORTANTE: La factura SÍ fue anulada en SAT, pero no se actualizó la base de datos',
+          detalle: {
             uuid: uuid,
-            error_detalle: 'El userId proporcionado no corresponde a un usuario válido',
-            accion_requerida: 'Verificar que el userId sea correcto y volver a intentar la actualización de BD'
-          }
+            problema: `El usuario con ID ${userId} no existe en el sistema`,
+            estado_sat: 'ANULADA ✅',
+            estado_bd: 'PENDIENTE DE ACTUALIZAR ⚠️'
+          },
+          accion_requerida: 'Verifique que el ID de usuario sea correcto y contacte al administrador para sincronizar el estado'
         };
       }
 
+      // Error genérico de BD
       return {
         success: false,
-        mensaje: 'Error al actualizar base de datos',
-        error: 'DATABASE_ERROR',
-        warning: '⚠️ IMPORTANTE: La factura SÍ fue anulada en COFIDI, pero no se pudo actualizar en la base de datos',
-        data: {
+        mensaje: 'Error al actualizar la base de datos',
+        error: 'ERROR_BASE_DATOS',
+        advertencia: '⚠️ IMPORTANTE: La factura SÍ fue anulada en SAT, pero no se actualizó la base de datos',
+        detalle: {
           uuid: uuid,
-          error_detalle: dbError.message,
-          accion_requerida: 'Contactar al administrador para sincronizar el estado en BD'
-        }
+          error_tecnico: dbError.message,
+          estado_sat: 'ANULADA ✅',
+          estado_bd: 'PENDIENTE DE ACTUALIZAR ⚠️'
+        },
+        accion_requerida: 'Contacte al administrador del sistema para sincronizar el estado de la factura'
       };
     }
 
   } catch (error: any) {
-    console.error('❌ Error general:', error);
+    console.error('❌ Error crítico en proceso de anulación:', error);
     
     set.status = 500;
 
+    // Error de conexión a BD
     if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
       return {
         success: false,
-        mensaje: 'Error de conexión a la base de datos',
-        error: 'DATABASE_CONNECTION_ERROR',
-        data: {
-          error_detalle: error.message
-        }
+        mensaje: 'No se pudo conectar con la base de datos',
+        error: 'ERROR_CONEXION_BD',
+        detalle: 'El servidor de base de datos no está disponible',
+        sugerencia: 'Verifique la conexión a internet o contacte al administrador'
       };
     }
 
+    // Error de conexión a COFIDI
     if (error.code === 'ENOTFOUND' || error.code === 'ECONNRESET') {
       return {
         success: false,
-        mensaje: 'Error de conexión con el servicio de COFIDI',
-        error: 'COFIDI_CONNECTION_ERROR',
-        data: {
-          error_detalle: error.message
-        }
+        mensaje: 'No se pudo conectar con el servicio de certificación SAT',
+        error: 'ERROR_CONEXION_COFIDI',
+        detalle: 'El servicio de COFIDI no está disponible en este momento',
+        sugerencia: 'Intente nuevamente en unos minutos o contacte al administrador'
       };
     }
 
+    // Error de timeout
+    if (error.code === 'ETIMEDOUT' || error.message?.includes('timeout')) {
+      return {
+        success: false,
+        mensaje: 'La solicitud excedió el tiempo de espera',
+        error: 'TIMEOUT',
+        detalle: 'El servicio tardó demasiado en responder',
+        sugerencia: 'Verifique el estado de la factura antes de intentar nuevamente'
+      };
+    }
+
+    // Error genérico
     return {
       success: false,
       mensaje: 'Error inesperado al procesar la anulación',
-      error: 'INTERNAL_SERVER_ERROR',
-      data: {
-        error_detalle: error.message,
+      error: 'ERROR_INTERNO',
+      detalle: {
+        mensaje_tecnico: error.message,
+        tipo_error: error.name || 'Error desconocido',
         stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      }
+      },
+      sugerencia: 'Contacte al administrador del sistema con los detalles del error'
     };
   }
 }, {
@@ -1473,7 +1695,10 @@ export const dteController = new Elysia({ prefix: "/api/dte" })
             created_at: facturas_electronicas.created_at,
           })
           .from(facturas_electronicas)
-          .where(eq(facturas_electronicas.pago_id, parseInt(pagoId)))
+          .where(and(
+            eq(facturas_electronicas.pago_id, parseInt(pagoId)),
+            eq(facturas_electronicas.status, "ACTIVA")
+          ))
           .orderBy(desc(facturas_electronicas.fecha_emision));
 
         console.log(`📄 ${facturas.length} facturas encontradas`);
@@ -1610,7 +1835,10 @@ async function certificarFacturaHelper({
     // 1️⃣ AUTO-GENERAR CAMPOS
     // ============================================
     const idInterno = generarIdInternoRandom();
-    const fechaHoraEmision = new Date().toISOString().substring(0, 19);
+const fechaGuatemala = new Date();
+fechaGuatemala.setUTCHours(fechaGuatemala.getUTCHours() - 6);
+const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
+
 
     // ============================================
     // 2️⃣ CONSTRUIR REQUEST COMPLETO
@@ -1724,6 +1952,24 @@ async function certificarFacturaHelper({
         abonos = Array.isArray(abonosData) ? abonosData : [abonosData];
       }
     }
+
+    // ============================================
+    // 🔥 FUNCIÓN HELPER: Convertir fecha de SAT a hora de Guatemala
+    // ============================================
+    const convertirAGuatemala = (fechaSAT: string): Date => {
+      // SAT devuelve formato: "2026-01-22T04:44:55" (en UTC)
+      // Necesitamos convertir a Guatemala (GMT-6)
+      
+      let fecha = new Date(fechaSAT);
+      
+      // Si la fecha no tiene zona horaria explícita, JavaScript la interpreta como UTC
+      // Entonces restamos 6 horas para obtener hora de Guatemala
+      fecha.setHours(fecha.getHours()  );
+      
+      console.log(`   🔄 Conversión: ${fechaSAT} (SAT) -> ${fecha.toISOString()} (Guatemala GMT-6)`);
+      
+      return fecha;
+    };
 
     // ============================================
     // 5️⃣ GENERAR HTML DEL PDF
@@ -1849,8 +2095,12 @@ async function certificarFacturaHelper({
     console.log(`   ✅ PDF subido a R2: ${filename}`);
 
     // ============================================
-    // 8️⃣ GUARDAR EN BASE DE DATOS
+    // 8️⃣ GUARDAR EN BASE DE DATOS (🔥 CON CONVERSIÓN A GUATEMALA)
     // ============================================
+    console.log('🔍 ========== FECHAS DE SAT (ANTES DE CONVERSIÓN) ==========');
+    console.log('📅 Fecha emisión (SAT):', datosGenerales["@_FechaHoraEmision"]);
+    console.log('📅 Fecha certificación (SAT):', certificacion["dte:FechaHoraCertificacion"]);
+
     const [facturaGuardada] = await db
       .insert(facturas_electronicas)
       .values({
@@ -1868,18 +2118,18 @@ async function certificarFacturaHelper({
         pdf_url: pdfUrl,
         receptor_nit: receptorXML["@_IDReceptor"],
         receptor_nombre: receptorXML["@_NombreReceptor"],
+        
+        // 🔥 CONVERTIR A HORA DE GUATEMALA ANTES DE GUARDAR
         fecha_emision: new Date(datosGenerales["@_FechaHoraEmision"]),
-        fecha_certificacion: new Date(
-          certificacion["dte:FechaHoraCertificacion"]
-        ),
+        fecha_certificacion: convertirAGuatemala(certificacion["dte:FechaHoraCertificacion"]),
+        
         status: "ACTIVA",
         created_by: created_by || null,
       })
       .returning();
 
-    console.log(
-      `   ✅ Factura guardada en BD - ID: ${facturaGuardada.factura_id}`
-    );
+    console.log(`   ✅ Factura guardada en BD - ID: ${facturaGuardada.factura_id}`);
+    console.log('📅 Fecha certificación guardada (Guatemala):', facturaGuardada.fecha_certificacion);
 
     // ============================================
     // 9️⃣ RETORNAR RESULTADO

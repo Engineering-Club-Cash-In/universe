@@ -93,7 +93,8 @@ export function BancosManager() {
     );
   }
 
-  return (<div className="flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-2">
+  return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       <Card className="w-full max-w-6xl">
         <CardHeader className="bg-gradient-to-r from-blue-500 to-blue-600">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">

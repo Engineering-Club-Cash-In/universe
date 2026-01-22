@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Loader2, Plus, X } from "lucide-react";
+import { FileUp, Loader2, Plus, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,10 @@ const CONTRACT_TYPES = [
 		enum: "contrato_privado_uso_carro_usado",
 		label: "Contrato Privado Uso Carro Usado",
 	},
+	{
+		enum: "otro",
+		label: "Otro (especificar en el nombre)",
+	},
 ] as const;
 
 interface CreateContractModalProps {
@@ -93,6 +97,7 @@ interface CreateContractModalProps {
 		representativeSigningLink: string | null;
 		additionalSigningLinks: string[] | null;
 		opportunityId: string | null;
+		pdfLink?: string | null;
 	};
 	/** Opportunity info (for display when editing) */
 	opportunityInfo?: {
@@ -125,6 +130,7 @@ export function CreateContractModal({
 	});
 
 	const [newAdditionalLink, setNewAdditionalLink] = useState("");
+	const [selectedPdfFile, setSelectedPdfFile] = useState<File | null>(null);
 
 	// Actualizar opportunityId cuando cambia preselectedOpportunityId
 	useEffect(() => {
@@ -167,6 +173,12 @@ export function CreateContractModal({
 			representativeSigningLink?: string;
 			additionalSigningLinks?: string[];
 			opportunityId?: string;
+			pdfFile?: {
+				name: string;
+				type: string;
+				size: number;
+				data: string;
+			};
 		}) => {
 			if (values.id) {
 				// Editar contrato existente
@@ -177,6 +189,7 @@ export function CreateContractModal({
 					clientSigningLink: values.clientSigningLink || null,
 					representativeSigningLink: values.representativeSigningLink || null,
 					additionalSigningLinks: values.additionalSigningLinks || null,
+					pdfFile: values.pdfFile,
 				});
 			}
 			// Crear nuevo contrato
@@ -209,6 +222,12 @@ export function CreateContractModal({
 			opportunityId: preselectedOpportunityId || "",
 		});
 		setNewAdditionalLink("");
+		setSelectedPdfFile(null);
+		// Reset file input
+		const fileInput = document.getElementById(
+			"pdf-file-input",
+		) as HTMLInputElement;
+		if (fileInput) fileInput.value = "";
 	};
 
 	const handleAddAdditionalLink = () => {
@@ -233,7 +252,22 @@ export function CreateContractModal({
 		}));
 	};
 
-	const handleSubmit = (e: React.FormEvent) => {
+	const handlePdfFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const file = e.target.files?.[0];
+		if (file) {
+			if (file.size > 10 * 1024 * 1024) {
+				toast.error("El archivo debe ser menor a 10MB");
+				return;
+			}
+			if (file.type !== "application/pdf") {
+				toast.error("Solo se permiten archivos PDF");
+				return;
+			}
+			setSelectedPdfFile(file);
+		}
+	};
+
+	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 
 		// Validaciones
@@ -250,6 +284,28 @@ export function CreateContractModal({
 			return;
 		}
 
+		// Preparar archivo PDF si existe
+		let pdfFileData: { name: string; type: string; size: number; data: string } | undefined;
+		if (selectedPdfFile) {
+			const base64 = await new Promise<string>((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onloadend = () => {
+					const result = reader.result as string;
+					const base64Data = result.split(",")[1];
+					resolve(base64Data);
+				};
+				reader.onerror = reject;
+				reader.readAsDataURL(selectedPdfFile);
+			});
+
+			pdfFileData = {
+				name: selectedPdfFile.name,
+				type: selectedPdfFile.type,
+				size: selectedPdfFile.size,
+				data: base64,
+			};
+		}
+
 		createMutation.mutate({
 			...(isEditing && contractToEdit ? { id: contractToEdit.id } : {}),
 			leadId,
@@ -263,6 +319,7 @@ export function CreateContractModal({
 					? formData.additionalSigningLinks
 					: undefined,
 			opportunityId: formData.opportunityId || undefined,
+			pdfFile: pdfFileData,
 		});
 	};
 
@@ -464,6 +521,60 @@ export function CreateContractModal({
 										</div>
 									))}
 								</div>
+							)}
+						</div>
+
+						{/* Subir documento PDF */}
+						<div className="space-y-2 rounded-lg border bg-muted/30 p-4">
+							<div className="flex items-center gap-2">
+								<FileUp className="h-4 w-4 text-muted-foreground" />
+								<Label htmlFor="pdf-file-input">
+									Subir documento si no se ha generado link o es necesario
+								</Label>
+							</div>
+							<input
+								id="pdf-file-input"
+								type="file"
+								accept=".pdf"
+								onChange={handlePdfFileChange}
+								className="h-10 w-full rounded-md border bg-background px-3 py-2 text-sm file:border-0 file:bg-transparent file:font-medium file:text-sm"
+								disabled={createMutation.isPending}
+							/>
+							{selectedPdfFile && (
+								<div className="flex items-center justify-between rounded-md border border-border bg-muted/50 p-2">
+									<p className="text-muted-foreground text-xs">
+										Seleccionado: {selectedPdfFile.name} (
+										{(selectedPdfFile.size / 1024).toFixed(1)} KB)
+									</p>
+									<Button
+										type="button"
+										variant="ghost"
+										size="sm"
+										onClick={() => {
+											setSelectedPdfFile(null);
+											const fileInput = document.getElementById(
+												"pdf-file-input",
+											) as HTMLInputElement;
+											if (fileInput) fileInput.value = "";
+										}}
+										disabled={createMutation.isPending}
+									>
+										<X className="h-4 w-4" />
+									</Button>
+								</div>
+							)}
+							{isEditing && contractToEdit?.pdfLink && !selectedPdfFile && (
+								<p className="text-muted-foreground text-xs">
+									Ya tiene un PDF subido.{" "}
+									<a
+										href={contractToEdit.pdfLink}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-primary underline"
+									>
+										Ver documento actual
+									</a>
+								</p>
 							)}
 						</div>
 					</div>

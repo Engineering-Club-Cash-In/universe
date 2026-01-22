@@ -924,6 +924,8 @@ export const crmRouter = {
 				rubros: z.string().optional(), // JSON string with expense items
 				gastosAdministrativos: z.number().optional(), // Administrative expenses for cartera "otros"
 				loanPurpose: z.enum(["personal", "business"]).optional(),
+				// Optimistic locking - prevents race conditions on concurrent updates
+				expectedUpdatedAt: z.string().datetime().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -941,6 +943,7 @@ export const crmRouter = {
 				gastosAdministrativos,
 				expectedCloseDate,
 				fechaInicio,
+				expectedUpdatedAt,
 				...updateData
 			} = input;
 
@@ -1105,13 +1108,22 @@ export const crmRouter = {
 
 			// Sales users can only update opportunities assigned to them
 			// Admin and sales_supervisor can update any opportunity
-			const whereClause =
+			// Include optimistic locking check if expectedUpdatedAt is provided
+			const baseWhereClause =
 				context.userRole === "admin" || context.userRole === "sales_supervisor"
 					? eq(opportunities.id, id)
 					: and(
 							eq(opportunities.id, id),
 							eq(opportunities.assignedTo, context.userId),
 						);
+
+			// Add optimistic locking condition if expectedUpdatedAt is provided
+			const whereClause = expectedUpdatedAt
+				? and(
+						baseWhereClause,
+						eq(opportunities.updatedAt, new Date(expectedUpdatedAt)),
+					)
+				: baseWhereClause;
 
 			// Sales users cannot reassign opportunities
 			if (
@@ -1184,6 +1196,13 @@ export const crmRouter = {
 				.returning();
 
 			if (updatedOpportunity.length === 0) {
+				// If expectedUpdatedAt was provided and no rows updated, it's likely a concurrent modification
+				if (expectedUpdatedAt) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
+					});
+				}
 				throw new Error(
 					"Opportunity not found or you don't have permission to update it",
 				);
@@ -1296,6 +1315,8 @@ export const crmRouter = {
 				approved: z.boolean(),
 				reason: z.string().optional(),
 				bypassValidation: z.boolean().optional(), // Solo admin puede usar bypass
+				// Optimistic locking - prevents race conditions on concurrent updates
+				expectedUpdatedAt: z.string().datetime().optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -1303,6 +1324,7 @@ export const crmRouter = {
 			const opportunity = await db
 				.select({
 					id: opportunities.id,
+					updatedAt: opportunities.updatedAt,
 					vehicleId: opportunities.vehicleId,
 					creditType: opportunities.creditType,
 					stageId: opportunities.stageId,
@@ -1454,6 +1476,26 @@ export const crmRouter = {
 				throw new Error("Opportunity is not in analysis stage");
 			}
 
+			// Validate analysisStatus is in a valid state for approval/rejection
+			const validStatusesForReview = ["pending", "resubmitted"];
+			if (!validStatusesForReview.includes(opportunity[0].analysisStatus)) {
+				if (opportunity[0].analysisStatus === "approved") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta oportunidad ya fue aprobada. No se puede aprobar o rechazar nuevamente.",
+					});
+				}
+				if (opportunity[0].analysisStatus === "rejected") {
+					throw new ORPCError("BAD_REQUEST", {
+						message:
+							"Esta oportunidad ya fue rechazada y está pendiente de corrección por el vendedor.",
+					});
+				}
+				throw new ORPCError("BAD_REQUEST", {
+					message: `Estado de análisis inválido: ${opportunity[0].analysisStatus}. Solo se pueden revisar oportunidades con estado 'pending' o 'resubmitted'.`,
+				});
+			}
+
 			// Get the next stage (40% - Cierre de propuesta) for approval
 			const nextStage = await db
 				.select()
@@ -1482,8 +1524,16 @@ export const crmRouter = {
 				: previousStage[0].id; // 20% - Solución y propuesta (rejection)
 
 			if (input.approved || input.reason || !input.approved) {
+				// Build where clause with optional optimistic locking
+				const whereClause = input.expectedUpdatedAt
+					? and(
+							eq(opportunities.id, input.opportunityId),
+							eq(opportunities.updatedAt, new Date(input.expectedUpdatedAt)),
+						)
+					: eq(opportunities.id, input.opportunityId);
+
 				// Update opportunity with analysisStatus
-				await db
+				const updatedRows = await db
 					.update(opportunities)
 					.set({
 						stageId: newStageId,
@@ -1498,7 +1548,16 @@ export const crmRouter = {
 							: opportunity[0].notes,
 						updatedAt: new Date(),
 					})
-					.where(eq(opportunities.id, input.opportunityId));
+					.where(whereClause)
+					.returning();
+
+				// Check for concurrent modification
+				if (updatedRows.length === 0 && input.expectedUpdatedAt) {
+					throw new ORPCError("CONFLICT", {
+						message:
+							"La oportunidad fue modificada por otro usuario. Por favor recarga la página e intenta de nuevo.",
+					});
+				}
 
 				// Record stage history
 				await db.insert(opportunityStageHistory).values({

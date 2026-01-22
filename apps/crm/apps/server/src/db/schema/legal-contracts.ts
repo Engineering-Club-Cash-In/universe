@@ -37,6 +37,7 @@ export const generatedLegalContracts = pgTable("generated_legal_contracts", {
 	clientSigningLink: text("client_signing_link"), // Link del cliente
 	representativeSigningLink: text("representative_signing_link"), // Link del representante
 	additionalSigningLinks: text("additional_signing_links").array(), // Links adicionales si aplica
+	pdfLink: text("pdf_link"), // Link del PDF subido a R2 (opcional)
 
 	// Metadata de generación
 	templateId: integer("template_id"),

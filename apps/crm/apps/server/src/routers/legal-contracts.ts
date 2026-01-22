@@ -2,6 +2,12 @@ import { ORPCError } from "@orpc/server";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
+import {
+	generateUniqueFilename,
+	getFileUrl,
+	uploadFileToR2,
+	validateFile,
+} from "../lib/storage";
 import { user } from "../db/schema/auth";
 import {
 	leads,
@@ -34,6 +40,14 @@ export const legalContractsRouter = {
 				templateId: z.number().optional(),
 				apiResponse: z.any().optional(),
 				opportunityId: z.string().uuid().optional(),
+				pdfFile: z
+					.object({
+						name: z.string(),
+						type: z.string(),
+						size: z.number(),
+						data: z.string(), // Base64
+					})
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -75,11 +89,40 @@ export const legalContractsRouter = {
 				}
 			}
 
-			// Crear el contrato
+			// Subir PDF si se proporciona
+			let pdfLink: string | undefined;
+			if (input.pdfFile) {
+				const validation = validateFile({
+					type: input.pdfFile.type,
+					size: input.pdfFile.size,
+				} as File);
+
+				if (!validation.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: validation.error || "Archivo inválido",
+					});
+				}
+
+				const fileBuffer = Buffer.from(input.pdfFile.data, "base64");
+				const fileBlob = new Blob([fileBuffer], { type: input.pdfFile.type });
+				const uniqueFilename = generateUniqueFilename(input.pdfFile.name);
+
+				const { key } = await uploadFileToR2(
+					fileBlob,
+					uniqueFilename,
+					`legal-contracts/${input.opportunityId || input.leadId}`,
+				);
+
+				pdfLink = await getFileUrl(key);
+			}
+
+			// Crear el contrato (sin incluir pdfFile en los valores)
+			const { pdfFile: _, ...contractData } = input;
 			const [newContract] = await db
 				.insert(generatedLegalContracts)
 				.values({
-					...input,
+					...contractData,
+					pdfLink,
 					generatedBy: context.userId,
 					generatedAt: new Date(),
 				})
@@ -98,6 +141,14 @@ export const legalContractsRouter = {
 				clientSigningLink: z.string().url().optional().nullable(),
 				representativeSigningLink: z.string().url().optional().nullable(),
 				additionalSigningLinks: z.array(z.string().url()).optional().nullable(),
+				pdfFile: z
+					.object({
+						name: z.string(),
+						type: z.string(),
+						size: z.number(),
+						data: z.string(), // Base64
+					})
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -121,6 +172,33 @@ export const legalContractsRouter = {
 				});
 			}
 
+			// Subir PDF si se proporciona
+			let pdfLink: string | undefined;
+			if (input.pdfFile) {
+				const validation = validateFile({
+					type: input.pdfFile.type,
+					size: input.pdfFile.size,
+				} as File);
+
+				if (!validation.valid) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: validation.error || "Archivo inválido",
+					});
+				}
+
+				const fileBuffer = Buffer.from(input.pdfFile.data, "base64");
+				const fileBlob = new Blob([fileBuffer], { type: input.pdfFile.type });
+				const uniqueFilename = generateUniqueFilename(input.pdfFile.name);
+
+				const { key } = await uploadFileToR2(
+					fileBlob,
+					uniqueFilename,
+					`legal-contracts/${existingContract.leadId}`,
+				);
+
+				pdfLink = await getFileUrl(key);
+			}
+
 			// Actualizar el contrato
 			const [updatedContract] = await db
 				.update(generatedLegalContracts)
@@ -130,6 +208,7 @@ export const legalContractsRouter = {
 					clientSigningLink: input.clientSigningLink,
 					representativeSigningLink: input.representativeSigningLink,
 					additionalSigningLinks: input.additionalSigningLinks,
+					...(pdfLink && { pdfLink }),
 					updatedAt: new Date(),
 				})
 				.where(eq(generatedLegalContracts.id, input.id))

@@ -8,6 +8,7 @@ interface Contract {
 	clientSigningLink: string | null;
 	representativeSigningLink: string | null;
 	additionalSigningLinks: string[] | null;
+	pdfLink?: string | null;
 	status: "pending" | "signed" | "cancelled";
 	generatedAt: Date | string;
 	opportunityId: string | null;

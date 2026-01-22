@@ -40,6 +40,7 @@ interface ContractCardProps {
 		clientSigningLink: string | null;
 		representativeSigningLink: string | null;
 		additionalSigningLinks: string[] | null;
+		pdfLink?: string | null;
 		status: "pending" | "signed" | "cancelled";
 		generatedAt: Date | string;
 		opportunityId: string | null;
@@ -249,6 +250,38 @@ export function ContractCard({
 									</div>
 								</div>
 							))}
+					</div>
+				)}
+
+				{/* PDF del contrato */}
+				{contract.pdfLink && (
+					<div className="rounded-lg border border-border bg-amber-50/50 p-3">
+						<div className="flex items-center justify-between gap-2">
+							<p className="font-medium text-amber-900 text-sm">
+								📄 Documento PDF
+							</p>
+							<div className="flex gap-1">
+								<Button
+									size="sm"
+									variant="outline"
+									className="h-7"
+									onClick={() => openLink(contract.pdfLink!)}
+								>
+									<ExternalLink className="mr-1 h-3 w-3" />
+									Ver PDF
+								</Button>
+								<Button
+									size="sm"
+									variant="ghost"
+									className="h-7 px-2"
+									onClick={() =>
+										copyToClipboard(contract.pdfLink!, "Link del PDF")
+									}
+								>
+									<Copy className="h-3 w-3" />
+								</Button>
+							</div>
+						</div>
 					</div>
 				)}
 			</CardContent>

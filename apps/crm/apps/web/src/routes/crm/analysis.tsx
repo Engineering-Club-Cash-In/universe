@@ -564,7 +564,7 @@ function AnalysisPage() {
 				open={isDocumentsDialogOpen}
 				onOpenChange={setIsDocumentsDialogOpen}
 			>
-				<DialogContent className="max-h-[90vh] min-w-[80vw] max-w-6xl overflow-y-auto">
+				<DialogContent className="max-h-[90vh] min-w-[60vw] max-w-6xl overflow-y-auto">
 					<DialogHeader>
 						<DialogTitle>Documentos de la Oportunidad</DialogTitle>
 						{selectedOpportunityForDocs && (

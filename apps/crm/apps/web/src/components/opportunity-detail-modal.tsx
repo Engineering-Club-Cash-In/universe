@@ -12,6 +12,7 @@ import {
 	ExternalLink,
 	FileSignature,
 	FileSpreadsheet,
+	FileText,
 	History,
 	Mail,
 	Target,
@@ -450,6 +451,19 @@ export function OpportunityDetailModal({
 												</div>
 
 												<div className="flex gap-2">
+													{contract.pdfLink && (
+														<Button variant="outline" size="sm" asChild>
+															<a
+																href={contract.pdfLink}
+																target="_blank"
+																rel="noopener noreferrer"
+																className="flex items-center gap-1"
+															>
+																<FileText className="h-3 w-3" />
+																PDF
+															</a>
+														</Button>
+													)}
 													{contract.clientSigningLink && (
 														<Button variant="outline" size="sm" asChild>
 															<a

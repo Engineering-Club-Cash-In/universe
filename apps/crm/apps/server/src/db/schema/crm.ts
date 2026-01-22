@@ -86,6 +86,15 @@ export const clientTypeEnum = pgEnum("client_type", [
 	"empresa", // Empresa (S.A, Ltda, etc.)
 ]);
 
+// Analysis status enum for tracking opportunity analysis workflow
+export const analysisStatusEnum = pgEnum("analysis_status", [
+	"not_applicable", // Nunca ha llegado a análisis (etapa < 30%)
+	"pending", // Primera vez en 30%, esperando revisión
+	"rejected", // Rechazada, en etapa < 30% esperando corrección
+	"resubmitted", // Corregida y reenviada a 30%
+	"approved", // Aprobada, pasó a 40%+
+]);
+
 // Companies table
 export const companies = pgTable("companies", {
 	id: uuid("id").primaryKey().defaultRandom(),
@@ -292,6 +301,18 @@ export const opportunities = pgTable("opportunities", {
 		() => user.id,
 	),
 	disbursementApprovedAt: timestamp("disbursement_approved_at"),
+
+	// Analysis Status
+	analysisStatus: analysisStatusEnum("analysis_status")
+		.notNull()
+		.default("not_applicable"),
+	analysisRejectionCount: integer("analysis_rejection_count")
+		.notNull()
+		.default(0),
+	lastAnalysisRejectedAt: timestamp("last_analysis_rejected_at"),
+	lastAnalysisRejectedBy: text("last_analysis_rejected_by").references(
+		() => user.id,
+	),
 
 	notes: text("notes"),
 	createdAt: timestamp("created_at").notNull().defaultNow(),

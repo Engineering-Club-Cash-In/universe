@@ -4,6 +4,7 @@ import {
 	AlertCircle,
 	CheckCircle,
 	FileText,
+	RefreshCw,
 	Wallet,
 	XCircle,
 } from "lucide-react";
@@ -381,6 +382,7 @@ function AnalysisPage() {
 									<TableHeader>
 										<TableRow>
 											<TableHead>Título</TableHead>
+											<TableHead>Estado</TableHead>
 											<TableHead>Lead</TableHead>
 											<TableHead>Empresa</TableHead>
 											<TableHead>Valor</TableHead>
@@ -401,6 +403,18 @@ function AnalysisPage() {
 													>
 														{opportunity.title}
 													</button>
+												</TableCell>
+												<TableCell>
+													{opportunity.analysisStatus === "resubmitted" ? (
+														<Badge className="border-orange-300 bg-orange-100 text-orange-700">
+															<RefreshCw className="mr-1 h-3 w-3" />
+															Reenviado ({opportunity.analysisRejectionCount}x)
+														</Badge>
+													) : (
+														<Badge className="border-green-300 bg-green-100 text-green-700">
+															Nueva
+														</Badge>
+													)}
 												</TableCell>
 												<TableCell>
 													{opportunity.lead ? (

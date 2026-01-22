@@ -380,7 +380,7 @@ export function MiniCardCredito({
               <span className="font-bold text-blue-700 text-sm">
                 Cuotas Atrasadas
               </span>
-              {(cuotasAtrasadasInfo?.cuotas.length ?? 0) > 0 && (
+              {mora > 0&& (
                 <span className="px-2 py-0.5 bg-red-500 text-white text-[10px] font-extrabold rounded-full shadow-md animate-pulse">
                   🚨 MORA
                 </span>

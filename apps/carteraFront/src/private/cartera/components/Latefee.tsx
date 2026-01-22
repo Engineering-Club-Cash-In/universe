@@ -187,7 +187,8 @@ export default function MorasManager() {
     setEditCreditoId(null);
   };
 
-  return (<div className="flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-2">
+  return (  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       {/* Title */}
       <h2 className="text-2xl font-bold text-blue-600 mb-4">
         Gestión de Moras

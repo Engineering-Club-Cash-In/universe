@@ -401,64 +401,171 @@ const updateInvestors = async (
   console.log(`📊 Cuota Total: Q${cuotaTotal.toFixed(2)}`);
 
   // Preparar datos de nuevos inversionistas
-  const creditosInversionistasData = inversionistas.map((inv) => {
-    const montoAportado = new Big(inv.monto_aportado);
-    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-    const porcentajeInversion = new Big(inv.porcentaje_inversion);
-    
-    // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN EN BASE AL CAPITAL
-    const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
-    
-    console.log(`📊 Inversionista ${inv.inversionista_id}:`);
-    console.log(`   - Monto aportado: Q${montoAportado.toFixed(2)}`);
-    console.log(`   - % Participación: ${porcentajeParticipacion.toFixed(2)}%`);
-    
-    // 🔥 CALCULAR CUOTA DEL INVERSIONISTA (% participación * cuota total)
-const cuotaInversionista = cuotaTotal
-  .minus(seguro)
-  .times(porcentajeParticipacion.div(100))
-  .round(2);
+  const creditosInversionistasData = inversionistas.map((inv, index, arr) => {
+  console.log(`\n${"=".repeat(60)}`);
+  console.log(`📊 PROCESANDO INVERSIONISTA #${index + 1}`);
+  console.log(`${"=".repeat(60)}`);
   
-    
-    console.log(`   - Cuota calculada: Q${cuotaInversionista.toFixed(2)}`);
-
-    // Calcular interés sobre el monto aportado
-    const interes = new Big(
-      updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
-    );
-    const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
-
-    const montoInversionista = newCuotaInteres
-      .times(porcentajeInversion)
-      .div(100)
-      .round(2);
-    const montoCashIn = newCuotaInteres
-      .times(porcentajeCashIn)
-      .div(100)
-      .round(2);
-
-    const ivaInversionista = montoInversionista.gt(0)
-      ? montoInversionista.times(0.12).round(2)
-      : new Big(0);
-    const ivaCashIn = montoCashIn.gt(0)
-      ? montoCashIn.times(0.12).round(2)
-      : new Big(0);
-
-    return {
-      credito_id: credito_id,
-      inversionista_id: inv.inversionista_id,
-      monto_aportado: montoAportado.toString(),
-      porcentaje_cash_in: porcentajeCashIn.toString(),
-      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-      monto_inversionista: montoInversionista.toString(),
-      monto_cash_in: montoCashIn.toString(),
-      iva_inversionista: ivaInversionista.toString(),
-      iva_cash_in: ivaCashIn.toString(),
-      fecha_creacion: new Date(),
-      cuota_inversionista: cuotaInversionista.toString(), // 🔥 CALCULADA AUTOMÁTICAMENTE
-      numero_credito_sifco: numero_credito_sifco ?? undefined,
-    };
+  const montoAportado = new Big(inv.monto_aportado);
+  const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+  const porcentajeInversion = new Big(inv.porcentaje_inversion);
+  
+  console.log(`🆔 ID Inversionista: ${inv.inversionista_id}`);
+  console.log(`💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
+  console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
+  
+  // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
+  const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+  
+  console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
+  console.log(`   Fórmula: (${montoAportado.toFixed(2)} / ${capitalTotal.toFixed(2)}) * 100`);
+  console.log(`   Resultado: ${porcentajeParticipacion.toFixed(4)}%`);
+  
+  // 🔥 PASO 1: RESTAR CARGOS DE LA CUOTA TOTAL
+  console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
+  console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
+  console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+  console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
+  
+  const cuotaSinCargos = cuotaTotal
+    .minus(seguro)
+    .minus(membresias);
+  
+  console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
+  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${seguro.toFixed(2)} - ${membresias.toFixed(2)}`);
+  
+  // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
+  console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
+  console.log(`   Fórmula: ${cuotaSinCargos.toFixed(2)} * (${porcentajeParticipacion.toFixed(4)}% / 100)`);
+  
+  const cuotaBase = cuotaSinCargos
+    .times(porcentajeParticipacion.div(100))
+    .round(2);
+  
+  console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
+  
+  // 🔥 ENCONTRAR AL INVERSIONISTA CON MAYOR MONTO APORTADO
+  console.log(`\n🔍 BUSCANDO INVERSIONISTA CON MAYOR MONTO APORTADO:`);
+  
+  arr.forEach((invTemp, idx) => {
+    const montoTemp = new Big(invTemp.monto_aportado);
+    console.log(`   [${idx + 1}] ID ${invTemp.inversionista_id}: Q${montoTemp.toFixed(2)}`);
   });
+  
+  const inversionistaMayor = arr.reduce((max, current) => 
+    new Big(current.monto_aportado).gt(new Big(max.monto_aportado)) ? current : max
+  );
+  
+  console.log(`   🏆 Mayor encontrado: ID ${inversionistaMayor.inversionista_id} con Q${new Big(inversionistaMayor.monto_aportado).toFixed(2)}`);
+  
+  const esMayor = inv.inversionista_id === inversionistaMayor.inversionista_id;
+  
+  console.log(`   ¿Es este inversionista el mayor? ${esMayor ? '✅ SÍ' : '❌ NO'}`);
+  
+  // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + MEMBRESÍA
+  let cuotaInversionista = cuotaBase;
+  
+  console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
+  
+  if (esMayor) {
+    console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
+    console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
+    console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
+    console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
+    
+    cuotaInversionista = cuotaBase
+      .plus(seguro)
+      .plus(membresias)
+      .round(2);
+    
+    console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
+    console.log(`   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`);
+  } else {
+    console.log(`   📍 Inversionista normal (no es el mayor)`);
+    console.log(`   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`);
+    console.log(`   (No se suman cargos)`);
+  }
+  
+  // Calcular interés sobre el monto aportado
+  console.log(`\n💹 CÁLCULO DE INTERESES:`);
+  const interes = new Big(
+    updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
+  );
+  console.log(`   Tasa de Interés: ${interes.toFixed(2)}%`);
+  console.log(`   Monto Aportado: Q${montoAportado.toFixed(2)}`);
+  
+  const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
+  console.log(`   Interés Calculado: Q${newCuotaInteres.toFixed(2)}`);
+  console.log(`   Fórmula: ${montoAportado.toFixed(2)} * (${interes.toFixed(2)}% / 100)`);
+
+  // Distribución del interés entre inversionista y cash-in
+  console.log(`\n📊 DISTRIBUCIÓN DE INTERÉS:`);
+  console.log(`   % Inversionista: ${porcentajeInversion.toFixed(2)}%`);
+  console.log(`   % Cash-In: ${porcentajeCashIn.toFixed(2)}%`);
+  
+  const montoInversionista = newCuotaInteres
+    .times(porcentajeInversion)
+    .div(100)
+    .round(2);
+  
+  const montoCashIn = newCuotaInteres
+    .times(porcentajeCashIn)
+    .div(100)
+    .round(2);
+  
+  console.log(`   Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
+  console.log(`   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeInversion.toFixed(2)}% / 100)`);
+  console.log(`   Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
+  console.log(`   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeCashIn.toFixed(2)}% / 100)`);
+
+  // Calcular IVAs
+  console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
+  
+  const ivaInversionista = montoInversionista.gt(0)
+    ? montoInversionista.times(0.12).round(2)
+    : new Big(0);
+  
+  const ivaCashIn = montoCashIn.gt(0)
+    ? montoCashIn.times(0.12).round(2)
+    : new Big(0);
+  
+  if (montoInversionista.gt(0)) {
+    console.log(`   IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
+    console.log(`   Fórmula: ${montoInversionista.toFixed(2)} * 0.12`);
+  } else {
+    console.log(`   IVA Inversionista: Q0.00 (sin monto)`);
+  }
+  
+  if (montoCashIn.gt(0)) {
+    console.log(`   IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
+    console.log(`   Fórmula: ${montoCashIn.toFixed(2)} * 0.12`);
+  } else {
+    console.log(`   IVA Cash-In: Q0.00 (sin monto)`);
+  }
+
+  console.log(`\n✅ RESUMEN FINAL:`);
+  console.log(`   - Cuota Inversionista: Q${cuotaInversionista.toFixed(2)}`);
+  console.log(`   - Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
+  console.log(`   - IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
+  console.log(`   - Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
+  console.log(`   - IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
+  console.log(`${"=".repeat(60)}\n`);
+
+  return {
+    credito_id: credito_id,
+    inversionista_id: inv.inversionista_id,
+    monto_aportado: montoAportado.toString(),
+    porcentaje_cash_in: porcentajeCashIn.toString(),
+    porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+    monto_inversionista: montoInversionista.toString(),
+    monto_cash_in: montoCashIn.toString(),
+    iva_inversionista: ivaInversionista.toString(),
+    iva_cash_in: ivaCashIn.toString(),
+    fecha_creacion: new Date(),
+    cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
+    numero_credito_sifco: numero_credito_sifco ?? undefined,
+  };
+});
 
   // Insertar nuevos inversionistas
   if (creditosInversionistasData.length > 0) {
@@ -681,7 +788,7 @@ export const updateAllInstallments = async ({
     // 1️⃣ Query optimizada con construcción condicional más limpia
     const whereConditions = numero_credito_sifco
       ? and(
-          eq(creditos.statusCredit, "ACTIVO"),
+    
           eq(creditos.numero_credito_sifco, numero_credito_sifco)
         )
       : eq(creditos.statusCredit, "ACTIVO");

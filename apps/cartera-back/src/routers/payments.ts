@@ -14,9 +14,10 @@ import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../contro
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
-import { pagos_credito } from "../database/db";
+import { creditos, pagos_credito } from "../database/db";
 import { reversePayment } from "../controllers/reversePayment";
-import { ajustarCuotasConSIFCO, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
+import { ajustarCuotasConSIFCO, marcarCuotasPagadasHastaNumero, procesarPagosSIFCODesdeJSON } from "../controllers/migratePayments";
+import { updateInstallments } from "../controllers/updateCredit";
 
 export const liquidatePaymentsSchema = z.object({
   pago_id: z.number().int().positive(),
@@ -398,27 +399,38 @@ export const paymentRouter = new Elysia()
     }),
   }
 )  .post("/procesar-discrepancias", async () => {
-    // 👇 Ruta quemada
-    const rutaArchivo = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosMenor20.json";
+  const rutasArchivos = [
+    "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditos.json",
+    "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosMenor20.json",
+    // podés agregar más
+  ];
 
-    console.log(`\n📂 Leyendo archivo: ${rutaArchivo}`);
+  const resultados: any[] = [];
+  const errores: any[] = [];
 
-    // Leer el archivo
-    const contenido = await fs.readFile(rutaArchivo, "utf-8");
+  for (const ruta of rutasArchivos) {
+    console.log(`\n📂 Leyendo archivo: ${ruta}`);
+
+    const contenido = await fs.readFile(ruta, "utf-8");
     const jsonData = JSON.parse(contenido);
 
-    if (!jsonData.data || !jsonData.data.detalleDiscrepancias) {
-      throw new Error("JSON inválido: falta 'data.detalleDiscrepancias'");
+    if (!jsonData.data) {
+      throw new Error(`JSON inválido en ${ruta}`);
     }
 
-    const discrepancias = jsonData.data.detalleDiscrepancias;
+    const {
+      detalleDiscrepancias = [],
+      detalleCoincidencias = [],
+    } = jsonData.data;
 
-    console.log(`\n🚀 Procesando ${discrepancias.length} créditos desde archivo...`);
+    /* =====================================================
+       1️⃣ PROCESAR DISCREPANCIAS
+       ===================================================== */
+    console.log(
+      `\n🚨 Procesando DISCREPANCIAS (${detalleDiscrepancias.length})...`
+    );
 
-    const resultados = [];
-    const errores = [];
-
-    for (const discrepancia of discrepancias) {
+    for (const discrepancia of detalleDiscrepancias) {
       const {
         numeroPrestamo,
         cuotaEsperada,
@@ -430,7 +442,7 @@ export const paymentRouter = new Elysia()
       } = discrepancia;
 
       try {
-        console.log(`\n📌 Procesando crédito: ${numeroPrestamo}`);
+        console.log(`\n📌 [DISCREPANCIA] Crédito: ${numeroPrestamo}`);
 
         await ajustarCuotasConSIFCO({
           numero_credito_sifco: numeroPrestamo,
@@ -444,35 +456,42 @@ export const paymentRouter = new Elysia()
 
         resultados.push({
           numeroPrestamo,
+          tipo: "discrepancia",
           status: "success",
-          mensaje: `Ajustado correctamente: ${cuotasPorCrear} cuotas creadas`,
         });
-
-        console.log(`   ✅ Crédito ${numeroPrestamo} ajustado exitosamente`);
       } catch (error: any) {
-        console.error(`   ❌ Error en crédito ${numeroPrestamo}:`, error.message);
-
         errores.push({
           numeroPrestamo,
+          tipo: "discrepancia",
           status: "error",
           mensaje: error.message,
         });
       }
     }
 
-    console.log(`\n🎉 Proceso completado!`);
-    console.log(`   ✅ Exitosos: ${resultados.length}`);
-    console.log(`   ❌ Errores: ${errores.length}`);
+    /* =====================================================
+       2️⃣ PROCESAR COINCIDENCIAS
+       ===================================================== */
+    console.log(
+      `\n✅ Procesando COINCIDENCIAS (${detalleCoincidencias.length})...`
+    );
 
-    return {
-      success: true,
-      totalProcesados: discrepancias.length,
-      exitosos: resultados.length,
-      errores: errores.length,
-      resultados,
-      detalleErrores: errores,
-    };
-  })
+  
+  }
+
+  console.log(`\n🎉 PROCESO COMPLETO`);
+  console.log(`   ✅ Exitosos: ${resultados.length}`);
+  console.log(`   ❌ Errores: ${errores.length}`);
+
+  return {
+    success: true,
+    exitosos: resultados.length,
+    errores: errores.length,
+    resultados,
+    detalleErrores: errores,
+  };
+})
+
 
   // 🔍 Endpoint para probar UN SOLO crédito (por si acaso)
   .post(
@@ -644,5 +663,362 @@ export const paymentRouter = new Elysia()
     }
   )
  
+.post(
+    "/mapear-pagos-coincidencias",
+    async ({ set }) => {
+      // 👇 Rutas quemadas
+      const rutaArchivoCoincidencias = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosMenor20.json";
+      const rutaArchivoPagos = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
 
- 
+      console.log(`\n📂 Leyendo archivo de coincidencias: ${rutaArchivoCoincidencias}`);
+
+      try {
+        // 1️⃣ Leer el archivo de COINCIDENCIAS primero
+        const contenidoCoincidencias = await fs.readFile(rutaArchivoCoincidencias, "utf-8");
+        const jsonCoincidencias = JSON.parse(contenidoCoincidencias);
+        const detalleCoincidencias = jsonCoincidencias.data?.detalleCoincidencias || [];
+        
+        console.log(`📦 JSON de coincidencias leído exitosamente`);
+        console.log(`📊 Total de coincidencias: ${detalleCoincidencias.length}`);
+
+        if (detalleCoincidencias.length === 0) {
+          return {
+            success: false,
+            message: "No hay coincidencias para procesar",
+            archivoCoincidencias: rutaArchivoCoincidencias,
+          };
+        }
+
+        // 2️⃣ Leer el archivo de PAGOS
+        console.log(`\n📂 Leyendo archivo de últimos pagos: ${rutaArchivoPagos}`);
+        const contenidoPagos = await fs.readFile(rutaArchivoPagos, "utf-8");
+        const jsonPagos = JSON.parse(contenidoPagos);
+        console.log(`📦 JSON de pagos leído exitosamente`);
+        console.log(`📊 Total de registros en pagos: ${jsonPagos.length}`);
+
+        // 3️⃣ Recorrer las COINCIDENCIAS
+        let ok = 0;
+        let fail = 0;
+        let notFound = 0;
+
+        for (const coincidencia of detalleCoincidencias) {
+          const numeroSifco = coincidencia.numeroPrestamo;
+          
+          console.log(`\n🔄 Procesando crédito con coincidencia: ${numeroSifco}`);
+          
+          try {
+            // 4️⃣ Buscar el crédito en el JSON de PAGOS
+            const registroPago = jsonPagos.find((p: any) => p.numeroCredito === numeroSifco);
+            
+            if (!registroPago || !registroPago.creditos || registroPago.creditos.length === 0) {
+              console.log(`⚠️ Crédito ${numeroSifco} no encontrado en archivo de pagos`);
+              notFound++;
+              continue;
+            }
+
+            // El primer elemento del array "creditos" tiene la info del último pago
+            const ultimoPago = registroPago.creditos[0];
+            const hastaCuota = ultimoPago.numeroCuota;
+            
+            console.log(`🔍 Crédito ${numeroSifco} encontrado - Último pago: ${ultimoPago.fechaUltimoPago}, Hasta cuota: ${hastaCuota}`);
+            
+            // 5️⃣ PRIMERO: Mapear pagos desde SIFCO
+            console.log(`📥 Mapeando pagos desde SIFCO para ${numeroSifco}...`);
+            await mapPagosPorCreditos(numeroSifco);
+            console.log(`✅ Pagos mapeados para ${numeroSifco}`);
+            
+            // 6️⃣ SEGUNDO: Marcar cuotas como pagadas
+            console.log(`✏️ Marcando cuotas como pagadas hasta ${hastaCuota} para ${numeroSifco}...`);
+            await marcarCuotasPagadasHastaNumero({
+              numero_credito_sifco: numeroSifco,
+              hasta_cuota: parseInt(hastaCuota),
+            });
+            console.log(`✅ Cuotas marcadas para ${numeroSifco}`);
+            
+            ok++;
+            console.log(`✅ Crédito ${numeroSifco} procesado exitosamente`);
+          } catch (error: any) {
+            fail++;
+            console.error(`❌ Error procesando crédito ${numeroSifco}:`, error.message);
+          }
+        }
+
+        console.log(`\n🎉 Resumen final: OK=${ok} | FAIL=${fail} | NO EN PAGOS=${notFound} | TOTAL=${detalleCoincidencias.length}`);
+
+        return {
+          success: true,
+          message: "Cuotas mapeadas y marcadas como pagadas desde coincidencias",
+          archivoCoincidencias: rutaArchivoCoincidencias,
+          archivoPagos: rutaArchivoPagos,
+          total_coincidencias: detalleCoincidencias.length,
+          exitosos: ok,
+          fallidos: fail,
+          no_encontrados_en_pagos: notFound,
+        };
+      } catch (error: any) {
+        console.error("❌ Error leyendo o procesando archivos:", error);
+        set.status = 500;
+        
+        return {
+          success: false,
+          message: `Error: ${error.message}`,
+          archivoCoincidencias: rutaArchivoCoincidencias,
+          archivoPagos: rutaArchivoPagos,
+        };
+      }
+    },
+    {
+      detail: {
+        tags: ["SIFCO Pagos"],
+        summary: "Mapear y marcar cuotas pagadas desde coincidencias",
+        description: "Lee coincidencias, busca en pagos, mapea desde SIFCO y marca cuotas como pagadas",
+      },
+    }
+  ).post(
+  "/recalcular-cuotas-sin-pagos",
+  async ({ set }) => {
+    const rutaArchivoCreditos = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosSinPAGOS.json";
+    const rutaArchivoPagos = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\resultado_ultimos_pagos.json";
+
+    console.log(`\n📂 Leyendo archivo de créditos sin pagos: ${rutaArchivoCreditos}`);
+
+    try {
+      // 1️⃣ Leer el archivo de CRÉDITOS (igual que el otro endpoint)
+      const contenidoCreditos = await fs.readFile(rutaArchivoCreditos, "utf-8");
+      const jsonCreditos = JSON.parse(contenidoCreditos);
+      const creditosSinPagos = jsonCreditos.creditos || [];
+      
+      console.log(`📦 JSON de créditos leído exitosamente`);
+      console.log(`📊 Total de créditos sin pagos: ${creditosSinPagos.length}`);
+
+      if (creditosSinPagos.length === 0) {
+        return {
+          success: false,
+          message: "No hay créditos para procesar",
+          rutaArchivoCreditos,
+        };
+      }
+
+      // 2️⃣ Leer el archivo de PAGOS (EXACTAMENTE igual que el endpoint que funciona)
+      console.log(`\n📂 Leyendo archivo de últimos pagos: ${rutaArchivoPagos}`);
+      const contenidoPagos = await fs.readFile(rutaArchivoPagos, "utf-8");
+      const jsonPagos = JSON.parse(contenidoPagos);
+      console.log(`📦 JSON de pagos leído exitosamente`);
+      console.log(`📊 Total de registros en pagos: ${jsonPagos.length}`);
+
+      // 3️⃣ Contadores
+      let ok = 0;
+      let fail = 0;
+      let notFound = 0;
+      let notFoundInPagos = 0;
+
+      // 4️⃣ Procesar cada crédito
+      for (const credito of creditosSinPagos) {
+        const numeroSifco = credito.numero_credito_sifco;
+
+        if (!numeroSifco) {
+          console.log(`⚠️ Crédito sin numero_credito_sifco, saltando...`);
+          fail++;
+          continue;
+        }
+
+        console.log(`\n🔄 Procesando crédito: ${numeroSifco}`);
+
+        try {
+          // 5️⃣ Buscar el crédito en DB para obtener la CUOTA
+          const creditoDB = await db
+            .select({
+              credito_id: creditos.credito_id,
+              cuota: creditos.cuota,
+              plazo: creditos.plazo,
+            })
+            .from(creditos)
+            .where(eq(creditos.numero_credito_sifco, numeroSifco))
+            .limit(1);
+
+          if (!creditoDB || creditoDB.length === 0) {
+            console.log(`⚠️ Crédito ${numeroSifco} NO encontrado en la base de datos`);
+            notFound++;
+            continue;
+          }
+
+          const { cuota, plazo } = creditoDB[0];
+          console.log(`🔍 Cuota: Q${cuota} | Plazo: ${plazo} meses`);
+
+          // 6️⃣ Validar que tenga cuota válida
+          if (!cuota || parseFloat(cuota) <= 0) {
+            console.log(`⚠️ Crédito ${numeroSifco} tiene cuota inválida: Q${cuota}`);
+            fail++;
+            continue;
+          }
+
+          // 7️⃣ Buscar el crédito en el JSON de PAGOS (igual que el otro endpoint)
+          const registroPago = jsonPagos.find((p: any) => p.numeroCredito === numeroSifco);
+          
+          let hastaCuota = 0;
+
+          if (!registroPago || !registroPago.creditos || registroPago.creditos.length === 0) {
+            console.log(`⚠️ Crédito ${numeroSifco} no encontrado en archivo de pagos`);
+            notFoundInPagos++;
+          } else {
+            // El primer elemento del array "creditos" tiene la info del último pago
+            const ultimoPago = registroPago.creditos[0];
+            hastaCuota = parseInt(ultimoPago.numeroCuota, 10);
+            
+            console.log(`🔍 Crédito ${numeroSifco} encontrado - Último pago: ${ultimoPago.fechaUltimoPago}, Hasta cuota: ${hastaCuota}`);
+          }
+
+          // 8️⃣ PASO 1: Mapear pagos desde SIFCO
+          console.log(`📥 Mapeando pagos desde SIFCO para ${numeroSifco}...`);
+          await mapPagosPorCreditos(numeroSifco);
+          console.log(`✅ Pagos mapeados para ${numeroSifco}`);
+
+          // 9️⃣ PASO 2: Marcar cuotas como pagadas
+          console.log(`✏️ Marcando cuotas como pagadas hasta ${hastaCuota} para ${numeroSifco}...`);
+          await marcarCuotasPagadasHastaNumero({
+            numero_credito_sifco: numeroSifco,
+            hasta_cuota: hastaCuota,
+          });
+          console.log(`✅ Cuotas marcadas para ${numeroSifco}`);
+
+          // 🔟 PASO 3: Recalcular todas las cuotas con LA CUOTA DEL CRÉDITO
+          console.log(`🔧 Recalculando todas las cuotas con Q${cuota}...`);
+          await updateInstallments({
+            numero_credito_sifco: numeroSifco,
+            nueva_cuota: parseFloat(cuota),
+            all: true,
+          });
+
+          ok++;
+          console.log(`✅ Crédito ${numeroSifco} procesado exitosamente`);
+
+        } catch (error: any) {
+          fail++;
+          console.error(`❌ Error procesando crédito ${numeroSifco}:`, error.message);
+        }
+      }
+
+      // 1️⃣1️⃣ Resumen final
+      console.log(`\n🎉 Resumen final: OK=${ok} | FAIL=${fail} | NO EN DB=${notFound} | NO EN PAGOS=${notFoundInPagos} | TOTAL=${creditosSinPagos.length}`);
+
+      return {
+        success: true,
+        message: "Pagos mapeados, marcados y cuotas recalculadas para créditos sin pagos",
+        rutaArchivoCreditos,
+        rutaArchivoPagos,
+        total_creditos: creditosSinPagos.length,
+        exitosos: ok,
+        fallidos: fail,
+        no_encontrados_db: notFound,
+        no_encontrados_pagos: notFoundInPagos,
+      };
+
+    } catch (error: any) {
+      console.error("❌ Error leyendo o procesando archivos:", error);
+      set.status = 500;
+
+      return {
+        success: false,
+        message: `Error: ${error.message}`,
+        rutaArchivoCreditos,
+        rutaArchivoPagos,
+      };
+    }
+  },
+  {
+    detail: {
+      tags: ["Créditos"],
+      summary: "Recalcular cuotas para créditos sin pagos",
+      description: "Lee créditos y pagos, mapea desde SIFCO, marca cuotas pagadas y recalcula todas las cuotas",
+    },
+  }
+)
+
+
+.post("/reparar-json-creditos", async ({ set }) => {
+  const rutaOrigen = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosSinPAGOS.json";
+  const rutaReparado = "C:\\Users\\Kelvin Palacios\\Documents\\analis de datos\\creditosSinPAGOS_reparado.json";
+  
+  try {
+    console.log(`📂 Leyendo archivo original: ${rutaOrigen}`);
+    
+    // Leer el contenido
+    const contenido = await fs.readFile(rutaOrigen, "utf-8");
+    
+    console.log(`📊 Tamaño: ${contenido.length} caracteres`);
+    
+    // 🔧 Reparar el JSON
+    let reparado = contenido.trim();
+    
+    // 1. Asegurar que empiece correctamente
+    if (!reparado.startsWith('{')) {
+      reparado = '{' + reparado;
+    }
+    
+    // 2. Arreglar el espacio después de "creditos":
+    reparado = reparado.replace('"creditos":[', '"creditos": [');
+    
+    // 3. Asegurar que termine correctamente
+    if (!reparado.endsWith(']}')) {
+      // Verificar si termina con ]
+      if (reparado.endsWith(']')) {
+        reparado = reparado + '}';
+      } else if (reparado.endsWith('}')) {
+        reparado = reparado.slice(0, -1) + ']}';
+      } else {
+        reparado = reparado + ']}';
+      }
+    }
+    
+    // 4. Intentar parsear para validar
+    let parsed;
+    try {
+      parsed = JSON.parse(reparado);
+      console.log(`✅ JSON reparado y validado`);
+      console.log(`📊 Total de créditos: ${parsed.creditos.length}`);
+    } catch (parseError: any) {
+      console.error(`❌ Aún hay errores después de reparar:`, parseError.message);
+      
+      // Guardar el contenido reparado para inspección
+      await fs.writeFile(rutaReparado + '.debug', reparado, "utf-8");
+      
+      return {
+        success: false,
+        message: `Error al parsear JSON reparado: ${parseError.message}`,
+        archivo_debug: rutaReparado + '.debug',
+      };
+    }
+    
+    // 5. Guardar el JSON reparado con formato bonito
+    const jsonBonito = JSON.stringify(parsed, null, 2);
+    await fs.writeFile(rutaReparado, jsonBonito, "utf-8");
+    
+    console.log(`💾 JSON reparado guardado en: ${rutaReparado}`);
+    
+    return {
+      success: true,
+      message: "JSON reparado exitosamente",
+      rutaOriginal: rutaOrigen,
+      rutaReparado: rutaReparado,
+      total_creditos: parsed.creditos.length,
+      primer_credito: parsed.creditos[0]?.numero_credito_sifco,
+      ultimo_credito: parsed.creditos[parsed.creditos.length - 1]?.numero_credito_sifco,
+    };
+    
+  } catch (error: any) {
+    console.error(`❌ Error reparando JSON:`, error);
+    set.status = 500;
+    
+    return {
+      success: false,
+      message: `Error: ${error.message}`,
+    };
+  }
+},
+{
+  detail: {
+    tags: ["Utilidades"],
+    summary: "Reparar JSON de créditos corrupto",
+    description: "Lee, valida y repara el JSON de créditos sin pagos",
+  },
+})

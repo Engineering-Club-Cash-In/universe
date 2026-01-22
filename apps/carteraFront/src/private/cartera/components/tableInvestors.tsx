@@ -173,6 +173,7 @@ export function TableInvestors() {
     setSelectedInvestorData(undefined);
     setModalOpen(true);
   };
+  
   const handleDescargarExcel = async () => {
     try {
       const result = await inversionistasService.getResumenGlobal({
@@ -231,7 +232,8 @@ const handleAbrirModalBoleta = (inversionista?: { id: number; nombre: string; dp
     refetch(); // Refresca la tabla después de crear/editar
   };
   return (
-<div className="flex flex-col bg-gradient-to-br from-blue-50 to-white">
+  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       {/* HEADER + FILTROS + BOTONES */}
       <div className="px-4 pt-4 pb-3 shrink-0">
         {/* Título */}

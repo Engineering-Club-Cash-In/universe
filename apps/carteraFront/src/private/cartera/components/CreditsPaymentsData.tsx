@@ -280,24 +280,21 @@ export function ListaCreditosPagos() {
   }
 
   return (
-<div
-  className={`
-    flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-8
-    ${isMobile ? "" : "overflow-x-auto"}
-  `}
->
-      {/* Título */}
+
+    
+  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
+    <div className="w-full max-w-[1400px]">
       <div className="flex flex-col items-center mb-6">
         <h1 className="text-3xl font-extrabold text-blue-700 text-center">
           Créditos
-        </h1>
-        <p className="text-lg text-gray-600 leading-relaxed text-center max-w-xl mt-2">
+        </h1><p className="text-lg text-gray-600 leading-relaxed text-center mt-2">
           Consulta aquí el detalle y estado de todos los créditos registrados,
           junto con su información más relevante y pagos asociados.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full max-w-4xl mx-auto mb-6">
+<div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white/80 border border-blue-100 shadow-md rounded-2xl px-4 py-4 w-full mb-6">
         {/* Filtro por # Crédito SIFCO */}
         <label className="flex items-center gap-2 font-medium text-blue-800">
           <Hash className="w-5 h-5" />
@@ -821,7 +818,7 @@ export function ListaCreditosPagos() {
           </DialogContent>
         </Dialog>
       )}
-    </div>
+  </div>  </div>
   );
 }
 
@@ -1160,8 +1157,8 @@ function DesktopView({
   canCreateConvenio,
 }: any) {
   return (
-    <div>
-      <Table className="w-full min-w-[1200px] border-separate border-spacing-y-1">
+<div className="w-full max-w-7xl mx-auto">
+  <Table className="w-full min-w-[1200px] border-separate border-spacing-y-1">
         <TableHeader>
           <TableRow className="bg-blue-50 border-b-2 border-blue-200 rounded-t-xl">
             <TableHead className="text-gray-900 font-bold text-center">

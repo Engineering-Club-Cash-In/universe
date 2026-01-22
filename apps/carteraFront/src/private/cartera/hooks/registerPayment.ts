@@ -14,12 +14,14 @@ import {
 import { useEffect, useState } from "react"; 
 import { useMutation } from "@tanstack/react-query";
 import { useResetCredit } from "./resetCredit";
-import { useAuth } from "@/Provider/authProvider";
+import { useAuth } from "@/Provider/authProvider"; 
+import { data } from "react-router-dom";
 export const pagoSchema = z.object({
   credito_id: z.number().int().positive(),
   usuario_id: z.number().int().positive(),
   monto_boleta: z.number().min(0.01),
   fecha_pago: z.string(), // "YYYY-MM-DD"
+  fecha_boleta: z.string().optional(), // 👈 AGREGAR ACÁ
   llamada: z.string().max(100).optional(),
   renuevo_o_nuevo: z.string().max(50).optional(),
   otros: z.number().min(0), 
@@ -29,9 +31,9 @@ export const pagoSchema = z.object({
   abono_directo_capital: z.number().optional(),
   cuotaApagar: z.number().int(),
   url_boletas: z.array(z.string().max(500)),
-  banco_id: z.number().int().positive(), // 👈 NUEVO
-  numeroAutorizacion: z.string().max(100).optional(), // 👈 NUEVO
-    registerBy: z.string().max(100)
+  banco_id: z.number().int().positive(),
+  numeroAutorizacion: z.string().max(100).optional(),
+  registerBy: z.string().max(100)
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -110,6 +112,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       fecha_pago: "",
       llamada: "",
       renuevo_o_nuevo: "",
+      fecha_boleta: "",
       otros: 0, 
       monto_boleta_cuota: undefined,
       credito_sifco: "",
@@ -348,43 +351,74 @@ const handleFormSubmit = (e: React.FormEvent) => {
   }
 
   // ===== CRÉDITO ACTIVO =====
-  const { monto_boleta, otros } = formik.values;
-  const cuota = Number(dataCredito?.credito?.cuota || 0);
-  const otrosNum = Number(otros || 0);
+const { monto_boleta, otros } = formik.values;
+const  cuota = Number(dataCredito?.credito?.cuota || 0);
+const otrosNum = Number(otros || 0);
+const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor || 0);
+const montoBoleta = Number(monto_boleta || 0);
+const moraNum = Number(mora || 0);
+const cuotaConvenioNum = Number(convenioActivoInfo?.cuotaConvenioAPagar || 0);
 
-  const montoBoletaReal =
-    Number(monto_boleta) -
-    otrosNum -
-    mora -
-    (Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0);
-  const montoBoletaSinMora =
-    Number(monto_boleta) - otrosNum - (Number(convenioActivoInfo?.cuotaConvenioAPagar) || 0);
+console.log("=== DEBUG VALORES ===");
+console.log("Saldo a Favor:", saldoAFavor);
+console.log("Monto Boleta:", montoBoleta);
+console.log("Otros:", otrosNum);
+console.log("Mora:", moraNum);
+console.log("Cuota Convenio:", cuotaConvenioNum);
 
-  if (montoBoletaSinMora < 0) {
-    alert(
-      "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
-    );
-    return;
-  }
+// 🔥 Calcular monto disponible total (boleta + saldo a favor)
+const montoDisponibleTotal = montoBoleta + saldoAFavor;
+console.log("Monto Disponible Total (boleta + saldo):", montoDisponibleTotal);
 
-  // 👇 SIEMPRE USA LA CUOTA SELECCIONADA POR EL USUARIO
-  const cuotaAPagar: number = cuotaSeleccionada;
+// 🔥 Restar lo que se va a otros conceptos
+const montoBoletaReal = montoDisponibleTotal - otrosNum - moraNum - cuotaConvenioNum;
+const montoBoletaSinMora = montoDisponibleTotal - otrosNum - cuotaConvenioNum;
+
+console.log("Monto Boleta Real (después de descuentos):", montoBoletaReal);
+console.log("Monto Boleta Sin Mora:", montoBoletaSinMora);
+
+// 🔥 Validación
+if (montoBoletaSinMora < 0) {
+  alert(
+    "El saldo a favor más la boleta debe ser mayor que cero y debe cubrir la suma de otros y convenio"
+  );
+  return;
+}
+
+// 👇 SIEMPRE USA LA CUOTA SELECCIONADA POR EL USUARIO
+const cuotaAPagar: number = cuotaSeleccionada;
+
+console.log("=== CUOTA DETERMINADA ===");
+console.log("Cuota seleccionada por usuario:", cuotaSeleccionada);
+console.log("Cuota a usar:", cuotaAPagar);
+
+// ===== MANEJO DE EXCEDENTES =====
+const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
+
+// 🔥 NO RESTAR SALDO A FAVOR A LA CUOTA - La cuota es fija
+// El saldo a favor ya está incluido en montoDisponibleTotal
+const cuotaComparar = cuota;
+
+console.log("=== VALIDACIÓN DE EXCEDENTES ===");
+console.log("Monto boleta real (redondeado):", montoRedondeado);
+console.log("Cuota a comparar:", cuotaComparar);
+
+const cuotaRedondeada = Math.round(cuotaComparar * 100) / 100;
+
+// Si hay excedente, abre el modal
+if (montoRedondeado > cuotaRedondeada) {
+  const excedenteCalculado = montoRedondeado - cuotaRedondeada;
   
-  console.log("=== CUOTA DETERMINADA ===");
-  console.log("Cuota seleccionada por usuario:", cuotaSeleccionada);
-  console.log("Cuota a usar:", cuotaAPagar);
+  console.log("=== HAY EXCEDENTE ===");
+  console.log("Excedente:", excedenteCalculado);
+  
+  setModalMode("excedente");
+  setExcedente(excedenteCalculado);
+  setModalExcesoOpen(true);
+  return;
+}
 
-  // ===== MANEJO DE EXCEDENTES =====
-  const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
-  const cuotaRedondeada = Math.round(cuota * 100) / 100;
-
-  // Si hay excedente, abre el modal
-  if (montoRedondeado > cuotaRedondeada) {
-    setModalMode("excedente");
-    setExcedente(montoRedondeado - cuotaRedondeada);
-    setModalExcesoOpen(true);
-    return;
-  }
+console.log("=== NO HAY EXCEDENTE - CONTINUAR CON PAGO ===");
 
   // Si la cuota actual ya está pagada y el monto no es exacto
   if (cuotaActualInfo?.pagada && montoRedondeado !== cuotaRedondeada) {
@@ -618,6 +652,7 @@ async function handleResetCredito() {
     resetBuscador,
     setResetBuscador,
     mora,
-    convenioActivoInfo
+    convenioActivoInfo,
+    cuotaSeleccionada
   };
 }

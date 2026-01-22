@@ -474,6 +474,7 @@ export const asesores = customSchema.table("asesores", {
   nombre: varchar("nombre", { length: 100 }).notNull(),
   telefono: varchar("telefono", { length: 20 }), // 🔥 NUEVO CAMPO OPCIONAL
   activo: boolean("activo"),
+  emailCashIn: varchar("email_cash_in", { length: 150 }),
 });
 
 export const cuentasEmpresa = customSchema.table("cuentas_empresa", {

@@ -611,7 +611,7 @@ export async function getCreditosWithUserByMesAnio(
     if (email_asesor && email_asesor.length > 0) {
       console.log(`🔎 Filtrando por email de asesor: ${email_asesor}`);
       conditions.push(
-        sql`${platform_users.email} ILIKE ${`%${email_asesor}%`}`
+        sql`${asesores.emailCashIn} ILIKE ${`%${email_asesor}%`}`
       );
     }
 
@@ -642,16 +642,11 @@ export async function getCreditosWithUserByMesAnio(
         creditos,
         usuarios,
         asesores,
-        platform_users,
         moras_credito,
       })
       .from(creditos)
       .innerJoin(usuarios, eq(creditos.usuario_id, usuarios.usuario_id))
       .innerJoin(asesores, eq(creditos.asesor_id, asesores.asesor_id))
-      .leftJoin(
-        platform_users,
-        eq(asesores.asesor_id, platform_users.asesor_id)
-      )
       .leftJoin(
         moras_credito,
         eq(creditos.credito_id, moras_credito.credito_id)
@@ -2248,9 +2243,9 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
   let asesorId: number | null = null;
   if (email) {
     const platformUser = await db
-      .select({ asesor_id: platform_users.asesor_id })
-      .from(platform_users)
-      .where(eq(platform_users.email, email))
+      .select({ asesor_id: asesores.asesor_id })
+      .from(asesores)
+      .where(eq(asesores.emailCashIn, email))
       .limit(1);
 
     if (platformUser.length > 0 && platformUser[0].asesor_id) {

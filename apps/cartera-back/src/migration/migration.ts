@@ -497,7 +497,7 @@ export async function mapEstadoCuentaToPagosBig(
   // 3️⃣ EXTRACCIÓN DE DATOS DE RESPUESTA
   // ═══════════════════════════════════════════════════════════════
   console.log(
-    "\n┌─────────────────────────────────────────────────────────────"
+    "\n┌──────f───────────────────────────────────────────────────────"
   );
   console.log("│ 3️⃣ EXTRAYENDO DATOS DE RESPUESTA WS");
   console.log("└─────────────────────────────────────────────────────────────");
@@ -719,7 +719,12 @@ export async function mapEstadoCuentaToPagosBig(
   console.log("└─────────────────────────────────────────────────────────────");
 
   const cuotasParaInsertar = cuotas.map((c, idx) => {
-    const numeroCuota = Number(c.InteresNumeroCuota ?? c.CapitalNumeroCuota);
+    const numeroCuota = Number(c.CapitalNumeroCuota )>0 ? Number(c.CapitalNumeroCuota) : Number(c.InteresNumeroCuota);
+    console.log(`\n🔍 Calculando número de cuota para cuota índice ${idx}:`);
+    console.log(c.CapitalNumeroCuota, c.InteresNumeroCuota);
+
+    console.log(`\n🔍 Procesando cuota ${idx + 1}/${cuotas.length}:`)
+    ;
     const isPagado = c.CapitalPagado === "S" && c.InteresPagado === "S";
 
     // 📅 Ajustar fecha de vencimiento según día de corte

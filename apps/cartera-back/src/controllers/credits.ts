@@ -314,8 +314,8 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const cuotaActualPagada = !!(cuotaActualData && cuotaActualData.pagado);
     console.log("cuotaActualData", cuotaActualData);
 
-    // La cuota actual del mes es la de número `mesesTranscurridos`
-    const cuotaActual = cuotaActualData.numero_cuota;
+    // La cuota actual del mes con toda su info
+    const cuotaActual = cuotaActualData;
     const cuotaActualStatus = cuotaActualData.validationStatus;
 
     const moraActual = await db
@@ -595,10 +595,14 @@ export async function getCreditosWithUserByMesAnio(
       }
     }
 
-    if (estado && estado.length > 0) {
+  if (estado && estado.length > 0) {
       if (estado === "ACTIVO") {
         console.log(`🔎 Filtrando por estado: ACTIVO + MOROSO`);
-        conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`);
+        if (cuotas_atrasadas == 0 ) {
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO')`);
+        } else {
+          conditions.push(sql`${creditos.statusCredit} IN ('ACTIVO', 'MOROSO')`);
+        }
       } else {
         console.log(`🔎 Filtrando por estado: ${estado}`);
         conditions.push(eq(creditos.statusCredit, estado));
@@ -622,9 +626,9 @@ export async function getCreditosWithUserByMesAnio(
       );
     }
 
-    if (cuotas_atrasadas !== undefined && cuotas_atrasadas > 0) {
+    if (cuotas_atrasadas && cuotas_atrasadas > 0) {
       console.log(`🔎 Filtrando por cuotas atrasadas >= ${cuotas_atrasadas}`);
-      conditions.push(gte(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
+      conditions.push(eq(moras_credito.cuotas_atrasadas, cuotas_atrasadas));
     }
   } catch (err) {
     console.error("❌ Error construyendo filtros:", err);

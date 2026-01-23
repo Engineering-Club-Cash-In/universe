@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {   z } from "zod";
+import { z } from "zod";
 import { useFormik } from "formik";
 import {
   createPago,
@@ -11,29 +11,29 @@ import {
   type Credito,
   type Usuario,
 } from "../services/services";
-import { useEffect, useState } from "react"; 
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useResetCredit } from "./resetCredit";
-import { useAuth } from "@/Provider/authProvider"; 
-import { data } from "react-router-dom";
+import { useAuth } from "@/Provider/authProvider";
+import { toast } from "sonner";
 export const pagoSchema = z.object({
-  credito_id: z.number().int().positive(),
-  usuario_id: z.number().int().positive(),
-  monto_boleta: z.number().min(0.01),
-  fecha_pago: z.string(), // "YYYY-MM-DD"
-  fecha_boleta: z.string().optional(), // 👈 AGREGAR ACÁ
+  credito_id: z.number().int().positive({ message: "Debe seleccionar un crédito" }),
+  usuario_id: z.number().int().positive({ message: "Usuario requerido" }),
+  monto_boleta: z.number().min(0.01, { message: "El monto de boleta debe ser mayor a 0" }),
+  fecha_pago: z.string().min(1, { message: "Fecha de pago requerida" }),
+  fecha_boleta: z.string().min(1, { message: "Fecha de boleta requerida" }),
   llamada: z.string().max(100).optional(),
   renuevo_o_nuevo: z.string().max(50).optional(),
-  otros: z.number().min(0), 
+  otros: z.number().min(0).optional(), // OPCIONAL
   monto_boleta_cuota: z.number().optional(),
   credito_sifco: z.string().max(50).optional(),
-  observaciones: z.string().max(500).optional(),
+  observaciones: z.string().max(500).optional(), // OPCIONAL
   abono_directo_capital: z.number().optional(),
   cuotaApagar: z.number().int(),
   url_boletas: z.array(z.string().max(500)),
-  banco_id: z.number().int().positive(),
-  numeroAutorizacion: z.string().max(100).optional(),
-  registerBy: z.string().max(100)
+  banco_id: z.number().int().positive({ message: "Debe seleccionar un banco" }),
+  numeroAutorizacion: z.string().optional(),
+  registerBy: z.string().min(1, { message: "Usuario registrador requerido" })
 });
 
 export type PagoFormValues = z.infer<typeof pagoSchema>;
@@ -113,16 +113,16 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       llamada: "",
       renuevo_o_nuevo: "",
       fecha_boleta: "",
-      otros: 0, 
+      otros: 0,
       monto_boleta_cuota: undefined,
       credito_sifco: "",
       observaciones: "",
       abono_directo_capital: 0,
       cuotaApagar: cuotaSeleccionada ?? 0,
       url_boletas: [],
-      banco_id: 0, // 👈 NUEVO
-      numeroAutorizacion: undefined, // 👈 NUEVO
-       registerBy: user?.email || ""
+      banco_id: 0,
+      numeroAutorizacion: "",
+      registerBy: user?.email || ""
     },
     validate: zodToFormikValidate(pagoSchema),
     onSubmit: async (values, { setSubmitting, setStatus, resetForm }) => {
@@ -137,11 +137,11 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
           typeof cuotaSeleccionada === "number" ? cuotaSeleccionada : 0;
         formik.setFieldValue("cuotaApagar", cuotaApagarValue);
         if (archivosParaSubir.length === 0) {
-          alert("Debes seleccionar al menos un archivo de boleta (máx. 3).");
+          toast.error("Debes seleccionar al menos un archivo de boleta (máx. 3)");
           return;
         }
         if (archivosParaSubir.length > 3) {
-          alert("Solo puedes subir hasta 3 archivos de boleta.");
+          toast.error("Solo puedes subir hasta 3 archivos de boleta");
           return;
         }
 
@@ -161,7 +161,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
         console.log("Valores a enviar:", valuesToSend);
          
         const response = await createPago(valuesToSend); // Esto es la respuesta completa
-        alert(response.message || "¡Pago registrado correctamente!");
+        toast.success(response.message || "¡Pago registrado correctamente!");
     
 
         setStatus({ success: true });
@@ -179,7 +179,7 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       } catch (error: any) {
         const backendMessage =
           error?.response?.data?.message || "Error desconocido";
-        alert(`No se pudo registrar el pago:\n${backendMessage}`);
+        toast.error(`No se pudo registrar el pago: ${backendMessage}`);
         setStatus({ success: false, error: backendMessage });
       } finally {
         setSubmitting(false);
@@ -233,9 +233,15 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       }
 
       // FLUJO ACTIVO
-      setCuotaSeleccionada(result.cuotasAtrasadas?.[0]?.numero_cuota ?? 0);
+      // Extraer numero_cuota del objeto cuotaActual (antes era número, ahora es objeto)
+      const cuotaActualObj = result.cuotaActual as any;
+      const cuotaActualNumero = typeof cuotaActualObj === 'object' && cuotaActualObj !== null
+        ? cuotaActualObj.numero_cuota
+        : cuotaActualObj;
+
+      setCuotaSeleccionada(result.cuotasAtrasadas?.[0]?.numero_cuota ?? cuotaActualNumero ?? 0);
       setMora(result.moraActual || 0);
-      
+
       // 👇 AGREGA INFO DE CONVENIO
       if (result.convenioActivo) {
         setConvenioActivoInfo({
@@ -246,17 +252,18 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
       }
 
       setCuotaActualInfo({
-        numero: result.cuotaActual,
+        numero: cuotaActualNumero,
         pagada: !!result.cuotaActualPagada,
-        validationStatus: result.cuotaActualStatus,
-        data:
-          result.cuotasPagadas.find(
-            (c: any) => c.numero_cuota === result.cuotaActual
-          ) ||
-          result.cuotasAtrasadas.find(
-            (c: any) => c.numero_cuota === result.cuotaActual
-          ) ||
-          null,
+        validationStatus: result.cuotaActualStatus ?? cuotaActualObj?.validationStatus,
+        data: typeof cuotaActualObj === 'object' && cuotaActualObj !== null
+          ? cuotaActualObj
+          : (result.cuotasPagadas.find(
+              (c: any) => c.numero_cuota === cuotaActualNumero
+            ) ||
+            result.cuotasAtrasadas.find(
+              (c: any) => c.numero_cuota === cuotaActualNumero
+            ) ||
+            null),
       });
 
       setCuotasAtrasadasInfo({
@@ -327,9 +334,7 @@ const handleFormSubmit = (e: React.FormEvent) => {
     );
 
     if (monto_boleta < 0) {
-      alert(
-        "El monto de la boleta debe ser mayor a cero y debe ser mayor que la suma de otros y mora"
-      );
+      toast.error("El monto de la boleta debe ser mayor a cero");
       return;
     }
 
@@ -346,7 +351,7 @@ const handleFormSubmit = (e: React.FormEvent) => {
 
   // ===== VALIDACIÓN: DEBE TENER CUOTA SELECCIONADA =====
   if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
-    alert("⚠️ Por favor selecciona una cuota a pagar del menú desplegable");
+    toast.error("Por favor selecciona una cuota a pagar del menú desplegable");
     return;
   }
 
@@ -367,7 +372,7 @@ console.log("Mora:", moraNum);
 console.log("Cuota Convenio:", cuotaConvenioNum);
 
 // 🔥 Calcular monto disponible total (boleta + saldo a favor)
-const montoDisponibleTotal = montoBoleta + saldoAFavor;
+const montoDisponibleTotal = montoBoleta ;
 console.log("Monto Disponible Total (boleta + saldo):", montoDisponibleTotal);
 
 // 🔥 Restar lo que se va a otros conceptos
@@ -379,9 +384,7 @@ console.log("Monto Boleta Sin Mora:", montoBoletaSinMora);
 
 // 🔥 Validación
 if (montoBoletaSinMora < 0) {
-  alert(
-    "El saldo a favor más la boleta debe ser mayor que cero y debe cubrir la suma de otros y convenio"
-  );
+  toast.error("El saldo a favor más la boleta debe cubrir la suma de otros y convenio");
   return;
 }
 
@@ -395,13 +398,26 @@ console.log("Cuota a usar:", cuotaAPagar);
 // ===== MANEJO DE EXCEDENTES =====
 const montoRedondeado = Math.round(montoBoletaReal * 100) / 100;
 
-// 🔥 NO RESTAR SALDO A FAVOR A LA CUOTA - La cuota es fija
-// El saldo a favor ya está incluido en montoDisponibleTotal
-const cuotaComparar = cuota;
+// 🔥 Calcular abonos ya realizados en la cuota actual
+const dataCuotaActual = cuotaActualInfo?.data;
+const abonosRealizados = dataCuotaActual ? (
+  Number(dataCuotaActual.abono_capital || 0) +
+  Number(dataCuotaActual.abono_interes || 0) +
+  Number(dataCuotaActual.abono_iva_12 || 0) +
+
+  Number(dataCuotaActual.abono_seguro || 0) +
+  Number(dataCuotaActual.abono_gps || 0) +
+  Number(dataCuotaActual.abono_membresias || 0)
+) : 0;
+
+// 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
+const cuotaComparar = Math.max(0, cuota );
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);
-console.log("Cuota a comparar:", cuotaComparar);
+console.log("Cuota base:", cuota);
+console.log("Abonos ya realizados:", abonosRealizados);
+console.log("Cuota a comparar (lo que falta):", cuotaComparar);
 
 const cuotaRedondeada = Math.round(cuotaComparar * 100) / 100;
 
@@ -449,7 +465,7 @@ console.log("=== NO HAY EXCEDENTE - CONTINUAR CON PAGO ===");
 const handleAbonoCapital = () => {
   // ✅ Validar que haya cuota seleccionada
   if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
-    alert("⚠️ Debes seleccionar una cuota antes de continuar");
+    toast.error("Debes seleccionar una cuota antes de continuar");
     setModalExcesoOpen(false);
     return;
   }
@@ -468,7 +484,7 @@ const handleAbonoCapital = () => {
 const handleAbonoSiguienteCuota = () => {
   // ✅ Validar que haya cuota seleccionada
   if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
-    alert("⚠️ Debes seleccionar una cuota antes de continuar");
+    toast.error("Debes seleccionar una cuota antes de continuar");
     setModalExcesoOpen(false);
     return;
   }
@@ -490,7 +506,7 @@ const handleAbonoSiguienteCuota = () => {
 const handleAbonoOtros = () => {
   // ✅ Validar que haya cuota seleccionada
   if (!cuotaSeleccionada || cuotaSeleccionada === 0) {
-    alert("⚠️ Debes seleccionar una cuota antes de continuar");
+    toast.error("Debes seleccionar una cuota antes de continuar");
     setModalExcesoOpen(false);
     return;
   }
@@ -513,7 +529,7 @@ const handleAbonoOtros = () => {
     return useMutation({
       mutationFn: liquidatePagosInversionistasService,
       onSuccess: () => {
-        alert("Pagos liquidados correctamente");
+        toast.success("Pagos liquidados correctamente");
         setModalExcesoOpen(false);
 
         if (formik.values.credito_sifco) {
@@ -521,7 +537,7 @@ const handleAbonoOtros = () => {
         }
       },
       onError: (err: any) => {
-        alert(err?.response?.data?.message || "Error al liquidar pagos");
+        toast.error(err?.response?.data?.message || "Error al liquidar pagos");
       },
     });
   }
@@ -530,13 +546,10 @@ const handleAbonoOtros = () => {
     return useMutation({
       mutationFn: reversePagosInversionistasService,
       onSuccess: () => {
-        alert("Pago reversado correctamente");
+        toast.success("Pago reversado correctamente");
       },
       onError: (err: any) => {
-        alert(
-          "Error al reversar pago: " +
-            (err?.response?.data?.message || "Error desconocido")
-        );
+        toast.error("Error al reversar pago: " + (err?.response?.data?.message || "Error desconocido"));
       },
     });
   }
@@ -556,7 +569,7 @@ const handleAbonoOtros = () => {
 
       // Aquí podrías hacer un refetch/queryClient.invalidateQueries para actualizar
     } catch (error) {
-      alert("Error al liquidar el pago");
+      toast.error("Error al liquidar el pago");
       console.error("Error liquidando pago:", error);
     }
   }
@@ -573,11 +586,11 @@ async function handleResetCredito() {
           typeof cuotaSeleccionada === "number" ? cuotaSeleccionada : 0;
         formik.setFieldValue("cuotaApagar", cuotaApagarValue);
         if (archivosParaSubir.length === 0) {
-          alert("Debes seleccionar al menos un archivo de boleta (máx. 3).");
+          toast.error("Debes seleccionar al menos un archivo de boleta (máx. 3)");
           return;
         }
         if (archivosParaSubir.length > 3) {
-          alert("Solo puedes subir hasta 3 archivos de boleta.");
+          toast.error("Solo puedes subir hasta 3 archivos de boleta");
           return;
         }
 
@@ -596,8 +609,8 @@ async function handleResetCredito() {
     cuota: cuotaActualInfo?.numero || 0,
   }, {
     onSuccess: (data) => {
-      alert(data.message || "Crédito reiniciado y pago creado exitosamente.");
-      
+      toast.success(data.message || "Crédito reiniciado y pago creado exitosamente");
+
         formik.resetForm();
         setDataCredito(null); // Limpiar datos del crédito
         setCuotaActualInfo(null);
@@ -610,7 +623,7 @@ async function handleResetCredito() {
       // Puedes hacer un refetch o limpiar el form aquí
     },
     onError: (error) => {
-      alert("Error al reiniciar crédito: " + (error?.message || error));
+      toast.error("Error al reiniciar crédito: " + (error?.message || error));
     }
   });
 }

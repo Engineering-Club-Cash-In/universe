@@ -392,7 +392,7 @@ const calcularMontoEfectivo = (
   otros: Big,
   abonoDirectoCapital: number
 ): Big => {
-  return saldoAFavor.add(montoBoleta).minus(otros).minus(abonoDirectoCapital ?? 0);
+  return (montoBoleta).minus(otros).minus(abonoDirectoCapital ?? 0);
 };
 
 // ========================================

@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar } from "lucide-react";
+import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
 import { ModalBadDebtCredit } from "./ModalBadDebtCredit";
@@ -32,20 +33,22 @@ const fields = [
     label: "Monto Boleta",
     type: "number",
     icon: <DollarSign className="text-blue-500 mr-2 w-5 h-5" />,
+    required: true,
   },
   {
     name: "otros",
-    label: "Otros",
+    label: "Otros (Opcional)",
     type: "number",
     icon: <Info className="text-blue-500 mr-2 w-5 h-5" />,
+    required: false,
   },
   {
     name: "observaciones",
-    label: "Observaciones",
+    label: "Observaciones (Opcional)",
     type: "text",
     icon: <Percent className="text-blue-500 mr-2 w-5 h-5" />,
+    required: false,
   },
-  
 ];
 
 export function PagoForm() {
@@ -91,12 +94,25 @@ export function PagoForm() {
 
     // Validar antes de abrir el modal
     if (!formik.isValid && Object.keys(formik.errors).length > 0) {
+      const nombresAmigables: Record<string, string> = {
+        monto_boleta: "Monto Boleta",
+        fecha_boleta: "Fecha Boleta",
+        banco_id: "Banco",
+        numeroAutorizacion: "Número de Autorización",
+        credito_id: "Crédito",
+        usuario_id: "Usuario",
+      };
+
       const errores = Object.entries(formik.errors)
-        .map(([campo, mensaje]) => `• ${campo}: ${mensaje}`)
+        .map(([campo, mensaje]) => {
+          const nombreCampo = nombresAmigables[campo] || campo;
+          return `• ${nombreCampo}: ${mensaje}`;
+        })
         .join("\n");
-      alert(
-        `Por favor revisa los siguientes errores antes de continuar:\n\n${errores}`
-      );
+
+      toast.error(`Campos con errores:\n${errores}`, {
+        duration: 5000,
+      });
       return;
     }
 
@@ -138,7 +154,7 @@ export function PagoForm() {
         const saldoAFavor = Number(dataCredito?.usuario?.saldo_a_favor) || 0;
         
         // 🔥 Total disponible = Boleta + Saldo a Favor
-        let montoRestante = montoBoleta + saldoAFavor;
+        let montoRestante = montoBoleta;
         
         const distribucion: { concepto: string; monto: number }[] = [];
 
@@ -417,6 +433,19 @@ export function PagoForm() {
                 mora={mora || 0}
                 convenioActivoInfo={convenioActivoInfo}
                 cuotaMensualAPagar={dataCredito.cuotaMensualAPagar}
+                abonosParciales={(() => {
+                  const data = cuotaActualInfo?.data;
+                  if (!data) return null;
+                  const abono_capital = Number(data.abono_capital || 0);
+                  const abono_interes = Number(data.abono_interes || 0);
+                  const abono_iva_12 = Number(data.abono_iva_12 || 0);
+                  const abono_seguro = Number(data.abono_seguro || 0);
+                  const abono_gps = Number(data.abono_gps || 0);
+                  const abono_membresias = Number(data.membresias_pago || 0);
+                  const total = abono_capital + abono_interes + abono_iva_12 + abono_seguro + abono_gps + abono_membresias;
+                  if (total === 0) return null;
+                  return { abono_capital, abono_interes, abono_iva_12, abono_seguro, abono_gps, abono_membresias, total };
+                })()}
               />
             )
           )}
@@ -446,7 +475,10 @@ export function PagoForm() {
                     }`}
                   >
                     {field.icon}
-                    <span>{field.label}</span>
+                    <span>
+                      {field.label}
+                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                    </span>
                   </Label>
                   <Input
                     id={field.name}
@@ -485,31 +517,27 @@ export function PagoForm() {
               <div className="min-h-[92px] flex flex-col justify-end w-full">
                 <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
                   <Building2 className="text-blue-500 mr-2 w-5 h-5" />
-                  <span>Banco (Opcional)</span>
+                  <span>Banco <span className="text-red-500">*</span></span>
                 </Label>
                 <Select
-                  value={formik.values.banco_id?.toString() || "none"}
+                  value={formik.values.banco_id?.toString() || ""}
                   onValueChange={(value) => {
-                    formik.setFieldValue(
-                      "banco_id",
-                      value === "none" ? undefined : Number(value)
-                    );
+                    formik.setFieldValue("banco_id", Number(value));
+                    formik.setFieldTouched("banco_id", true);
                   }}
                   disabled={loadingBancos}
                 >
-                  <SelectTrigger className="w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white border-gray-300 [&>span]:text-gray-900">
+                  <SelectTrigger className={`w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white [&>span]:text-gray-900 ${
+                    formik.errors.banco_id && formik.touched.banco_id
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-gray-300"
+                  }`}>
                     <SelectValue
                       placeholder="Selecciona un banco"
                       className="text-gray-900"
                     />
                   </SelectTrigger>
                   <SelectContent className="bg-white border border-gray-200 shadow-lg">
-                    <SelectItem
-                      value="none"
-                      className="text-gray-900 hover:bg-blue-50 cursor-pointer"
-                    >
-                      Sin banco
-                    </SelectItem>
                     {bancos.map((banco) => (
                       <SelectItem
                         key={banco.banco_id}
@@ -521,12 +549,17 @@ export function PagoForm() {
                     ))}
                   </SelectContent>
                 </Select>
+                {formik.errors.banco_id && formik.touched.banco_id && (
+                  <div className="text-red-500 text-sm mt-1">
+                    {formik.errors.banco_id}
+                  </div>
+                )}
               </div> 
               {/* Campo Número de Autorización */}
               <div className="min-h-[92px] flex flex-col justify-end w-full">
                 <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
                   <FileText className="text-blue-500 mr-2 w-5 h-5" />
-                  <span>Número de Autorización </span>
+                  <span>Número de Autorización (Opcional)</span>
                 </Label>
                 <Input
                   id="numeroAutorizacion"
@@ -536,7 +569,11 @@ export function PagoForm() {
                   onChange={formik.handleChange}
                   onBlur={formik.handleBlur}
                   placeholder="Ej: 123456789"
-                  className="w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70 border-gray-300"
+                  className={`w-full max-w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white/70 ${
+                    formik.errors.numeroAutorizacion && formik.touched.numeroAutorizacion
+                      ? "border-red-500 focus:ring-red-500"
+                      : "border-gray-300"
+                  }`}
                 />
                 {formik.errors.numeroAutorizacion &&
                   formik.touched.numeroAutorizacion && (
@@ -550,14 +587,20 @@ export function PagoForm() {
               <div className="min-h-[92px] flex flex-col justify-end w-full">
                 <Label className="text-gray-900 font-semibold mb-1 flex items-center text-lg">
                   <Calendar className="text-blue-500 mr-2 w-5 h-5" />
-                  <span>Fecha Boleta (Opcional)</span>
+                  <span>Fecha Boleta <span className="text-red-500">*</span></span>
                 </Label>
                 <DatePickerMUI
                   value={formik.values.fecha_boleta}
-                  onChange={(value) =>
-                    formik.setFieldValue("fecha_boleta", value)
-                  }
+                  onChange={(value) => {
+                    formik.setFieldValue("fecha_boleta", value);
+                    formik.setFieldTouched("fecha_boleta", true);
+                  }}
                 />
+                {formik.errors.fecha_boleta && formik.touched.fecha_boleta && (
+                  <div className="text-red-500 text-sm mt-1">
+                    {formik.errors.fecha_boleta}
+                  </div>
+                )}
               </div>
             </div>
  {/* Boletas */}
@@ -577,9 +620,7 @@ export function PagoForm() {
                   onChange={(e) => {
                     const files = Array.from(e.target.files ?? []);
                     if (files.length + archivosParaSubir.length > 3) {
-                      alert(
-                        "Solo puedes seleccionar hasta 3 archivos en total."
-                      );
+                      toast.error("Solo puedes seleccionar hasta 3 archivos en total");
                       return;
                     }
                     setArchivosParaSubir([...archivosParaSubir, ...files]);

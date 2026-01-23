@@ -24,6 +24,7 @@ export function MiniCardCredito({
   mora,
   convenioActivoInfo,
   cuotaMensualAPagar,
+  abonosParciales,
 }: {
   credito: any;
   usuario: any;
@@ -89,6 +90,15 @@ export function MiniCardCredito({
   pagosConvenio?: any[]; // 👈 Opcional
 } | null;
   cuotaMensualAPagar?: string;
+  abonosParciales?: {
+    abono_capital: number;
+    abono_interes: number;
+    abono_iva_12: number;
+    abono_seguro: number;
+    abono_gps: number;
+    abono_membresias: number;
+    total: number;
+  } | null;
 }) {
   if (!credito || !usuario) return null;
 
@@ -513,6 +523,57 @@ export function MiniCardCredito({
               </>
             )}
           </div>
+
+          {/* Abonos Parciales */}
+          {abonosParciales && abonosParciales.total > 0 && (
+            <div className="flex flex-col bg-gradient-to-br from-cyan-50 to-blue-50 rounded-lg p-4 shadow-sm border-2 border-cyan-300">
+              <span className="font-bold text-cyan-700 text-sm mb-2 flex items-center gap-2">
+                💳 Abono Parcial en Cuota
+              </span>
+              <div className="space-y-1">
+                {abonosParciales.abono_capital > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">Capital:</span>
+                    <span className="font-semibold text-cyan-700">Q{abonosParciales.abono_capital.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {abonosParciales.abono_interes > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">Interés:</span>
+                    <span className="font-semibold text-cyan-700">Q{abonosParciales.abono_interes.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {abonosParciales.abono_iva_12 > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">IVA:</span>
+                    <span className="font-semibold text-cyan-700">Q{abonosParciales.abono_iva_12.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {abonosParciales.abono_seguro > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">Seguro:</span>
+                    <span className="font-semibold text-cyan-700">Q{abonosParciales.abono_seguro.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {abonosParciales.abono_gps > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">GPS:</span>
+                    <span className="font-semibold text-cyan-700">Q{abonosParciales.abono_gps.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                {abonosParciales.abono_membresias > 0 && (
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-600">Membresías:</span>
+                    <span className="font-semibold text-cyan-700">Q{abonosParciales.abono_membresias.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                  </div>
+                )}
+                <div className="flex justify-between pt-2 mt-2 border-t border-cyan-200">
+                  <span className="font-bold text-cyan-800 text-sm">Total Abonado:</span>
+                  <span className="font-black text-cyan-700 text-lg">Q{abonosParciales.total.toLocaleString("es-GT", { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Selector de cuotas */}
           {cuotasPendientesInfo &&

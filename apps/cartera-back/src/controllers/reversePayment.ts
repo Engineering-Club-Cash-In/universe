@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, not, inArray } from "drizzle-orm";
 import Big from "big.js";
 import { db } from "../database";
 import {
@@ -489,7 +489,48 @@ export const reversePayment = async ({ body, set }: any) => {
         .where(eq(usuarios.usuario_id, user.usuario_id));
 
       console.log("✅ Saldo a favor actualizado");
- 
+
+      // ======================================================================
+      // 1️⃣5️⃣ LIMPIAR PAGOS DUPLICADOS DE LA MISMA CUOTA
+      // ======================================================================
+      let pagosDuplicados: { pago_id: number }[] = [];
+
+      if (pagoEstabaPagado) {
+        console.log("\n🧹 ========== LIMPIANDO PAGOS DUPLICADOS ==========");
+
+        // Primero obtener los IDs de pagos duplicados
+        const pagosDuplicadosIds = await tx
+          .select({ pago_id: pagos_credito.pago_id })
+          .from(pagos_credito)
+          .where(
+            and(
+              eq(pagos_credito.cuota_id, pago.cuota_id),
+              eq(pagos_credito.credito_id, credito_id),
+              not(eq(pagos_credito.pago_id, pago_id))
+            )
+          );
+
+        const ids = pagosDuplicadosIds.map((p) => p.pago_id);
+
+        if (ids.length > 0) {
+          // Eliminar registros relacionados primero (evita FK constraint)
+          await tx.delete(boletas).where(inArray(boletas.pago_id, ids));
+          await tx
+            .delete(pagos_credito_inversionistas)
+            .where(inArray(pagos_credito_inversionistas.pago_id, ids));
+
+          // Ahora sí eliminar los pagos duplicados
+          pagosDuplicados = await tx
+            .delete(pagos_credito)
+            .where(inArray(pagos_credito.pago_id, ids))
+            .returning({ pago_id: pagos_credito.pago_id });
+        }
+
+        console.log(`🗑️ Pagos duplicados eliminados: ${pagosDuplicados.length}`);
+      } else {
+        console.log("\n⏭️ Pago eliminado - no se limpian duplicados");
+      }
+
       // ======================================================================
       // ✅ RETORNAR DATOS DE LA TRANSACCIÓN
       // ======================================================================

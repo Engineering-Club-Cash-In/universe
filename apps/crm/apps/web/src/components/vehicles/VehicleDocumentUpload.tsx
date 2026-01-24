@@ -36,7 +36,7 @@ const documentTypeLabels: Record<string, string> = {
 	representacion_legal_vehiculo: "Representación Legal",
 	dpi_representante_legal_vehiculo: "DPI del Representante Legal",
 	pago_impuesto_circulacion: "Comprobante de Pago Impuesto de Circulación",
-	consulta_sat: "Captura de Pantalla Consulta SAT",
+	consulta_sat: "Captura de Pantalla de Usuario de SAT",
 	consulta_garantias_mobiliarias:
 		"Certificación de Garantías Mobiliarias (RGM)",
 };

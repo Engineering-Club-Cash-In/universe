@@ -191,7 +191,7 @@ export const getDocumentTypeLabel = (documentType: string): string => {
 		representacion_legal_vehiculo: "Representación legal (vehículo)",
 		dpi_representante_legal_vehiculo: "DPI representante legal (vehículo)",
 		pago_impuesto_circulacion: "Pago impuesto de circulación",
-		consulta_sat: "Consulta SAT",
+		consulta_sat: "Usuario de SAT (Propietario)",
 		consulta_garantias_mobiliarias: "Consulta garantías mobiliarias",
 		datos_vehiculo_nuevo: "Documentos del vehículo nuevo",
 		cotizacion_vehiculo_nuevo: "Cotización del vehículo nuevo",
@@ -205,7 +205,6 @@ export const getDocumentTypeLabel = (documentType: string): string => {
 		redes_sociales_internet: "Redes Sociales - Internet",
 		enganche: "Comprobante de Enganche",
 		// === Verificaciones de Vehículo / Propietario ===
-		usuario_sat_propietario: "Usuario de SAT (Propietario)",
 		rtu_propietario: "RTU (Propietario)",
 		omisos_incumplimientos_propietario:
 			"Omisos e Incumplimientos (Propietario)",

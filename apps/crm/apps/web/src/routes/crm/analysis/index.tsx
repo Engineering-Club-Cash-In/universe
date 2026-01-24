@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	CheckCircle,
@@ -10,9 +10,7 @@ import {
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AnalysisChecklistView } from "@/components/analysis/AnalysisChecklistView";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
-import { DocumentValidationChecklist } from "@/components/document-validation-checklist";
 import {
 	LeadDetailModal,
 	type LeadForModal,
@@ -58,7 +56,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { client, orpc } from "@/utils/orpc";
 
-export const Route = createFileRoute("/crm/analysis")({
+export const Route = createFileRoute("/crm/analysis/")({
 	component: AnalysisPage,
 });
 
@@ -83,17 +81,17 @@ function OpportunityActions({
 			input: { opportunityId: opportunity.id },
 		}),
 		enabled: !!opportunity.id,
-	});
+	})
 
 	const checklist = useQuery({
 		queryKey: ["getAnalysisChecklist", opportunity.id],
 		queryFn: async () => {
 			return await client.getAnalysisChecklist({
 				opportunityId: opportunity.id,
-			});
+			})
 		},
 		enabled: !!opportunity.id,
-	});
+	})
 
 	const canApprove =
 		(validation.data?.canApprove ?? false) &&
@@ -113,18 +111,18 @@ function OpportunityActions({
 		if (!validation.data.allDocumentsPresent) {
 			reasons.push(
 				`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`,
-			);
+			)
 		}
 
 		const checklistData = checklist.data as any;
 		if (checklistData && !checklistData.canApprove) {
 			reasons.push(
 				"Debe completar todas las verificaciones del checklist de análisis",
-			);
+			)
 		}
 
 		return reasons.length > 0 ? reasons.join("\n") : "";
-	};
+	}
 
 	return (
 		<div className="flex gap-2">
@@ -160,7 +158,7 @@ function OpportunityActions({
 				Rechazar
 			</Button>
 		</div>
-	);
+	)
 }
 
 function AnalysisPage() {
@@ -170,7 +168,7 @@ function AnalysisPage() {
 
 	const [opportunities, setOpportunities] = useState<OpportunityForAnalysis[]>(
 		[],
-	);
+	)
 	const [isLoading, setIsLoading] = useState(true);
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<OpportunityForAnalysis | null>(null);
@@ -178,9 +176,6 @@ function AnalysisPage() {
 	const [isApproving, setIsApproving] = useState(true);
 	const [reason, setReason] = useState("");
 	const [isSubmitting, setIsSubmitting] = useState(false);
-	const [isDocumentsDialogOpen, setIsDocumentsDialogOpen] = useState(false);
-	const [selectedOpportunityForDocs, setSelectedOpportunityForDocs] =
-		useState<OpportunityForAnalysis | null>(null);
 
 	// Modal states for opportunity and lead detail
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -211,7 +206,7 @@ function AnalysisPage() {
 		} finally {
 			setIsLoading(false);
 		}
-	};
+	}
 
 	// Cargar al montar el componente
 	React.useEffect(() => {
@@ -226,12 +221,11 @@ function AnalysisPage() {
 		setIsApproving(approve);
 		setReason("");
 		setIsApprovalDialogOpen(true);
-	};
+	}
 
 	const handleViewDocuments = (opportunity: OpportunityForAnalysis) => {
-		setSelectedOpportunityForDocs(opportunity);
-		setIsDocumentsDialogOpen(true);
-	};
+		navigate({ to: "/crm/analysis/$opportunityId", params: { opportunityId: opportunity.id } });
+	}
 
 	const handleOpenOpportunityModal = (opportunity: OpportunityForAnalysis) => {
 		setSelectedOpportunityForModal({
@@ -272,9 +266,9 @@ function AnalysisPage() {
 						isNew: opportunity.vehicle.isNew,
 					}
 				: null,
-		});
+		})
 		setIsOpportunityModalOpen(true);
-	};
+	}
 
 	const handleOpenLeadModal = (opportunity: OpportunityForAnalysis) => {
 		if (!opportunity.lead) return;
@@ -290,9 +284,9 @@ function AnalysisPage() {
 			createdAt: new Date(),
 			company: null,
 			assignedUser: null,
-		});
+		})
 		setIsLeadModalOpen(true);
-	};
+	}
 
 	const handleSubmitApproval = async () => {
 		if (!selectedOpportunity) return;
@@ -303,11 +297,11 @@ function AnalysisPage() {
 				opportunityId: selectedOpportunity.id,
 				approved: isApproving,
 				reason: reason || undefined,
-			});
+			})
 
 			toast.success(
 				isApproving ? "Oportunidad aprobada" : "Oportunidad rechazada",
-			);
+			)
 
 			setIsApprovalDialogOpen(false);
 			loadOpportunities(); // Recargar lista
@@ -315,11 +309,11 @@ function AnalysisPage() {
 			toast.error(
 				error.message ||
 					`No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`,
-			);
+			)
 		} finally {
 			setIsSubmitting(false);
 		}
-	};
+	}
 
 	if (isLoading) {
 		return (
@@ -330,7 +324,7 @@ function AnalysisPage() {
 					</CardContent>
 				</Card>
 			</div>
-		);
+		)
 	}
 
 	return (
@@ -394,15 +388,20 @@ function AnalysisPage() {
 										{opportunities.map((opportunity) => (
 											<TableRow key={opportunity.id}>
 												<TableCell className="font-medium">
-													<button
-														type="button"
-														className="cursor-pointer text-left text-primary hover:underline"
-														onClick={() =>
-															handleOpenOpportunityModal(opportunity)
-														}
-													>
-														{opportunity.title}
-													</button>
+													<div className="space-y-1">
+														<button
+															type="button"
+															className="cursor-pointer text-left text-primary hover:underline"
+															onClick={() =>
+																handleOpenOpportunityModal(opportunity)
+															}
+														>
+															{opportunity.title}
+														</button>
+														<p className="font-mono text-[10px] text-muted-foreground/60">
+															ID: {opportunity.id.slice(0, 8)}
+														</p>
+													</div>
 												</TableCell>
 												<TableCell>
 													{opportunity.analysisStatus === "resubmitted" ? (
@@ -559,46 +558,6 @@ function AnalysisPage() {
 				</DialogContent>
 			</Dialog>
 
-			{/* Dialog de documentos */}
-			<Dialog
-				open={isDocumentsDialogOpen}
-				onOpenChange={setIsDocumentsDialogOpen}
-			>
-				<DialogContent className="max-h-[90vh] min-w-[60vw] max-w-6xl overflow-y-auto">
-					<DialogHeader>
-						<DialogTitle>Documentos de la Oportunidad</DialogTitle>
-						{selectedOpportunityForDocs && (
-							<DialogDescription>
-								{selectedOpportunityForDocs.title}
-								{selectedOpportunityForDocs.lead && (
-									<>
-										{" - Lead: "}
-										{selectedOpportunityForDocs.lead.firstName}{" "}
-										{selectedOpportunityForDocs.lead.lastName}
-									</>
-								)}
-							</DialogDescription>
-						)}
-					</DialogHeader>
-					<div className="w-full space-y-6 py-4">
-						{selectedOpportunityForDocs && (
-							<>
-								<AnalysisChecklistView
-									opportunityId={selectedOpportunityForDocs.id}
-									onUpdate={loadOpportunities}
-								/>
-								<DocumentValidationChecklist
-									opportunityId={selectedOpportunityForDocs.id}
-								/>
-								<DocumentsViewer
-									opportunityId={selectedOpportunityForDocs.id}
-								/>
-							</>
-						)}
-					</div>
-				</DialogContent>
-			</Dialog>
-
 			{/* Opportunity Detail Modal */}
 			<OpportunityDetailModal
 				open={isOpportunityModalOpen}
@@ -616,14 +575,14 @@ function AnalysisPage() {
 				readOnly
 			/>
 		</div>
-	);
+	)
 }
 
 // Component for disbursement section (90% → 100%)
 function DisbursementSection() {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
 		null,
-	);
+	)
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
 		useState<OpportunityForModal | null>(null);
@@ -638,7 +597,7 @@ function DisbursementSection() {
 	} = useQuery({
 		queryKey: ["getOpportunitiesForDisbursement"],
 		queryFn: () => client.getOpportunitiesForDisbursement(),
-	});
+	})
 
 	type DisbursementOpportunity = NonNullable<typeof opportunities>[0];
 
@@ -681,9 +640,9 @@ function DisbursementSection() {
 						isNew: opp.vehicle.isNew,
 					}
 				: null,
-		});
+		})
 		setIsOpportunityModalOpen(true);
-	};
+	}
 
 	const handleNavigateToLead = (leadId: string) => {
 		// Find the opportunity with this lead
@@ -699,11 +658,11 @@ function DisbursementSection() {
 				source: "",
 				status: "qualified",
 				createdAt: opp.createdAt,
-			});
+			})
 			setIsOpportunityModalOpen(false);
 			setIsLeadModalOpen(true);
 		}
-	};
+	}
 
 	if (isLoading) {
 		return (
@@ -712,7 +671,7 @@ function DisbursementSection() {
 					<p className="text-muted-foreground">Cargando oportunidades...</p>
 				</CardContent>
 			</Card>
-		);
+		)
 	}
 
 	if (!opportunities || opportunities.length === 0) {
@@ -723,7 +682,7 @@ function DisbursementSection() {
 					No hay oportunidades pendientes de desembolso en este momento.
 				</AlertDescription>
 			</Alert>
-		);
+		)
 	}
 
 	return (
@@ -755,14 +714,17 @@ function DisbursementSection() {
 											type="button"
 											className="cursor-pointer text-left font-medium text-primary hover:underline"
 											onClick={(e) => {
-												e.stopPropagation();
-												handleOpenOpportunityModal(opp);
+												e.stopPropagation()
+												handleOpenOpportunityModal(opp)
 											}}
 										>
 											{opp.leadName}
 										</button>
 										<p className="text-muted-foreground text-sm">
 											{opp.leadPhone}
+										</p>
+										<p className="font-mono text-[10px] text-muted-foreground/60">
+											ID: {opp.id.slice(0, 8)}
 										</p>
 									</div>
 									<div className="text-right">
@@ -799,7 +761,7 @@ function DisbursementSection() {
 						opportunityId={selectedOpportunity}
 						onApproved={() => {
 							setSelectedOpportunity(null);
-							refetch();
+							refetch()
 						}}
 					/>
 				) : (
@@ -831,119 +793,6 @@ function DisbursementSection() {
 				readOnly
 			/>
 		</div>
-	);
+	)
 }
 
-// Component to view documents
-// TODO: Descomentar cuando exista el endpoint getOpportunityDocuments en el router
-function DocumentsViewer({ opportunityId }: { opportunityId: string }) {
-	const documentsQuery = useQuery({
-		...orpc.getOpportunityDocuments.queryOptions({ input: { opportunityId } }),
-		enabled: !!opportunityId,
-	});
-
-	const documentTypeLabels: Record<string, string> = {
-		identification: "Identificación (DPI/Pasaporte)",
-		income_proof: "Comprobante de Ingresos",
-		bank_statement: "Estado de Cuenta Bancario",
-		business_license: "Patente de Comercio",
-		property_deed: "Escrituras de Propiedad",
-		vehicle_title: "Tarjeta de Circulación",
-		credit_report: "Reporte Crediticio",
-		other: "Otro",
-		// Documentos específicos por cliente
-		dpi: "DPI",
-		licencia: "Licencia",
-		recibo_luz: "Recibo de luz",
-		recibo_adicional: "Recibo adicional",
-		formularios: "Formularios",
-		estados_cuenta_1: "Estado de cuenta mes 1",
-		estados_cuenta_2: "Estado de cuenta mes 2",
-		estados_cuenta_3: "Estado de cuenta mes 3",
-		patente_comercio: "Patente de comercio",
-		representacion_legal: "Representación Legal",
-		constitucion_sociedad: "Constitución de sociedad",
-		patente_mercantil: "Patente mercantil",
-		iva_1: "Formulario IVA mes 1",
-		iva_2: "Formulario IVA mes 2",
-		iva_3: "Formulario IVA mes 3",
-		estado_financiero: "Estado financiero",
-		clausula_consentimiento: "Cláusula de consentimiento",
-		minutas: "Minutas",
-	};
-
-	const getDocumentIcon = (mimeType: string) => {
-		if (mimeType.includes("pdf")) return "📄";
-		if (mimeType.includes("image")) return "🖼️";
-		if (mimeType.includes("word")) return "📝";
-		return "📎";
-	};
-
-	if (documentsQuery.isLoading) {
-		return (
-			<div className="flex items-center justify-center py-8">
-				<p className="text-muted-foreground">Cargando documentos...</p>
-			</div>
-		);
-	}
-
-	if (!documentsQuery.data || documentsQuery.data.length === 0) {
-		return (
-			<Alert>
-				<AlertCircle className="h-4 w-4" />
-				<AlertDescription>
-					No hay documentos subidos para esta oportunidad.
-				</AlertDescription>
-			</Alert>
-		);
-	}
-
-	return (
-		<div className="w-full space-y-4">
-			{documentsQuery.data.map((doc) => (
-				<Card key={doc.id} className="w-full">
-					<CardContent className="w-full p-4">
-						<div className="flex flex-wrap items-center justify-between gap-4">
-							<div className="flex min-w-0 flex-1 items-center gap-3">
-								<span className="text-2xl">
-									{getDocumentIcon(doc.mimeType)}
-								</span>
-								<div className="min-w-0 flex-1">
-									<div className="flex flex-wrap items-center gap-2">
-										<span className="truncate font-medium">
-											{doc.originalName}
-										</span>
-										<Badge variant="outline" className="text-xs">
-											{documentTypeLabels[doc.documentType] || doc.documentType}
-										</Badge>
-									</div>
-									{doc.description && (
-										<p className="mt-1 text-muted-foreground text-sm">
-											{doc.description}
-										</p>
-									)}
-									<div className="mt-2 flex flex-wrap items-center gap-4 text-muted-foreground text-xs">
-										<span>{(doc.size / 1024 / 1024).toFixed(2)} MB</span>
-										<span>
-											Subido por {doc.uploadedBy?.name || "Usuario desconocido"}
-										</span>
-										<span>{new Date(doc.uploadedAt).toLocaleString()}</span>
-									</div>
-								</div>
-							</div>
-							<Button
-								size="sm"
-								variant="default"
-								onClick={() => window.open(doc.url, "_blank")}
-								className="flex-shrink-0"
-							>
-								<FileText className="mr-1 h-4 w-4" />
-								Ver Documento
-							</Button>
-						</div>
-					</CardContent>
-				</Card>
-			))}
-		</div>
-	);
-}

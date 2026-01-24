@@ -1,8 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import {
 	CheckCircle2,
-	Circle,
 	FileText,
+	MinusCircle,
 	ShieldCheck,
 	Truck,
 } from "lucide-react";
@@ -62,6 +62,16 @@ interface Checklist {
 		vehiculo: ChecklistSection;
 	};
 }
+
+// Helper function to format document type labels
+const getDocumentTypeLabel = (documentType: string): string => {
+	if (documentType === "consulta_sat") {
+		return "Usuario SAT (Propietario)";
+	}
+	return documentType
+		.replace(/_/g, " ")
+		.replace(/\b\w/g, (l: string) => l.toUpperCase());
+};
 
 export function AnalysisChecklistView({
 	opportunityId,
@@ -185,7 +195,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.documentos.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-										<Circle className="h-5 w-5 text-muted-foreground" />
+									<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge variant="outline">
 										{checklist.sections.documentos.items?.filter(
@@ -210,7 +220,7 @@ export function AnalysisChecklistView({
 												{item.uploaded ? (
 													<CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600" />
 												) : (
-													<Circle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+												<MinusCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
 												)}
 												<div>
 													<p className="font-medium text-sm">
@@ -254,7 +264,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.verificaciones.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-										<Circle className="h-5 w-5 text-muted-foreground" />
+									<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge variant="outline">
 										{checklist.sections.verificaciones.items?.filter(
@@ -334,7 +344,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.vehiculo.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-										<Circle className="h-5 w-5 text-muted-foreground" />
+									<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge
 										variant={
@@ -362,7 +372,7 @@ export function AnalysisChecklistView({
 											{checklist.sections.vehiculo.inspected ? (
 												<CheckCircle2 className="h-4 w-4 text-green-600" />
 											) : (
-												<Circle className="h-4 w-4 text-muted-foreground" />
+												<MinusCircle className="h-4 w-4 text-muted-foreground" />
 											)}
 											<span className="text-muted-foreground text-sm">
 												{checklist.sections.vehiculo.inspected
@@ -416,15 +426,11 @@ export function AnalysisChecklistView({
 																	{item.uploaded ? (
 																		<CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600" />
 																	) : (
-																		<Circle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+																		<MinusCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
 																	)}
 																	<div>
 																		<p className="font-medium text-sm">
-																			{item.documentType
-																				.replace(/_/g, " ")
-																				.replace(/\b\w/g, (l: string) =>
-																					l.toUpperCase(),
-																				)}
+																			{getDocumentTypeLabel(item.documentType)}
 																		</p>
 																		{item.required && (
 																			<span className="text-muted-foreground text-xs">

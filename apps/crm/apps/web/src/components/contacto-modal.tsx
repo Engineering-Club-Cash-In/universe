@@ -67,8 +67,8 @@ export function ContactoModal({
 			}),
 		onSuccess: () => {
 			toast.success("Contacto registrado correctamente");
-			queryClient.invalidateQueries({ queryKey: ["getCasosCobros"] });
-			queryClient.invalidateQueries({ queryKey: ["getHistorialContactos"] });
+			// Invalidar usando los queryOptions de orpc para obtener las query keys correctas
+			queryClient.invalidateQueries(orpc.getHistorialContactos.queryOptions({ input: { casoCobroId } }));
 			form.reset();
 			// Cerrar el dialogo
 			document

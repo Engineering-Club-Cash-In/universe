@@ -2496,6 +2496,8 @@ export const crmRouter = {
 			// Verificar permisos
 			if (
 				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "analyst" ||
 				document.uploadedBy === context.userId
 			) {
 				// Eliminar de R2
@@ -2909,7 +2911,7 @@ export const crmRouter = {
 									completed: false,
 								},
 								{
-									name: "Consulta SAT (Portal web)",
+									name: "Usuario SAT",
 									type: "consulta_sat_portal",
 									required: true,
 									completed: false,

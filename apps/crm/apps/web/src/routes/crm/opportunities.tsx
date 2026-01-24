@@ -212,6 +212,11 @@ function DraggableOpportunityCard({
 						</div>
 					</div>
 				)}
+				<div className="border-t pt-1">
+					<span className="font-mono text-[10px] text-muted-foreground/60">
+						ID: {opportunity.id.slice(0, 8)}
+					</span>
+				</div>
 			</div>
 		</Card>
 	);
@@ -2303,6 +2308,16 @@ function RouteComponent() {
 											</div>
 										)}
 
+									{/* Opportunity ID */}
+									<div className="rounded-lg border bg-muted/20 px-4 py-3">
+										<div className="flex items-center justify-between">
+											<span className="text-muted-foreground text-xs">ID de Oportunidad</span>
+											<code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+												{selectedOpportunity.id.slice(0, 8)}
+											</code>
+										</div>
+									</div>
+
 									{/* Actions */}
 									<div className="flex gap-3 border-t pt-6">
 										<Button
@@ -3189,7 +3204,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			value: "pago_impuesto_circulacion",
 			label: "Pago impuesto de circulación",
 		},
-		{ value: "consulta_sat", label: "Consulta SAT" },
+		{ value: "consulta_sat", label: "Usuario de SAT (Propietario)" },
 		{
 			value: "consulta_garantias_mobiliarias",
 			label: "Consulta garantías mobiliarias",

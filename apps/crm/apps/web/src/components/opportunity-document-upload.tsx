@@ -61,7 +61,6 @@ const documentCategories = {
 		"enganche",
 	],
 	"Verificaciones del Vehículo / Propietario": [
-		"usuario_sat_propietario",
 		"rtu_propietario",
 		"omisos_incumplimientos_propietario",
 		"garantia_mobiliaria_sat",

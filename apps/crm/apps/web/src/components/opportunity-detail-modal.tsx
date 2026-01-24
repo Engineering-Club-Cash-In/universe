@@ -574,10 +574,19 @@ export function OpportunityDetailModal({
 							</div>
 						)}
 
+						{/* Opportunity ID */}
+						<div className="rounded-lg border bg-muted/20 px-4 py-3">
+							<div className="flex items-center justify-between">
+								<span className="text-muted-foreground text-xs">ID de Oportunidad</span>
+								<code className="rounded bg-muted px-2 py-1 font-mono text-xs">
+									{opportunity.id.slice(0, 8)}
+								</code>
+							</div>
+						</div>
+
 						{/* Actions */}
 						{!readOnly && (onEdit || onChangeStage) && (
-							<div className="flex gap-3 border-t pt-6">
-								{onEdit && (
+							<div className="flex gap-3 border-t pt-6">{onEdit && (
 									<Button
 										variant="outline"
 										size="default"

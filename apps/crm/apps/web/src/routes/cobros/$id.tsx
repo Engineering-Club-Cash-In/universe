@@ -101,7 +101,7 @@ function RouteComponent() {
 	// Estados de paginación
 	const [contactosPage, setContactosPage] = useState(1);
 	const [cuotasPage, setCuotasPage] = useState(1);
-	const ITEMS_PER_PAGE = 10;
+	const ITEMS_PER_PAGE = 20;
 
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM

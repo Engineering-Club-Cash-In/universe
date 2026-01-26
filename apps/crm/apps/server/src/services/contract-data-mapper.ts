@@ -588,3 +588,133 @@ export async function validateOpportunityForContracts(
 export function getContractTypes() {
 	return CONTRACT_TYPES;
 }
+
+/**
+ * Transforma ContractData del CRM al formato plano que espera legal-docs-blueprints API
+ */
+export function transformToApiFormat(
+	data: ContractData,
+	contractType: string,
+): Record<string, unknown> {
+	// Campos base comunes a todos los contratos
+	const baseFields: Record<string, unknown> = {
+		// Fecha del contrato
+		contract_day: data.contrato.fecha.dayPadded,
+		contract_month: data.contrato.fecha.month,
+		contract_year: data.contrato.fecha.year,
+		contract_year_partial: data.contrato.fecha.yearPartial,
+
+		// DPI del cliente (usado para guardar en CRM)
+		dpi: data.cliente.dpi,
+
+		// Datos del cliente/deudor
+		debtor_name: data.cliente.nombreCompletoMayusculas,
+		debtor_age: data.cliente.edadEnLetras,
+		debtor_gender: data.cliente.genero === "masculino" ? "male" : "female",
+		debtor_marital_status: mapMaritalStatusToApi(data.cliente.estadoCivil),
+		debtor_nationality: data.cliente.nacionalidad,
+		debtor_cui: data.cliente.dpiFormateado,
+		debtor_address: data.cliente.direccionMayusculas,
+		debtor_email: data.cliente.email,
+		debtor_occupation: data.cliente.profesion || "",
+
+		// Alias para compatibilidad con diferentes templates
+		client_name: data.cliente.nombreCompletoMayusculas,
+		client_age: data.cliente.edadEnLetras,
+		client_gender: data.cliente.genero === "masculino" ? "male" : "female",
+		client_marital_status: mapMaritalStatusToApi(data.cliente.estadoCivil),
+		client_nationality: data.cliente.nacionalidad,
+		client_cui: data.cliente.dpiFormateado,
+		client_address: data.cliente.direccionMayusculas,
+
+		// Nombres para cláusulas (algunos contratos usan estos)
+		user_name: data.cliente.nombreCompletoMayusculas,
+		user_name_clause_a: data.cliente.nombreCompletoMayusculas,
+		user_name_clause_a2: data.cliente.nombreCompletoMayusculas,
+		user_name_clause_b: data.cliente.nombreCompletoMayusculas,
+		user_name_clause_d: data.cliente.nombreCompletoMayusculas,
+		user_name_final: data.cliente.nombreCompletoMayusculas,
+
+		// Datos del vehículo
+		vehicle_type: data.vehiculo.tipoVehiculoMayusculas,
+		vehicle_brand: data.vehiculo.marcaMayusculas,
+		vehicle_line: data.vehiculo.lineaMayusculas,
+		vehicle_model: String(data.vehiculo.anio),
+		vehicle_color: data.vehiculo.colorMayusculas,
+		vehicle_plate: data.vehiculo.placasMayusculas,
+		vehicle_chassis: data.vehiculo.vinMayusculas,
+		vehicle_motor: data.vehiculo.motorMayusculas,
+		vehicle_fuel: data.vehiculo.combustibleMayusculas || "GASOLINA",
+		vehicle_cc: data.vehiculo.cilindraje || "",
+		vehicle_cylinders: data.vehiculo.cilindros || "",
+		vehicle_seats: String(data.vehiculo.asientos),
+		vehicle_doors: data.vehiculo.puertas ? String(data.vehiculo.puertas) : "4",
+		vehicle_axles: String(data.vehiculo.ejes),
+		vehicle_use: data.vehiculo.usoMayusculas,
+		vehicle_series: data.vehiculo.serieMayusculas || "",
+		vehicle_iscv: data.vehiculo.codigoIscvMayusculas || "",
+
+		// Datos de deuda/crédito
+		original_debt_amount_text: data.credito.montoTotalEnLetras,
+		original_debt_amount_number: data.credito.montoTotalConQ,
+		guaranteed_amount_text: data.credito.montoTotalEnLetras,
+		guaranteed_amount_number: data.credito.montoTotalConQ,
+		vehicle_estimated_value_text: data.credito.montoTotalEnLetras,
+		vehicle_estimated_value_number: data.credito.montoTotalConQ,
+
+		// Datos de plazo
+		guarantee_duration_months: data.credito.numeroCuotasEnLetras,
+		contract_duration_months: data.credito.numeroCuotasEnLetras,
+
+		// Cuota mensual
+		monthly_payment_text: data.credito.cuotaMensualEnLetras,
+		monthly_payment_number: data.credito.cuotaMensualConQ,
+
+		// Tasa de interés
+		interest_rate: String(data.credito.tasaInteres),
+		interest_rate_text: data.credito.tasaInteresEnLetras,
+
+		// Datos adicionales para campos específicos
+		nombreCompleto: data.cliente.nombreCompletoMayusculas,
+		direccion: data.cliente.direccionMayusculas,
+		telefono: data.cliente.telefono,
+		correo: data.cliente.email,
+		email: data.cliente.email,
+	};
+
+	// Agregar fecha de inicio si existe
+	if (data.contrato.fechaInicio) {
+		baseFields.contract_start_date = `${data.contrato.fechaInicio.day} de ${data.contrato.fechaInicio.month} del año ${data.contrato.fechaInicio.year}`;
+		baseFields.contract_end_day = data.contrato.fechaInicio.dayPadded;
+		baseFields.contract_end_month = data.contrato.fechaInicio.month;
+		baseFields.contract_end_year = data.contrato.fechaInicio.yearPartial;
+	}
+
+	// Agregar beneficiarios si existen
+	if (data.beneficiarios && data.beneficiarios.length > 0) {
+		baseFields.beneficiarios = data.beneficiarios.map((b) => ({
+			account_or_beneficiary: b.cuenta,
+			amount: b.monto,
+			amount_text: b.montoEnLetras,
+		}));
+	}
+
+	return baseFields;
+}
+
+/**
+ * Mapea estado civil del formato CRM al formato del API
+ */
+function mapMaritalStatusToApi(estadoCivil: string): string {
+	const mapping: Record<string, string> = {
+		soltero: "single",
+		soltera: "single",
+		casado: "married",
+		casada: "married",
+		divorciado: "divorced",
+		divorciada: "divorced",
+		viudo: "widowed",
+		viuda: "widowed",
+	};
+	return mapping[estadoCivil.toLowerCase()] || "single";
+}

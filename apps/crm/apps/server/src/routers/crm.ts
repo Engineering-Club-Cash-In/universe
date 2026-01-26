@@ -12,7 +12,10 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import { updateChecklistForClientDocument } from "@/lib/checklist";
+import {
+	updateChecklistForClientDocument,
+	updateChecklistForVehicleDocument,
+} from "@/lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -2526,6 +2529,49 @@ export const crmRouter = {
 				})
 				.returning();
 
+			// Tipos de documentos que pertenecen al vehículo
+			const vehicleDocumentTypes = [
+				"tarjeta_circulacion",
+				"titulo_propiedad",
+				"dpi_dueno",
+				"patente_comercio_vehiculo",
+				"representacion_legal_vehiculo",
+				"dpi_representante_legal_vehiculo",
+				"pago_impuesto_circulacion",
+				"consulta_sat",
+				"consulta_garantias_mobiliarias",
+				"datos_vehiculo_nuevo",
+				"cotizacion_vehiculo_nuevo",
+			];
+
+			const isVehicleDocument = vehicleDocumentTypes.includes(input.documentType);
+
+			// Si es un documento de vehículo y la oportunidad tiene vehículo asociado,
+			// también guardarlo en vehicleDocuments para que aparezca en el checklist del vehículo
+			if (isVehicleDocument && opportunity[0]?.vehicleId) {
+				const [vehicleDoc] = await db
+					.insert(vehicleDocuments)
+					.values({
+						vehicleId: opportunity[0].vehicleId,
+						filename: uniqueFilename,
+						originalName: input.file.name,
+						mimeType: input.file.type,
+						size: input.file.size,
+						documentType: input.documentType,
+						description: input.description,
+						uploadedBy: context.userId,
+						filePath: key,
+					})
+					.returning();
+
+				// Actualizar el checklist de análisis con el documento del vehículo
+				await updateChecklistForVehicleDocument(
+					opportunity[0].vehicleId,
+					input.documentType,
+					vehicleDoc.id,
+				);
+			}
+
 			await updateChecklistForClientDocument(
 				input.opportunityId,
 				input.documentType,
@@ -2836,6 +2882,33 @@ export const crmRouter = {
 					.select()
 					.from(vehicleDocuments)
 					.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId));
+
+				// Fallback: buscar documentos de vehículo en opportunityDocuments
+				// para oportunidades existentes que subieron docs antes de la sincronización
+				const vehicleDocTypes = requiredVehicleDocs.map((d) => d.documentType);
+				const uploadedVehicleTypesFromVehicle = new Set(
+					uploadedVehicleDocs.map((d) => d.documentType),
+				);
+
+				// Buscar en opportunityDocuments los tipos que faltan
+				const missingTypes = vehicleDocTypes.filter(
+					(type) => !uploadedVehicleTypesFromVehicle.has(type),
+				);
+
+				if (missingTypes.length > 0) {
+					const fallbackDocs = uploadedDocs.filter((d) =>
+						missingTypes.includes(d.documentType),
+					);
+					// Agregar los docs del fallback con una marca para identificarlos
+					uploadedVehicleDocs = [
+						...uploadedVehicleDocs,
+						...fallbackDocs.map((d) => ({
+							...d,
+							vehicleId: opportunity.vehicleId,
+							fromOpportunity: true, // Marca para saber que viene de oportunidad
+						})),
+					];
+				}
 			}
 
 			const uploadedVehicleTypes = new Set(

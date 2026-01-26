@@ -195,12 +195,14 @@ export const crmRouter = {
 				conditions.push(eq(leads.id, id));
 			}
 
-			// Role-based filter: admin, sales_supervisor, and juridico can see all
+			// Role-based filter: admin, sales_supervisor, juridico, and analyst can see all
 			// When fetching by specific ID, juridico needs access for contract generation
+			// Analysts need access to view lead details for analysis checklist
 			const canSeeAllLeads =
 				context.userRole === "admin" ||
 				context.userRole === "sales_supervisor" ||
-				context.userRole === "juridico";
+				context.userRole === "juridico" ||
+				context.userRole === "analyst";
 
 			if (!canSeeAllLeads) {
 				conditions.push(eq(leads.assignedTo, context.userId));

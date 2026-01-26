@@ -1673,60 +1673,21 @@ export const crmRouter = {
 				throw new Error("El detalle de crédito ya fue aprobado");
 			}
 
-			// Validar que los campos requeridos estén llenos
-			const camposFaltantes: string[] = [];
-
-			if (!opportunity.categoria) {
-				camposFaltantes.push("Categoría");
-			}
-			if (!opportunity.nit) {
-				camposFaltantes.push("NIT");
-			}
-			if (!opportunity.diaPagoMensual) {
-				camposFaltantes.push("Día de pago mensual");
-			}
-
-			// Validar dirección desde el lead
-			if (opportunity.leadId) {
-				const [leadData] = await db
-					.select({ direccion: leads.direccion })
-					.from(leads)
-					.where(eq(leads.id, opportunity.leadId))
-					.limit(1);
-				if (!leadData?.direccion) {
-					camposFaltantes.push("Dirección");
-				}
-			} else {
-				camposFaltantes.push("Lead/Dirección");
-			}
-
-			// Validar inversionistas
-			if (!opportunity.inversionistas) {
-				camposFaltantes.push("Inversionistas");
-			} else {
-				try {
-					const inversionistasParsed = JSON.parse(opportunity.inversionistas);
-					if (
-						!Array.isArray(inversionistasParsed) ||
-						inversionistasParsed.length === 0
-					) {
-						camposFaltantes.push("Inversionistas");
-					}
-				} catch {
-					camposFaltantes.push("Inversionistas (formato inválido)");
-				}
-			}
-
-			if (camposFaltantes.length > 0) {
-				throw new Error(
-					`Faltan campos requeridos para aprobar: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
-				);
+			const nextStage = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.order, 6)) // "Formalización" 50%
+				.limit(1);
+			
+			if (!nextStage[0]) {
+				throw new Error("Next stage not found");
 			}
 
 			// Update opportunity with approval
 			await db
 				.update(opportunities)
 				.set({
+					stageId: nextStage[0].id,
 					creditDetailApproved: true,
 					creditDetailApprovedBy: context.userId,
 					creditDetailApprovedAt: new Date(),

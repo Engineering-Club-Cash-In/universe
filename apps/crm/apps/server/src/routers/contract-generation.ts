@@ -370,7 +370,15 @@ async function callLegalDocsApi(
 			};
 		}
 
-		// Preparar payload para la API
+		// Extraer email del cliente para los links de firma
+		const clientEmail = data?.cliente?.email;
+		const emails = clientEmail ? [clientEmail] : undefined;
+
+		// Determinar género para concordancia en documentos
+		const gender =
+			data?.cliente?.genero === "femenino" ? "female" : ("male" as const);
+
+		// Preparar payload para la API (formato compatible con legal-docs-blueprints)
 		const payload = {
 			// Datos del cliente
 			cliente: data?.cliente,
@@ -382,6 +390,13 @@ async function callLegalDocsApi(
 			contrato: data?.contrato,
 			// Beneficiarios (si aplica)
 			beneficiarios: data?.beneficiarios,
+			// Emails para links de firma (Documenso)
+			emails,
+			// Opciones adicionales
+			options: {
+				gender,
+				generatePdf: true,
+			},
 		};
 
 		console.log(`[LegalDocs] Llamando a ${LEGAL_DOCS_API_URL}${endpoint}`);

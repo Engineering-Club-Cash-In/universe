@@ -2,7 +2,10 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, FileSignature, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { ContractWizard } from "@/components/contracts/ContractWizard";
+import {
+	DynamicContractWizard,
+	type CRMData,
+} from "@/components/contracts/DynamicContractWizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,47 +22,13 @@ export const Route = createFileRoute("/juridico/generate/$opportunityId")({
 	component: RouteComponent,
 });
 
-// Contract type descriptions for UI
-const CONTRACT_DESCRIPTIONS: Record<string, string> = {
-	compraventa: "Contrato principal de compraventa del vehículo",
-	credito_prendario: "Contrato de crédito con garantía prendaria",
-	pagare: "Pagaré que respalda el crédito otorgado",
-	mandato_especial: "Mandato para representación legal",
-	reconocimiento_deuda: "Documento de reconocimiento de deuda",
-	contrato_gps: "Contrato de instalación y servicio GPS",
-	contrato_seguro: "Contrato de seguro vehicular",
-	poder_especial: "Poder especial para trámites",
-	declaracion_jurada: "Declaración jurada del cliente",
-	acta_entrega: "Acta de entrega del vehículo",
-	contrato_fianza: "Contrato de fianza o garantía",
-	carta_compromiso: "Carta compromiso del cliente",
-	autorizacion_desembolso: "Autorización para desembolso",
-};
-
-// Contract categories
-const CONTRACT_CATEGORIES: Record<string, "principal" | "garantia" | "otro"> = {
-	compraventa: "principal",
-	credito_prendario: "principal",
-	pagare: "garantia",
-	mandato_especial: "otro",
-	reconocimiento_deuda: "garantia",
-	contrato_gps: "otro",
-	contrato_seguro: "otro",
-	poder_especial: "otro",
-	declaracion_jurada: "otro",
-	acta_entrega: "otro",
-	contrato_fianza: "garantia",
-	carta_compromiso: "otro",
-	autorizacion_desembolso: "otro",
-};
-
 function RouteComponent() {
 	const { opportunityId } = Route.useParams();
 	const navigate = useNavigate();
 	const { canViewLegal, isLoading: isLoadingPermissions } =
 		useJuridicoPermissions();
 
-	// Get contract types
+	// Get contract types from API (dynamic)
 	const contractTypesQuery = useQuery({
 		queryKey: ["getContractTypes"],
 		queryFn: () => client.getContractTypes(),
@@ -73,7 +42,7 @@ function RouteComponent() {
 		enabled: canViewLegal && !!opportunityId,
 	});
 
-	// Get preview data for contracts
+	// Get preview data for contracts (contains CRM data)
 	const previewQuery = useQuery({
 		...orpc.getContractPreviewData.queryOptions({
 			input: { opportunityId },
@@ -88,25 +57,44 @@ function RouteComponent() {
 		enabled: canViewLegal,
 	});
 
-	// Generate contracts mutation
+	// Mutation to get documents by DPI
+	const getDocsByDpiMutation = useMutation({
+		mutationFn: async ({
+			dpi,
+			documentNames,
+		}: {
+			dpi: string;
+			documentNames: string[];
+		}) => {
+			return await client.getDocumentsByDpi({ dpi, documentNames });
+		},
+	});
+
+	// Generate contracts mutation (direct to API)
 	const generateMutation = useMutation({
 		mutationFn: async (data: {
-			selectedContracts: string[];
-			contractDate: { day: string; month: string; year: string };
-			beneficiarios: Array<{ cuenta: string; monto: string }>;
+			contracts: Array<{
+				contractType: string;
+				data: Record<string, string>;
+				emails?: string[];
+				options: {
+					gender: "male" | "female";
+					generatePdf: boolean;
+					filenamePrefix: string;
+				};
+			}>;
 		}) => {
-			return await client.generateContracts({
+			return await client.generateContractsDirect({
+				...data,
 				opportunityId,
-				contractTypes: data.selectedContracts,
-				contractDate: data.contractDate,
-				beneficiarios: data.beneficiarios,
+				leadId: opportunity?.lead?.id,
 			});
 		},
 		onSuccess: (data) => {
 			if (data.success) {
-				toast.success(data.message);
+				toast.success(data.message || "Contratos generados exitosamente");
 			} else {
-				toast.warning(data.message);
+				toast.warning(data.message || "Algunos contratos fallaron");
 			}
 		},
 		onError: (error: Error) => {
@@ -142,43 +130,53 @@ function RouteComponent() {
 		(opp) => opp.id === opportunityId,
 	);
 	const validation = validationQuery.data;
-	const contractTypes = contractTypesQuery.data || [];
+	const contractTypes = contractTypesQuery.data?.data || [];
 
-	// Map contract types to the format expected by the wizard
-	const mappedContractTypes = contractTypes.map((ct) => ({
-		id: ct.id,
-		name: ct.name,
-		description: CONTRACT_DESCRIPTIONS[ct.id] || ct.name,
-		category: CONTRACT_CATEGORIES[ct.id] || "otro",
-		requiresBeneficiarios: ct.requiresBeneficiary,
-	}));
-
-	// Map preview data - adjusting field names from backend
-	const previewData = previewQuery.data
+	// Map preview data to CRM data format for the wizard
+	const crmData: CRMData = previewQuery.data
 		? {
 				cliente: {
-					nombre: previewQuery.data.cliente?.nombreCompleto,
+					nombreCompleto: previewQuery.data.cliente?.nombreCompleto,
 					dpi: previewQuery.data.cliente?.dpi,
 					direccion: previewQuery.data.cliente?.direccion,
 					nacionalidad: previewQuery.data.cliente?.nacionalidad,
 					estadoCivil: previewQuery.data.cliente?.estadoCivil,
+					profesion: previewQuery.data.cliente?.profesion,
+					correo: previewQuery.data.cliente?.email,
+					edad: previewQuery.data.cliente?.edad,
+					genero:
+						previewQuery.data.cliente?.genero === "femenino" ? "F" : "M",
 				},
 				vehiculo: {
+					tipo: previewQuery.data.vehiculo?.tipoVehiculo,
 					marca: previewQuery.data.vehiculo?.marca,
 					linea: previewQuery.data.vehiculo?.linea,
 					modelo: String(previewQuery.data.vehiculo?.anio || ""),
 					color: previewQuery.data.vehiculo?.color,
-					placa: previewQuery.data.vehiculo?.placas,
-					vin: previewQuery.data.vehiculo?.vin,
+					uso: previewQuery.data.vehiculo?.uso,
+					chasis: previewQuery.data.vehiculo?.vin,
+					combustible: previewQuery.data.vehiculo?.combustible,
+					motor: previewQuery.data.vehiculo?.motor,
+					serie: previewQuery.data.vehiculo?.serie,
+					cm3: previewQuery.data.vehiculo?.cilindraje,
+					asientos: previewQuery.data.vehiculo?.asientos
+						? String(previewQuery.data.vehiculo.asientos)
+						: undefined,
+					cilindros: previewQuery.data.vehiculo?.cilindros,
+					iscv: previewQuery.data.vehiculo?.codigoIscv,
 				},
 				credito: {
-					montoCredito: String(previewQuery.data.credito?.montoTotal || ""),
-					plazo: String(previewQuery.data.credito?.numeroCuotas || ""),
-					cuotaMensual: String(previewQuery.data.credito?.cuotaMensual || ""),
-					tasaInteres: String(previewQuery.data.credito?.tasaInteres || ""),
+					capitalAdeudado: previewQuery.data.credito?.montoTotal,
+					mesesPrestamo: previewQuery.data.credito?.numeroCuotas,
+					cuotaMensual: previewQuery.data.credito?.cuotaMensual,
+					porcentajeInteres: previewQuery.data.credito?.tasaInteres,
 				},
 			}
-		: null;
+		: {
+				cliente: {},
+				vehiculo: {},
+				credito: {},
+			};
 
 	const handleBack = () => {
 		if (opportunity?.lead?.id) {
@@ -192,10 +190,27 @@ function RouteComponent() {
 		}
 	};
 
+	const handleGetDocumentsByDpi = async (
+		dpi: string,
+		documentNames: string[],
+	) => {
+		const result = await getDocsByDpiMutation.mutateAsync({
+			dpi,
+			documentNames,
+		});
+		return result;
+	};
+
 	const handleGenerate = async (data: {
-		selectedContracts: string[];
-		contractDate: { day: string; month: string; year: string };
-		beneficiarios: Array<{ cuenta: string; monto: string }>;
+		contracts: Array<{
+			contractType: string;
+			data: Record<string, string>;
+			options: {
+				gender: "male" | "female";
+				generatePdf: boolean;
+				filenamePrefix: string;
+			};
+		}>;
 	}) => {
 		const result = await generateMutation.mutateAsync(data);
 		return result;
@@ -319,20 +334,22 @@ function RouteComponent() {
 			)}
 
 			{/* Contract Wizard */}
-			{validation?.isValid && (
+			{validation?.isValid && crmData.cliente.dpi && (
 				<Card>
 					<CardHeader>
-						<CardTitle>Wizard de Generación de Contratos</CardTitle>
+						<CardTitle>Generación de Documentos Legales</CardTitle>
 						<CardDescription>
-							Seleccione los contratos a generar, configure los parámetros y
-							obtenga los links de firma.
+							Seleccione los documentos a generar. Los datos serán pre-llenados
+							automáticamente con la información del CRM.
 						</CardDescription>
 					</CardHeader>
 					<CardContent>
-						<ContractWizard
-							contractTypes={mappedContractTypes}
-							previewData={previewData}
-							isLoadingPreview={previewQuery.isLoading}
+						<DynamicContractWizard
+							documentTypes={contractTypes}
+							crmData={crmData}
+							opportunityId={opportunityId}
+							leadId={opportunity?.lead?.id}
+							onGetDocumentsByDpi={handleGetDocumentsByDpi}
 							onGenerate={handleGenerate}
 							onBack={handleBack}
 							isGenerating={generateMutation.isPending}

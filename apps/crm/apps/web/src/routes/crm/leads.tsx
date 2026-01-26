@@ -298,6 +298,10 @@ function RouteComponent() {
 			notes: "",
 			score: "",
 			fit: false,
+			// Campos para contratos legales
+			birthDate: "" as string,
+			gender: "" as "male" | "female" | "",
+			nationality: "",
 		},
 		validators: {
 			onSubmit: ({ value }) => {
@@ -359,6 +363,12 @@ function RouteComponent() {
 				notes: value.notes || undefined,
 				score: value.score ? Number.parseFloat(value.score) : undefined,
 				fit: value.fit,
+				// Campos para contratos legales
+				birthDate: value.birthDate
+					? new Date(value.birthDate)
+					: undefined,
+				gender: value.gender || undefined,
+				nationality: value.nationality || undefined,
 			};
 
 			if (editingLead) {
@@ -624,6 +634,22 @@ function RouteComponent() {
 				(editingLead as any).municipio || "",
 			);
 			createLeadForm.setFieldValue("zona", (editingLead as any).zona || "");
+			// Campos para contratos legales
+			const birthDate = (editingLead as any).birthDate;
+			createLeadForm.setFieldValue(
+				"birthDate",
+				birthDate
+					? new Date(birthDate).toISOString().split("T")[0]
+					: "",
+			);
+			createLeadForm.setFieldValue(
+				"gender",
+				(editingLead as any).gender || "",
+			);
+			createLeadForm.setFieldValue(
+				"nationality",
+				(editingLead as any).nationality || "",
+			);
 		}
 	}, [editingLead]);
 
@@ -1301,6 +1327,83 @@ function RouteComponent() {
 																}
 																min="0"
 																max="20"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+									</div>
+
+									{/* Datos para Contratos Legales */}
+									<div className="space-y-4">
+										<h3 className="font-semibold text-lg">
+											Datos para Contratos
+											<span className="ml-2 font-normal text-muted-foreground text-sm">
+												(requeridos para generar documentos legales)
+											</span>
+										</h3>
+										<div className="grid grid-cols-3 gap-4">
+											<div>
+												<createLeadForm.Field name="birthDate">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Fecha de Nacimiento
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="date"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="gender">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Género</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(
+																		value as "male" | "female" | "",
+																	)
+																}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar género" />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="male">Masculino</SelectItem>
+																	<SelectItem value="female">Femenino</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="nationality">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Nacionalidad</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: guatemalteco"
 															/>
 														</div>
 													)}

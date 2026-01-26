@@ -302,6 +302,13 @@ function VehiclesDashboard() {
 		transmission: "",
 		kmMileage: 0,
 		isNew: false,
+		// Campos para contratos legales
+		seats: null as number | null,
+		doors: null as number | null,
+		axles: 2 as number | null,
+		vehicleUse: "",
+		series: "",
+		iscvCode: "",
 	});
 
 	const updateVehicleMutation = useMutation({
@@ -320,6 +327,13 @@ function VehiclesDashboard() {
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
 					kmMileage: data.kmMileage,
+					// Campos para contratos legales
+					seats: data.seats,
+					doors: data.doors,
+					axles: data.axles,
+					vehicleUse: data.vehicleUse || null,
+					series: data.series || null,
+					iscvCode: data.iscvCode || null,
 				},
 			}),
 		onSuccess: () => {
@@ -625,6 +639,13 @@ function VehiclesDashboard() {
 																					vehicle.transmission || "",
 																				kmMileage: vehicle.kmMileage || 0,
 																				isNew: vehicle.isNew || false,
+																				// Campos para contratos legales
+																				seats: vehicle.seats ?? null,
+																				doors: vehicle.doors ?? null,
+																				axles: vehicle.axles ?? 2,
+																				vehicleUse: vehicle.vehicleUse || "",
+																				series: vehicle.series || "",
+																				iscvCode: vehicle.iscvCode || "",
 																			});
 																			setIsEditVehicleOpen(true);
 																		}}
@@ -1837,6 +1858,123 @@ function VehiclesDashboard() {
 											<SelectItem value="Manual">Manual</SelectItem>
 										</SelectContent>
 									</Select>
+								</div>
+							</div>
+						</div>
+
+						{/* Campos para Contratos Legales */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-sm">
+								Datos Técnicos para Contratos
+								<span className="ml-2 font-normal text-muted-foreground text-xs">
+									(requeridos para generar contratos legales)
+								</span>
+							</h4>
+							<div className="grid grid-cols-3 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="edit-seats">Asientos</Label>
+									<Input
+										id="edit-seats"
+										type="number"
+										value={editVehicleForm.seats ?? ""}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												seats: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={1}
+										max={50}
+										placeholder="Ej: 5"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-doors">Puertas</Label>
+									<Input
+										id="edit-doors"
+										type="number"
+										value={editVehicleForm.doors ?? ""}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												doors: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={2}
+										max={6}
+										placeholder="Ej: 4"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-axles">Ejes</Label>
+									<Input
+										id="edit-axles"
+										type="number"
+										value={editVehicleForm.axles ?? ""}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												axles: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={2}
+										max={10}
+										placeholder="Ej: 2"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-vehicleUse">Uso del Vehículo</Label>
+									<Select
+										value={editVehicleForm.vehicleUse}
+										onValueChange={(value) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												vehicleUse: value,
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar uso" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Particular">Particular</SelectItem>
+											<SelectItem value="Comercial">Comercial</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-series">Serie</Label>
+									<Input
+										id="edit-series"
+										value={editVehicleForm.series}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												series: e.target.value,
+											})
+										}
+										placeholder="Serie del vehículo"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-iscvCode">Código ISCV</Label>
+									<Input
+										id="edit-iscvCode"
+										value={editVehicleForm.iscvCode}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												iscvCode: e.target.value,
+											})
+										}
+										placeholder="Código ISCV"
+									/>
 								</div>
 							</div>
 						</div>

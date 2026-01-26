@@ -4106,29 +4106,6 @@ export const crmRouter = {
 			if (!stage50) {
 				return { data: [], total: 0, limit, offset };
 			}
-		// Get opportunities at 50%
-		const opps = await db
-			.select({
-				id: opportunities.id,
-				title: opportunities.title,
-				value: opportunities.value,
-				stageId: opportunities.stageId,
-				inversionistas: opportunities.inversionistas,
-				leadId: opportunities.leadId,
-				vehicleId: opportunities.vehicleId,
-				numeroCuotas: opportunities.numeroCuotas,
-				tasaInteres: opportunities.tasaInteres,
-				cuotaMensual: opportunities.cuotaMensual,
-				// Campos adicionales para edición
-				categoria: opportunities.categoria,
-				nit: opportunities.nit,
-				diaPagoMensual: opportunities.diaPagoMensual,
-				createdAt: opportunities.createdAt,
-				updatedAt: opportunities.updatedAt,
-			})
-			.from(opportunities)
-			.where(eq(opportunities.stageId, stage50.id))
-			.orderBy(desc(opportunities.updatedAt));
 
 			// Build conditions
 			const conditions = [eq(opportunities.stageId, stage50.id)];
@@ -4172,6 +4149,9 @@ export const crmRouter = {
 					numeroCuotas: opportunities.numeroCuotas,
 					tasaInteres: opportunities.tasaInteres,
 					cuotaMensual: opportunities.cuotaMensual,
+					categoria: opportunities.categoria,
+					nit: opportunities.nit,
+					diaPagoMensual: opportunities.diaPagoMensual,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
 				})

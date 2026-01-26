@@ -37,6 +37,14 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { client } from "@/utils/orpc";
 
 // Type for selected investor
@@ -61,7 +69,7 @@ type CreditCategory =
 // Type for opportunity from getOpportunitiesForInvestment
 type InvestmentOpportunity = Awaited<
 	ReturnType<typeof client.getOpportunitiesForInvestment>
->[0];
+>["data"][number];
 
 export function InvestmentAssignmentSection() {
 	const queryClient = useQueryClient();

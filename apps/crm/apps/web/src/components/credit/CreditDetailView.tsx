@@ -559,12 +559,12 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-			const camposFaltantes = validateRequiredFields();
+		    /*const camposFaltantes = validateRequiredFields();
 			if (camposFaltantes.length > 0) {
 				throw new Error(
 					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
 				);
-			}
+			}*/
 
 			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
 			if (

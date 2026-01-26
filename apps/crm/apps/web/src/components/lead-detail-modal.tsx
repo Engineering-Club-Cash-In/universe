@@ -178,10 +178,12 @@ export function LeadDetailModal({
 					<div className="flex items-start justify-between">
 						<div>
 							<h3 className="font-semibold text-lg">
-								{displayLead.firstName} {displayLead.middleName || ""} {displayLead.lastName}{" "}
-								{displayLead.secondLastName || ""}
+								{displayLead.firstName} {displayLead.middleName || ""}{" "}
+								{displayLead.lastName} {displayLead.secondLastName || ""}
 							</h3>
-							<p className="text-muted-foreground text-sm">{displayLead.email}</p>
+							<p className="text-muted-foreground text-sm">
+								{displayLead.email}
+							</p>
 						</div>
 						<div className="flex flex-col gap-2">
 							<Badge
@@ -193,7 +195,9 @@ export function LeadDetailModal({
 							{displayLead.fit !== null && displayLead.fit !== undefined && (
 								<Badge
 									variant={displayLead.fit ? "default" : "secondary"}
-									className={displayLead.fit ? "bg-green-500 hover:bg-green-600" : ""}
+									className={
+										displayLead.fit ? "bg-green-500 hover:bg-green-600" : ""
+									}
 								>
 									{displayLead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
 								</Badge>
@@ -212,15 +216,17 @@ export function LeadDetailModal({
 										Nombre Completo
 									</Label>
 									<p className="font-medium text-sm">
-										{displayLead.firstName} {displayLead.middleName || ""} {displayLead.lastName}{" "}
-										{displayLead.secondLastName || ""}
+										{displayLead.firstName} {displayLead.middleName || ""}{" "}
+										{displayLead.lastName} {displayLead.secondLastName || ""}
 									</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
 										DPI
 									</Label>
-									<p className="text-sm">{displayLead.dpi || "No especificado"}</p>
+									<p className="text-sm">
+										{displayLead.dpi || "No especificado"}
+									</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
@@ -256,7 +262,9 @@ export function LeadDetailModal({
 									<Label className="font-medium text-muted-foreground text-sm">
 										Edad
 									</Label>
-									<p className="text-sm">{displayLead.age || "No especificado"}</p>
+									<p className="text-sm">
+										{displayLead.age || "No especificado"}
+									</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
@@ -305,7 +313,9 @@ export function LeadDetailModal({
 									</Label>
 									<div className="flex items-center gap-2">
 										<Mail className="h-4 w-4 text-muted-foreground" />
-										<p className="text-sm">{displayLead.email || "No especificado"}</p>
+										<p className="text-sm">
+											{displayLead.email || "No especificado"}
+										</p>
 									</div>
 								</div>
 								<div>
@@ -314,7 +324,9 @@ export function LeadDetailModal({
 									</Label>
 									<div className="flex items-center gap-2">
 										<Phone className="h-4 w-4 text-muted-foreground" />
-										<p className="text-sm">{displayLead.phone || "No especificado"}</p>
+										<p className="text-sm">
+											{displayLead.phone || "No especificado"}
+										</p>
 									</div>
 								</div>
 								<div>
@@ -427,7 +439,9 @@ export function LeadDetailModal({
 									<Label className="font-medium text-muted-foreground text-sm">
 										Zona
 									</Label>
-									<p className="text-sm">{displayLead.zona || "No especificado"}</p>
+									<p className="text-sm">
+										{displayLead.zona || "No especificado"}
+									</p>
 								</div>
 							</div>
 						</div>
@@ -444,11 +458,17 @@ export function LeadDetailModal({
 									<Label className="text-sm">Posee Casa Propia</Label>
 								</div>
 								<div className="flex items-center gap-2">
-									<Checkbox checked={displayLead.ownsVehicle ?? false} disabled />
+									<Checkbox
+										checked={displayLead.ownsVehicle ?? false}
+										disabled
+									/>
 									<Label className="text-sm">Posee Vehículo Propio</Label>
 								</div>
 								<div className="flex items-center gap-2">
-									<Checkbox checked={displayLead.hasCreditCard ?? false} disabled />
+									<Checkbox
+										checked={displayLead.hasCreditCard ?? false}
+										disabled
+									/>
 									<Label className="text-sm">Tiene Tarjeta de Crédito</Label>
 								</div>
 							</div>
@@ -483,7 +503,10 @@ export function LeadDetailModal({
 								{displayLead.livenessValidated !== null &&
 									displayLead.livenessValidated !== undefined && (
 										<div className="flex items-center gap-2">
-											<Checkbox checked={displayLead.livenessValidated} disabled />
+											<Checkbox
+												checked={displayLead.livenessValidated}
+												disabled
+											/>
 											<Label className="text-sm">Liveness Validado</Label>
 										</div>
 									)}

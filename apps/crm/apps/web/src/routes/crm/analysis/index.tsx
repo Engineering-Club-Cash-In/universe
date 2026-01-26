@@ -1,15 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
 	AlertCircle,
 	CheckCircle,
+	ChevronLeft,
+	ChevronRight,
+	ChevronsLeft,
+	ChevronsRight,
 	FileText,
 	RefreshCw,
+	Search,
 	TrendingUp,
 	Wallet,
 	XCircle,
 } from "lucide-react";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { InvestmentAssignmentSection } from "@/components/analysis/InvestmentAssignmentSection";
@@ -39,6 +44,7 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
 	Table,
 	TableBody,
@@ -64,7 +70,7 @@ export const Route = createFileRoute("/crm/analysis/")({
 
 type OpportunityForAnalysis = Awaited<
 	ReturnType<typeof client.getOpportunitiesForAnalysis>
->[0];
+>["data"][0];
 
 // Helper component to render action buttons with validation
 function OpportunityActions({
@@ -168,10 +174,21 @@ function AnalysisPage() {
 	const navigate = Route.useNavigate();
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 
-	const [opportunities, setOpportunities] = useState<OpportunityForAnalysis[]>(
-		[],
-	);
-	const [isLoading, setIsLoading] = useState(true);
+	// Search and pagination states
+	const [searchTerm, setSearchTerm] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const [page, setPage] = useState(0);
+	const pageSize = 20;
+
+	// Debounce search input
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPage(0); // Reset to first page on search
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
+
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<OpportunityForAnalysis | null>(null);
 	const [isApprovalDialogOpen, setIsApprovalDialogOpen] = useState(false);
@@ -197,23 +214,24 @@ function AnalysisPage() {
 		}
 	}, [userProfile.data, navigate]);
 
-	// Cargar oportunidades en análisis
-	const loadOpportunities = async () => {
-		try {
-			setIsLoading(true);
-			const data = await client.getOpportunitiesForAnalysis();
-			setOpportunities(data);
-		} catch (error) {
-			toast.error("No se pudieron cargar las oportunidades");
-		} finally {
-			setIsLoading(false);
-		}
-	};
+	// Query with pagination
+	const {
+		data: opportunitiesData,
+		isLoading,
+		refetch: loadOpportunities,
+	} = useQuery({
+		queryKey: ["getOpportunitiesForAnalysis", page, pageSize, debouncedSearch],
+		queryFn: () =>
+			client.getOpportunitiesForAnalysis({
+				limit: pageSize,
+				offset: page * pageSize,
+				search: debouncedSearch || undefined,
+			}),
+	});
 
-	// Cargar al montar el componente
-	React.useEffect(() => {
-		loadOpportunities();
-	}, []);
+	const opportunities = opportunitiesData?.data ?? [];
+	const total = opportunitiesData?.total ?? 0;
+	const totalPages = Math.ceil(total / pageSize);
 
 	const handleApprovalClick = (
 		opportunity: OpportunityForAnalysis,
@@ -346,9 +364,9 @@ function AnalysisPage() {
 					<TabsTrigger value="analysis" className="flex items-center gap-2">
 						<FileText className="h-4 w-4" />
 						Análisis (30% → 40%)
-						{opportunities.length > 0 && (
+						{total > 0 && (
 							<Badge variant="secondary" className="ml-1">
-								{opportunities.length}
+								{total}
 							</Badge>
 						)}
 					</TabsTrigger>
@@ -363,138 +381,206 @@ function AnalysisPage() {
 				</TabsList>
 
 				<TabsContent value="analysis">
-					{opportunities.length === 0 ? (
-						<Alert>
-							<AlertCircle className="h-4 w-4" />
-							<AlertDescription>
-								No hay oportunidades pendientes de análisis en este momento.
-							</AlertDescription>
-						</Alert>
-					) : (
-						<Card>
-							<CardHeader>
-								<CardTitle>Oportunidades Pendientes de Análisis</CardTitle>
-								<CardDescription>
-									{opportunities.length} oportunidad
-									{opportunities.length !== 1 ? "es" : ""} esperando revisión de
-									documentación
-								</CardDescription>
-							</CardHeader>
-							<CardContent>
-								<Table>
-									<TableHeader>
-										<TableRow>
-											<TableHead>Título</TableHead>
-											<TableHead>Estado</TableHead>
-											<TableHead>Lead</TableHead>
-											<TableHead>Empresa</TableHead>
-											<TableHead>Valor</TableHead>
-											<TableHead>Fecha Esperada</TableHead>
-											<TableHead>Acciones</TableHead>
-										</TableRow>
-									</TableHeader>
-									<TableBody>
-										{opportunities.map((opportunity) => (
-											<TableRow key={opportunity.id}>
-												<TableCell className="font-medium">
-													<div className="space-y-1">
-														<button
-															type="button"
-															className="cursor-pointer text-left text-primary hover:underline"
-															onClick={() =>
-																handleOpenOpportunityModal(opportunity)
-															}
-														>
-															{opportunity.title}
-														</button>
-														<p className="font-mono text-[10px] text-muted-foreground/60">
-															ID: {opportunity.id.slice(0, 8)}
-														</p>
-													</div>
-												</TableCell>
-												<TableCell>
-													{opportunity.analysisStatus === "resubmitted" ? (
-														<Badge className="border-orange-300 bg-orange-100 text-orange-700">
-															<RefreshCw className="mr-1 h-3 w-3" />
-															Reenviado ({opportunity.analysisRejectionCount}x)
-														</Badge>
-													) : (
-														<Badge className="border-green-300 bg-green-100 text-green-700">
-															Nueva
-														</Badge>
-													)}
-												</TableCell>
-												<TableCell>
-													{opportunity.lead ? (
-														<div>
+					<Card>
+						<CardHeader>
+							<CardTitle>Oportunidades Pendientes de Análisis</CardTitle>
+							<CardDescription>
+								{total} oportunidad
+								{total !== 1 ? "es" : ""} esperando revisión de documentación
+							</CardDescription>
+						</CardHeader>
+						<CardContent>
+							{/* Buscador */}
+							<div className="mb-4 flex items-center gap-4">
+								<div className="relative max-w-sm flex-1">
+									<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+									<Input
+										placeholder="Buscar por nombre, placa..."
+										value={searchTerm}
+										onChange={(e) => setSearchTerm(e.target.value)}
+										className="pl-10"
+									/>
+								</div>
+							</div>
+
+							{opportunities.length === 0 ? (
+								<Alert>
+									<AlertCircle className="h-4 w-4" />
+									<AlertDescription>
+										{debouncedSearch
+											? "No se encontraron oportunidades con ese criterio de búsqueda."
+											: "No hay oportunidades pendientes de análisis en este momento."}
+									</AlertDescription>
+								</Alert>
+							) : (
+								<>
+									<Table>
+										<TableHeader>
+											<TableRow>
+												<TableHead>Título</TableHead>
+												<TableHead>Estado</TableHead>
+												<TableHead>Lead</TableHead>
+												<TableHead>Empresa</TableHead>
+												<TableHead>Valor</TableHead>
+												<TableHead>Fecha Esperada</TableHead>
+												<TableHead>Acciones</TableHead>
+											</TableRow>
+										</TableHeader>
+										<TableBody>
+											{opportunities.map((opportunity) => (
+												<TableRow key={opportunity.id}>
+													<TableCell className="font-medium">
+														<div className="space-y-1">
 															<button
 																type="button"
-																className="cursor-pointer text-left font-medium text-primary hover:underline"
-																onClick={() => handleOpenLeadModal(opportunity)}
+																className="cursor-pointer text-left text-primary hover:underline"
+																onClick={() =>
+																	handleOpenOpportunityModal(opportunity)
+																}
 															>
-																{opportunity.lead.firstName}{" "}
-																{opportunity.lead.lastName}
+																{opportunity.title}
 															</button>
-															<p className="text-muted-foreground text-sm">
-																{opportunity.lead.email}
+															<p className="font-mono text-[10px] text-muted-foreground/60">
+																ID: {opportunity.id.slice(0, 8)}
 															</p>
 														</div>
-													) : (
-														<span className="text-muted-foreground">
-															Sin lead
-														</span>
-													)}
-												</TableCell>
-												<TableCell>
-													{opportunity.company?.name || (
-														<span className="text-muted-foreground">
-															Sin empresa
-														</span>
-													)}
-												</TableCell>
-												<TableCell>
-													{opportunity.value ? (
-														<span className="font-medium">
-															Q{Number(opportunity.value).toLocaleString()}
-														</span>
-													) : (
-														<span className="text-muted-foreground">
-															Sin valor
-														</span>
-													)}
-												</TableCell>
-												<TableCell>
-													{opportunity.expectedCloseDate ? (
-														new Date(
-															opportunity.expectedCloseDate,
-														).toLocaleDateString("es-GT")
-													) : (
-														<span className="text-muted-foreground">
-															Sin fecha
-														</span>
-													)}
-												</TableCell>
-												<TableCell>
-													<OpportunityActions
-														opportunity={opportunity}
-														onApprove={() =>
-															handleApprovalClick(opportunity, true)
-														}
-														onReject={() =>
-															handleApprovalClick(opportunity, false)
-														}
-														onViewDocuments={() =>
-															handleViewDocuments(opportunity)
-														}
-													/>
-												</TableCell>
-											</TableRow>
-										))}
-									</TableBody>
-								</Table>
-							</CardContent>
-						</Card>
-					)}
+													</TableCell>
+													<TableCell>
+														{opportunity.analysisStatus === "resubmitted" ? (
+															<Badge className="border-orange-300 bg-orange-100 text-orange-700">
+																<RefreshCw className="mr-1 h-3 w-3" />
+																Reenviado ({opportunity.analysisRejectionCount}
+																x)
+															</Badge>
+														) : (
+															<Badge className="border-green-300 bg-green-100 text-green-700">
+																Nueva
+															</Badge>
+														)}
+													</TableCell>
+													<TableCell>
+														{opportunity.lead ? (
+															<div>
+																<button
+																	type="button"
+																	className="cursor-pointer text-left font-medium text-primary hover:underline"
+																	onClick={() =>
+																		handleOpenLeadModal(opportunity)
+																	}
+																>
+																	{opportunity.lead.firstName}{" "}
+																	{opportunity.lead.lastName}
+																</button>
+																<p className="text-muted-foreground text-sm">
+																	{opportunity.lead.email}
+																</p>
+															</div>
+														) : (
+															<span className="text-muted-foreground">
+																Sin lead
+															</span>
+														)}
+													</TableCell>
+													<TableCell>
+														{opportunity.company?.name || (
+															<span className="text-muted-foreground">
+																Sin empresa
+															</span>
+														)}
+													</TableCell>
+													<TableCell>
+														{opportunity.value ? (
+															<span className="font-medium">
+																Q{Number(opportunity.value).toLocaleString()}
+															</span>
+														) : (
+															<span className="text-muted-foreground">
+																Sin valor
+															</span>
+														)}
+													</TableCell>
+													<TableCell>
+														{opportunity.expectedCloseDate ? (
+															new Date(
+																opportunity.expectedCloseDate,
+															).toLocaleDateString("es-GT")
+														) : (
+															<span className="text-muted-foreground">
+																Sin fecha
+															</span>
+														)}
+													</TableCell>
+													<TableCell>
+														<OpportunityActions
+															opportunity={opportunity}
+															onApprove={() =>
+																handleApprovalClick(opportunity, true)
+															}
+															onReject={() =>
+																handleApprovalClick(opportunity, false)
+															}
+															onViewDocuments={() =>
+																handleViewDocuments(opportunity)
+															}
+														/>
+													</TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+									</Table>
+
+									{/* Paginación */}
+									{totalPages > 1 && (
+										<div className="mt-4 flex items-center justify-between border-t pt-4">
+											<span className="text-muted-foreground text-sm">
+												Mostrando {page * pageSize + 1} -{" "}
+												{Math.min((page + 1) * pageSize, total)} de {total}
+											</span>
+											<div className="flex items-center gap-2">
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => setPage(0)}
+													disabled={page === 0}
+												>
+													<ChevronsLeft className="h-4 w-4" />
+												</Button>
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => setPage((p) => Math.max(0, p - 1))}
+													disabled={page === 0}
+												>
+													<ChevronLeft className="h-4 w-4" />
+												</Button>
+												<span className="px-2 text-sm">
+													Página {page + 1} de {totalPages}
+												</span>
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() =>
+														setPage((p) => Math.min(totalPages - 1, p + 1))
+													}
+													disabled={page >= totalPages - 1}
+												>
+													<ChevronRight className="h-4 w-4" />
+												</Button>
+												<Button
+													variant="outline"
+													size="sm"
+													onClick={() => setPage(totalPages - 1)}
+													disabled={page >= totalPages - 1}
+												>
+													<ChevronsRight className="h-4 w-4" />
+												</Button>
+											</div>
+										</div>
+									)}
+								</>
+							)}
+						</CardContent>
+					</Card>
 				</TabsContent>
 
 				<TabsContent value="investment">
@@ -603,16 +689,47 @@ function DisbursementSection() {
 	const [selectedLeadForModal, setSelectedLeadForModal] =
 		useState<LeadForModal | null>(null);
 
+	// Search and pagination states
+	const [searchTerm, setSearchTerm] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const [pageD, setPageD] = useState(0);
+	const pageSizeD = 20;
+
+	// Debounce search input
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPageD(0); // Reset to first page on search
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
+
 	const {
-		data: opportunities,
+		data: opportunitiesData,
 		isLoading,
 		refetch,
 	} = useQuery({
-		queryKey: ["getOpportunitiesForDisbursement"],
-		queryFn: () => client.getOpportunitiesForDisbursement(),
+		queryKey: [
+			"getOpportunitiesForDisbursement",
+			pageD,
+			pageSizeD,
+			debouncedSearch,
+		],
+		queryFn: () =>
+			client.getOpportunitiesForDisbursement({
+				limit: pageSizeD,
+				offset: pageD * pageSizeD,
+				search: debouncedSearch || undefined,
+			}),
 	});
 
-	type DisbursementOpportunity = NonNullable<typeof opportunities>[0];
+	const opportunities = opportunitiesData?.data ?? [];
+	const totalD = opportunitiesData?.total ?? 0;
+	const totalPagesD = Math.ceil(totalD / pageSizeD);
+
+	type DisbursementOpportunity = NonNullable<
+		typeof opportunitiesData
+	>["data"][0];
 
 	const handleOpenOpportunityModal = (opp: DisbursementOpportunity) => {
 		setSelectedOpportunityForModal({
@@ -687,17 +804,6 @@ function DisbursementSection() {
 		);
 	}
 
-	if (!opportunities || opportunities.length === 0) {
-		return (
-			<Alert>
-				<AlertCircle className="h-4 w-4" />
-				<AlertDescription>
-					No hay oportunidades pendientes de desembolso en este momento.
-				</AlertDescription>
-			</Alert>
-		);
-	}
-
 	return (
 		<div className="grid gap-6 lg:grid-cols-2">
 			{/* Lista de oportunidades */}
@@ -705,65 +811,140 @@ function DisbursementSection() {
 				<CardHeader>
 					<CardTitle>Oportunidades en 90%</CardTitle>
 					<CardDescription>
-						{opportunities.length} oportunidad
-						{opportunities.length !== 1 ? "es" : ""} pendientes de desembolso
+						{totalD} oportunidad
+						{totalD !== 1 ? "es" : ""} pendientes de desembolso
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="space-y-3">
-						{opportunities.map((opp) => (
-							<div
-								key={opp.id}
-								className={`cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/50 ${
-									selectedOpportunity === opp.id
-										? "border-primary bg-muted/50"
-										: ""
-								}`}
-								onClick={() => setSelectedOpportunity(opp.id)}
-							>
-								<div className="flex items-center justify-between">
-									<div>
-										<button
-											type="button"
-											className="cursor-pointer text-left font-medium text-primary hover:underline"
-											onClick={(e) => {
-												e.stopPropagation();
-												handleOpenOpportunityModal(opp);
-											}}
-										>
-											{opp.leadName}
-										</button>
-										<p className="text-muted-foreground text-sm">
-											{opp.leadPhone}
-										</p>
-										<p className="font-mono text-[10px] text-muted-foreground/60">
-											ID: {opp.id.slice(0, 8)}
-										</p>
-									</div>
-									<div className="text-right">
-										<p className="font-medium">
-											Q{Number(opp.value).toLocaleString()}
-										</p>
-										<div className="flex items-center gap-2">
-											{opp.hasChecklist ? (
-												<Badge
-													variant={
-														opp.checklistProgress === 100
-															? "default"
-															: "secondary"
-													}
+					{/* Buscador */}
+					<div className="mb-4 flex items-center gap-4">
+						<div className="relative flex-1">
+							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<Input
+								placeholder="Buscar por nombre, placa..."
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+								className="pl-10"
+							/>
+						</div>
+					</div>
+
+					{opportunities.length === 0 ? (
+						<Alert>
+							<AlertCircle className="h-4 w-4" />
+							<AlertDescription>
+								{debouncedSearch
+									? "No se encontraron oportunidades con ese criterio de búsqueda."
+									: "No hay oportunidades pendientes de desembolso en este momento."}
+							</AlertDescription>
+						</Alert>
+					) : (
+						<>
+							<div className="space-y-3">
+								{opportunities.map((opp) => (
+									<div
+										key={opp.id}
+										className={`cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/50 ${
+											selectedOpportunity === opp.id
+												? "border-primary bg-muted/50"
+												: ""
+										}`}
+										onClick={() => setSelectedOpportunity(opp.id)}
+									>
+										<div className="flex items-center justify-between">
+											<div>
+												<button
+													type="button"
+													className="cursor-pointer text-left font-medium text-primary hover:underline"
+													onClick={(e) => {
+														e.stopPropagation();
+														handleOpenOpportunityModal(opp);
+													}}
 												>
-													{opp.checklistProgress}%
-												</Badge>
-											) : (
-												<Badge variant="outline">Sin iniciar</Badge>
-											)}
+													{opp.leadName}
+												</button>
+												<p className="text-muted-foreground text-sm">
+													{opp.leadPhone}
+												</p>
+												<p className="font-mono text-[10px] text-muted-foreground/60">
+													ID: {opp.id.slice(0, 8)}
+												</p>
+											</div>
+											<div className="text-right">
+												<p className="font-medium">
+													Q{Number(opp.value).toLocaleString()}
+												</p>
+												<div className="flex items-center gap-2">
+													{opp.hasChecklist ? (
+														<Badge
+															variant={
+																opp.checklistProgress === 100
+																	? "default"
+																	: "secondary"
+															}
+														>
+															{opp.checklistProgress}%
+														</Badge>
+													) : (
+														<Badge variant="outline">Sin iniciar</Badge>
+													)}
+												</div>
+											</div>
 										</div>
 									</div>
-								</div>
+								))}
 							</div>
-						))}
-					</div>
+
+							{/* Paginación */}
+							{totalPagesD > 1 && (
+								<div className="mt-4 flex items-center justify-between border-t pt-4">
+									<span className="text-muted-foreground text-sm">
+										Mostrando {pageD * pageSizeD + 1} -{" "}
+										{Math.min((pageD + 1) * pageSizeD, totalD)} de {totalD}
+									</span>
+									<div className="flex items-center gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPageD(0)}
+											disabled={pageD === 0}
+										>
+											<ChevronsLeft className="h-4 w-4" />
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPageD((p) => Math.max(0, p - 1))}
+											disabled={pageD === 0}
+										>
+											<ChevronLeft className="h-4 w-4" />
+										</Button>
+										<span className="px-2 text-sm">
+											Página {pageD + 1} de {totalPagesD}
+										</span>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												setPageD((p) => Math.min(totalPagesD - 1, p + 1))
+											}
+											disabled={pageD >= totalPagesD - 1}
+										>
+											<ChevronRight className="h-4 w-4" />
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPageD(totalPagesD - 1)}
+											disabled={pageD >= totalPagesD - 1}
+										>
+											<ChevronsRight className="h-4 w-4" />
+										</Button>
+									</div>
+								</div>
+							)}
+						</>
+					)}
 				</CardContent>
 			</Card>
 

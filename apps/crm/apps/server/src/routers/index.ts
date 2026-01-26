@@ -57,6 +57,7 @@ export const appRouter = {
 	getOpportunitiesForAnalysis: crmRouter.getOpportunitiesForAnalysis,
 	approveOpportunityAnalysis: crmRouter.approveOpportunityAnalysis,
 	approveCreditDetail: crmRouter.approveCreditDetail,
+	revokeCreditDetailApproval: crmRouter.revokeCreditDetailApproval,
 	getCreditDetailApprovalStatus: crmRouter.getCreditDetailApprovalStatus,
 	getOpportunityHistory: crmRouter.getOpportunityHistory,
 	validateOpportunityDocuments: crmRouter.validateOpportunityDocuments,

@@ -9,15 +9,21 @@ import {
 	ChevronsLeft,
 	ChevronsRight,
 	CreditCard,
+	Eye,
 	Loader2,
 	Plus,
 	Search,
 	Trash2,
 	TrendingUp,
 	User,
+	FileText,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +48,21 @@ interface SelectedInversionista {
 	porcentaje_cash_in: number;
 }
 
+// Credit categories type
+type CreditCategory =
+    | ""
+	| "Contraseña"
+	| "CV Vehículo"
+	| "CV Vehículo nuevo"
+	| "Fiduciario"
+	| "Hipotecario"
+	| "Vehículo";
+
+// Type for opportunity from getOpportunitiesForInvestment
+type InvestmentOpportunity = Awaited<
+	ReturnType<typeof client.getOpportunitiesForInvestment>
+>[0];
+
 export function InvestmentAssignmentSection() {
 	const queryClient = useQueryClient();
 	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
@@ -50,6 +71,17 @@ export function InvestmentAssignmentSection() {
 	const [selectedInversionistas, setSelectedInversionistas] = useState<
 		SelectedInversionista[]
 	>([]);
+	
+	// Estados para campos adicionales del detalle de crédito
+	const [editDireccion, setEditDireccion] = useState<string>("");
+	const [editCategoria, setEditCategoria] = useState<CreditCategory>("");
+	const [editNit, setEditNit] = useState<string>("");
+	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
+
+	// Estados para el modal de detalle de oportunidad
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
+		useState<OpportunityForModal | null>(null);
 
 	// Search and pagination states
 	const [searchTerm, setSearchTerm] = useState("");
@@ -96,16 +128,49 @@ export function InvestmentAssignmentSection() {
 		queryFn: () => client.getInversionistas({ page: 1, perPage: 100 }),
 	});
 
+	const selectedOpportunity = opportunities?.find(
+		(o) => o.id === selectedOpportunityId,
+	);
+
+	// Inicializar valores cuando se selecciona una oportunidad
+	useEffect(() => {
+		if (selectedOpportunity) {
+			// Dirección: usar la del lead si existe
+			setEditDireccion(selectedOpportunity.lead?.direccion || "");
+			// Categoría: usar la de la oportunidad si existe
+			setEditCategoria((selectedOpportunity.categoria as CreditCategory) || "");
+			// NIT: usar el de la oportunidad si existe
+			setEditNit(selectedOpportunity.nit || "");
+			// Día de pago: usar el de la oportunidad o 15 por default
+			setEditDiaPagoMensual(selectedOpportunity.diaPagoMensual || 15);
+			// Limpiar inversionistas seleccionados
+			setSelectedInversionistas([]);
+		}
+	}, [selectedOpportunity]);
+
 	// Mutation to assign investor and advance
 	const assignMutation = useMutation({
 		mutationFn: async ({
 			opportunityId,
 			inversionistas,
+			categoria,
+			nit,
+			diaPagoMensual,
 		}: {
 			opportunityId: string;
 			inversionistas: string;
+			categoria: CreditCategory;
+			nit: string;
+			diaPagoMensual: number;
 		}) => {
-			return client.assignInvestorAndAdvance({ opportunityId, inversionistas });
+			return client.assignInvestorAndAdvance({ 
+				opportunityId, 
+				inversionistas,
+			    // @ts-ignore
+				categoria: categoria,
+				nit: nit,
+				diaPagoMensual: diaPagoMensual,
+			});
 		},
 		onSuccess: () => {
 			toast.success("Inversionista asignado y oportunidad avanzada a 80%");
@@ -115,16 +180,16 @@ export function InvestmentAssignmentSection() {
 			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
 			setSelectedOpportunityId(null);
 			setSelectedInversionistas([]);
+			// Reset campos adicionales
+			setEditCategoria("");
+			setEditNit("");
+			setEditDiaPagoMensual(15);
 			refetchOpportunities();
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al asignar inversionista");
 		},
 	});
-
-	const selectedOpportunity = opportunities?.find(
-		(o) => o.id === selectedOpportunityId,
-	);
 
 	// Calculate totals
 	const totalMonto = selectedInversionistas.reduce(
@@ -198,6 +263,9 @@ export function InvestmentAssignmentSection() {
 		assignMutation.mutate({
 			opportunityId: selectedOpportunityId,
 			inversionistas: JSON.stringify(selectedInversionistas),
+			categoria: editCategoria,
+			nit: editNit,
+			diaPagoMensual: editDiaPagoMensual,
 		});
 	};
 
@@ -255,6 +323,50 @@ export function InvestmentAssignmentSection() {
 			style: "currency",
 			currency: "GTQ",
 		}).format(Number(value));
+	};
+
+	// Función para abrir el modal de detalle de oportunidad
+	const handleOpenOpportunityModal = (opp: InvestmentOpportunity) => {
+		setSelectedOpportunityForModal({
+			id: opp.id,
+			title: opp.title || opp.lead?.name || "Oportunidad",
+			value: opp.value,
+			creditType: null,
+			status: "open",
+			expectedCloseDate: null,
+			createdAt: opp.createdAt,
+			lead: opp.lead
+				? {
+						id: opp.lead.id,
+						firstName: opp.lead.name?.split(" ")[0] || "",
+						lastName: opp.lead.name?.split(" ").slice(1).join(" ") || "",
+						dpi: null,
+						email: null,
+						phone: opp.lead.phone,
+					}
+				: null,
+			stage: opp.stage?.id
+				? {
+						id: opp.stage.id,
+						name: opp.stage.name,
+						closurePercentage: opp.stage.closurePercentage,
+						color: opp.stage.color,
+					}
+				: null,
+			assignedUser: null,
+			vehicle: opp.vehicle
+				? {
+						id: opp.vehicle.id,
+						make: opp.vehicle.description?.split(" ")[0] || "",
+						model: opp.vehicle.description?.split(" ").slice(1, -1).join(" ") || "",
+						year: Number.parseInt(opp.vehicle.description?.split(" ").pop() || "0") || 0,
+						licensePlate: opp.vehicle.licensePlate,
+						color: null,
+						isNew: opp.vehicle.isNew,
+					}
+				: null,
+		});
+		setIsOpportunityModalOpen(true);
 	};
 
 	if (isLoadingOpportunities) {
@@ -457,15 +569,25 @@ export function InvestmentAssignmentSection() {
 						<CardHeader className="pb-3">
 							<div className="flex items-center justify-between">
 								<CardTitle className="text-lg">Asignar Inversión</CardTitle>
-								<Badge
-									variant="outline"
-									style={{
-										borderColor: selectedOpportunity.stage.color,
-										color: selectedOpportunity.stage.color,
-									}}
-								>
-									{selectedOpportunity.stage.closurePercentage}%
-								</Badge>
+								<div className="flex items-center gap-2">
+									<Button
+										variant="outline"
+										size="sm"
+										onClick={() => handleOpenOpportunityModal(selectedOpportunity)}
+									>
+										<Eye className="mr-1 h-4 w-4" />
+										Ver Detalle
+									</Button>
+									<Badge
+										variant="outline"
+										style={{
+											borderColor: selectedOpportunity.stage.color,
+											color: selectedOpportunity.stage.color,
+										}}
+									>
+										{selectedOpportunity.stage.closurePercentage}%
+									</Badge>
+								</div>
 							</div>
 							<div className="mt-2 text-muted-foreground text-sm">
 								<span className="font-medium">
@@ -527,6 +649,72 @@ export function InvestmentAssignmentSection() {
 									</div>
 								</div>
 							</div>
+
+							<Separator />
+
+							{/* Datos del Crédito - Campos editables */}
+							<div className="space-y-3">
+								<div className="flex items-center gap-2">
+									<FileText className="h-4 w-4" />
+									<Label className="font-medium text-sm">Datos del Crédito</Label>
+								</div>
+								
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+
+									{/* Categoría y NIT */}
+									<div className="grid grid-cols-2 gap-2">
+										<div>
+											<Label className="text-xs">Categoría</Label>
+											<Select
+												value={editCategoria}
+												onValueChange={(value) => setEditCategoria(value as CreditCategory)}
+											>
+												<SelectTrigger>
+													<SelectValue placeholder="Seleccionar categoría" />
+												</SelectTrigger>
+												<SelectContent>
+													<SelectItem value="Contraseña">Contraseña</SelectItem>
+													<SelectItem value="CV Vehículo">CV Vehículo</SelectItem>
+													<SelectItem value="CV Vehículo nuevo">CV Vehículo nuevo</SelectItem>
+													<SelectItem value="Fiduciario">Fiduciario</SelectItem>
+													<SelectItem value="Hipotecario">Hipotecario</SelectItem>
+													<SelectItem value="Vehículo">Vehículo</SelectItem>
+												</SelectContent>
+											</Select>
+										</div>
+										<div>
+											<Label className="text-xs">NIT</Label>
+											<Input
+												value={editNit}
+												onChange={(e) => setEditNit(e.target.value)}
+												placeholder="Ej: 12345678-9"
+											/>
+										</div>
+									</div>
+
+									{/* Día de pago mensual */}
+									<div>
+										<Label className="text-xs">Día de Pago Mensual</Label>
+										<Select
+											value={editDiaPagoMensual.toString()}
+											onValueChange={(value) => setEditDiaPagoMensual(Number(value))}
+										>
+											<SelectTrigger>
+												<SelectValue placeholder="Seleccionar día" />
+											</SelectTrigger>
+											<SelectContent>
+												{Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
+													<SelectItem key={day} value={day.toString()}>
+														{day}
+													</SelectItem>
+												))}
+											</SelectContent>
+										</Select>
+									</div>
+								</div>
+							</div>
+
+							<Separator />
 
 							{/* Investors section */}
 							<div className="space-y-2">
@@ -705,6 +893,15 @@ export function InvestmentAssignmentSection() {
 					</Card>
 				)}
 			</div>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunityForModal}
+				userRole="analyst"
+				readOnly
+			/>
 		</div>
 	);
 }

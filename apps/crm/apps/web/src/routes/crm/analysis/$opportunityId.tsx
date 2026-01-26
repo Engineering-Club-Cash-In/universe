@@ -391,7 +391,7 @@ function OpportunityDocumentsPage() {
 							>
 								{opportunity.title}
 							</button>
-							<p className="mt-1 font-mono text-sm text-muted-foreground">
+							<p className="mt-1 font-mono text-muted-foreground text-sm">
 								ID: {opportunity.id.slice(0, 8)}
 							</p>
 							{opportunity.lead && (

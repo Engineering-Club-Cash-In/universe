@@ -6,6 +6,7 @@ import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 import { authRouter } from "./auth";
 import { checksRouter } from "./checks";
 import { cobrosRouter } from "./cobros";
+import { contractGenerationRouter } from "./contract-generation";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
 import { legalContractsRouter } from "./legal-contracts";
@@ -146,6 +147,17 @@ export const appRouter = {
 	getOpportunitiesForContracts:
 		legalContractsRouter.getOpportunitiesForContracts,
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
+
+	// Contract Generation routes (Generación automática de contratos)
+	getContractTypes: contractGenerationRouter.getContractTypes,
+	getDocumentsByDpi: contractGenerationRouter.getDocumentsByDpi,
+	getContractPreviewData: contractGenerationRouter.getContractPreviewData,
+	validateForContractGeneration:
+		contractGenerationRouter.validateForContractGeneration,
+	enrichLeadFromRenap: contractGenerationRouter.enrichLeadFromRenap,
+	generateContracts: contractGenerationRouter.generateContracts,
+	generateContractsDirect: contractGenerationRouter.generateContractsDirect,
+	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

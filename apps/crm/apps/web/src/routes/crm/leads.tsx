@@ -135,6 +135,7 @@ function RouteComponent() {
 	const processedLeadIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+	const isTransitioningToEditRef = useRef(false);
 
 	// Debounce search input
 	useEffect(() => {
@@ -271,6 +272,7 @@ function RouteComponent() {
 			phone: "",
 			age: "",
 			dpi: "",
+			direccion: "",
 			departamento: "",
 			municipio: "",
 			zona: "",
@@ -298,6 +300,10 @@ function RouteComponent() {
 			notes: "",
 			score: "",
 			fit: false,
+			// Campos para contratos legales
+			birthDate: "" as string,
+			gender: "" as "male" | "female" | "",
+			nationality: "",
 		},
 		validators: {
 			onSubmit: ({ value }) => {
@@ -346,6 +352,7 @@ function RouteComponent() {
 				dpi: value.dpi || undefined,
 				middleName: value.middleName || undefined,
 				secondLastName: value.secondLastName || undefined,
+				direccion: value.direccion || undefined,
 				departamento: value.departamento || undefined,
 				municipio: value.municipio || undefined,
 				zona: value.zona || undefined,
@@ -359,6 +366,10 @@ function RouteComponent() {
 				notes: value.notes || undefined,
 				score: value.score ? Number.parseFloat(value.score) : undefined,
 				fit: value.fit,
+				// Campos para contratos legales
+				birthDate: value.birthDate ? new Date(value.birthDate) : undefined,
+				gender: value.gender || undefined,
+				nationality: value.nationality || undefined,
 			};
 
 			if (editingLead) {
@@ -535,15 +546,22 @@ function RouteComponent() {
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
 
-	// Clear search param when details modal closes
+	// Clear search param when details modal closes (unless transitioning to edit)
 	useEffect(() => {
 		const wasOpen = prevDetailsOpenRef.current;
 		prevDetailsOpenRef.current = isDetailsDialogOpen;
 
-		if (wasOpen && !isDetailsDialogOpen && processedLeadIdRef.current) {
-			processedLeadIdRef.current = null;
-			if (search.leadId) {
-				navigate({ to: "/crm/leads", search: {}, replace: true });
+		if (wasOpen && !isDetailsDialogOpen) {
+			// Skip cleanup if transitioning to edit modal
+			if (isTransitioningToEditRef.current) {
+				isTransitioningToEditRef.current = false;
+				return;
+			}
+			if (processedLeadIdRef.current) {
+				processedLeadIdRef.current = null;
+				if (search.leadId) {
+					navigate({ to: "/crm/leads", search: {}, replace: true });
+				}
 			}
 		}
 	}, [isDetailsDialogOpen, navigate, search.leadId]);
@@ -568,7 +586,10 @@ function RouteComponent() {
 				editingLead.age ? String(editingLead.age) : "",
 			);
 			createLeadForm.setFieldValue("dpi", editingLead.dpi || "");
-			createLeadForm.setFieldValue("clientType", "individual");
+			createLeadForm.setFieldValue(
+				"clientType",
+				(editingLead as any).clientType || "individual",
+			);
 			createLeadForm.setFieldValue(
 				"maritalStatus",
 				editingLead.maritalStatus || "single",
@@ -616,6 +637,10 @@ function RouteComponent() {
 			);
 			createLeadForm.setFieldValue("fit", editingLead.fit || false);
 			// Campos de dirección
+			createLeadForm.setFieldValue(
+				"direccion",
+				(editingLead as any).direccion || "",
+			);
 			const departamento = (editingLead as any).departamento || "";
 			createLeadForm.setFieldValue("departamento", departamento);
 			setSelectedDepartamento(departamento);
@@ -624,6 +649,17 @@ function RouteComponent() {
 				(editingLead as any).municipio || "",
 			);
 			createLeadForm.setFieldValue("zona", (editingLead as any).zona || "");
+			// Campos para contratos legales
+			const birthDate = (editingLead as any).birthDate;
+			createLeadForm.setFieldValue(
+				"birthDate",
+				birthDate ? new Date(birthDate).toISOString().split("T")[0] : "",
+			);
+			createLeadForm.setFieldValue("gender", (editingLead as any).gender || "");
+			createLeadForm.setFieldValue(
+				"nationality",
+				(editingLead as any).nationality || "",
+			);
 		}
 	}, [editingLead]);
 
@@ -1309,9 +1345,113 @@ function RouteComponent() {
 										</div>
 									</div>
 
+									{/* Datos para Contratos Legales */}
+									<div className="space-y-4">
+										<h3 className="font-semibold text-lg">
+											Datos para Contratos
+											<span className="ml-2 font-normal text-muted-foreground text-sm">
+												(requeridos para generar documentos legales)
+											</span>
+										</h3>
+										<div className="grid grid-cols-3 gap-4">
+											<div>
+												<createLeadForm.Field name="birthDate">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Fecha de Nacimiento
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																type="date"
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="gender">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Género</Label>
+															<Select
+																value={field.state.value}
+																onValueChange={(value) =>
+																	field.handleChange(
+																		value as "male" | "female" | "",
+																	)
+																}
+															>
+																<SelectTrigger>
+																	<SelectValue placeholder="Seleccionar género" />
+																</SelectTrigger>
+																<SelectContent>
+																	<SelectItem value="male">
+																		Masculino
+																	</SelectItem>
+																	<SelectItem value="female">
+																		Femenino
+																	</SelectItem>
+																</SelectContent>
+															</Select>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+											<div>
+												<createLeadForm.Field name="nationality">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>Nacionalidad</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: guatemalteco"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+									</div>
+
 									{/* Dirección */}
 									<div className="space-y-4">
 										<h3 className="font-semibold text-lg">Dirección</h3>
+										<div className="grid grid-cols-1 gap-4">
+											<div>
+												<createLeadForm.Field name="direccion">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Dirección Completa
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: 4ta Calle 5-67, Zona 1"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
 										<div className="grid grid-cols-3 gap-4">
 											<div>
 												<createLeadForm.Field name="departamento">
@@ -2807,6 +2947,7 @@ function RouteComponent() {
 									className="flex-1"
 									onClick={() => {
 										setEditingLead(selectedLead);
+										isTransitioningToEditRef.current = true;
 										setIsDetailsDialogOpen(false);
 										setIsCreateDialogOpen(true);
 									}}

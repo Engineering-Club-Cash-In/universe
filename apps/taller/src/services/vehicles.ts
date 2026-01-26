@@ -7,6 +7,7 @@ export interface VehicleData {
   year: number;
   licensePlate: string;
   vinNumber: string;
+  motorNumber: string;
   color: string;
   vehicleType: string;
   milesMileage: number | null;
@@ -91,6 +92,7 @@ export const prepareInspectionData = (formData: any) => {
     year: parseInt(formData.vehicleYear),
     licensePlate: formData.licensePlate,
     vinNumber: formData.vinNumber,
+    motorNumber: formData.motorNumber,
     color: formData.color,
     vehicleType: formData.vehicleType,
     milesMileage: formData.milesMileage ? parseInt(formData.milesMileage) : null,

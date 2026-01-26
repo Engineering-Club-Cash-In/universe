@@ -75,8 +75,9 @@ function RouteComponent() {
 	const dashboardStats = useQuery({
 		...orpc.getCobrosDashboardStats.queryOptions({
 			input: {
-				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "") ? session?.user?.email : undefined,
-
+				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
+					? session?.user?.email
+					: undefined,
 			},
 		}),
 		enabled: !!session,
@@ -113,8 +114,9 @@ function RouteComponent() {
 				estadoMora: filtroEtapa || undefined,
 				nombreUsuario: debouncedFilterValue || undefined,
 				time: timeParam,
-				emailCobrador:
-					!PERMISSIONS.canAssignCobros(userRole ?? "") ? session?.user?.email : undefined,
+				emailCobrador: !PERMISSIONS.canAssignCobros(userRole ?? "")
+					? session?.user?.email
+					: undefined,
 			},
 		}),
 		enabled: !!session,

@@ -1,7 +1,15 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FileText, FileUp, Loader2, Trash2, Upload } from "lucide-react";
+import {
+	AlertTriangle,
+	FileText,
+	FileUp,
+	Loader2,
+	Trash2,
+	Upload,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
@@ -13,7 +21,23 @@ interface OpportunityDocumentUploadProps {
 	documents: any[];
 	isLoading: boolean;
 	onRefresh: () => void;
+	hasVehicle?: boolean;
 }
+
+// Tipos de documentos que pertenecen al vehículo
+const vehicleDocumentTypes = [
+	"tarjeta_circulacion",
+	"titulo_propiedad",
+	"dpi_dueno",
+	"patente_comercio_vehiculo",
+	"representacion_legal_vehiculo",
+	"dpi_representante_legal_vehiculo",
+	"pago_impuesto_circulacion",
+	"consulta_sat",
+	"consulta_garantias_mobiliarias",
+	"datos_vehiculo_nuevo",
+	"cotizacion_vehiculo_nuevo",
+];
 
 const documentCategories = {
 	"Documentos del Cliente": [
@@ -86,9 +110,14 @@ export function OpportunityDocumentUpload({
 	documents,
 	isLoading,
 	onRefresh,
+	hasVehicle = false,
 }: OpportunityDocumentUploadProps) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [documentType, setDocumentType] = useState<string>("");
+
+	// Verificar si el documento seleccionado es de vehículo y no hay vehículo asignado
+	const isVehicleDocWithoutVehicle =
+		vehicleDocumentTypes.includes(documentType) && !hasVehicle;
 
 	const queryClient = useQueryClient();
 
@@ -223,6 +252,17 @@ export function OpportunityDocumentUpload({
 							/>
 						</div>
 					</div>
+
+					{isVehicleDocWithoutVehicle && (
+						<Alert variant="default" className="border-amber-500 bg-amber-50">
+							<AlertTriangle className="h-4 w-4 text-amber-600" />
+							<AlertDescription className="text-amber-800 text-sm">
+								Este es un documento de vehículo, pero la oportunidad no tiene
+								un vehículo asignado. El documento se guardará en la
+								oportunidad, pero no se reflejará en el checklist del vehículo.
+							</AlertDescription>
+						</Alert>
+					)}
 
 					{selectedFile && (
 						<p className="text-muted-foreground text-xs">

@@ -477,8 +477,7 @@ function ExtraCostsTable({
 			Math.round((Number(values.extraMembershipCost) || 0) * 100) / 100;
 		const extraAdmin =
 			Math.round((Number(values.extraAdminCost) || 0) * 100) / 100;
-		const extraGps =
-			Math.round((Number(values.extraGpsCost) || 0) * 100) / 100;
+		const extraGps = Math.round((Number(values.extraGpsCost) || 0) * 100) / 100;
 		if (localValues.extraInsurance !== extraInsurance) {
 			updates.extraInsurance = extraInsurance;
 		}
@@ -1740,7 +1739,6 @@ function QuoterPage() {
 											</div>
 										)}
 									</quoterForm.Field>
-
 								</CardContent>
 							</Card>
 						</div>

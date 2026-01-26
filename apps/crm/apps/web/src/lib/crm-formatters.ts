@@ -109,6 +109,30 @@ export const getWorkTimeLabel = (time: string) => {
 	}
 };
 
+export const getClientTypeLabel = (clientType: string) => {
+	switch (clientType) {
+		case "individual":
+			return "Individual";
+		case "comerciante":
+			return "Comerciante";
+		case "empresa":
+			return "Empresa";
+		default:
+			return clientType;
+	}
+};
+
+export const getGenderLabel = (gender: string) => {
+	switch (gender) {
+		case "male":
+			return "Masculino";
+		case "female":
+			return "Femenino";
+		default:
+			return gender;
+	}
+};
+
 export const getLoanPurposeLabel = (purpose: string) => {
 	switch (purpose) {
 		case "personal":

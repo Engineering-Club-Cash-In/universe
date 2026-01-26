@@ -2906,6 +2906,29 @@ export const crmRouter = {
 				requiredVehicleDocs = reqVehicleDocsResult;
 				uploadedVehicleDocs = uploadedVehicleDocsResult;
 
+				// Filter out documents that don't apply to new vehicles
+				if (vehicle.isNew) {
+					const docsNotApplicableToNewVehicles = [
+						"tarjeta_circulacion",
+						"titulo_propiedad",
+						"dpi_dueno",
+						"pago_impuesto_circulacion",
+						"consulta_sat",
+						"consulta_garantias_mobiliarias",
+						"usuario_sat_propietario",
+						"rtu_propietario",
+						"omisos_incumplimientos_propietario",
+						"garantia_mobiliaria_sat",
+						"garantia_mobiliaria_dpi",
+						"garantia_mobiliaria_nit",
+						"garantia_mobiliaria_serie",
+						"multas_vehiculo",
+					];
+					requiredVehicleDocs = requiredVehicleDocs.filter(
+						(doc) => !docsNotApplicableToNewVehicles.includes(doc.documentType),
+					);
+				}
+
 				// Fallback: buscar documentos de vehículo en opportunityDocuments
 				// para oportunidades existentes que subieron docs antes de la sincronización
 				if (requiredVehicleDocs.length > 0) {

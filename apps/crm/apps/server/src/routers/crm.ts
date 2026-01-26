@@ -50,9 +50,13 @@ import {
 } from "../lib/storage";
 import {
 	formatMissingFields,
-	getMissingFields,
+	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import {
+	formatMissingLeadFields,
+	getMissingLeadFieldsForContracts,
+} from "../lib/lead-helpers";
 import { closeOpportunity } from "../services/close-opportunity";
 
 export const crmRouter = {
@@ -1011,36 +1015,73 @@ export const crmRouter = {
 					}
 				}
 
-				// Validaciones para vehículos nuevos en transiciones de stage
-				if (currentOpportunity[0].vehicleId && toPercentage >= 80) {
-					const vehicleForValidation = await db
-						.select({
-							isNew: vehicles.isNew,
-							vinNumber: vehicles.vinNumber,
-							licensePlate: vehicles.licensePlate,
-							origin: vehicles.origin,
-							fuelType: vehicles.fuelType,
-							transmission: vehicles.transmission,
-						})
-						.from(vehicles)
-						.where(eq(vehicles.id, currentOpportunity[0].vehicleId))
-						.limit(1);
+				// Validaciones para avanzar a etapa 80% (jurídica)
+				if (toPercentage >= 80) {
+					// Validar datos del vehículo para contratos
+					if (currentOpportunity[0].vehicleId) {
+						const vehicleForValidation = await db
+							.select({
+								isNew: vehicles.isNew,
+								vinNumber: vehicles.vinNumber,
+								motorNumber: vehicles.motorNumber,
+								seats: vehicles.seats,
+								vehicleUse: vehicles.vehicleUse,
+								licensePlate: vehicles.licensePlate,
+								origin: vehicles.origin,
+								fuelType: vehicles.fuelType,
+								transmission: vehicles.transmission,
+							})
+							.from(vehicles)
+							.where(eq(vehicles.id, currentOpportunity[0].vehicleId))
+							.limit(1);
 
-					if (vehicleForValidation[0]?.isNew) {
-						// Transición a 100%: Requerir datos completos
-						if (toPercentage === 80) {
+						if (vehicleForValidation[0]) {
+							// Validar campos mínimos para contratos (aplica a todos los vehículos)
 							const missingForContracts = getMissingFieldsForContracts(
 								vehicleForValidation[0],
 							);
 							if (missingForContracts.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
-									message: `Para avanzar a etapa 90% (contratos), el vehículo nuevo debe tener: ${formatMissingFields(missingForContracts)}`,
+									message: `Para avanzar a etapa jurídica (80%), el vehículo debe tener: ${formatMissingFields(missingForContracts)}`,
 								});
 							}
-							const missingFields = getMissingFields(vehicleForValidation[0]);
-							if (missingFields.length > 0) {
+
+							// Para vehículos nuevos, validar campos adicionales para 100%
+							if (vehicleForValidation[0].isNew) {
+								const missingForCompletion = getMissingFieldsForCompletion(
+									vehicleForValidation[0],
+								);
+								if (missingForCompletion.length > 0) {
+									throw new ORPCError("BAD_REQUEST", {
+										message: `Para completar la oportunidad (100%), el vehículo nuevo debe tener datos completos. Faltan: ${formatMissingFields(missingForCompletion)}`,
+									});
+								}
+							}
+						}
+					}
+
+					// Validar datos del lead para contratos
+					if (currentOpportunity[0].leadId) {
+						const leadForValidation = await db
+							.select({
+								dpi: leads.dpi,
+								direccion: leads.direccion,
+								maritalStatus: leads.maritalStatus,
+								gender: leads.gender,
+								birthDate: leads.birthDate,
+								nationality: leads.nationality,
+							})
+							.from(leads)
+							.where(eq(leads.id, currentOpportunity[0].leadId))
+							.limit(1);
+
+						if (leadForValidation[0]) {
+							const missingLeadFields = getMissingLeadFieldsForContracts(
+								leadForValidation[0],
+							);
+							if (missingLeadFields.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
-									message: `Para completar la oportunidad (100%), el vehículo nuevo debe tener datos completos. Faltan: ${formatMissingFields(missingFields)}`,
+									message: `Para avanzar a etapa jurídica (80%), el cliente debe tener: ${formatMissingLeadFields(missingLeadFields)}`,
 								});
 							}
 						}

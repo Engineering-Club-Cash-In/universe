@@ -8,6 +8,7 @@ import { checksRouter } from "./checks";
 import { cobrosRouter } from "./cobros";
 import { crmRouter } from "./crm";
 import { insuranceRouter } from "./insurance";
+import { contractGenerationRouter } from "./contract-generation";
 import { legalContractsRouter } from "./legal-contracts";
 import { locationsRouter } from "./locations";
 import { miniagentRouter } from "./miniagent";
@@ -146,6 +147,15 @@ export const appRouter = {
 	getOpportunitiesForContracts:
 		legalContractsRouter.getOpportunitiesForContracts,
 	approveOpportunityLegal: legalContractsRouter.approveOpportunityLegal,
+
+	// Contract Generation routes (Generación automática de contratos)
+	getContractTypes: contractGenerationRouter.getContractTypes,
+	getContractPreviewData: contractGenerationRouter.getContractPreviewData,
+	validateForContractGeneration:
+		contractGenerationRouter.validateForContractGeneration,
+	enrichLeadFromRenap: contractGenerationRouter.enrichLeadFromRenap,
+	generateContracts: contractGenerationRouter.generateContracts,
+	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

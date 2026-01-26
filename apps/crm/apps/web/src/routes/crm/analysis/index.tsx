@@ -5,12 +5,14 @@ import {
 	CheckCircle,
 	FileText,
 	RefreshCw,
+	TrendingUp,
 	Wallet,
 	XCircle,
 } from "lucide-react";
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
+import { InvestmentAssignmentSection } from "@/components/analysis/InvestmentAssignmentSection";
 import {
 	LeadDetailModal,
 	type LeadForModal,
@@ -350,6 +352,10 @@ function AnalysisPage() {
 							</Badge>
 						)}
 					</TabsTrigger>
+					<TabsTrigger value="investment" className="flex items-center gap-2">
+						<TrendingUp className="h-4 w-4" />
+						Asignación de Inversión (50% → 80%)
+					</TabsTrigger>
 					<TabsTrigger value="disbursement" className="flex items-center gap-2">
 						<Wallet className="h-4 w-4" />
 						Desembolso (90% → 100%)
@@ -489,6 +495,10 @@ function AnalysisPage() {
 							</CardContent>
 						</Card>
 					)}
+				</TabsContent>
+
+				<TabsContent value="investment">
+					<InvestmentAssignmentSection />
 				</TabsContent>
 
 				<TabsContent value="disbursement">

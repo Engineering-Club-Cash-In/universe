@@ -320,7 +320,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-purple-600">
-									{analysisStats.data?.filter(
+									{analysisStats.data?.data?.filter(
 										(o) => o.stage?.closurePercentage === 30,
 									).length || 0}
 								</div>
@@ -338,7 +338,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-blue-600">
-									{analysisStats.data?.filter(
+									{analysisStats.data?.data?.filter(
 										(o) => o.stage?.closurePercentage === 40,
 									).length || 0}
 								</div>
@@ -356,7 +356,7 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl">
-									{analysisStats.data?.length || 0}
+									{analysisStats.data?.total || 0}
 								</div>
 								<p className="text-muted-foreground text-xs">
 									Oportunidades por procesar

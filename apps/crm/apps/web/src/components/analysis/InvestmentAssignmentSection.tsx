@@ -4,14 +4,19 @@ import {
 	AlertTriangle,
 	Car,
 	CheckCircle2,
+	ChevronLeft,
+	ChevronRight,
+	ChevronsLeft,
+	ChevronsRight,
 	CreditCard,
 	Loader2,
 	Plus,
+	Search,
 	Trash2,
 	TrendingUp,
 	User,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +31,7 @@ import {
 import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { client, orpc } from "@/utils/orpc";
+import { client } from "@/utils/orpc";
 
 // Type for selected investor
 interface SelectedInversionista {
@@ -37,11 +42,6 @@ interface SelectedInversionista {
 	porcentaje_cash_in: number;
 }
 
-// Type for opportunity from getOpportunitiesForInvestment
-type InvestmentOpportunity = Awaited<
-	ReturnType<typeof client.getOpportunitiesForInvestment>
->[0];
-
 export function InvestmentAssignmentSection() {
 	const queryClient = useQueryClient();
 	const [selectedOpportunityId, setSelectedOpportunityId] = useState<
@@ -51,15 +51,44 @@ export function InvestmentAssignmentSection() {
 		SelectedInversionista[]
 	>([]);
 
+	// Search and pagination states
+	const [searchTerm, setSearchTerm] = useState("");
+	const [debouncedSearch, setDebouncedSearch] = useState("");
+	const [page, setPage] = useState(0);
+	const pageSize = 20;
+
+	// Debounce search input
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			setDebouncedSearch(searchTerm);
+			setPage(0); // Reset to first page on search
+		}, 300);
+		return () => clearTimeout(timer);
+	}, [searchTerm]);
+
 	// Query for opportunities at 50%
 	const {
-		data: opportunities,
+		data: opportunitiesData,
 		isLoading: isLoadingOpportunities,
 		refetch: refetchOpportunities,
 	} = useQuery({
-		queryKey: ["getOpportunitiesForInvestment"],
-		queryFn: () => client.getOpportunitiesForInvestment(),
+		queryKey: [
+			"getOpportunitiesForInvestment",
+			page,
+			pageSize,
+			debouncedSearch,
+		],
+		queryFn: () =>
+			client.getOpportunitiesForInvestment({
+				limit: pageSize,
+				offset: page * pageSize,
+				search: debouncedSearch || undefined,
+			}),
 	});
+
+	const opportunities = opportunitiesData?.data ?? [];
+	const total = opportunitiesData?.total ?? 0;
+	const totalPages = Math.ceil(total / pageSize);
 
 	// Query for available investors
 	const inversionistasQuery = useQuery({
@@ -239,18 +268,6 @@ export function InvestmentAssignmentSection() {
 		);
 	}
 
-	if (!opportunities || opportunities.length === 0) {
-		return (
-			<Alert>
-				<AlertCircle className="h-4 w-4" />
-				<AlertDescription>
-					No hay oportunidades pendientes de asignación de inversión en este
-					momento.
-				</AlertDescription>
-			</Alert>
-		);
-	}
-
 	return (
 		<div className="grid gap-6 lg:grid-cols-2">
 			{/* List of opportunities */}
@@ -258,96 +275,178 @@ export function InvestmentAssignmentSection() {
 				<CardHeader>
 					<CardTitle>Oportunidades en 50%</CardTitle>
 					<CardDescription>
-						{opportunities.length} oportunidad
-						{opportunities.length !== 1 ? "es" : ""} pendientes de asignación de
-						inversión
+						{total} oportunidad
+						{total !== 1 ? "es" : ""} pendientes de asignación de inversión
 					</CardDescription>
 				</CardHeader>
 				<CardContent>
-					<div className="space-y-3">
-						{opportunities.map((opp) => (
-							<div
-								key={opp.id}
-								className={`cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/50 ${
-									selectedOpportunityId === opp.id
-										? "border-primary bg-muted/50"
-										: ""
-								}`}
-								onClick={() => {
-									setSelectedOpportunityId(opp.id);
-									setSelectedInversionistas([]);
-								}}
-							>
-								<div className="flex items-center justify-between">
-									<div>
-										<p className="font-medium">
-											{opp.lead?.name || "Sin cliente"}
-										</p>
-										<p className="text-muted-foreground text-sm">
-											{opp.vehicle?.description || "Sin vehículo"}
-										</p>
-										<p className="font-mono text-[10px] text-muted-foreground/60">
-											ID: {opp.id.slice(0, 8)}
-										</p>
-									</div>
-									<div className="text-right">
-										<p className="font-medium">{formatCurrency(opp.value)}</p>
-										<div className="flex items-center gap-2">
-											{opp.hasInvestor ? (
-												<Badge variant="default">Con inversor</Badge>
-											) : (
-												<Badge variant="outline">Sin inversor</Badge>
-											)}
+					{/* Buscador */}
+					<div className="mb-4 flex items-center gap-4">
+						<div className="relative flex-1">
+							<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+							<Input
+								placeholder="Buscar por nombre, placa..."
+								value={searchTerm}
+								onChange={(e) => setSearchTerm(e.target.value)}
+								className="pl-10"
+							/>
+						</div>
+					</div>
+
+					{opportunities.length === 0 ? (
+						<Alert>
+							<AlertCircle className="h-4 w-4" />
+							<AlertDescription>
+								{debouncedSearch
+									? "No se encontraron oportunidades con ese criterio de búsqueda."
+									: "No hay oportunidades pendientes de asignación de inversión en este momento."}
+							</AlertDescription>
+						</Alert>
+					) : (
+						<>
+							<div className="space-y-3">
+								{opportunities.map((opp) => (
+									<div
+										key={opp.id}
+										className={`cursor-pointer rounded-lg border p-4 transition-colors hover:bg-muted/50 ${
+											selectedOpportunityId === opp.id
+												? "border-primary bg-muted/50"
+												: ""
+										}`}
+										onClick={() => {
+											setSelectedOpportunityId(opp.id);
+											setSelectedInversionistas([]);
+										}}
+									>
+										<div className="flex items-center justify-between">
+											<div>
+												<p className="font-medium">
+													{opp.lead?.name || "Sin cliente"}
+												</p>
+												<p className="text-muted-foreground text-sm">
+													{opp.vehicle?.description || "Sin vehículo"}
+												</p>
+												<p className="font-mono text-[10px] text-muted-foreground/60">
+													ID: {opp.id.slice(0, 8)}
+												</p>
+											</div>
+											<div className="text-right">
+												<p className="font-medium">
+													{formatCurrency(opp.value)}
+												</p>
+												<div className="flex items-center gap-2">
+													{opp.hasInvestor ? (
+														<Badge variant="default">Con inversor</Badge>
+													) : (
+														<Badge variant="outline">Sin inversor</Badge>
+													)}
+												</div>
+											</div>
+										</div>
+
+										{/* Validation indicators */}
+										<div className="mt-2 flex flex-wrap gap-1">
+											<Badge
+												variant={
+													opp.lead?.hasRequiredData
+														? "secondary"
+														: "destructive"
+												}
+												className="text-xs"
+											>
+												<User className="mr-1 h-3 w-3" />
+												Cliente{" "}
+												{opp.lead?.hasRequiredData ? (
+													<CheckCircle2 className="ml-1 h-3 w-3" />
+												) : (
+													<AlertTriangle className="ml-1 h-3 w-3" />
+												)}
+											</Badge>
+											<Badge
+												variant={
+													opp.vehicle?.hasRequiredData
+														? "secondary"
+														: "destructive"
+												}
+												className="text-xs"
+											>
+												<Car className="mr-1 h-3 w-3" />
+												Vehículo{" "}
+												{opp.vehicle?.hasRequiredData ? (
+													<CheckCircle2 className="ml-1 h-3 w-3" />
+												) : (
+													<AlertTriangle className="ml-1 h-3 w-3" />
+												)}
+											</Badge>
+											<Badge
+												variant={
+													opp.hasCreditData ? "secondary" : "destructive"
+												}
+												className="text-xs"
+											>
+												<CreditCard className="mr-1 h-3 w-3" />
+												Crédito{" "}
+												{opp.hasCreditData ? (
+													<CheckCircle2 className="ml-1 h-3 w-3" />
+												) : (
+													<AlertTriangle className="ml-1 h-3 w-3" />
+												)}
+											</Badge>
 										</div>
 									</div>
-								</div>
-
-								{/* Validation indicators */}
-								<div className="mt-2 flex flex-wrap gap-1">
-									<Badge
-										variant={
-											opp.lead?.hasRequiredData ? "secondary" : "destructive"
-										}
-										className="text-xs"
-									>
-										<User className="mr-1 h-3 w-3" />
-										Cliente{" "}
-										{opp.lead?.hasRequiredData ? (
-											<CheckCircle2 className="ml-1 h-3 w-3" />
-										) : (
-											<AlertTriangle className="ml-1 h-3 w-3" />
-										)}
-									</Badge>
-									<Badge
-										variant={
-											opp.vehicle?.hasRequiredData ? "secondary" : "destructive"
-										}
-										className="text-xs"
-									>
-										<Car className="mr-1 h-3 w-3" />
-										Vehículo{" "}
-										{opp.vehicle?.hasRequiredData ? (
-											<CheckCircle2 className="ml-1 h-3 w-3" />
-										) : (
-											<AlertTriangle className="ml-1 h-3 w-3" />
-										)}
-									</Badge>
-									<Badge
-										variant={opp.hasCreditData ? "secondary" : "destructive"}
-										className="text-xs"
-									>
-										<CreditCard className="mr-1 h-3 w-3" />
-										Crédito{" "}
-										{opp.hasCreditData ? (
-											<CheckCircle2 className="ml-1 h-3 w-3" />
-										) : (
-											<AlertTriangle className="ml-1 h-3 w-3" />
-										)}
-									</Badge>
-								</div>
+								))}
 							</div>
-						))}
-					</div>
+
+							{/* Paginación */}
+							{totalPages > 1 && (
+								<div className="mt-4 flex items-center justify-between border-t pt-4">
+									<span className="text-muted-foreground text-sm">
+										Mostrando {page * pageSize + 1} -{" "}
+										{Math.min((page + 1) * pageSize, total)} de {total}
+									</span>
+									<div className="flex items-center gap-2">
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPage(0)}
+											disabled={page === 0}
+										>
+											<ChevronsLeft className="h-4 w-4" />
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPage((p) => Math.max(0, p - 1))}
+											disabled={page === 0}
+										>
+											<ChevronLeft className="h-4 w-4" />
+										</Button>
+										<span className="px-2 text-sm">
+											Página {page + 1} de {totalPages}
+										</span>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() =>
+												setPage((p) => Math.min(totalPages - 1, p + 1))
+											}
+											disabled={page >= totalPages - 1}
+										>
+											<ChevronRight className="h-4 w-4" />
+										</Button>
+										<Button
+											variant="outline"
+											size="sm"
+											onClick={() => setPage(totalPages - 1)}
+											disabled={page >= totalPages - 1}
+										>
+											<ChevronsRight className="h-4 w-4" />
+										</Button>
+									</div>
+								</div>
+							)}
+						</>
+					)}
 				</CardContent>
 			</Card>
 

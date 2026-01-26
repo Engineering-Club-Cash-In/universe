@@ -297,6 +297,7 @@ function VehiclesDashboard() {
 		vehicleType: "",
 		licensePlate: "",
 		vinNumber: "",
+		motorNumber: "",
 		origin: "",
 		fuelType: "",
 		transmission: "",
@@ -323,6 +324,7 @@ function VehiclesDashboard() {
 					vehicleType: data.vehicleType,
 					licensePlate: data.licensePlate || null,
 					vinNumber: data.vinNumber || null,
+					motorNumber: data.motorNumber || null,
 					origin: data.origin || null,
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
@@ -633,6 +635,7 @@ function VehiclesDashboard() {
 																				licensePlate:
 																					vehicle.licensePlate || "",
 																				vinNumber: vehicle.vinNumber || "",
+																				motorNumber: vehicle.motorNumber || "",
 																				origin: vehicle.origin || "",
 																				fuelType: vehicle.fuelType || "",
 																				transmission:
@@ -1798,6 +1801,20 @@ function VehiclesDashboard() {
 											})
 										}
 										placeholder="Número de identificación"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-motorNumber">Número de Motor</Label>
+									<Input
+										id="edit-motorNumber"
+										value={editVehicleForm.motorNumber}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												motorNumber: e.target.value,
+											})
+										}
+										placeholder="Número de motor"
 									/>
 								</div>
 								<div className="space-y-2">

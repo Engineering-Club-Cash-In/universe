@@ -26,6 +26,7 @@ import {
 	crmProcedure,
 	protectedProcedure,
 	publicProcedure,
+	tallerOrCrmProcedure,
 	tallerProcedure,
 } from "../lib/orpc";
 import {
@@ -278,7 +279,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get vehicle by ID with all related data
-	getById: tallerProcedure
+	getById: tallerOrCrmProcedure
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			const [vehicle] = await db
@@ -412,7 +413,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Update vehicle
-	update: tallerProcedure
+	update: tallerOrCrmProcedure
 		.input(
 			z.object({
 				id: z.string(),

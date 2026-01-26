@@ -106,6 +106,7 @@ function VehiclesDashboard() {
 	const processedVehicleIdRef = useRef<string | null>(null);
 	const processedInspectionIdRef = useRef<string | null>(null);
 	const prevDetailsOpenRef = useRef(false);
+	const isTransitioningToEditRef = useRef(false);
 
 	// Debounce search
 	useEffect(() => {
@@ -148,8 +149,7 @@ function VehiclesDashboard() {
 		queryFn: search.vehicleId
 			? () => client.getVehicleById({ id: search.vehicleId! })
 			: () => Promise.resolve(null),
-		enabled:
-			!!search.vehicleId && processedVehicleIdRef.current !== search.vehicleId,
+		enabled: !!search.vehicleId,
 	});
 
 	// Query to fetch inspection by ID (to get vehicleId, then fetch vehicle)
@@ -203,12 +203,17 @@ function VehiclesDashboard() {
 		}
 	}, [search.inspectionId, vehicleFromInspectionQuery.data]);
 
-	// Clear search params when details modal closes
+	// Clear search params when details modal closes (unless transitioning to edit)
 	useEffect(() => {
 		const wasOpen = prevDetailsOpenRef.current;
 		prevDetailsOpenRef.current = isDetailsOpen;
 
 		if (wasOpen && !isDetailsOpen) {
+			// Skip cleanup if transitioning to edit modal
+			if (isTransitioningToEditRef.current) {
+				isTransitioningToEditRef.current = false;
+				return;
+			}
 			if (processedVehicleIdRef.current || processedInspectionIdRef.current) {
 				processedVehicleIdRef.current = null;
 				processedInspectionIdRef.current = null;
@@ -928,6 +933,7 @@ function VehiclesDashboard() {
 											series: selectedVehicle.series || "",
 											iscvCode: selectedVehicle.iscvCode || "",
 										});
+										isTransitioningToEditRef.current = true;
 										setIsDetailsOpen(false);
 										setIsEditVehicleOpen(true);
 									}}

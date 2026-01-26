@@ -135,6 +135,7 @@ function RouteComponent() {
 	const processedLeadIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
 	const prevDetailsOpenRef = useRef(isDetailsDialogOpen);
+	const isTransitioningToEditRef = useRef(false);
 
 	// Debounce search input
 	useEffect(() => {
@@ -545,15 +546,22 @@ function RouteComponent() {
 		}
 	}, [isCreateDialogOpen, navigate, search.companyId]);
 
-	// Clear search param when details modal closes
+	// Clear search param when details modal closes (unless transitioning to edit)
 	useEffect(() => {
 		const wasOpen = prevDetailsOpenRef.current;
 		prevDetailsOpenRef.current = isDetailsDialogOpen;
 
-		if (wasOpen && !isDetailsDialogOpen && processedLeadIdRef.current) {
-			processedLeadIdRef.current = null;
-			if (search.leadId) {
-				navigate({ to: "/crm/leads", search: {}, replace: true });
+		if (wasOpen && !isDetailsDialogOpen) {
+			// Skip cleanup if transitioning to edit modal
+			if (isTransitioningToEditRef.current) {
+				isTransitioningToEditRef.current = false;
+				return;
+			}
+			if (processedLeadIdRef.current) {
+				processedLeadIdRef.current = null;
+				if (search.leadId) {
+					navigate({ to: "/crm/leads", search: {}, replace: true });
+				}
 			}
 		}
 	}, [isDetailsDialogOpen, navigate, search.leadId]);
@@ -2939,6 +2947,7 @@ function RouteComponent() {
 									className="flex-1"
 									onClick={() => {
 										setEditingLead(selectedLead);
+										isTransitioningToEditRef.current = true;
 										setIsDetailsDialogOpen(false);
 										setIsCreateDialogOpen(true);
 									}}

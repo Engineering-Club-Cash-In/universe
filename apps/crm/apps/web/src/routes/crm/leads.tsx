@@ -271,6 +271,7 @@ function RouteComponent() {
 			phone: "",
 			age: "",
 			dpi: "",
+			direccion: "",
 			departamento: "",
 			municipio: "",
 			zona: "",
@@ -350,6 +351,7 @@ function RouteComponent() {
 				dpi: value.dpi || undefined,
 				middleName: value.middleName || undefined,
 				secondLastName: value.secondLastName || undefined,
+				direccion: value.direccion || undefined,
 				departamento: value.departamento || undefined,
 				municipio: value.municipio || undefined,
 				zona: value.zona || undefined,
@@ -364,9 +366,7 @@ function RouteComponent() {
 				score: value.score ? Number.parseFloat(value.score) : undefined,
 				fit: value.fit,
 				// Campos para contratos legales
-				birthDate: value.birthDate
-					? new Date(value.birthDate)
-					: undefined,
+				birthDate: value.birthDate ? new Date(value.birthDate) : undefined,
 				gender: value.gender || undefined,
 				nationality: value.nationality || undefined,
 			};
@@ -578,7 +578,10 @@ function RouteComponent() {
 				editingLead.age ? String(editingLead.age) : "",
 			);
 			createLeadForm.setFieldValue("dpi", editingLead.dpi || "");
-			createLeadForm.setFieldValue("clientType", "individual");
+			createLeadForm.setFieldValue(
+				"clientType",
+				(editingLead as any).clientType || "individual",
+			);
 			createLeadForm.setFieldValue(
 				"maritalStatus",
 				editingLead.maritalStatus || "single",
@@ -626,6 +629,10 @@ function RouteComponent() {
 			);
 			createLeadForm.setFieldValue("fit", editingLead.fit || false);
 			// Campos de dirección
+			createLeadForm.setFieldValue(
+				"direccion",
+				(editingLead as any).direccion || "",
+			);
 			const departamento = (editingLead as any).departamento || "";
 			createLeadForm.setFieldValue("departamento", departamento);
 			setSelectedDepartamento(departamento);
@@ -638,14 +645,9 @@ function RouteComponent() {
 			const birthDate = (editingLead as any).birthDate;
 			createLeadForm.setFieldValue(
 				"birthDate",
-				birthDate
-					? new Date(birthDate).toISOString().split("T")[0]
-					: "",
+				birthDate ? new Date(birthDate).toISOString().split("T")[0] : "",
 			);
-			createLeadForm.setFieldValue(
-				"gender",
-				(editingLead as any).gender || "",
-			);
+			createLeadForm.setFieldValue("gender", (editingLead as any).gender || "");
 			createLeadForm.setFieldValue(
 				"nationality",
 				(editingLead as any).nationality || "",
@@ -1382,8 +1384,12 @@ function RouteComponent() {
 																	<SelectValue placeholder="Seleccionar género" />
 																</SelectTrigger>
 																<SelectContent>
-																	<SelectItem value="male">Masculino</SelectItem>
-																	<SelectItem value="female">Femenino</SelectItem>
+																	<SelectItem value="male">
+																		Masculino
+																	</SelectItem>
+																	<SelectItem value="female">
+																		Femenino
+																	</SelectItem>
 																</SelectContent>
 															</Select>
 														</div>
@@ -1415,6 +1421,29 @@ function RouteComponent() {
 									{/* Dirección */}
 									<div className="space-y-4">
 										<h3 className="font-semibold text-lg">Dirección</h3>
+										<div className="grid grid-cols-1 gap-4">
+											<div>
+												<createLeadForm.Field name="direccion">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>
+																Dirección Completa
+															</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="Ej: 4ta Calle 5-67, Zona 1"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
 										<div className="grid grid-cols-3 gap-4">
 											<div>
 												<createLeadForm.Field name="departamento">

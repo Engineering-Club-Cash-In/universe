@@ -596,6 +596,23 @@ function OpportunityDocumentsPage() {
 				opportunity={selectedOpportunityForModal}
 				userRole="analyst"
 				readOnly
+				onNavigateToLead={() => {
+					setIsOpportunityModalOpen(false);
+					if (opportunity?.lead) {
+						setSelectedLeadForModal({
+							id: opportunity.lead.id,
+							firstName: opportunity.lead.firstName,
+							lastName: opportunity.lead.lastName,
+							email: opportunity.lead.email,
+							phone: null,
+							dpi: null,
+							source: "",
+							status: "",
+							createdAt: new Date(),
+						});
+						setIsLeadModalOpen(true);
+					}
+				}}
 			/>
 
 			{/* Lead Detail Modal */}

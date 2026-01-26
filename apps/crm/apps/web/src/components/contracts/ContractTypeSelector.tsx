@@ -115,7 +115,7 @@ export function ContractTypeSelector({
 
 	return (
 		<div className="space-y-6">
-			<div className="mb-4 text-sm text-muted-foreground">
+			<div className="mb-4 text-muted-foreground text-sm">
 				Seleccione los contratos que desea generar. Puede seleccionar múltiples
 				contratos a la vez.
 			</div>
@@ -133,9 +133,10 @@ export function ContractTypeSelector({
 			{otrosContracts.length > 0 &&
 				renderContractGroup("Otros Documentos", "otro", otrosContracts)}
 
-			<div className="mt-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-3">
+			<div className="mt-4 rounded-lg border-amber-500 border-l-4 bg-amber-50 p-3">
 				<p className="text-amber-800 text-sm">
-					<strong>{selectedContracts.length}</strong> contrato(s) seleccionado(s)
+					<strong>{selectedContracts.length}</strong> contrato(s)
+					seleccionado(s)
 				</p>
 			</div>
 		</div>

@@ -5,10 +5,7 @@ import type { Vehicle } from "../db/schema/vehicles";
  * Aplica a todos los vehículos (nuevos y usados).
  */
 export function getMissingFieldsForContracts(
-	vehicle: Pick<
-		Vehicle,
-		"vinNumber" | "motorNumber" | "seats" | "vehicleUse"
-	>,
+	vehicle: Pick<Vehicle, "vinNumber" | "motorNumber" | "seats" | "vehicleUse">,
 ): string[] {
 	const requiredForContracts = [
 		{ field: "vinNumber" as const, label: "VIN/Chasis" },

@@ -6,7 +6,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@/components/ui/select";
-import { BeneficiariosForm, type Beneficiario } from "./BeneficiariosForm";
+import { type Beneficiario, BeneficiariosForm } from "./BeneficiariosForm";
 
 interface ContractDate {
 	day: string;

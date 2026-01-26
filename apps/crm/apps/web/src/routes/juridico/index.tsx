@@ -500,17 +500,17 @@ function RouteComponent() {
 																	<DropdownMenuItem
 																		onClick={(e) => {
 																			e.stopPropagation();
-																		setOpportunityToApprove({
-																			id: opp.id,
-																			title: opp.title,
-																		});
-																		setIsApproveModalOpen(true);
-																	}}
-																	disabled={opp.contractCount === 0}
-																	className="cursor-pointer"
-																>
-																	<CheckCircle className="mr-2 h-4 w-4" />
-																	Aprobar (→ 90%)
+																			setOpportunityToApprove({
+																				id: opp.id,
+																				title: opp.title,
+																			});
+																			setIsApproveModalOpen(true);
+																		}}
+																		disabled={opp.contractCount === 0}
+																		className="cursor-pointer"
+																	>
+																		<CheckCircle className="mr-2 h-4 w-4" />
+																		Aprobar (→ 90%)
 																	</DropdownMenuItem>
 																)}
 														</DropdownMenuContent>

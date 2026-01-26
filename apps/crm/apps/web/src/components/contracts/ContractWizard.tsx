@@ -1,9 +1,7 @@
 import { Check, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-	type Beneficiario,
-} from "./BeneficiariosForm";
+import type { Beneficiario } from "./BeneficiariosForm";
 import { ContractConfig } from "./ContractConfig";
 import { type ContractResult, ContractResults } from "./ContractResults";
 import { ContractTypeSelector } from "./ContractTypeSelector";
@@ -104,8 +102,8 @@ export function ContractWizard({
 		useState<GenerationResult | null>(null);
 
 	// Check if any selected contract requires beneficiarios
-	const requiresBeneficiarios = selectedContracts.some((id) =>
-		contractTypes.find((c) => c.id === id)?.requiresBeneficiarios,
+	const requiresBeneficiarios = selectedContracts.some(
+		(id) => contractTypes.find((c) => c.id === id)?.requiresBeneficiarios,
 	);
 
 	const canProceedStep1 = selectedContracts.length > 0;
@@ -238,11 +236,7 @@ export function ContractWizard({
 					disabled={isGenerating}
 				>
 					<ChevronLeft className="mr-2 h-4 w-4" />
-					{step === 1
-						? "Volver"
-						: step === 3
-							? "Generar Más"
-							: "Anterior"}
+					{step === 1 ? "Volver" : step === 3 ? "Generar Más" : "Anterior"}
 				</Button>
 
 				{step === 3 ? (

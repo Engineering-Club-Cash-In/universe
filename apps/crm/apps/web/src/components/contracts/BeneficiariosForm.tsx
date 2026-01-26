@@ -71,7 +71,9 @@ export function BeneficiariosForm({
 								<Input
 									id={`cuenta-${index}`}
 									value={beneficiario.cuenta}
-									onChange={(e) => handleChange(index, "cuenta", e.target.value)}
+									onChange={(e) =>
+										handleChange(index, "cuenta", e.target.value)
+									}
 									placeholder="Ej: Banco Industrial - 123456789"
 								/>
 							</div>

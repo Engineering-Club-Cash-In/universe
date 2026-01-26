@@ -4207,23 +4207,26 @@ export const crmRouter = {
 				});
 			}
 
-			// Update opportunity with investors and move to 80%
-			await db
-				.update(opportunities)
-				.set({
-					inversionistas: input.inversionistas,
-					stageId: stage80.id,
-					updatedAt: new Date(),
-				})
-				.where(eq(opportunities.id, input.opportunityId));
+			// Update opportunity and record history in a transaction for atomicity
+			await db.transaction(async (tx) => {
+				// Update opportunity with investors and move to 80%
+				await tx
+					.update(opportunities)
+					.set({
+						inversionistas: input.inversionistas,
+						stageId: stage80.id,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
 
-			// Record stage history
-			await db.insert(opportunityStageHistory).values({
-				opportunityId: input.opportunityId,
-				fromStageId: opportunity.stageId,
-				toStageId: stage80.id,
-				changedBy: context.userId,
-				reason: "Inversión asignada - Avance a etapa jurídica",
+				// Record stage history
+				await tx.insert(opportunityStageHistory).values({
+					opportunityId: input.opportunityId,
+					fromStageId: opportunity.stageId,
+					toStageId: stage80.id,
+					changedBy: context.userId,
+					reason: "Inversión asignada - Avance a etapa jurídica",
+				});
 			});
 
 			return {

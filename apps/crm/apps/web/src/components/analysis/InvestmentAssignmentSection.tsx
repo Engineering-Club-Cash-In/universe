@@ -10,13 +10,13 @@ import {
 	ChevronsRight,
 	CreditCard,
 	Eye,
+	FileText,
 	Loader2,
 	Plus,
 	Search,
 	Trash2,
 	TrendingUp,
 	User,
-	FileText,
 } from "lucide-react";
 import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -58,7 +58,7 @@ interface SelectedInversionista {
 
 // Credit categories type
 type CreditCategory =
-    | ""
+	| ""
 	| "Contraseña"
 	| "CV Vehículo"
 	| "CV Vehículo nuevo"
@@ -79,21 +79,23 @@ export function InvestmentAssignmentSection() {
 	const [selectedInversionistas, setSelectedInversionistas] = useState<
 		SelectedInversionista[]
 	>([]);
-	
+
 	// Estados para campos adicionales del detalle de crédito
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editNit, setEditNit] = useState<string>("");
 	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
 
 	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
-	const getAutomaticCategoria = (opp: InvestmentOpportunity | undefined): CreditCategory => {
+	const getAutomaticCategoria = (
+		opp: InvestmentOpportunity | undefined,
+	): CreditCategory => {
 		if (!opp) return "";
-		
+
 		// Si es sobre vehículo, siempre es "Vehículo"
 		if (opp.creditType === "sobre_vehiculo") {
 			return "Vehículo";
 		}
-		
+
 		// Si es autocompra, depende de si el vehículo es nuevo o no
 		if (opp.creditType === "autocompra") {
 			if (opp.vehicle?.isNew) {
@@ -101,7 +103,7 @@ export function InvestmentAssignmentSection() {
 			}
 			return "CV Vehículo";
 		}
-		
+
 		return "";
 	};
 
@@ -188,10 +190,10 @@ export function InvestmentAssignmentSection() {
 			nit: string;
 			diaPagoMensual: number;
 		}) => {
-			return client.assignInvestorAndAdvance({ 
-				opportunityId, 
+			return client.assignInvestorAndAdvance({
+				opportunityId,
 				inversionistas,
-			    // @ts-ignore
+				// @ts-expect-error
 				categoria: categoria,
 				nit: nit,
 				diaPagoMensual: diaPagoMensual,
@@ -385,8 +387,12 @@ export function InvestmentAssignmentSection() {
 				? {
 						id: opp.vehicle.id,
 						make: opp.vehicle.description?.split(" ")[0] || "",
-						model: opp.vehicle.description?.split(" ").slice(1, -1).join(" ") || "",
-						year: Number.parseInt(opp.vehicle.description?.split(" ").pop() || "0") || 0,
+						model:
+							opp.vehicle.description?.split(" ").slice(1, -1).join(" ") || "",
+						year:
+							Number.parseInt(
+								opp.vehicle.description?.split(" ").pop() || "0",
+							) || 0,
 						licensePlate: opp.vehicle.licensePlate,
 						color: null,
 						isNew: opp.vehicle.isNew,
@@ -603,7 +609,9 @@ export function InvestmentAssignmentSection() {
 									<Button
 										variant="outline"
 										size="sm"
-										onClick={() => handleOpenOpportunityModal(selectedOpportunity)}
+										onClick={() =>
+											handleOpenOpportunityModal(selectedOpportunity)
+										}
 									>
 										<Eye className="mr-1 h-4 w-4" />
 										Ver Detalle
@@ -686,20 +694,25 @@ export function InvestmentAssignmentSection() {
 							<div className="space-y-3">
 								<div className="flex items-center gap-2">
 									<FileText className="h-4 w-4" />
-									<Label className="font-medium text-sm">Datos del Crédito</Label>
+									<Label className="font-medium text-sm">
+										Datos del Crédito
+									</Label>
 								</div>
-								
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
 
+								<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
 									{/* Categoría (automática) y NIT */}
 									<div className="grid grid-cols-2 gap-2">
 										<div>
 											<Label className="text-xs">Categoría</Label>
 											<div className="flex h-10 w-full items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">
-												{getAutomaticCategoria(selectedOpportunity) || "Sin categoría"}
+												{getAutomaticCategoria(selectedOpportunity) ||
+													"Sin categoría"}
 											</div>
 											<p className="mt-1 text-[10px] text-muted-foreground">
-												Calculada según tipo de crédito{selectedOpportunity?.creditType === "autocompra" ? " y vehículo" : ""}
+												Calculada según tipo de crédito
+												{selectedOpportunity?.creditType === "autocompra"
+													? " y vehículo"
+													: ""}
 											</p>
 										</div>
 										<div>
@@ -717,17 +730,21 @@ export function InvestmentAssignmentSection() {
 										<Label className="text-xs">Día de Pago Mensual</Label>
 										<Select
 											value={editDiaPagoMensual.toString()}
-											onValueChange={(value) => setEditDiaPagoMensual(Number(value))}
+											onValueChange={(value) =>
+												setEditDiaPagoMensual(Number(value))
+											}
 										>
 											<SelectTrigger>
 												<SelectValue placeholder="Seleccionar día" />
 											</SelectTrigger>
 											<SelectContent>
-												{Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-													<SelectItem key={day} value={day.toString()}>
-														{day}
-													</SelectItem>
-												))}
+												{Array.from({ length: 31 }, (_, i) => i + 1).map(
+													(day) => (
+														<SelectItem key={day} value={day.toString()}>
+															{day}
+														</SelectItem>
+													),
+												)}
 											</SelectContent>
 										</Select>
 									</div>

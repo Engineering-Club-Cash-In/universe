@@ -892,11 +892,51 @@ function VehiclesDashboard() {
 			>
 				<DialogContent className="max-h-[90vh] min-w-[90vw] max-w-7xl overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>Detalles del Vehículo</DialogTitle>
-						<DialogDescription>
-							Información completa del vehículo {selectedVehicle?.make}{" "}
-							{selectedVehicle?.model} {selectedVehicle?.year}
-						</DialogDescription>
+						<div className="flex items-center justify-between">
+							<div>
+								<DialogTitle>Detalles del Vehículo</DialogTitle>
+								<DialogDescription>
+									Información completa del vehículo {selectedVehicle?.make}{" "}
+									{selectedVehicle?.model} {selectedVehicle?.year}
+								</DialogDescription>
+							</div>
+							{selectedVehicle && (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										setEditVehicleForm({
+											id: selectedVehicle.id,
+											make: selectedVehicle.make || "",
+											model: selectedVehicle.model || "",
+											year:
+												selectedVehicle.year || new Date().getFullYear(),
+											color: selectedVehicle.color || "",
+											vehicleType: selectedVehicle.vehicleType || "",
+											licensePlate: selectedVehicle.licensePlate || "",
+											vinNumber: selectedVehicle.vinNumber || "",
+											motorNumber: selectedVehicle.motorNumber || "",
+											origin: selectedVehicle.origin || "",
+											fuelType: selectedVehicle.fuelType || "",
+											transmission: selectedVehicle.transmission || "",
+											kmMileage: selectedVehicle.kmMileage || 0,
+											isNew: selectedVehicle.isNew || false,
+											seats: selectedVehicle.seats ?? null,
+											doors: selectedVehicle.doors ?? null,
+											axles: selectedVehicle.axles ?? 2,
+											vehicleUse: selectedVehicle.vehicleUse || "",
+											series: selectedVehicle.series || "",
+											iscvCode: selectedVehicle.iscvCode || "",
+										});
+										setIsDetailsOpen(false);
+										setIsEditVehicleOpen(true);
+									}}
+								>
+									<Pencil className="mr-2 h-4 w-4" />
+									Editar
+								</Button>
+							)}
+						</div>
 					</DialogHeader>
 
 					{selectedVehicle && (

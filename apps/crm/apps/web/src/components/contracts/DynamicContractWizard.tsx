@@ -1005,9 +1005,126 @@ export function DynamicContractWizard({
 		}
 	};
 
+	// Validate a specific field against its regex
+	const validateField = useCallback((field: Field, value: string): string => {
+		const strValue = typeof value === "string" ? value : String(value || "");
+
+		// Validate required field
+		if (field.required && !strValue.trim()) {
+			return "Este campo es obligatorio";
+		}
+
+		// Validate regex if there's a value and regex is defined
+		if (strValue.trim() && field.regex) {
+			try {
+				const regex = new RegExp(field.regex);
+				if (!regex.test(strValue)) {
+					return "El formato del campo no es válido";
+				}
+			} catch {
+				console.warn(`Regex inválida para el campo ${field.key}:`, field.regex);
+			}
+		}
+
+		return "";
+	}, []);
+
+	// Filter input in real-time based on regex pattern
+	const validateInputOnType = useCallback(
+		(regex: string, value: string): string => {
+			if (!regex || !value) return value;
+
+			try {
+				// Remove anchors ^ and $ for real-time validation
+				const cleanPattern = regex.replace(/^\^|\$$/g, "");
+
+				// Extract quantifier info and character type
+				const quantifierMatch = cleanPattern.match(
+					/^(.+?)\{(\d+)(?:,(\d+))?\}$/,
+				);
+
+				if (quantifierMatch) {
+					const [, charPattern, min, max] = quantifierMatch;
+					const maxLength = Number.parseInt(max || min);
+
+					// Build allowed characters set
+					let allowedChars = "";
+
+					if (charPattern.includes("\\d")) allowedChars += "0-9";
+					if (charPattern.includes("\\w")) allowedChars += "a-zA-Z0-9_";
+					if (charPattern.includes("\\s")) allowedChars += " \\t\\n\\r";
+
+					// Handle character sets [...]
+					const charSetMatch = charPattern.match(/\[([^\]]+)\]/);
+					if (charSetMatch) {
+						allowedChars += charSetMatch[1];
+					}
+
+					// Literal characters
+					if (charPattern.includes("\\.")) allowedChars += ".";
+					if (charPattern.includes("-") && !charPattern.includes("["))
+						allowedChars += "-";
+					if (charPattern.includes(",")) allowedChars += ",";
+
+					if (allowedChars) {
+						// Filter disallowed characters
+						const inverseRegex = new RegExp(`[^${allowedChars}]`, "g");
+						const filtered = value.replace(inverseRegex, "");
+
+						// Limit to max length
+						return filtered.slice(0, maxLength);
+					}
+				}
+
+				// Fallback: extract allowed characters without strict limit
+				const charSetMatch = cleanPattern.match(/\[([^\]]+)\]/g);
+
+				if (charSetMatch) {
+					let allowedChars = "";
+					for (const set of charSetMatch) {
+						allowedChars += set.slice(1, -1);
+					}
+
+					if (cleanPattern.includes("\\d")) allowedChars += "0-9";
+					if (cleanPattern.includes("\\s")) allowedChars += " \\s";
+					if (cleanPattern.includes("(") && cleanPattern.includes(")"))
+						allowedChars += "()";
+					if (cleanPattern.includes("\\.")) allowedChars += ".";
+					if (cleanPattern.includes(",")) allowedChars += ",";
+
+					const inverseRegex = new RegExp(`[^${allowedChars}]`, "g");
+					return value.replace(inverseRegex, "");
+				}
+
+				return value;
+			} catch (error) {
+				console.warn("Error procesando regex:", error);
+				return value;
+			}
+		},
+		[],
+	);
+
 	// Handle field change (for manual adjustments)
 	const handleFieldChange = (fieldKey: string, value: string) => {
-		setFieldValues((prev) => ({ ...prev, [fieldKey]: value }));
+		// Find field to get its regex
+		const field = relevantFields.find((f) => f.key === fieldKey);
+
+		// Apply real-time validation if field has regex
+		const processedValue = field?.regex
+			? validateInputOnType(field.regex, value)
+			: value;
+
+		setFieldValues((prev) => ({ ...prev, [fieldKey]: processedValue }));
+
+		// Validate and update errors
+		if (field) {
+			const error = validateField(field, processedValue);
+			setFieldErrors((prev) => ({
+				...prev,
+				[fieldKey]: error,
+			}));
+		}
 	};
 
 	// Check if field has value
@@ -1361,16 +1478,17 @@ export function DynamicContractWizard({
 											</CardTitle>
 										</CardHeader>
 										<CardContent>
-											<div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+											<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 												{relevantFields.map((field) => {
 													const hasValue = fieldHasValue(field.key);
+													const hasError = !!fieldErrors[field.key];
 													return (
-														<div
-															key={field.key}
-															className={`rounded-lg border p-3 ${hasValue ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}
-														>
-															<div className="mb-1 flex items-center gap-2">
-																{hasValue ? (
+														<div key={field.key} className="flex flex-col">
+															{/* Label */}
+															<div className="mb-1.5 flex items-center gap-2">
+																{hasError ? (
+																	<AlertCircle className="h-4 w-4 text-red-500" />
+																) : hasValue ? (
 																	<CheckCircle className="h-4 w-4 text-green-600" />
 																) : (
 																	<AlertCircle className="h-4 w-4 text-amber-600" />
@@ -1382,14 +1500,35 @@ export function DynamicContractWizard({
 																	)}
 																</span>
 															</div>
+
+															{/* Description - visible hint */}
+															<div className="min-h-[20px]">
+																{field.description && (
+																	<p className="text-muted-foreground text-xs leading-tight">
+																		{field.description}
+																	</p>
+																)}
+															</div>
+
+															{/* Input */}
 															<Input
 																value={fieldValues[field.key] || ""}
 																onChange={(e) =>
 																	handleFieldChange(field.key, e.target.value)
 																}
-																placeholder={field.description || "Sin valor"}
-																className="h-8 bg-white text-sm"
+																placeholder={`Ingresa ${field.name.toLowerCase()}`}
+																className={`h-9 bg-white text-sm ${hasError ? "border-red-500" : ""}`}
 															/>
+
+															{/* Error message */}
+															<div className="mt-1 min-h-[20px]">
+																{fieldErrors[field.key] && (
+																	<p className="flex items-center gap-1 text-red-600 text-sm">
+																		<AlertCircle className="h-3 w-3" />
+																		{fieldErrors[field.key]}
+																	</p>
+																)}
+															</div>
 														</div>
 													);
 												})}

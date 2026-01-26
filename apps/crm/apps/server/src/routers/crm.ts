@@ -4254,6 +4254,7 @@ export const crmRouter = {
 					diaPagoMensual: opp.diaPagoMensual,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
+					creditType: opp.creditType,
 					lead: lead
 						? {
 								id: lead.id,

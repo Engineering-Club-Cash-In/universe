@@ -1,13 +1,8 @@
 import { ORPCError } from "@orpc/server";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
+import { closeOpportunity } from "@/services/close-opportunity";
 import { db } from "../db";
-import {
-	generateUniqueFilename,
-	getFileUrl,
-	uploadFileToR2,
-	validateFile,
-} from "../lib/storage";
 import { user } from "../db/schema/auth";
 import {
 	leads,
@@ -23,8 +18,13 @@ import {
 	viewOpportunityContractsProcedure,
 } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
+import {
+	generateUniqueFilename,
+	getFileUrl,
+	uploadFileToR2,
+	validateFile,
+} from "../lib/storage";
 import { checkDocumensoSigningStatus } from "../services/documenso-signing";
-import { closeOpportunity } from "@/services/close-opportunity";
 
 export const legalContractsRouter = {
 	// Crear nuevo contrato legal
@@ -735,7 +735,6 @@ export const legalContractsRouter = {
 					message: closeResult.error || "Error al cerrar la oportunidad",
 				});
 			}
-			
 
 			// Obtener la etapa del 90%
 			const [targetStage] = await db

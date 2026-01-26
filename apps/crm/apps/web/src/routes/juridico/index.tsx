@@ -5,6 +5,7 @@ import { es } from "date-fns/locale";
 import {
 	Banknote,
 	CheckCircle,
+	FilePlus2,
 	FileSignature,
 	FileText,
 	Loader2,
@@ -481,22 +482,35 @@ function RouteComponent() {
 																	Gestionar
 																</Link>
 															</DropdownMenuItem>
+															{opp.stage.closurePercentage === 80 && (
+																<DropdownMenuItem asChild>
+																	<Link
+																		to="/juridico/generate/$opportunityId"
+																		params={{ opportunityId: opp.id }}
+																		className="cursor-pointer"
+																		onClick={(e) => e.stopPropagation()}
+																	>
+																		<FilePlus2 className="mr-2 h-4 w-4" />
+																		Generar Contratos
+																	</Link>
+																</DropdownMenuItem>
+															)}
 															{canApproveLegalStage &&
 																opp.stage.closurePercentage === 80 && (
 																	<DropdownMenuItem
 																		onClick={(e) => {
 																			e.stopPropagation();
-																		setOpportunityToApprove({
-																			id: opp.id,
-																			title: opp.title,
-																		});
-																		setIsApproveModalOpen(true);
-																	}}
-																	disabled={opp.contractCount === 0}
-																	className="cursor-pointer"
-																>
-																	<CheckCircle className="mr-2 h-4 w-4" />
-																	Aprobar (→ 90%)
+																			setOpportunityToApprove({
+																				id: opp.id,
+																				title: opp.title,
+																			});
+																			setIsApproveModalOpen(true);
+																		}}
+																		disabled={opp.contractCount === 0}
+																		className="cursor-pointer"
+																	>
+																		<CheckCircle className="mr-2 h-4 w-4" />
+																		Aprobar (→ 90%)
 																	</DropdownMenuItem>
 																)}
 														</DropdownMenuContent>

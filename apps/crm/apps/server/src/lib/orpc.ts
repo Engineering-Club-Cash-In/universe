@@ -293,6 +293,57 @@ const requireTallerOrigin = o.middleware(async ({ context, next }) => {
 	});
 });
 
+// Middleware que permite acceso desde taller (por origen) O desde CRM (por rol)
+const requireTallerOrCrm = o.middleware(async ({ context, next }) => {
+	const tallerUrl = process.env.TALLER_URL;
+	const frontUrl = process.env.FRONT_URL;
+	const origin = context.headers.get("origin");
+	const referer = context.headers.get("referer");
+
+	// Verificar si viene del taller
+	const isFromTaller =
+		(tallerUrl &&
+			(origin === tallerUrl ||
+				referer?.startsWith(tallerUrl) ||
+				referer?.startsWith(`${tallerUrl}/`))) ||
+		(frontUrl &&
+			(origin === frontUrl ||
+				referer?.startsWith(frontUrl) ||
+				referer?.startsWith(`${frontUrl}/`)));
+
+	if (isFromTaller) {
+		return next({ context });
+	}
+
+	// Si no viene del taller, verificar si tiene acceso CRM
+	if (!context.session?.user) {
+		throw new ORPCError("UNAUTHORIZED");
+	}
+
+	const userId = context.session.user.id;
+	const userData = await db
+		.select()
+		.from(user)
+		.where(eq(user.id, userId))
+		.limit(1);
+	const userRole = userData[0]?.role;
+
+	if (!PERMISSIONS.canAccessCRM(userRole)) {
+		throw new ORPCError("FORBIDDEN", {
+			message: "CRM or Taller access required",
+		});
+	}
+
+	return next({
+		context: {
+			...context,
+			user: userData[0],
+			userId,
+			userRole,
+		},
+	});
+});
+
 export const protectedProcedure = publicProcedure.use(requireAuth);
 export const adminProcedure = publicProcedure.use(requireAdmin);
 export const crmProcedure = publicProcedure.use(requireCrmAccess);
@@ -307,3 +358,4 @@ export const viewOpportunityContractsProcedure = publicProcedure.use(
 );
 export const juridicoProcedure = publicProcedure.use(requireJuridico);
 export const tallerProcedure = publicProcedure.use(requireTallerOrigin);
+export const tallerOrCrmProcedure = publicProcedure.use(requireTallerOrCrm);

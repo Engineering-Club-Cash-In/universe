@@ -26,6 +26,7 @@ import {
 	crmProcedure,
 	protectedProcedure,
 	publicProcedure,
+	tallerOrCrmProcedure,
 	tallerProcedure,
 } from "../lib/orpc";
 import {
@@ -278,7 +279,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Get vehicle by ID with all related data
-	getById: tallerProcedure
+	getById: tallerOrCrmProcedure
 		.input(z.object({ id: z.string() }))
 		.handler(async ({ input }) => {
 			const [vehicle] = await db
@@ -335,6 +336,7 @@ export const vehiclesRouter = {
 				year: z.number(),
 				licensePlate: z.string(),
 				vinNumber: z.string(),
+				motorNumber: z.string().optional(),
 				color: z.string(),
 				vehicleType: z.string(),
 				milesMileage: z.number().nullable().optional(),
@@ -347,6 +349,13 @@ export const vehiclesRouter = {
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
 				isNew: z.boolean().optional().default(false),
+				// Campos para contratos legales
+				seats: z.number().nullable().optional(),
+				doors: z.number().nullable().optional(),
+				axles: z.number().nullable().optional().default(2),
+				vehicleUse: z.string().nullable().optional(),
+				series: z.string().nullable().optional(),
+				iscvCode: z.string().nullable().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -371,6 +380,7 @@ export const vehiclesRouter = {
 				// Campos opcionales (llegan después del dealer)
 				licensePlate: z.string().optional(),
 				vinNumber: z.string().optional(),
+				motorNumber: z.string().optional(),
 				milesMileage: z.number().nullable().optional(),
 				kmMileage: z.number().optional().default(0),
 				origin: z.string().optional(),
@@ -380,6 +390,13 @@ export const vehiclesRouter = {
 				transmission: z.string().optional(),
 				companyId: z.string().nullable().optional(),
 				status: z.string().optional().default("pending"),
+				// Campos para contratos legales
+				seats: z.number().nullable().optional(),
+				doors: z.number().nullable().optional(),
+				axles: z.number().nullable().optional().default(2),
+				vehicleUse: z.string().nullable().optional(),
+				series: z.string().nullable().optional(),
+				iscvCode: z.string().nullable().optional(),
 			}),
 		)
 		.handler(async ({ input }) => {
@@ -396,7 +413,7 @@ export const vehiclesRouter = {
 		}),
 
 	// Update vehicle
-	update: tallerProcedure
+	update: tallerOrCrmProcedure
 		.input(
 			z.object({
 				id: z.string(),
@@ -406,6 +423,7 @@ export const vehiclesRouter = {
 					year: z.number().optional(),
 					licensePlate: z.string().nullable().optional(),
 					vinNumber: z.string().nullable().optional(),
+					motorNumber: z.string().nullable().optional(),
 					color: z.string().optional(),
 					vehicleType: z.string().optional(),
 					milesMileage: z.number().nullable().optional(),
@@ -420,6 +438,13 @@ export const vehiclesRouter = {
 					status: z
 						.enum(["pending", "available", "sold", "maintenance", "auction"])
 						.optional(),
+					// Campos para contratos legales
+					seats: z.number().nullable().optional(),
+					doors: z.number().nullable().optional(),
+					axles: z.number().nullable().optional(),
+					vehicleUse: z.string().nullable().optional(),
+					series: z.string().nullable().optional(),
+					iscvCode: z.string().nullable().optional(),
 				}),
 			}),
 		)
@@ -709,6 +734,7 @@ export const vehiclesRouter = {
 					year: z.number(),
 					licensePlate: z.string(),
 					vinNumber: z.string(),
+					motorNumber: z.string().optional(),
 					color: z.string(),
 					vehicleType: z.string(),
 					milesMileage: z.number().nullable().optional(),
@@ -719,6 +745,13 @@ export const vehiclesRouter = {
 					fuelType: z.enum(["Gasolina", "Diesel", "Eléctrico", "Híbrido"]),
 					transmission: z.enum(["Automático", "Manual"]),
 					companyId: z.string().nullable().optional(),
+					// Campos para contratos legales
+					seats: z.number().nullable().optional(),
+					doors: z.number().nullable().optional(),
+					axles: z.number().nullable().optional().default(2),
+					vehicleUse: z.string().nullable().optional(),
+					series: z.string().nullable().optional(),
+					iscvCode: z.string().nullable().optional(),
 				}),
 				// Inspection data
 				inspection: z.object({

@@ -81,17 +81,17 @@ function OpportunityActions({
 			input: { opportunityId: opportunity.id },
 		}),
 		enabled: !!opportunity.id,
-	})
+	});
 
 	const checklist = useQuery({
 		queryKey: ["getAnalysisChecklist", opportunity.id],
 		queryFn: async () => {
 			return await client.getAnalysisChecklist({
 				opportunityId: opportunity.id,
-			})
+			});
 		},
 		enabled: !!opportunity.id,
-	})
+	});
 
 	const canApprove =
 		(validation.data?.canApprove ?? false) &&
@@ -111,18 +111,18 @@ function OpportunityActions({
 		if (!validation.data.allDocumentsPresent) {
 			reasons.push(
 				`Faltan ${validation.data.missingDocuments.length} documentos obligatorios`,
-			)
+			);
 		}
 
 		const checklistData = checklist.data as any;
 		if (checklistData && !checklistData.canApprove) {
 			reasons.push(
 				"Debe completar todas las verificaciones del checklist de análisis",
-			)
+			);
 		}
 
 		return reasons.length > 0 ? reasons.join("\n") : "";
-	}
+	};
 
 	return (
 		<div className="flex gap-2">
@@ -158,7 +158,7 @@ function OpportunityActions({
 				Rechazar
 			</Button>
 		</div>
-	)
+	);
 }
 
 function AnalysisPage() {
@@ -168,7 +168,7 @@ function AnalysisPage() {
 
 	const [opportunities, setOpportunities] = useState<OpportunityForAnalysis[]>(
 		[],
-	)
+	);
 	const [isLoading, setIsLoading] = useState(true);
 	const [selectedOpportunity, setSelectedOpportunity] =
 		useState<OpportunityForAnalysis | null>(null);
@@ -206,7 +206,7 @@ function AnalysisPage() {
 		} finally {
 			setIsLoading(false);
 		}
-	}
+	};
 
 	// Cargar al montar el componente
 	React.useEffect(() => {
@@ -221,11 +221,14 @@ function AnalysisPage() {
 		setIsApproving(approve);
 		setReason("");
 		setIsApprovalDialogOpen(true);
-	}
+	};
 
 	const handleViewDocuments = (opportunity: OpportunityForAnalysis) => {
-		navigate({ to: "/crm/analysis/$opportunityId", params: { opportunityId: opportunity.id } });
-	}
+		navigate({
+			to: "/crm/analysis/$opportunityId",
+			params: { opportunityId: opportunity.id },
+		});
+	};
 
 	const handleOpenOpportunityModal = (opportunity: OpportunityForAnalysis) => {
 		setSelectedOpportunityForModal({
@@ -266,9 +269,9 @@ function AnalysisPage() {
 						isNew: opportunity.vehicle.isNew,
 					}
 				: null,
-		})
+		});
 		setIsOpportunityModalOpen(true);
-	}
+	};
 
 	const handleOpenLeadModal = (opportunity: OpportunityForAnalysis) => {
 		if (!opportunity.lead) return;
@@ -284,9 +287,9 @@ function AnalysisPage() {
 			createdAt: new Date(),
 			company: null,
 			assignedUser: null,
-		})
+		});
 		setIsLeadModalOpen(true);
-	}
+	};
 
 	const handleSubmitApproval = async () => {
 		if (!selectedOpportunity) return;
@@ -297,11 +300,11 @@ function AnalysisPage() {
 				opportunityId: selectedOpportunity.id,
 				approved: isApproving,
 				reason: reason || undefined,
-			})
+			});
 
 			toast.success(
 				isApproving ? "Oportunidad aprobada" : "Oportunidad rechazada",
-			)
+			);
 
 			setIsApprovalDialogOpen(false);
 			loadOpportunities(); // Recargar lista
@@ -309,11 +312,11 @@ function AnalysisPage() {
 			toast.error(
 				error.message ||
 					`No se pudo ${isApproving ? "aprobar" : "rechazar"} la oportunidad`,
-			)
+			);
 		} finally {
 			setIsSubmitting(false);
 		}
-	}
+	};
 
 	if (isLoading) {
 		return (
@@ -324,7 +327,7 @@ function AnalysisPage() {
 					</CardContent>
 				</Card>
 			</div>
-		)
+		);
 	}
 
 	return (
@@ -575,14 +578,14 @@ function AnalysisPage() {
 				readOnly
 			/>
 		</div>
-	)
+	);
 }
 
 // Component for disbursement section (90% → 100%)
 function DisbursementSection() {
 	const [selectedOpportunity, setSelectedOpportunity] = useState<string | null>(
 		null,
-	)
+	);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
 		useState<OpportunityForModal | null>(null);
@@ -597,7 +600,7 @@ function DisbursementSection() {
 	} = useQuery({
 		queryKey: ["getOpportunitiesForDisbursement"],
 		queryFn: () => client.getOpportunitiesForDisbursement(),
-	})
+	});
 
 	type DisbursementOpportunity = NonNullable<typeof opportunities>[0];
 
@@ -640,9 +643,9 @@ function DisbursementSection() {
 						isNew: opp.vehicle.isNew,
 					}
 				: null,
-		})
+		});
 		setIsOpportunityModalOpen(true);
-	}
+	};
 
 	const handleNavigateToLead = (leadId: string) => {
 		// Find the opportunity with this lead
@@ -658,11 +661,11 @@ function DisbursementSection() {
 				source: "",
 				status: "qualified",
 				createdAt: opp.createdAt,
-			})
+			});
 			setIsOpportunityModalOpen(false);
 			setIsLeadModalOpen(true);
 		}
-	}
+	};
 
 	if (isLoading) {
 		return (
@@ -671,7 +674,7 @@ function DisbursementSection() {
 					<p className="text-muted-foreground">Cargando oportunidades...</p>
 				</CardContent>
 			</Card>
-		)
+		);
 	}
 
 	if (!opportunities || opportunities.length === 0) {
@@ -682,7 +685,7 @@ function DisbursementSection() {
 					No hay oportunidades pendientes de desembolso en este momento.
 				</AlertDescription>
 			</Alert>
-		)
+		);
 	}
 
 	return (
@@ -714,8 +717,8 @@ function DisbursementSection() {
 											type="button"
 											className="cursor-pointer text-left font-medium text-primary hover:underline"
 											onClick={(e) => {
-												e.stopPropagation()
-												handleOpenOpportunityModal(opp)
+												e.stopPropagation();
+												handleOpenOpportunityModal(opp);
 											}}
 										>
 											{opp.leadName}
@@ -761,7 +764,7 @@ function DisbursementSection() {
 						opportunityId={selectedOpportunity}
 						onApproved={() => {
 							setSelectedOpportunity(null);
-							refetch()
+							refetch();
 						}}
 					/>
 				) : (
@@ -793,6 +796,5 @@ function DisbursementSection() {
 				readOnly
 			/>
 		</div>
-	)
+	);
 }
-

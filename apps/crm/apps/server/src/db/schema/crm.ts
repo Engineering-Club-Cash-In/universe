@@ -142,6 +142,10 @@ export const leads = pgTable("leads", {
 	zona: text("zona"), // Zona
 	clientType: clientTypeEnum("client_type").notNull().default("individual"),
 	maritalStatus: maritalStatusEnum("marital_status"),
+	// Campos adicionales para contratos legales
+	birthDate: timestamp("birth_date"), // Fecha de nacimiento (para calcular edad)
+	gender: text("gender"), // 'male' | 'female'
+	nationality: text("nationality"), // Nacionalidad (ej: "guatemalteco")
 	dependents: integer("dependents").default(0),
 	monthlyIncome: decimal("monthly_income", { precision: 12, scale: 2 }),
 	loanAmount: decimal("loan_amount", { precision: 12, scale: 2 }),

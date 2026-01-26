@@ -263,7 +263,10 @@ function RouteComponent() {
 										onClick={() =>
 											navigate({
 												to: "/vehicles",
-												search: { vehicleId: undefined, inspectionId: undefined },
+												search: {
+													vehicleId: opportunity?.vehicle?.id,
+													inspectionId: undefined,
+												},
 											})
 										}
 										className="mt-2 inline-block text-primary text-sm hover:underline"
@@ -282,7 +285,12 @@ function RouteComponent() {
 									</ul>
 									<button
 										type="button"
-										onClick={() => navigate({ to: "/crm/leads" })}
+										onClick={() =>
+											navigate({
+												to: "/crm/leads",
+												search: { leadId: opportunity?.lead?.id },
+											})
+										}
 										className="mt-2 inline-block text-primary text-sm hover:underline"
 									>
 										Ir a editar lead →

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
+import { VEHICLE_DOCUMENT_TYPES } from "@/lib/document-constants";
 import { client } from "@/utils/orpc";
 
 interface OpportunityDocumentUploadProps {
@@ -23,21 +24,6 @@ interface OpportunityDocumentUploadProps {
 	onRefresh: () => void;
 	hasVehicle?: boolean;
 }
-
-// Tipos de documentos que pertenecen al vehículo
-const vehicleDocumentTypes = [
-	"tarjeta_circulacion",
-	"titulo_propiedad",
-	"dpi_dueno",
-	"patente_comercio_vehiculo",
-	"representacion_legal_vehiculo",
-	"dpi_representante_legal_vehiculo",
-	"pago_impuesto_circulacion",
-	"consulta_sat",
-	"consulta_garantias_mobiliarias",
-	"datos_vehiculo_nuevo",
-	"cotizacion_vehiculo_nuevo",
-];
 
 const documentCategories = {
 	"Documentos del Cliente": [
@@ -117,7 +103,9 @@ export function OpportunityDocumentUpload({
 
 	// Verificar si el documento seleccionado es de vehículo y no hay vehículo asignado
 	const isVehicleDocWithoutVehicle =
-		vehicleDocumentTypes.includes(documentType) && !hasVehicle;
+		VEHICLE_DOCUMENT_TYPES.includes(
+			documentType as (typeof VEHICLE_DOCUMENT_TYPES)[number],
+		) && !hasVehicle;
 
 	const queryClient = useQueryClient();
 

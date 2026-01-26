@@ -12,7 +12,10 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import { updateChecklistForClientDocument } from "@/lib/checklist";
+import {
+	updateChecklistForClientDocument,
+	updateChecklistForVehicleDocument,
+} from "@/lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -39,6 +42,10 @@ import {
 	opportunityDocuments,
 } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import {
+	formatMissingLeadFields,
+	getMissingLeadFieldsForContracts,
+} from "../lib/lead-helpers";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -50,7 +57,7 @@ import {
 } from "../lib/storage";
 import {
 	formatMissingFields,
-	getMissingFields,
+	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 import { closeOpportunity } from "../services/close-opportunity";
@@ -186,11 +193,14 @@ export const crmRouter = {
 				conditions.push(eq(leads.id, id));
 			}
 
-			// Role-based filter: admin and sales_supervisor can see all, others only their own
-			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
-			) {
+			// Role-based filter: admin, sales_supervisor, and juridico can see all
+			// When fetching by specific ID, juridico needs access for contract generation
+			const canSeeAllLeads =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "juridico";
+
+			if (!canSeeAllLeads) {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
@@ -240,7 +250,11 @@ export const crmRouter = {
 					phone: leads.phone,
 					age: leads.age,
 					dpi: leads.dpi,
+					clientType: leads.clientType,
 					maritalStatus: leads.maritalStatus,
+					birthDate: leads.birthDate,
+					gender: leads.gender,
+					nationality: leads.nationality,
 					dependents: leads.dependents,
 					monthlyIncome: leads.monthlyIncome,
 					loanAmount: leads.loanAmount,
@@ -261,8 +275,11 @@ export const crmRouter = {
 					zona: leads.zona,
 					direccion: leads.direccion,
 					scoredAt: leads.scoredAt,
+					livenessValidated: leads.livenessValidated,
+					convertedAt: leads.convertedAt,
 					createdAt: leads.createdAt,
 					updatedAt: leads.updatedAt,
+					createdBy: leads.createdBy,
 					company: {
 						id: companies.id,
 						name: companies.name,
@@ -383,6 +400,7 @@ export const crmRouter = {
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				direccion: z.string().optional(),
 				departamento: z.string().optional(),
 				municipio: z.string().optional(),
 				zona: z.string().optional(),
@@ -392,6 +410,9 @@ export const crmRouter = {
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
+				birthDate: z.coerce.date().optional().nullable(),
+				gender: z.string().optional().nullable(),
+				nationality: z.string().optional().nullable(),
 				dependents: z.number().int().min(0).default(0),
 				monthlyIncome: z.number().positive().optional(),
 				loanAmount: z.number().positive().optional(),
@@ -452,12 +473,17 @@ export const crmRouter = {
 				phone: z.string().optional(),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				direccion: z.string().optional(),
 				departamento: z.string().optional(),
 				municipio: z.string().optional(),
 				zona: z.string().optional(),
+				clientType: z.enum(["individual", "comerciante", "empresa"]).optional(),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
+				birthDate: z.coerce.date().optional().nullable(),
+				gender: z.string().optional().nullable(),
+				nationality: z.string().optional().nullable(),
 				dependents: z.number().int().min(0).optional(),
 				monthlyIncome: z.number().positive().optional(),
 				loanAmount: z.number().positive().optional(),
@@ -493,11 +519,12 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
 
-			// Sales users can only update leads assigned to them
-			const whereClause =
-				context.userRole === "admin"
-					? eq(leads.id, id)
-					: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
+			// Admin and juridico can update any lead, others only their own
+			const canUpdateAnyLead =
+				context.userRole === "admin" || context.userRole === "juridico";
+			const whereClause = canUpdateAnyLead
+				? eq(leads.id, id)
+				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
 
 			// Sales users cannot reassign leads
 			if (
@@ -1011,36 +1038,73 @@ export const crmRouter = {
 					}
 				}
 
-				// Validaciones para vehículos nuevos en transiciones de stage
-				if (currentOpportunity[0].vehicleId && toPercentage >= 80) {
-					const vehicleForValidation = await db
-						.select({
-							isNew: vehicles.isNew,
-							vinNumber: vehicles.vinNumber,
-							licensePlate: vehicles.licensePlate,
-							origin: vehicles.origin,
-							fuelType: vehicles.fuelType,
-							transmission: vehicles.transmission,
-						})
-						.from(vehicles)
-						.where(eq(vehicles.id, currentOpportunity[0].vehicleId))
-						.limit(1);
+				// Validaciones para avanzar a etapa 80% (jurídica)
+				if (toPercentage >= 80) {
+					// Validar datos del vehículo para contratos
+					if (currentOpportunity[0].vehicleId) {
+						const vehicleForValidation = await db
+							.select({
+								isNew: vehicles.isNew,
+								vinNumber: vehicles.vinNumber,
+								motorNumber: vehicles.motorNumber,
+								seats: vehicles.seats,
+								vehicleUse: vehicles.vehicleUse,
+								licensePlate: vehicles.licensePlate,
+								origin: vehicles.origin,
+								fuelType: vehicles.fuelType,
+								transmission: vehicles.transmission,
+							})
+							.from(vehicles)
+							.where(eq(vehicles.id, currentOpportunity[0].vehicleId))
+							.limit(1);
 
-					if (vehicleForValidation[0]?.isNew) {
-						// Transición a 100%: Requerir datos completos
-						if (toPercentage === 80) {
+						if (vehicleForValidation[0]) {
+							// Validar campos mínimos para contratos (aplica a todos los vehículos)
 							const missingForContracts = getMissingFieldsForContracts(
 								vehicleForValidation[0],
 							);
 							if (missingForContracts.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
-									message: `Para avanzar a etapa 90% (contratos), el vehículo nuevo debe tener: ${formatMissingFields(missingForContracts)}`,
+									message: `Para avanzar a etapa jurídica (80%), el vehículo debe tener: ${formatMissingFields(missingForContracts)}`,
 								});
 							}
-							const missingFields = getMissingFields(vehicleForValidation[0]);
-							if (missingFields.length > 0) {
+
+							// Para vehículos nuevos, validar campos adicionales para 100%
+							if (vehicleForValidation[0].isNew) {
+								const missingForCompletion = getMissingFieldsForCompletion(
+									vehicleForValidation[0],
+								);
+								if (missingForCompletion.length > 0) {
+									throw new ORPCError("BAD_REQUEST", {
+										message: `Para completar la oportunidad (100%), el vehículo nuevo debe tener datos completos. Faltan: ${formatMissingFields(missingForCompletion)}`,
+									});
+								}
+							}
+						}
+					}
+
+					// Validar datos del lead para contratos
+					if (currentOpportunity[0].leadId) {
+						const leadForValidation = await db
+							.select({
+								dpi: leads.dpi,
+								direccion: leads.direccion,
+								maritalStatus: leads.maritalStatus,
+								gender: leads.gender,
+								birthDate: leads.birthDate,
+								nationality: leads.nationality,
+							})
+							.from(leads)
+							.where(eq(leads.id, currentOpportunity[0].leadId))
+							.limit(1);
+
+						if (leadForValidation[0]) {
+							const missingLeadFields = getMissingLeadFieldsForContracts(
+								leadForValidation[0],
+							);
+							if (missingLeadFields.length > 0) {
 								throw new ORPCError("BAD_REQUEST", {
-									message: `Para completar la oportunidad (100%), el vehículo nuevo debe tener datos completos. Faltan: ${formatMissingFields(missingFields)}`,
+									message: `Para avanzar a etapa jurídica (80%), el cliente debe tener: ${formatMissingLeadFields(missingLeadFields)}`,
 								});
 							}
 						}
@@ -1050,12 +1114,13 @@ export const crmRouter = {
 				//  en este apartado ya nadie puede mover de 80 a 90 sin aprobacion de analista
 				// Validate document approval when moving from 80% to 90%
 				if (fromPercentage === 80 && toPercentage >= 90) {
-					console.log("Validating document approval for 80% to 90% stage change");
+					console.log(
+						"Validating document approval for 80% to 90% stage change",
+					);
 					throw new ORPCError("BAD_REQUEST", {
 						message:
 							"Para avanzar de evaluación (80%) a la siguiente etapa (90%+), solo un analista puede realizar este cambio después de aprobar los documentos.",
 					});
-					
 				}
 
 				// Validate disbursement approval when moving from 90% to 100%
@@ -2464,6 +2529,49 @@ export const crmRouter = {
 				})
 				.returning();
 
+			// Tipos de documentos que pertenecen al vehículo
+			const vehicleDocumentTypes = [
+				"tarjeta_circulacion",
+				"titulo_propiedad",
+				"dpi_dueno",
+				"patente_comercio_vehiculo",
+				"representacion_legal_vehiculo",
+				"dpi_representante_legal_vehiculo",
+				"pago_impuesto_circulacion",
+				"consulta_sat",
+				"consulta_garantias_mobiliarias",
+				"datos_vehiculo_nuevo",
+				"cotizacion_vehiculo_nuevo",
+			];
+
+			const isVehicleDocument = vehicleDocumentTypes.includes(input.documentType);
+
+			// Si es un documento de vehículo y la oportunidad tiene vehículo asociado,
+			// también guardarlo en vehicleDocuments para que aparezca en el checklist del vehículo
+			if (isVehicleDocument && opportunity[0]?.vehicleId) {
+				const [vehicleDoc] = await db
+					.insert(vehicleDocuments)
+					.values({
+						vehicleId: opportunity[0].vehicleId,
+						filename: uniqueFilename,
+						originalName: input.file.name,
+						mimeType: input.file.type,
+						size: input.file.size,
+						documentType: input.documentType,
+						description: input.description,
+						uploadedBy: context.userId,
+						filePath: key,
+					})
+					.returning();
+
+				// Actualizar el checklist de análisis con el documento del vehículo
+				await updateChecklistForVehicleDocument(
+					opportunity[0].vehicleId,
+					input.documentType,
+					vehicleDoc.id,
+				);
+			}
+
 			await updateChecklistForClientDocument(
 				input.opportunityId,
 				input.documentType,
@@ -2774,6 +2882,33 @@ export const crmRouter = {
 					.select()
 					.from(vehicleDocuments)
 					.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId));
+
+				// Fallback: buscar documentos de vehículo en opportunityDocuments
+				// para oportunidades existentes que subieron docs antes de la sincronización
+				const vehicleDocTypes = requiredVehicleDocs.map((d) => d.documentType);
+				const uploadedVehicleTypesFromVehicle = new Set(
+					uploadedVehicleDocs.map((d) => d.documentType),
+				);
+
+				// Buscar en opportunityDocuments los tipos que faltan
+				const missingTypes = vehicleDocTypes.filter(
+					(type) => !uploadedVehicleTypesFromVehicle.has(type),
+				);
+
+				if (missingTypes.length > 0) {
+					const fallbackDocs = uploadedDocs.filter((d) =>
+						missingTypes.includes(d.documentType),
+					);
+					// Agregar los docs del fallback con una marca para identificarlos
+					uploadedVehicleDocs = [
+						...uploadedVehicleDocs,
+						...fallbackDocs.map((d) => ({
+							...d,
+							vehicleId: opportunity.vehicleId,
+							fromOpportunity: true, // Marca para saber que viene de oportunidad
+						})),
+					];
+				}
 			}
 
 			const uploadedVehicleTypes = new Set(
@@ -3581,7 +3716,6 @@ export const crmRouter = {
 					message: "No se encontró la etapa del 100%",
 				});
 			}
-
 
 			// Update opportunity with approval and move to 100%
 			await db

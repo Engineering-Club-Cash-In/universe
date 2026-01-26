@@ -65,6 +65,9 @@ const formSchema = z.object({
 	vinNumber: z
 		.string()
 		.min(1, { message: "El número VIN/Chasis es requerido" }),
+	motorNumber: z
+		.string()
+		.min(1, { message: "El número de motor es requerido" }),
 	milesMileage: z.string().optional(),
 	kmMileage: z.string().min(1, { message: "El kilometraje es requerido" }),
 	origin: z.enum(["Agencia", "Rodado"]),
@@ -150,6 +153,7 @@ function VehicleInspectionForm() {
 				year: Number.parseInt(values.vehicleYear),
 				licensePlate: values.licensePlate,
 				vinNumber: values.vinNumber,
+				motorNumber: values.motorNumber,
 				color: values.color,
 				vehicleType: values.vehicleType,
 				milesMileage: values.milesMileage
@@ -380,22 +384,41 @@ function VehicleInspectionForm() {
 								/>
 							</div>
 
-							<FormField
-								control={form.control}
-								name="vinNumber"
-								render={({ field }) => (
-									<FormItem>
-										<FormLabel>No. Vin/Chasis</FormLabel>
-										<FormControl>
-											<Input
-												placeholder="Número de identificación del vehículo"
-												{...field}
-											/>
-										</FormControl>
-										<FormMessage />
-									</FormItem>
-								)}
-							/>
+							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+								<FormField
+									control={form.control}
+									name="vinNumber"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>No. VIN/Chasis</FormLabel>
+											<FormControl>
+												<Input
+													placeholder="Número de identificación del vehículo"
+													{...field}
+												/>
+											</FormControl>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+
+								<FormField
+									control={form.control}
+									name="motorNumber"
+									render={({ field }) => (
+										<FormItem>
+											<FormLabel>No. de Motor</FormLabel>
+											<FormControl>
+												<Input
+													placeholder="Número de motor del vehículo"
+													{...field}
+												/>
+											</FormControl>
+											<FormMessage />
+										</FormItem>
+									)}
+								/>
+							</div>
 
 							<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
 								<FormField

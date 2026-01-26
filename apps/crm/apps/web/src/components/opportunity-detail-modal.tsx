@@ -199,9 +199,7 @@ export function OpportunityDetailModal({
 						<TabsTrigger value="details">Detalles</TabsTrigger>
 						<TabsTrigger value="documents">Documentos</TabsTrigger>
 						<TabsTrigger value="credit">Crédito</TabsTrigger>
-						{!readOnly && (
-							<TabsTrigger value="history">Historial</TabsTrigger>
-						)}
+						{!readOnly && <TabsTrigger value="history">Historial</TabsTrigger>}
 					</TabsList>
 
 					<TabsContent value="details" className="mt-6 space-y-6">
@@ -577,7 +575,9 @@ export function OpportunityDetailModal({
 						{/* Opportunity ID */}
 						<div className="rounded-lg border bg-muted/20 px-4 py-3">
 							<div className="flex items-center justify-between">
-								<span className="text-muted-foreground text-xs">ID de Oportunidad</span>
+								<span className="text-muted-foreground text-xs">
+									ID de Oportunidad
+								</span>
 								<code className="rounded bg-muted px-2 py-1 font-mono text-xs">
 									{opportunity.id.slice(0, 8)}
 								</code>
@@ -586,7 +586,8 @@ export function OpportunityDetailModal({
 
 						{/* Actions */}
 						{!readOnly && (onEdit || onChangeStage) && (
-							<div className="flex gap-3 border-t pt-6">{onEdit && (
+							<div className="flex gap-3 border-t pt-6">
+								{onEdit && (
 									<Button
 										variant="outline"
 										size="default"
@@ -641,14 +642,14 @@ export function OpportunityDetailModal({
 							documents={opportunityDocumentsQuery.data || []}
 							isLoading={opportunityDocumentsQuery.isLoading}
 							onRefresh={() => opportunityDocumentsQuery.refetch()}
+							hasVehicle={!!opportunity.vehicle}
 						/>
 					</TabsContent>
 
 					<TabsContent value="credit" className="mt-6 space-y-4">
 						{(() => {
 							const showCreditDetail =
-								opportunity.stage &&
-								opportunity.stage.closurePercentage >= 30;
+								opportunity.stage && opportunity.stage.closurePercentage >= 30;
 
 							if (!showCreditDetail) {
 								return (
@@ -659,8 +660,8 @@ export function OpportunityDetailModal({
 											oportunidad alcance el 30% de avance.
 										</p>
 										<p className="mt-2 text-muted-foreground text-sm">
-											Etapa actual: {opportunity.stage?.name || "Sin etapa"}{" "}
-											({opportunity.stage?.closurePercentage || 0}%)
+											Etapa actual: {opportunity.stage?.name || "Sin etapa"} (
+											{opportunity.stage?.closurePercentage || 0}%)
 										</p>
 									</div>
 								);
@@ -677,8 +678,8 @@ export function OpportunityDetailModal({
 											Se requiere una cotización
 										</h3>
 										<p className="mb-4 text-muted-foreground">
-											Para ver el detalle del crédito, primero debes crear
-											una cotización para esta oportunidad.
+											Para ver el detalle del crédito, primero debes crear una
+											cotización para esta oportunidad.
 										</p>
 										{onNavigateToQuoter && (
 											<Button

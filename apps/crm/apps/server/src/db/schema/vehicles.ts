@@ -83,6 +83,15 @@ export const vehicles = pgTable("vehicles", {
 	// Identificación del vehículo (opcionales para nuevos - llegan después del dealer)
 	licensePlate: text("license_plate").unique(), // Opcional para nuevos
 	vinNumber: text("vin_number").unique(), // Opcional para nuevos
+	motorNumber: text("motor_number"), // Número de motor
+
+	// Campos adicionales para contratos legales
+	seats: integer("seats"), // Número de asientos
+	doors: integer("doors"), // Número de puertas
+	axles: integer("axles").default(2), // Número de ejes (default 2)
+	vehicleUse: text("vehicle_use"), // 'Particular' | 'Comercial'
+	series: text("series"), // Serie del vehículo
+	iscvCode: text("iscv_code"), // Código ISCV
 
 	// Technical details (opcionales para nuevos)
 	milesMileage: integer("miles_mileage"),

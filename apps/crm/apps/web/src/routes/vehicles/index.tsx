@@ -106,6 +106,7 @@ function VehiclesDashboard() {
 	const processedVehicleIdRef = useRef<string | null>(null);
 	const processedInspectionIdRef = useRef<string | null>(null);
 	const prevDetailsOpenRef = useRef(false);
+	const isTransitioningToEditRef = useRef(false);
 
 	// Debounce search
 	useEffect(() => {
@@ -148,8 +149,7 @@ function VehiclesDashboard() {
 		queryFn: search.vehicleId
 			? () => client.getVehicleById({ id: search.vehicleId! })
 			: () => Promise.resolve(null),
-		enabled:
-			!!search.vehicleId && processedVehicleIdRef.current !== search.vehicleId,
+		enabled: !!search.vehicleId,
 	});
 
 	// Query to fetch inspection by ID (to get vehicleId, then fetch vehicle)
@@ -203,12 +203,17 @@ function VehiclesDashboard() {
 		}
 	}, [search.inspectionId, vehicleFromInspectionQuery.data]);
 
-	// Clear search params when details modal closes
+	// Clear search params when details modal closes (unless transitioning to edit)
 	useEffect(() => {
 		const wasOpen = prevDetailsOpenRef.current;
 		prevDetailsOpenRef.current = isDetailsOpen;
 
 		if (wasOpen && !isDetailsOpen) {
+			// Skip cleanup if transitioning to edit modal
+			if (isTransitioningToEditRef.current) {
+				isTransitioningToEditRef.current = false;
+				return;
+			}
 			if (processedVehicleIdRef.current || processedInspectionIdRef.current) {
 				processedVehicleIdRef.current = null;
 				processedInspectionIdRef.current = null;
@@ -297,11 +302,19 @@ function VehiclesDashboard() {
 		vehicleType: "",
 		licensePlate: "",
 		vinNumber: "",
+		motorNumber: "",
 		origin: "",
 		fuelType: "",
 		transmission: "",
 		kmMileage: 0,
 		isNew: false,
+		// Campos para contratos legales
+		seats: null as number | null,
+		doors: null as number | null,
+		axles: 2 as number | null,
+		vehicleUse: "",
+		series: "",
+		iscvCode: "",
 	});
 
 	const updateVehicleMutation = useMutation({
@@ -316,10 +329,18 @@ function VehiclesDashboard() {
 					vehicleType: data.vehicleType,
 					licensePlate: data.licensePlate || null,
 					vinNumber: data.vinNumber || null,
+					motorNumber: data.motorNumber || null,
 					origin: data.origin || null,
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
 					kmMileage: data.kmMileage,
+					// Campos para contratos legales
+					seats: data.seats,
+					doors: data.doors,
+					axles: data.axles,
+					vehicleUse: data.vehicleUse || null,
+					series: data.series || null,
+					iscvCode: data.iscvCode || null,
 				},
 			}),
 		onSuccess: () => {
@@ -619,12 +640,20 @@ function VehiclesDashboard() {
 																				licensePlate:
 																					vehicle.licensePlate || "",
 																				vinNumber: vehicle.vinNumber || "",
+																				motorNumber: vehicle.motorNumber || "",
 																				origin: vehicle.origin || "",
 																				fuelType: vehicle.fuelType || "",
 																				transmission:
 																					vehicle.transmission || "",
 																				kmMileage: vehicle.kmMileage || 0,
 																				isNew: vehicle.isNew || false,
+																				// Campos para contratos legales
+																				seats: vehicle.seats ?? null,
+																				doors: vehicle.doors ?? null,
+																				axles: vehicle.axles ?? 2,
+																				vehicleUse: vehicle.vehicleUse || "",
+																				series: vehicle.series || "",
+																				iscvCode: vehicle.iscvCode || "",
 																			});
 																			setIsEditVehicleOpen(true);
 																		}}
@@ -868,11 +897,52 @@ function VehiclesDashboard() {
 			>
 				<DialogContent className="max-h-[90vh] min-w-[90vw] max-w-7xl overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>Detalles del Vehículo</DialogTitle>
-						<DialogDescription>
-							Información completa del vehículo {selectedVehicle?.make}{" "}
-							{selectedVehicle?.model} {selectedVehicle?.year}
-						</DialogDescription>
+						<div className="flex items-center justify-between">
+							<div>
+								<DialogTitle>Detalles del Vehículo</DialogTitle>
+								<DialogDescription>
+									Información completa del vehículo {selectedVehicle?.make}{" "}
+									{selectedVehicle?.model} {selectedVehicle?.year}
+								</DialogDescription>
+							</div>
+							{selectedVehicle && (
+								<Button
+									variant="outline"
+									size="sm"
+									onClick={() => {
+										setEditVehicleForm({
+											id: selectedVehicle.id,
+											make: selectedVehicle.make || "",
+											model: selectedVehicle.model || "",
+											year:
+												selectedVehicle.year || new Date().getFullYear(),
+											color: selectedVehicle.color || "",
+											vehicleType: selectedVehicle.vehicleType || "",
+											licensePlate: selectedVehicle.licensePlate || "",
+											vinNumber: selectedVehicle.vinNumber || "",
+											motorNumber: selectedVehicle.motorNumber || "",
+											origin: selectedVehicle.origin || "",
+											fuelType: selectedVehicle.fuelType || "",
+											transmission: selectedVehicle.transmission || "",
+											kmMileage: selectedVehicle.kmMileage || 0,
+											isNew: selectedVehicle.isNew || false,
+											seats: selectedVehicle.seats ?? null,
+											doors: selectedVehicle.doors ?? null,
+											axles: selectedVehicle.axles ?? 2,
+											vehicleUse: selectedVehicle.vehicleUse || "",
+											series: selectedVehicle.series || "",
+											iscvCode: selectedVehicle.iscvCode || "",
+										});
+										isTransitioningToEditRef.current = true;
+										setIsDetailsOpen(false);
+										setIsEditVehicleOpen(true);
+									}}
+								>
+									<Pencil className="mr-2 h-4 w-4" />
+									Editar
+								</Button>
+							)}
+						</div>
 					</DialogHeader>
 
 					{selectedVehicle && (
@@ -1780,6 +1850,20 @@ function VehiclesDashboard() {
 									/>
 								</div>
 								<div className="space-y-2">
+									<Label htmlFor="edit-motorNumber">Número de Motor</Label>
+									<Input
+										id="edit-motorNumber"
+										value={editVehicleForm.motorNumber}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												motorNumber: e.target.value,
+											})
+										}
+										placeholder="Número de motor"
+									/>
+								</div>
+								<div className="space-y-2">
 									<Label htmlFor="edit-origin">Origen</Label>
 									<Select
 										value={editVehicleForm.origin}
@@ -1837,6 +1921,123 @@ function VehiclesDashboard() {
 											<SelectItem value="Manual">Manual</SelectItem>
 										</SelectContent>
 									</Select>
+								</div>
+							</div>
+						</div>
+
+						{/* Campos para Contratos Legales */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-sm">
+								Datos Técnicos para Contratos
+								<span className="ml-2 font-normal text-muted-foreground text-xs">
+									(requeridos para generar contratos legales)
+								</span>
+							</h4>
+							<div className="grid grid-cols-3 gap-4">
+								<div className="space-y-2">
+									<Label htmlFor="edit-seats">Asientos</Label>
+									<Input
+										id="edit-seats"
+										type="number"
+										value={editVehicleForm.seats ?? ""}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												seats: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={1}
+										max={50}
+										placeholder="Ej: 5"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-doors">Puertas</Label>
+									<Input
+										id="edit-doors"
+										type="number"
+										value={editVehicleForm.doors ?? ""}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												doors: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={2}
+										max={6}
+										placeholder="Ej: 4"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-axles">Ejes</Label>
+									<Input
+										id="edit-axles"
+										type="number"
+										value={editVehicleForm.axles ?? ""}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												axles: e.target.value
+													? Number.parseInt(e.target.value)
+													: null,
+											})
+										}
+										min={2}
+										max={10}
+										placeholder="Ej: 2"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-vehicleUse">Uso del Vehículo</Label>
+									<Select
+										value={editVehicleForm.vehicleUse}
+										onValueChange={(value) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												vehicleUse: value,
+											})
+										}
+									>
+										<SelectTrigger>
+											<SelectValue placeholder="Seleccionar uso" />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="Particular">Particular</SelectItem>
+											<SelectItem value="Comercial">Comercial</SelectItem>
+										</SelectContent>
+									</Select>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-series">Serie</Label>
+									<Input
+										id="edit-series"
+										value={editVehicleForm.series}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												series: e.target.value,
+											})
+										}
+										placeholder="Serie del vehículo"
+									/>
+								</div>
+								<div className="space-y-2">
+									<Label htmlFor="edit-iscvCode">Código ISCV</Label>
+									<Input
+										id="edit-iscvCode"
+										value={editVehicleForm.iscvCode}
+										onChange={(e) =>
+											setEditVehicleForm({
+												...editVehicleForm,
+												iscvCode: e.target.value,
+											})
+										}
+										placeholder="Código ISCV"
+									/>
 								</div>
 							</div>
 						</div>

@@ -4152,6 +4152,7 @@ export const crmRouter = {
 					categoria: opportunities.categoria,
 					nit: opportunities.nit,
 					diaPagoMensual: opportunities.diaPagoMensual,
+					creditType: opportunities.creditType,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
 				})

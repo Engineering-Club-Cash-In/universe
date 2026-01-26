@@ -403,8 +403,8 @@ const documentRequirementsByClientTypeData = [
 		clientType: "comerciante" as const,
 		creditType: "autocompra" as const,
 		documentType: "patente_comercio" as const,
-		required: true,
-		description: "Patente de comercio",
+		required: false,
+		description: "Patente de comercio (opcional para empresarios individuales)",
 		order: 9,
 	},
 
@@ -477,8 +477,8 @@ const documentRequirementsByClientTypeData = [
 		clientType: "comerciante" as const,
 		creditType: "sobre_vehiculo" as const,
 		documentType: "patente_comercio" as const,
-		required: true,
-		description: "Patente de comercio",
+		required: false,
+		description: "Patente de comercio (opcional para empresarios individuales)",
 		order: 9,
 	},
 

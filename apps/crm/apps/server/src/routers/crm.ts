@@ -3892,6 +3892,7 @@ export const crmRouter = {
 				vehicleId: opportunities.vehicleId,
 				numeroCuotas: opportunities.numeroCuotas,
 				tasaInteres: opportunities.tasaInteres,
+				creditType: opportunities.creditType,
 				cuotaMensual: opportunities.cuotaMensual,
 				// Campos adicionales para edición
 				categoria: opportunities.categoria,
@@ -3995,6 +3996,7 @@ export const crmRouter = {
 					diaPagoMensual: opp.diaPagoMensual,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
+					creditType: opp.creditType,
 					lead: lead
 						? {
 								id: lead.id,

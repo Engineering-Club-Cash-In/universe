@@ -77,9 +77,28 @@ export function InvestmentAssignmentSection() {
 	
 	// Estados para campos adicionales del detalle de crédito
 	const [editDireccion, setEditDireccion] = useState<string>("");
-	const [editCategoria, setEditCategoria] = useState<CreditCategory>("");
 	const [editNit, setEditNit] = useState<string>("");
 	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
+
+	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
+	const getAutomaticCategoria = (opp: InvestmentOpportunity | undefined): CreditCategory => {
+		if (!opp) return "";
+		
+		// Si es sobre vehículo, siempre es "Vehículo"
+		if (opp.creditType === "sobre_vehiculo") {
+			return "Vehículo";
+		}
+		
+		// Si es autocompra, depende de si el vehículo es nuevo o no
+		if (opp.creditType === "autocompra") {
+			if (opp.vehicle?.isNew) {
+				return "CV Vehículo nuevo";
+			}
+			return "CV Vehículo";
+		}
+		
+		return "";
+	};
 
 	// Estados para el modal de detalle de oportunidad
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
@@ -111,8 +130,6 @@ export function InvestmentAssignmentSection() {
 		if (selectedOpportunity) {
 			// Dirección: usar la del lead si existe
 			setEditDireccion(selectedOpportunity.lead?.direccion || "");
-			// Categoría: usar la de la oportunidad si existe
-			setEditCategoria((selectedOpportunity.categoria as CreditCategory) || "");
 			// NIT: usar el de la oportunidad si existe
 			setEditNit(selectedOpportunity.nit || "");
 			// Día de pago: usar el de la oportunidad o 15 por default
@@ -155,7 +172,6 @@ export function InvestmentAssignmentSection() {
 			setSelectedOpportunityId(null);
 			setSelectedInversionistas([]);
 			// Reset campos adicionales
-			setEditCategoria("");
 			setEditNit("");
 			setEditDiaPagoMensual(15);
 			refetchOpportunities();
@@ -234,10 +250,13 @@ export function InvestmentAssignmentSection() {
 			return;
 		}
 
+		// Calcular la categoría automáticamente
+		const categoriaAutomatica = getAutomaticCategoria(selectedOpportunity);
+
 		assignMutation.mutate({
 			opportunityId: selectedOpportunityId,
 			inversionistas: JSON.stringify(selectedInversionistas),
-			categoria: editCategoria,
+			categoria: categoriaAutomatica,
 			nit: editNit,
 			diaPagoMensual: editDiaPagoMensual,
 		});
@@ -565,26 +584,16 @@ export function InvestmentAssignmentSection() {
 								
 								<div className="space-y-3 rounded-lg border bg-muted/30 p-3">
 
-									{/* Categoría y NIT */}
+									{/* Categoría (automática) y NIT */}
 									<div className="grid grid-cols-2 gap-2">
 										<div>
 											<Label className="text-xs">Categoría</Label>
-											<Select
-												value={editCategoria}
-												onValueChange={(value) => setEditCategoria(value as CreditCategory)}
-											>
-												<SelectTrigger>
-													<SelectValue placeholder="Seleccionar categoría" />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="Contraseña">Contraseña</SelectItem>
-													<SelectItem value="CV Vehículo">CV Vehículo</SelectItem>
-													<SelectItem value="CV Vehículo nuevo">CV Vehículo nuevo</SelectItem>
-													<SelectItem value="Fiduciario">Fiduciario</SelectItem>
-													<SelectItem value="Hipotecario">Hipotecario</SelectItem>
-													<SelectItem value="Vehículo">Vehículo</SelectItem>
-												</SelectContent>
-											</Select>
+											<div className="flex h-10 w-full items-center rounded-md border border-input bg-muted px-3 py-2 text-sm">
+												{getAutomaticCategoria(selectedOpportunity) || "Sin categoría"}
+											</div>
+											<p className="mt-1 text-[10px] text-muted-foreground">
+												Calculada según tipo de crédito{selectedOpportunity?.creditType === "autocompra" ? " y vehículo" : ""}
+											</p>
 										</div>
 										<div>
 											<Label className="text-xs">NIT</Label>

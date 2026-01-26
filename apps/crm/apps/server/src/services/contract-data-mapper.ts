@@ -41,7 +41,11 @@ export const CONTRACT_TYPES = [
 		name: "Garantía Mobiliaria",
 		requiresBeneficiary: true,
 	},
-	{ id: "pagare", name: "Pagaré Único Libre de Protesto", requiresBeneficiary: true },
+	{
+		id: "pagare",
+		name: "Pagaré Único Libre de Protesto",
+		requiresBeneficiary: true,
+	},
 	{
 		id: "reconocimiento_deuda",
 		name: "Reconocimiento de Deuda",

@@ -914,8 +914,7 @@ function VehiclesDashboard() {
 											id: selectedVehicle.id,
 											make: selectedVehicle.make || "",
 											model: selectedVehicle.model || "",
-											year:
-												selectedVehicle.year || new Date().getFullYear(),
+											year: selectedVehicle.year || new Date().getFullYear(),
 											color: selectedVehicle.color || "",
 											vehicleType: selectedVehicle.vehicleType || "",
 											licensePlate: selectedVehicle.licensePlate || "",

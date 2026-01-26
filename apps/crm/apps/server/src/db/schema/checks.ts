@@ -18,7 +18,7 @@ export const creditChecks = pgTable("credit_checks", {
 	// Datos del cheque/transferencia
 	checkDate: timestamp("check_date").notNull(),
 	issuer: text("issuer").notNull(), // Emisor
-	issuerBank: text("issuer_bank").notNull(), // Banco del emisor
+	issuerBank: text("issuer_bank"), // Banco del emisor (opcional - lo asigna contabilidad)
 	beneficiary: text("beneficiary").notNull(), // Beneficiario
 	accountNumber: text("account_number"), // No. Cuenta del beneficiario
 	transferType: text("transfer_type").notNull().default("TRANSFERENCIA"), // TRANSFERENCIA, CHEQUE, etc.

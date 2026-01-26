@@ -374,7 +374,9 @@ function RouteComponent() {
 						Panel de Cobros
 					</h2>
 					{cobrosStats.isLoading ? (
-						<div className="text-muted-foreground">Cargando estadísticas...</div>
+						<div className="text-muted-foreground">
+							Cargando estadísticas...
+						</div>
 					) : cobrosStats.data ? (
 						<div className="grid gap-4 md:grid-cols-4">
 							<Card>
@@ -479,9 +481,8 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-amber-600">
-									{juridicoStats.data?.filter(
-										(o) => o.contractCount === 0,
-									).length || 0}
+									{juridicoStats.data?.filter((o) => o.contractCount === 0)
+										.length || 0}
 								</div>
 								<p className="text-muted-foreground text-xs">
 									Pendientes de generar
@@ -497,9 +498,8 @@ function RouteComponent() {
 							</CardHeader>
 							<CardContent>
 								<div className="font-bold text-2xl text-green-600">
-									{juridicoStats.data?.filter(
-										(o) => o.contractCount > 0,
-									).length || 0}
+									{juridicoStats.data?.filter((o) => o.contractCount > 0)
+										.length || 0}
 								</div>
 								<p className="text-muted-foreground text-xs">
 									Contratos generados

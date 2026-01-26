@@ -285,7 +285,9 @@ export function CreateContractModal({
 		}
 
 		// Preparar archivo PDF si existe
-		let pdfFileData: { name: string; type: string; size: number; data: string } | undefined;
+		let pdfFileData:
+			| { name: string; type: string; size: number; data: string }
+			| undefined;
 		if (selectedPdfFile) {
 			const base64 = await new Promise<string>((resolve, reject) => {
 				const reader = new FileReader();

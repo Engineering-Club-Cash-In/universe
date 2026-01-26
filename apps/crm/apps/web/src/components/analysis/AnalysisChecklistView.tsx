@@ -195,7 +195,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.documentos.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-									<MinusCircle className="h-5 w-5 text-muted-foreground" />
+										<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge variant="outline">
 										{checklist.sections.documentos.items?.filter(
@@ -220,7 +220,7 @@ export function AnalysisChecklistView({
 												{item.uploaded ? (
 													<CheckCircle2 className="h-4 w-4 flex-shrink-0 text-green-600" />
 												) : (
-												<MinusCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+													<MinusCircle className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
 												)}
 												<div>
 													<p className="font-medium text-sm">
@@ -264,7 +264,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.verificaciones.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-									<MinusCircle className="h-5 w-5 text-muted-foreground" />
+										<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge variant="outline">
 										{checklist.sections.verificaciones.items?.filter(
@@ -344,7 +344,7 @@ export function AnalysisChecklistView({
 									{checklist.sections.vehiculo.completed ? (
 										<CheckCircle2 className="h-5 w-5 text-green-600" />
 									) : (
-									<MinusCircle className="h-5 w-5 text-muted-foreground" />
+										<MinusCircle className="h-5 w-5 text-muted-foreground" />
 									)}
 									<Badge
 										variant={

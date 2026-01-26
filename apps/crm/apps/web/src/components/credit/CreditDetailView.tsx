@@ -2612,9 +2612,7 @@ export function CreditDetailView({
 							{!quotation ? (
 								<div className="rounded-lg border border-dashed p-8 text-center">
 									<Calculator className="mx-auto h-12 w-12 text-muted-foreground" />
-									<h3 className="mt-4 font-semibold text-lg">
-										Sin cotización
-									</h3>
+									<h3 className="mt-4 font-semibold text-lg">Sin cotización</h3>
 									<p className="mt-2 text-muted-foreground text-sm">
 										Esta oportunidad no tiene una cotización asociada.
 									</p>
@@ -2996,7 +2994,9 @@ export function CreditDetailView({
 																	Membresía (Inicial)
 																</Label>
 																<p className="font-medium">
-																	{formatCurrency(quotation.extraMembershipCost)}
+																	{formatCurrency(
+																		quotation.extraMembershipCost,
+																	)}
 																</p>
 															</div>
 														)}

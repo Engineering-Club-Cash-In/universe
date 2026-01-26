@@ -102,6 +102,15 @@ export function LeadDetailModal({
 	readOnly = false,
 	onEdit,
 }: LeadDetailModalProps) {
+	// Query for full lead data - this ensures we always have complete data
+	const fullLeadQuery = useQuery({
+		...orpc.getLeads.queryOptions({
+			input: { id: lead?.id ?? "", limit: 1 },
+		}),
+		enabled: open && !!lead?.id,
+		queryKey: ["getLeadById", lead?.id],
+	});
+
 	// Query for credit analysis data
 	const creditAnalysisQuery = useQuery({
 		...orpc.getCreditAnalysisByLeadId.queryOptions({
@@ -112,6 +121,53 @@ export function LeadDetailModal({
 	});
 
 	if (!lead) return null;
+
+	// Use full lead data if available, otherwise fall back to passed lead
+	const fullLead = fullLeadQuery.data?.data?.[0];
+	const displayLead: LeadForModal = fullLead
+		? {
+				id: fullLead.id,
+				firstName: fullLead.firstName,
+				middleName: fullLead.middleName,
+				lastName: fullLead.lastName,
+				secondLastName: fullLead.secondLastName,
+				email: fullLead.email,
+				phone: fullLead.phone,
+				dpi: fullLead.dpi,
+				age: fullLead.age,
+				clientType: fullLead.clientType,
+				maritalStatus: fullLead.maritalStatus,
+				birthDate: fullLead.birthDate ? new Date(fullLead.birthDate) : null,
+				gender: fullLead.gender,
+				nationality: fullLead.nationality,
+				dependents: fullLead.dependents,
+				jobTitle: fullLead.jobTitle,
+				monthlyIncome: fullLead.monthlyIncome,
+				loanAmount: fullLead.loanAmount,
+				occupation: fullLead.occupation,
+				workTime: fullLead.workTime,
+				ownsHome: fullLead.ownsHome,
+				ownsVehicle: fullLead.ownsVehicle,
+				hasCreditCard: fullLead.hasCreditCard,
+				source: fullLead.source || "",
+				status: fullLead.status,
+				direccion: fullLead.direccion,
+				departamento: fullLead.departamento,
+				municipio: fullLead.municipio,
+				zona: fullLead.zona,
+				livenessValidated: fullLead.livenessValidated,
+				convertedAt: fullLead.convertedAt
+					? new Date(fullLead.convertedAt)
+					: null,
+				createdAt: new Date(fullLead.createdAt),
+				createdBy: fullLead.createdBy,
+				company: fullLead.company,
+				assignedUser: fullLead.assignedUser,
+				score: fullLead.score,
+				fit: fullLead.fit,
+				scoredAt: fullLead.scoredAt ? new Date(fullLead.scoredAt) : null,
+			}
+		: lead;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -124,24 +180,24 @@ export function LeadDetailModal({
 					<div className="flex items-start justify-between">
 						<div>
 							<h3 className="font-semibold text-lg">
-								{lead.firstName} {lead.middleName || ""} {lead.lastName}{" "}
-								{lead.secondLastName || ""}
+								{displayLead.firstName} {displayLead.middleName || ""} {displayLead.lastName}{" "}
+								{displayLead.secondLastName || ""}
 							</h3>
-							<p className="text-muted-foreground text-sm">{lead.email}</p>
+							<p className="text-muted-foreground text-sm">{displayLead.email}</p>
 						</div>
 						<div className="flex flex-col gap-2">
 							<Badge
-								className={getLeadStatusBadgeColor(lead.status)}
+								className={getLeadStatusBadgeColor(displayLead.status)}
 								variant="outline"
 							>
-								{getStatusLabel(lead.status)}
+								{getStatusLabel(displayLead.status)}
 							</Badge>
-							{lead.fit !== null && lead.fit !== undefined && (
+							{displayLead.fit !== null && displayLead.fit !== undefined && (
 								<Badge
-									variant={lead.fit ? "default" : "secondary"}
-									className={lead.fit ? "bg-green-500 hover:bg-green-600" : ""}
+									variant={displayLead.fit ? "default" : "secondary"}
+									className={displayLead.fit ? "bg-green-500 hover:bg-green-600" : ""}
 								>
-									{lead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
+									{displayLead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
 								</Badge>
 							)}
 						</div>
@@ -158,23 +214,23 @@ export function LeadDetailModal({
 										Nombre Completo
 									</Label>
 									<p className="font-medium text-sm">
-										{lead.firstName} {lead.middleName || ""} {lead.lastName}{" "}
-										{lead.secondLastName || ""}
+										{displayLead.firstName} {displayLead.middleName || ""} {displayLead.lastName}{" "}
+										{displayLead.secondLastName || ""}
 									</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
 										DPI
 									</Label>
-									<p className="text-sm">{lead.dpi || "No especificado"}</p>
+									<p className="text-sm">{displayLead.dpi || "No especificado"}</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
 										Tipo de Cliente
 									</Label>
 									<p className="text-sm">
-										{lead.clientType
-											? getClientTypeLabel(lead.clientType)
+										{displayLead.clientType
+											? getClientTypeLabel(displayLead.clientType)
 											: "No especificado"}
 									</p>
 								</div>
@@ -183,8 +239,8 @@ export function LeadDetailModal({
 										Género
 									</Label>
 									<p className="text-sm">
-										{lead.gender
-											? getGenderLabel(lead.gender)
+										{displayLead.gender
+											? getGenderLabel(displayLead.gender)
 											: "No especificado"}
 									</p>
 								</div>
@@ -193,8 +249,8 @@ export function LeadDetailModal({
 										Fecha de Nacimiento
 									</Label>
 									<p className="text-sm">
-										{lead.birthDate
-											? formatGuatemalaDate(lead.birthDate)
+										{displayLead.birthDate
+											? formatGuatemalaDate(displayLead.birthDate)
 											: "No especificado"}
 									</p>
 								</div>
@@ -202,14 +258,14 @@ export function LeadDetailModal({
 									<Label className="font-medium text-muted-foreground text-sm">
 										Edad
 									</Label>
-									<p className="text-sm">{lead.age || "No especificado"}</p>
+									<p className="text-sm">{displayLead.age || "No especificado"}</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
 										Nacionalidad
 									</Label>
 									<p className="text-sm">
-										{lead.nationality || "No especificado"}
+										{displayLead.nationality || "No especificado"}
 									</p>
 								</div>
 								<div>
@@ -217,8 +273,8 @@ export function LeadDetailModal({
 										Estado Civil
 									</Label>
 									<p className="text-sm">
-										{lead.maritalStatus
-											? getMaritalStatusLabel(lead.maritalStatus)
+										{displayLead.maritalStatus
+											? getMaritalStatusLabel(displayLead.maritalStatus)
 											: "No especificado"}
 									</p>
 								</div>
@@ -226,14 +282,14 @@ export function LeadDetailModal({
 									<Label className="font-medium text-muted-foreground text-sm">
 										Dependientes
 									</Label>
-									<p className="text-sm">{lead.dependents || 0}</p>
+									<p className="text-sm">{displayLead.dependents || 0}</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
 										Cargo
 									</Label>
 									<p className="text-sm">
-										{lead.jobTitle || "No especificado"}
+										{displayLead.jobTitle || "No especificado"}
 									</p>
 								</div>
 							</div>
@@ -251,7 +307,7 @@ export function LeadDetailModal({
 									</Label>
 									<div className="flex items-center gap-2">
 										<Mail className="h-4 w-4 text-muted-foreground" />
-										<p className="text-sm">{lead.email || "No especificado"}</p>
+										<p className="text-sm">{displayLead.email || "No especificado"}</p>
 									</div>
 								</div>
 								<div>
@@ -260,7 +316,7 @@ export function LeadDetailModal({
 									</Label>
 									<div className="flex items-center gap-2">
 										<Phone className="h-4 w-4 text-muted-foreground" />
-										<p className="text-sm">{lead.phone || "No especificado"}</p>
+										<p className="text-sm">{displayLead.phone || "No especificado"}</p>
 									</div>
 								</div>
 								<div>
@@ -270,7 +326,7 @@ export function LeadDetailModal({
 									<div className="flex items-center gap-2">
 										<Building className="h-4 w-4 text-muted-foreground" />
 										<p className="text-sm">
-											{lead.company?.name || "Sin empresa"}
+											{displayLead.company?.name || "Sin empresa"}
 										</p>
 									</div>
 								</div>
@@ -291,8 +347,8 @@ export function LeadDetailModal({
 										Ingreso Mensual
 									</Label>
 									<p className="font-medium text-sm">
-										{lead.monthlyIncome
-											? formatCurrency(lead.monthlyIncome)
+										{displayLead.monthlyIncome
+											? formatCurrency(displayLead.monthlyIncome)
 											: "No especificado"}
 									</p>
 								</div>
@@ -301,8 +357,8 @@ export function LeadDetailModal({
 										Monto a Financiar
 									</Label>
 									<p className="font-medium text-sm">
-										{lead.loanAmount
-											? formatCurrency(lead.loanAmount)
+										{displayLead.loanAmount
+											? formatCurrency(displayLead.loanAmount)
 											: "No especificado"}
 									</p>
 								</div>
@@ -318,8 +374,8 @@ export function LeadDetailModal({
 										Ocupación
 									</Label>
 									<p className="text-sm">
-										{lead.occupation
-											? getOccupationLabel(lead.occupation)
+										{displayLead.occupation
+											? getOccupationLabel(displayLead.occupation)
 											: "No especificado"}
 									</p>
 								</div>
@@ -328,8 +384,8 @@ export function LeadDetailModal({
 										Tiempo en el Trabajo
 									</Label>
 									<p className="text-sm">
-										{lead.workTime
-											? getWorkTimeLabel(lead.workTime)
+										{displayLead.workTime
+											? getWorkTimeLabel(displayLead.workTime)
 											: "No especificado"}
 									</p>
 								</div>
@@ -338,10 +394,10 @@ export function LeadDetailModal({
 					</div>
 
 					{/* Location Section */}
-					{(lead.direccion ||
-						lead.departamento ||
-						lead.municipio ||
-						lead.zona) && (
+					{(displayLead.direccion ||
+						displayLead.departamento ||
+						displayLead.municipio ||
+						displayLead.zona) && (
 						<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 							<h3 className="font-semibold text-base">Ubicación</h3>
 							<div className="grid grid-cols-4 gap-4">
@@ -350,7 +406,7 @@ export function LeadDetailModal({
 										Dirección
 									</Label>
 									<p className="text-sm">
-										{lead.direccion || "No especificado"}
+										{displayLead.direccion || "No especificado"}
 									</p>
 								</div>
 								<div>
@@ -358,7 +414,7 @@ export function LeadDetailModal({
 										Departamento
 									</Label>
 									<p className="text-sm">
-										{lead.departamento || "No especificado"}
+										{displayLead.departamento || "No especificado"}
 									</p>
 								</div>
 								<div>
@@ -366,14 +422,14 @@ export function LeadDetailModal({
 										Municipio
 									</Label>
 									<p className="text-sm">
-										{lead.municipio || "No especificado"}
+										{displayLead.municipio || "No especificado"}
 									</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
 										Zona
 									</Label>
-									<p className="text-sm">{lead.zona || "No especificado"}</p>
+									<p className="text-sm">{displayLead.zona || "No especificado"}</p>
 								</div>
 							</div>
 						</div>
@@ -386,15 +442,15 @@ export function LeadDetailModal({
 							<h3 className="font-semibold text-base">Activos</h3>
 							<div className="space-y-3">
 								<div className="flex items-center gap-2">
-									<Checkbox checked={lead.ownsHome ?? false} disabled />
+									<Checkbox checked={displayLead.ownsHome ?? false} disabled />
 									<Label className="text-sm">Posee Casa Propia</Label>
 								</div>
 								<div className="flex items-center gap-2">
-									<Checkbox checked={lead.ownsVehicle ?? false} disabled />
+									<Checkbox checked={displayLead.ownsVehicle ?? false} disabled />
 									<Label className="text-sm">Posee Vehículo Propio</Label>
 								</div>
 								<div className="flex items-center gap-2">
-									<Checkbox checked={lead.hasCreditCard ?? false} disabled />
+									<Checkbox checked={displayLead.hasCreditCard ?? false} disabled />
 									<Label className="text-sm">Tiene Tarjeta de Crédito</Label>
 								</div>
 							</div>
@@ -409,10 +465,10 @@ export function LeadDetailModal({
 										Fuente
 									</Label>
 									<Badge
-										className={getSourceBadgeColor(lead.source)}
+										className={getSourceBadgeColor(displayLead.source)}
 										variant="outline"
 									>
-										{getSourceLabel(lead.source)}
+										{getSourceLabel(displayLead.source)}
 									</Badge>
 								</div>
 								<div>
@@ -420,16 +476,16 @@ export function LeadDetailModal({
 										Estado
 									</Label>
 									<Badge
-										className={getLeadStatusBadgeColor(lead.status)}
+										className={getLeadStatusBadgeColor(displayLead.status)}
 										variant="outline"
 									>
-										{getStatusLabel(lead.status)}
+										{getStatusLabel(displayLead.status)}
 									</Badge>
 								</div>
-								{lead.livenessValidated !== null &&
-									lead.livenessValidated !== undefined && (
+								{displayLead.livenessValidated !== null &&
+									displayLead.livenessValidated !== undefined && (
 										<div className="flex items-center gap-2">
-											<Checkbox checked={lead.livenessValidated} disabled />
+											<Checkbox checked={displayLead.livenessValidated} disabled />
 											<Label className="text-sm">Liveness Validado</Label>
 										</div>
 									)}
@@ -447,7 +503,7 @@ export function LeadDetailModal({
 										Asignado a
 									</Label>
 									<p className="text-sm">
-										{lead.assignedUser?.name || "No asignado"}
+										{displayLead.assignedUser?.name || "No asignado"}
 									</p>
 								</div>
 								<div>
@@ -455,16 +511,16 @@ export function LeadDetailModal({
 										Fecha de Creación
 									</Label>
 									<p className="text-sm">
-										{formatGuatemalaDate(lead.createdAt)}
+										{formatGuatemalaDate(displayLead.createdAt)}
 									</p>
 								</div>
-								{lead.convertedAt && (
+								{displayLead.convertedAt && (
 									<div>
 										<Label className="font-medium text-muted-foreground text-sm">
 											Fecha de Conversión
 										</Label>
 										<p className="text-sm">
-											{formatGuatemalaDate(lead.convertedAt)}
+											{formatGuatemalaDate(displayLead.convertedAt)}
 										</p>
 									</div>
 								)}
@@ -473,7 +529,7 @@ export function LeadDetailModal({
 					</div>
 
 					{/* Scoring Section */}
-					{lead.score && (
+					{displayLead.score && (
 						<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
 							<h3 className="font-semibold text-base">Análisis de Riesgo</h3>
 							<div className="grid grid-cols-3 gap-4">
@@ -485,19 +541,19 @@ export function LeadDetailModal({
 										<div className="relative h-8 w-full rounded-full bg-gray-200">
 											<div
 												className={`absolute top-0 left-0 h-full rounded-full ${
-													Number(lead.score) >= 0.7
+													Number(displayLead.score) >= 0.7
 														? "bg-green-500"
-														: Number(lead.score) >= 0.4
+														: Number(displayLead.score) >= 0.4
 															? "bg-yellow-500"
 															: "bg-red-500"
 												}`}
 												style={{
-													width: `${Number(lead.score) * 100}%`,
+													width: `${Number(displayLead.score) * 100}%`,
 												}}
 											/>
 										</div>
 										<span className="font-bold text-lg">
-											{(Number(lead.score) * 100).toFixed(0)}%
+											{(Number(displayLead.score) * 100).toFixed(0)}%
 										</span>
 									</div>
 								</div>
@@ -506,14 +562,14 @@ export function LeadDetailModal({
 										Estado de Aprobación
 									</Label>
 									<Badge
-										variant={lead.fit ? "default" : "secondary"}
+										variant={displayLead.fit ? "default" : "secondary"}
 										className={
-											lead.fit
+											displayLead.fit
 												? "bg-green-500 px-4 py-1 text-lg hover:bg-green-600"
 												: "px-4 py-1 text-lg"
 										}
 									>
-										{lead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
+										{displayLead.fit ? "PREAPROBADO" : "NO PREAPROBADO"}
 									</Badge>
 								</div>
 								<div className="space-y-2">
@@ -521,8 +577,8 @@ export function LeadDetailModal({
 										Fecha de Análisis
 									</Label>
 									<p className="text-sm">
-										{lead.scoredAt
-											? formatGuatemalaDate(lead.scoredAt)
+										{displayLead.scoredAt
+											? formatGuatemalaDate(displayLead.scoredAt)
 											: "No analizado"}
 									</p>
 								</div>
@@ -663,7 +719,7 @@ export function LeadDetailModal({
 							<Button asChild>
 								<Link
 									to="/juridico/$leadId"
-									params={{ leadId: lead.id }}
+									params={{ leadId: displayLead.id }}
 									onClick={() => onOpenChange(false)}
 								>
 									Ver Contratos

@@ -163,10 +163,54 @@ function dpiGroupToWords(numStr: string): string {
 	const num = Number.parseInt(numStr, 10);
 	if (Number.isNaN(num)) return numStr;
 
-	const unidades = ["", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve"];
-	const especiales = ["diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete", "dieciocho", "diecinueve"];
-	const decenas = ["", "", "veinte", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa"];
-	const centenas = ["", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos"];
+	const unidades = [
+		"",
+		"uno",
+		"dos",
+		"tres",
+		"cuatro",
+		"cinco",
+		"seis",
+		"siete",
+		"ocho",
+		"nueve",
+	];
+	const especiales = [
+		"diez",
+		"once",
+		"doce",
+		"trece",
+		"catorce",
+		"quince",
+		"dieciséis",
+		"diecisiete",
+		"dieciocho",
+		"diecinueve",
+	];
+	const decenas = [
+		"",
+		"",
+		"veinte",
+		"treinta",
+		"cuarenta",
+		"cincuenta",
+		"sesenta",
+		"setenta",
+		"ochenta",
+		"noventa",
+	];
+	const centenas = [
+		"",
+		"ciento",
+		"doscientos",
+		"trescientos",
+		"cuatrocientos",
+		"quinientos",
+		"seiscientos",
+		"setecientos",
+		"ochocientos",
+		"novecientos",
+	];
 
 	if (num === 0) return "cero";
 	if (num === 100) return "cien";
@@ -211,7 +255,9 @@ function dpiGroupToWords(numStr: string): string {
 				} else if (d === 2) {
 					result += result ? ` veinti${unidades[u]}` : `veinti${unidades[u]}`;
 				} else {
-					result += result ? ` ${decenas[d]} y ${unidades[u]}` : `${decenas[d]} y ${unidades[u]}`;
+					result += result
+						? ` ${decenas[d]} y ${unidades[u]}`
+						: `${decenas[d]} y ${unidades[u]}`;
 				}
 			}
 		}
@@ -222,10 +268,54 @@ function dpiGroupToWords(numStr: string): string {
 
 // Convert money amount to words in Spanish
 function moneyToWords(amount: number): string {
-	const unidades = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE"];
-	const especiales = ["DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISEIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE"];
-	const decenas = ["", "", "VEINTE", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"];
-	const centenas = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"];
+	const unidades = [
+		"",
+		"UN",
+		"DOS",
+		"TRES",
+		"CUATRO",
+		"CINCO",
+		"SEIS",
+		"SIETE",
+		"OCHO",
+		"NUEVE",
+	];
+	const especiales = [
+		"DIEZ",
+		"ONCE",
+		"DOCE",
+		"TRECE",
+		"CATORCE",
+		"QUINCE",
+		"DIECISEIS",
+		"DIECISIETE",
+		"DIECIOCHO",
+		"DIECINUEVE",
+	];
+	const decenas = [
+		"",
+		"",
+		"VEINTE",
+		"TREINTA",
+		"CUARENTA",
+		"CINCUENTA",
+		"SESENTA",
+		"SETENTA",
+		"OCHENTA",
+		"NOVENTA",
+	];
+	const centenas = [
+		"",
+		"CIENTO",
+		"DOSCIENTOS",
+		"TRESCIENTOS",
+		"CUATROCIENTOS",
+		"QUINIENTOS",
+		"SEISCIENTOS",
+		"SETECIENTOS",
+		"OCHOCIENTOS",
+		"NOVECIENTOS",
+	];
 
 	const convertirGrupo = (n: number): string => {
 		if (n === 0) return "";
@@ -347,10 +437,23 @@ export function DynamicContractWizard({
 	const [diaPago, setDiaPago] = useState<string>("15"); // Default día 15
 
 	// Months in Spanish for date conversion
-	const monthsSpanish = useMemo(() => [
-		"enero", "febrero", "marzo", "abril", "mayo", "junio",
-		"julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-	], []);
+	const monthsSpanish = useMemo(
+		() => [
+			"enero",
+			"febrero",
+			"marzo",
+			"abril",
+			"mayo",
+			"junio",
+			"julio",
+			"agosto",
+			"septiembre",
+			"octubre",
+			"noviembre",
+			"diciembre",
+		],
+		[],
+	);
 
 	// Get ALL relevant fields for selected documents (including date fields for checking)
 	const allRelevantFields = useMemo(() => {
@@ -374,21 +477,21 @@ export function DynamicContractWizard({
 	// Check if any date-derived fields are needed
 	const needsDateConfig = useMemo(() => {
 		return allRelevantFields.some((field) =>
-			DATE_DERIVED_FIELDS.includes(field.key?.toLowerCase())
+			DATE_DERIVED_FIELDS.includes(field.key?.toLowerCase()),
 		);
 	}, [allRelevantFields]);
 
 	// Get relevant fields EXCLUDING date-derived fields (shown separately)
 	const relevantFields = useMemo(() => {
 		return allRelevantFields.filter(
-			(field) => !DATE_DERIVED_FIELDS.includes(field.key?.toLowerCase())
+			(field) => !DATE_DERIVED_FIELDS.includes(field.key?.toLowerCase()),
 		);
 	}, [allRelevantFields]);
 
 	// Get date-derived fields separately
 	const dateFields = useMemo(() => {
-		return allRelevantFields.filter(
-			(field) => DATE_DERIVED_FIELDS.includes(field.key?.toLowerCase())
+		return allRelevantFields.filter((field) =>
+			DATE_DERIVED_FIELDS.includes(field.key?.toLowerCase()),
 		);
 	}, [allRelevantFields]);
 
@@ -397,14 +500,37 @@ export function DynamicContractWizard({
 		if (num < 0 || num > 99) return num.toString();
 
 		const basicNumbers: Record<number, string> = {
-			0: "cero", 1: "uno", 2: "dos", 3: "tres", 4: "cuatro",
-			5: "cinco", 6: "seis", 7: "siete", 8: "ocho", 9: "nueve",
-			10: "diez", 11: "once", 12: "doce", 13: "trece", 14: "catorce",
-			15: "quince", 16: "dieciséis", 17: "diecisiete", 18: "dieciocho",
-			19: "diecinueve", 20: "veinte", 21: "veintiuno", 22: "veintidós",
-			23: "veintitrés", 24: "veinticuatro", 25: "veinticinco",
-			26: "veintiséis", 27: "veintisiete", 28: "veintiocho",
-			29: "veintinueve", 30: "treinta",
+			0: "cero",
+			1: "uno",
+			2: "dos",
+			3: "tres",
+			4: "cuatro",
+			5: "cinco",
+			6: "seis",
+			7: "siete",
+			8: "ocho",
+			9: "nueve",
+			10: "diez",
+			11: "once",
+			12: "doce",
+			13: "trece",
+			14: "catorce",
+			15: "quince",
+			16: "dieciséis",
+			17: "diecisiete",
+			18: "dieciocho",
+			19: "diecinueve",
+			20: "veinte",
+			21: "veintiuno",
+			22: "veintidós",
+			23: "veintitrés",
+			24: "veinticuatro",
+			25: "veinticinco",
+			26: "veintiséis",
+			27: "veintisiete",
+			28: "veintiocho",
+			29: "veintinueve",
+			30: "treinta",
 		};
 
 		if (basicNumbers[num] !== undefined) return basicNumbers[num];
@@ -414,12 +540,24 @@ export function DynamicContractWizard({
 			const units = num % 10;
 
 			const tensText: Record<number, string> = {
-				3: "treinta", 4: "cuarenta", 5: "cincuenta",
-				6: "sesenta", 7: "setenta", 8: "ochenta", 9: "noventa",
+				3: "treinta",
+				4: "cuarenta",
+				5: "cincuenta",
+				6: "sesenta",
+				7: "setenta",
+				8: "ochenta",
+				9: "noventa",
 			};
 			const unitsText: Record<number, string> = {
-				1: "uno", 2: "dos", 3: "tres", 4: "cuatro", 5: "cinco",
-				6: "seis", 7: "siete", 8: "ocho", 9: "nueve",
+				1: "uno",
+				2: "dos",
+				3: "tres",
+				4: "cuatro",
+				5: "cinco",
+				6: "seis",
+				7: "siete",
+				8: "ocho",
+				9: "nueve",
 			};
 
 			if (units === 0) return tensText[tens] || num.toString();
@@ -663,7 +801,8 @@ export function DynamicContractWizard({
 						break;
 					case "mesesprestamo":
 						if (credito.mesesPrestamo) {
-							initialValues[field.key] = `${numberToText(credito.mesesPrestamo).toUpperCase()} (${credito.mesesPrestamo})`;
+							initialValues[field.key] =
+								`${numberToText(credito.mesesPrestamo).toUpperCase()} (${credito.mesesPrestamo})`;
 							return;
 						}
 						break;
@@ -677,10 +816,13 @@ export function DynamicContractWizard({
 					case "cantidadcuota":
 						// Cuota en letras minúsculas
 						if (credito.cuotaMensual) {
-							const cuotaFormateada = credito.cuotaMensual.toLocaleString("es-GT", {
-								minimumFractionDigits: 2,
-								maximumFractionDigits: 2,
-							});
+							const cuotaFormateada = credito.cuotaMensual.toLocaleString(
+								"es-GT",
+								{
+									minimumFractionDigits: 2,
+									maximumFractionDigits: 2,
+								},
+							);
 							initialValues[field.key] = `Q.${cuotaFormateada}`;
 							return;
 						}
@@ -740,7 +882,7 @@ export function DynamicContractWizard({
 						initialValues[field.key] = String(credito.porcentajeMora || 5);
 						return;
 					case "porcentajemoratexto":
-					case "porcentajemoraletras":
+					case "porcentajemoraletras": {
 						// Default 5% si no viene del backend
 						const mora = credito.porcentajeMora || 5;
 						const partesMora = String(mora).split(".");
@@ -752,6 +894,7 @@ export function DynamicContractWizard({
 							initialValues[field.key] = enteroMora;
 						}
 						return;
+					}
 					case "plazo":
 						if (credito.mesesPrestamo) {
 							initialValues[field.key] = String(credito.mesesPrestamo);
@@ -847,7 +990,9 @@ export function DynamicContractWizard({
 				// Auto-calculate fecha de vencimiento if we have credit data
 				if (crmData.credito?.mesesPrestamo) {
 					const fechaInicio = new Date();
-					fechaInicio.setMonth(fechaInicio.getMonth() + crmData.credito.mesesPrestamo);
+					fechaInicio.setMonth(
+						fechaInicio.getMonth() + crmData.credito.mesesPrestamo,
+					);
 					const fechaStr = fechaInicio.toISOString().split("T")[0];
 					setFechaVencimiento(fechaStr);
 					updateDateFields(fechaStr, diaPago);
@@ -905,7 +1050,9 @@ export function DynamicContractWizard({
 		}
 	};
 
-	const allSelected = documentTypes.length > 0 && selectedDocuments.length === documentTypes.length;
+	const allSelected =
+		documentTypes.length > 0 &&
+		selectedDocuments.length === documentTypes.length;
 
 	const canProceedStep1 = selectedDocuments.length > 0;
 	const canProceedStep2 =
@@ -1009,11 +1156,7 @@ export function DynamicContractWizard({
 							<div className="flex items-center justify-between">
 								<CardTitle>Seleccione los documentos a generar</CardTitle>
 								{documentTypes.length > 0 && (
-									<Button
-										variant="outline"
-										size="sm"
-										onClick={handleSelectAll}
-									>
+									<Button variant="outline" size="sm" onClick={handleSelectAll}>
 										{allSelected ? "Deseleccionar todos" : "Seleccionar todos"}
 									</Button>
 								)}
@@ -1024,7 +1167,7 @@ export function DynamicContractWizard({
 								{documentTypes.map((docType) => (
 									<div
 										key={docType.enum}
-										className={`flex items-center space-x-3 rounded-lg border p-4 cursor-pointer transition-colors ${
+										className={`flex cursor-pointer items-center space-x-3 rounded-lg border p-4 transition-colors ${
 											selectedDocuments.includes(docType.enum)
 												? "border-primary bg-primary/5"
 												: "border-border hover:border-primary/50"
@@ -1097,7 +1240,9 @@ export function DynamicContractWizard({
 													</p>
 													<p className="text-muted-foreground text-sm">
 														{renapData.birthDate} •{" "}
-														{renapData.gender === "F" ? "Femenino" : "Masculino"}
+														{renapData.gender === "F"
+															? "Femenino"
+															: "Masculino"}
 													</p>
 												</div>
 											</div>
@@ -1110,8 +1255,22 @@ export function DynamicContractWizard({
 									<Card>
 										<CardHeader>
 											<CardTitle className="flex items-center gap-2">
-												<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-													<rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+												<svg
+													xmlns="http://www.w3.org/2000/svg"
+													className="h-5 w-5"
+													viewBox="0 0 24 24"
+													fill="none"
+													stroke="currentColor"
+													strokeWidth="2"
+												>
+													<rect
+														x="3"
+														y="4"
+														width="18"
+														height="18"
+														rx="2"
+														ry="2"
+													/>
 													<line x1="16" y1="2" x2="16" y2="6" />
 													<line x1="8" y1="2" x2="8" y2="6" />
 													<line x1="3" y1="10" x2="21" y2="10" />
@@ -1126,38 +1285,53 @@ export function DynamicContractWizard({
 													<select
 														id="diaPago"
 														value={diaPago}
-														onChange={(e) => handleDiaPagoChange(e.target.value)}
+														onChange={(e) =>
+															handleDiaPagoChange(e.target.value)
+														}
 														className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 													>
-														{Array.from({ length: 31 }, (_, i) => i + 1).map((day) => (
-															<option key={day} value={day}>
-																{day === 15 ? `${day} (Recomendado)` : day}
-															</option>
-														))}
+														{Array.from({ length: 31 }, (_, i) => i + 1).map(
+															(day) => (
+																<option key={day} value={day}>
+																	{day === 15 ? `${day} (Recomendado)` : day}
+																</option>
+															),
+														)}
 														<option value="ultimo">Último día del mes</option>
 													</select>
 													<p className="text-muted-foreground text-xs">
-														Se usará: "{fieldValues.diaPago || numberToText(Number(diaPago))}"
+														Se usará: "
+														{fieldValues.diaPago ||
+															numberToText(Number(diaPago))}
+														"
 													</p>
 												</div>
 												<div className="space-y-2">
-													<Label htmlFor="fechaVencimiento">Fecha de Vencimiento del Crédito</Label>
+													<Label htmlFor="fechaVencimiento">
+														Fecha de Vencimiento del Crédito
+													</Label>
 													<Input
 														id="fechaVencimiento"
 														type="date"
 														value={fechaVencimiento}
-														onChange={(e) => handleFechaVencimientoChange(e.target.value)}
+														onChange={(e) =>
+															handleFechaVencimientoChange(e.target.value)
+														}
 													/>
 													{fechaVencimiento && (
 														<p className="text-muted-foreground text-xs">
-															Se usará: "{fieldValues.diaTextoVencimiento} de {fieldValues.mesTextoVencimiento} del dos mil {fieldValues.anoTextoVencimiento}"
+															Se usará: "{fieldValues.diaTextoVencimiento} de{" "}
+															{fieldValues.mesTextoVencimiento} del dos mil{" "}
+															{fieldValues.anoTextoVencimiento}"
 														</p>
 													)}
 												</div>
 											</div>
 											{dateFields.length > 0 && (
 												<div className="mt-4 rounded-lg border bg-muted/30 p-3">
-													<p className="mb-2 font-medium text-sm">Campos que se llenarán automáticamente:</p>
+													<p className="mb-2 font-medium text-sm">
+														Campos que se llenarán automáticamente:
+													</p>
 													<div className="flex flex-wrap gap-2">
 														{dateFields.map((field) => (
 															<span
@@ -1213,9 +1387,7 @@ export function DynamicContractWizard({
 																onChange={(e) =>
 																	handleFieldChange(field.key, e.target.value)
 																}
-																placeholder={
-																	field.description || "Sin valor"
-																}
+																placeholder={field.description || "Sin valor"}
 																className="h-8 bg-white text-sm"
 															/>
 														</div>
@@ -1226,7 +1398,8 @@ export function DynamicContractWizard({
 											{fieldStats.filledRequired < fieldStats.required && (
 												<div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
 													<p className="font-medium text-amber-800 text-sm">
-														Faltan {fieldStats.required - fieldStats.filledRequired}{" "}
+														Faltan{" "}
+														{fieldStats.required - fieldStats.filledRequired}{" "}
 														campos requeridos por completar
 													</p>
 												</div>
@@ -1251,7 +1424,7 @@ export function DynamicContractWizard({
 												.map((doc) => {
 													// Get the label from documentTypes for a readable name
 													const docType = documentTypes.find(
-														(dt) => dt.enum === doc.nombre_documento
+														(dt) => dt.enum === doc.nombre_documento,
 													);
 													const displayName =
 														doc.descripcion ||

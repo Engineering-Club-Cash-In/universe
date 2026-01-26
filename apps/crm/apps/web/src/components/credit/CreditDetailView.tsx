@@ -501,61 +501,6 @@ export function CreditDetailView({
 		},
 	});
 
-	// Validar campos requeridos antes de aprobar
-	const validateRequiredFields = (): string[] => {
-		const camposFaltantes: string[] = [];
-
-		if (!editCategoria && !opportunity.categoria) {
-			camposFaltantes.push("Categoría");
-		}
-		if (!editNit && !opportunity.nit) {
-			camposFaltantes.push("NIT");
-		}
-		if (!editDireccion && !lead?.direccion) {
-			camposFaltantes.push("Dirección");
-		}
-		if (!editDiaPagoMensual && !opportunity.diaPagoMensual) {
-			camposFaltantes.push("Día de pago mensual");
-		}
-
-		// Validar inversionistas
-		let inversionistasToValidate: SelectedInversionista[] = [];
-		if (editInversionistas.length > 0) {
-			inversionistasToValidate = editInversionistas;
-		} else {
-			try {
-				const parsed = opportunity.inversionistas
-					? JSON.parse(opportunity.inversionistas)
-					: [];
-				if (Array.isArray(parsed) && parsed.length > 0) {
-					inversionistasToValidate = parsed;
-				} else {
-					camposFaltantes.push("Inversionistas");
-				}
-			} catch {
-				camposFaltantes.push("Inversionistas");
-			}
-		}
-
-		// Validar que la suma de montos aportados = amountToFinance (capital)
-		if (inversionistasToValidate.length > 0 && quotation?.totalFinanced) {
-			const totalAportado = inversionistasToValidate.reduce(
-				(sum, inv) => sum + (inv.monto_aportado || 0),
-				0,
-			);
-			const capitalCredito = Number.parseFloat(quotation.totalFinanced);
-
-			// Permitir una pequeña diferencia por redondeo (1 centavo)
-			if (Math.abs(totalAportado - capitalCredito) > 0.01) {
-				camposFaltantes.push(
-					`La suma de montos aportados (Q${totalAportado.toLocaleString()}) debe ser igual al capital del crédito (Q${capitalCredito.toLocaleString()})`,
-				);
-			}
-		}
-
-		return camposFaltantes;
-	};
-
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
@@ -945,39 +890,7 @@ export function CreditDetailView({
 											</p>
 										)}
 									</div>
-									<div>
-										<Label className="text-muted-foreground text-xs">
-											Categoría
-										</Label>
-										{isEditing ? (
-											<Select
-												value={editCategoria}
-												onValueChange={(value) =>
-													setEditCategoria(value as CreditCategory)
-												}
-											>
-												<SelectTrigger className="mt-1">
-													<SelectValue placeholder="Seleccionar categoría" />
-												</SelectTrigger>
-												<SelectContent>
-													<SelectItem value="Contraseña">Contraseña</SelectItem>
-													<SelectItem value="CV Vehículo">
-														CV Vehículo
-													</SelectItem>
-													<SelectItem value="CV Vehículo nuevo">
-														CV Vehículo nuevo
-													</SelectItem>
-													<SelectItem value="Fiduciario">Fiduciario</SelectItem>
-													<SelectItem value="Hipotecario">
-														Hipotecario
-													</SelectItem>
-													<SelectItem value="Vehículo">Vehículo</SelectItem>
-												</SelectContent>
-											</Select>
-										) : (
-											<p className="font-medium">{editCategoria || "N/A"}</p>
-										)}
-									</div>
+
 									<div>
 										<Label className="text-muted-foreground text-xs">
 											Edad

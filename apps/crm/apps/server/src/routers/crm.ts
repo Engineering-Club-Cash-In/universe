@@ -39,6 +39,10 @@ import {
 	opportunityDocuments,
 } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import {
+	formatMissingLeadFields,
+	getMissingLeadFieldsForContracts,
+} from "../lib/lead-helpers";
 import { analystProcedure, crmProcedure } from "../lib/orpc";
 import { PERMISSIONS } from "../lib/roles";
 import {
@@ -53,10 +57,6 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import {
-	formatMissingLeadFields,
-	getMissingLeadFieldsForContracts,
-} from "../lib/lead-helpers";
 import { closeOpportunity } from "../services/close-opportunity";
 
 export const crmRouter = {
@@ -394,6 +394,7 @@ export const crmRouter = {
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				direccion: z.string().optional(),
 				departamento: z.string().optional(),
 				municipio: z.string().optional(),
 				zona: z.string().optional(),
@@ -403,6 +404,9 @@ export const crmRouter = {
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
+				birthDate: z.coerce.date().optional().nullable(),
+				gender: z.string().optional().nullable(),
+				nationality: z.string().optional().nullable(),
 				dependents: z.number().int().min(0).default(0),
 				monthlyIncome: z.number().positive().optional(),
 				loanAmount: z.number().positive().optional(),
@@ -463,12 +467,17 @@ export const crmRouter = {
 				phone: z.string().optional(),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				direccion: z.string().optional(),
 				departamento: z.string().optional(),
 				municipio: z.string().optional(),
 				zona: z.string().optional(),
+				clientType: z.enum(["individual", "comerciante", "empresa"]).optional(),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
+				birthDate: z.coerce.date().optional().nullable(),
+				gender: z.string().optional().nullable(),
+				nationality: z.string().optional().nullable(),
 				dependents: z.number().int().min(0).optional(),
 				monthlyIncome: z.number().positive().optional(),
 				loanAmount: z.number().positive().optional(),
@@ -1098,12 +1107,13 @@ export const crmRouter = {
 				//  en este apartado ya nadie puede mover de 80 a 90 sin aprobacion de analista
 				// Validate document approval when moving from 80% to 90%
 				if (fromPercentage === 80 && toPercentage >= 90) {
-					console.log("Validating document approval for 80% to 90% stage change");
+					console.log(
+						"Validating document approval for 80% to 90% stage change",
+					);
 					throw new ORPCError("BAD_REQUEST", {
 						message:
 							"Para avanzar de evaluación (80%) a la siguiente etapa (90%+), solo un analista puede realizar este cambio después de aprobar los documentos.",
 					});
-					
 				}
 
 				// Validate disbursement approval when moving from 90% to 100%
@@ -3629,7 +3639,6 @@ export const crmRouter = {
 					message: "No se encontró la etapa del 100%",
 				});
 			}
-
 
 			// Update opportunity with approval and move to 100%
 			await db

@@ -2850,7 +2850,7 @@ export const crmRouter = {
 			// Phase 3: Vehicle-dependent queries (if vehicle exists)
 			let vehicleInspected = false;
 			let inspectionId = null;
-			let vehicleOwnerType = vehicle?.ownerType ?? null;
+			const vehicleOwnerType = vehicle?.ownerType ?? null;
 			let requiredVehicleDocs: any[] = [];
 			let uploadedVehicleDocs: any[] = [];
 
@@ -2861,35 +2861,40 @@ export const crmRouter = {
 				}
 
 				// Run vehicle document queries in parallel
-				const [inspectionResult, reqVehicleDocsResult, uploadedVehicleDocsResult] =
-					await Promise.all([
-						// Inspection check (only for used vehicles)
-						!vehicle.isNew
-							? db
-									.select()
-									.from(vehicleInspections)
-									.where(
-										and(
-											eq(vehicleInspections.vehicleId, opportunity.vehicleId!),
-											eq(vehicleInspections.status, "approved"),
-										),
-									)
-									.limit(1)
-							: Promise.resolve([]),
-						// Required vehicle documents
-						vehicleOwnerType
-							? db
-									.select()
-									.from(vehicleDocumentRequirements)
-									.where(eq(vehicleDocumentRequirements.ownerType, vehicleOwnerType))
-									.orderBy(vehicleDocumentRequirements.order)
-							: Promise.resolve([]),
-						// Uploaded vehicle documents
-						db
-							.select()
-							.from(vehicleDocuments)
-							.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId!)),
-					]);
+				const [
+					inspectionResult,
+					reqVehicleDocsResult,
+					uploadedVehicleDocsResult,
+				] = await Promise.all([
+					// Inspection check (only for used vehicles)
+					!vehicle.isNew
+						? db
+								.select()
+								.from(vehicleInspections)
+								.where(
+									and(
+										eq(vehicleInspections.vehicleId, opportunity.vehicleId!),
+										eq(vehicleInspections.status, "approved"),
+									),
+								)
+								.limit(1)
+						: Promise.resolve([]),
+					// Required vehicle documents
+					vehicleOwnerType
+						? db
+								.select()
+								.from(vehicleDocumentRequirements)
+								.where(
+									eq(vehicleDocumentRequirements.ownerType, vehicleOwnerType),
+								)
+								.orderBy(vehicleDocumentRequirements.order)
+						: Promise.resolve([]),
+					// Uploaded vehicle documents
+					db
+						.select()
+						.from(vehicleDocuments)
+						.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId!)),
+				]);
 
 				const [inspection] = inspectionResult;
 				if (inspection) {
@@ -2903,7 +2908,9 @@ export const crmRouter = {
 				// Fallback: buscar documentos de vehículo en opportunityDocuments
 				// para oportunidades existentes que subieron docs antes de la sincronización
 				if (requiredVehicleDocs.length > 0) {
-					const vehicleDocTypes = requiredVehicleDocs.map((d) => d.documentType);
+					const vehicleDocTypes = requiredVehicleDocs.map(
+						(d) => d.documentType,
+					);
 					const uploadedVehicleTypesFromVehicle = new Set(
 						uploadedVehicleDocs.map((d) => d.documentType),
 					);
@@ -3872,4 +3879,356 @@ export const crmRouter = {
 
 		return result;
 	}),
+
+	// Get opportunities at 50% for investment assignment
+	getOpportunitiesForInvestment: analystProcedure.handler(async () => {
+		// Get the 50% stage
+		const [stage50] = await db
+			.select()
+			.from(salesStages)
+			.where(eq(salesStages.closurePercentage, 50))
+			.limit(1);
+
+		if (!stage50) {
+			return [];
+		}
+
+		// Get opportunities at 50%
+		const opps = await db
+			.select({
+				id: opportunities.id,
+				title: opportunities.title,
+				value: opportunities.value,
+				stageId: opportunities.stageId,
+				inversionistas: opportunities.inversionistas,
+				leadId: opportunities.leadId,
+				vehicleId: opportunities.vehicleId,
+				numeroCuotas: opportunities.numeroCuotas,
+				tasaInteres: opportunities.tasaInteres,
+				cuotaMensual: opportunities.cuotaMensual,
+				createdAt: opportunities.createdAt,
+				updatedAt: opportunities.updatedAt,
+			})
+			.from(opportunities)
+			.where(eq(opportunities.stageId, stage50.id))
+			.orderBy(desc(opportunities.updatedAt));
+
+		// Get additional info for each opportunity
+		const result = await Promise.all(
+			opps.map(async (opp) => {
+				// Get lead info
+				let lead: {
+					id: string;
+					firstName: string;
+					lastName: string;
+					phone: string | null;
+					dpi: string | null;
+					direccion: string | null;
+					maritalStatus: "single" | "married" | "divorced" | "widowed" | null;
+					gender: string | null;
+					birthDate: Date | null;
+					nationality: string | null;
+				} | null = null;
+
+				if (opp.leadId) {
+					const [leadResult] = await db
+						.select({
+							id: leads.id,
+							firstName: leads.firstName,
+							lastName: leads.lastName,
+							phone: leads.phone,
+							dpi: leads.dpi,
+							direccion: leads.direccion,
+							maritalStatus: leads.maritalStatus,
+							gender: leads.gender,
+							birthDate: leads.birthDate,
+							nationality: leads.nationality,
+						})
+						.from(leads)
+						.where(eq(leads.id, opp.leadId))
+						.limit(1);
+					lead = leadResult || null;
+				}
+
+				// Get vehicle info
+				let vehicle: {
+					id: string;
+					make: string;
+					model: string;
+					year: number;
+					licensePlate: string | null;
+					color: string;
+					isNew: boolean;
+					vinNumber: string | null;
+					motorNumber: string | null;
+					seats: number | null;
+					vehicleUse: string | null;
+				} | null = null;
+
+				if (opp.vehicleId) {
+					const [vehicleResult] = await db
+						.select({
+							id: vehicles.id,
+							make: vehicles.make,
+							model: vehicles.model,
+							year: vehicles.year,
+							licensePlate: vehicles.licensePlate,
+							color: vehicles.color,
+							isNew: vehicles.isNew,
+							vinNumber: vehicles.vinNumber,
+							motorNumber: vehicles.motorNumber,
+							seats: vehicles.seats,
+							vehicleUse: vehicles.vehicleUse,
+						})
+						.from(vehicles)
+						.where(eq(vehicles.id, opp.vehicleId))
+						.limit(1);
+					vehicle = vehicleResult || null;
+				}
+
+				// Check if has investor assigned
+				let hasInvestor = false;
+				if (opp.inversionistas) {
+					try {
+						const parsed = JSON.parse(opp.inversionistas);
+						hasInvestor = Array.isArray(parsed) && parsed.length > 0;
+					} catch {
+						hasInvestor = false;
+					}
+				}
+
+				return {
+					id: opp.id,
+					title: opp.title,
+					value: opp.value,
+					hasInvestor,
+					hasCreditData: !!(
+						opp.numeroCuotas &&
+						opp.tasaInteres &&
+						opp.cuotaMensual
+					),
+					createdAt: opp.createdAt,
+					updatedAt: opp.updatedAt,
+					lead: lead
+						? {
+								id: lead.id,
+								name: `${lead.firstName} ${lead.lastName}`,
+								phone: lead.phone,
+								hasRequiredData: !!(
+									lead.dpi &&
+									lead.direccion &&
+									lead.maritalStatus &&
+									lead.gender &&
+									lead.birthDate &&
+									lead.nationality
+								),
+								missingFields: getMissingLeadFieldsForContracts({
+									dpi: lead.dpi,
+									direccion: lead.direccion,
+									maritalStatus: lead.maritalStatus,
+									gender: lead.gender,
+									birthDate: lead.birthDate,
+									nationality: lead.nationality,
+								}),
+							}
+						: null,
+					vehicle: vehicle
+						? {
+								id: vehicle.id,
+								description: `${vehicle.make} ${vehicle.model} ${vehicle.year}`,
+								licensePlate: vehicle.licensePlate,
+								isNew: vehicle.isNew,
+								hasRequiredData: !!(
+									vehicle.vinNumber &&
+									vehicle.motorNumber &&
+									vehicle.seats &&
+									vehicle.vehicleUse
+								),
+								missingFields: getMissingFieldsForContracts({
+									vinNumber: vehicle.vinNumber,
+									motorNumber: vehicle.motorNumber,
+									seats: vehicle.seats,
+									vehicleUse: vehicle.vehicleUse,
+								}),
+							}
+						: null,
+					stage: {
+						id: stage50.id,
+						name: stage50.name,
+						closurePercentage: stage50.closurePercentage,
+						color: stage50.color,
+					},
+				};
+			}),
+		);
+
+		return result;
+	}),
+
+	// Assign investor and advance to 80%
+	assignInvestorAndAdvance: analystProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				inversionistas: z.string(), // JSON string with investors array
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Get the opportunity
+			const [opportunity] = await db
+				.select()
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// Validate opportunity is at 50%
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage || currentStage.closurePercentage !== 50) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "La oportunidad debe estar en la etapa del 50%",
+				});
+			}
+
+			// Parse and validate investors
+			let parsedInversionistas: Array<{
+				inversionista_id: number;
+				nombre: string;
+				monto_aportado?: number;
+				porcentaje_participacion?: number;
+			}>;
+
+			try {
+				parsedInversionistas = JSON.parse(input.inversionistas);
+				if (
+					!Array.isArray(parsedInversionistas) ||
+					parsedInversionistas.length === 0
+				) {
+					throw new Error("Invalid investors array");
+				}
+			} catch {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe seleccionar al menos un inversionista",
+				});
+			}
+
+			// Validate minimum data for contracts
+			const validationErrors: string[] = [];
+
+			// Validate lead data
+			if (opportunity.leadId) {
+				const [lead] = await db
+					.select({
+						dpi: leads.dpi,
+						direccion: leads.direccion,
+						maritalStatus: leads.maritalStatus,
+						gender: leads.gender,
+						birthDate: leads.birthDate,
+						nationality: leads.nationality,
+					})
+					.from(leads)
+					.where(eq(leads.id, opportunity.leadId))
+					.limit(1);
+
+				if (lead) {
+					const missingLeadFields = getMissingLeadFieldsForContracts(lead);
+					if (missingLeadFields.length > 0) {
+						validationErrors.push(
+							`Cliente: Faltan ${formatMissingLeadFields(missingLeadFields)}`,
+						);
+					}
+				}
+			} else {
+				validationErrors.push("No hay cliente asociado a la oportunidad");
+			}
+
+			// Validate vehicle data
+			if (opportunity.vehicleId) {
+				const [vehicle] = await db
+					.select({
+						vinNumber: vehicles.vinNumber,
+						motorNumber: vehicles.motorNumber,
+						seats: vehicles.seats,
+						vehicleUse: vehicles.vehicleUse,
+					})
+					.from(vehicles)
+					.where(eq(vehicles.id, opportunity.vehicleId))
+					.limit(1);
+
+				if (vehicle) {
+					const missingVehicleFields = getMissingFieldsForContracts(vehicle);
+					if (missingVehicleFields.length > 0) {
+						validationErrors.push(
+							`Vehículo: Faltan ${formatMissingFields(missingVehicleFields)}`,
+						);
+					}
+				}
+			} else {
+				validationErrors.push("No hay vehículo asociado a la oportunidad");
+			}
+
+			// Validate credit data
+			const creditMissing: string[] = [];
+			if (!opportunity.value) creditMissing.push("Monto del crédito");
+			if (!opportunity.cuotaMensual) creditMissing.push("Cuota mensual");
+			if (!opportunity.numeroCuotas) creditMissing.push("Número de cuotas");
+			if (!opportunity.tasaInteres) creditMissing.push("Tasa de interés");
+
+			if (creditMissing.length > 0) {
+				validationErrors.push(`Crédito: Faltan ${creditMissing.join(", ")}`);
+			}
+
+			if (validationErrors.length > 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: `No se puede avanzar a 80%. ${validationErrors.join(". ")}`,
+				});
+			}
+
+			// Get the 80% stage
+			const [stage80] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 80))
+				.limit(1);
+
+			if (!stage80) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "No se encontró la etapa del 80%",
+				});
+			}
+
+			// Update opportunity with investors and move to 80%
+			await db
+				.update(opportunities)
+				.set({
+					inversionistas: input.inversionistas,
+					stageId: stage80.id,
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			// Record stage history
+			await db.insert(opportunityStageHistory).values({
+				opportunityId: input.opportunityId,
+				fromStageId: opportunity.stageId,
+				toStageId: stage80.id,
+				changedBy: context.userId,
+				reason: "Inversión asignada - Avance a etapa jurídica",
+			});
+
+			return {
+				success: true,
+				message: "Inversionista asignado y oportunidad avanzada a 80%",
+			};
+		}),
 };

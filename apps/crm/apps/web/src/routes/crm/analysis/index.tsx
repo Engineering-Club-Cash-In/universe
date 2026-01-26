@@ -14,7 +14,7 @@ import {
 	Wallet,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { InvestmentAssignmentSection } from "@/components/analysis/InvestmentAssignmentSection";
@@ -62,6 +62,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/analysis/")({
@@ -208,7 +209,7 @@ function AnalysisPage() {
 	useEffect(() => {
 		if (
 			userProfile.data &&
-			!["admin", "analyst"].includes(userProfile.data.role)
+			!PERMISSIONS.canAccessAnalysis(userProfile.data.role)
 		) {
 			navigate({ to: "/dashboard" });
 		}
@@ -397,7 +398,10 @@ function AnalysisPage() {
 									<Input
 										placeholder="Buscar por nombre, placa..."
 										value={searchTerm}
-										onChange={(e) => setSearchTerm(e.target.value)}
+										onChange={(e) => {
+											const value = e.target.value;
+											startTransition(() => setSearchTerm(value));
+										}}
 										className="pl-10"
 									/>
 								</div>
@@ -778,7 +782,7 @@ function DisbursementSection() {
 		// Find the opportunity with this lead
 		const opp = opportunities?.find((o) => o.leadId === leadId);
 		if (opp) {
-			setSelectedLeadForModal({
+			const leadData = {
 				id: leadId,
 				firstName: opp.leadName?.split(" ")[0] || "",
 				lastName: opp.leadName?.split(" ").slice(1).join(" ") || "",
@@ -788,9 +792,13 @@ function DisbursementSection() {
 				source: "",
 				status: "qualified",
 				createdAt: opp.createdAt,
-			});
+			};
 			setIsOpportunityModalOpen(false);
-			setIsLeadModalOpen(true);
+			// Delay opening second modal to allow first to fully close
+			setTimeout(() => {
+				setSelectedLeadForModal(leadData);
+				setIsLeadModalOpen(true);
+			}, 150);
 		}
 	};
 
@@ -823,7 +831,10 @@ function DisbursementSection() {
 							<Input
 								placeholder="Buscar por nombre, placa..."
 								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
+								onChange={(e) => {
+									const value = e.target.value;
+									startTransition(() => setSearchTerm(value));
+								}}
 								className="pl-10"
 							/>
 						</div>

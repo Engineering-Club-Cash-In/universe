@@ -18,7 +18,7 @@ import {
 	User,
 	FileText,
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
 	OpportunityDetailModal,
@@ -426,7 +426,10 @@ export function InvestmentAssignmentSection() {
 							<Input
 								placeholder="Buscar por nombre, placa..."
 								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
+								onChange={(e) => {
+									const value = e.target.value;
+									startTransition(() => setSearchTerm(value));
+								}}
 								className="pl-10"
 							/>
 						</div>

@@ -1815,38 +1815,41 @@ export const crmRouter = {
 				);
 			}
 
-			// Get stage 40% (Cierre de propuesta)
+			// Get stage 40% by closurePercentage (more reliable than order)
 			const [previousStage] = await db
 				.select()
 				.from(salesStages)
-				.where(eq(salesStages.order, 5)) // Order 5 = 40% - Cierre de propuesta
+				.where(eq(salesStages.closurePercentage, 40))
 				.limit(1);
 
 			if (!previousStage) {
-				throw new Error("Etapa anterior no encontrada");
+				throw new Error("Etapa 40% no encontrada");
 			}
 
-			// Update opportunity - revoke approval
-			await db
-				.update(opportunities)
-				.set({
-					stageId: previousStage.id,
-					creditDetailApproved: false,
-					creditDetailApprovedBy: null,
-					creditDetailApprovedAt: null,
-					updatedAt: new Date(),
-				})
-				.where(eq(opportunities.id, input.opportunityId));
+			// Update opportunity and record history in a transaction for atomicity
+			await db.transaction(async (tx) => {
+				// Update opportunity - revoke approval
+				await tx
+					.update(opportunities)
+					.set({
+						stageId: previousStage.id,
+						creditDetailApproved: false,
+						creditDetailApprovedBy: null,
+						creditDetailApprovedAt: null,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
 
-			// Record stage history
-			await db.insert(opportunityStageHistory).values({
-				opportunityId: input.opportunityId,
-				fromStageId: opportunity.stageId,
-				toStageId: previousStage.id,
-				changedBy: context.userId,
-				reason:
-					"Aprobación de detalle cancelada - Regresado a Cierre de propuesta (40%)",
-				isOverride: false,
+				// Record stage history
+				await tx.insert(opportunityStageHistory).values({
+					opportunityId: input.opportunityId,
+					fromStageId: opportunity.stageId,
+					toStageId: previousStage.id,
+					changedBy: context.userId,
+					reason:
+						"Aprobación de detalle cancelada - Regresado a Cierre de propuesta (40%)",
+					isOverride: false,
+				});
 			});
 
 			return { success: true };
@@ -4152,6 +4155,7 @@ export const crmRouter = {
 					categoria: opportunities.categoria,
 					nit: opportunities.nit,
 					diaPagoMensual: opportunities.diaPagoMensual,
+					creditType: opportunities.creditType,
 					createdAt: opportunities.createdAt,
 					updatedAt: opportunities.updatedAt,
 				})

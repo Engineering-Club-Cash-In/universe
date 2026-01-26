@@ -10,13 +10,21 @@ import {
 	calculateAge,
 	calculateAgeInWords,
 	capitalizeWords,
+	dpiToLegalFormat,
+	dpiToWordsUppercase,
 	formatDpi,
+	formatMoneyNumber,
+	formatMoneyWithQ,
 	formatNationality,
 	getDateComponents,
+	getGenderLetter,
+	getYearPartial,
+	getYearTwoDigits,
 	mapGender,
 	mapMaritalStatus,
 	numberToWords,
 	numberToWordsQuetzales,
+	numberToWordsQuetzalesLegal,
 	toUpperCase,
 } from "../lib/contract-utils";
 
@@ -49,7 +57,10 @@ export interface ContractDateComponents {
 	day: string;
 	month: string;
 	year: string;
+	yearPartial: string; // Solo parte después de "dos mil" (ej: "veinticinco")
+	yearTwoDigits: string; // Año en 2 dígitos (ej: "25")
 	dayNumber: number;
+	dayPadded: string; // Día con padding (ej: "02")
 	monthNumber: number;
 	yearNumber: number;
 }
@@ -65,12 +76,16 @@ export interface ContractData {
 		segundoApellido: string;
 		dpi: string;
 		dpiFormateado: string;
+		dpiLegal: string;
+		dpiLetras: string; // DPI en MAYÚSCULAS sin paréntesis
 		edad: number;
 		edadEnLetras: string;
 		estadoCivil: string;
 		genero: string;
+		generoLetra: string; // "o" para masculino, "a" para femenino
 		nacionalidad: string;
 		direccion: string;
+		direccionMayusculas: string;
 		telefono: string;
 		email: string;
 		profesion?: string;
@@ -78,16 +93,24 @@ export interface ContractData {
 	// Datos del vehículo
 	vehiculo: {
 		marca: string;
+		marcaMayusculas: string;
 		modelo: string;
 		linea: string;
+		lineaMayusculas: string;
 		anio: number;
 		anioEnLetras: string;
 		color: string;
+		colorMayusculas: string;
 		tipoVehiculo: string;
+		tipoVehiculoMayusculas: string;
 		placas: string;
+		placasMayusculas: string;
 		vin: string;
+		vinMayusculas: string;
 		motor: string;
+		motorMayusculas: string;
 		serie?: string;
+		serieMayusculas?: string;
 		asientos: number;
 		asientosEnLetras: string;
 		puertas?: number;
@@ -97,10 +120,13 @@ export interface ContractData {
 		cilindros?: string;
 		cilindraje?: string;
 		combustible?: string;
+		combustibleMayusculas?: string;
 		transmision?: string;
 		origen?: string;
 		uso: string; // Particular o Comercial
+		usoMayusculas: string;
 		codigoIscv?: string;
+		codigoIscvMayusculas?: string;
 		kilometraje?: number;
 		esNuevo: boolean;
 	};
@@ -108,8 +134,14 @@ export interface ContractData {
 	credito: {
 		montoTotal: number;
 		montoTotalEnLetras: string;
+		montoTotalLegal: string; // MAYÚSCULAS (Q.número)
+		montoTotalNumero: string; // Número formateado sin Q (ej: "146,970.60")
+		montoTotalConQ: string; // Con Q (ej: "Q.146,970.60")
 		cuotaMensual: number;
 		cuotaMensualEnLetras: string;
+		cuotaMensualLegal: string; // MAYÚSCULAS (Q.número)
+		cuotaMensualNumero: string; // Número formateado sin Q
+		cuotaMensualConQ: string; // Con Q
 		numeroCuotas: number;
 		numeroCuotasEnLetras: string;
 		tasaInteres: number;
@@ -321,16 +353,26 @@ export async function mapOpportunityToContractData(
 	const vehicleData = vehicle
 		? {
 				marca: vehicle.make,
+				marcaMayusculas: toUpperCase(vehicle.make),
 				modelo: vehicle.model,
 				linea: vehicle.model, // En algunos casos línea = modelo
+				lineaMayusculas: toUpperCase(vehicle.model),
 				anio: vehicle.year,
 				anioEnLetras: numberToWords(vehicle.year),
 				color: vehicle.color,
+				colorMayusculas: toUpperCase(vehicle.color),
 				tipoVehiculo: vehicle.vehicleType,
+				tipoVehiculoMayusculas: toUpperCase(vehicle.vehicleType),
 				placas: vehicle.licensePlate || "",
+				placasMayusculas: toUpperCase(vehicle.licensePlate || ""),
 				vin: vehicle.vinNumber || "",
+				vinMayusculas: toUpperCase(vehicle.vinNumber || ""),
 				motor: vehicle.motorNumber || "",
+				motorMayusculas: toUpperCase(vehicle.motorNumber || ""),
 				serie: vehicle.series || undefined,
+				serieMayusculas: vehicle.series
+					? toUpperCase(vehicle.series)
+					: undefined,
 				asientos: vehicle.seats || 0,
 				asientosEnLetras: numberToWords(vehicle.seats || 0),
 				puertas: vehicle.doors || undefined,
@@ -342,29 +384,44 @@ export async function mapOpportunityToContractData(
 				cilindros: vehicle.cylinders || undefined,
 				cilindraje: vehicle.engineCC || undefined,
 				combustible: vehicle.fuelType || undefined,
+				combustibleMayusculas: vehicle.fuelType
+					? toUpperCase(vehicle.fuelType)
+					: undefined,
 				transmision: vehicle.transmission || undefined,
 				origen: vehicle.origin || undefined,
 				uso: vehicle.vehicleUse || "Particular",
+				usoMayusculas: toUpperCase(vehicle.vehicleUse || "Particular"),
 				codigoIscv: vehicle.iscvCode || undefined,
+				codigoIscvMayusculas: vehicle.iscvCode
+					? toUpperCase(vehicle.iscvCode)
+					: undefined,
 				kilometraje: vehicle.kmMileage || undefined,
 				esNuevo: vehicle.isNew,
 			}
 		: {
 				marca: "",
+				marcaMayusculas: "",
 				modelo: "",
 				linea: "",
+				lineaMayusculas: "",
 				anio: 0,
 				anioEnLetras: "",
 				color: "",
+				colorMayusculas: "",
 				tipoVehiculo: "",
+				tipoVehiculoMayusculas: "",
 				placas: "",
+				placasMayusculas: "",
 				vin: "",
+				vinMayusculas: "",
 				motor: "",
+				motorMayusculas: "",
 				asientos: 0,
 				asientosEnLetras: "",
 				ejes: 2,
 				ejesEnLetras: "dos",
 				uso: "Particular",
+				usoMayusculas: "PARTICULAR",
 				esNuevo: false,
 			};
 
@@ -392,12 +449,16 @@ export async function mapOpportunityToContractData(
 			segundoApellido: lead.secondLastName || "",
 			dpi: lead.dpi || "",
 			dpiFormateado: formatDpi(lead.dpi || ""),
+			dpiLegal: dpiToLegalFormat(lead.dpi || ""),
+			dpiLetras: dpiToWordsUppercase(lead.dpi || ""),
 			edad,
 			edadEnLetras,
 			estadoCivil,
 			genero: mapGender(lead.gender),
+			generoLetra: getGenderLetter(lead.gender),
 			nacionalidad,
 			direccion: lead.direccion || "",
+			direccionMayusculas: toUpperCase(lead.direccion || ""),
 			telefono: lead.phone || "",
 			email: lead.email || "",
 			profesion: lead.jobTitle || undefined,
@@ -406,8 +467,14 @@ export async function mapOpportunityToContractData(
 		credito: {
 			montoTotal,
 			montoTotalEnLetras: numberToWordsQuetzales(montoTotal),
+			montoTotalLegal: numberToWordsQuetzalesLegal(montoTotal),
+			montoTotalNumero: formatMoneyNumber(montoTotal),
+			montoTotalConQ: formatMoneyWithQ(montoTotal),
 			cuotaMensual,
 			cuotaMensualEnLetras: numberToWordsQuetzales(cuotaMensual),
+			cuotaMensualLegal: numberToWordsQuetzalesLegal(cuotaMensual),
+			cuotaMensualNumero: formatMoneyNumber(cuotaMensual),
+			cuotaMensualConQ: formatMoneyWithQ(cuotaMensual),
 			numeroCuotas,
 			numeroCuotasEnLetras: numberToWords(numeroCuotas),
 			tasaInteres,

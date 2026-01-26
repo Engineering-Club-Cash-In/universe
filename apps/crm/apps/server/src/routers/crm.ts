@@ -40,6 +40,7 @@ import {
 	documentTypeEnum,
 	documentValidations,
 	opportunityDocuments,
+	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import {
@@ -2529,22 +2530,9 @@ export const crmRouter = {
 				})
 				.returning();
 
-			// Tipos de documentos que pertenecen al vehículo
-			const vehicleDocumentTypes = [
-				"tarjeta_circulacion",
-				"titulo_propiedad",
-				"dpi_dueno",
-				"patente_comercio_vehiculo",
-				"representacion_legal_vehiculo",
-				"dpi_representante_legal_vehiculo",
-				"pago_impuesto_circulacion",
-				"consulta_sat",
-				"consulta_garantias_mobiliarias",
-				"datos_vehiculo_nuevo",
-				"cotizacion_vehiculo_nuevo",
-			];
-
-			const isVehicleDocument = vehicleDocumentTypes.includes(input.documentType);
+			const isVehicleDocument = VEHICLE_DOCUMENT_TYPES.includes(
+				input.documentType as (typeof VEHICLE_DOCUMENT_TYPES)[number],
+			);
 
 			// Si es un documento de vehículo y la oportunidad tiene vehículo asociado,
 			// también guardarlo en vehicleDocuments para que aparezca en el checklist del vehículo

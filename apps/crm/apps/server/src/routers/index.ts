@@ -76,6 +76,9 @@ export const appRouter = {
 	updateDisbursementChecklistNotes: crmRouter.updateDisbursementChecklistNotes,
 	approveDisbursement: crmRouter.approveDisbursement,
 	getOpportunitiesForDisbursement: crmRouter.getOpportunitiesForDisbursement,
+	// Investment assignment (50% → 80%)
+	getOpportunitiesForInvestment: crmRouter.getOpportunitiesForInvestment,
+	assignInvestorAndAdvance: crmRouter.assignInvestorAndAdvance,
 	getClients: crmRouter.getClients,
 	getClientsStats: crmRouter.getClientsStats,
 	getLeadsAsClients: crmRouter.getLeadsAsClients,

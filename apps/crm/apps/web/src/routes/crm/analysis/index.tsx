@@ -14,7 +14,7 @@ import {
 	Wallet,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { DisbursementChecklistView } from "@/components/analysis/DisbursementChecklistView";
 import { InvestmentAssignmentSection } from "@/components/analysis/InvestmentAssignmentSection";
@@ -398,7 +398,10 @@ function AnalysisPage() {
 									<Input
 										placeholder="Buscar por nombre, placa..."
 										value={searchTerm}
-										onChange={(e) => setSearchTerm(e.target.value)}
+										onChange={(e) => {
+											const value = e.target.value;
+											startTransition(() => setSearchTerm(value));
+										}}
 										className="pl-10"
 									/>
 								</div>
@@ -824,7 +827,10 @@ function DisbursementSection() {
 							<Input
 								placeholder="Buscar por nombre, placa..."
 								value={searchTerm}
-								onChange={(e) => setSearchTerm(e.target.value)}
+								onChange={(e) => {
+									const value = e.target.value;
+									startTransition(() => setSearchTerm(value));
+								}}
 								className="pl-10"
 							/>
 						</div>

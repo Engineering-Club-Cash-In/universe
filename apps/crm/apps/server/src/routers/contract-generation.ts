@@ -1,6 +1,6 @@
 /**
  * Router para generación de contratos legales desde el CRM
- * Integra con legal-docs-blueprints API
+ * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
 import { eq } from "drizzle-orm";
@@ -11,26 +11,91 @@ import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
 import { juridicoProcedure } from "../lib/orpc";
 import {
-	type Beneficiario,
-	CONTRACT_TYPES,
 	enrichLeadFromRenap,
-	getContractTypes,
 	mapOpportunityToContractData,
 	transformToApiFormat,
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
+import {
+	getDocumentTypes,
+	getDocumentsByDpi,
+	generateContract as generateContractApi,
+	type DocumentType,
+	type Field,
+	type Document,
+	type RenapData,
+} from "../services/legal-docs-api";
 
-// URL de la API de legal-docs-blueprints (configurar en variables de entorno)
+// URL de la API de documentos legales (tipos y campos por DPI)
+const LEGAL_API_URL =
+	process.env.LEGAL_API_URL || "https://api.devteamatcci.site";
+
+// URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =
-	process.env.LEGAL_DOCS_API_URL || "http://localhost:3002/api";
+	process.env.LEGAL_DOCS_API_URL || "https://legal-docs-blueprints.s4.devteamatcci.site";
 
 export const contractGenerationRouter = {
 	/**
-	 * Obtiene los tipos de contratos disponibles
+	 * Obtiene los tipos de contratos disponibles desde la API
 	 */
 	getContractTypes: juridicoProcedure.handler(async () => {
-		return getContractTypes();
+		try {
+			const response = await getDocumentTypes();
+			if (!response.success) {
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: "Error al obtener tipos de documentos",
+				});
+			}
+			return {
+				success: true,
+				total: response.total,
+				data: response.data,
+			};
+		} catch (error) {
+			console.error("[getContractTypes] Error:", error);
+			throw new ORPCError("INTERNAL_SERVER_ERROR", {
+				message:
+					error instanceof Error
+						? error.message
+						: "Error al obtener tipos de documentos",
+			});
+		}
 	}),
+
+	/**
+	 * Obtiene documentos y campos por DPI y tipos seleccionados
+	 */
+	getDocumentsByDpi: juridicoProcedure
+		.input(
+			z.object({
+				dpi: z.string().length(13),
+				documentNames: z.array(z.string()).min(1),
+			}),
+		)
+		.handler(async ({ input }) => {
+			try {
+				const response = await getDocumentsByDpi(input.dpi, input.documentNames);
+				if (!response.success) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: response.message || "Error al obtener documentos",
+					});
+				}
+				return {
+					success: true,
+					renapData: response.renapData,
+					documents: response.documents,
+					fields: response.campos,
+				};
+			} catch (error) {
+				console.error("[getDocumentsByDpi] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "Error al obtener documentos por DPI",
+				});
+			}
+		}),
 
 	/**
 	 * Obtiene los datos de una oportunidad mapeados para preview de contrato
@@ -209,11 +274,8 @@ export const contractGenerationRouter = {
 
 			for (const contractType of input.contractTypes) {
 				try {
-					const contractTypeInfo = CONTRACT_TYPES.find(
-						(ct) => ct.id === contractType,
-					);
-					const contractName =
-						contractTypeInfo?.name || `Contrato ${contractType}`;
+					// El nombre del contrato viene del tipo (ya es el enum de la API)
+					const contractName = `Contrato ${contractType}`;
 
 					// Llamar a la API de legal-docs-blueprints
 					const apiResult = await callLegalDocsApi(contractType, contractData);
@@ -256,12 +318,9 @@ export const contractGenerationRouter = {
 						});
 					}
 				} catch (error) {
-					const contractTypeInfo = CONTRACT_TYPES.find(
-						(ct) => ct.id === contractType,
-					);
 					results.push({
 						contractType,
-						contractName: contractTypeInfo?.name || contractType,
+						contractName: `Contrato ${contractType}`,
 						success: false,
 						error: error instanceof Error ? error.message : "Error desconocido",
 					});
@@ -302,6 +361,128 @@ export const contractGenerationRouter = {
 				.orderBy(generatedLegalContracts.generatedAt);
 
 			return contracts;
+		}),
+
+	/**
+	 * Genera contratos directamente con datos del formulario
+	 * Similar al frontend antiguo, sin necesidad de oportunidad
+	 */
+	generateContractsDirect: juridicoProcedure
+		.input(
+			z.object({
+				contracts: z.array(
+					z.object({
+						contractType: z.string(),
+						data: z.record(z.string(), z.string()),
+						emails: z.array(z.string()).optional(),
+						options: z.object({
+							gender: z.enum(["male", "female"]),
+							generatePdf: z.boolean().default(true),
+							filenamePrefix: z.string(),
+						}),
+					}),
+				),
+				// Opcional: vincular a una oportunidad/lead existente
+				opportunityId: z.string().uuid().optional(),
+				leadId: z.string().uuid().optional(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { generateContractsBatch } = await import(
+				"../services/legal-docs-api"
+			);
+
+			try {
+				// Llamar a la API de generación de contratos
+				const apiResult = await generateContractsBatch({
+					contracts: input.contracts,
+				});
+
+				// Transformar resultados al formato esperado por el frontend
+				const results: Array<{
+					contractType: string;
+					contractName: string;
+					success: boolean;
+					documentLink?: string;
+					signingLinks?: string[];
+					error?: string;
+				}> = [];
+
+				let successCount = 0;
+				let failCount = 0;
+
+				if (apiResult.results) {
+					for (let i = 0; i < apiResult.results.length; i++) {
+						const contractResult = apiResult.results[i];
+						const originalContract = input.contracts[i];
+
+						if (contractResult.success) {
+							successCount++;
+
+							// Si hay leadId, guardar en la BD
+							if (input.leadId) {
+								await db.insert(generatedLegalContracts).values({
+									leadId: input.leadId,
+									opportunityId: input.opportunityId,
+									contractType:
+										contractResult.nameDocument?.[0]?.enum ||
+										originalContract.contractType,
+									contractName:
+										contractResult.nameDocument?.[0]?.label || "Contrato",
+									clientSigningLink: contractResult.signing_links?.[0],
+									representativeSigningLink: contractResult.signing_links?.[1],
+									additionalSigningLinks:
+										contractResult.signing_links?.slice(2),
+									templateId: contractResult.templateId,
+									apiResponse: contractResult,
+									pdfLink: contractResult.linkDocument,
+									status: "pending",
+									generatedBy: context.userId,
+									generatedAt: new Date(),
+								});
+							}
+
+							results.push({
+								contractType: originalContract.contractType,
+								contractName:
+									contractResult.nameDocument?.[0]?.label || "Contrato",
+								success: true,
+								documentLink: contractResult.linkDocument,
+								signingLinks: contractResult.signing_links,
+							});
+						} else {
+							failCount++;
+							results.push({
+								contractType: originalContract.contractType,
+								contractName:
+									contractResult.nameDocument?.[0]?.label || "Contrato",
+								success: false,
+								error: "Error al generar el documento",
+							});
+						}
+					}
+				}
+
+				return {
+					success: failCount === 0,
+					totalRequested: input.contracts.length,
+					successCount,
+					failCount,
+					results,
+					message:
+						failCount === 0
+							? `Se generaron ${successCount} documento(s) exitosamente`
+							: `Se generaron ${successCount} documento(s), ${failCount} fallaron`,
+				};
+			} catch (error) {
+				console.error("[generateContractsDirect] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "Error al generar contratos",
+				});
+			}
 		}),
 };
 
@@ -354,20 +535,22 @@ async function callLegalDocsApi(
 		}
 
 		// Mapear el tipo de contrato del CRM al tipo de legal-docs-blueprints
+		// Valores tomados del enum ContractType en legal-docs-blueprints/types/contract.ts
 		const contractTypeMap: Record<string, string> = {
-			compraventa: "uso_carro_usado",
+			compraventa: "contrato_privado_uso_carro_usado",
 			credito_prendario: "garantia_mobiliaria",
 			pagare: "pagare_unico_libre_protesto",
-			mandato_especial: "mandato_especial",
-			reconocimiento_deuda: "reconocimiento_deuda",
-			contrato_gps: "carta_aceptacion_gps",
+			reconocimiento_deuda: "reconocimiento_deuda_feb_2025",
+			contrato_gps: "carta_aceptacion_instalacion_gps",
 			contrato_seguro: "cobertura_inrexsa",
-			poder_especial: "poder_especial",
-			declaracion_jurada: "declaracion_de_vendedor",
+			declaracion_jurada: "declaracion_vendedor",
 			acta_entrega: "descargo_responsabilidades",
-			contrato_fianza: "fianza",
 			carta_compromiso: "carta_carro_nuevo",
 			autorizacion_desembolso: "carta_emision_cheques",
+			// Tipos adicionales disponibles en el API:
+			// carta_traspaso_vehiculo: "carta_traspaso_vehiculo_rdbe",
+			// contrato_carro_nuevo: "contrato_privado_uso_carro_nuevo",
+			// solicitud_compra_tercero: "solicitud_compra_vehiculo_tercero",
 		};
 
 		const apiContractType = contractTypeMap[contractType];
@@ -399,7 +582,9 @@ async function callLegalDocsApi(
 
 		const endpoint = `/contracts/${apiContractType}`;
 		console.log(`[LegalDocs] Llamando a ${LEGAL_DOCS_API_URL}${endpoint}`);
-		console.log(`[LegalDocs] Payload keys: ${Object.keys(flatData).join(", ")}`);
+		console.log(
+			`[LegalDocs] Payload keys: ${Object.keys(flatData).join(", ")}`,
+		);
 
 		const response = await fetch(`${LEGAL_DOCS_API_URL}${endpoint}`, {
 			method: "POST",

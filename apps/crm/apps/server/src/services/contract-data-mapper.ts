@@ -29,20 +29,54 @@ import {
 } from "../lib/contract-utils";
 
 // Tipos de contratos disponibles
+// Solo incluir tipos que existen en legal-docs-blueprints API
 export const CONTRACT_TYPES = [
-	{ id: "compraventa", name: "Contrato de Compraventa", requiresBeneficiary: false },
-	{ id: "credito_prendario", name: "Contrato de Crédito Prendario", requiresBeneficiary: true },
-	{ id: "pagare", name: "Pagaré", requiresBeneficiary: true },
-	{ id: "mandato_especial", name: "Mandato Especial Irrevocable", requiresBeneficiary: false },
-	{ id: "reconocimiento_deuda", name: "Reconocimiento de Deuda", requiresBeneficiary: true },
-	{ id: "contrato_gps", name: "Contrato de GPS", requiresBeneficiary: false },
-	{ id: "contrato_seguro", name: "Contrato de Seguro", requiresBeneficiary: false },
-	{ id: "poder_especial", name: "Poder Especial", requiresBeneficiary: false },
-	{ id: "declaracion_jurada", name: "Declaración Jurada", requiresBeneficiary: false },
-	{ id: "acta_entrega", name: "Acta de Entrega-Recepción", requiresBeneficiary: false },
-	{ id: "contrato_fianza", name: "Contrato de Fianza", requiresBeneficiary: true },
-	{ id: "carta_compromiso", name: "Carta Compromiso", requiresBeneficiary: false },
-	{ id: "autorizacion_desembolso", name: "Autorización de Desembolso", requiresBeneficiary: true },
+	{
+		id: "compraventa",
+		name: "Contrato de Compraventa (Uso Carro Usado)",
+		requiresBeneficiary: false,
+	},
+	{
+		id: "credito_prendario",
+		name: "Garantía Mobiliaria",
+		requiresBeneficiary: true,
+	},
+	{ id: "pagare", name: "Pagaré Único Libre de Protesto", requiresBeneficiary: true },
+	{
+		id: "reconocimiento_deuda",
+		name: "Reconocimiento de Deuda",
+		requiresBeneficiary: true,
+	},
+	{
+		id: "contrato_gps",
+		name: "Carta Aceptación Instalación GPS",
+		requiresBeneficiary: false,
+	},
+	{
+		id: "contrato_seguro",
+		name: "Cobertura INREXSA",
+		requiresBeneficiary: false,
+	},
+	{
+		id: "declaracion_jurada",
+		name: "Declaración de Vendedor",
+		requiresBeneficiary: false,
+	},
+	{
+		id: "acta_entrega",
+		name: "Descargo de Responsabilidades",
+		requiresBeneficiary: false,
+	},
+	{
+		id: "carta_compromiso",
+		name: "Carta Carro Nuevo",
+		requiresBeneficiary: false,
+	},
+	{
+		id: "autorizacion_desembolso",
+		name: "Carta Emisión de Cheques",
+		requiresBeneficiary: true,
+	},
 ] as const;
 
 export type ContractType = (typeof CONTRACT_TYPES)[number]["id"];
@@ -548,7 +582,8 @@ export async function validateOpportunityForContracts(
 		if (!vehicle.vinNumber) missingVehicleFields.push("VIN/Chasis");
 		if (!vehicle.motorNumber) missingVehicleFields.push("Número de Motor");
 		if (!vehicle.seats) missingVehicleFields.push("Asientos");
-		if (!vehicle.vehicleUse) missingVehicleFields.push("Uso (Particular/Comercial)");
+		if (!vehicle.vehicleUse)
+			missingVehicleFields.push("Uso (Particular/Comercial)");
 	}
 
 	// Validar campos del lead

@@ -14,6 +14,7 @@ export interface ContractResult {
 	contractName: string;
 	success: boolean;
 	contractId?: string;
+	documentLink?: string;
 	signingLinks?: string[];
 	error?: string;
 }
@@ -97,9 +98,41 @@ export function ContractResults({
 							</Badge>
 						</div>
 
-						{result.success && result.signingLinks && (
+						{result.success && (
 							<div className="space-y-2">
-								{result.signingLinks.map((link, linkIndex) => {
+								{/* Document PDF link */}
+								{result.documentLink && (
+									<div className="flex items-center justify-between rounded bg-blue-50 p-2">
+										<span className="font-medium text-blue-700 text-sm">
+											Documento PDF
+										</span>
+										<div className="flex gap-2">
+											<Button
+												variant="ghost"
+												size="sm"
+												onClick={() =>
+													copyToClipboard(result.documentLink!, "documento")
+												}
+											>
+												<Copy className="mr-1 h-4 w-4" />
+												Copiar
+											</Button>
+											<Button
+												variant="ghost"
+												size="sm"
+												onClick={() =>
+													window.open(result.documentLink, "_blank")
+												}
+											>
+												<ExternalLink className="mr-1 h-4 w-4" />
+												Ver PDF
+											</Button>
+										</div>
+									</div>
+								)}
+
+								{/* Signing links */}
+								{result.signingLinks?.map((link, linkIndex) => {
 									const linkLabel =
 										linkIndex === 0
 											? "Firma Cliente"

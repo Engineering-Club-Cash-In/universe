@@ -2760,19 +2760,29 @@ export const crmRouter = {
 	getAnalysisChecklist: analystProcedure
 		.input(z.object({ opportunityId: z.string().uuid() }))
 		.handler(async ({ input }) => {
-			// Get opportunity with lead info
-			const [opportunity] = await db
-				.select({
-					id: opportunities.id,
-					creditType: opportunities.creditType,
-					vehicleId: opportunities.vehicleId,
-					leadId: opportunities.leadId,
-					clientType: leads.clientType,
-				})
-				.from(opportunities)
-				.leftJoin(leads, eq(opportunities.leadId, leads.id))
-				.where(eq(opportunities.id, input.opportunityId))
-				.limit(1);
+			// Phase 1: Get opportunity and check for existing checklist in parallel
+			const [opportunityResult, existingChecklistResult] = await Promise.all([
+				db
+					.select({
+						id: opportunities.id,
+						creditType: opportunities.creditType,
+						vehicleId: opportunities.vehicleId,
+						leadId: opportunities.leadId,
+						clientType: leads.clientType,
+					})
+					.from(opportunities)
+					.leftJoin(leads, eq(opportunities.leadId, leads.id))
+					.where(eq(opportunities.id, input.opportunityId))
+					.limit(1),
+				db
+					.select()
+					.from(analysisChecklists)
+					.where(eq(analysisChecklists.opportunityId, input.opportunityId))
+					.limit(1),
+			]);
+
+			const [opportunity] = opportunityResult;
+			const [existingChecklist] = existingChecklistResult;
 
 			if (!opportunity) {
 				throw new Error("Oportunidad no encontrada");
@@ -2780,142 +2790,146 @@ export const crmRouter = {
 
 			console.log("[getAnalysisChecklist] opportunity:", opportunity);
 
-			// Check if checklist already exists
-			const [existingChecklist] = await db
-				.select()
-				.from(analysisChecklists)
-				.where(eq(analysisChecklists.opportunityId, input.opportunityId))
-				.limit(1);
-
+			// Early return if checklist already exists
 			if (existingChecklist) {
 				return existingChecklist.checklistData;
 			}
 
-			// Get required documents for this client type
-			const requiredDocs = await db
-				.select()
-				.from(documentRequirementsByClientType)
-				.where(
-					and(
-						eq(
-							documentRequirementsByClientType.clientType,
-							opportunity.clientType || "individual",
-						),
-						eq(
-							documentRequirementsByClientType.creditType,
-							opportunity.creditType,
-						),
-					),
-				)
-				.orderBy(documentRequirementsByClientType.order);
-
-			// Get uploaded documents
-			const uploadedDocs = await db
-				.select()
-				.from(opportunityDocuments)
-				.where(eq(opportunityDocuments.opportunityId, input.opportunityId));
+			// Phase 2: Run independent queries in parallel
+			const [requiredDocs, uploadedDocs, vehicleResult, creditAnalysisResult] =
+				await Promise.all([
+					// Required documents for client type
+					db
+						.select()
+						.from(documentRequirementsByClientType)
+						.where(
+							and(
+								eq(
+									documentRequirementsByClientType.clientType,
+									opportunity.clientType || "individual",
+								),
+								eq(
+									documentRequirementsByClientType.creditType,
+									opportunity.creditType,
+								),
+							),
+						)
+						.orderBy(documentRequirementsByClientType.order),
+					// Uploaded opportunity documents
+					db
+						.select()
+						.from(opportunityDocuments)
+						.where(eq(opportunityDocuments.opportunityId, input.opportunityId)),
+					// Vehicle info (if exists)
+					opportunity.vehicleId
+						? db
+								.select()
+								.from(vehicles)
+								.where(eq(vehicles.id, opportunity.vehicleId))
+								.limit(1)
+						: Promise.resolve([]),
+					// Credit analysis (if lead exists)
+					opportunity.leadId
+						? db
+								.select()
+								.from(creditAnalysis)
+								.where(eq(creditAnalysis.leadId, opportunity.leadId))
+								.limit(1)
+						: Promise.resolve([]),
+				]);
 
 			const uploadedTypes = new Set(uploadedDocs.map((d) => d.documentType));
+			const [vehicle] = vehicleResult;
+			const [creditAnalysisExists] = creditAnalysisResult;
 
-			// Check vehicle inspection and get vehicle info
+			console.log(
+				"[getAnalysisChecklist] creditAnalysisExists:",
+				creditAnalysisExists,
+			);
+
+			// Phase 3: Vehicle-dependent queries (if vehicle exists)
 			let vehicleInspected = false;
 			let inspectionId = null;
-			let vehicleOwnerType = null;
-			if (opportunity.vehicleId) {
-				// Get vehicle info including ownerType
-				const [vehicle] = await db
-					.select()
-					.from(vehicles)
-					.where(eq(vehicles.id, opportunity.vehicleId))
-					.limit(1);
-
-				if (vehicle) {
-					vehicleOwnerType = vehicle.ownerType;
-
-					// Vehículos nuevos no requieren inspección
-					if (vehicle.isNew) {
-						vehicleInspected = true;
-					} else {
-						// Check inspection solo para vehículos usados
-						const [inspection] = await db
-							.select()
-							.from(vehicleInspections)
-							.where(
-								and(
-									eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-									eq(vehicleInspections.status, "approved"),
-								),
-							)
-							.limit(1);
-
-						if (inspection) {
-							vehicleInspected = true;
-							inspectionId = inspection.id;
-						}
-					}
-				}
-			}
-
-			// Get required vehicle documents based on ownerType
+			let vehicleOwnerType = vehicle?.ownerType ?? null;
 			let requiredVehicleDocs: any[] = [];
 			let uploadedVehicleDocs: any[] = [];
-			if (opportunity.vehicleId && vehicleOwnerType) {
-				requiredVehicleDocs = await db
-					.select()
-					.from(vehicleDocumentRequirements)
-					.where(eq(vehicleDocumentRequirements.ownerType, vehicleOwnerType))
-					.orderBy(vehicleDocumentRequirements.order);
 
-				uploadedVehicleDocs = await db
-					.select()
-					.from(vehicleDocuments)
-					.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId));
+			if (vehicle) {
+				// New vehicles don't require inspection
+				if (vehicle.isNew) {
+					vehicleInspected = true;
+				}
+
+				// Run vehicle document queries in parallel
+				const [inspectionResult, reqVehicleDocsResult, uploadedVehicleDocsResult] =
+					await Promise.all([
+						// Inspection check (only for used vehicles)
+						!vehicle.isNew
+							? db
+									.select()
+									.from(vehicleInspections)
+									.where(
+										and(
+											eq(vehicleInspections.vehicleId, opportunity.vehicleId!),
+											eq(vehicleInspections.status, "approved"),
+										),
+									)
+									.limit(1)
+							: Promise.resolve([]),
+						// Required vehicle documents
+						vehicleOwnerType
+							? db
+									.select()
+									.from(vehicleDocumentRequirements)
+									.where(eq(vehicleDocumentRequirements.ownerType, vehicleOwnerType))
+									.orderBy(vehicleDocumentRequirements.order)
+							: Promise.resolve([]),
+						// Uploaded vehicle documents
+						db
+							.select()
+							.from(vehicleDocuments)
+							.where(eq(vehicleDocuments.vehicleId, opportunity.vehicleId!)),
+					]);
+
+				const [inspection] = inspectionResult;
+				if (inspection) {
+					vehicleInspected = true;
+					inspectionId = inspection.id;
+				}
+
+				requiredVehicleDocs = reqVehicleDocsResult;
+				uploadedVehicleDocs = uploadedVehicleDocsResult;
 
 				// Fallback: buscar documentos de vehículo en opportunityDocuments
 				// para oportunidades existentes que subieron docs antes de la sincronización
-				const vehicleDocTypes = requiredVehicleDocs.map((d) => d.documentType);
-				const uploadedVehicleTypesFromVehicle = new Set(
-					uploadedVehicleDocs.map((d) => d.documentType),
-				);
-
-				// Buscar en opportunityDocuments los tipos que faltan
-				const missingTypes = vehicleDocTypes.filter(
-					(type) => !uploadedVehicleTypesFromVehicle.has(type),
-				);
-
-				if (missingTypes.length > 0) {
-					const fallbackDocs = uploadedDocs.filter((d) =>
-						missingTypes.includes(d.documentType),
+				if (requiredVehicleDocs.length > 0) {
+					const vehicleDocTypes = requiredVehicleDocs.map((d) => d.documentType);
+					const uploadedVehicleTypesFromVehicle = new Set(
+						uploadedVehicleDocs.map((d) => d.documentType),
 					);
-					// Agregar los docs del fallback con una marca para identificarlos
-					uploadedVehicleDocs = [
-						...uploadedVehicleDocs,
-						...fallbackDocs.map((d) => ({
-							...d,
-							vehicleId: opportunity.vehicleId,
-							fromOpportunity: true, // Marca para saber que viene de oportunidad
-						})),
-					];
+
+					const missingTypes = vehicleDocTypes.filter(
+						(type) => !uploadedVehicleTypesFromVehicle.has(type),
+					);
+
+					if (missingTypes.length > 0) {
+						const fallbackDocs = uploadedDocs.filter((d) =>
+							missingTypes.includes(d.documentType),
+						);
+						uploadedVehicleDocs = [
+							...uploadedVehicleDocs,
+							...fallbackDocs.map((d) => ({
+								...d,
+								vehicleId: opportunity.vehicleId,
+								fromOpportunity: true,
+							})),
+						];
+					}
 				}
 			}
 
 			const uploadedVehicleTypes = new Set(
 				uploadedVehicleDocs.map((d) => d.documentType),
-			);
-
-			// Check if credit analysis exists
-			let creditAnalysisExists = null;
-			if (opportunity.leadId) {
-				[creditAnalysisExists] = await db
-					.select()
-					.from(creditAnalysis)
-					.where(eq(creditAnalysis.leadId, opportunity.leadId))
-					.limit(1);
-			}
-
-			console.log(
-				"[getAnalysisChecklist] creditAnalysisExists:",
-				creditAnalysisExists,
 			);
 
 			// Create initial checklist structure

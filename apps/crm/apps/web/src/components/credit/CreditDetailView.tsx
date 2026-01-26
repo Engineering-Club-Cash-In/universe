@@ -13,6 +13,7 @@ import {
 	Save,
 	Trash2,
 	User,
+	X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -504,7 +505,7 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-		    /*const camposFaltantes = validateRequiredFields();
+			/*const camposFaltantes = validateRequiredFields();
 			if (camposFaltantes.length > 0) {
 				throw new Error(
 					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
@@ -525,14 +526,42 @@ export function CreditDetailView({
 			return client.approveCreditDetail({ opportunityId });
 		},
 		onSuccess: () => {
-			toast.success("Detalle de crédito aprobado correctamente");
+			toast.success(
+				"Detalle de crédito aprobado - Oportunidad movida a Formalización (50%)",
+			);
 			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
 			queryClient.invalidateQueries({
 				queryKey: ["getCreditDetailApprovalStatus", opportunityId],
 			});
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunityHistory", opportunityId],
+			});
+			// Invalidar cualquier otra query relacionada con oportunidades
+			queryClient.invalidateQueries({ queryKey: ["opportunities"] });
 		},
 		onError: (error) => {
 			toast.error(`Error al aprobar: ${error.message}`);
+		},
+	});
+
+	// Mutation para cancelar aprobación del detalle de crédito
+	const revokeCreditDetailMutation = useMutation({
+		mutationFn: () => client.revokeCreditDetailApproval({ opportunityId }),
+		onSuccess: () => {
+			toast.success(
+				"Aprobación cancelada - Oportunidad regresada a Cierre de propuesta (40%)",
+			);
+			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
+			queryClient.invalidateQueries({
+				queryKey: ["getCreditDetailApprovalStatus", opportunityId],
+			});
+			queryClient.invalidateQueries({
+				queryKey: ["getOpportunityHistory", opportunityId],
+			});
+			queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+		},
+		onError: (error) => {
+			toast.error(`Error al cancelar aprobación: ${error.message}`);
 		},
 	});
 
@@ -779,13 +808,29 @@ export function CreditDetailView({
 								</div>
 								<div className="flex items-center gap-3">
 									{creditDetailApprovalQuery.data?.approved ? (
-										<Badge
-											variant="outline"
-											className="border-green-500 bg-green-50 text-green-700"
-										>
-											<CheckCircle className="mr-1 h-3 w-3" />
-											Aprobado
-										</Badge>
+										<div className="flex items-center gap-2">
+											<Badge
+												variant="outline"
+												className="border-green-500 bg-green-50 text-green-700"
+											>
+												<CheckCircle className="mr-1 h-3 w-3" />
+												Aprobado
+											</Badge>
+											{canApprove && (
+												<Button
+													size="sm"
+													variant="ghost"
+													className="text-muted-foreground hover:text-destructive"
+													onClick={() => revokeCreditDetailMutation.mutate()}
+													disabled={revokeCreditDetailMutation.isPending}
+												>
+													<X className="mr-1 h-3 w-3" />
+													{revokeCreditDetailMutation.isPending
+														? "Cancelando..."
+														: "Cancelar"}
+												</Button>
+											)}
+										</div>
 									) : (
 										<>
 											{isEditing ? (
@@ -919,17 +964,23 @@ export function CreditDetailView({
 											Día de Pago Mensual
 										</Label>
 										{isEditing ? (
-											<Input
-												type="number"
-												min={1}
-												max={31}
-												value={editDiaPagoMensual}
-												onChange={(e) =>
-													setEditDiaPagoMensual(Number(e.target.value) || 15)
+											<Select
+												value={String(editDiaPagoMensual)}
+												onValueChange={(value) =>
+													setEditDiaPagoMensual(Number(value))
 												}
-												placeholder="15"
-												className="mt-1"
-											/>
+											>
+												<SelectTrigger className="mt-1">
+													<SelectValue placeholder="Seleccionar día" />
+												</SelectTrigger>
+												<SelectContent>
+													{[1, 5, 10, 15, 20, 25, 30].map((day) => (
+														<SelectItem key={day} value={String(day)}>
+															Día {day}
+														</SelectItem>
+													))}
+												</SelectContent>
+											</Select>
 										) : (
 											<p className="font-medium">
 												Día{" "}
@@ -2560,6 +2611,93 @@ export function CreditDetailView({
 										</div>
 									</div>
 
+									{/* Resumen Principal - Datos Clave */}
+									<div className="rounded-lg border-2 border-primary bg-primary/5 p-4">
+										<h4 className="mb-4 flex items-center gap-2 font-bold text-primary">
+											<Banknote className="h-5 w-5" />
+											Resumen del Crédito
+										</h4>
+										<div className="grid grid-cols-2 gap-6 md:grid-cols-4">
+											<div className="rounded-md bg-background p-3 text-center shadow-sm">
+												<Label className="text-muted-foreground text-xs">
+													Monto a Financiar
+												</Label>
+												<p className="font-bold text-lg">
+													{formatCurrency(quotation.amountToFinance)}
+												</p>
+											</div>
+											<div className="rounded-md bg-background p-3 text-center shadow-sm">
+												<Label className="text-muted-foreground text-xs">
+													Plazo
+												</Label>
+												<p className="font-bold text-lg">
+													{quotation.termMonths} meses
+												</p>
+											</div>
+											<div className="rounded-md bg-background p-3 text-center shadow-sm">
+												<Label className="text-muted-foreground text-xs">
+													Tasa de Interés
+												</Label>
+												<p className="font-bold text-lg">
+													{formatPercent(quotation.interestRate)}
+												</p>
+											</div>
+											<div className="rounded-md bg-primary/10 p-3 text-center shadow-sm ring-2 ring-primary">
+												<Label className="font-medium text-primary text-xs">
+													Cuota Mensual
+												</Label>
+												<p className="font-bold text-primary text-xl">
+													{formatCurrency(quotation.monthlyPayment)}
+												</p>
+											</div>
+										</div>
+									</div>
+
+									<Separator />
+
+									{/* Términos del Crédito - Detalle */}
+									<div>
+										<h4 className="mb-3 flex items-center gap-2 font-semibold">
+											<Calculator className="h-4 w-4" />
+											Términos del Crédito
+										</h4>
+										<div className="grid grid-cols-2 gap-4 rounded-lg border bg-muted/30 p-4 md:grid-cols-4">
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Valor del Vehículo
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.vehicleValue)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Monto Asegurado
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.insuredAmount)}
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Enganche
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.downPayment)} (
+													{formatPercent(quotation.downPaymentPercentage)})
+												</p>
+											</div>
+											<div>
+												<Label className="text-muted-foreground text-xs">
+													Total Financiado
+												</Label>
+												<p className="font-medium">
+													{formatCurrency(quotation.totalFinanced)}
+												</p>
+											</div>
+										</div>
+									</div>
+
 									<Separator />
 
 									{/* Información del Vehículo */}
@@ -2600,83 +2738,6 @@ export function CreditDetailView({
 												<p className="font-medium">
 													{vehicleTypeLabels[quotation.vehicleType] ||
 														quotation.vehicleType}
-												</p>
-											</div>
-										</div>
-									</div>
-
-									<Separator />
-
-									{/* Términos del Crédito */}
-									<div>
-										<h4 className="mb-3 flex items-center gap-2 font-semibold">
-											<Banknote className="h-4 w-4" />
-											Términos del Crédito
-										</h4>
-										<div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Valor del Vehículo
-												</Label>
-												<p className="font-medium">
-													{formatCurrency(quotation.vehicleValue)}
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Monto Asegurado
-												</Label>
-												<p className="font-medium">
-													{formatCurrency(quotation.insuredAmount)}
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Enganche
-												</Label>
-												<p className="font-medium">
-													{formatCurrency(quotation.downPayment)} (
-													{formatPercent(quotation.downPaymentPercentage)})
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Plazo
-												</Label>
-												<p className="font-medium">
-													{quotation.termMonths} meses
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Tasa de Interés
-												</Label>
-												<p className="font-medium">
-													{formatPercent(quotation.interestRate)}
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Monto a Financiar
-												</Label>
-												<p className="font-medium">
-													{formatCurrency(quotation.amountToFinance)}
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Total Financiado
-												</Label>
-												<p className="font-medium">
-													{formatCurrency(quotation.totalFinanced)}
-												</p>
-											</div>
-											<div>
-												<Label className="text-muted-foreground text-xs">
-													Cuota Mensual
-												</Label>
-												<p className="font-bold text-primary">
-													{formatCurrency(quotation.monthlyPayment)}
 												</p>
 											</div>
 										</div>

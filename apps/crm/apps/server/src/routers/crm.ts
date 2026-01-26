@@ -190,11 +190,14 @@ export const crmRouter = {
 				conditions.push(eq(leads.id, id));
 			}
 
-			// Role-based filter: admin and sales_supervisor can see all, others only their own
-			if (
-				context.userRole !== "admin" &&
-				context.userRole !== "sales_supervisor"
-			) {
+			// Role-based filter: admin, sales_supervisor, and juridico can see all
+			// When fetching by specific ID, juridico needs access for contract generation
+			const canSeeAllLeads =
+				context.userRole === "admin" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "juridico";
+
+			if (!canSeeAllLeads) {
 				conditions.push(eq(leads.assignedTo, context.userId));
 			}
 
@@ -513,11 +516,12 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const { id, assignedTo, ...updateData } = input;
 
-			// Sales users can only update leads assigned to them
-			const whereClause =
-				context.userRole === "admin"
-					? eq(leads.id, id)
-					: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
+			// Admin and juridico can update any lead, others only their own
+			const canUpdateAnyLead =
+				context.userRole === "admin" || context.userRole === "juridico";
+			const whereClause = canUpdateAnyLead
+				? eq(leads.id, id)
+				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
 
 			// Sales users cannot reassign leads
 			if (

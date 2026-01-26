@@ -14,6 +14,8 @@ import { Label } from "@/components/ui/label";
 import {
 	formatCurrency,
 	formatGuatemalaDate,
+	getClientTypeLabel,
+	getGenderLabel,
 	getLeadStatusBadgeColor,
 	getMaritalStatusLabel,
 	getOccupationLabel,
@@ -34,7 +36,11 @@ export type LeadForModal = {
 	phone?: string | null;
 	dpi?: string | null;
 	age?: number | null;
+	clientType?: string | null;
 	maritalStatus?: string | null;
+	birthDate?: Date | null;
+	gender?: string | null;
+	nationality?: string | null;
 	dependents?: number | null;
 	jobTitle?: string | null;
 	monthlyIncome?: string | null;
@@ -46,7 +52,14 @@ export type LeadForModal = {
 	hasCreditCard?: boolean | null;
 	source: string;
 	status: string;
+	direccion?: string | null;
+	departamento?: string | null;
+	municipio?: string | null;
+	zona?: string | null;
+	livenessValidated?: boolean | null;
+	convertedAt?: Date | null;
 	createdAt: Date;
+	createdBy?: string | null;
 	company?: {
 		id: string;
 		name: string;
@@ -157,9 +170,47 @@ export function LeadDetailModal({
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
+										Tipo de Cliente
+									</Label>
+									<p className="text-sm">
+										{lead.clientType
+											? getClientTypeLabel(lead.clientType)
+											: "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Género
+									</Label>
+									<p className="text-sm">
+										{lead.gender
+											? getGenderLabel(lead.gender)
+											: "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Fecha de Nacimiento
+									</Label>
+									<p className="text-sm">
+										{lead.birthDate
+											? formatGuatemalaDate(lead.birthDate)
+											: "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
 										Edad
 									</Label>
 									<p className="text-sm">{lead.age || "No especificado"}</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Nacionalidad
+									</Label>
+									<p className="text-sm">
+										{lead.nationality || "No especificado"}
+									</p>
 								</div>
 								<div>
 									<Label className="font-medium text-muted-foreground text-sm">
@@ -286,6 +337,48 @@ export function LeadDetailModal({
 						</div>
 					</div>
 
+					{/* Location Section */}
+					{(lead.direccion ||
+						lead.departamento ||
+						lead.municipio ||
+						lead.zona) && (
+						<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+							<h3 className="font-semibold text-base">Ubicación</h3>
+							<div className="grid grid-cols-4 gap-4">
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Dirección
+									</Label>
+									<p className="text-sm">
+										{lead.direccion || "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Departamento
+									</Label>
+									<p className="text-sm">
+										{lead.departamento || "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Municipio
+									</Label>
+									<p className="text-sm">
+										{lead.municipio || "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										Zona
+									</Label>
+									<p className="text-sm">{lead.zona || "No especificado"}</p>
+								</div>
+							</div>
+						</div>
+					)}
+
 					{/* Bottom Section - Assets & Status */}
 					<div className="grid grid-cols-3 gap-6">
 						{/* Assets */}
@@ -333,6 +426,13 @@ export function LeadDetailModal({
 										{getStatusLabel(lead.status)}
 									</Badge>
 								</div>
+								{lead.livenessValidated !== null &&
+									lead.livenessValidated !== undefined && (
+										<div className="flex items-center gap-2">
+											<Checkbox checked={lead.livenessValidated} disabled />
+											<Label className="text-sm">Liveness Validado</Label>
+										</div>
+									)}
 							</div>
 						</div>
 
@@ -358,6 +458,16 @@ export function LeadDetailModal({
 										{formatGuatemalaDate(lead.createdAt)}
 									</p>
 								</div>
+								{lead.convertedAt && (
+									<div>
+										<Label className="font-medium text-muted-foreground text-sm">
+											Fecha de Conversión
+										</Label>
+										<p className="text-sm">
+											{formatGuatemalaDate(lead.convertedAt)}
+										</p>
+									</div>
+								)}
 							</div>
 						</div>
 					</div>

@@ -642,6 +642,7 @@ export function OpportunityDetailModal({
 							documents={opportunityDocumentsQuery.data || []}
 							isLoading={opportunityDocumentsQuery.isLoading}
 							onRefresh={() => opportunityDocumentsQuery.refetch()}
+							hasVehicle={!!opportunity.vehicle}
 						/>
 					</TabsContent>
 

@@ -783,7 +783,7 @@ const vehicleDocumentRequirementsData = [
 	{
 		ownerType: "individual" as const,
 		documentType: "pago_impuesto_circulacion" as const,
-		required: true,
+		required: false,
 		order: 4,
 	},
 	{
@@ -821,7 +821,7 @@ const vehicleDocumentRequirementsData = [
 	{
 		ownerType: "empresa_individual" as const,
 		documentType: "pago_impuesto_circulacion" as const,
-		required: true,
+		required: false,
 		order: 4,
 	},
 	{
@@ -865,7 +865,7 @@ const vehicleDocumentRequirementsData = [
 	{
 		ownerType: "sociedad_anonima" as const,
 		documentType: "pago_impuesto_circulacion" as const,
-		required: true,
+		required: false,
 		order: 5,
 	},
 	{

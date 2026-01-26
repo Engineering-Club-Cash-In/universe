@@ -2949,7 +2949,10 @@ function RouteComponent() {
 										setEditingLead(selectedLead);
 										isTransitioningToEditRef.current = true;
 										setIsDetailsDialogOpen(false);
-										setIsCreateDialogOpen(true);
+										// Delay opening second modal to allow first to fully close
+										setTimeout(() => {
+											setIsCreateDialogOpen(true);
+										}, 150);
 									}}
 								>
 									Editar Lead

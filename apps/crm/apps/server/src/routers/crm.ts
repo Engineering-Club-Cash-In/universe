@@ -1673,10 +1673,21 @@ export const crmRouter = {
 				throw new Error("El detalle de crédito ya fue aprobado");
 			}
 
+			const nextStage = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.order, 6)) // "Formalización" 50%
+				.limit(1);
+			
+			if (!nextStage[0]) {
+				throw new Error("Next stage not found");
+			}
+
 			// Update opportunity with approval
 			await db
 				.update(opportunities)
 				.set({
+					stageId: nextStage[0].id,
 					creditDetailApproved: true,
 					creditDetailApprovedBy: context.userId,
 					creditDetailApprovedAt: new Date(),

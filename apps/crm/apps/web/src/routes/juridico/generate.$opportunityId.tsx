@@ -3,8 +3,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowLeft, FileSignature, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
-	DynamicContractWizard,
 	type CRMData,
+	DynamicContractWizard,
 } from "@/components/contracts/DynamicContractWizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,8 +144,7 @@ function RouteComponent() {
 					profesion: previewQuery.data.cliente?.profesion,
 					correo: previewQuery.data.cliente?.email,
 					edad: previewQuery.data.cliente?.edad,
-					genero:
-						previewQuery.data.cliente?.genero === "femenino" ? "F" : "M",
+					genero: previewQuery.data.cliente?.genero === "femenino" ? "F" : "M",
 				},
 				vehiculo: {
 					tipo: previewQuery.data.vehiculo?.tipoVehiculo,

@@ -1308,8 +1308,21 @@ export const crmRouter = {
 		}),
 
 	// Analyst specific endpoints
-	getOpportunitiesForAnalysis: analystProcedure.handler(
-		async ({ context: _ }) => {
+	getOpportunitiesForAnalysis: analystProcedure
+		.input(
+			z
+				.object({
+					limit: z.number().min(1).max(100).default(20),
+					offset: z.number().min(0).default(0),
+					search: z.string().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input }) => {
+			const limit = input?.limit ?? 20;
+			const offset = input?.offset ?? 0;
+			const search = input?.search;
+
 			// Get the stage ID for "Recepción de documentación y traslado a análisis"
 			const analysisStage = await db
 				.select()
@@ -1326,8 +1339,37 @@ export const crmRouter = {
 				throw new Error("Analysis stage not found");
 			}
 
-			// Get all opportunities in the analysis stage
-			return await db
+			// Build conditions
+			const conditions = [eq(opportunities.stageId, analysisStage[0].id)];
+
+			// Search filter (name, license plate)
+			if (search && search.trim() !== "") {
+				const searchTerms = search.trim().split(/\s+/);
+				for (const term of searchTerms) {
+					const searchPattern = `%${term}%`;
+					conditions.push(
+						or(
+							ilike(leads.firstName, searchPattern),
+							ilike(leads.lastName, searchPattern),
+							ilike(vehicles.licensePlate, searchPattern),
+						)!,
+					);
+				}
+			}
+
+			// conditions always has at least one element (stageId condition)
+			const whereClause = and(...conditions)!;
+
+			// Get total count
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(whereClause);
+
+			// Get paginated data
+			const data = await db
 				.select({
 					id: opportunities.id,
 					title: opportunities.title,
@@ -1372,10 +1414,18 @@ export const crmRouter = {
 				.leftJoin(companies, eq(opportunities.companyId, companies.id))
 				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
 				.leftJoin(salesStages, eq(opportunities.stageId, salesStages.id))
-				.where(eq(opportunities.stageId, analysisStage[0].id))
-				.orderBy(opportunities.createdAt);
-		},
-	),
+				.where(whereClause)
+				.orderBy(opportunities.createdAt)
+				.limit(limit)
+				.offset(offset);
+
+			return {
+				data,
+				total,
+				limit,
+				offset,
+			};
+		}),
 
 	approveOpportunityAnalysis: analystProcedure
 		.input(
@@ -1682,7 +1732,7 @@ export const crmRouter = {
 				.from(salesStages)
 				.where(eq(salesStages.order, 6)) // "Formalización" 50%
 				.limit(1);
-			
+
 			if (!nextStage[0]) {
 				throw new Error("Next stage not found");
 			}
@@ -1698,6 +1748,106 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.where(eq(opportunities.id, input.opportunityId));
+
+			// Record stage history
+			await db.insert(opportunityStageHistory).values({
+				opportunityId: input.opportunityId,
+				fromStageId: opportunity.stageId,
+				toStageId: nextStage[0].id,
+				changedBy: context.userId,
+				reason: "Detalle de crédito aprobado - Movido a Formalización (50%)",
+				isOverride: false,
+			});
+
+			return { success: true };
+		}),
+
+	// Revoke credit detail approval (back to 40%)
+	revokeCreditDetailApproval: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Only admin or sales_supervisor can revoke
+			if (!PERMISSIONS.canApproveCreditDetail(context.userRole)) {
+				throw new Error(
+					"Solo supervisores de ventas o administradores pueden cancelar la aprobación",
+				);
+			}
+
+			// Get current opportunity with stage info
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					stageId: opportunities.stageId,
+					creditDetailApproved: opportunities.creditDetailApproved,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new Error("Oportunidad no encontrada");
+			}
+
+			// Validate that it's approved
+			if (!opportunity.creditDetailApproved) {
+				throw new Error("El detalle de crédito no está aprobado");
+			}
+
+			// Get current stage to check closure percentage
+			const [currentStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.id, opportunity.stageId))
+				.limit(1);
+
+			if (!currentStage) {
+				throw new Error("Etapa actual no encontrada");
+			}
+
+			// Cannot revoke if at 90% or higher (already sent to cartera)
+			if (currentStage.closurePercentage >= 90) {
+				throw new Error(
+					"No se puede cancelar la aprobación de una oportunidad que ya fue enviada a cartera",
+				);
+			}
+
+			// Get stage 40% (Cierre de propuesta)
+			const [previousStage] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.order, 5)) // Order 5 = 40% - Cierre de propuesta
+				.limit(1);
+
+			if (!previousStage) {
+				throw new Error("Etapa anterior no encontrada");
+			}
+
+			// Update opportunity - revoke approval
+			await db
+				.update(opportunities)
+				.set({
+					stageId: previousStage.id,
+					creditDetailApproved: false,
+					creditDetailApprovedBy: null,
+					creditDetailApprovedAt: null,
+					updatedAt: new Date(),
+				})
+				.where(eq(opportunities.id, input.opportunityId));
+
+			// Record stage history
+			await db.insert(opportunityStageHistory).values({
+				opportunityId: input.opportunityId,
+				fromStageId: opportunity.stageId,
+				toStageId: previousStage.id,
+				changedBy: context.userId,
+				reason:
+					"Aprobación de detalle cancelada - Regresado a Cierre de propuesta (40%)",
+				isOverride: false,
+			});
 
 			return { success: true };
 		}),
@@ -3750,88 +3900,145 @@ export const crmRouter = {
 		}),
 
 	// Get opportunities at 90% for disbursement review
-	getOpportunitiesForDisbursement: analystProcedure.handler(async () => {
-		// Get the 90% stage
-		const [stage90] = await db
-			.select()
-			.from(salesStages)
-			.where(eq(salesStages.closurePercentage, 90))
-			.limit(1);
+	getOpportunitiesForDisbursement: analystProcedure
+		.input(
+			z
+				.object({
+					limit: z.number().min(1).max(100).default(20),
+					offset: z.number().min(0).default(0),
+					search: z.string().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input }) => {
+			const limit = input?.limit ?? 20;
+			const offset = input?.offset ?? 0;
+			const search = input?.search;
 
-		if (!stage90) {
-			return [];
-		}
+			// Get the 90% stage
+			const [stage90] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 90))
+				.limit(1);
 
-		// Get opportunities at 90%
-		const opps = await db
-			.select({
-				id: opportunities.id,
-				value: opportunities.value,
-				stageId: opportunities.stageId,
-				disbursementApproved: opportunities.disbursementApproved,
-				leadId: opportunities.leadId,
-				vehicleId: opportunities.vehicleId,
-				createdAt: opportunities.createdAt,
-				updatedAt: opportunities.updatedAt,
-			})
-			.from(opportunities)
-			.where(eq(opportunities.stageId, stage90.id))
-			.orderBy(desc(opportunities.updatedAt));
+			if (!stage90) {
+				return { data: [], total: 0, limit, offset };
+			}
 
-		// Get lead info for each opportunity
-		const result = await Promise.all(
-			opps.map(async (opp) => {
-				let lead:
-					| { firstName: string; lastName: string; phone: string | null }
-					| undefined;
-				if (opp.leadId) {
-					const [leadResult] = await db
-						.select({
-							firstName: leads.firstName,
-							lastName: leads.lastName,
-							phone: leads.phone,
-						})
-						.from(leads)
-						.where(eq(leads.id, opp.leadId))
-						.limit(1);
-					lead = leadResult;
+			// Build conditions
+			const conditions = [eq(opportunities.stageId, stage90.id)];
+
+			// Search filter (name, license plate)
+			if (search && search.trim() !== "") {
+				const searchTerms = search.trim().split(/\s+/);
+				for (const term of searchTerms) {
+					const searchPattern = `%${term}%`;
+					conditions.push(
+						or(
+							ilike(leads.firstName, searchPattern),
+							ilike(leads.lastName, searchPattern),
+							ilike(vehicles.licensePlate, searchPattern),
+						)!,
+					);
 				}
+			}
 
-				// Get vehicle info
-				let vehicle:
-					| {
-							id: string;
-							make: string;
-							model: string;
-							year: number;
-							licensePlate: string | null;
-							color: string;
-							isNew: boolean;
-					  }
-					| undefined;
-				if (opp.vehicleId) {
-					const [vehicleResult] = await db
-						.select({
-							id: vehicles.id,
-							make: vehicles.make,
-							model: vehicles.model,
-							year: vehicles.year,
-							licensePlate: vehicles.licensePlate,
-							color: vehicles.color,
-							isNew: vehicles.isNew,
-						})
-						.from(vehicles)
-						.where(eq(vehicles.id, opp.vehicleId))
-						.limit(1);
-					vehicle = vehicleResult;
-				}
+			// conditions always has at least one element (stageId condition)
+			const whereClause = and(...conditions)!;
 
-				// Get checklist status
-				const [checklist] = await db
-					.select()
-					.from(disbursementChecklists)
-					.where(eq(disbursementChecklists.opportunityId, opp.id))
-					.limit(1);
+			// Get total count
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(whereClause);
+
+			// Get paginated opportunities at 90%
+			const opps = await db
+				.select({
+					id: opportunities.id,
+					value: opportunities.value,
+					stageId: opportunities.stageId,
+					disbursementApproved: opportunities.disbursementApproved,
+					leadId: opportunities.leadId,
+					vehicleId: opportunities.vehicleId,
+					createdAt: opportunities.createdAt,
+					updatedAt: opportunities.updatedAt,
+				})
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(whereClause)
+				.orderBy(desc(opportunities.updatedAt))
+				.limit(limit)
+				.offset(offset);
+
+			if (opps.length === 0) {
+				return { data: [], total, limit, offset };
+			}
+
+			// Batch fetch leads and vehicles to avoid N+1 queries
+			const leadIds = opps
+				.map((o) => o.leadId)
+				.filter((id): id is string => id !== null);
+			const vehicleIds = opps
+				.map((o) => o.vehicleId)
+				.filter((id): id is string => id !== null);
+			const oppIds = opps.map((o) => o.id);
+
+			// Fetch all leads in one query
+			const leadsData =
+				leadIds.length > 0
+					? await db
+							.select({
+								id: leads.id,
+								firstName: leads.firstName,
+								lastName: leads.lastName,
+								phone: leads.phone,
+							})
+							.from(leads)
+							.where(inArray(leads.id, leadIds))
+					: [];
+
+			// Fetch all vehicles in one query
+			const vehiclesData =
+				vehicleIds.length > 0
+					? await db
+							.select({
+								id: vehicles.id,
+								make: vehicles.make,
+								model: vehicles.model,
+								year: vehicles.year,
+								licensePlate: vehicles.licensePlate,
+								color: vehicles.color,
+								isNew: vehicles.isNew,
+							})
+							.from(vehicles)
+							.where(inArray(vehicles.id, vehicleIds))
+					: [];
+
+			// Fetch all checklists in one query
+			const checklistsData = await db
+				.select()
+				.from(disbursementChecklists)
+				.where(inArray(disbursementChecklists.opportunityId, oppIds));
+
+			// Create maps for quick lookup
+			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
+			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+			const checklistsMap = new Map(
+				checklistsData.map((c) => [c.opportunityId, c]),
+			);
+
+			// Map results
+			const data = opps.map((opp) => {
+				const lead = opp.leadId ? leadsMap.get(opp.leadId) : undefined;
+				const vehicle = opp.vehicleId
+					? vehiclesMap.get(opp.vehicleId)
+					: undefined;
+				const checklist = checklistsMap.get(opp.id);
 
 				let progress = 0;
 				if (checklist) {
@@ -3848,7 +4055,14 @@ export const crmRouter = {
 				}
 
 				return {
-					...opp,
+					id: opp.id,
+					value: opp.value,
+					stageId: opp.stageId,
+					disbursementApproved: opp.disbursementApproved,
+					leadId: opp.leadId,
+					vehicleId: opp.vehicleId,
+					createdAt: opp.createdAt,
+					updatedAt: opp.updatedAt,
 					leadName: lead ? `${lead.firstName} ${lead.lastName}` : "N/A",
 					leadPhone: lead?.phone,
 					vehicle: vehicle || null,
@@ -3861,121 +4075,167 @@ export const crmRouter = {
 						color: stage90.color,
 					},
 				};
-			}),
-		);
+			});
 
-		return result;
-	}),
+			return { data, total, limit, offset };
+		}),
 
 	// Get opportunities at 50% for investment assignment
-	getOpportunitiesForInvestment: analystProcedure.handler(async () => {
-		// Get the 50% stage
-		const [stage50] = await db
-			.select()
-			.from(salesStages)
-			.where(eq(salesStages.closurePercentage, 50))
-			.limit(1);
+	getOpportunitiesForInvestment: analystProcedure
+		.input(
+			z
+				.object({
+					limit: z.number().min(1).max(100).default(20),
+					offset: z.number().min(0).default(0),
+					search: z.string().optional(),
+				})
+				.optional(),
+		)
+		.handler(async ({ input }) => {
+			const limit = input?.limit ?? 20;
+			const offset = input?.offset ?? 0;
+			const search = input?.search;
 
-		if (!stage50) {
-			return [];
-		}
+			// Get the 50% stage
+			const [stage50] = await db
+				.select()
+				.from(salesStages)
+				.where(eq(salesStages.closurePercentage, 50))
+				.limit(1);
 
-		// Get opportunities at 50%
-		const opps = await db
-			.select({
-				id: opportunities.id,
-				title: opportunities.title,
-				value: opportunities.value,
-				stageId: opportunities.stageId,
-				inversionistas: opportunities.inversionistas,
-				leadId: opportunities.leadId,
-				vehicleId: opportunities.vehicleId,
-				numeroCuotas: opportunities.numeroCuotas,
-				tasaInteres: opportunities.tasaInteres,
-				cuotaMensual: opportunities.cuotaMensual,
-				createdAt: opportunities.createdAt,
-				updatedAt: opportunities.updatedAt,
-			})
-			.from(opportunities)
-			.where(eq(opportunities.stageId, stage50.id))
-			.orderBy(desc(opportunities.updatedAt));
+			if (!stage50) {
+				return { data: [], total: 0, limit, offset };
+			}
 
-		if (opps.length === 0) {
-			return [];
-		}
+			// Build conditions
+			const conditions = [eq(opportunities.stageId, stage50.id)];
 
-		// Batch fetch leads and vehicles to avoid N+1 queries
-		const leadIds = opps
-			.map((o) => o.leadId)
-			.filter((id): id is string => id !== null);
-		const vehicleIds = opps
-			.map((o) => o.vehicleId)
-			.filter((id): id is string => id !== null);
-
-		// Fetch all leads in one query
-		const leadsData =
-			leadIds.length > 0
-				? await db
-						.select({
-							id: leads.id,
-							firstName: leads.firstName,
-							lastName: leads.lastName,
-							phone: leads.phone,
-							dpi: leads.dpi,
-							direccion: leads.direccion,
-							maritalStatus: leads.maritalStatus,
-							gender: leads.gender,
-							birthDate: leads.birthDate,
-							nationality: leads.nationality,
-						})
-						.from(leads)
-						.where(inArray(leads.id, leadIds))
-				: [];
-
-		// Fetch all vehicles in one query
-		const vehiclesData =
-			vehicleIds.length > 0
-				? await db
-						.select({
-							id: vehicles.id,
-							make: vehicles.make,
-							model: vehicles.model,
-							year: vehicles.year,
-							licensePlate: vehicles.licensePlate,
-							color: vehicles.color,
-							isNew: vehicles.isNew,
-							vinNumber: vehicles.vinNumber,
-							motorNumber: vehicles.motorNumber,
-							seats: vehicles.seats,
-							vehicleUse: vehicles.vehicleUse,
-						})
-						.from(vehicles)
-						.where(inArray(vehicles.id, vehicleIds))
-				: [];
-
-		// Create maps for quick lookup
-		const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
-		const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
-
-		// Map results
-		const result = opps.map((opp) => {
-			const lead = opp.leadId ? leadsMap.get(opp.leadId) || null : null;
-			const vehicle = opp.vehicleId
-				? vehiclesMap.get(opp.vehicleId) || null
-				: null;
-
-			// Check if has investor assigned
-			let hasInvestor = false;
-			if (opp.inversionistas) {
-				try {
-					const parsed = JSON.parse(opp.inversionistas);
-					hasInvestor = Array.isArray(parsed) && parsed.length > 0;
-				} catch {
-					hasInvestor = false;
+			// Search filter (name, license plate)
+			if (search && search.trim() !== "") {
+				const searchTerms = search.trim().split(/\s+/);
+				for (const term of searchTerms) {
+					const searchPattern = `%${term}%`;
+					conditions.push(
+						or(
+							ilike(leads.firstName, searchPattern),
+							ilike(leads.lastName, searchPattern),
+							ilike(vehicles.licensePlate, searchPattern),
+						)!,
+					);
 				}
 			}
 
-			return {
+			// conditions always has at least one element (stageId condition)
+			const whereClause = and(...conditions)!;
+
+			// Get total count
+			const [{ total }] = await db
+				.select({ total: count() })
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(whereClause);
+
+			// Get paginated opportunities at 50%
+			const opps = await db
+				.select({
+					id: opportunities.id,
+					title: opportunities.title,
+					value: opportunities.value,
+					stageId: opportunities.stageId,
+					inversionistas: opportunities.inversionistas,
+					leadId: opportunities.leadId,
+					vehicleId: opportunities.vehicleId,
+					numeroCuotas: opportunities.numeroCuotas,
+					tasaInteres: opportunities.tasaInteres,
+					cuotaMensual: opportunities.cuotaMensual,
+					createdAt: opportunities.createdAt,
+					updatedAt: opportunities.updatedAt,
+				})
+				.from(opportunities)
+				.leftJoin(leads, eq(opportunities.leadId, leads.id))
+				.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
+				.where(whereClause)
+				.orderBy(desc(opportunities.updatedAt))
+				.limit(limit)
+				.offset(offset);
+
+			if (opps.length === 0) {
+				return { data: [], total, limit, offset };
+			}
+
+			// Batch fetch leads and vehicles to avoid N+1 queries
+			const leadIds = opps
+				.map((o) => o.leadId)
+				.filter((id): id is string => id !== null);
+			const vehicleIds = opps
+				.map((o) => o.vehicleId)
+				.filter((id): id is string => id !== null);
+
+			// Fetch all leads in one query
+			const leadsData =
+				leadIds.length > 0
+					? await db
+							.select({
+								id: leads.id,
+								firstName: leads.firstName,
+								lastName: leads.lastName,
+								phone: leads.phone,
+								dpi: leads.dpi,
+								direccion: leads.direccion,
+								maritalStatus: leads.maritalStatus,
+								gender: leads.gender,
+								birthDate: leads.birthDate,
+								nationality: leads.nationality,
+							})
+							.from(leads)
+							.where(inArray(leads.id, leadIds))
+					: [];
+
+			// Fetch all vehicles in one query
+			const vehiclesData =
+				vehicleIds.length > 0
+					? await db
+							.select({
+								id: vehicles.id,
+								make: vehicles.make,
+								model: vehicles.model,
+								year: vehicles.year,
+								licensePlate: vehicles.licensePlate,
+								color: vehicles.color,
+								isNew: vehicles.isNew,
+								vinNumber: vehicles.vinNumber,
+								motorNumber: vehicles.motorNumber,
+								seats: vehicles.seats,
+								vehicleUse: vehicles.vehicleUse,
+							})
+							.from(vehicles)
+							.where(inArray(vehicles.id, vehicleIds))
+					: [];
+
+			// Create maps for quick lookup
+			const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
+			const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
+
+			// Map results
+			const data = opps.map((opp) => {
+				const lead = opp.leadId ? leadsMap.get(opp.leadId) || null : null;
+				const vehicle = opp.vehicleId
+					? vehiclesMap.get(opp.vehicleId) || null
+					: null;
+
+				// Check if has investor assigned
+				let hasInvestor = false;
+				if (opp.inversionistas) {
+					try {
+						const parsed = JSON.parse(opp.inversionistas);
+						hasInvestor = Array.isArray(parsed) && parsed.length > 0;
+					} catch {
+						hasInvestor = false;
+					}
+				}
+
+				return {
 					id: opp.id,
 					title: opp.title,
 					value: opp.value,
@@ -4030,17 +4290,17 @@ export const crmRouter = {
 								}),
 							}
 						: null,
-				stage: {
-					id: stage50.id,
-					name: stage50.name,
-					closurePercentage: stage50.closurePercentage,
-					color: stage50.color,
-				},
-			};
-		});
+					stage: {
+						id: stage50.id,
+						name: stage50.name,
+						closurePercentage: stage50.closurePercentage,
+						color: stage50.color,
+					},
+				};
+			});
 
-		return result;
-	}),
+			return { data, total, limit, offset };
+		}),
 
 	// Assign investor and advance to 80%
 	assignInvestorAndAdvance: analystProcedure

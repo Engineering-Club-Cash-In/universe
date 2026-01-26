@@ -3893,6 +3893,10 @@ export const crmRouter = {
 				numeroCuotas: opportunities.numeroCuotas,
 				tasaInteres: opportunities.tasaInteres,
 				cuotaMensual: opportunities.cuotaMensual,
+				// Campos adicionales para edición
+				categoria: opportunities.categoria,
+				nit: opportunities.nit,
+				diaPagoMensual: opportunities.diaPagoMensual,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
 			})
@@ -3985,6 +3989,10 @@ export const crmRouter = {
 						opp.tasaInteres &&
 						opp.cuotaMensual
 					),
+					// Campos adicionales para edición
+					categoria: opp.categoria,
+					nit: opp.nit,
+					diaPagoMensual: opp.diaPagoMensual,
 					createdAt: opp.createdAt,
 					updatedAt: opp.updatedAt,
 					lead: lead
@@ -3992,6 +4000,7 @@ export const crmRouter = {
 								id: lead.id,
 								name: `${lead.firstName} ${lead.lastName}`,
 								phone: lead.phone,
+								direccion: lead.direccion,
 								hasRequiredData: !!(
 									lead.dpi &&
 									lead.direccion &&
@@ -4048,6 +4057,16 @@ export const crmRouter = {
 			z.object({
 				opportunityId: z.string().uuid(),
 				inversionistas: z.string(), // JSON string with investors array
+				categoria: z.enum([
+					"Contraseña",
+					"CV Vehículo",
+					"CV Vehículo nuevo",
+					"Fiduciario",
+					"Hipotecario",
+					"Vehículo",
+				]),
+				nit: z.string(),
+				diaPagoMensual: z.number().min(1).max(31),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -4165,6 +4184,11 @@ export const crmRouter = {
 			if (!opportunity.cuotaMensual) creditMissing.push("Cuota mensual");
 			if (!opportunity.numeroCuotas) creditMissing.push("Número de cuotas");
 			if (!opportunity.tasaInteres) creditMissing.push("Tasa de interés");
+			if (!opportunity.categoria && !input.categoria)
+				creditMissing.push("Categoría de crédito");
+			if (!opportunity.nit && !input.nit) creditMissing.push("NIT");
+			if (!opportunity.diaPagoMensual && !input.diaPagoMensual)
+				creditMissing.push("Día de pago mensual");
 
 			if (creditMissing.length > 0) {
 				validationErrors.push(`Crédito: Faltan ${creditMissing.join(", ")}`);
@@ -4197,6 +4221,9 @@ export const crmRouter = {
 					.set({
 						inversionistas: input.inversionistas,
 						stageId: stage80.id,
+						categoria: input.categoria,
+						nit: input.nit,
+						diaPagoMensual: input.diaPagoMensual,
 						updatedAt: new Date(),
 					})
 					.where(eq(opportunities.id, input.opportunityId));

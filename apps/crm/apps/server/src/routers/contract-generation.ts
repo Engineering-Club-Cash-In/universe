@@ -17,12 +17,12 @@ import {
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
 import {
-	getDocumentTypes,
-	getDocumentsByDpi,
-	generateContract as generateContractApi,
+	type Document,
 	type DocumentType,
 	type Field,
-	type Document,
+	generateContract as generateContractApi,
+	getDocumentsByDpi,
+	getDocumentTypes,
 	type RenapData,
 } from "../services/legal-docs-api";
 
@@ -32,7 +32,8 @@ const LEGAL_API_URL =
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =
-	process.env.LEGAL_DOCS_API_URL || "https://legal-docs-blueprints.s4.devteamatcci.site";
+	process.env.LEGAL_DOCS_API_URL ||
+	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
 export const contractGenerationRouter = {
 	/**
@@ -74,7 +75,10 @@ export const contractGenerationRouter = {
 		)
 		.handler(async ({ input }) => {
 			try {
-				const response = await getDocumentsByDpi(input.dpi, input.documentNames);
+				const response = await getDocumentsByDpi(
+					input.dpi,
+					input.documentNames,
+				);
 				if (!response.success) {
 					throw new ORPCError("BAD_REQUEST", {
 						message: response.message || "Error al obtener documentos",

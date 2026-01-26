@@ -622,7 +622,7 @@ export function CreditDetailView({
 				quotationId: quotation?.id,
 				checkDate: value.checkDate.toISOString(),
 				issuer: value.issuer,
-				issuerBank: value.issuerBank,
+				issuerBank: value.issuerBank || undefined,
 				beneficiary: value.beneficiary,
 				accountNumber: value.accountNumber || undefined,
 				transferType: value.transferType,
@@ -2523,7 +2523,7 @@ export function CreditDetailView({
 															{formatDate(check.checkDate)}
 														</TableCell>
 														<TableCell>{check.issuer}</TableCell>
-														<TableCell>{check.issuerBank}</TableCell>
+														<TableCell>{check.issuerBank || "-"}</TableCell>
 														<TableCell>{check.beneficiary}</TableCell>
 														<TableCell>{check.accountNumber || "-"}</TableCell>
 														<TableCell>{check.transferType}</TableCell>

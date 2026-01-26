@@ -782,7 +782,7 @@ function DisbursementSection() {
 		// Find the opportunity with this lead
 		const opp = opportunities?.find((o) => o.leadId === leadId);
 		if (opp) {
-			setSelectedLeadForModal({
+			const leadData = {
 				id: leadId,
 				firstName: opp.leadName?.split(" ")[0] || "",
 				lastName: opp.leadName?.split(" ").slice(1).join(" ") || "",
@@ -792,9 +792,13 @@ function DisbursementSection() {
 				source: "",
 				status: "qualified",
 				createdAt: opp.createdAt,
-			});
+			};
 			setIsOpportunityModalOpen(false);
-			setIsLeadModalOpen(true);
+			// Delay opening second modal to allow first to fully close
+			setTimeout(() => {
+				setSelectedLeadForModal(leadData);
+				setIsLeadModalOpen(true);
+			}, 150);
 		}
 	};
 

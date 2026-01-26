@@ -46,6 +46,7 @@ const formSchema = z.object({
   vehicleYear: z.string({ message: "El año es requerido" }).min(1, { message: "El año es requerido" }),
   licensePlate: z.string({ message: "El número de placa es requerido" }).min(1, { message: "El número de placa es requerido" }),
   vinNumber: z.string({ message: "El número VIN/Chasis es requerido" }).min(1, { message: "El número VIN/Chasis es requerido" }),
+  motorNumber: z.string({ message: "El número de motor es requerido" }).min(1, { message: "El número de motor es requerido" }),
   milesMileage: z.string().optional(),
   kmMileage: z.string({ message: "El kilometraje es requerido" }).min(1, { message: "El kilometraje es requerido" }),
   origin: z.enum(["Nacional", "Importado"], { message: "La procedencia es requerida" }),
@@ -92,6 +93,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       vehicleYear: "",
       licensePlate: "",
       vinNumber: "",
+      motorNumber: "",
       milesMileage: "",
       kmMileage: "",
       origin: undefined,
@@ -155,6 +157,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       vehicleYear: "",
       licensePlate: "",
       vinNumber: "",
+      motorNumber: "",
       milesMileage: "",
       kmMileage: "",
       origin: undefined,
@@ -217,6 +220,7 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
       vehicleYear: "2023",
       licensePlate: "P-123ABC",
       vinNumber: "JTMB34FV2ND123456",
+      motorNumber: "2ZR-FE-1234567",
       milesMileage: "15000",
       kmMileage: "24140",
       origin: "Importado" as const,
@@ -379,22 +383,41 @@ const VehicleInspectionForm = forwardRef<VehicleInspectionFormRef, VehicleInspec
                 />
               </div>
 
-              <FormField
-                control={form.control}
-                name="vinNumber"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>No. Vin/Chasis</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="Número de identificación del vehículo"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
+                <FormField
+                  control={form.control}
+                  name="vinNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>No. VIN/Chasis</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Número de identificación del vehículo"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="motorNumber"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>No. de Motor</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="Número de motor del vehículo"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                 <FormField

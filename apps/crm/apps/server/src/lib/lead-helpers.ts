@@ -25,9 +25,7 @@ export function getMissingLeadFieldsForContracts(
 		{ field: "nationality" as const, label: "Nacionalidad" },
 	];
 
-	return requiredForContracts
-		.filter((f) => !lead[f.field])
-		.map((f) => f.label);
+	return requiredForContracts.filter((f) => !lead[f.field]).map((f) => f.label);
 }
 
 /**

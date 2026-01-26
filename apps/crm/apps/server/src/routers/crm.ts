@@ -6,6 +6,7 @@ import {
 	eq,
 	gte,
 	ilike,
+	inArray,
 	isNotNull,
 	not,
 	or,
@@ -194,12 +195,14 @@ export const crmRouter = {
 				conditions.push(eq(leads.id, id));
 			}
 
-			// Role-based filter: admin, sales_supervisor, and juridico can see all
+			// Role-based filter: admin, sales_supervisor, juridico, and analyst can see all
 			// When fetching by specific ID, juridico needs access for contract generation
+			// Analysts need access to view lead details for analysis checklist
 			const canSeeAllLeads =
 				context.userRole === "admin" ||
 				context.userRole === "sales_supervisor" ||
-				context.userRole === "juridico";
+				context.userRole === "juridico" ||
+				context.userRole === "analyst";
 
 			if (!canSeeAllLeads) {
 				conditions.push(eq(leads.assignedTo, context.userId));
@@ -2866,6 +2869,29 @@ export const crmRouter = {
 				requiredVehicleDocs = reqVehicleDocsResult;
 				uploadedVehicleDocs = uploadedVehicleDocsResult;
 
+				// Filter out documents that don't apply to new vehicles
+				if (vehicle.isNew) {
+					const docsNotApplicableToNewVehicles = [
+						"tarjeta_circulacion",
+						"titulo_propiedad",
+						"dpi_dueno",
+						"pago_impuesto_circulacion",
+						"consulta_sat",
+						"consulta_garantias_mobiliarias",
+						"usuario_sat_propietario",
+						"rtu_propietario",
+						"omisos_incumplimientos_propietario",
+						"garantia_mobiliaria_sat",
+						"garantia_mobiliaria_dpi",
+						"garantia_mobiliaria_nit",
+						"garantia_mobiliaria_serie",
+						"multas_vehiculo",
+					];
+					requiredVehicleDocs = requiredVehicleDocs.filter(
+						(doc) => !docsNotApplicableToNewVehicles.includes(doc.documentType),
+					);
+				}
+
 				// Fallback: buscar documentos de vehículo en opportunityDocuments
 				// para oportunidades existentes que subieron docs antes de la sincronización
 				if (requiredVehicleDocs.length > 0) {
@@ -3874,25 +3900,22 @@ export const crmRouter = {
 			.where(eq(opportunities.stageId, stage50.id))
 			.orderBy(desc(opportunities.updatedAt));
 
-		// Get additional info for each opportunity
-		const result = await Promise.all(
-			opps.map(async (opp) => {
-				// Get lead info
-				let lead: {
-					id: string;
-					firstName: string;
-					lastName: string;
-					phone: string | null;
-					dpi: string | null;
-					direccion: string | null;
-					maritalStatus: "single" | "married" | "divorced" | "widowed" | null;
-					gender: string | null;
-					birthDate: Date | null;
-					nationality: string | null;
-				} | null = null;
+		if (opps.length === 0) {
+			return [];
+		}
 
-				if (opp.leadId) {
-					const [leadResult] = await db
+		// Batch fetch leads and vehicles to avoid N+1 queries
+		const leadIds = opps
+			.map((o) => o.leadId)
+			.filter((id): id is string => id !== null);
+		const vehicleIds = opps
+			.map((o) => o.vehicleId)
+			.filter((id): id is string => id !== null);
+
+		// Fetch all leads in one query
+		const leadsData =
+			leadIds.length > 0
+				? await db
 						.select({
 							id: leads.id,
 							firstName: leads.firstName,
@@ -3906,28 +3929,13 @@ export const crmRouter = {
 							nationality: leads.nationality,
 						})
 						.from(leads)
-						.where(eq(leads.id, opp.leadId))
-						.limit(1);
-					lead = leadResult || null;
-				}
+						.where(inArray(leads.id, leadIds))
+				: [];
 
-				// Get vehicle info
-				let vehicle: {
-					id: string;
-					make: string;
-					model: string;
-					year: number;
-					licensePlate: string | null;
-					color: string;
-					isNew: boolean;
-					vinNumber: string | null;
-					motorNumber: string | null;
-					seats: number | null;
-					vehicleUse: string | null;
-				} | null = null;
-
-				if (opp.vehicleId) {
-					const [vehicleResult] = await db
+		// Fetch all vehicles in one query
+		const vehiclesData =
+			vehicleIds.length > 0
+				? await db
 						.select({
 							id: vehicles.id,
 							make: vehicles.make,
@@ -3942,23 +3950,32 @@ export const crmRouter = {
 							vehicleUse: vehicles.vehicleUse,
 						})
 						.from(vehicles)
-						.where(eq(vehicles.id, opp.vehicleId))
-						.limit(1);
-					vehicle = vehicleResult || null;
-				}
+						.where(inArray(vehicles.id, vehicleIds))
+				: [];
 
-				// Check if has investor assigned
-				let hasInvestor = false;
-				if (opp.inversionistas) {
-					try {
-						const parsed = JSON.parse(opp.inversionistas);
-						hasInvestor = Array.isArray(parsed) && parsed.length > 0;
-					} catch {
-						hasInvestor = false;
-					}
-				}
+		// Create maps for quick lookup
+		const leadsMap = new Map(leadsData.map((l) => [l.id, l]));
+		const vehiclesMap = new Map(vehiclesData.map((v) => [v.id, v]));
 
-				return {
+		// Map results
+		const result = opps.map((opp) => {
+			const lead = opp.leadId ? leadsMap.get(opp.leadId) || null : null;
+			const vehicle = opp.vehicleId
+				? vehiclesMap.get(opp.vehicleId) || null
+				: null;
+
+			// Check if has investor assigned
+			let hasInvestor = false;
+			if (opp.inversionistas) {
+				try {
+					const parsed = JSON.parse(opp.inversionistas);
+					hasInvestor = Array.isArray(parsed) && parsed.length > 0;
+				} catch {
+					hasInvestor = false;
+				}
+			}
+
+			return {
 					id: opp.id,
 					title: opp.title,
 					value: opp.value,
@@ -4013,15 +4030,14 @@ export const crmRouter = {
 								}),
 							}
 						: null,
-					stage: {
-						id: stage50.id,
-						name: stage50.name,
-						closurePercentage: stage50.closurePercentage,
-						color: stage50.color,
-					},
-				};
-			}),
-		);
+				stage: {
+					id: stage50.id,
+					name: stage50.name,
+					closurePercentage: stage50.closurePercentage,
+					color: stage50.color,
+				},
+			};
+		});
 
 		return result;
 	}),
@@ -4077,10 +4093,15 @@ export const crmRouter = {
 				) {
 					throw new Error("Invalid investors array");
 				}
-			} catch {
-				throw new ORPCError("BAD_REQUEST", {
-					message: "Debe seleccionar al menos un inversionista",
-				});
+				if (parsedInversionistas.length > 20) {
+					throw new Error("Too many investors");
+				}
+			} catch (e) {
+				const message =
+					e instanceof Error && e.message === "Too many investors"
+						? "No se pueden asignar más de 20 inversionistas por oportunidad"
+						: "Debe seleccionar al menos un inversionista";
+				throw new ORPCError("BAD_REQUEST", { message });
 			}
 
 			// Validate minimum data for contracts
@@ -4168,23 +4189,26 @@ export const crmRouter = {
 				});
 			}
 
-			// Update opportunity with investors and move to 80%
-			await db
-				.update(opportunities)
-				.set({
-					inversionistas: input.inversionistas,
-					stageId: stage80.id,
-					updatedAt: new Date(),
-				})
-				.where(eq(opportunities.id, input.opportunityId));
+			// Update opportunity and record history in a transaction for atomicity
+			await db.transaction(async (tx) => {
+				// Update opportunity with investors and move to 80%
+				await tx
+					.update(opportunities)
+					.set({
+						inversionistas: input.inversionistas,
+						stageId: stage80.id,
+						updatedAt: new Date(),
+					})
+					.where(eq(opportunities.id, input.opportunityId));
 
-			// Record stage history
-			await db.insert(opportunityStageHistory).values({
-				opportunityId: input.opportunityId,
-				fromStageId: opportunity.stageId,
-				toStageId: stage80.id,
-				changedBy: context.userId,
-				reason: "Inversión asignada - Avance a etapa jurídica",
+				// Record stage history
+				await tx.insert(opportunityStageHistory).values({
+					opportunityId: input.opportunityId,
+					fromStageId: opportunity.stageId,
+					toStageId: stage80.id,
+					changedBy: context.userId,
+					reason: "Inversión asignada - Avance a etapa jurídica",
+				});
 			});
 
 			return {

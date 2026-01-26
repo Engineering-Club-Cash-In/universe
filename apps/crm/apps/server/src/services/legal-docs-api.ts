@@ -9,7 +9,8 @@ const LEGAL_API_URL =
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =
-	process.env.LEGAL_DOCS_API_URL || "https://legal-docs-blueprints.s4.devteamatcci.site";
+	process.env.LEGAL_DOCS_API_URL ||
+	"https://legal-docs-blueprints.s4.devteamatcci.site";
 
 // ============ TIPOS ============
 
@@ -171,7 +172,9 @@ export async function generateContractsBatch(
 
 	if (!response.ok) {
 		const errorText = await response.text();
-		throw new Error(`Error al generar contratos: ${response.status} - ${errorText}`);
+		throw new Error(
+			`Error al generar contratos: ${response.status} - ${errorText}`,
+		);
 	}
 
 	return response.json();
@@ -221,9 +224,7 @@ export async function generateContract(
 /**
  * Mapea el género del formato de RENAP al formato del API
  */
-export function mapGenderFromRenap(
-	renapGender: string,
-): "male" | "female" {
+export function mapGenderFromRenap(renapGender: string): "male" | "female" {
 	return renapGender === "F" ? "female" : "male";
 }
 

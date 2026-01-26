@@ -108,7 +108,6 @@ export function LeadDetailModal({
 			input: { id: lead?.id ?? "", limit: 1 },
 		}),
 		enabled: open && !!lead?.id,
-		queryKey: ["getLeadById", lead?.id],
 	});
 
 	// Query for credit analysis data
@@ -117,7 +116,6 @@ export function LeadDetailModal({
 			input: { leadId: lead?.id ?? "" },
 		}),
 		enabled: open && !!lead?.id,
-		queryKey: ["getCreditAnalysisByLeadId", lead?.id],
 	});
 
 	if (!lead) return null;

@@ -16,6 +16,7 @@ import {
 	enrichLeadFromRenap,
 	getContractTypes,
 	mapOpportunityToContractData,
+	transformToApiFormat,
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
 
@@ -345,61 +346,60 @@ async function callLegalDocsApi(
 	data: Awaited<ReturnType<typeof mapOpportunityToContractData>>,
 ): Promise<LegalDocsApiResult> {
 	try {
-		// Mapear el tipo de contrato del CRM al endpoint de legal-docs-blueprints
-		const endpointMap: Record<string, string> = {
-			compraventa: "/contracts/compraventa",
-			credito_prendario: "/contracts/credito-prendario",
-			pagare: "/contracts/pagare",
-			mandato_especial: "/contracts/mandato-especial",
-			reconocimiento_deuda: "/contracts/reconocimiento-deuda",
-			contrato_gps: "/contracts/gps",
-			contrato_seguro: "/contracts/seguro",
-			poder_especial: "/contracts/poder-especial",
-			declaracion_jurada: "/contracts/declaracion-jurada",
-			acta_entrega: "/contracts/acta-entrega",
-			contrato_fianza: "/contracts/fianza",
-			carta_compromiso: "/contracts/carta-compromiso",
-			autorizacion_desembolso: "/contracts/autorizacion-desembolso",
+		if (!data) {
+			return {
+				success: false,
+				error: "No hay datos para generar el contrato",
+			};
+		}
+
+		// Mapear el tipo de contrato del CRM al tipo de legal-docs-blueprints
+		const contractTypeMap: Record<string, string> = {
+			compraventa: "uso_carro_usado",
+			credito_prendario: "garantia_mobiliaria",
+			pagare: "pagare_unico_libre_protesto",
+			mandato_especial: "mandato_especial",
+			reconocimiento_deuda: "reconocimiento_deuda",
+			contrato_gps: "carta_aceptacion_gps",
+			contrato_seguro: "cobertura_inrexsa",
+			poder_especial: "poder_especial",
+			declaracion_jurada: "declaracion_de_vendedor",
+			acta_entrega: "descargo_responsabilidades",
+			contrato_fianza: "fianza",
+			carta_compromiso: "carta_carro_nuevo",
+			autorizacion_desembolso: "carta_emision_cheques",
 		};
 
-		const endpoint = endpointMap[contractType];
-		if (!endpoint) {
+		const apiContractType = contractTypeMap[contractType];
+		if (!apiContractType) {
 			return {
 				success: false,
 				error: `Tipo de contrato no soportado: ${contractType}`,
 			};
 		}
 
+		// Transformar datos del CRM al formato plano que espera el API
+		const flatData = transformToApiFormat(data, contractType);
+
 		// Extraer email del cliente para los links de firma
-		const clientEmail = data?.cliente?.email;
+		const clientEmail = data.cliente?.email;
 		const emails = clientEmail ? [clientEmail] : undefined;
 
 		// Determinar género para concordancia en documentos
 		const gender =
-			data?.cliente?.genero === "femenino" ? "female" : ("male" as const);
+			data.cliente?.genero === "femenino" ? "female" : ("male" as const);
 
-		// Preparar payload para la API (formato compatible con legal-docs-blueprints)
+		// Preparar payload para el endpoint /contracts/:type
+		// El endpoint extrae emails y gender del body, el resto va a data
 		const payload = {
-			// Datos del cliente
-			cliente: data?.cliente,
-			// Datos del vehículo
-			vehiculo: data?.vehiculo,
-			// Datos del crédito
-			credito: data?.credito,
-			// Datos del contrato
-			contrato: data?.contrato,
-			// Beneficiarios (si aplica)
-			beneficiarios: data?.beneficiarios,
-			// Emails para links de firma (Documenso)
+			...flatData,
 			emails,
-			// Opciones adicionales
-			options: {
-				gender,
-				generatePdf: true,
-			},
+			gender,
 		};
 
+		const endpoint = `/contracts/${apiContractType}`;
 		console.log(`[LegalDocs] Llamando a ${LEGAL_DOCS_API_URL}${endpoint}`);
+		console.log(`[LegalDocs] Payload keys: ${Object.keys(flatData).join(", ")}`);
 
 		const response = await fetch(`${LEGAL_DOCS_API_URL}${endpoint}`, {
 			method: "POST",
@@ -424,8 +424,8 @@ async function callLegalDocsApi(
 		return {
 			success: true,
 			templateId: result.templateId,
-			signingLinks: result.signingLinks || [],
-			pdfUrl: result.pdfUrl,
+			signingLinks: result.signing_links || result.signingLinks || [],
+			pdfUrl: result.pdf_url || result.pdfUrl,
 			rawResponse: result,
 		};
 	} catch (error) {

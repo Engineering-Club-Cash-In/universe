@@ -13,10 +13,6 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import {
-	updateChecklistForClientDocument,
-	updateChecklistForVehicleDocument,
-} from "../lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -44,6 +40,10 @@ import {
 	VEHICLE_DOCUMENT_TYPES,
 } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import {
+	updateChecklistForClientDocument,
+	updateChecklistForVehicleDocument,
+} from "../lib/checklist";
 import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
@@ -683,7 +683,6 @@ export const crmRouter = {
 				.object({
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
-					limit: z.number().min(1).max(100).default(50),
 					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
 					opportunityId: z.string().uuid().optional(),
 				})
@@ -692,7 +691,6 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
 			const searchTerm = input?.search;
-			const limit = input?.limit ?? 50;
 
 			const selectFields = {
 				id: opportunities.id,
@@ -823,13 +821,10 @@ export const crmRouter = {
 			if (conditions.length > 0) {
 				return await baseQuery
 					.where(and(...conditions))
-					.orderBy(desc(opportunities.createdAt))
-					.limit(limit);
+					.orderBy(desc(opportunities.createdAt));
 			}
 
-			return await baseQuery
-				.orderBy(desc(opportunities.createdAt))
-				.limit(limit);
+			return await baseQuery.orderBy(desc(opportunities.createdAt));
 		}),
 
 	createOpportunity: crmProcedure
@@ -4230,14 +4225,22 @@ export const crmRouter = {
 					? vehiclesMap.get(opp.vehicleId) || null
 					: null;
 
-				// Check if has investor assigned
-				let hasInvestor = false;
+				// Parse existing investors
+				let existingInvestors: Array<{
+					inversionista_id: number;
+					nombre: string;
+					porcentaje_participacion: number;
+					monto_aportado: number;
+					porcentaje_cash_in?: number;
+				}> = [];
 				if (opp.inversionistas) {
 					try {
 						const parsed = JSON.parse(opp.inversionistas);
-						hasInvestor = Array.isArray(parsed) && parsed.length > 0;
+						if (Array.isArray(parsed)) {
+							existingInvestors = parsed;
+						}
 					} catch {
-						hasInvestor = false;
+						existingInvestors = [];
 					}
 				}
 
@@ -4245,7 +4248,8 @@ export const crmRouter = {
 					id: opp.id,
 					title: opp.title,
 					value: opp.value,
-					hasInvestor,
+					hasInvestor: existingInvestors.length > 0,
+					existingInvestors,
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&

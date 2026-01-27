@@ -66,10 +66,21 @@ type CreditCategory =
 	| "Hipotecario"
 	| "Vehículo";
 
+// Type for existing investor from DB
+type ExistingInvestor = {
+	inversionista_id: number;
+	nombre: string;
+	porcentaje_participacion: number;
+	monto_aportado: number;
+	porcentaje_cash_in?: number;
+};
+
 // Type for opportunity from getOpportunitiesForInvestment
 type InvestmentOpportunity = Awaited<
 	ReturnType<typeof client.getOpportunitiesForInvestment>
->["data"][number];
+>["data"][number] & {
+	existingInvestors?: ExistingInvestor[];
+};
 
 export function InvestmentAssignmentSection() {
 	const queryClient = useQueryClient();
@@ -147,7 +158,8 @@ export function InvestmentAssignmentSection() {
 			}),
 	});
 
-	const opportunities = opportunitiesData?.data ?? [];
+	const opportunities = (opportunitiesData?.data ??
+		[]) as InvestmentOpportunity[];
 	const total = opportunitiesData?.total ?? 0;
 	const totalPages = Math.ceil(total / pageSize);
 
@@ -753,10 +765,55 @@ export function InvestmentAssignmentSection() {
 
 							<Separator />
 
-							{/* Investors section */}
+							{/* Existing Investors section */}
+							{selectedOpportunity?.existingInvestors &&
+								selectedOpportunity.existingInvestors.length > 0 && (
+									<div className="space-y-2">
+										<Label className="font-medium text-sm">
+											Inversionistas Asignados
+										</Label>
+										<div className="space-y-2">
+											{selectedOpportunity.existingInvestors.map(
+												(inv: ExistingInvestor, index: number) => (
+													<div
+														key={index}
+														className="rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-800 dark:bg-green-950"
+													>
+														<div className="flex items-center justify-between">
+															<div>
+																<p className="font-medium text-sm">
+																	{inv.nombre}
+																</p>
+																<p className="text-muted-foreground text-xs">
+																	Monto: Q{" "}
+																	{inv.monto_aportado?.toLocaleString("es-GT", {
+																		minimumFractionDigits: 2,
+																	})}{" "}
+																	| Participación:{" "}
+																	{inv.porcentaje_participacion}%
+																	{inv.porcentaje_cash_in !== undefined &&
+																		` | Cash-in: ${inv.porcentaje_cash_in}%`}
+																</p>
+															</div>
+															<Badge variant="default" className="bg-green-600">
+																Asignado
+															</Badge>
+														</div>
+													</div>
+												),
+											)}
+										</div>
+									</div>
+								)}
+
+							{/* New Investors section */}
 							<div className="space-y-2">
 								<div className="flex items-center justify-between">
-									<Label className="font-medium text-sm">Inversionistas</Label>
+									<Label className="font-medium text-sm">
+										{selectedOpportunity?.existingInvestors?.length
+											? "Agregar más inversionistas"
+											: "Inversionistas"}
+									</Label>
 									<Button
 										type="button"
 										variant="outline"
@@ -770,8 +827,9 @@ export function InvestmentAssignmentSection() {
 
 								{selectedInversionistas.length === 0 ? (
 									<div className="rounded-lg border bg-muted/30 p-4 text-center text-muted-foreground text-sm">
-										No hay inversionistas asignados. Haga clic en "Agregar" para
-										agregar uno.
+										{selectedOpportunity?.existingInvestors?.length
+											? 'Haga clic en "Agregar" para agregar más inversionistas.'
+											: 'No hay inversionistas asignados. Haga clic en "Agregar" para agregar uno.'}
 									</div>
 								) : (
 									<div className="space-y-3">

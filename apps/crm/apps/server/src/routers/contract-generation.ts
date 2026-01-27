@@ -16,7 +16,10 @@ import {
 	transformToApiFormat,
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
-import { getDocumentsByDpi, getDocumentTypes } from "../services/legal-docs-api";
+import {
+	getDocumentsByDpi,
+	getDocumentTypes,
+} from "../services/legal-docs-api";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =

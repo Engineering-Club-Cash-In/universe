@@ -219,7 +219,10 @@ export function OpportunityDocumentUpload({
 			];
 			Promise.all(
 				types.map((type) =>
-					uploadMutation.mutateAsync({ file: selectedFile, documentType: type }),
+					uploadMutation.mutateAsync({
+						file: selectedFile,
+						documentType: type,
+					}),
 				),
 			).then(() => {
 				setIncludeAll3Months(false);
@@ -265,9 +268,11 @@ export function OpportunityDocumentUpload({
 						</div>
 					</div>
 
-					{["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
-						documentType,
-					) && (
+					{[
+						"estados_cuenta_1",
+						"estados_cuenta_2",
+						"estados_cuenta_3",
+					].includes(documentType) && (
 						<div className="flex items-center gap-2">
 							<Checkbox
 								id="include-all-months"

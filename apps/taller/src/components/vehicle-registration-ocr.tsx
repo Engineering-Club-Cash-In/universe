@@ -305,6 +305,9 @@ export default function VehicleRegistrationOCR({
                   {result.ocrData.vin && (
                     <div><strong>VIN:</strong> {result.ocrData.vin}</div>
                   )}
+                  {result.ocrData.motor && (
+                    <div><strong>No. Motor:</strong> {result.ocrData.motor}</div>
+                  )}
                 </div>
               </div>
             )}

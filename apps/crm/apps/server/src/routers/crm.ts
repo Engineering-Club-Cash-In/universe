@@ -16,7 +16,7 @@ import { z } from "zod";
 import {
 	updateChecklistForClientDocument,
 	updateChecklistForVehicleDocument,
-} from "@/lib/checklist";
+} from "../lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -62,7 +62,6 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import { closeOpportunity } from "../services/close-opportunity";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)

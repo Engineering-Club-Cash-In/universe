@@ -16,19 +16,7 @@ import {
 	transformToApiFormat,
 	validateOpportunityForContracts,
 } from "../services/contract-data-mapper";
-import {
-	type Document,
-	type DocumentType,
-	type Field,
-	generateContract as generateContractApi,
-	getDocumentsByDpi,
-	getDocumentTypes,
-	type RenapData,
-} from "../services/legal-docs-api";
-
-// URL de la API de documentos legales (tipos y campos por DPI)
-const LEGAL_API_URL =
-	process.env.LEGAL_API_URL || "https://api.devteamatcci.site";
+import { getDocumentsByDpi, getDocumentTypes } from "../services/legal-docs-api";
 
 // URL de la API de generación de contratos (legal-docs-blueprints)
 const LEGAL_DOCS_API_URL =

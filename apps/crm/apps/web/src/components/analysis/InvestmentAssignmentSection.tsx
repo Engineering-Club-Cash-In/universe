@@ -197,14 +197,14 @@ export function InvestmentAssignmentSection() {
 			diaPagoMensual,
 		}: {
 			opportunityId: string;
-			inversionistas: string;
+			inversionistas?: string;
 			categoria: CreditCategory;
 			nit: string;
 			diaPagoMensual: number;
 		}) => {
 			return client.assignInvestorAndAdvance({
 				opportunityId,
-				inversionistas,
+				...(inversionistas && { inversionistas }),
 				// @ts-expect-error
 				categoria: categoria,
 				nit: nit,
@@ -303,7 +303,10 @@ export function InvestmentAssignmentSection() {
 
 		assignMutation.mutate({
 			opportunityId: selectedOpportunityId,
-			inversionistas: JSON.stringify(selectedInversionistas),
+			// Solo enviar inversionistas si hay nuevos seleccionados
+			...(selectedInversionistas.length > 0 && {
+				inversionistas: JSON.stringify(selectedInversionistas),
+			}),
 			categoria: categoriaAutomatica,
 			nit: editNit,
 			diaPagoMensual: editDiaPagoMensual,

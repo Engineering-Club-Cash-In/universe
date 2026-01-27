@@ -311,12 +311,16 @@ export function InvestmentAssignmentSection() {
 	};
 
 	// Check if can assign
-	const canAssign =
-		selectedOpportunity &&
+	const hasExistingInvestors =
+		(selectedOpportunity?.existingInvestors?.length ?? 0) > 0;
+	const hasNewInvestors =
 		selectedInversionistas.length > 0 &&
 		selectedInversionistas.every(
 			(inv) => inv.inversionista_id > 0 && inv.monto_aportado > 0,
-		) &&
+		);
+	const canAssign =
+		selectedOpportunity &&
+		(hasExistingInvestors || hasNewInvestors) &&
 		selectedOpportunity.lead?.hasRequiredData &&
 		selectedOpportunity.vehicle?.hasRequiredData &&
 		selectedOpportunity.hasCreditData;
@@ -326,9 +330,12 @@ export function InvestmentAssignmentSection() {
 		const reasons: string[] = [];
 		if (!selectedOpportunity) return reasons;
 
-		if (selectedInversionistas.length === 0) {
+		const hasExisting =
+			(selectedOpportunity?.existingInvestors?.length ?? 0) > 0;
+
+		if (selectedInversionistas.length === 0 && !hasExisting) {
 			reasons.push("Debe agregar al menos un inversionista");
-		} else {
+		} else if (selectedInversionistas.length > 0) {
 			const invalidInvestors = selectedInversionistas.filter(
 				(inv) => !inv.inversionista_id || inv.monto_aportado <= 0,
 			);

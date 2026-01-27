@@ -25,9 +25,6 @@ export interface InspectionData {
   inspectionDate: Date;
   inspectionResult: string;
   vehicleRating: 'Comercial' | 'No comercial';
-  marketValue: string;
-  suggestedCommercialValue: string;
-  bankValue: string;
   currentConditionValue: string;
   vehicleEquipment: string;
   importantConsiderations?: string;
@@ -37,6 +34,7 @@ export interface InspectionData {
   missingAirbag?: string;
   testDrive: boolean;
   noTestDriveReason?: string;
+  sectionTimes?: Record<string, number>;
 }
 
 export interface ChecklistItem {
@@ -85,7 +83,7 @@ export const createFullInspection = async (
 };
 
 // Helper function to convert form data to API format
-export const prepareInspectionData = (formData: any) => {
+export const prepareInspectionData = (formData: any, sectionTimes?: Record<string, number>) => {
   const vehicleData: VehicleData = {
     make: formData.vehicleMake,
     model: formData.vehicleModel,
@@ -109,9 +107,6 @@ export const prepareInspectionData = (formData: any) => {
     inspectionDate: formData.inspectionDate,
     inspectionResult: formData.inspectionResult,
     vehicleRating: formData.vehicleRating,
-    marketValue: formData.marketValue,
-    suggestedCommercialValue: formData.suggestedCommercialValue,
-    bankValue: formData.bankValue,
     currentConditionValue: formData.currentConditionValue,
     vehicleEquipment: formData.vehicleEquipment,
     importantConsiderations: formData.importantConsiderations,
@@ -121,6 +116,7 @@ export const prepareInspectionData = (formData: any) => {
     missingAirbag: formData.missingAirbag,
     testDrive: formData.testDrive === 'Sí',
     noTestDriveReason: formData.noTestDriveReason,
+    sectionTimes: sectionTimes || {},
   };
 
   return { vehicleData, inspectionData };

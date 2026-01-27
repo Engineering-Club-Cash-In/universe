@@ -1,7 +1,6 @@
 import { ORPCError } from "@orpc/server";
 import { and, count, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
-import { closeOpportunity } from "@/services/close-opportunity";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import {
@@ -24,6 +23,7 @@ import {
 	uploadFileToR2,
 	validateFile,
 } from "../lib/storage";
+import { closeOpportunity } from "../services/close-opportunity";
 import { checkDocumensoSigningStatus } from "../services/documenso-signing";
 
 export const legalContractsRouter = {

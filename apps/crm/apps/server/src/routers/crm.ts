@@ -13,10 +13,6 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import {
-	updateChecklistForClientDocument,
-	updateChecklistForVehicleDocument,
-} from "@/lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -45,6 +41,10 @@ import {
 } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import {
+	updateChecklistForClientDocument,
+	updateChecklistForVehicleDocument,
+} from "../lib/checklist";
+import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
@@ -62,7 +62,6 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import { closeOpportunity } from "../services/close-opportunity";
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -684,7 +683,6 @@ export const crmRouter = {
 				.object({
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
-					limit: z.number().min(1).max(100).default(50),
 					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
 					opportunityId: z.string().uuid().optional(),
 				})
@@ -693,7 +691,6 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
 			const searchTerm = input?.search;
-			const limit = input?.limit ?? 50;
 
 			const selectFields = {
 				id: opportunities.id,
@@ -824,13 +821,10 @@ export const crmRouter = {
 			if (conditions.length > 0) {
 				return await baseQuery
 					.where(and(...conditions))
-					.orderBy(desc(opportunities.createdAt))
-					.limit(limit);
+					.orderBy(desc(opportunities.createdAt));
 			}
 
-			return await baseQuery
-				.orderBy(desc(opportunities.createdAt))
-				.limit(limit);
+			return await baseQuery.orderBy(desc(opportunities.createdAt));
 		}),
 
 	createOpportunity: crmProcedure
@@ -4231,14 +4225,22 @@ export const crmRouter = {
 					? vehiclesMap.get(opp.vehicleId) || null
 					: null;
 
-				// Check if has investor assigned
-				let hasInvestor = false;
+				// Parse existing investors
+				let existingInvestors: Array<{
+					inversionista_id: number;
+					nombre: string;
+					porcentaje_participacion: number;
+					monto_aportado: number;
+					porcentaje_cash_in?: number;
+				}> = [];
 				if (opp.inversionistas) {
 					try {
 						const parsed = JSON.parse(opp.inversionistas);
-						hasInvestor = Array.isArray(parsed) && parsed.length > 0;
+						if (Array.isArray(parsed)) {
+							existingInvestors = parsed;
+						}
 					} catch {
-						hasInvestor = false;
+						existingInvestors = [];
 					}
 				}
 
@@ -4246,7 +4248,8 @@ export const crmRouter = {
 					id: opp.id,
 					title: opp.title,
 					value: opp.value,
-					hasInvestor,
+					hasInvestor: existingInvestors.length > 0,
+					existingInvestors,
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&
@@ -4320,7 +4323,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				inversionistas: z.string(), // JSON string with investors array
+				inversionistas: z.string().optional(), // JSON string with NEW investors array (optional if already has investors)
 				categoria: z.enum([
 					"Contraseña",
 					"CV Vehículo",
@@ -4360,31 +4363,65 @@ export const crmRouter = {
 				});
 			}
 
-			// Parse and validate investors
-			let parsedInversionistas: Array<{
+			// Parse existing investors from DB
+			let existingInvestors: Array<{
 				inversionista_id: number;
 				nombre: string;
 				monto_aportado?: number;
 				porcentaje_participacion?: number;
-			}>;
+			}> = [];
+			if (opportunity.inversionistas) {
+				try {
+					const parsed = JSON.parse(opportunity.inversionistas);
+					if (Array.isArray(parsed)) {
+						existingInvestors = parsed;
+					}
+				} catch {
+					// Invalid JSON, treat as no existing investors
+				}
+			}
 
-			try {
-				parsedInversionistas = JSON.parse(input.inversionistas);
-				if (
-					!Array.isArray(parsedInversionistas) ||
-					parsedInversionistas.length === 0
-				) {
-					throw new Error("Invalid investors array");
+			// Parse and validate new investors (if provided)
+			let newInversionistas: Array<{
+				inversionista_id: number;
+				nombre: string;
+				monto_aportado?: number;
+				porcentaje_participacion?: number;
+			}> = [];
+
+			if (input.inversionistas) {
+				try {
+					newInversionistas = JSON.parse(input.inversionistas);
+					if (!Array.isArray(newInversionistas)) {
+						throw new Error("Invalid investors array");
+					}
+					if (newInversionistas.length > 20) {
+						throw new Error("Too many investors");
+					}
+				} catch (e) {
+					const message =
+						e instanceof Error && e.message === "Too many investors"
+							? "No se pueden asignar más de 20 inversionistas por oportunidad"
+							: "Formato de inversionistas inválido";
+					throw new ORPCError("BAD_REQUEST", { message });
 				}
-				if (parsedInversionistas.length > 20) {
-					throw new Error("Too many investors");
-				}
-			} catch (e) {
-				const message =
-					e instanceof Error && e.message === "Too many investors"
-						? "No se pueden asignar más de 20 inversionistas por oportunidad"
-						: "Debe seleccionar al menos un inversionista";
-				throw new ORPCError("BAD_REQUEST", { message });
+			}
+
+			// Combine existing + new investors
+			const allInvestors = [...existingInvestors, ...newInversionistas];
+
+			// Validate we have at least one investor (existing or new)
+			if (allInvestors.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe haber al menos un inversionista asignado",
+				});
+			}
+
+			if (allInvestors.length > 20) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se pueden tener más de 20 inversionistas por oportunidad",
+				});
 			}
 
 			// Validate minimum data for contracts
@@ -4479,11 +4516,11 @@ export const crmRouter = {
 
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {
-				// Update opportunity with investors and move to 80%
+				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)
 					.set({
-						inversionistas: input.inversionistas,
+						inversionistas: JSON.stringify(allInvestors),
 						stageId: stage80.id,
 						categoria: input.categoria,
 						nit: input.nit,

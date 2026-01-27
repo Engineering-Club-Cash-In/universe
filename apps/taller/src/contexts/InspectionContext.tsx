@@ -3,6 +3,10 @@ import type { ChecklistItem, PhotoData } from '../services/vehicles';
 
 const STORAGE_KEY = 'taller-inspection-draft';
 
+export interface SectionTimes {
+  [sectionId: string]: number; // tiempo en segundos
+}
+
 interface InspectionContextType {
   formData: any;
   setFormData: (data: any) => void;
@@ -10,6 +14,8 @@ interface InspectionContextType {
   setChecklistItems: (items: ChecklistItem[]) => void;
   photos: PhotoData[];
   setPhotos: (photos: PhotoData[]) => void;
+  sectionTimes: SectionTimes;
+  setSectionTimes: (times: SectionTimes | ((prev: SectionTimes) => SectionTimes)) => void;
   currentStep: number;
   setCurrentStep: (step: number) => void;
   resetInspection: () => void;
@@ -19,6 +25,7 @@ interface StoredData {
   formData: any;
   checklistItems: ChecklistItem[];
   photos: PhotoData[];
+  sectionTimes: SectionTimes;
   currentStep: number;
   savedAt: string;
 }
@@ -28,6 +35,7 @@ const serializeForStorage = (
   formData: any,
   checklistItems: ChecklistItem[],
   photos: PhotoData[],
+  sectionTimes: SectionTimes,
   currentStep: number
 ): StoredData => {
   return {
@@ -46,6 +54,7 @@ const serializeForStorage = (
       valuatorComment: p.valuatorComment,
       noCommentsChecked: p.noCommentsChecked,
     })),
+    sectionTimes,
     currentStep,
     savedAt: new Date().toISOString(),
   };
@@ -62,6 +71,7 @@ const deserializeFromStorage = (stored: StoredData) => {
     },
     checklistItems: stored.checklistItems || [],
     photos: stored.photos || [],
+    sectionTimes: stored.sectionTimes || {},
     currentStep: stored.currentStep || 0,
   };
 };
@@ -77,7 +87,7 @@ const loadSavedData = () => {
   } catch (e) {
     console.error('Error loading saved inspection:', e);
   }
-  return { formData: {}, checklistItems: [], photos: [], currentStep: 0 };
+  return { formData: {}, checklistItems: [], photos: [], sectionTimes: {}, currentStep: 0 };
 };
 
 const InspectionContext = createContext<InspectionContextType | undefined>(undefined);
@@ -89,22 +99,24 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [formData, setFormData] = useState<any>(initialData.formData);
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>(initialData.checklistItems);
   const [photos, setPhotos] = useState<PhotoData[]>(initialData.photos);
+  const [sectionTimes, setSectionTimes] = useState<SectionTimes>(initialData.sectionTimes);
   const [currentStep, setCurrentStep] = useState<number>(initialData.currentStep);
 
   // Guardar automáticamente cuando cambian los datos
   useEffect(() => {
-    const dataToSave = serializeForStorage(formData, checklistItems, photos, currentStep);
+    const dataToSave = serializeForStorage(formData, checklistItems, photos, sectionTimes, currentStep);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
     } catch (e) {
       console.error('Error saving inspection draft:', e);
     }
-  }, [formData, checklistItems, photos, currentStep]);
+  }, [formData, checklistItems, photos, sectionTimes, currentStep]);
 
   const resetInspection = () => {
     setFormData({});
     setChecklistItems([]);
     setPhotos([]);
+    setSectionTimes({});
     setCurrentStep(0);
     localStorage.removeItem(STORAGE_KEY);
   };
@@ -118,6 +130,8 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setChecklistItems,
         photos,
         setPhotos,
+        sectionTimes,
+        setSectionTimes,
         currentStep,
         setCurrentStep,
         resetInspection,

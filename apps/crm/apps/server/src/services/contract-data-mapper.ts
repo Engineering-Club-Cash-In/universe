@@ -18,8 +18,6 @@ import {
 	formatNationality,
 	getDateComponents,
 	getGenderLetter,
-	getYearPartial,
-	getYearTwoDigits,
 	mapGender,
 	mapMaritalStatus,
 	numberToWords,
@@ -633,7 +631,7 @@ export function getContractTypes() {
  */
 export function transformToApiFormat(
 	data: ContractData,
-	contractType: string,
+	_contractType: string,
 ): Record<string, unknown> {
 	// Campos base comunes a todos los contratos
 	const baseFields: Record<string, unknown> = {

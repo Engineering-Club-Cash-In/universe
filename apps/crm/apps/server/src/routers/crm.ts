@@ -13,10 +13,6 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import {
-	updateChecklistForClientDocument,
-	updateChecklistForVehicleDocument,
-} from "@/lib/checklist";
 import { db } from "../db";
 import {
 	vehicleDocumentRequirements,
@@ -45,6 +41,10 @@ import {
 } from "../db/schema/documents";
 import { generatedLegalContracts } from "../db/schema/legal-contracts";
 import {
+	updateChecklistForClientDocument,
+	updateChecklistForVehicleDocument,
+} from "../lib/checklist";
+import {
 	formatMissingLeadFields,
 	getMissingLeadFieldsForContracts,
 } from "../lib/lead-helpers";
@@ -62,7 +62,53 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
-import { closeOpportunity } from "../services/close-opportunity";
+
+/**
+ * Helper function to check vehicle inspection status.
+ * Reduces code duplication across the codebase.
+ *
+ * @param vehicleId - The ID of the vehicle to check
+ * @returns Object with inspection status details
+ */
+async function getVehicleInspectionStatus(vehicleId: string) {
+	// Get vehicle info and check if it's new
+	const [vehicle] = await db
+		.select({ isNew: vehicles.isNew })
+		.from(vehicles)
+		.where(eq(vehicles.id, vehicleId))
+		.limit(1);
+
+	const isNew = vehicle?.isNew ?? false;
+
+	// New vehicles don't require inspection
+	if (isNew) {
+		return {
+			isNew: true,
+			isInspected: true,
+			inspectionId: null,
+			inspectionStatus: "not_required" as const,
+		};
+	}
+
+	// Check for approved inspection
+	const [inspection] = await db
+		.select({ id: vehicleInspections.id, status: vehicleInspections.status })
+		.from(vehicleInspections)
+		.where(
+			and(
+				eq(vehicleInspections.vehicleId, vehicleId),
+				eq(vehicleInspections.status, "approved"),
+			),
+		)
+		.limit(1);
+
+	return {
+		isNew: false,
+		isInspected: !!inspection,
+		inspectionId: inspection?.id ?? null,
+		inspectionStatus: inspection?.status ?? "pending",
+	};
+}
 
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
@@ -684,7 +730,6 @@ export const crmRouter = {
 				.object({
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
-					limit: z.number().min(1).max(100).default(50),
 					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
 					opportunityId: z.string().uuid().optional(),
 				})
@@ -693,7 +738,6 @@ export const crmRouter = {
 		.handler(async ({ input, context }) => {
 			const leadIdFilter = input?.leadId;
 			const searchTerm = input?.search;
-			const limit = input?.limit ?? 50;
 
 			const selectFields = {
 				id: opportunities.id,
@@ -824,13 +868,10 @@ export const crmRouter = {
 			if (conditions.length > 0) {
 				return await baseQuery
 					.where(and(...conditions))
-					.orderBy(desc(opportunities.createdAt))
-					.limit(limit);
+					.orderBy(desc(opportunities.createdAt));
 			}
 
-			return await baseQuery
-				.orderBy(desc(opportunities.createdAt))
-				.limit(limit);
+			return await baseQuery.orderBy(desc(opportunities.createdAt));
 		}),
 
 	createOpportunity: crmProcedure
@@ -2771,36 +2812,12 @@ export const crmRouter = {
 				let inspectionStatus = "pending";
 				let isNewVehicle = false;
 				if (opp.vehicleId) {
-					// Obtener info del vehículo para verificar si es nuevo
-					const [vehicleData] = await db
-						.select({ isNew: vehicles.isNew })
-						.from(vehicles)
-						.where(eq(vehicles.id, opp.vehicleId))
-						.limit(1);
-
-					isNewVehicle = vehicleData?.isNew ?? false;
-
-					// Vehículos nuevos no requieren inspección
-					if (isNewVehicle) {
-						vehicleInspected = true;
-						inspectionStatus = "not_required";
-					} else {
-						const inspection = await db
-							.select()
-							.from(vehicleInspections)
-							.where(
-								and(
-									eq(vehicleInspections.vehicleId, opp.vehicleId),
-									eq(vehicleInspections.status, "approved"),
-								),
-							)
-							.limit(1);
-
-						vehicleInspected = inspection.length > 0;
-						if (inspection.length > 0) {
-							inspectionStatus = inspection[0].status;
-						}
-					}
+					const inspectionResult = await getVehicleInspectionStatus(
+						opp.vehicleId,
+					);
+					vehicleInspected = inspectionResult.isInspected;
+					inspectionStatus = inspectionResult.inspectionStatus;
+					isNewVehicle = inspectionResult.isNew;
 				}
 
 				// 3. Obtener documentos requeridos según tipo de cliente y crédito
@@ -3165,7 +3182,7 @@ export const crmRouter = {
 						// Vehicle documents subsection
 						documentos: {
 							completed:
-								requiredVehicleDocs.length > 0 &&
+								requiredVehicleDocs.length === 0 ||
 								requiredVehicleDocs.every((doc) =>
 									uploadedVehicleTypes.has(doc.documentType),
 								),
@@ -3338,28 +3355,10 @@ export const crmRouter = {
 
 			let vehicleInspected = false;
 			if (opportunity?.vehicleId) {
-				const [inspection] = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
-					.limit(1);
-				vehicleInspected = !!inspection;
-				if (!vehicleInspected) {
-					const [vehicle] = await db
-						.select()
-						.from(vehicles)
-						.where(eq(vehicles.id, opportunity.vehicleId))
-						.limit(1);
-
-					if (vehicle?.isNew) {
-						vehicleInspected = true;
-					}
-				}
+				const inspectionResult = await getVehicleInspectionStatus(
+					opportunity.vehicleId,
+				);
+				vehicleInspected = inspectionResult.isInspected;
 			}
 
 			// Recalculate vehicle section if exists
@@ -3489,7 +3488,7 @@ export const crmRouter = {
 					.filter((i: any) => i.required)
 					.every((i: any) => i.completed);
 
-			// Get opportunity and vehicle inspection status
+			// Get opportunity
 			const [opportunity] = await db
 				.select({ vehicleId: opportunities.vehicleId })
 				.from(opportunities)
@@ -3498,17 +3497,10 @@ export const crmRouter = {
 
 			let vehicleInspected = false;
 			if (opportunity?.vehicleId) {
-				const [inspection] = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
-					.limit(1);
-				vehicleInspected = !!inspection;
+				const inspectionResult = await getVehicleInspectionStatus(
+					opportunity.vehicleId,
+				);
+				vehicleInspected = inspectionResult.isInspected;
 			}
 
 			// Recalculate vehicle section completion
@@ -4231,14 +4223,22 @@ export const crmRouter = {
 					? vehiclesMap.get(opp.vehicleId) || null
 					: null;
 
-				// Check if has investor assigned
-				let hasInvestor = false;
+				// Parse existing investors
+				let existingInvestors: Array<{
+					inversionista_id: number;
+					nombre: string;
+					porcentaje_participacion: number;
+					monto_aportado: number;
+					porcentaje_cash_in?: number;
+				}> = [];
 				if (opp.inversionistas) {
 					try {
 						const parsed = JSON.parse(opp.inversionistas);
-						hasInvestor = Array.isArray(parsed) && parsed.length > 0;
+						if (Array.isArray(parsed)) {
+							existingInvestors = parsed;
+						}
 					} catch {
-						hasInvestor = false;
+						existingInvestors = [];
 					}
 				}
 
@@ -4246,7 +4246,8 @@ export const crmRouter = {
 					id: opp.id,
 					title: opp.title,
 					value: opp.value,
-					hasInvestor,
+					hasInvestor: existingInvestors.length > 0,
+					existingInvestors,
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&
@@ -4320,7 +4321,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				inversionistas: z.string(), // JSON string with investors array
+				inversionistas: z.string().optional(), // JSON string with NEW investors array (optional if already has investors)
 				categoria: z.enum([
 					"Contraseña",
 					"CV Vehículo",
@@ -4360,31 +4361,65 @@ export const crmRouter = {
 				});
 			}
 
-			// Parse and validate investors
-			let parsedInversionistas: Array<{
+			// Parse existing investors from DB
+			let existingInvestors: Array<{
 				inversionista_id: number;
 				nombre: string;
 				monto_aportado?: number;
 				porcentaje_participacion?: number;
-			}>;
+			}> = [];
+			if (opportunity.inversionistas) {
+				try {
+					const parsed = JSON.parse(opportunity.inversionistas);
+					if (Array.isArray(parsed)) {
+						existingInvestors = parsed;
+					}
+				} catch {
+					// Invalid JSON, treat as no existing investors
+				}
+			}
 
-			try {
-				parsedInversionistas = JSON.parse(input.inversionistas);
-				if (
-					!Array.isArray(parsedInversionistas) ||
-					parsedInversionistas.length === 0
-				) {
-					throw new Error("Invalid investors array");
+			// Parse and validate new investors (if provided)
+			let newInversionistas: Array<{
+				inversionista_id: number;
+				nombre: string;
+				monto_aportado?: number;
+				porcentaje_participacion?: number;
+			}> = [];
+
+			if (input.inversionistas) {
+				try {
+					newInversionistas = JSON.parse(input.inversionistas);
+					if (!Array.isArray(newInversionistas)) {
+						throw new Error("Invalid investors array");
+					}
+					if (newInversionistas.length > 20) {
+						throw new Error("Too many investors");
+					}
+				} catch (e) {
+					const message =
+						e instanceof Error && e.message === "Too many investors"
+							? "No se pueden asignar más de 20 inversionistas por oportunidad"
+							: "Formato de inversionistas inválido";
+					throw new ORPCError("BAD_REQUEST", { message });
 				}
-				if (parsedInversionistas.length > 20) {
-					throw new Error("Too many investors");
-				}
-			} catch (e) {
-				const message =
-					e instanceof Error && e.message === "Too many investors"
-						? "No se pueden asignar más de 20 inversionistas por oportunidad"
-						: "Debe seleccionar al menos un inversionista";
-				throw new ORPCError("BAD_REQUEST", { message });
+			}
+
+			// Combine existing + new investors
+			const allInvestors = [...existingInvestors, ...newInversionistas];
+
+			// Validate we have at least one investor (existing or new)
+			if (allInvestors.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe haber al menos un inversionista asignado",
+				});
+			}
+
+			if (allInvestors.length > 20) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se pueden tener más de 20 inversionistas por oportunidad",
+				});
 			}
 
 			// Validate minimum data for contracts
@@ -4479,11 +4514,11 @@ export const crmRouter = {
 
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {
-				// Update opportunity with investors and move to 80%
+				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)
 					.set({
-						inversionistas: input.inversionistas,
+						inversionistas: JSON.stringify(allInvestors),
 						stageId: stage80.id,
 						categoria: input.categoria,
 						nit: input.nit,

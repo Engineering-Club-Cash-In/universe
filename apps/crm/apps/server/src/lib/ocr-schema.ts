@@ -84,6 +84,7 @@ export function mapOCRToVehicleForm(ocrData: VehicleRegistrationOCR) {
 		vehicleYear: ocrData.model || "", // Año (ej: 2017, 2023)
 		licensePlate: ocrData.licensePlate || "",
 		vinNumber: ocrData.vin || ocrData.chassis || ocrData.series || "",
+		motorNumber: ocrData.motor || "", // Número de motor
 		color: ocrData.color || "",
 		cylinders: ocrData.cylinders || "",
 		engineCC: ocrData.cc || "",

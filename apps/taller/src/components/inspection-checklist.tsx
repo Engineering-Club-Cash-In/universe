@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   AlertTriangle,
   CheckCircle,
@@ -14,7 +14,7 @@ import {
   Sparkles,
   FileText,
 } from "lucide-react";
-import { useInspection } from "../contexts/InspectionContext";
+import { useInspection, type SectionTimes } from "../contexts/InspectionContext";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
@@ -395,19 +395,58 @@ interface InspectionChecklistProps {
   isWizardMode?: boolean;
 }
 
-export default function InspectionChecklist({ 
-  onComplete, 
-  isWizardMode = false 
+export default function InspectionChecklist({
+  onComplete,
+  isWizardMode = false
 }: InspectionChecklistProps) {
-  const { setChecklistItems } = useInspection();
+  const { setChecklistItems, setSectionTimes } = useInspection();
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({});
   const [expandedCategories, setExpandedCategories] = useState<
     Record<string, boolean>
   >({});
   const [showOnlyCritical, setShowOnlyCritical] = useState(false);
-  
+
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
+
+  // Track start times for open categories
+  const categoryStartTimes = useRef<Record<string, number>>({});
+
+  // Save accumulated time for a category
+  const saveTimeForCategory = useCallback((categoryId: string) => {
+    const startTime = categoryStartTimes.current[categoryId];
+    if (startTime) {
+      const elapsedSeconds = Math.round((Date.now() - startTime) / 1000);
+      if (elapsedSeconds > 0) {
+        setSectionTimes((prev: SectionTimes) => ({
+          ...prev,
+          [categoryId]: (prev[categoryId] || 0) + elapsedSeconds,
+        }));
+      }
+      delete categoryStartTimes.current[categoryId];
+    }
+  }, [setSectionTimes]);
+
+  // Initialize start times for categories that start expanded (default behavior)
+  useEffect(() => {
+    const now = Date.now();
+    inspectionCategories.forEach((cat) => {
+      // Categories default to expanded (expandedCategories[cat.id] ?? true)
+      // If not explicitly collapsed, start tracking time
+      if (expandedCategories[cat.id] === undefined || expandedCategories[cat.id]) {
+        if (!categoryStartTimes.current[cat.id]) {
+          categoryStartTimes.current[cat.id] = now;
+        }
+      }
+    });
+  }, []); // Only run on mount
+
+  // Save times for all open categories on unmount
+  useEffect(() => {
+    return () => {
+      Object.keys(categoryStartTimes.current).forEach(saveTimeForCategory);
+    };
+  }, [saveTimeForCategory]);
 
   // Toggle item check
   const toggleItem = (itemId: string) => {
@@ -450,10 +489,23 @@ export default function InspectionChecklist({
 
   // Toggle category expansion
   const toggleCategory = (categoryId: string) => {
-    setExpandedCategories((prev) => ({
-      ...prev,
-      [categoryId]: !prev[categoryId],
-    }));
+    setExpandedCategories((prev) => {
+      const wasExpanded = prev[categoryId];
+      const willExpand = !wasExpanded;
+
+      if (willExpand) {
+        // Starting to view this category - record start time
+        categoryStartTimes.current[categoryId] = Date.now();
+      } else {
+        // Closing this category - save accumulated time
+        saveTimeForCategory(categoryId);
+      }
+
+      return {
+        ...prev,
+        [categoryId]: willExpand,
+      };
+    });
   };
 
   // Calculate statistics
@@ -483,13 +535,24 @@ export default function InspectionChecklist({
   // Expand all / Collapse all
   const expandAll = () => {
     const expanded: Record<string, boolean> = {};
+    const now = Date.now();
     inspectionCategories.forEach((cat) => {
       expanded[cat.id] = true;
+      // Start tracking time for newly expanded categories
+      if (!expandedCategories[cat.id]) {
+        categoryStartTimes.current[cat.id] = now;
+      }
     });
     setExpandedCategories(expanded);
   };
 
   const collapseAll = () => {
+    // Save times for all currently expanded categories
+    Object.keys(expandedCategories).forEach((categoryId) => {
+      if (expandedCategories[categoryId]) {
+        saveTimeForCategory(categoryId);
+      }
+    });
     setExpandedCategories({});
   };
   

@@ -101,9 +101,24 @@ const inspectionSteps = [
           "Tomada desde arriba para verificar techo solar, abolladuras o problemas de pintura.",
       },
       {
-        id: "undercarriage",
-        title: "Parte Inferior",
-        description: "Toma de ángulo inferior mostrando la parte inferior del vehículo.",
+        id: "undercarriage-front",
+        title: "Parte Inferior Delantera",
+        description: "Vista inferior del área del motor desde abajo.",
+      },
+      {
+        id: "undercarriage-right",
+        title: "Parte Inferior Lateral Derecha",
+        description: "Vista inferior del costado derecho del vehículo.",
+      },
+      {
+        id: "undercarriage-left",
+        title: "Parte Inferior Lateral Izquierda",
+        description: "Vista inferior del costado izquierdo del vehículo.",
+      },
+      {
+        id: "undercarriage-rear",
+        title: "Parte Inferior Trasera",
+        description: "Vista inferior del área del baúl o zona de carga.",
       },
     ],
   },
@@ -197,6 +212,11 @@ const inspectionSteps = [
         description: "Desde arriba con el capó abierto.",
       },
       {
+        id: "engine-bay-uncovered",
+        title: "Motor sin Tapaderas Plásticas",
+        description: "Compartimiento del motor con las cubiertas plásticas removidas para inspección detallada.",
+      },
+      {
         id: "battery",
         title: "Batería y Componentes Eléctricos",
         description: "Acercamiento del área de la batería.",
@@ -277,7 +297,7 @@ export default function VehiclePictures({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Restaurar fotos del contexto al montar (después de recarga)
+  // Restaurar fotos del contexto al montar (después de recarga o navegación)
   useEffect(() => {
     if (contextPhotos && contextPhotos.length > 0) {
       setPhotos((prev) => {
@@ -298,6 +318,42 @@ export default function VehiclePictures({
       });
     }
   }, []); // Solo al montar
+
+  // Sincronizar fotos al contexto cuando cambian (para preservar al navegar)
+  useEffect(() => {
+    const photoDataForContext: {
+      category: string;
+      photoType: string;
+      title: string;
+      description?: string;
+      url: string;
+      valuatorComment?: string;
+      noCommentsChecked?: boolean;
+    }[] = [];
+
+    for (const [stepId, stepPhotos] of Object.entries(photos)) {
+      const step = inspectionSteps.find(s => s.id === stepId);
+      for (const [photoId, photoData] of Object.entries(stepPhotos)) {
+        if (photoData && photoData.uploadStatus === 'uploaded' && photoData.serverUrl) {
+          const photo = step?.photos.find(p => p.id === photoId);
+          photoDataForContext.push({
+            category: stepId,
+            photoType: photoId,
+            title: photo?.title || '',
+            description: photo?.description,
+            url: photoData.serverUrl,
+            valuatorComment: photoData.valuatorComment,
+            noCommentsChecked: photoData.noCommentsChecked,
+          });
+        }
+      }
+    }
+
+    // Solo actualizar si hay fotos para guardar
+    if (photoDataForContext.length > 0) {
+      setContextPhotos(photoDataForContext);
+    }
+  }, [photos, setContextPhotos]);
 
   // Check if dev mode is enabled
   const isDevMode = import.meta.env.VITE_DEV_MODE === 'TRUE';
@@ -963,13 +1019,12 @@ export default function VehiclePictures({
                 >
                   <Camera className="h-10 w-10 text-muted-foreground mb-2" />
                   <p className="text-sm text-muted-foreground">
-                    Clic para subir o tomar una foto
+                    Clic para tomar o seleccionar una foto
                   </p>
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     className="hidden"
                     onChange={handleFileUpload}
                   />
@@ -1068,6 +1123,7 @@ export default function VehiclePictures({
                 if (currentPhotoData) {
                   goToNextPhoto();
                 } else {
+                  // Abre el selector de archivo por defecto
                   fileInputRef.current?.click();
                 }
               }}
@@ -1082,7 +1138,7 @@ export default function VehiclePictures({
               ) : (
                 <>
                   <Upload className="mr-2 h-4 w-4" />
-                  <span className="sm:inline">Subir</span>
+                  <span className="sm:inline">Agregar</span>
                 </>
               )}
             </Button>

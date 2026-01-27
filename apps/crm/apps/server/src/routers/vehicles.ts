@@ -27,7 +27,6 @@ import {
 	protectedProcedure,
 	publicProcedure,
 	tallerOrCrmProcedure,
-	tallerProcedure,
 } from "../lib/orpc";
 import {
 	deleteFileFromR2,
@@ -540,9 +539,9 @@ export const vehiclesRouter = {
 				inspectionDate: z.date(),
 				inspectionResult: z.string(),
 				vehicleRating: z.string(),
-				marketValue: z.string(),
-				suggestedCommercialValue: z.string(),
-				bankValue: z.string(),
+				marketValue: z.string().optional().default("0"),
+				suggestedCommercialValue: z.string().optional().default("0"),
+				bankValue: z.string().optional().default("0"),
 				currentConditionValue: z.string(),
 				vehicleEquipment: z.string(),
 				importantConsiderations: z.string().optional(),
@@ -759,9 +758,9 @@ export const vehiclesRouter = {
 					inspectionDate: z.date(),
 					inspectionResult: z.string(),
 					vehicleRating: z.enum(["Comercial", "No comercial"]),
-					marketValue: z.string(),
-					suggestedCommercialValue: z.string(),
-					bankValue: z.string(),
+					marketValue: z.string().optional().default("0"),
+					suggestedCommercialValue: z.string().optional().default("0"),
+					bankValue: z.string().optional().default("0"),
 					currentConditionValue: z.string(),
 					vehicleEquipment: z.string(),
 					importantConsiderations: z.string().optional(),
@@ -771,6 +770,7 @@ export const vehiclesRouter = {
 					missingAirbag: z.string().optional(),
 					testDrive: z.boolean(),
 					noTestDriveReason: z.string().optional(),
+					sectionTimes: z.record(z.string(), z.number()).optional().default({}),
 				}),
 				// Checklist items
 				checklistItems: z.array(
@@ -1109,8 +1109,13 @@ METODOLOGÍA DE VALORACIÓN:
 
 RANGOS DE VALORES TÍPICOS (Referencia):
 - Económicos: Q25,000 - Q80,000
-- Medianos: Q80,000 - Q200,000  
+- Medianos: Q80,000 - Q200,000
 - Premium: Q200,000 - Q500,000+
+
+CLASIFICACIÓN COMERCIAL:
+Debes clasificar el vehículo como "Comercial" o "No comercial" basándote en qué tan fácil es venderlo:
+- Comercial: Vehículos con alta demanda en Guatemala, marcas populares (Toyota, Mazda, Honda, Nissan, Kia, Hyundai, etc.), modelos comunes, pickups, sedanes y SUVs que se venden rápidamente.
+- No comercial: Vehículos de nicho, marcas poco conocidas en el mercado local, modelos muy específicos, deportivos de lujo, o vehículos que por sus características tardan más en encontrar comprador.
 
 Proporciona una valoración conservadora pero realista para el mercado guatemalteco.`,
 						},

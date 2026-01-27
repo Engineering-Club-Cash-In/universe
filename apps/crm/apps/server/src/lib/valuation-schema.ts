@@ -23,6 +23,14 @@ export const vehicleValuationSchema = z.object({
 		.array(z.string())
 		.optional()
 		.describe("Recomendaciones para mejorar el valor"),
+	commercialClassification: z
+		.enum(["Comercial", "No comercial"])
+		.describe(
+			"Comercial = alta demanda en el mercado, se vende fácil. No comercial = vehículo de nicho, difícil de vender",
+		),
+	commercialClassificationReasoning: z
+		.string()
+		.describe("Razón de la clasificación comercial"),
 });
 
 export type VehicleValuation = z.infer<typeof vehicleValuationSchema>;

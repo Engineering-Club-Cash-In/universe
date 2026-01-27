@@ -186,6 +186,9 @@ export const vehicleInspections = pgTable("vehicle_inspections", {
 	// Alerts (stored as JSON array)
 	alerts: json("alerts").$type<string[]>().default([]),
 
+	// Section times (tiempo en segundos por sección del checklist)
+	sectionTimes: json("section_times").$type<Record<string, number>>().default({}),
+
 	// Timestamps
 	createdAt: timestamp("created_at").defaultNow().notNull(),
 	updatedAt: timestamp("updated_at").defaultNow().notNull(),

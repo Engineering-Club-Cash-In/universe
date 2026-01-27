@@ -27,15 +27,6 @@ const valuationSchema = z.object({
   vehicleRating: z.enum(["Comercial", "No comercial"], {
     message: "La calificación es requerida",
   }),
-  marketValue: z
-    .string({ message: "El valor de mercado es requerido" })
-    .min(1, { message: "El valor de mercado es requerido" }),
-  suggestedCommercialValue: z
-    .string({ message: "El valor comercial sugerido es requerido" })
-    .min(1, { message: "El valor comercial sugerido es requerido" }),
-  bankValue: z
-    .string({ message: "El valor bancario es requerido" })
-    .min(1, { message: "El valor bancario es requerido" }),
   currentConditionValue: z
     .string({ message: "El valor en condiciones actuales es requerido" })
     .min(1, { message: "El valor en condiciones actuales es requerido" }),
@@ -66,6 +57,8 @@ interface AIValuationResult {
   marketAnalysis: string;
   depreciationFactors: string[];
   confidence: string;
+  commercialClassification?: "Comercial" | "No comercial";
+  commercialClassificationReasoning?: string;
 }
 
 export default function VehicleValuation({
@@ -83,9 +76,6 @@ export default function VehicleValuation({
     resolver: zodResolver(valuationSchema),
     defaultValues: {
       vehicleRating: undefined,
-      marketValue: "",
-      suggestedCommercialValue: "",
-      bankValue: "",
       currentConditionValue: "",
       vehicleEquipment: "",
       importantConsiderations: "",
@@ -122,13 +112,20 @@ export default function VehicleValuation({
         reasoning: result.valuation.reasoning,
         marketAnalysis: result.valuation.marketAnalysis,
         depreciationFactors: result.valuation.depreciationFactors,
-        confidence: result.valuation.confidence
+        confidence: result.valuation.confidence,
+        commercialClassification: result.valuation.commercialClassification,
+        commercialClassificationReasoning: result.valuation.commercialClassificationReasoning
       };
-      
+
       setAiValuation(aiResult);
-      
+
       // Auto-fill suggested value
       form.setValue("currentConditionValue", aiResult.suggestedValue.toString());
+
+      // Auto-fill commercial classification if available
+      if (aiResult.commercialClassification) {
+        form.setValue("vehicleRating", aiResult.commercialClassification);
+      }
       
       toast.success("Valoración por IA completada");
     } catch (error) {
@@ -228,7 +225,23 @@ export default function VehicleValuation({
                 name="vehicleRating"
                 render={({ field }) => (
                   <FormItem className="space-y-3">
-                    <FormLabel>Calificación del vehículo</FormLabel>
+                    <FormLabel className="flex items-center gap-2">
+                      Calificación del vehículo
+                      {aiValuation?.commercialClassification && (
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          aiValuation.commercialClassification === "Comercial"
+                            ? "bg-green-100 text-green-700"
+                            : "bg-orange-100 text-orange-700"
+                        }`}>
+                          IA: {aiValuation.commercialClassification}
+                        </span>
+                      )}
+                    </FormLabel>
+                    {aiValuation?.commercialClassificationReasoning && (
+                      <p className="text-xs text-muted-foreground">
+                        {aiValuation.commercialClassificationReasoning}
+                      </p>
+                    )}
                     <FormControl>
                       <RadioGroup
                         onValueChange={field.onChange}
@@ -258,108 +271,35 @@ export default function VehicleValuation({
                 )}
               />
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <FormField
-                  control={form.control}
-                  name="marketValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor de mercado</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="suggestedCommercialValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor comercial sugerido</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                <FormField
-                  control={form.control}
-                  name="bankValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Valor bancario</FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="currentConditionValue"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="flex items-center gap-2">
-                        Valor condiciones actuales
-                        {aiValuation && (
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                            IA: Q{aiValuation.suggestedValue.toLocaleString()}
-                          </span>
-                        )}
-                      </FormLabel>
-                      <FormControl>
-                        <Input 
-                          placeholder="Valor en moneda local"
-                          value={formatCurrency(field.value)}
-                          onChange={(e) => {
-                            const result = handleCurrencyInput(e.target.value);
-                            field.onChange(result.raw);
-                          }}
-                          onBlur={field.onBlur}
-                          name={field.name}
-                        />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </div>
+              <FormField
+                control={form.control}
+                name="currentConditionValue"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="flex items-center gap-2">
+                      Valor vehículo condiciones actuales
+                      {aiValuation && (
+                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                          IA: Q{aiValuation.suggestedValue.toLocaleString()}
+                        </span>
+                      )}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Valor en moneda local"
+                        value={formatCurrency(field.value)}
+                        onChange={(e) => {
+                          const result = handleCurrencyInput(e.target.value);
+                          field.onChange(result.raw);
+                        }}
+                        onBlur={field.onBlur}
+                        name={field.name}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
               <FormField
                 control={form.control}

@@ -3159,7 +3159,7 @@ export const crmRouter = {
 						// Vehicle documents subsection
 						documentos: {
 							completed:
-								requiredVehicleDocs.length > 0 &&
+								requiredVehicleDocs.length === 0 ||
 								requiredVehicleDocs.every((doc) =>
 									uploadedVehicleTypes.has(doc.documentType),
 								),
@@ -3483,26 +3483,36 @@ export const crmRouter = {
 					.filter((i: any) => i.required)
 					.every((i: any) => i.completed);
 
-			// Get opportunity and vehicle inspection status
-			const [opportunity] = await db
-				.select({ vehicleId: opportunities.vehicleId })
+			// Get opportunity with vehicle data in a single query
+			const [opportunityWithVehicle] = await db
+				.select({
+					vehicleId: opportunities.vehicleId,
+					vehicleIsNew: vehicles.isNew,
+				})
 				.from(opportunities)
+				.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
+			const opportunity = opportunityWithVehicle;
 			let vehicleInspected = false;
 			if (opportunity?.vehicleId) {
-				const [inspection] = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
-					.limit(1);
-				vehicleInspected = !!inspection;
+				// New vehicles don't require inspection
+				if (opportunity.vehicleIsNew) {
+					vehicleInspected = true;
+				} else {
+					const [inspection] = await db
+						.select()
+						.from(vehicleInspections)
+						.where(
+							and(
+								eq(vehicleInspections.vehicleId, opportunity.vehicleId),
+								eq(vehicleInspections.status, "approved"),
+							),
+						)
+						.limit(1);
+					vehicleInspected = !!inspection;
+				}
 			}
 
 			// Recalculate vehicle section completion

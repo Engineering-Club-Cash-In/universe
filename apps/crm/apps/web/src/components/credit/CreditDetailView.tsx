@@ -551,14 +551,19 @@ export function CreditDetailView({
 			toast.success(
 				"Aprobación cancelada - Oportunidad regresada a Cierre de propuesta (40%)",
 			);
-			queryClient.invalidateQueries({ queryKey: ["getOpportunities"] });
+			// Batch invalidate related queries
 			queryClient.invalidateQueries({
-				queryKey: ["getCreditDetailApprovalStatus", opportunityId],
+				predicate: (query) => {
+					const key = query.queryKey;
+					return (
+						key[0] === "getOpportunities" ||
+						key[0] === "opportunities" ||
+						(key[0] === "getCreditDetailApprovalStatus" &&
+							key[1] === opportunityId) ||
+						(key[0] === "getOpportunityHistory" && key[1] === opportunityId)
+					);
+				},
 			});
-			queryClient.invalidateQueries({
-				queryKey: ["getOpportunityHistory", opportunityId],
-			});
-			queryClient.invalidateQueries({ queryKey: ["opportunities"] });
 		},
 		onError: (error) => {
 			toast.error(`Error al cancelar aprobación: ${error.message}`);

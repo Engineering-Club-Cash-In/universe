@@ -40,7 +40,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
-import { PERMISSIONS, getRoleLabel } from "@/lib/roles";
+import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 // Type for the opportunity data

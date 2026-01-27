@@ -63,6 +63,53 @@ import {
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
 
+/**
+ * Helper function to check vehicle inspection status.
+ * Reduces code duplication across the codebase.
+ *
+ * @param vehicleId - The ID of the vehicle to check
+ * @returns Object with inspection status details
+ */
+async function getVehicleInspectionStatus(vehicleId: string) {
+	// Get vehicle info and check if it's new
+	const [vehicle] = await db
+		.select({ isNew: vehicles.isNew })
+		.from(vehicles)
+		.where(eq(vehicles.id, vehicleId))
+		.limit(1);
+
+	const isNew = vehicle?.isNew ?? false;
+
+	// New vehicles don't require inspection
+	if (isNew) {
+		return {
+			isNew: true,
+			isInspected: true,
+			inspectionId: null,
+			inspectionStatus: "not_required" as const,
+		};
+	}
+
+	// Check for approved inspection
+	const [inspection] = await db
+		.select({ id: vehicleInspections.id, status: vehicleInspections.status })
+		.from(vehicleInspections)
+		.where(
+			and(
+				eq(vehicleInspections.vehicleId, vehicleId),
+				eq(vehicleInspections.status, "approved"),
+			),
+		)
+		.limit(1);
+
+	return {
+		isNew: false,
+		isInspected: !!inspection,
+		inspectionId: inspection?.id ?? null,
+		inspectionStatus: inspection?.status ?? "pending",
+	};
+}
+
 export const crmRouter = {
 	// Sales Stages (read-only for all CRM users)
 	getSalesStages: crmProcedure.handler(async ({ context: _ }) => {
@@ -2765,36 +2812,12 @@ export const crmRouter = {
 				let inspectionStatus = "pending";
 				let isNewVehicle = false;
 				if (opp.vehicleId) {
-					// Obtener info del vehículo para verificar si es nuevo
-					const [vehicleData] = await db
-						.select({ isNew: vehicles.isNew })
-						.from(vehicles)
-						.where(eq(vehicles.id, opp.vehicleId))
-						.limit(1);
-
-					isNewVehicle = vehicleData?.isNew ?? false;
-
-					// Vehículos nuevos no requieren inspección
-					if (isNewVehicle) {
-						vehicleInspected = true;
-						inspectionStatus = "not_required";
-					} else {
-						const inspection = await db
-							.select()
-							.from(vehicleInspections)
-							.where(
-								and(
-									eq(vehicleInspections.vehicleId, opp.vehicleId),
-									eq(vehicleInspections.status, "approved"),
-								),
-							)
-							.limit(1);
-
-						vehicleInspected = inspection.length > 0;
-						if (inspection.length > 0) {
-							inspectionStatus = inspection[0].status;
-						}
-					}
+					const inspectionResult = await getVehicleInspectionStatus(
+						opp.vehicleId,
+					);
+					vehicleInspected = inspectionResult.isInspected;
+					inspectionStatus = inspectionResult.inspectionStatus;
+					isNewVehicle = inspectionResult.isNew;
 				}
 
 				// 3. Obtener documentos requeridos según tipo de cliente y crédito
@@ -3332,28 +3355,10 @@ export const crmRouter = {
 
 			let vehicleInspected = false;
 			if (opportunity?.vehicleId) {
-				const [inspection] = await db
-					.select()
-					.from(vehicleInspections)
-					.where(
-						and(
-							eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-							eq(vehicleInspections.status, "approved"),
-						),
-					)
-					.limit(1);
-				vehicleInspected = !!inspection;
-				if (!vehicleInspected) {
-					const [vehicle] = await db
-						.select()
-						.from(vehicles)
-						.where(eq(vehicles.id, opportunity.vehicleId))
-						.limit(1);
-
-					if (vehicle?.isNew) {
-						vehicleInspected = true;
-					}
-				}
+				const inspectionResult = await getVehicleInspectionStatus(
+					opportunity.vehicleId,
+				);
+				vehicleInspected = inspectionResult.isInspected;
 			}
 
 			// Recalculate vehicle section if exists
@@ -3483,36 +3488,19 @@ export const crmRouter = {
 					.filter((i: any) => i.required)
 					.every((i: any) => i.completed);
 
-			// Get opportunity with vehicle data in a single query
-			const [opportunityWithVehicle] = await db
-				.select({
-					vehicleId: opportunities.vehicleId,
-					vehicleIsNew: vehicles.isNew,
-				})
+			// Get opportunity
+			const [opportunity] = await db
+				.select({ vehicleId: opportunities.vehicleId })
 				.from(opportunities)
-				.leftJoin(vehicles, eq(vehicles.id, opportunities.vehicleId))
 				.where(eq(opportunities.id, input.opportunityId))
 				.limit(1);
 
-			const opportunity = opportunityWithVehicle;
 			let vehicleInspected = false;
 			if (opportunity?.vehicleId) {
-				// New vehicles don't require inspection
-				if (opportunity.vehicleIsNew) {
-					vehicleInspected = true;
-				} else {
-					const [inspection] = await db
-						.select()
-						.from(vehicleInspections)
-						.where(
-							and(
-								eq(vehicleInspections.vehicleId, opportunity.vehicleId),
-								eq(vehicleInspections.status, "approved"),
-							),
-						)
-						.limit(1);
-					vehicleInspected = !!inspection;
-				}
+				const inspectionResult = await getVehicleInspectionStatus(
+					opportunity.vehicleId,
+				);
+				vehicleInspected = inspectionResult.isInspected;
 			}
 
 			// Recalculate vehicle section completion

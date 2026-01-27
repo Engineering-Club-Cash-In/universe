@@ -4323,7 +4323,7 @@ export const crmRouter = {
 		.input(
 			z.object({
 				opportunityId: z.string().uuid(),
-				inversionistas: z.string(), // JSON string with investors array
+				inversionistas: z.string().optional(), // JSON string with NEW investors array (optional if already has investors)
 				categoria: z.enum([
 					"Contraseña",
 					"CV Vehículo",
@@ -4363,31 +4363,65 @@ export const crmRouter = {
 				});
 			}
 
-			// Parse and validate investors
-			let parsedInversionistas: Array<{
+			// Parse existing investors from DB
+			let existingInvestors: Array<{
 				inversionista_id: number;
 				nombre: string;
 				monto_aportado?: number;
 				porcentaje_participacion?: number;
-			}>;
+			}> = [];
+			if (opportunity.inversionistas) {
+				try {
+					const parsed = JSON.parse(opportunity.inversionistas);
+					if (Array.isArray(parsed)) {
+						existingInvestors = parsed;
+					}
+				} catch {
+					// Invalid JSON, treat as no existing investors
+				}
+			}
 
-			try {
-				parsedInversionistas = JSON.parse(input.inversionistas);
-				if (
-					!Array.isArray(parsedInversionistas) ||
-					parsedInversionistas.length === 0
-				) {
-					throw new Error("Invalid investors array");
+			// Parse and validate new investors (if provided)
+			let newInversionistas: Array<{
+				inversionista_id: number;
+				nombre: string;
+				monto_aportado?: number;
+				porcentaje_participacion?: number;
+			}> = [];
+
+			if (input.inversionistas) {
+				try {
+					newInversionistas = JSON.parse(input.inversionistas);
+					if (!Array.isArray(newInversionistas)) {
+						throw new Error("Invalid investors array");
+					}
+					if (newInversionistas.length > 20) {
+						throw new Error("Too many investors");
+					}
+				} catch (e) {
+					const message =
+						e instanceof Error && e.message === "Too many investors"
+							? "No se pueden asignar más de 20 inversionistas por oportunidad"
+							: "Formato de inversionistas inválido";
+					throw new ORPCError("BAD_REQUEST", { message });
 				}
-				if (parsedInversionistas.length > 20) {
-					throw new Error("Too many investors");
-				}
-			} catch (e) {
-				const message =
-					e instanceof Error && e.message === "Too many investors"
-						? "No se pueden asignar más de 20 inversionistas por oportunidad"
-						: "Debe seleccionar al menos un inversionista";
-				throw new ORPCError("BAD_REQUEST", { message });
+			}
+
+			// Combine existing + new investors
+			const allInvestors = [...existingInvestors, ...newInversionistas];
+
+			// Validate we have at least one investor (existing or new)
+			if (allInvestors.length === 0) {
+				throw new ORPCError("BAD_REQUEST", {
+					message: "Debe haber al menos un inversionista asignado",
+				});
+			}
+
+			if (allInvestors.length > 20) {
+				throw new ORPCError("BAD_REQUEST", {
+					message:
+						"No se pueden tener más de 20 inversionistas por oportunidad",
+				});
 			}
 
 			// Validate minimum data for contracts
@@ -4482,11 +4516,11 @@ export const crmRouter = {
 
 			// Update opportunity and record history in a transaction for atomicity
 			await db.transaction(async (tx) => {
-				// Update opportunity with investors and move to 80%
+				// Update opportunity with combined investors and move to 80%
 				await tx
 					.update(opportunities)
 					.set({
-						inversionistas: input.inversionistas,
+						inversionistas: JSON.stringify(allInvestors),
 						stageId: stage80.id,
 						categoria: input.categoria,
 						nit: input.nit,

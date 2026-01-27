@@ -672,7 +672,7 @@ export class CarteraBackClient {
 	 */
 	async facturarGenerico(input: FacturarGenericoInput): Promise<FacturarGenericoResponse> {
 		const response = await this.request<FacturarGenericoResponse>(
-			"/facturar-generico",
+			"/api/dte/facturar-generico",
 			{
 				method: "POST",
 				body: JSON.stringify(input),

@@ -598,24 +598,23 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						`[CloseOpportunity] Generating invoice: ${invoice.name} with ${invoice.items.length} item(s)`,
 					);
 
-					// Llamar al endpoint de facturación genérica
-					const response = await carteraBackClient.facturarGenerico({
+					// Construir el payload exacto que se envía al endpoint
+					const requestBody = {
 						nit: nit || "CF", // CF = Consumidor Final si no hay NIT
 						items: invoice.items,
 						created_by: FACTURACION_CREATED_BY,
-					});
+					};
 
-					// Registrar éxito en el log
+					// Llamar al endpoint de facturación genérica
+					const response = await carteraBackClient.facturarGenerico(requestBody);
+
+					// Registrar éxito en el log con el payload exacto enviado
 					await logInvoiceSyncOperation({
 						operation: "generate_invoice",
 						entityType: "factura",
 						entityId: `${opportunityId}-${invoice.name}`,
 						status: "success",
-						requestPayload: JSON.stringify({
-							nit,
-							invoiceName: invoice.name,
-							items: invoice.items,
-						}),
+						requestPayload: JSON.stringify(requestBody),
 						responsePayload: JSON.stringify(response),
 						startedAt: new Date(startTime),
 						completedAt: new Date(),
@@ -636,18 +635,21 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 						`[CloseOpportunity] ✗ Failed to generate invoice "${invoice.name}": ${errorMessage}`,
 					);
 
-					// Registrar error en el log
+					// Construir el payload para el log de error
+					const errorRequestBody = {
+						nit: nit || "CF",
+						items: invoice.items,
+						created_by: FACTURACION_CREATED_BY,
+					};
+
+					// Registrar error en el log con el payload exacto
 					await logInvoiceSyncOperation({
 						operation: "generate_invoice",
 						entityType: "factura",
 						entityId: `${opportunityId}-${invoice.name}`,
 						status: "error",
 						errorMessage,
-						requestPayload: JSON.stringify({
-							nit,
-							invoiceName: invoice.name,
-							items: invoice.items,
-						}),
+						requestPayload: JSON.stringify(errorRequestBody),
 						startedAt: new Date(startTime),
 						completedAt: new Date(),
 						durationMs: Date.now() - startTime,

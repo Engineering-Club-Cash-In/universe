@@ -3503,6 +3503,19 @@ export const crmRouter = {
 					)
 					.limit(1);
 				vehicleInspected = !!inspection;
+
+				// New vehicles don't require inspection
+				if (!vehicleInspected) {
+					const [vehicle] = await db
+						.select({ isNew: vehicles.isNew })
+						.from(vehicles)
+						.where(eq(vehicles.id, opportunity.vehicleId))
+						.limit(1);
+
+					if (vehicle?.isNew) {
+						vehicleInspected = true;
+					}
+				}
 			}
 
 			// Recalculate vehicle section completion

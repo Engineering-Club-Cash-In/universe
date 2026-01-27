@@ -11,6 +11,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Combobox } from "@/components/ui/combobox";
 import { Label } from "@/components/ui/label";
 import { getDocumentTypeLabel } from "@/lib/crm-formatters";
@@ -100,6 +101,7 @@ export function OpportunityDocumentUpload({
 }: OpportunityDocumentUploadProps) {
 	const [selectedFile, setSelectedFile] = useState<File | null>(null);
 	const [documentType, setDocumentType] = useState<string>("");
+	const [includeAll3Months, setIncludeAll3Months] = useState(false);
 
 	// Verificar si el documento seleccionado es de vehículo y no hay vehículo asignado
 	const isVehicleDocWithoutVehicle =
@@ -202,7 +204,32 @@ export function OpportunityDocumentUpload({
 			toast.error("Selecciona tipo de documento y archivo");
 			return;
 		}
-		uploadMutation.mutate({ file: selectedFile, documentType });
+
+		// Si es estado de cuenta y marcó "incluye los 3 meses", subir para los 3 tipos
+		if (
+			includeAll3Months &&
+			["estados_cuenta_1", "estados_cuenta_2", "estados_cuenta_3"].includes(
+				documentType,
+			)
+		) {
+			const types = [
+				"estados_cuenta_1",
+				"estados_cuenta_2",
+				"estados_cuenta_3",
+			];
+			Promise.all(
+				types.map((type) =>
+					uploadMutation.mutateAsync({
+						file: selectedFile,
+						documentType: type,
+					}),
+				),
+			).then(() => {
+				setIncludeAll3Months(false);
+			});
+		} else {
+			uploadMutation.mutate({ file: selectedFile, documentType });
+		}
 	};
 
 	return (
@@ -240,6 +267,29 @@ export function OpportunityDocumentUpload({
 							/>
 						</div>
 					</div>
+
+					{[
+						"estados_cuenta_1",
+						"estados_cuenta_2",
+						"estados_cuenta_3",
+					].includes(documentType) && (
+						<div className="flex items-center gap-2">
+							<Checkbox
+								id="include-all-months"
+								checked={includeAll3Months}
+								onCheckedChange={(checked) =>
+									setIncludeAll3Months(checked as boolean)
+								}
+								className="cursor-pointer"
+							/>
+							<Label
+								htmlFor="include-all-months"
+								className="cursor-pointer text-sm"
+							>
+								Este PDF incluye los 3 meses de estados de cuenta
+							</Label>
+						</div>
+					)}
 
 					{isVehicleDocWithoutVehicle && (
 						<Alert variant="default" className="border-amber-500 bg-amber-50">

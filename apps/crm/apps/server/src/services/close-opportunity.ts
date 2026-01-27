@@ -158,10 +158,11 @@ interface QuotationDataForBilling {
 	leasingContractCost: string | null; // Contrato de abogado (leasing)
 	mobileGuaranteeCost: string | null; // Garantía mobiliaria
 	interestCost: string | null; // Intereses anticipados (cuota 0)
-	extraMembershipCost: string | null; // Membresía extra
+	extraMembershipCost: string | null; // Membresía extra (cuota 0)
 	appointmentCost: string | null; // Nombramiento
 	keyCopyCost: string | null; // Copia de llave
 	extraInsuranceCost: string | null; // Seguro extra
+	extraAdminCost: string | null; // Gastos administrativos
 }
 
 /** Parámetros para generación de facturas en background */
@@ -360,6 +361,7 @@ async function getLatestApprovedQuotation(
 				appointmentCost: quotations.appointmentCost,
 				keyCopyCost: quotations.keyCopyCost,
 				extraInsuranceCost: quotations.extraInsuranceCost,
+				extraAdminCost: quotations.extraAdminCost,
 			})
 			.from(quotations)
 			.where(eq(quotations.opportunityId, opportunityId))
@@ -526,8 +528,11 @@ function buildInvoices(
 	const extraInsuranceCost = quotation.extraInsuranceCost
 		? Number(quotation.extraInsuranceCost)
 		: 0;
+	const extraAdminCost = quotation.extraAdminCost
+		? Number(quotation.extraAdminCost)
+		: 0;
 
-	if (extraInsuranceCost > 0 || extraMembershipCost > 0) {
+	if (extraInsuranceCost > 0 || extraAdminCost > 0) {
 		const seguroGastosItems: FacturaItem[] = [];
 		if (extraInsuranceCost > 0) {
 			seguroGastosItems.push({
@@ -535,10 +540,10 @@ function buildInvoices(
 				rubro: "Seguro - Prima de seguro vehicular",
 			});
 		}
-		if (extraMembershipCost > 0) {
+		if (extraAdminCost > 0) {
 			seguroGastosItems.push({
-				monto: extraMembershipCost,
-				rubro: "Gastos administrativos - Membresía",
+				monto: extraAdminCost,
+				rubro: "Gastos administrativos",
 			});
 		}
 		if (seguroGastosItems.length > 0) {

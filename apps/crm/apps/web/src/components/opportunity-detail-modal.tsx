@@ -40,7 +40,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
-import { PERMISSIONS } from "@/lib/roles";
+import { PERMISSIONS, getRoleLabel } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
 
 // Type for the opportunity data
@@ -768,13 +768,7 @@ export function OpportunityDetailModal({
 																		variant="outline"
 																		className="ml-1 text-xs"
 																	>
-																		{change.changedBy.role === "admin"
-																			? "Admin"
-																			: change.changedBy.role === "sales"
-																				? "Ventas"
-																				: change.changedBy.role === "analyst"
-																					? "Analista"
-																					: change.changedBy.role}
+																		{getRoleLabel(change.changedBy.role)}
 																	</Badge>
 																)}
 															</div>

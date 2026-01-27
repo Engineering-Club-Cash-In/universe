@@ -1,6 +1,7 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { getRoleLabel } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import {
 	Table,
@@ -62,7 +63,7 @@ export function MiniAgentCredentialsTable({ users, onSave }: Props) {
 							<TableCell className="font-medium">{user.name}</TableCell>
 							<TableCell>{user.email}</TableCell>
 							<TableCell>
-								<Badge variant="outline">{user.role}</Badge>
+								<Badge variant="outline">{getRoleLabel(user.role)}</Badge>
 							</TableCell>
 							<TableCell>
 								{user.hasCredentials ? (

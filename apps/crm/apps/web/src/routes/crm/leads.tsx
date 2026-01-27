@@ -118,6 +118,16 @@ function RouteComponent() {
 		title: "",
 		creditType: "autocompra" as "autocompra" | "sobre_vehiculo",
 	});
+	const [duplicateWarning, setDuplicateWarning] = useState<{
+		show: boolean;
+		message: string;
+		pendingData: {
+			title: string;
+			leadId: string;
+			creditType: "autocompra" | "sobre_vehiculo";
+			stageId: string;
+		} | null;
+	}>({ show: false, message: "", pendingData: null });
 	const [creditAnalysisForm, setCreditAnalysisForm] = useState({
 		monthlyFixedIncome: "",
 		monthlyVariableIncome: "",
@@ -456,8 +466,28 @@ function RouteComponent() {
 			leadId: string;
 			creditType: "autocompra" | "sobre_vehiculo";
 			stageId: string;
+			force?: boolean;
 		}) => client.createOpportunity(input),
-		onSuccess: () => {
+		onSuccess: (data) => {
+			// Check if backend returned a warning about duplicate
+			if (data.warning === true && "message" in data) {
+				// Show confirmation dialog
+				const initialStage = salesStagesQuery.data?.find(
+					(s) => s.closurePercentage === 1,
+				);
+				setDuplicateWarning({
+					show: true,
+					message: data.message,
+					pendingData: {
+						title: convertForm.title,
+						leadId: leadToConvert!.id,
+						creditType: convertForm.creditType,
+						stageId: initialStage!.id,
+					},
+				});
+				return;
+			}
+
 			// Actualizar el lead a "converted"
 			if (leadToConvert) {
 				updateLeadMutation.mutate({
@@ -480,6 +510,24 @@ function RouteComponent() {
 			toast.error(error.message || "Error al crear la oportunidad");
 		},
 	});
+
+	// Handler para confirmar creación de oportunidad duplicada
+	const handleConfirmDuplicate = () => {
+		if (duplicateWarning.pendingData) {
+			createOpportunityMutation.mutate({
+				...duplicateWarning.pendingData,
+				force: true,
+			});
+		}
+		setDuplicateWarning({ show: false, message: "", pendingData: null });
+	};
+
+	const handleCancelDuplicate = () => {
+		setDuplicateWarning({ show: false, message: "", pendingData: null });
+		setIsConvertDialogOpen(false);
+		setLeadToConvert(null);
+		setConvertForm({ title: "", creditType: "autocompra" });
+	};
 
 	useEffect(() => {
 		if (!session && !isPending) {
@@ -3145,6 +3193,41 @@ function RouteComponent() {
 							</div>
 						</div>
 					)}
+				</DialogContent>
+			</Dialog>
+
+			{/* Dialog de advertencia por oportunidad duplicada */}
+			<Dialog
+				open={duplicateWarning.show}
+				onOpenChange={(open) => {
+					if (!open) handleCancelDuplicate();
+				}}
+			>
+				<DialogContent>
+					<DialogHeader>
+						<DialogTitle className="flex items-center gap-2 text-amber-600">
+							<AlertTriangle className="h-5 w-5" />
+							Oportunidad Existente
+						</DialogTitle>
+						<DialogDescription>{duplicateWarning.message}</DialogDescription>
+					</DialogHeader>
+					<p className="text-muted-foreground text-sm">
+						¿Desea crear otra oportunidad de todos modos?
+					</p>
+					<div className="flex justify-end gap-2">
+						<Button variant="outline" onClick={handleCancelDuplicate}>
+							Cancelar
+						</Button>
+						<Button
+							variant="destructive"
+							onClick={handleConfirmDuplicate}
+							disabled={createOpportunityMutation.isPending}
+						>
+							{createOpportunityMutation.isPending
+								? "Creando..."
+								: "Crear de Todos Modos"}
+						</Button>
+					</div>
 				</DialogContent>
 			</Dialog>
 		</div>

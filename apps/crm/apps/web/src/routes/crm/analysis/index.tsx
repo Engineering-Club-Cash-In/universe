@@ -264,10 +264,17 @@ function AnalysisPage() {
 				? {
 						id: opportunity.lead.id,
 						firstName: opportunity.lead.firstName,
+						middleName: opportunity.lead.middleName,
 						lastName: opportunity.lead.lastName,
-						dpi: null,
+						secondLastName: opportunity.lead.secondLastName,
+						dpi: opportunity.lead.dpi,
 						email: opportunity.lead.email,
 						phone: opportunity.lead.phone,
+						age: opportunity.lead.age,
+						direccion: opportunity.lead.direccion,
+						departamento: opportunity.lead.departamento,
+						municipio: opportunity.lead.municipio,
+						zona: opportunity.lead.zona,
 					}
 				: null,
 			stage: opportunity.stage?.id
@@ -302,7 +309,7 @@ function AnalysisPage() {
 			lastName: opportunity.lead.lastName,
 			email: opportunity.lead.email,
 			phone: opportunity.lead.phone,
-			dpi: null,
+			dpi: opportunity.lead.dpi,
 			source: "",
 			status: "",
 			createdAt: new Date(),

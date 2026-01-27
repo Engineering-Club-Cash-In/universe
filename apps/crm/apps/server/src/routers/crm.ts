@@ -1459,9 +1459,17 @@ export const crmRouter = {
 					lead: {
 						id: leads.id,
 						firstName: leads.firstName,
+						middleName: leads.middleName,
 						lastName: leads.lastName,
+						secondLastName: leads.secondLastName,
+						dpi: leads.dpi,
 						email: leads.email,
 						phone: leads.phone,
+						age: leads.age,
+						direccion: leads.direccion,
+						departamento: leads.departamento,
+						municipio: leads.municipio,
+						zona: leads.zona,
 					},
 					company: {
 						id: companies.id,

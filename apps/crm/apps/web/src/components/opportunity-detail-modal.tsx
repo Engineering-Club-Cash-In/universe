@@ -58,10 +58,17 @@ export type OpportunityForModal = {
 	lead?: {
 		id: string;
 		firstName: string;
+		middleName?: string | null;
 		lastName: string;
+		secondLastName?: string | null;
 		dpi?: string | null;
 		email: string | null;
 		phone?: string | null;
+		age?: number | null;
+		direccion?: string | null;
+		departamento?: string | null;
+		municipio?: string | null;
+		zona?: string | null;
 	} | null;
 	company?: {
 		id: string;

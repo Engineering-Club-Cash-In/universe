@@ -135,7 +135,6 @@ export function AnalysisChecklistView({
 				verificationType,
 				completed,
 			});
-			await refetch();
 		} catch (error) {
 			// Revert on error
 			queryClient.setQueryData(queryKey, previousData);
@@ -161,8 +160,8 @@ export function AnalysisChecklistView({
 						...old.sections.vehiculo,
 						verificaciones: {
 							completed: old.sections.vehiculo.verificaciones.completed,
-							items: old.sections.vehiculo.verificaciones.items.map(
-								(item: any) =>
+							items: old.sections.vehiculo.verificaciones.items?.map(
+								(item: ChecklistItem) =>
 									item.type === verificationType
 										? { ...item, completed }
 										: item,
@@ -179,7 +178,6 @@ export function AnalysisChecklistView({
 				verificationType,
 				completed,
 			});
-			await refetch();
 		} catch (error) {
 			// Revert on error
 			queryClient.setQueryData(queryKey, previousData);

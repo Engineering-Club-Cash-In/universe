@@ -1,7 +1,6 @@
 import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { getRoleLabel } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import {
 	Table,
@@ -11,6 +10,7 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
+import { getRoleLabel } from "@/lib/roles";
 import { MiniAgentCredentialsModal } from "./miniagent-credentials-modal";
 
 interface User {

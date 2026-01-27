@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	CheckCircle2,
 	FileText,
@@ -77,6 +77,7 @@ export function AnalysisChecklistView({
 	opportunityId,
 	onUpdate,
 }: AnalysisChecklistViewProps) {
+	const queryClient = useQueryClient();
 	const [openSections, setOpenSections] = useState({
 		documentos: true,
 		verificaciones: true,
@@ -108,6 +109,26 @@ export function AnalysisChecklistView({
 		verificationType: string,
 		completed: boolean,
 	) => {
+		const queryKey = ["getAnalysisChecklist", opportunityId];
+		const previousData = queryClient.getQueryData<Checklist>(queryKey);
+
+		// Optimistic update
+		queryClient.setQueryData<Checklist>(queryKey, (old) => {
+			if (!old) return old;
+			return {
+				...old,
+				sections: {
+					...old.sections,
+					verificaciones: {
+						...old.sections.verificaciones,
+						items: old.sections.verificaciones.items?.map((item) =>
+							item.type === verificationType ? { ...item, completed } : item,
+						),
+					},
+				},
+			};
+		});
+
 		try {
 			await client.updateAnalysisChecklistVerification({
 				opportunityId,
@@ -116,6 +137,8 @@ export function AnalysisChecklistView({
 			});
 			await refetch();
 		} catch (error) {
+			// Revert on error
+			queryClient.setQueryData(queryKey, previousData);
 			console.error("Error updating verification:", error);
 		}
 	};
@@ -124,6 +147,32 @@ export function AnalysisChecklistView({
 		verificationType: string,
 		completed: boolean,
 	) => {
+		const queryKey = ["getAnalysisChecklist", opportunityId];
+		const previousData = queryClient.getQueryData<Checklist>(queryKey);
+
+		// Optimistic update
+		queryClient.setQueryData<Checklist>(queryKey, (old) => {
+			if (!old?.sections?.vehiculo?.verificaciones) return old;
+			return {
+				...old,
+				sections: {
+					...old.sections,
+					vehiculo: {
+						...old.sections.vehiculo,
+						verificaciones: {
+							completed: old.sections.vehiculo.verificaciones.completed,
+							items: old.sections.vehiculo.verificaciones.items.map(
+								(item: any) =>
+									item.type === verificationType
+										? { ...item, completed }
+										: item,
+							),
+						},
+					},
+				},
+			};
+		});
+
 		try {
 			await client.updateAnalysisChecklistVehicleVerification({
 				opportunityId,
@@ -132,6 +181,8 @@ export function AnalysisChecklistView({
 			});
 			await refetch();
 		} catch (error) {
+			// Revert on error
+			queryClient.setQueryData(queryKey, previousData);
 			console.error("Error updating vehicle verification:", error);
 		}
 	};
@@ -297,7 +348,7 @@ export function AnalysisChecklistView({
 													)
 												}
 												disabled={!item.required}
-												className="mt-1"
+												className="mt-1 cursor-pointer"
 											/>
 											<div className="flex-1">
 												<p className="font-medium text-sm">{item.name}</p>
@@ -488,7 +539,7 @@ export function AnalysisChecklistView({
 																		)
 																	}
 																	disabled={!item.required}
-																	className="mt-1"
+																	className="mt-1 cursor-pointer"
 																/>
 																<div className="flex-1">
 																	<p className="font-medium text-sm">

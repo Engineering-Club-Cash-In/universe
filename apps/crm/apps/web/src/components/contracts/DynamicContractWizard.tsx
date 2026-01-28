@@ -4,10 +4,21 @@ import {
 	CheckCircle,
 	ChevronLeft,
 	ChevronRight,
+	Link2,
 	Loader2,
 	User,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -114,6 +125,16 @@ interface GenerationResult {
 	results: ContractResult[];
 }
 
+// Extended result with data needed for linking
+interface GenerationResultWithData extends GenerationResult {
+	results: Array<
+		ContractResult & {
+			templateId?: number;
+			apiResponse?: unknown;
+		}
+	>;
+}
+
 interface DynamicContractWizardProps {
 	documentTypes: DocumentType[];
 	crmData: CRMData;
@@ -139,9 +160,22 @@ interface DynamicContractWizardProps {
 				filenamePrefix: string;
 			};
 		}>;
-	}) => Promise<GenerationResult>;
+	}) => Promise<GenerationResultWithData>;
+	onLinkContracts: (data: {
+		opportunityId: string;
+		leadId: string;
+		contracts: Array<{
+			contractType: string;
+			contractName: string;
+			documentLink?: string;
+			signingLinks?: string[];
+			templateId?: number;
+			apiResponse?: unknown;
+		}>;
+	}) => Promise<{ success: boolean; message: string }>;
 	onBack: () => void;
 	isGenerating?: boolean;
+	isLinking?: boolean;
 }
 
 // Fields to hide from form (signatures, etc.)
@@ -413,14 +447,18 @@ export function DynamicContractWizard({
 	documentTypes,
 	crmData,
 	opportunityId,
+	leadId,
 	onGetDocumentsByDpi,
 	onGenerate,
+	onLinkContracts,
 	onBack,
 	isGenerating = false,
+	isLinking = false,
 }: DynamicContractWizardProps) {
 	const [step, setStep] = useState<1 | 2 | 3>(1);
 	const [selectedDocuments, setSelectedDocuments] = useState<string[]>([]);
 	const [isLoadingFields, setIsLoadingFields] = useState(false);
+	const [showLinkConfirmDialog, setShowLinkConfirmDialog] = useState(false);
 
 	// Data from API
 	const [renapData, setRenapData] = useState<RenapData | null>(null);
@@ -430,7 +468,7 @@ export function DynamicContractWizard({
 	const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
 	const [generationResult, setGenerationResult] =
-		useState<GenerationResult | null>(null);
+		useState<GenerationResultWithData | null>(null);
 
 	// Date configuration states
 	const [fechaVencimiento, setFechaVencimiento] = useState<string>("");
@@ -1212,8 +1250,38 @@ export function DynamicContractWizard({
 		if (step === 2) {
 			setStep(1);
 		} else if (step === 3) {
+			// Volver al paso 2 para corregir campos y regenerar
 			setGenerationResult(null);
-			setStep(1);
+			setStep(2);
+		}
+	};
+
+	// Handle linking contracts to opportunity
+	const handleLinkContracts = async () => {
+		if (!generationResult || !leadId) return;
+
+		const successfulContracts = generationResult.results.filter(
+			(r) => r.success,
+		);
+		if (successfulContracts.length === 0) return;
+
+		try {
+			await onLinkContracts({
+				opportunityId,
+				leadId,
+				contracts: successfulContracts.map((c) => ({
+					contractType: c.contractType,
+					contractName: c.contractName,
+					documentLink: c.documentLink,
+					signingLinks: c.signingLinks,
+					templateId: c.templateId,
+					apiResponse: c.apiResponse,
+				})),
+			});
+			setShowLinkConfirmDialog(false);
+			onBack(); // Volver a la pantalla anterior después de enlazar
+		} catch (error) {
+			console.error("Error linking contracts:", error);
 		}
 	};
 
@@ -1589,12 +1657,45 @@ export function DynamicContractWizard({
 
 				{/* Step 3: Results */}
 				{step === 3 && generationResult && (
-					<ContractResults
-						results={generationResult.results}
-						totalRequested={generationResult.totalRequested}
-						successCount={generationResult.successCount}
-						failCount={generationResult.failCount}
-					/>
+					<div className="space-y-4">
+						<ContractResults
+							results={generationResult.results}
+							totalRequested={generationResult.totalRequested}
+							successCount={generationResult.successCount}
+							failCount={generationResult.failCount}
+						/>
+
+						{/* Instructions for user */}
+						<Card className="border-blue-200 bg-blue-50">
+							<CardContent className="pt-4">
+								<div className="flex items-start gap-3">
+									<div className="rounded-full bg-blue-100 p-2">
+										<Link2 className="h-5 w-5 text-blue-600" />
+									</div>
+									<div>
+										<h4 className="font-semibold text-blue-800">
+											¿Qué sigue?
+										</h4>
+										<ul className="mt-1 list-inside list-disc space-y-1 text-blue-700 text-sm">
+											<li>
+												<strong>Revisa los documentos generados</strong> haciendo
+												clic en el botón morado "Ver PDF"
+											</li>
+											<li>
+												Si algún documento tiene errores, haz clic en "Corregir
+												y Regenerar" para volver a editarlo
+											</li>
+											<li>
+												Cuando estés satisfecho, haz clic en{" "}
+												<strong>"Finalizar y Enlazar"</strong> para guardar los
+												contratos en la oportunidad
+											</li>
+										</ul>
+									</div>
+								</div>
+							</CardContent>
+						</Card>
+					</div>
 				)}
 			</div>
 
@@ -1603,14 +1704,38 @@ export function DynamicContractWizard({
 				<Button
 					variant="outline"
 					onClick={step === 1 ? onBack : handlePrevious}
-					disabled={isGenerating || isLoadingFields}
+					disabled={isGenerating || isLoadingFields || isLinking}
 				>
 					<ChevronLeft className="mr-2 h-4 w-4" />
-					{step === 1 ? "Volver" : step === 3 ? "Generar Más" : "Anterior"}
+					{step === 1
+						? "Volver"
+						: step === 3
+							? "Corregir y Regenerar"
+							: "Anterior"}
 				</Button>
 
 				{step === 3 ? (
-					<Button onClick={onBack}>Finalizar</Button>
+					<Button
+						onClick={() => setShowLinkConfirmDialog(true)}
+						disabled={
+							!generationResult?.results.some((r) => r.success) ||
+							!leadId ||
+							isLinking
+						}
+						className="bg-green-600 hover:bg-green-700"
+					>
+						{isLinking ? (
+							<>
+								<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								Enlazando...
+							</>
+						) : (
+							<>
+								<Link2 className="mr-2 h-4 w-4" />
+								Finalizar y Enlazar
+							</>
+						)}
+					</Button>
 				) : (
 					<Button
 						onClick={handleNext}
@@ -1635,6 +1760,53 @@ export function DynamicContractWizard({
 					</Button>
 				)}
 			</div>
+
+			{/* Confirmation Dialog for Linking Contracts */}
+			<AlertDialog
+				open={showLinkConfirmDialog}
+				onOpenChange={setShowLinkConfirmDialog}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>
+							¿Enlazar contratos a la oportunidad?
+						</AlertDialogTitle>
+						<AlertDialogDescription className="space-y-2">
+							<p>
+								Estás a punto de enlazar{" "}
+								<strong>
+									{generationResult?.results.filter((r) => r.success).length ||
+										0}{" "}
+									contrato(s)
+								</strong>{" "}
+								a la oportunidad.
+							</p>
+							<p className="text-amber-600">
+								<strong>Nota importante:</strong> Esta acción solo enlaza los
+								contratos a la oportunidad. No envía a análisis ni avanza la
+								etapa del lead.
+							</p>
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={isLinking}>Cancelar</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={handleLinkContracts}
+							disabled={isLinking}
+							className="bg-green-600 hover:bg-green-700"
+						>
+							{isLinking ? (
+								<>
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									Enlazando...
+								</>
+							) : (
+								"Sí, enlazar contratos"
+							)}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</div>
 	);
 }

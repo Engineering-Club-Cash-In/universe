@@ -1,7 +1,18 @@
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { Copy, Edit, ExternalLink, FileText } from "lucide-react";
+import { Copy, Edit, ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +64,8 @@ interface ContractCardProps {
 	} | null;
 	onUpdate?: () => void;
 	onEdit?: () => void;
+	onDelete?: (contractId: string) => Promise<void>;
+	isDeleting?: boolean;
 }
 
 const statusConfig = {
@@ -75,8 +88,11 @@ export function ContractCard({
 	opportunity,
 	onUpdate,
 	onEdit,
+	onDelete,
+	isDeleting = false,
 }: ContractCardProps) {
 	const { canAssignLegal, canCreateLegal } = useJuridicoPermissions();
+	const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
 	const copyToClipboard = (text: string, label: string) => {
 		navigator.clipboard.writeText(text);
@@ -85,6 +101,13 @@ export function ContractCard({
 
 	const openLink = (url: string) => {
 		window.open(url, "_blank", "noopener,noreferrer");
+	};
+
+	const handleDelete = async () => {
+		if (onDelete) {
+			await onDelete(contract.id);
+			setShowDeleteDialog(false);
+		}
 	};
 
 	const formattedDate = format(
@@ -124,6 +147,21 @@ export function ContractCard({
 							>
 								<Edit className="mr-1 h-3 w-3" />
 								Editar
+							</Button>
+						)}
+						{canCreateLegal && onDelete && (
+							<Button
+								size="sm"
+								variant="outline"
+								onClick={() => setShowDeleteDialog(true)}
+								className="h-8 text-red-600 hover:bg-red-50 hover:text-red-700"
+								disabled={isDeleting}
+							>
+								{isDeleting ? (
+									<Loader2 className="h-3 w-3 animate-spin" />
+								) : (
+									<Trash2 className="h-3 w-3" />
+								)}
 							</Button>
 						)}
 					</div>
@@ -285,6 +323,36 @@ export function ContractCard({
 					</div>
 				)}
 			</CardContent>
+
+			{/* Dialog de confirmación para eliminar */}
+			<AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>¿Eliminar contrato?</AlertDialogTitle>
+						<AlertDialogDescription>
+							Estás a punto de eliminar el contrato "{contract.contractName}".
+							Esta acción no se puede deshacer.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={handleDelete}
+							disabled={isDeleting}
+							className="bg-red-600 hover:bg-red-700"
+						>
+							{isDeleting ? (
+								<>
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+									Eliminando...
+								</>
+							) : (
+								"Eliminar"
+							)}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</Card>
 	);
 }

@@ -16,6 +16,8 @@ export interface ContractResult {
 	contractId?: string;
 	documentLink?: string;
 	signingLinks?: string[];
+	templateId?: number;
+	apiResponse?: unknown;
 	error?: string;
 }
 
@@ -102,8 +104,8 @@ export function ContractResults({
 							<div className="space-y-2">
 								{/* Document PDF link */}
 								{result.documentLink && (
-									<div className="flex items-center justify-between rounded bg-blue-50 p-2">
-										<span className="font-medium text-blue-700 text-sm">
+									<div className="flex items-center justify-between rounded bg-purple-50 p-2">
+										<span className="font-medium text-purple-700 text-sm">
 											Documento PDF
 										</span>
 										<div className="flex gap-2">
@@ -118,8 +120,8 @@ export function ContractResults({
 												Copiar
 											</Button>
 											<Button
-												variant="ghost"
 												size="sm"
+												className="bg-purple-600 text-white hover:bg-purple-700"
 												onClick={() =>
 													window.open(result.documentLink, "_blank")
 												}

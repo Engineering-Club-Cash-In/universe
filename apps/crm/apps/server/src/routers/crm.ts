@@ -3413,7 +3413,7 @@ export const crmRouter = {
 				// Recalculate vehicle section completion
 				checklistData.sections.vehiculo.completed =
 					vehicleInspected &&
-					(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+					(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
 					(checklistData.sections.vehiculo.verificaciones?.completed ?? false);
 			}
 
@@ -3545,7 +3545,7 @@ export const crmRouter = {
 			// Recalculate vehicle section completion
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
-				(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+				(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
 				checklistData.sections.vehiculo.verificaciones.completed;
 
 			// Recalculate client verificaciones completion

@@ -600,6 +600,30 @@ export interface GetStatsParams {
 }
 
 // ============================================================================
+// FACTURACIÓN
+// ============================================================================
+
+/** Item de factura genérica */
+export interface FacturaItem {
+	monto: number;
+	rubro: string;
+}
+
+/** Input para facturación genérica */
+export interface FacturarGenericoInput {
+	nit: string;
+	items: FacturaItem[];
+	created_by: number;
+}
+
+/** Respuesta de facturación genérica */
+export interface FacturarGenericoResponse {
+	success: boolean;
+	message?: string;
+	factura_id?: number;
+}
+
+// ============================================================================
 // ERROR TYPES
 // ============================================================================
 

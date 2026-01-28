@@ -57,6 +57,7 @@ import {
 	generateAmortizationTable,
 	generateQuotationPdf,
 } from "@/lib/generate-pdf";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 const searchSchema = z.object({
@@ -383,8 +384,10 @@ function ExtraCostsTable({
 		() => {
 			const active: Record<string, boolean> = {};
 			for (const field of EXTRA_COST_FIELDS) {
-				// Activo por defecto si: es computed, o tiene defaultActive: true
-				active[field.name] = field.computed ?? field.defaultActive ?? false;
+				// Activo si: es computed (siempre), o tiene valor > 0 en el form
+				// Los defaults del form ya vienen con valores, así que si el form tiene valor > 0, se activa
+				const formValue = Number(values[field.valueField]) || 0;
+				active[field.name] = field.computed || formValue > 0;
 			}
 			return active;
 		},
@@ -716,8 +719,11 @@ function QuoterPage() {
 		return () => clearTimeout(timer);
 	}, [opportunitiesSearch]);
 
-	// Verificar que sea usuario de ventas
-	if (userProfile.data && !["admin", "sales"].includes(userProfile.data.role)) {
+	// Verificar que sea usuario de ventas (admin, sales, sales_supervisor)
+	if (
+		userProfile.data &&
+		!PERMISSIONS.canCreateOpportunities(userProfile.data.role)
+	) {
 		navigate({ to: "/dashboard" });
 	}
 

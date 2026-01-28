@@ -728,7 +728,8 @@ export function CreditDetailView({
 		verificacionDireccion +
 		impuestoCirculacion +
 		traspaso +
-		garantiaMobiliaria;
+		garantiaMobiliaria +
+		placas;
 
 	// Subtotal: Gastos de Abogado
 	const subtotalGastosAbogado = contratoLeasing + autenticaContrato;
@@ -1783,6 +1784,20 @@ export function CreditDetailView({
 													{garantiaMobiliaria > 0
 														? formatCurrency(garantiaMobiliaria)
 														: "Q -"}
+												</TableCell>
+											</TableRow>
+											<TableRow>
+												<TableCell>Placas</TableCell>
+												<TableCell className="text-center">
+													<Badge
+														variant={placas > 0 ? "default" : "outline"}
+														className="text-xs"
+													>
+														{placas > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">
+													{placas > 0 ? formatCurrency(placas) : "Q -"}
 												</TableCell>
 											</TableRow>
 										</TableBody>

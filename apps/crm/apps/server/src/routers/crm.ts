@@ -901,6 +901,7 @@ export const crmRouter = {
 				assignedTo: z.string().optional(), // Better Auth user ID (text, not UUID)
 				vendorId: z.string().uuid().optional(), // Vehicle vendor
 				notes: z.string().optional(),
+				force: z.boolean().optional(), // Skip duplicate check
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -910,6 +911,38 @@ export const crmRouter = {
 				throw new Error(
 					"Sales users can only assign opportunities to themselves",
 				);
+			}
+
+			// Check for recent opportunity with same lead (within 1 hour)
+			if (input.leadId && !input.force) {
+				const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+				const [recentOpportunity] = await db
+					.select({
+						id: opportunities.id,
+						title: opportunities.title,
+						createdAt: opportunities.createdAt,
+					})
+					.from(opportunities)
+					.where(
+						and(
+							eq(opportunities.leadId, input.leadId),
+							gte(opportunities.createdAt, oneHourAgo),
+						),
+					)
+					.orderBy(desc(opportunities.createdAt))
+					.limit(1);
+
+				if (recentOpportunity) {
+					const minutesAgo = Math.round(
+						(Date.now() - new Date(recentOpportunity.createdAt!).getTime()) /
+							60000,
+					);
+					return {
+						warning: true as const,
+						message: `Ya existe una oportunidad "${recentOpportunity.title}" creada hace ${minutesAgo} minutos para este lead.`,
+						existingOpportunity: recentOpportunity,
+					};
+				}
 			}
 
 			// If a lead is provided, get the company and source from the lead
@@ -946,7 +979,7 @@ export const crmRouter = {
 					updatedAt: new Date(),
 				})
 				.returning();
-			return newOpportunity[0];
+			return { ...newOpportunity[0], warning: false as const };
 		}),
 
 	updateOpportunity: crmProcedure
@@ -1426,9 +1459,17 @@ export const crmRouter = {
 					lead: {
 						id: leads.id,
 						firstName: leads.firstName,
+						middleName: leads.middleName,
 						lastName: leads.lastName,
+						secondLastName: leads.secondLastName,
+						dpi: leads.dpi,
 						email: leads.email,
 						phone: leads.phone,
+						age: leads.age,
+						direccion: leads.direccion,
+						departamento: leads.departamento,
+						municipio: leads.municipio,
+						zona: leads.zona,
 					},
 					company: {
 						id: companies.id,
@@ -2810,14 +2851,12 @@ export const crmRouter = {
 				// 2. Validar inspección del vehículo (solo si hay vehículo asociado)
 				let vehicleInspected = false;
 				let inspectionStatus = "pending";
-				let isNewVehicle = false;
 				if (opp.vehicleId) {
 					const inspectionResult = await getVehicleInspectionStatus(
 						opp.vehicleId,
 					);
 					vehicleInspected = inspectionResult.isInspected;
 					inspectionStatus = inspectionResult.inspectionStatus;
-					isNewVehicle = inspectionResult.isNew;
 				}
 
 				// 3. Obtener documentos requeridos según tipo de cliente y crédito

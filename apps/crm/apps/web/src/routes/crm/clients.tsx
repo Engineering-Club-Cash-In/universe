@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-	ArrowUpRight,
 	Banknote,
 	Briefcase,
 	Calendar,
@@ -21,6 +20,10 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -197,6 +200,11 @@ function RouteComponent() {
 	// Modal state
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedClient, setSelectedClient] = useState<ClientData | null>(null);
+
+	// Opportunity modal state
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
+		useState<OpportunityForModal | null>(null);
 
 	// Debounce search
 	useEffect(() => {
@@ -1088,15 +1096,40 @@ function RouteComponent() {
 													variant="outline"
 													size="sm"
 													onClick={() => {
-														setIsDetailsDialogOpen(false);
-														navigate({
-															to: "/crm/opportunities",
-															search: { opportunityId: opp.id },
-														});
+														// Convertir la oportunidad al tipo esperado por el modal
+														const opportunityForModal: OpportunityForModal = {
+															id: opp.id,
+															title: opp.title,
+															value: opp.value,
+															creditType: opp.creditType,
+															status: opp.status,
+															expectedCloseDate: null,
+															createdAt: opp.createdAt,
+															lead: selectedClient
+																? {
+																		id: selectedClient.id,
+																		firstName: selectedClient.firstName,
+																		lastName: selectedClient.lastName,
+																		email: selectedClient.email,
+																		phone: selectedClient.phone,
+																		dpi: selectedClient.dpi,
+																	}
+																: null,
+															stage: opp.stage
+																? {
+																		id: opp.stage.id,
+																		name: opp.stage.name,
+																		closurePercentage: opp.stage.closurePercentage,
+																		color: opp.stage.color || "#888",
+																	}
+																: null,
+														};
+														setSelectedOpportunityForModal(opportunityForModal);
+														setIsOpportunityModalOpen(true);
 													}}
 													className="ml-4 shrink-0"
 												>
-													<ArrowUpRight className="mr-1 h-4 w-4" />
+													<Eye className="mr-1 h-4 w-4" />
 													Ver Oportunidad
 												</Button>
 											</div>
@@ -1108,6 +1141,15 @@ function RouteComponent() {
 					)}
 				</DialogContent>
 			</Dialog>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunityForModal}
+				userRole={userProfile.data?.role}
+				readOnly
+			/>
 		</div>
 	);
 }

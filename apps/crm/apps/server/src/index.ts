@@ -750,6 +750,19 @@ app.get("/upload-csv", async (c) => {
 	}
 });
 
+// Endpoint REST directo para migración masiva de créditos (más fácil de usar desde Postman)
+app.post("/api/migrate/creditos", async (c) => {
+	try {
+		const { migrarCreditos } = await import("./controllers/migrate-creditos");
+		const creditos = await c.req.json();
+		const resultado = await migrarCreditos(creditos);
+		return c.json(resultado);
+	} catch (err: any) {
+		console.error("[Migrate] Error:", err);
+		return c.json({ error: err.message }, 500);
+	}
+});
+
 export default {
 	port: process.env.PORT || 3000,
 	fetch: app.fetch,

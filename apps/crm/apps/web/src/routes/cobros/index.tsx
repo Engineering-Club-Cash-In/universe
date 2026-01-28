@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { differenceInDays } from "date-fns";
 import {
 	Banknote,
@@ -51,6 +51,7 @@ export const Route = createFileRoute("/cobros/")({
 
 function RouteComponent() {
 	const { data: session } = authClient.useSession();
+	const navigate = useNavigate();
 	const [filtroTemporal, setFiltroTemporal] = useState<FiltroTemporal>("todos");
 	const [mostrarCompletadosIncobrables, setMostrarCompletadosIncobrables] =
 		useState(false);
@@ -573,6 +574,15 @@ function RouteComponent() {
 						isLoading={todosLosCreditos.isLoading}
 						setGlobalFilterParam={setFilterValue}
 						searchPlaceholder="Buscar por cliente"
+						onRowClick={(row) => {
+							const linkId = row.numeroCredito || row.contratoId;
+							const tipoLink = row.casoCobroId ? "caso" : "contrato";
+							navigate({
+								to: "/cobros/$id",
+								params: { id: linkId },
+								search: { tipo: tipoLink },
+							});
+						}}
 						filterContent={
 							<>
 								<span className="font-medium text-muted-foreground text-sm">

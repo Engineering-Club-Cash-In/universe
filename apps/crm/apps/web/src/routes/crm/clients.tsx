@@ -239,6 +239,20 @@ function RouteComponent() {
 		],
 	});
 
+	// Query para estadísticas globales (no paginadas)
+	const statsQuery = useQuery({
+		...orpc.getLeadsAsClientsStats.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: [
+			"getLeadsAsClientsStats",
+			session?.user?.id,
+			userProfile.data?.role,
+		],
+	});
+
 	useEffect(() => {
 		if (!session && !isPending) {
 			navigate({ to: "/login" });
@@ -293,7 +307,9 @@ function RouteComponent() {
 						<HandshakeIcon className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">{totalRecords}</div>
+						<div className="font-bold text-2xl">
+							{statsQuery.data?.totalClients ?? 0}
+						</div>
 						<p className="text-muted-foreground text-xs">
 							Leads con créditos cerrados
 						</p>
@@ -308,10 +324,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{clients.reduce(
-								(sum, c) => sum + (c.closedOpportunitiesCount || 0),
-								0,
-							)}
+							{statsQuery.data?.totalClosedOpportunities ?? 0}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Total de créditos activos
@@ -325,10 +338,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							Q
-							{clients
-								.reduce((sum, c) => sum + (c.totalClosedValue || 0), 0)
-								.toLocaleString()}
+							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							En créditos cerrados

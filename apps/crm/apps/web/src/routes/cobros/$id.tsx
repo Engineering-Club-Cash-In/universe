@@ -8,6 +8,7 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	Clock,
+	Eye,
 	FileText,
 	Mail,
 	MapPin,
@@ -19,6 +20,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { ContactoModal } from "@/components/contacto-modal";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -103,6 +108,11 @@ function RouteComponent() {
 	const [cuotasPage, setCuotasPage] = useState(1);
 	const ITEMS_PER_PAGE = 20;
 
+	// Estado del modal de oportunidad
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
+		useState<OpportunityForModal | null>(null);
+
 	// Obtener detalles del contrato/caso
 	// Si es ID numérico, usar endpoint de Cartera-Back, si es UUID usar el del CRM
 	const casoDetails = useQuery({
@@ -147,6 +157,54 @@ function RouteComponent() {
 			tipo === "caso" &&
 			casoDetails.data?.estadoMora === "incobrable",
 	});
+
+	// Obtener la oportunidad asociada por numeroSifco para ver detalles completos
+	const opportunityQuery = useQuery({
+		...orpc.getOpportunities.queryOptions({
+			input: { search: casoDetails.data?.numeroCreditoSifco || "" },
+		}),
+		enabled: !!session && !!casoDetails.data?.numeroCreditoSifco,
+	});
+
+	// Buscar la oportunidad que coincide con el numeroSifco
+	const matchingOpportunity = opportunityQuery.data?.find(
+		(opp) => opp.numeroSifco === casoDetails.data?.numeroCreditoSifco,
+	);
+
+	// Función para abrir el modal de detalle de oportunidad
+	const handleOpenOpportunityDetail = () => {
+		if (matchingOpportunity) {
+			const opportunityForModal: OpportunityForModal = {
+				id: matchingOpportunity.id,
+				title: matchingOpportunity.title,
+				value: matchingOpportunity.value,
+				creditType: matchingOpportunity.creditType,
+				status: matchingOpportunity.status,
+				expectedCloseDate: matchingOpportunity.expectedCloseDate,
+				createdAt: matchingOpportunity.createdAt,
+				lead: matchingOpportunity.lead
+					? {
+							id: matchingOpportunity.lead.id,
+							firstName: matchingOpportunity.lead.firstName,
+							lastName: matchingOpportunity.lead.lastName,
+							email: matchingOpportunity.lead.email,
+							phone: null,
+							dpi: null,
+						}
+					: null,
+				stage: matchingOpportunity.stage
+					? {
+							id: matchingOpportunity.stage.id,
+							name: matchingOpportunity.stage.name,
+							closurePercentage: matchingOpportunity.stage.closurePercentage,
+							color: matchingOpportunity.stage.color || "#888",
+						}
+					: null,
+			};
+			setSelectedOpportunityForModal(opportunityForModal);
+			setIsOpportunityModalOpen(true);
+		}
+	};
 
 	if (casoDetails.isLoading) {
 		return (
@@ -861,6 +919,37 @@ function RouteComponent() {
 										: "Sin fecha"}
 								</p>
 							</div>
+							{caso.creditType && (
+								<div>
+									<p className="text-muted-foreground text-sm">Tipo de Crédito</p>
+									<p className="font-medium">
+										{caso.creditType === "autocompra"
+											? "Autocompra"
+											: "Sobre Vehículo"}
+									</p>
+								</div>
+							)}
+							{caso.oportunidadNotes && (
+								<div className="border-t pt-3">
+									<p className="mb-1 text-muted-foreground text-xs">Notas</p>
+									<p className="max-h-32 overflow-y-auto text-xs leading-relaxed">
+										{caso.oportunidadNotes}
+									</p>
+								</div>
+							)}
+							{/* Botón para ver detalle de la oportunidad */}
+							{matchingOpportunity && (
+								<div className="border-t pt-3">
+									<Button
+										size="sm"
+										className="w-full bg-blue-600 text-white hover:bg-blue-700"
+										onClick={handleOpenOpportunityDetail}
+									>
+										<Eye className="mr-2 h-4 w-4" />
+										Ver Detalle Completo
+									</Button>
+								</div>
+							)}
 						</CardContent>
 					</Card>
 
@@ -879,10 +968,73 @@ function RouteComponent() {
 									{caso.vehiculoMarca} {caso.vehiculoModelo} {caso.vehiculoYear}
 								</p>
 							</div>
+							{caso.vehiculoTipo && (
+								<div>
+									<p className="text-muted-foreground text-sm">Tipo</p>
+									<p className="font-medium">{caso.vehiculoTipo}</p>
+								</div>
+							)}
 							<div>
 								<p className="text-muted-foreground text-sm">Placa</p>
-								<p className="font-medium">{caso.vehiculoPlaca}</p>
+								<p className="font-medium">{caso.vehiculoPlaca || "-"}</p>
 							</div>
+							{caso.vehiculoMotor && (
+								<div>
+									<p className="text-muted-foreground text-sm">Motor</p>
+									<p className="font-medium text-xs">{caso.vehiculoMotor}</p>
+								</div>
+							)}
+							{caso.vehiculoChasis && (
+								<div>
+									<p className="text-muted-foreground text-sm">Chasis</p>
+									<p className="font-medium text-xs">{caso.vehiculoChasis}</p>
+								</div>
+							)}
+							{caso.vehiculoAsientos && (
+								<div>
+									<p className="text-muted-foreground text-sm">Pasajeros</p>
+									<p className="font-medium">{caso.vehiculoAsientos}</p>
+								</div>
+							)}
+							{caso.vehiculoUso && (
+								<div>
+									<p className="text-muted-foreground text-sm">Uso</p>
+									<p className="font-medium">{caso.vehiculoUso}</p>
+								</div>
+							)}
+							{/* Información del Seguro */}
+							{caso.vehiculoNumeroPoliza && (
+								<div className="border-t pt-3">
+									<p className="mb-2 flex items-center gap-1 text-muted-foreground text-xs">
+										<Shield className="h-3 w-3" />
+										Seguro
+									</p>
+									<div className="space-y-2 text-xs">
+										<div>
+											<p className="text-muted-foreground">Póliza</p>
+											<p className="font-medium">{caso.vehiculoNumeroPoliza}</p>
+										</div>
+										{caso.vehiculoMontoAsegurado && (
+											<div>
+												<p className="text-muted-foreground">Monto Asegurado</p>
+												<p className="font-medium">
+													Q{Number(caso.vehiculoMontoAsegurado).toLocaleString()}
+												</p>
+											</div>
+										)}
+										{caso.vehiculoFechaVencimientoSeguro && (
+											<div>
+												<p className="text-muted-foreground">Vencimiento</p>
+												<p className="font-medium">
+													{new Date(
+														caso.vehiculoFechaVencimientoSeguro,
+													).toLocaleDateString("es-GT")}
+												</p>
+											</div>
+										)}
+									</div>
+								</div>
+							)}
 						</CardContent>
 					</Card>
 
@@ -1044,6 +1196,14 @@ function RouteComponent() {
 					)}
 				</div>
 			</div>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunityForModal}
+				readOnly
+			/>
 		</div>
 	);
 }

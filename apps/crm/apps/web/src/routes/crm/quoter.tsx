@@ -52,7 +52,11 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { authClient } from "@/lib/auth-client";
-import { generateQuotationPdf } from "@/lib/generate-pdf";
+import {
+	type AmortizationRow,
+	generateAmortizationTable,
+	generateQuotationPdf,
+} from "@/lib/generate-pdf";
 import { client, orpc } from "@/utils/orpc";
 
 const searchSchema = z.object({
@@ -93,67 +97,6 @@ function calculateMonthlyPayment(
 
 	// Agregar seguro y GPS a la cuota mensual
 	return Math.round((baseMonthlyPayment + insuranceCost + gpsCost) * 100) / 100;
-}
-
-// Interfaz para las filas de la tabla de amortización
-interface AmortizationRow {
-	period: number;
-	initialBalance: number;
-	interestPlusVAT: number;
-	principal: number;
-	finalBalance: number;
-}
-
-// Función para generar tabla de amortización (según Excel)
-function generateAmortizationTable(
-	totalFinanced: number,
-	monthlyRate: number,
-	termMonths: number,
-	insuranceCost: number,
-	gpsCost: number,
-): AmortizationRow[] {
-	const table: AmortizationRow[] = [];
-	let balance = totalFinanced;
-	const r = monthlyRate / 100;
-	const VAT = 0.12; // 12% IVA
-
-	// Calcular la cuota base (sin seguro ni GPS)
-	const rWithVAT = r * (1 + VAT);
-	const factor = (1 + rWithVAT) ** termMonths;
-	const baseMonthlyPayment =
-		(totalFinanced * (rWithVAT * factor)) / (factor - 1);
-
-	// Período 0 (inicial)
-	const initialInterest = balance * r;
-	const initialInterestWithVAT = initialInterest * (1 + VAT);
-
-	table.push({
-		period: 0,
-		initialBalance: Math.round(balance * 100) / 100,
-		interestPlusVAT: Math.round(initialInterestWithVAT * 100) / 100,
-		principal: 0,
-		finalBalance: Math.round(balance * 100) / 100,
-	});
-
-	// Períodos 1 a termMonths
-	for (let i = 1; i <= termMonths; i++) {
-		const interest = balance * r;
-		const interestWithVAT = interest * (1 + VAT);
-		const principalPayment = baseMonthlyPayment - interestWithVAT;
-		const newBalance = balance - principalPayment;
-
-		table.push({
-			period: i,
-			initialBalance: Math.round(balance * 100) / 100,
-			interestPlusVAT: Math.round(interestWithVAT * 100) / 100,
-			principal: Math.round(principalPayment * 100) / 100,
-			finalBalance: Math.round((newBalance > 0 ? newBalance : 0) * 100) / 100,
-		});
-
-		balance = newBalance;
-	}
-
-	return table;
 }
 
 // Tipo para los valores del formulario de cotización
@@ -1075,8 +1018,6 @@ function QuoterPage() {
 				totalFinanced,
 				Number(values.interestRate),
 				Number(values.termMonths),
-				insuranceCost,
-				gpsCost,
 			);
 			setAmortizationTable(table);
 		} else {

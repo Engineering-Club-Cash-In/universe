@@ -6,6 +6,7 @@ import {
 	Car,
 	CheckCircle,
 	CreditCard,
+	Download,
 	Edit2,
 	FileText,
 	Percent,
@@ -54,6 +55,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+	generateAmortizationTable,
+	generateQuotationPdf,
+} from "@/lib/generate-pdf";
 import type { IOpportunity } from "@/routes/crm/opportunities";
 import { client } from "@/utils/orpc";
 
@@ -2610,6 +2615,41 @@ export function CreditDetailView({
 															? "Rechazada"
 															: "Borrador"}
 											</Badge>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => {
+													const amortizationTable = generateAmortizationTable(
+														Number(quotation.totalFinanced),
+														Number(quotation.interestRate),
+														quotation.termMonths,
+													);
+													generateQuotationPdf({
+														vehicleBrand: quotation.vehicleBrand,
+														vehicleLine: quotation.vehicleLine,
+														vehicleModel: quotation.vehicleModel,
+														vehicleValue: Number(quotation.vehicleValue),
+														downPayment: Number(quotation.downPayment),
+														downPaymentPercentage: Number(
+															quotation.downPaymentPercentage,
+														),
+														amountToFinance: Number(quotation.amountToFinance),
+														totalFinanced: Number(quotation.totalFinanced),
+														monthlyPayment: Number(quotation.monthlyPayment),
+														termMonths: quotation.termMonths,
+														interestRate: Number(quotation.interestRate),
+														insuranceCost: Number(quotation.insuranceCost),
+														gpsCost: Number(quotation.gpsCost),
+														transferCost: Number(quotation.transferCost),
+														adminCost: Number(quotation.adminCost),
+														membershipCost: Number(quotation.membershipCost),
+														amortizationTable,
+													});
+												}}
+											>
+												<Download className="mr-2 h-4 w-4" />
+												Descargar PDF
+											</Button>
 										</div>
 										<div className="text-muted-foreground text-sm">
 											Creada: {formatDate(quotation.createdAt)}

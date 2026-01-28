@@ -872,6 +872,7 @@ function QuoterPage() {
 				keyCopyDiffCost: Number(value.keyCopyDiffCost),
 				circulationTaxCost: Number(value.circulationTaxCost),
 				mobileGuaranteeCost: Number(value.mobileGuaranteeCost),
+				licensePlatesCost: Number(value.licensePlatesCost),
 				leasingContractCost: Number(value.leasingContractCost),
 				collectionAuthCost: Number(value.collectionAuthCost),
 				legalCost: Number(value.legalCost),
@@ -1192,14 +1193,14 @@ function QuoterPage() {
 				);
 				quoterForm.setFieldValue("legalCost", Number(q.legalCost) || 0);
 
-				// Gastos de Autocompras
+				// Gastos de Autocompras - usar el valor exacto guardado, no defaults
 				quoterForm.setFieldValue(
 					"appointmentCost",
-					Number(q.appointmentCost) || 0,
+					q.appointmentCost ? Number(q.appointmentCost) : 0,
 				);
 				quoterForm.setFieldValue(
 					"addressVerificationCost",
-					Number(q.addressVerificationCost) || 0,
+					q.addressVerificationCost ? Number(q.addressVerificationCost) : 0,
 				);
 
 				// Gastos extra (descuentos iniciales)
@@ -1844,7 +1845,7 @@ function QuoterPage() {
 								<quoterForm.Field name="creditType">
 									{(creditTypeField) => (
 										<ExtraCostsTable
-											key={creditTypeField.state.value}
+											key={`${creditTypeField.state.value}-${quoterForm.state.values.opportunityId}`}
 											values={quoterForm.state.values as QuotationFormValues}
 											totalFinanced={calculatedValues.totalFinanced}
 											creditType={creditTypeField.state.value}

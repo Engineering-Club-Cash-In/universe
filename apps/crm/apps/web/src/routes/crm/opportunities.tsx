@@ -678,8 +678,8 @@ function RouteComponent() {
 	const opportunitiesQuery = useQuery({
 		...orpc.getOpportunities.queryOptions({
 			input: {
-				notStatus: "migrate"
-			}
+				excludeStatuses: ["migrate"],
+			},
 		}),
 		enabled:
 			!!userProfile.data?.role &&

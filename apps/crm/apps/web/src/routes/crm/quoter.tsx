@@ -796,7 +796,6 @@ function QuoterPage() {
 		queryKey: ["getOpportunities", "quoter", debouncedOpportunitiesSearch],
 		queryFn: () =>
 			client.getOpportunities({
-				limit: 50,
 				search: debouncedOpportunitiesSearch || undefined,
 				notStatus: "won",
 			}),

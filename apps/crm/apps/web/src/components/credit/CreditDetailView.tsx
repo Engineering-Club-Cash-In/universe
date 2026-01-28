@@ -143,6 +143,7 @@ interface CreditDetailViewProps {
 		keyCopyDiffCost?: string | null;
 		circulationTaxCost?: string | null;
 		mobileGuaranteeCost?: string | null;
+		licensePlatesCost?: string | null;
 		leasingContractCost?: string | null;
 		collectionAuthCost?: string | null;
 		legalCost?: string | null;
@@ -416,6 +417,15 @@ export function CreditDetailView({
 					monto: garantiaMobiliariaValue,
 				});
 
+			const placasValue = Number.parseFloat(
+				quotation?.licensePlatesCost || "0",
+			);
+			if (placasValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Placas",
+					monto: placasValue,
+				});
+
 			const contratoLeasingValue = Number.parseFloat(
 				quotation?.leasingContractCost || "0",
 			);
@@ -679,6 +689,7 @@ export function CreditDetailView({
 	const garantiaMobiliaria = Number.parseFloat(
 		quotation?.mobileGuaranteeCost || "0",
 	);
+	const placas = Number.parseFloat(quotation?.licensePlatesCost || "0");
 
 	// ========================================
 	// Sección "Gastos de Abogado"
@@ -2847,6 +2858,7 @@ export function CreditDetailView({
 										quotation.finesCost ||
 										quotation.keyCopyCost ||
 										quotation.circulationTaxCost ||
+										quotation.licensePlatesCost ||
 										quotation.legalCost) && (
 										<>
 											<Separator />
@@ -2922,6 +2934,18 @@ export function CreditDetailView({
 																</Label>
 																<p className="font-medium">
 																	{formatCurrency(quotation.circulationTaxCost)}
+																</p>
+															</div>
+														)}
+													{quotation.licensePlatesCost &&
+														Number.parseFloat(quotation.licensePlatesCost) >
+															0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Placas
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.licensePlatesCost)}
 																</p>
 															</div>
 														)}

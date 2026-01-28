@@ -12,7 +12,7 @@ import {
 	Target,
 	Trash2,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { Badge } from "@/components/ui/badge";
@@ -745,6 +745,12 @@ function QuoterPage() {
 		enabled: !!session,
 	});
 
+	// Vehículo seleccionado desde la oportunidad (para mostrar en el combobox)
+	const [opportunityVehicle, setOpportunityVehicle] = useState<{
+		value: string;
+		label: string;
+	} | null>(null);
+
 	// Estado del formulario
 	const [calculatedValues, setCalculatedValues] = useState({
 		amountToFinance: 0,
@@ -765,6 +771,7 @@ function QuoterPage() {
 			toast.success("Cotización creada exitosamente");
 			queryClient.invalidateQueries(orpc.getQuotations.queryOptions());
 			quoterForm.reset();
+			setOpportunityVehicle(null);
 			setCalculatedValues({
 				amountToFinance: 0,
 				totalFinanced: 0,
@@ -1031,8 +1038,15 @@ function QuoterPage() {
 		make: string;
 		model: string;
 		year: number;
+		licensePlate: string | null;
 		vehicleType?: string | null;
 	}) => {
+		// Guardar el vehículo para mostrarlo en el combobox
+		setOpportunityVehicle({
+			value: vehicle.id,
+			label: `${vehicle.make} ${vehicle.model} ${vehicle.year} - ${vehicle.licensePlate || ""}`,
+		});
+
 		// Primero llenamos los datos básicos del vehículo
 		quoterForm.setFieldValue("vehicleId", vehicle.id);
 		quoterForm.setFieldValue("vehicleBrand", vehicle.make);
@@ -1072,9 +1086,7 @@ function QuoterPage() {
 
 	// Cuando se selecciona un vehículo, auto-llenar datos
 	const handleVehicleSelect = (vehicleId: string) => {
-		const vehicle = vehiclesQuery.data?.data?.find(
-			(v: any) => v.id === vehicleId,
-		);
+		const vehicle = vehiclesQuery.data?.data?.find((v) => v.id === vehicleId);
 		if (vehicle) {
 			quoterForm.setFieldValue("vehicleId", vehicleId);
 			quoterForm.setFieldValue("vehicleBrand", vehicle.make);
@@ -1097,6 +1109,126 @@ function QuoterPage() {
 				// Actualizar seguro y membresía
 				updateInsuranceCost(numericValue, quoterForm.state.values.vehicleType);
 			}
+		}
+	};
+
+	// Cargar cotización existente de una oportunidad
+	const loadExistingQuotation = async (opportunityId: string) => {
+		try {
+			const quotations = await client.listQuotationsByOpportunity({
+				opportunityId,
+			});
+
+			if (quotations && quotations.length > 0) {
+				const q = quotations[0]; // La más reciente
+
+				// Cargar todos los campos de la cotización
+				quoterForm.setFieldValue("vehicleId", q.vehicleId || "");
+				quoterForm.setFieldValue("vehicleBrand", q.vehicleBrand || "");
+				quoterForm.setFieldValue("vehicleLine", q.vehicleLine || "");
+				quoterForm.setFieldValue("vehicleModel", q.vehicleModel || "");
+				const vehicleTypeToUse =
+					(q.vehicleType as typeof quoterForm.state.values.vehicleType) ||
+					"particular";
+				quoterForm.setFieldValue("vehicleType", vehicleTypeToUse);
+				quoterForm.setFieldValue("vehicleValue", Number(q.vehicleValue) || 0);
+				quoterForm.setFieldValue("insuredAmount", Number(q.insuredAmount) || 0);
+				quoterForm.setFieldValue("downPayment", Number(q.downPayment) || 0);
+				quoterForm.setFieldValue("termMonths", q.termMonths || 36);
+				quoterForm.setFieldValue("interestRate", Number(q.interestRate) || 2.5);
+
+				// Costos básicos
+				quoterForm.setFieldValue("insuranceCost", Number(q.insuranceCost) || 0);
+				quoterForm.setFieldValue("gpsCost", Number(q.gpsCost) || 0);
+				quoterForm.setFieldValue("transferCost", Number(q.transferCost) || 0);
+				quoterForm.setFieldValue("adminCost", Number(q.adminCost) || 0);
+				quoterForm.setFieldValue(
+					"membershipCost",
+					Number(q.membershipCost) || 0,
+				);
+
+				// Comisiones
+				quoterForm.setFieldValue("freelanceCost", Number(q.freelanceCost) || 0);
+				quoterForm.setFieldValue(
+					"freelancePercentage",
+					Number(q.freelancePercentage) || 0,
+				);
+				quoterForm.setFieldValue("royalty", Number(q.royalty) || 0);
+				quoterForm.setFieldValue(
+					"royaltyPercentage",
+					Number(q.royaltyPercentage) || 4,
+				);
+
+				// Gastos adicionales
+				quoterForm.setFieldValue(
+					"inspectionCost",
+					Number(q.inspectionCost) || 0,
+				);
+				quoterForm.setFieldValue("finesCost", Number(q.finesCost) || 0);
+				quoterForm.setFieldValue("keyCopyCost", Number(q.keyCopyCost) || 0);
+				quoterForm.setFieldValue(
+					"keyCopyDiffCost",
+					Number(q.keyCopyDiffCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"circulationTaxCost",
+					Number(q.circulationTaxCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"mobileGuaranteeCost",
+					Number(q.mobileGuaranteeCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"licensePlatesCost",
+					Number(q.licensePlatesCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"leasingContractCost",
+					Number(q.leasingContractCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"collectionAuthCost",
+					Number(q.collectionAuthCost) || 0,
+				);
+				quoterForm.setFieldValue("legalCost", Number(q.legalCost) || 0);
+
+				// Gastos de Autocompras
+				quoterForm.setFieldValue(
+					"appointmentCost",
+					Number(q.appointmentCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"addressVerificationCost",
+					Number(q.addressVerificationCost) || 0,
+				);
+
+				// Gastos extra (descuentos iniciales)
+				quoterForm.setFieldValue("extraGpsCost", Number(q.extraGpsCost) || 0);
+				quoterForm.setFieldValue(
+					"extraInsuranceCost",
+					Number(q.extraInsuranceCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"extraMembershipCost",
+					Number(q.extraMembershipCost) || 0,
+				);
+				quoterForm.setFieldValue(
+					"extraAdminCost",
+					Number(q.extraAdminCost) || 600,
+				);
+				quoterForm.setFieldValue("interestCost", Number(q.interestCost) || 0);
+				quoterForm.setFieldValue(
+					"vehicleTransferCost",
+					Number(q.vehicleTransferCost) || 0,
+				);
+
+				// Recalcular después de cargar
+				setTimeout(() => recalculate(), 100);
+
+				toast.success("Cotización existente cargada");
+			}
+		} catch (error) {
+			console.error("Error al cargar cotización existente:", error);
 		}
 	};
 
@@ -1207,9 +1339,9 @@ function QuoterPage() {
 												})) || []),
 											]}
 											value={field.state.value || "none"}
-											onChange={(value) => {
+											onChange={async (value) => {
 												field.handleChange(value === "none" ? "" : value);
-												// Auto-seleccionar el tipo de crédito y vehículo de la oportunidad
+												// Auto-seleccionar el tipo de crédito y cargar cotización/vehículo
 												if (value && value !== "none") {
 													const selectedOpp = opportunitiesQuery.data?.find(
 														(opp: any) => opp.id === value,
@@ -1220,16 +1352,20 @@ function QuoterPage() {
 															selectedOpp.creditType,
 														);
 													}
-													// Si la oportunidad tiene un vehículo, auto-llenar sus datos
+
+													// Intentar cargar cotización existente primero
+													await loadExistingQuotation(value);
+
+													// Guardar vehículo de la oportunidad para el combobox
 													if (selectedOpp?.vehicle?.id) {
-														handleOpportunityVehicleSelect({
-															id: selectedOpp.vehicle.id,
-															make: selectedOpp.vehicle.make,
-															model: selectedOpp.vehicle.model,
-															year: selectedOpp.vehicle.year,
-															vehicleType: selectedOpp.vehicle.vehicleType,
+														setOpportunityVehicle({
+															value: selectedOpp.vehicle.id,
+															label: `${selectedOpp.vehicle.make} ${selectedOpp.vehicle.model} ${selectedOpp.vehicle.year} - ${selectedOpp.vehicle.licensePlate || ""}`,
 														});
 													}
+												} else {
+													// Limpiar vehículo de oportunidad cuando se deselecciona
+													setOpportunityVehicle(null);
 												}
 											}}
 											onSearchChange={setOpportunitiesSearch}
@@ -1314,13 +1450,26 @@ function QuoterPage() {
 									<div className="space-y-2">
 										<Label>Seleccionar Vehículo (Opcional)</Label>
 										<Combobox
-											options={
-												vehiclesQuery.data?.data?.map((vehicle: any) => ({
-													value: vehicle.id,
-													label: `${vehicle.make} ${vehicle.model} ${vehicle.year} - ${vehicle.licensePlate}`,
-												})) || []
-											}
-											value={null}
+											options={(() => {
+												const queryOptions =
+													vehiclesQuery.data?.data?.map((vehicle) => ({
+														value: vehicle.id,
+														label: `${vehicle.make} ${vehicle.model} ${vehicle.year} - ${vehicle.licensePlate}`,
+													})) || [];
+
+												// Agregar vehículo de oportunidad si no está en la lista
+												if (
+													opportunityVehicle &&
+													!queryOptions.some(
+														(opt) => opt.value === opportunityVehicle.value,
+													)
+												) {
+													return [opportunityVehicle, ...queryOptions];
+												}
+
+												return queryOptions;
+											})()}
+											value={quoterForm.state.values.vehicleId || null}
 											onChange={(value) => {
 												if (value) handleVehicleSelect(value);
 											}}

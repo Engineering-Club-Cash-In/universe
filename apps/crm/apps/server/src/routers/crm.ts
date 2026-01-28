@@ -2851,14 +2851,12 @@ export const crmRouter = {
 				// 2. Validar inspección del vehículo (solo si hay vehículo asociado)
 				let vehicleInspected = false;
 				let inspectionStatus = "pending";
-				let isNewVehicle = false;
 				if (opp.vehicleId) {
 					const inspectionResult = await getVehicleInspectionStatus(
 						opp.vehicleId,
 					);
 					vehicleInspected = inspectionResult.isInspected;
 					inspectionStatus = inspectionResult.inspectionStatus;
-					isNewVehicle = inspectionResult.isNew;
 				}
 
 				// 3. Obtener documentos requeridos según tipo de cliente y crédito

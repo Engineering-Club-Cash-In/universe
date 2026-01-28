@@ -520,23 +520,29 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-			/*const camposFaltantes = validateRequiredFields();
-			if (camposFaltantes.length > 0) {
+			// Validar que el NIT esté presente
+			const nitValue = editNit || opportunity.nit;
+			if (!nitValue || nitValue.trim() === "") {
 				throw new Error(
-					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
+					"El NIT es obligatorio para aprobar el detalle de crédito. Por favor ingrese el NIT del cliente.",
 				);
-			}*/
+			}
+
+			const cuotaMensual = quotation?.monthlyPayment || "0";
+			const tasaMensualValue = quotation?.interestRate || "0";
+			const numeroCuotasValue = quotation?.termMonths || 0;
+			const totalFinanced = quotation?.totalFinanced || "0";
 
 			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
-			if (
-				quotation?.totalFinanced &&
-				Number(quotation?.totalFinanced) !== Number(opportunity.value)
-			) {
-				await client.updateOpportunity({
-					id: opportunityId,
-					value: quotation.totalFinanced,
-				});
-			}
+			
+			await client.updateOpportunity({
+				id: opportunityId,
+				numeroCuotas: numeroCuotasValue,
+				tasaInteres: tasaMensualValue,
+				cuotaMensual: cuotaMensual,
+				value: totalFinanced,
+			});
+			
 
 			return client.approveCreditDetail({ opportunityId });
 		},

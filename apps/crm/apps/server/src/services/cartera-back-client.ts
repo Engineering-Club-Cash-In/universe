@@ -21,6 +21,8 @@ import type {
 	CreditActionInput,
 	CreditoDetailResponse,
 	CreditoDirectoResponse,
+	FacturarGenericoInput,
+	FacturarGenericoResponse,
 	GetAdvisorsParams,
 	GetAllCreditsParams,
 	GetInvestorReportParams,
@@ -656,6 +658,26 @@ export class CarteraBackClient {
 			true,
 		);
 
+		return response;
+	}
+
+	// ========================================================================
+	// FACTURACIÓN
+	// ========================================================================
+
+	/**
+	 * Genera una factura genérica en cartera-back
+	 * @param input - Datos de la factura a generar
+	 * @returns Resultado de la operación
+	 */
+	async facturarGenerico(input: FacturarGenericoInput): Promise<FacturarGenericoResponse> {
+		const response = await this.request<FacturarGenericoResponse>(
+			"/api/dte/facturar-generico",
+			{
+				method: "POST",
+				body: JSON.stringify(input),
+			},
+		);
 		return response;
 	}
 

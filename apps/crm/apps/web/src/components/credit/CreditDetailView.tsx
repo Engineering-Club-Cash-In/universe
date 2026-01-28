@@ -520,12 +520,9 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-			/*const camposFaltantes = validateRequiredFields();
-			if (camposFaltantes.length > 0) {
-				throw new Error(
-					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
-				);
-			}*/
+			const cuotaMensual = quotation?.monthlyPayment || "0";
+			const tasaMensualValue = quotation?.interestRate || "0";
+			const numeroCuotasValue = quotation?.termMonths || 0;
 
 			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
 			if (
@@ -534,6 +531,9 @@ export function CreditDetailView({
 			) {
 				await client.updateOpportunity({
 					id: opportunityId,
+					numeroCuotas: numeroCuotasValue,
+					tasaInteres: tasaMensualValue,
+					cuotaMensual: cuotaMensual,
 					value: quotation.totalFinanced,
 				});
 			}

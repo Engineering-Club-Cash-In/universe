@@ -360,7 +360,7 @@ export const contractGenerationRouter = {
 
 	/**
 	 * Genera contratos directamente con datos del formulario
-	 * Similar al frontend antiguo, sin necesidad de oportunidad
+	 * NO enlaza los contratos a la oportunidad, solo los genera
 	 */
 	generateContractsDirect: juridicoProcedure
 		.input(
@@ -377,12 +377,9 @@ export const contractGenerationRouter = {
 						}),
 					}),
 				),
-				// Opcional: vincular a una oportunidad/lead existente
-				opportunityId: z.string().uuid().optional(),
-				leadId: z.string().uuid().optional(),
 			}),
 		)
-		.handler(async ({ input, context }) => {
+		.handler(async ({ input }) => {
 			const { generateContractsBatch } = await import(
 				"../services/legal-docs-api"
 			);
@@ -400,6 +397,8 @@ export const contractGenerationRouter = {
 					success: boolean;
 					documentLink?: string;
 					signingLinks?: string[];
+					templateId?: number;
+					apiResponse?: unknown;
 					error?: string;
 				}> = [];
 
@@ -414,29 +413,7 @@ export const contractGenerationRouter = {
 						if (contractResult.success) {
 							successCount++;
 
-							// Si hay leadId, guardar en la BD
-							if (input.leadId) {
-								await db.insert(generatedLegalContracts).values({
-									leadId: input.leadId,
-									opportunityId: input.opportunityId,
-									contractType:
-										contractResult.nameDocument?.[0]?.enum ||
-										originalContract.contractType,
-									contractName:
-										contractResult.nameDocument?.[0]?.label || "Contrato",
-									clientSigningLink: contractResult.signing_links?.[0],
-									representativeSigningLink: contractResult.signing_links?.[1],
-									additionalSigningLinks:
-										contractResult.signing_links?.slice(2),
-									templateId: contractResult.templateId,
-									apiResponse: contractResult,
-									pdfLink: contractResult.linkDocument,
-									status: "pending",
-									generatedBy: context.userId,
-									generatedAt: new Date(),
-								});
-							}
-
+							// NO guardamos en BD aquí, solo retornamos los datos
 							results.push({
 								contractType: originalContract.contractType,
 								contractName:
@@ -444,6 +421,8 @@ export const contractGenerationRouter = {
 								success: true,
 								documentLink: contractResult.linkDocument,
 								signingLinks: contractResult.signing_links,
+								templateId: contractResult.templateId,
+								apiResponse: contractResult,
 							});
 						} else {
 							failCount++;
@@ -476,6 +455,76 @@ export const contractGenerationRouter = {
 						error instanceof Error
 							? error.message
 							: "Error al generar contratos",
+				});
+			}
+		}),
+
+	/**
+	 * Enlaza contratos generados previamente a una oportunidad/lead
+	 * Este endpoint guarda los contratos en la base de datos
+	 */
+	linkContractsToOpportunity: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				leadId: z.string().uuid(),
+				contracts: z.array(
+					z.object({
+						contractType: z.string(),
+						contractName: z.string(),
+						documentLink: z.string().optional(),
+						signingLinks: z.array(z.string()).optional(),
+						templateId: z.number().optional(),
+						apiResponse: z.unknown().optional(),
+					}),
+				),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			try {
+				const savedContracts: Array<{ id: string; contractType: string }> = [];
+
+				for (const contract of input.contracts) {
+					const [saved] = await db
+						.insert(generatedLegalContracts)
+						.values({
+							leadId: input.leadId,
+							opportunityId: input.opportunityId,
+							contractType: contract.contractType,
+							contractName: contract.contractName,
+							clientSigningLink: contract.signingLinks?.[0] || null,
+							representativeSigningLink: contract.signingLinks?.[1] || null,
+							additionalSigningLinks: contract.signingLinks?.slice(2) || null,
+							templateId: contract.templateId,
+							apiResponse: contract.apiResponse,
+							pdfLink: contract.documentLink || null,
+							status: "pending",
+							generatedBy: context.userId,
+							generatedAt: new Date(),
+						})
+						.returning({ id: generatedLegalContracts.id });
+
+					if (saved) {
+						savedContracts.push({
+							id: saved.id,
+							contractType: contract.contractType,
+						});
+					}
+				}
+
+				return {
+					success: true,
+					linkedCount: savedContracts.length,
+					contracts: savedContracts,
+					message: `Se enlazaron ${savedContracts.length} contrato(s) a la oportunidad exitosamente`,
+				};
+			} catch (error) {
+				console.error("[linkContractsToOpportunity] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "Error al enlazar contratos a la oportunidad",
 				});
 			}
 		}),

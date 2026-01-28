@@ -13,6 +13,9 @@ import {
   TimeoutError,
 } from "@/services/errors";
 
+// Clave para guardar datos en localStorage
+const STORAGE_KEY = "legal-documents-wizard-state";
+
 interface DocumentData {
   // Step 1
   documentTypes?: string[];
@@ -33,9 +36,47 @@ interface DocumentData {
   additionalClauses?: string;
 }
 
+// Función para cargar estado desde localStorage
+const loadStateFromStorage = (): { step: number; data: DocumentData } | null => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (!stored) return null;
+    
+    const parsed = JSON.parse(stored);
+    console.log("📂 Estado cargado desde localStorage:", parsed);
+    return parsed;
+  } catch (error) {
+    console.error("❌ Error cargando estado desde localStorage:", error);
+    return null;
+  }
+};
+
+// Función para guardar estado en localStorage
+const saveStateToStorage = (step: number, data: DocumentData) => {
+  try {
+    const state = { step, data };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    console.log("💾 Estado guardado en localStorage:", state);
+  } catch (error) {
+    console.error("❌ Error guardando estado en localStorage:", error);
+  }
+};
+
+// Función para limpiar localStorage
+const clearStorage = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    console.log("🗑️ Estado limpiado de localStorage");
+  } catch (error) {
+    console.error("❌ Error limpiando localStorage:", error);
+  }
+};
+
 export function useGenerateComponent() {
-  const [currentStep, setCurrentStep] = useState(1);
-  const [formData, setFormData] = useState<DocumentData>({});
+  // Inicializar desde localStorage si existe
+  const [initialState] = useState(() => loadStateFromStorage());
+  const [currentStep, setCurrentStep] = useState(initialState?.step || 1);
+  const [formData, setFormData] = useState<DocumentData>(initialState?.data || {});
   const [isLoading, setIsLoading] = useState(false);
   const [step3Valid, setStep3Valid] = useState(false);
   const [shouldValidateStep3, setShouldValidateStep3] = useState(false);
@@ -46,6 +87,14 @@ export function useGenerateComponent() {
   useEffect(() => {
     console.log(`🔄 step3Valid changed to:`, step3Valid);
   }, [step3Valid]);
+
+  // Guardar en localStorage cuando cambian los datos o el paso (excepto en paso 4)
+  useEffect(() => {
+    // No guardar en el paso 4 (documentos generados)
+    if (currentStep === 4) return;
+    
+    saveStateToStorage(currentStep, formData);
+  }, [formData, currentStep]);
 
   const handleDataChange = useCallback(
     (field: string, value: string | boolean | string[] | object | null) => {
@@ -130,24 +179,6 @@ export function useGenerateComponent() {
           const fields = documentFields.map((field) => {
             const value = formData.fieldValues?.[field.key] || "";
 
-            /*  if (field.is_double_line) {
-              // para cada documento se requiere diferente mínimo de caracteres para el doble renglón
-              const minCharacters = document.count_doble_line ?? 160;
-              const currentLength = value.length;
-              // contar cuantas mayúsculas hay en el texto, cada mayúscula cuenta como 1.25 caracteres
-              const uppercaseCount = (value.match(/[A-ZÁÉÍÓÚÑ]/g) || []).length;
-              // redondear hacia arriba la cantidad de caracteres que aportan las mayúsculas
-              const length = currentLength + Math.ceil(uppercaseCount / 4);
-              if (length < minCharacters) {
-                const underscoresNeeded = minCharacters - length;
-                const underscores = "-".repeat(underscoresNeeded);
-                value += " " + underscores;
-                console.log(
-                  `➕ Agregando ${underscoresNeeded} guiones al campo ${field.name} (${currentLength} → ${minCharacters} caracteres)`
-                );
-              }
-            }*/
-
             return { [field.key]: value };
           });
 
@@ -178,6 +209,10 @@ export function useGenerateComponent() {
       // Guardar la respuesta y avanzar al Step 4
       setDocumentsResponse(result);
       setCurrentStep(4);
+      
+      // Limpiar localStorage después de generar exitosamente
+      clearStorage();
+      console.log("✅ Documentos generados exitosamente - localStorage limpiado");
     } catch (error) {
       console.error("Error generando documentos:", error);
 
@@ -294,6 +329,18 @@ export function useGenerateComponent() {
     setStep3Valid(valid);
   }, []);
 
+  const resetWizard = useCallback(() => {
+    console.log("🔄 Reiniciando wizard completo");
+    setCurrentStep(1);
+    setFormData({});
+    setStep3Valid(false);
+    setShouldValidateStep3(false);
+    setDocumentsResponse(null);
+    clearStorage();
+    // Scroll hasta arriba
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
+
   return {
     // Estados
     currentStep,
@@ -311,5 +358,6 @@ export function useGenerateComponent() {
     handleStepClick,
     setStep3ValidWrapper,
     resetRenapData,
+    resetWizard,
   };
 }

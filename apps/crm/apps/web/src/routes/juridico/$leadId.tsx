@@ -46,6 +46,9 @@ function RouteComponent() {
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
+	const [deletingContractId, setDeletingContractId] = useState<string | null>(
+		null,
+	);
 	const [contractToEdit, setContractToEdit] = useState<{
 		id: string;
 		contractType: string;
@@ -81,6 +84,28 @@ function RouteComponent() {
 			toast.error(error.message || "Error al aprobar la oportunidad");
 		},
 	});
+
+	// Mutación para eliminar contrato
+	const deleteMutation = useMutation({
+		mutationFn: async (contractId: string) => {
+			return await client.deleteLegalContract({ contractId });
+		},
+		onSuccess: () => {
+			toast.success("Contrato eliminado correctamente");
+			refetch();
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al eliminar el contrato");
+		},
+		onSettled: () => {
+			setDeletingContractId(null);
+		},
+	});
+
+	const handleDeleteContract = async (contractId: string) => {
+		setDeletingContractId(contractId);
+		await deleteMutation.mutateAsync(contractId);
+	};
 
 	// Obtener información del lead
 	const { data: leadInfo, isLoading: isLoadingLead } = useQuery({
@@ -242,22 +267,6 @@ function RouteComponent() {
 					</div>
 
 					<div className="flex gap-2">
-						{canApproveLegalStage &&
-							opportunityData &&
-							opportunityData.stage?.closurePercentage === 80 && (
-								<Button
-									onClick={() => setIsApproveModalOpen(true)}
-									disabled={
-										approveMutation.isPending ||
-										!contracts ||
-										contracts.length === 0
-									}
-									className="bg-green-600 text-white hover:bg-green-700"
-								>
-									<CheckCircle className="mr-2 h-4 w-4" />
-									Contratos Completados
-								</Button>
-							)}
 						{canCreateLegal && (
 							<Button onClick={() => setIsCreateModalOpen(true)}>
 								<Plus className="mr-2 h-4 w-4" />
@@ -268,30 +277,72 @@ function RouteComponent() {
 				</div>
 			</div>
 
-			{/* Información del lead */}
-			{leadInfo && (
-				<Card>
-					<CardHeader>
-						<CardTitle>Información de Contacto</CardTitle>
-					</CardHeader>
-					<CardContent>
-						<div className="grid gap-4 md:grid-cols-2">
-							<div>
-								<p className="font-medium text-muted-foreground text-sm">
-									Email
-								</p>
-								<p className="mt-1">{leadInfo.email || "No disponible"}</p>
+			{/* Grid superior: Información de contacto + Card de aprobación */}
+			<div className="grid gap-4 md:grid-cols-2">
+				{/* Información del lead */}
+				{leadInfo && (
+					<Card>
+						<CardHeader className="pb-3">
+							<CardTitle className="text-base">
+								Información de Contacto
+							</CardTitle>
+						</CardHeader>
+						<CardContent className="pt-0">
+							<div className="grid gap-3 sm:grid-cols-2">
+								<div>
+									<p className="font-medium text-muted-foreground text-xs">
+										Email
+									</p>
+									<p className="text-sm">{leadInfo.email || "No disponible"}</p>
+								</div>
+								<div>
+									<p className="font-medium text-muted-foreground text-xs">
+										Teléfono
+									</p>
+									<p className="text-sm">{leadInfo.phone || "No disponible"}</p>
+								</div>
 							</div>
-							<div>
-								<p className="font-medium text-muted-foreground text-sm">
-									Teléfono
-								</p>
-								<p className="mt-1">{leadInfo.phone || "No disponible"}</p>
-							</div>
-						</div>
-					</CardContent>
-				</Card>
-			)}
+						</CardContent>
+					</Card>
+				)}
+
+				{/* Card para enviar a análisis */}
+				{canApproveLegalStage &&
+					opportunityData &&
+					opportunityData.stage?.closurePercentage === 80 && (
+						<Card className="border-green-200 bg-green-50">
+							<CardContent className="flex h-full flex-col justify-center py-4">
+								<div className="flex flex-col gap-3">
+									<div className="flex items-center gap-2">
+										<div className="rounded-full bg-green-100 p-1.5">
+											<CheckCircle className="h-4 w-4 text-green-600" />
+										</div>
+										<h4 className="font-semibold text-green-800 text-sm">
+											¿Listo para enviar a análisis?
+										</h4>
+									</div>
+									<p className="text-green-700 text-xs">
+										Cuando todos los contratos estén completos y verificados,
+										avanza la oportunidad a la siguiente etapa.
+									</p>
+									<Button
+										onClick={() => setIsApproveModalOpen(true)}
+										disabled={
+											approveMutation.isPending ||
+											!contracts ||
+											contracts.length === 0
+										}
+										size="sm"
+										className="w-full bg-green-600 text-white hover:bg-green-700"
+									>
+										<CheckCircle className="mr-2 h-4 w-4" />
+										Contratos Completados
+									</Button>
+								</div>
+							</CardContent>
+						</Card>
+					)}
+			</div>
 
 			{/* Lista de contratos */}
 			<Card>
@@ -308,6 +359,8 @@ function RouteComponent() {
 						contracts={contracts || []}
 						onUpdate={refetch}
 						onEdit={canCreateLegal ? handleEdit : undefined}
+						onDelete={canCreateLegal ? handleDeleteContract : undefined}
+						deletingContractId={deletingContractId}
 					/>
 				</CardContent>
 			</Card>

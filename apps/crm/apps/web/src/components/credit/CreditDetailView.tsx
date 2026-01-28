@@ -520,14 +520,6 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-			// Validar que el NIT esté presente
-			const nitValue = editNit || opportunity.nit;
-			if (!nitValue || nitValue.trim() === "") {
-				throw new Error(
-					"El NIT es obligatorio para aprobar el detalle de crédito. Por favor ingrese el NIT del cliente.",
-				);
-			}
-
 			const cuotaMensual = quotation?.monthlyPayment || "0";
 			const tasaMensualValue = quotation?.interestRate || "0";
 			const numeroCuotasValue = quotation?.termMonths || 0;

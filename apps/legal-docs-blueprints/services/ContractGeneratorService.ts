@@ -26,6 +26,11 @@ export class ContractGeneratorService {
   private outputDir: string;
   private templateRegistry: Map<ContractType, ContractTemplateConfig>;
 
+  // Control de concurrencia para Gotenberg
+  private pdfConversionQueue: Array<() => void> = [];
+  private activePdfConversions = 0;
+  private readonly maxConcurrentPdfConversions = 3; // Máximo 3 conversiones simultáneas
+
   constructor(options: ContractGeneratorOptions = {}) {
     this.gotenbergUrl = options.gotenbergUrl || 'http://localhost:3000';
     this.templatesDir = options.templatesDir || path.join(process.cwd(), 'templates');
@@ -632,28 +637,78 @@ export class ContractGeneratorService {
   /**
    * Convierte un buffer DOCX a PDF usando Gotenberg
    */
-  private async convertToPdf(docxBuffer: Buffer): Promise<Buffer> {
-    const form = new FormData();
-    form.append('file', docxBuffer, {
-      filename: 'contract.docx',
-      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  /**
+   * Espera a que haya un slot disponible para conversión PDF
+   */
+  private async acquirePdfSlot(): Promise<void> {
+    if (this.activePdfConversions < this.maxConcurrentPdfConversions) {
+      this.activePdfConversions++;
+      return;
+    }
+
+    // Esperar a que se libere un slot
+    return new Promise<void>((resolve) => {
+      this.pdfConversionQueue.push(() => {
+        this.activePdfConversions++;
+        resolve();
+      });
     });
+  }
 
-    const response = await axios.post(
-      `${this.gotenbergUrl}/forms/libreoffice/convert`,
-      form,
-      {
-        headers: {
-          ...form.getHeaders(),
-        },
-        responseType: 'arraybuffer',
-        maxBodyLength: Infinity,
-        maxContentLength: Infinity,
-        timeout: 30000 // 30 segundos timeout
+  /**
+   * Libera un slot de conversión PDF
+   */
+  private releasePdfSlot(): void {
+    this.activePdfConversions--;
+    const next = this.pdfConversionQueue.shift();
+    if (next) {
+      next();
+    }
+  }
+
+  private async convertToPdf(docxBuffer: Buffer): Promise<Buffer> {
+    // Esperar a que haya un slot disponible (máximo 3 conversiones simultáneas)
+    await this.acquirePdfSlot();
+
+    try {
+      const form = new FormData();
+      form.append('file', docxBuffer, {
+        filename: 'contract.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      });
+
+      const response = await axios.post(
+        `${this.gotenbergUrl}/forms/libreoffice/convert`,
+        form,
+        {
+          headers: {
+            ...form.getHeaders(),
+          },
+          responseType: 'arraybuffer',
+          // Límites razonables para evitar memory leaks
+          maxBodyLength: 50 * 1024 * 1024, // 50MB máximo
+          maxContentLength: 50 * 1024 * 1024, // 50MB máximo
+          timeout: 60000 // 60 segundos timeout (LibreOffice puede ser lento)
+        }
+      );
+
+      return Buffer.from(response.data);
+    } catch (error: any) {
+      // Mejorar el mensaje de error para diagnóstico
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Gotenberg no está disponible. El servicio puede estar caído o reiniciándose.');
       }
-    );
-
-    return Buffer.from(response.data);
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        throw new Error('Timeout al conectar con Gotenberg. El servicio puede estar sobrecargado.');
+      }
+      if (error.response?.status === 503) {
+        throw new Error('Gotenberg está sobrecargado (503). Intente nuevamente en unos segundos.');
+      }
+      throw new Error(`Error al convertir a PDF: ${error.message}`);
+    } finally {
+      // SIEMPRE liberar el slot, incluso si hay error
+      this.releasePdfSlot();
+    }
   }
 
   /**

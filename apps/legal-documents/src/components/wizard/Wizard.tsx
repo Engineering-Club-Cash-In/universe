@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { RotateCcw } from 'lucide-react'
 
 export interface WizardStep {
   id: number
@@ -18,6 +19,7 @@ interface WizardProps {
   readonly onNext: () => void
   readonly onPrevious: () => void
   readonly onStepClick?: (stepId: number) => void
+  readonly onReset?: () => void
   readonly canGoNext?: boolean
   readonly canGoPrevious?: boolean
   readonly nextLabel?: string
@@ -32,6 +34,7 @@ export function Wizard({
   onNext,
   onPrevious,
   onStepClick,
+  onReset,
   canGoNext = true,
   canGoPrevious = true,
   nextLabel = "Siguiente",
@@ -94,13 +97,27 @@ export function Wizard({
 
         {/* Navigation buttons */}
         <div className="flex justify-between items-center">
-          <Button 
-            variant="outline" 
-            onClick={onPrevious}
-            disabled={isFirstStep || !canGoPrevious || isLoading}
-          >
-            {previousLabel}
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              onClick={onPrevious}
+              disabled={isFirstStep || !canGoPrevious || isLoading}
+            >
+              {previousLabel}
+            </Button>
+            
+            {onReset && currentStep !== 4 && (
+              <Button 
+                variant="ghost" 
+                onClick={onReset}
+                disabled={isLoading}
+                className="gap-2"
+              >
+                <RotateCcw className="h-4 w-4" />
+                Reiniciar
+              </Button>
+            )}
+          </div>
 
           <div className="text-sm text-muted-foreground">
             Paso {currentStep} de {steps.length}

@@ -278,6 +278,9 @@ export const crmRouter = {
 				}
 			}
 
+			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
+			conditions.push(not(eq(leads.status, "migrate")));
+
 			const whereClause =
 				conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -730,7 +733,7 @@ export const crmRouter = {
 				.object({
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
-					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					notStatus: z.enum(["open", "won", "lost", "on_hold", "migrate"]).optional(),
 					opportunityId: z.string().uuid().optional(),
 				})
 				.optional(),

@@ -291,7 +291,8 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
         "numeroCuota": "",
         "cuota": "",
         "montoBoleta": "",
-        "pagado": pagado
+        "pagado": pagado,
+        "capital": ""
     }
 
     # Buscar por nombre exacto de columna
@@ -306,6 +307,7 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
 
     # Usar índices específicos para evitar duplicados
     # # (índice 2) → numeroCuota
+    # Capital (índice 4) → capital
     # Cuota (índice 37) → cuota
     # Monto boleta (índice 38) → montoBoleta
     columnas_lista = list(columnas)
@@ -319,6 +321,12 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
                 info["numeroCuota"] = str(int(float(val)))
             except (ValueError, TypeError):
                 info["numeroCuota"] = str(val).strip()
+
+    # capital - columna 'Capital' índice 4
+    if len(columnas_lista) > 4 and columnas_lista[4] == 'Capital':
+        val = fila.iloc[4] if hasattr(fila, 'iloc') else fila[columnas_lista[4]]
+        if pd.notna(val):
+            info["capital"] = str(val)
 
     # cuota - columna 'Cuota' índice 37
     if len(columnas_lista) > 37 and columnas_lista[37] == 'Cuota':
@@ -381,9 +389,19 @@ def procesar_creditos(xlsx, hojas_disponibles, grupos_creditos):
                     "pagado": "No encontrado"
                 })
 
+        # Calcular suma de capitales
+        sum_capital = 0.0
+        for c in creditos_info:
+            if c.get("capital"):
+                try:
+                    sum_capital += float(c["capital"])
+                except (ValueError, TypeError):
+                    pass
+
         resultado.append({
             "numeroCredito": str(padre),
-            "creditos": creditos_info
+            "creditos": creditos_info,
+            "sumCapital": str(sum_capital)
         })
 
     return resultado
@@ -460,7 +478,7 @@ def buscar_ultimo_pago_optimizado(hojas_cache, hojas_disponibles, numero_credito
     return None
 
 
-def guardar_resultado(resultado, nombre_archivo="resultado_ultimos_pagos.json"):
+def guardar_resultado(resultado, nombre_archivo="pagados_inversionista.json"):
     """Guarda el resultado en un archivo JSON"""
     print(f"\n{'='*60}")
     print("PASO 4: Guardando resultado")

@@ -291,7 +291,8 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
         "numeroCuota": "",
         "cuota": "",
         "montoBoleta": "",
-        "pagado": pagado
+        "pagado": pagado,
+        "capitalRestante": ""
     }
 
     # Buscar por nombre exacto de columna
@@ -306,6 +307,7 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
 
     # Usar índices específicos para evitar duplicados
     # # (índice 2) → numeroCuota
+    # Capital restante (índice 25) → capitalRestante
     # Cuota (índice 37) → cuota
     # Monto boleta (índice 38) → montoBoleta
     columnas_lista = list(columnas)
@@ -319,6 +321,12 @@ def extraer_info_pago(fila, columnas, hoja, pagado):
                 info["numeroCuota"] = str(int(float(val)))
             except (ValueError, TypeError):
                 info["numeroCuota"] = str(val).strip()
+
+    # capitalRestante - columna 'Capital restante' índice 25
+    if len(columnas_lista) > 25 and columnas_lista[25] == 'Capital restante':
+        val = fila.iloc[25] if hasattr(fila, 'iloc') else fila[columnas_lista[25]]
+        if pd.notna(val):
+            info["capitalRestante"] = str(val)
 
     # cuota - columna 'Cuota' índice 37
     if len(columnas_lista) > 37 and columnas_lista[37] == 'Cuota':

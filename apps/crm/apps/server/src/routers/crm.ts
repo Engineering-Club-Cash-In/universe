@@ -4409,13 +4409,11 @@ export const crmRouter = {
 								isNew: vehicle.isNew,
 								hasRequiredData: !!(
 									vehicle.vinNumber &&
-									vehicle.motorNumber &&
 									vehicle.seats &&
 									vehicle.vehicleUse
 								),
 								missingFields: getMissingFieldsForContracts({
 									vinNumber: vehicle.vinNumber,
-									motorNumber: vehicle.motorNumber,
 									seats: vehicle.seats,
 									vehicleUse: vehicle.vehicleUse,
 								}),
@@ -4574,7 +4572,6 @@ export const crmRouter = {
 				const [vehicle] = await db
 					.select({
 						vinNumber: vehicles.vinNumber,
-						motorNumber: vehicles.motorNumber,
 						seats: vehicles.seats,
 						vehicleUse: vehicles.vehicleUse,
 					})

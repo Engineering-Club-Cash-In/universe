@@ -1,11 +1,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, FileSignature, Loader2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Eye, FileSignature, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import {
 	type CRMData,
 	DynamicContractWizard,
 } from "@/components/contracts/DynamicContractWizard";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +32,7 @@ function RouteComponent() {
 	const navigate = useNavigate();
 	const { canViewLegal, isLoading: isLoadingPermissions } =
 		useJuridicoPermissions();
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 
 	// Get contract types from API (dynamic)
 	const contractTypesQuery = useQuery({
@@ -66,7 +72,7 @@ function RouteComponent() {
 			dpi: string;
 			documentNames: string[];
 		}) => {
-			return await client.getDocumentsByDpi({ dpi, documentNames });
+			return await client.getDocumentsByDpi({ dpi: dpi.replace(/\s/g, ""), documentNames });
 		},
 	});
 
@@ -200,6 +206,42 @@ function RouteComponent() {
 				vehiculo: {},
 				credito: {},
 			};
+
+	// Transformar datos de oportunidad para el modal
+	const selectedOpportunity: OpportunityForModal | null = opportunity
+		? {
+				id: opportunity.id,
+				title: opportunity.title,
+				value: opportunity.value,
+				creditType: opportunity.creditType,
+				status: opportunity.status,
+				expectedCloseDate: opportunity.expectedCloseDate,
+				createdAt: opportunity.createdAt,
+				lead: opportunity.lead
+					? {
+							id: opportunity.lead.id,
+							firstName: opportunity.lead.firstName,
+							lastName: opportunity.lead.lastName,
+							dpi: null,
+							email: opportunity.lead.email,
+							phone: null,
+						}
+					: null,
+				stage: opportunity.stage,
+				assignedUser: opportunity.assignedUser,
+				vehicle: opportunity.vehicle?.id
+					? {
+							id: opportunity.vehicle.id,
+							make: opportunity.vehicle.make,
+							model: opportunity.vehicle.model,
+							year: opportunity.vehicle.year,
+							licensePlate: opportunity.vehicle.licensePlate,
+							color: opportunity.vehicle.color,
+							isNew: opportunity.vehicle.isNew,
+						}
+					: null,
+			}
+		: null;
 
 	const handleBack = () => {
 		if (opportunity?.lead?.id) {
@@ -376,11 +418,23 @@ function RouteComponent() {
 			{validation?.isValid && crmData.cliente.dpi && (
 				<Card>
 					<CardHeader>
-						<CardTitle>Generación de Documentos Legales</CardTitle>
-						<CardDescription>
-							Seleccione los documentos a generar. Los datos serán pre-llenados
-							automáticamente con la información del CRM.
-						</CardDescription>
+						<div className="flex items-center justify-between">
+							<div>
+								<CardTitle>Generación de Documentos Legales</CardTitle>
+								<CardDescription>
+									Seleccione los documentos a generar. Los datos serán pre-llenados
+									automáticamente con la información del CRM.
+								</CardDescription>
+							</div>
+							<Button
+							variant="outline"
+							className="border-blue-500 text-blue-500 hover:bg-blue-50"
+								onClick={() => setIsOpportunityModalOpen(true)}
+							>
+								<Eye className="mr-2 h-4 w-4" />
+								Ver detalle de la oportunidad
+							</Button>
+						</div>
 					</CardHeader>
 					<CardContent>
 						<DynamicContractWizard
@@ -398,6 +452,15 @@ function RouteComponent() {
 					</CardContent>
 				</Card>
 			)}
+
+			{/* Modal de detalle de oportunidad */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunity}
+				userRole="juridico"
+				readOnly
+			/>
 		</div>
 	);
 }

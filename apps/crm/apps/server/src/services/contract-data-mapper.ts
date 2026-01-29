@@ -403,8 +403,8 @@ export async function mapOpportunityToContractData(
 				placasMayusculas: toUpperCase(vehicle.licensePlate || ""),
 				vin: vehicle.vinNumber || "",
 				vinMayusculas: toUpperCase(vehicle.vinNumber || ""),
-				motor: vehicle.motorNumber || "",
-				motorMayusculas: toUpperCase(vehicle.motorNumber || ""),
+				motor: vehicle.motorNumber || "-",
+				motorMayusculas: toUpperCase(vehicle.motorNumber || "-"),
 				serie: vehicle.series || undefined,
 				serieMayusculas: vehicle.series
 					? toUpperCase(vehicle.series)
@@ -582,7 +582,6 @@ export async function validateOpportunityForContracts(
 		missingVehicleFields.push("Vehículo no asociado");
 	} else {
 		if (!vehicle.vinNumber) missingVehicleFields.push("VIN/Chasis");
-		if (!vehicle.motorNumber) missingVehicleFields.push("Número de Motor");
 		if (!vehicle.seats) missingVehicleFields.push("Asientos");
 		if (!vehicle.vehicleUse)
 			missingVehicleFields.push("Uso (Particular/Comercial)");

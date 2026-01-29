@@ -62,6 +62,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { scoreLead } from "../services/lead-scoring";
 
 /**
  * Helper function to check vehicle inspection status.
@@ -571,7 +572,10 @@ export const crmRouter = {
 
 			// Admin and juridico can update any lead, others only their own
 			const canUpdateAnyLead =
-				context.userRole === "admin" || context.userRole === "juridico" || context.userRole === "sales_supervisor" || context.userRole === "analyst";
+				context.userRole === "admin" ||
+				context.userRole === "juridico" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "analyst";
 			const whereClause = canUpdateAnyLead
 				? eq(leads.id, id)
 				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
@@ -3413,7 +3417,9 @@ export const crmRouter = {
 				// Recalculate vehicle section completion
 				checklistData.sections.vehiculo.completed =
 					vehicleInspected &&
-					(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
+					(checklistData.sections.vehiculo.documentos?.items?.length > 0
+						? (checklistData.sections.vehiculo.documentos?.completed ?? true)
+						: true) &&
 					(checklistData.sections.vehiculo.verificaciones?.completed ?? false);
 			}
 
@@ -3545,7 +3551,9 @@ export const crmRouter = {
 			// Recalculate vehicle section completion
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
-				(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
+				(checklistData.sections.vehiculo.documentos?.items?.length > 0
+					? (checklistData.sections.vehiculo.documentos?.completed ?? true)
+					: true) &&
 				checklistData.sections.vehiculo.verificaciones.completed;
 
 			// Recalculate client verificaciones completion
@@ -4290,7 +4298,7 @@ export const crmRouter = {
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&
-						opp.cuotaMensual 
+						opp.cuotaMensual
 					),
 					// Campos adicionales para edición
 					categoria: opp.categoria,
@@ -4577,5 +4585,17 @@ export const crmRouter = {
 				success: true,
 				message: "Inversionista asignado y oportunidad avanzada a 80%",
 			};
+		}),
+
+	// ── Credit Scoring ──────────────────────────────────────────────────
+	scoreLead: crmProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+				opportunityId: z.string().uuid().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			return await scoreLead(input.leadId, input.opportunityId);
 		}),
 };

@@ -1,6 +1,13 @@
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
-import { Copy, Edit, ExternalLink, FileText, Loader2, Trash2 } from "lucide-react";
+import {
+	Copy,
+	Edit,
+	ExternalLink,
+	FileText,
+	Loader2,
+	Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -335,7 +342,9 @@ export function ContractCard({
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>
-						<AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+						<AlertDialogCancel disabled={isDeleting}>
+							Cancelar
+						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={handleDelete}
 							disabled={isDeleting}

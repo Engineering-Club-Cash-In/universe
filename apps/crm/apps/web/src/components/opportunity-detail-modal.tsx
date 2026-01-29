@@ -281,10 +281,10 @@ export function OpportunityDetailModal({
 												onClick={() => onOpenChange(false)}
 											>
 												<span className="font-medium">
-													{opportunity.lead.firstName} {opportunity.lead.lastName}
+													{opportunity.lead.firstName}{" "}
+													{opportunity.lead.lastName}
 												</span>
 											</Link>
-											
 										)}
 									</div>
 									{opportunity.lead.dpi && (

@@ -28,12 +28,16 @@ interface ContractsListProps {
 	}>;
 	onUpdate?: () => void;
 	onEdit?: (contract: Contract, opportunity?: Opportunity | null) => void;
+	onDelete?: (contractId: string) => Promise<void>;
+	deletingContractId?: string | null;
 }
 
 export function ContractsList({
 	contracts,
 	onUpdate,
 	onEdit,
+	onDelete,
+	deletingContractId,
 }: ContractsListProps) {
 	if (contracts.length === 0) {
 		return (
@@ -58,6 +62,8 @@ export function ContractsList({
 					opportunity={opportunity}
 					onUpdate={onUpdate}
 					onEdit={onEdit ? () => onEdit(contract, opportunity) : undefined}
+					onDelete={onDelete}
+					isDeleting={deletingContractId === contract.id}
 				/>
 			))}
 		</div>

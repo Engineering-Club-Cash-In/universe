@@ -571,7 +571,7 @@ export const crmRouter = {
 
 			// Admin and juridico can update any lead, others only their own
 			const canUpdateAnyLead =
-				context.userRole === "admin" || context.userRole === "juridico";
+				context.userRole === "admin" || context.userRole === "juridico" || context.userRole === "sales_supervisor" || context.userRole === "analyst";
 			const whereClause = canUpdateAnyLead
 				? eq(leads.id, id)
 				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
@@ -3413,7 +3413,7 @@ export const crmRouter = {
 				// Recalculate vehicle section completion
 				checklistData.sections.vehiculo.completed =
 					vehicleInspected &&
-					(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+					(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
 					(checklistData.sections.vehiculo.verificaciones?.completed ?? false);
 			}
 
@@ -3545,7 +3545,7 @@ export const crmRouter = {
 			// Recalculate vehicle section completion
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
-				(checklistData.sections.vehiculo.documentos?.completed ?? false) &&
+				(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
 				checklistData.sections.vehiculo.verificaciones.completed;
 
 			// Recalculate client verificaciones completion
@@ -4290,7 +4290,7 @@ export const crmRouter = {
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&
-						opp.cuotaMensual
+						opp.cuotaMensual 
 					),
 					// Campos adicionales para edición
 					categoria: opp.categoria,

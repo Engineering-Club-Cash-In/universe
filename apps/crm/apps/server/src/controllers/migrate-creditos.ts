@@ -3,11 +3,12 @@
  * Endpoint REST directo para usar desde Postman
  */
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { db } from "../db";
 import { user } from "../db/schema/auth";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
+import { carteraBackClient } from "../services/cartera-back-client";
 
 // Tipo del crédito de entrada
 interface CreditoInput {
@@ -421,6 +422,143 @@ export async function migrarCreditos(
 
 	console.log(
 		`[Migrate] Completado: ${resultado.totalExitosos} exitosos, ${resultado.totalFallidos} fallidos, ${resultado.totalIgnorados} ignorados`,
+	);
+
+	return resultado;
+}
+
+// Resultado de la actualización de values
+interface UpdateValueResult {
+	totalEncontradas: number;
+	totalActualizadas: number;
+	totalFallidas: number;
+	totalSinSifco: number;
+	actualizaciones: Array<{
+		opportunityId: string;
+		numeroSifco: string;
+		valueAnterior: string | null;
+		valueNuevo: string;
+	}>;
+	errores: Array<{
+		opportunityId: string;
+		numeroSifco: string | null;
+		error: string;
+	}>;
+}
+
+/**
+ * Pequeña pausa para evitar sobrecargar cartera-back
+ */
+function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Actualiza el campo value de las oportunidades en estado "migrate" sin value
+ * consultando la deuda total desde cartera-back
+ */
+export async function actualizarValueOportunidades(): Promise<UpdateValueResult> {
+	console.log("[UpdateValue] Iniciando actualización de values de oportunidades migradas");
+
+	const resultado: UpdateValueResult = {
+		totalEncontradas: 0,
+		totalActualizadas: 0,
+		totalFallidas: 0,
+		totalSinSifco: 0,
+		actualizaciones: [],
+		errores: [],
+	};
+
+	// Buscar oportunidades con status "migrate" y sin value
+	const oportunidadesSinValue = await db
+		.select({
+			id: opportunities.id,
+			numeroSifco: opportunities.numeroSifco,
+			value: opportunities.value,
+		})
+		.from(opportunities)
+		.where(
+			and(
+				eq(opportunities.status, "migrate"),
+				isNull(opportunities.value)
+			)
+		);
+
+	resultado.totalEncontradas = oportunidadesSinValue.length;
+	console.log(`[UpdateValue] Encontradas ${resultado.totalEncontradas} oportunidades sin value`);
+
+	// Delay entre peticiones para no sobrecargar cartera-back (500ms)
+	const DELAY_BETWEEN_REQUESTS = 500;
+
+	for (let i = 0; i < oportunidadesSinValue.length; i++) {
+		const oportunidad = oportunidadesSinValue[i];
+
+		// Agregar delay entre peticiones (excepto la primera)
+		if (i > 0) {
+			await delay(DELAY_BETWEEN_REQUESTS);
+		}
+
+		// Log de progreso cada 10 oportunidades
+		if (i > 0 && i % 10 === 0) {
+			console.log(`[UpdateValue] Progreso: ${i}/${oportunidadesSinValue.length} procesadas...`);
+		}
+
+		// Si no tiene numeroSifco, no podemos consultar cartera
+		if (!oportunidad.numeroSifco) {
+			resultado.totalSinSifco++;
+			resultado.errores.push({
+				opportunityId: oportunidad.id,
+				numeroSifco: null,
+				error: "No tiene número SIFCO",
+			});
+			continue;
+		}
+
+		try {
+			// Consultar cartera-back para obtener la deuda total
+			const creditoData = await carteraBackClient.getCredito(oportunidad.numeroSifco);
+
+			if (!creditoData?.credito?.deudatotal) {
+				resultado.totalFallidas++;
+				resultado.errores.push({
+					opportunityId: oportunidad.id,
+					numeroSifco: oportunidad.numeroSifco,
+					error: "No se encontró deudatotal en la respuesta de cartera",
+				});
+				continue;
+			}
+
+			const deudaTotal = creditoData.credito.deudatotal;
+
+			// Actualizar el value de la oportunidad
+			await db
+				.update(opportunities)
+				.set({ value: deudaTotal })
+				.where(eq(opportunities.id, oportunidad.id));
+
+			resultado.totalActualizadas++;
+			resultado.actualizaciones.push({
+				opportunityId: oportunidad.id,
+				numeroSifco: oportunidad.numeroSifco,
+				valueAnterior: oportunidad.value,
+				valueNuevo: deudaTotal,
+			});
+
+			console.log(`[UpdateValue] Actualizada oportunidad ${oportunidad.id}: value=${deudaTotal}`);
+		} catch (error) {
+			resultado.totalFallidas++;
+			const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+			resultado.errores.push({
+				opportunityId: oportunidad.id,
+				numeroSifco: oportunidad.numeroSifco,
+				error: errorMessage,
+			});
+			console.error(`[UpdateValue] Error actualizando ${oportunidad.id}:`, errorMessage);
+		}
+	}
+
+	console.log(
+		`[UpdateValue] Completado: ${resultado.totalActualizadas} actualizadas, ${resultado.totalFallidas} fallidas, ${resultado.totalSinSifco} sin SIFCO`,
 	);
 
 	return resultado;

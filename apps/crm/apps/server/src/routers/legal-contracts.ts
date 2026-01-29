@@ -217,6 +217,45 @@ export const legalContractsRouter = {
 			return updatedContract;
 		}),
 
+	// Eliminar contrato legal
+	deleteLegalContract: juridicoProcedure
+		.input(
+			z.object({
+				contractId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			// Verificar permisos
+			if (!context.canCreateLegalContracts) {
+				throw new ORPCError("FORBIDDEN", {
+					message: "No tienes permisos para eliminar contratos",
+				});
+			}
+
+			// Verificar que el contrato existe
+			const [existingContract] = await db
+				.select()
+				.from(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId))
+				.limit(1);
+
+			if (!existingContract) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Contrato no encontrado",
+				});
+			}
+
+			// Eliminar el contrato
+			await db
+				.delete(generatedLegalContracts)
+				.where(eq(generatedLegalContracts.id, input.contractId));
+
+			return {
+				success: true,
+				message: "Contrato eliminado exitosamente",
+			};
+		}),
+
 	// Listar contratos por lead
 	listLegalContractsByLead: juridicoProcedure
 		.input(

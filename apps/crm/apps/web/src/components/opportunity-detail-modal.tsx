@@ -272,9 +272,19 @@ export function OpportunityDetailModal({
 												{opportunity.lead.firstName} {opportunity.lead.lastName}
 											</span>
 										) : (
-											<span className="font-medium">
-												{opportunity.lead.firstName} {opportunity.lead.lastName}
-											</span>
+											<Link
+												to="/crm/leads"
+												search={{
+													leadId: opportunity.lead.id,
+												}}
+												className="font-medium text-primary hover:underline"
+												onClick={() => onOpenChange(false)}
+											>
+												<span className="font-medium">
+													{opportunity.lead.firstName} {opportunity.lead.lastName}
+												</span>
+											</Link>
+											
 										)}
 									</div>
 									{opportunity.lead.dpi && (

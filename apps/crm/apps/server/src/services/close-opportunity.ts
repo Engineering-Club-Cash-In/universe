@@ -5,23 +5,28 @@
  */
 
 import crypto from "node:crypto";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
 	carteraBackReferences,
+	carteraBackSyncLog,
 	type NewCarteraBackReference,
+	type NewCarteraBackSyncLog,
+	quotations,
 	renapInfo,
 	vehicles,
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
+import type { FacturaItem } from "../types/cartera-back";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
 import {
 	type CreateCreditoResult,
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
+import { carteraBackClient } from "./cartera-back-client";
 
 // ============================================================================
 // CONSTANTS
@@ -35,6 +40,25 @@ export const DEFAULT_CODIGO_POSTAL = "01001";
 
 /** Credit number prefix for CRM-generated credits */
 export const CREDIT_NUMBER_PREFIX = "CRM";
+
+// ============================================================================
+// FACTURACIÓN CONSTANTS (valores fijos para facturas)
+// ============================================================================
+
+/** Costo fijo de traspaso de vehículo */
+export const FACTURACION_TRASPASO_COSTO = 400;
+
+/** Costo fijo de garantía mobiliaria */
+export const FACTURACION_GARANTIA_MOBILIARIA_COSTO = 100;
+
+/** Costo fijo de nombramiento */
+export const FACTURACION_NOMBRAMIENTO_COSTO = 150;
+
+/** Costo fijo de copia de llave */
+export const FACTURACION_COPIA_LLAVE_COSTO = 950;
+
+/** Usuario por defecto para created_by en facturación */
+export const FACTURACION_CREATED_BY = 1;
 
 // ============================================================================
 // TYPES
@@ -126,6 +150,34 @@ interface CompleteClientResult {
 	clientId?: string;
 	contractId?: string;
 	error?: string;
+}
+
+/** Datos de la última cotización aprobada para facturación */
+interface QuotationDataForBilling {
+	vehicleTransferCost: string | null; // Traspaso de vehículo
+	leasingContractCost: string | null; // Contrato de abogado (leasing)
+	mobileGuaranteeCost: string | null; // Garantía mobiliaria
+	interestCost: string | null; // Intereses anticipados (cuota 0)
+	extraMembershipCost: string | null; // Membresía extra (cuota 0)
+	appointmentCost: string | null; // Nombramiento
+	keyCopyDiffCost: string | null; // Diferencia de copia de llave
+	extraInsuranceCost: string | null; // Seguro extra
+	extraAdminCost: string | null; // Gastos administrativos
+}
+
+/** Parámetros para generación de facturas en background */
+interface GenerateInvoicesParams {
+	opportunityId: string;
+	nit: string;
+	royalti: number | null;
+	quotation: QuotationDataForBilling | null;
+	userId: string;
+}
+
+/** Representa una factura individual a generar */
+interface InvoiceToGenerate {
+	name: string; // Nombre descriptivo de la factura para logs
+	items: FacturaItem[];
 }
 
 // ============================================================================
@@ -275,6 +327,375 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 	}
 
 	return missingFields;
+}
+
+// ============================================================================
+// FACTURACIÓN HELPERS
+// ============================================================================
+
+/**
+ * Registra un log de sincronización de facturación
+ */
+async function logInvoiceSyncOperation(log: NewCarteraBackSyncLog): Promise<void> {
+	try {
+		await db.insert(carteraBackSyncLog).values(log);
+	} catch (error) {
+		console.error("[CloseOpportunity] Failed to log invoice operation:", error);
+	}
+}
+
+/**
+ * Obtiene la última cotización aprobada de una oportunidad
+ */
+async function getLatestApprovedQuotation(
+	opportunityId: string,
+): Promise<QuotationDataForBilling | null> {
+	try {
+		const [quotation] = await db
+			.select({
+				vehicleTransferCost: quotations.vehicleTransferCost,
+				leasingContractCost: quotations.leasingContractCost,
+				mobileGuaranteeCost: quotations.mobileGuaranteeCost,
+				interestCost: quotations.interestCost,
+				extraMembershipCost: quotations.extraMembershipCost,
+				appointmentCost: quotations.appointmentCost,
+				keyCopyDiffCost: quotations.keyCopyDiffCost,
+				extraInsuranceCost: quotations.extraInsuranceCost,
+				extraAdminCost: quotations.extraAdminCost,
+			})
+			.from(quotations)
+			.where(eq(quotations.opportunityId, opportunityId))
+			.orderBy(desc(quotations.createdAt))
+			.limit(1);
+
+		return quotation || null;
+	} catch (error) {
+		console.error(
+			"[CloseOpportunity] Error fetching latest quotation:",
+			error,
+		);
+		return null;
+	}
+}
+
+/**
+ * Construye las facturas individuales basándose en los datos de oportunidad y cotización
+ * Cada punto genera una factura separada:
+ * 1. ROYALTY: 1 factura con 1 rubro (royalti de oportunidad)
+ * 2. TRASPASO: 1 factura con 1 rubro (Q400 fijo si vehicle_transfer_cost > 0)
+ * 3. CONTRATO ABOGADO: 1 factura con 1 rubro (valor de leasing_contract_cost)
+ * 4. GARANTÍA MOBILIARIA: 1 factura con 1 rubro (Q100 fijo si mobile_guarantee_cost > 0)
+ * 5. CUOTA 0: 1 factura con 2 rubros (interest_cost + extra_membership_cost)
+ * 6. NOMBRAMIENTO: 1 factura con 1 rubro (Q150 fijo si appointment_cost > 0)
+ * 7. COPIA DE LLAVE: 1 factura con 1 rubro (valor de key_copy_diff_cost)
+ * 8. SEGURO Y GASTOS ADMIN: 1 factura con 2 rubros (extra_insurance_cost + extra_admin_cost)
+ */
+function buildInvoices(
+	royalti: number | null,
+	quotation: QuotationDataForBilling | null,
+): InvoiceToGenerate[] {
+	const invoices: InvoiceToGenerate[] = [];
+
+	// 1. ROYALTY - Siempre se factura si existe (1 factura, 1 rubro)
+	if (royalti && royalti > 0) {
+		invoices.push({
+			name: "Royalty",
+			items: [
+				{
+					monto: royalti,
+					rubro: "Royalty - Comisión por servicio de intermediación",
+				},
+			],
+		});
+	}
+
+	if (!quotation) {
+		console.log("[CloseOpportunity] No quotation found, only royalty invoice will be generated");
+		return invoices;
+	}
+
+	// 2. TRASPASO - Q400 fijo si tiene costo de traspaso (1 factura, 1 rubro)
+	const vehicleTransferCost = quotation.vehicleTransferCost
+		? Number(quotation.vehicleTransferCost)
+		: 0;
+	if (vehicleTransferCost > 0) {
+		invoices.push({
+			name: "Traspaso",
+			items: [
+				{
+					monto: FACTURACION_TRASPASO_COSTO,
+					rubro: "Traspaso de vehículo",
+				},
+			],
+		});
+	}
+
+	// 3. CONTRATO DE ABOGADO - Facturar el valor del leasing_contract_cost (1 factura, 1 rubro)
+	const leasingContractCost = quotation.leasingContractCost
+		? Number(quotation.leasingContractCost)
+		: 0;
+	if (leasingContractCost > 0) {
+		invoices.push({
+			name: "Contrato Abogado",
+			items: [
+				{
+					monto: leasingContractCost,
+					rubro: "Contrato de abogado - Servicios legales",
+				},
+			],
+		});
+	}
+
+	// 4. GARANTÍA MOBILIARIA - Q100 fijo si tiene costo (1 factura, 1 rubro)
+	const mobileGuaranteeCost = quotation.mobileGuaranteeCost
+		? Number(quotation.mobileGuaranteeCost)
+		: 0;
+	if (mobileGuaranteeCost > 0) {
+		invoices.push({
+			name: "Garantía Mobiliaria",
+			items: [
+				{
+					monto: FACTURACION_GARANTIA_MOBILIARIA_COSTO,
+					rubro: "Garantía mobiliaria - Inscripción de garantía",
+				},
+			],
+		});
+	}
+
+	// 5. CUOTA 0 - Interés anticipado y membresía (1 factura, 2 rubros)
+	const interestCost = quotation.interestCost
+		? Number(quotation.interestCost)
+		: 0;
+	const extraMembershipCost = quotation.extraMembershipCost
+		? Number(quotation.extraMembershipCost)
+		: 0;
+
+	if (interestCost > 0 || extraMembershipCost > 0) {
+		const cuota0Items: FacturaItem[] = [];
+		if (interestCost > 0) {
+			cuota0Items.push({
+				monto: interestCost,
+				rubro: "Cuota 0 - Intereses anticipados",
+			});
+		}
+		if (extraMembershipCost > 0) {
+			cuota0Items.push({
+				monto: extraMembershipCost,
+				rubro: "Cuota 0 - Membresía inicial",
+			});
+		}
+		if (cuota0Items.length > 0) {
+			invoices.push({
+				name: "Cuota 0",
+				items: cuota0Items,
+			});
+		}
+	}
+
+	// 6. NOMBRAMIENTO - Q150 fijo si tiene costo (1 factura, 1 rubro)
+	const appointmentCost = quotation.appointmentCost
+		? Number(quotation.appointmentCost)
+		: 0;
+	if (appointmentCost > 0) {
+		invoices.push({
+			name: "Nombramiento",
+			items: [
+				{
+					monto: FACTURACION_NOMBRAMIENTO_COSTO,
+					rubro: "Nombramiento - Gestión de documentos legales",
+				},
+			],
+		});
+	}
+
+	// 7. COPIA DE LLAVE - Facturar el valor real de key_copy_diff_cost (1 factura, 1 rubro)
+	const keyCopyDiffCost = quotation.keyCopyDiffCost
+		? Number(quotation.keyCopyDiffCost)
+		: 0;
+	if (keyCopyDiffCost > 0) {
+		invoices.push({
+			name: "Copia de Llave",
+			items: [
+				{
+					monto: keyCopyDiffCost,
+					rubro: "Copia de llave - Duplicado de llave del vehículo",
+				},
+			],
+		});
+	}
+
+	// 8. SEGURO Y GASTOS ADMINISTRATIVOS (1 factura, 2 rubros)
+	const extraInsuranceCost = quotation.extraInsuranceCost
+		? Number(quotation.extraInsuranceCost)
+		: 0;
+	const extraAdminCost = quotation.extraAdminCost
+		? Number(quotation.extraAdminCost)
+		: 0;
+
+	if (extraInsuranceCost > 0 || extraAdminCost > 0) {
+		const seguroGastosItems: FacturaItem[] = [];
+		if (extraInsuranceCost > 0) {
+			seguroGastosItems.push({
+				monto: extraInsuranceCost,
+				rubro: "Seguro - Prima de seguro vehicular",
+			});
+		}
+		if (extraAdminCost > 0) {
+			seguroGastosItems.push({
+				monto: extraAdminCost,
+				rubro: "Gastos administrativos",
+			});
+		}
+		if (seguroGastosItems.length > 0) {
+			invoices.push({
+				name: "Seguro y Gastos Administrativos",
+				items: seguroGastosItems,
+			});
+		}
+	}
+
+	return invoices;
+}
+
+/**
+ * Genera facturas en cartera-back de forma asíncrona (fire-and-forget)
+ * Cada factura se envía de forma secuencial para evitar saturar el servidor
+ * Los errores se registran en cartera_back_sync_log pero no bloquean el flujo principal
+ */
+function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
+	const { opportunityId, nit, royalti, quotation, userId } = params;
+
+	// Ejecutar en background (fire-and-forget)
+	setImmediate(async () => {
+		console.log(
+			`[CloseOpportunity] Starting background invoice generation for opportunity: ${opportunityId}`,
+		);
+
+		try {
+			// Construir las facturas individuales
+			const invoices = buildInvoices(royalti, quotation);
+
+			if (invoices.length === 0) {
+				console.log(
+					"[CloseOpportunity] No invoices to generate, skipping facturación",
+				);
+				return;
+			}
+
+			console.log(
+				`[CloseOpportunity] Generating ${invoices.length} invoices for NIT: ${nit}`,
+			);
+
+			// Procesar cada factura secuencialmente
+			let successCount = 0;
+			let errorCount = 0;
+
+			for (const invoice of invoices) {
+				const startTime = Date.now();
+
+				try {
+					console.log(
+						`[CloseOpportunity] Generating invoice: ${invoice.name} with ${invoice.items.length} item(s)`,
+					);
+
+					// Construir el payload exacto que se envía al endpoint
+					const requestBody = {
+						nit: nit || "CF", // CF = Consumidor Final si no hay NIT
+						items: invoice.items,
+						created_by: FACTURACION_CREATED_BY,
+					};
+
+					// Llamar al endpoint de facturación genérica
+					const response = await carteraBackClient.facturarGenerico(requestBody);
+
+					// Registrar éxito en el log con el payload exacto enviado
+					await logInvoiceSyncOperation({
+						operation: "generate_invoice",
+						entityType: "factura",
+						entityId: `${opportunityId}-${invoice.name}`,
+						status: "success",
+						requestPayload: JSON.stringify(requestBody),
+						responsePayload: JSON.stringify(response),
+						startedAt: new Date(startTime),
+						completedAt: new Date(),
+						durationMs: Date.now() - startTime,
+						userId,
+						source: "crm",
+					});
+
+					successCount++;
+					console.log(
+						`[CloseOpportunity] ✓ Invoice "${invoice.name}" generated successfully`,
+					);
+				} catch (error) {
+					const errorMessage =
+						error instanceof Error ? error.message : String(error);
+
+					console.error(
+						`[CloseOpportunity] ✗ Failed to generate invoice "${invoice.name}": ${errorMessage}`,
+					);
+
+					// Construir el payload para el log de error
+					const errorRequestBody = {
+						nit: nit || "CF",
+						items: invoice.items,
+						created_by: FACTURACION_CREATED_BY,
+					};
+
+					// Registrar error en el log con el payload exacto
+					await logInvoiceSyncOperation({
+						operation: "generate_invoice",
+						entityType: "factura",
+						entityId: `${opportunityId}-${invoice.name}`,
+						status: "error",
+						errorMessage,
+						requestPayload: JSON.stringify(errorRequestBody),
+						startedAt: new Date(startTime),
+						completedAt: new Date(),
+						durationMs: Date.now() - startTime,
+						userId,
+						source: "crm",
+					});
+
+					errorCount++;
+					// Continuar con la siguiente factura aunque esta falle
+				}
+
+				// Pequeña pausa entre facturas para no saturar el servidor
+				await new Promise((resolve) => setTimeout(resolve, 100));
+			}
+
+			console.log(
+				`[CloseOpportunity] Invoice generation completed: ${successCount} success, ${errorCount} errors`,
+			);
+		} catch (error) {
+			const errorMessage =
+				error instanceof Error ? error.message : String(error);
+
+			console.error(
+				`[CloseOpportunity] ✗ Critical error in invoice generation for opportunity ${opportunityId}: ${errorMessage}`,
+			);
+
+			// Registrar error crítico en el log
+			await logInvoiceSyncOperation({
+				operation: "generate_invoices_batch",
+				entityType: "factura",
+				entityId: opportunityId,
+				status: "error",
+				errorMessage: `Critical error: ${errorMessage}`,
+				requestPayload: JSON.stringify({
+					nit,
+					royalti,
+					quotation,
+				}),
+				startedAt: new Date(),
+				completedAt: new Date(),
+				durationMs: 0,
+				userId,
+				source: "crm",
+			});
+		}
+	});
 }
 
 // ============================================================================
@@ -665,7 +1086,32 @@ export async function closeOpportunity(
 			};
 		}
 
-		// 2. Complete local operations in a transaction for atomicity
+		// 2. Get the latest quotation for invoicing (async - doesn't block)
+		const quotation = await getLatestApprovedQuotation(opportunityId);
+		console.log(
+			`[CloseOpportunity] Latest quotation found: ${quotation ? "YES" : "NO"}`,
+		);
+
+		// 3. Generate invoices in background (fire-and-forget)
+		// This runs asynchronously after the credit is created
+		if (isCarteraBackEnabled()) {
+			const royalti = opportunity.royalti
+				? Number.parseFloat(opportunity.royalti)
+				: null;
+
+			generateInvoicesInBackground({
+				opportunityId,
+				nit: opportunity.nit || "CF",
+				royalti,
+				quotation,
+				userId,
+			});
+			console.log(
+				"[CloseOpportunity] Invoice generation queued in background",
+			);
+		}
+
+		// 4. Complete local operations in a transaction for atomicity
 		// This ensures that if any local operation fails, all changes are rolled back
 		const transactionResult = await db.transaction(async (tx) => {
 			// Complete client flow (client, contract, references)

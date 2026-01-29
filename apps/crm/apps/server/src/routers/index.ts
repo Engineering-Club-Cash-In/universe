@@ -138,6 +138,7 @@ export const appRouter = {
 	// Legal Contracts routes (Jurídico)
 	createLegalContract: legalContractsRouter.createLegalContract,
 	updateLegalContract: legalContractsRouter.updateLegalContract,
+	deleteLegalContract: legalContractsRouter.deleteLegalContract,
 	listLegalContractsByLead: legalContractsRouter.listLegalContractsByLead,
 	listLegalContractsByOpportunity:
 		legalContractsRouter.listLegalContractsByOpportunity,
@@ -161,6 +162,8 @@ export const appRouter = {
 	enrichLeadFromRenap: contractGenerationRouter.enrichLeadFromRenap,
 	generateContracts: contractGenerationRouter.generateContracts,
 	generateContractsDirect: contractGenerationRouter.generateContractsDirect,
+	linkContractsToOpportunity:
+		contractGenerationRouter.linkContractsToOpportunity,
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
 
 	// Vendors routes

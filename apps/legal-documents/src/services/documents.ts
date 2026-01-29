@@ -151,7 +151,7 @@ export const documentsService = {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(payload),
-          maxRetries: 2,
+          maxRetries: 3,
           timeout: 120000, // 120 segundos para generación de documentos
         }
       );

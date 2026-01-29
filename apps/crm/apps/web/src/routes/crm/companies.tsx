@@ -62,6 +62,7 @@ import {
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/companies")({
@@ -85,7 +86,7 @@ function RouteComponent() {
 		...orpc.getCompanies.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getCompanies", session?.user?.id, userProfile.data?.role],
 	});
@@ -93,7 +94,7 @@ function RouteComponent() {
 		...orpc.getLeads.queryOptions({ limit: 100 }),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: [
 			"getLeads",
@@ -106,7 +107,7 @@ function RouteComponent() {
 		...orpc.getOpportunities.queryOptions(),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getOpportunities", session?.user?.id, userProfile.data?.role],
 	});
@@ -114,7 +115,7 @@ function RouteComponent() {
 		...orpc.getClients.queryOptions({ input: { limit: 1000, offset: 0 } }),
 		enabled:
 			!!userProfile.data?.role &&
-			["admin", "sales"].includes(userProfile.data.role) &&
+			PERMISSIONS.canCreateCompanies(userProfile.data.role) &&
 			!!session?.user?.id,
 		queryKey: ["getClients", "all", session?.user?.id, userProfile.data?.role],
 	});
@@ -273,7 +274,7 @@ function RouteComponent() {
 		} else if (
 			session &&
 			userProfile.data?.role &&
-			!["admin", "sales"].includes(userProfile.data.role)
+			!PERMISSIONS.canCreateCompanies(userProfile.data.role)
 		) {
 			navigate({ to: "/dashboard" });
 			toast.error("Acceso denegado: Se requiere acceso al CRM");
@@ -286,7 +287,7 @@ function RouteComponent() {
 
 	if (
 		!userProfile.data?.role ||
-		!["admin", "sales"].includes(userProfile.data.role)
+		!PERMISSIONS.canCreateCompanies(userProfile.data.role)
 	) {
 		return null;
 	}

@@ -6,6 +6,7 @@ import {
 	Car,
 	CheckCircle,
 	CreditCard,
+	Download,
 	Edit2,
 	FileText,
 	Percent,
@@ -54,6 +55,10 @@ import {
 	TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+	generateAmortizationTable,
+	generateQuotationPdf,
+} from "@/lib/generate-pdf";
 import type { IOpportunity } from "@/routes/crm/opportunities";
 import { client } from "@/utils/orpc";
 
@@ -138,6 +143,7 @@ interface CreditDetailViewProps {
 		keyCopyDiffCost?: string | null;
 		circulationTaxCost?: string | null;
 		mobileGuaranteeCost?: string | null;
+		licensePlatesCost?: string | null;
 		leasingContractCost?: string | null;
 		collectionAuthCost?: string | null;
 		legalCost?: string | null;
@@ -411,6 +417,15 @@ export function CreditDetailView({
 					monto: garantiaMobiliariaValue,
 				});
 
+			const placasValue = Number.parseFloat(
+				quotation?.licensePlatesCost || "0",
+			);
+			if (placasValue > 0)
+				rubrosArray.push({
+					nombre_rubro: "Placas",
+					monto: placasValue,
+				});
+
 			const contratoLeasingValue = Number.parseFloat(
 				quotation?.leasingContractCost || "0",
 			);
@@ -505,23 +520,21 @@ export function CreditDetailView({
 	// Mutation para aprobar detalle de crédito
 	const approveCreditDetailMutation = useMutation({
 		mutationFn: async () => {
-			/*const camposFaltantes = validateRequiredFields();
-			if (camposFaltantes.length > 0) {
-				throw new Error(
-					`Faltan campos requeridos: ${camposFaltantes.join(", ")}. Guarde los cambios primero.`,
-				);
-			}*/
+			const cuotaMensual = quotation?.monthlyPayment || "0";
+			const tasaMensualValue = quotation?.interestRate || "0";
+			const numeroCuotasValue = quotation?.termMonths || 0;
+			const totalFinanced = quotation?.totalFinanced || "0";
 
 			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
-			if (
-				quotation?.totalFinanced &&
-				Number(quotation?.totalFinanced) !== Number(opportunity.value)
-			) {
-				await client.updateOpportunity({
-					id: opportunityId,
-					value: quotation.totalFinanced,
-				});
-			}
+			
+			await client.updateOpportunity({
+				id: opportunityId,
+				numeroCuotas: numeroCuotasValue,
+				tasaInteres: tasaMensualValue,
+				cuotaMensual: cuotaMensual,
+				value: totalFinanced,
+			});
+			
 
 			return client.approveCreditDetail({ opportunityId });
 		},
@@ -674,6 +687,7 @@ export function CreditDetailView({
 	const garantiaMobiliaria = Number.parseFloat(
 		quotation?.mobileGuaranteeCost || "0",
 	);
+	const placas = Number.parseFloat(quotation?.licensePlatesCost || "0");
 
 	// ========================================
 	// Sección "Gastos de Abogado"
@@ -712,7 +726,8 @@ export function CreditDetailView({
 		verificacionDireccion +
 		impuestoCirculacion +
 		traspaso +
-		garantiaMobiliaria;
+		garantiaMobiliaria +
+		placas;
 
 	// Subtotal: Gastos de Abogado
 	const subtotalGastosAbogado = contratoLeasing + autenticaContrato;
@@ -1769,6 +1784,20 @@ export function CreditDetailView({
 														: "Q -"}
 												</TableCell>
 											</TableRow>
+											<TableRow>
+												<TableCell>Placas</TableCell>
+												<TableCell className="text-center">
+													<Badge
+														variant={placas > 0 ? "default" : "outline"}
+														className="text-xs"
+													>
+														{placas > 0 ? "SI" : "NO"}
+													</Badge>
+												</TableCell>
+												<TableCell className="text-right">
+													{placas > 0 ? formatCurrency(placas) : "Q -"}
+												</TableCell>
+											</TableRow>
 										</TableBody>
 									</Table>
 									<div className="mt-3 flex justify-end">
@@ -2610,6 +2639,41 @@ export function CreditDetailView({
 															? "Rechazada"
 															: "Borrador"}
 											</Badge>
+											<Button
+												variant="outline"
+												size="sm"
+												onClick={() => {
+													const amortizationTable = generateAmortizationTable(
+														Number(quotation.totalFinanced),
+														Number(quotation.interestRate),
+														quotation.termMonths,
+													);
+													generateQuotationPdf({
+														vehicleBrand: quotation.vehicleBrand,
+														vehicleLine: quotation.vehicleLine,
+														vehicleModel: quotation.vehicleModel,
+														vehicleValue: Number(quotation.vehicleValue),
+														downPayment: Number(quotation.downPayment),
+														downPaymentPercentage: Number(
+															quotation.downPaymentPercentage,
+														),
+														amountToFinance: Number(quotation.amountToFinance),
+														totalFinanced: Number(quotation.totalFinanced),
+														monthlyPayment: Number(quotation.monthlyPayment),
+														termMonths: quotation.termMonths,
+														interestRate: Number(quotation.interestRate),
+														insuranceCost: Number(quotation.insuranceCost),
+														gpsCost: Number(quotation.gpsCost),
+														transferCost: Number(quotation.transferCost),
+														adminCost: Number(quotation.adminCost),
+														membershipCost: Number(quotation.membershipCost),
+														amortizationTable,
+													});
+												}}
+											>
+												<Download className="mr-2 h-4 w-4" />
+												Descargar PDF
+											</Button>
 										</div>
 										<div className="text-muted-foreground text-sm">
 											Creada: {formatDate(quotation.createdAt)}
@@ -2807,6 +2871,7 @@ export function CreditDetailView({
 										quotation.finesCost ||
 										quotation.keyCopyCost ||
 										quotation.circulationTaxCost ||
+										quotation.licensePlatesCost ||
 										quotation.legalCost) && (
 										<>
 											<Separator />
@@ -2882,6 +2947,18 @@ export function CreditDetailView({
 																</Label>
 																<p className="font-medium">
 																	{formatCurrency(quotation.circulationTaxCost)}
+																</p>
+															</div>
+														)}
+													{quotation.licensePlatesCost &&
+														Number.parseFloat(quotation.licensePlatesCost) >
+															0 && (
+															<div>
+																<Label className="text-muted-foreground text-xs">
+																	Placas
+																</Label>
+																<p className="font-medium">
+																	{formatCurrency(quotation.licensePlatesCost)}
 																</p>
 															</div>
 														)}

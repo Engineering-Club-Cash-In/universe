@@ -14,13 +14,67 @@ const app = new Elysia()
    * GET /health - Health check
    */
   .get('/health', async () => {
-  const gotenbergHealth = await contractGenerator.checkGotenbergHealth();
+    // Health check con timeout independiente para no bloquear si Gotenberg está colgado
+    const gotenbergHealthPromise = contractGenerator.checkGotenbergHealth();
+    const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 3000));
+
+    const gotenbergHealth = await Promise.race([gotenbergHealthPromise, timeoutPromise]);
+
+    // Verificar memoria disponible (en MB)
+    const memoryUsage = process.memoryUsage();
+    const heapUsedMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(memoryUsage.heapTotal / 1024 / 1024);
+    const rssMB = Math.round(memoryUsage.rss / 1024 / 1024);
 
     return {
       status: 'ok',
       service: 'Contract Generator API',
       timestamp: new Date().toISOString(),
-      gotenberg: gotenbergHealth ? 'available' : 'unavailable'
+      gotenberg: gotenbergHealth ? 'available' : 'unavailable',
+      memory: {
+        heapUsedMB,
+        heapTotalMB,
+        rssMB
+      }
+    };
+  })
+
+  /**
+   * GET /metrics - Endpoint de métricas detalladas para diagnóstico
+   */
+  .get('/metrics', async () => {
+    const memoryUsage = process.memoryUsage();
+    const uptime = process.uptime();
+
+    // Verificar Gotenberg con timeout
+    const gotenbergStart = Date.now();
+    const gotenbergHealthPromise = contractGenerator.checkGotenbergHealth();
+    const timeoutPromise = new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000));
+    const gotenbergHealth = await Promise.race([gotenbergHealthPromise, timeoutPromise]);
+    const gotenbergLatency = Date.now() - gotenbergStart;
+
+    return {
+      timestamp: new Date().toISOString(),
+      uptime: {
+        seconds: Math.round(uptime),
+        formatted: `${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m ${Math.round(uptime % 60)}s`
+      },
+      memory: {
+        heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024),
+        heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024),
+        rss: Math.round(memoryUsage.rss / 1024 / 1024),
+        external: Math.round(memoryUsage.external / 1024 / 1024),
+        unit: 'MB'
+      },
+      gotenberg: {
+        status: gotenbergHealth ? 'healthy' : 'unhealthy',
+        latencyMs: gotenbergLatency,
+        timedOut: gotenbergLatency >= 5000
+      },
+      process: {
+        pid: process.pid,
+        nodeVersion: process.version
+      }
     };
   })
 

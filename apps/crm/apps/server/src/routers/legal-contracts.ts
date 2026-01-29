@@ -674,8 +674,7 @@ export const legalContractsRouter = {
 				.where(
 					and(
 						inArray(salesStages.closurePercentage, targetPercentages),
-						ne(opportunities.status, "won"),
-						ne(opportunities.status, "lost"),
+						ne(opportunities.status, "lost"), // en un futuro agregar el estado "migrate"
 					),
 				)
 				.orderBy(opportunities.createdAt);

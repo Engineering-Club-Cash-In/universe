@@ -9,6 +9,7 @@ import {
 	ChevronsLeft,
 	ChevronsRight,
 	Filter,
+	Loader2,
 	Mail,
 	MoreHorizontal,
 	Pencil,
@@ -510,6 +511,39 @@ function RouteComponent() {
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Error al crear la oportunidad");
+		},
+	});
+
+	// Mapa de campos a español para scoring
+	const scoringFieldLabels: Record<string, string> = {
+		age: "Edad",
+		monthlyIncome: "Ingreso Mensual",
+		loanAmount: "Monto del Préstamo",
+		workTime: "Tiempo Laboral",
+		occupation: "Ocupación",
+		maritalStatus: "Estado Civil",
+	};
+
+	// Mutación para calcular score crediticio
+	const scoreLeadMutation = useMutation({
+		mutationFn: (leadId: string) => client.scoreLead({ leadId }),
+		onSuccess: (data) => {
+			if (data.missingFields && data.missingFields.length > 0) {
+				const fieldNames = data.missingFields
+					.map((f: string) => scoringFieldLabels[f] || f)
+					.join(", ");
+				toast.warning(
+					`No se puede calcular el score. Faltan campos: ${fieldNames}`,
+				);
+				return;
+			}
+			toast.success("Score crediticio calculado exitosamente");
+			queryClient.invalidateQueries({
+				predicate: (query) => query.queryKey[0] === "getLeads",
+			});
+		},
+		onError: () => {
+			toast.error("Error al calcular el score");
 		},
 	});
 
@@ -2416,11 +2450,24 @@ function RouteComponent() {
 							</div>
 
 							{/* Scoring Section */}
-							{selectedLead.score && (
-								<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+								<div className="flex items-center justify-between">
 									<h3 className="font-semibold text-base">
 										Análisis de Riesgo
 									</h3>
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={scoreLeadMutation.isPending}
+										onClick={() => scoreLeadMutation.mutate(selectedLead.id)}
+									>
+										{scoreLeadMutation.isPending && (
+											<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+										)}
+										{selectedLead.score ? "Recalcular Score" : "Calcular Score"}
+									</Button>
+								</div>
+								{selectedLead.score ? (
 									<div className="grid grid-cols-3 gap-4">
 										<div className="space-y-2">
 											<Label className="font-medium text-muted-foreground text-sm">
@@ -2472,8 +2519,12 @@ function RouteComponent() {
 											</p>
 										</div>
 									</div>
-								</div>
-							)}
+								) : (
+									<p className="text-muted-foreground text-sm">
+										Sin análisis de riesgo aún
+									</p>
+								)}
+							</div>
 
 							{/* Credit Analysis Section - Análisis de Capacidad de Pago */}
 							<div className="space-y-3 rounded-lg border bg-muted/30 p-4">

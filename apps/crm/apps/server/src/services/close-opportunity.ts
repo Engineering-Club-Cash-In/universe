@@ -160,7 +160,7 @@ interface QuotationDataForBilling {
 	interestCost: string | null; // Intereses anticipados (cuota 0)
 	extraMembershipCost: string | null; // Membresía extra (cuota 0)
 	appointmentCost: string | null; // Nombramiento
-	keyCopyCost: string | null; // Copia de llave
+	keyCopyDiffCost: string | null; // Diferencia de copia de llave
 	extraInsuranceCost: string | null; // Seguro extra
 	extraAdminCost: string | null; // Gastos administrativos
 }
@@ -359,7 +359,7 @@ async function getLatestApprovedQuotation(
 				interestCost: quotations.interestCost,
 				extraMembershipCost: quotations.extraMembershipCost,
 				appointmentCost: quotations.appointmentCost,
-				keyCopyCost: quotations.keyCopyCost,
+				keyCopyDiffCost: quotations.keyCopyDiffCost,
 				extraInsuranceCost: quotations.extraInsuranceCost,
 				extraAdminCost: quotations.extraAdminCost,
 			})
@@ -387,8 +387,8 @@ async function getLatestApprovedQuotation(
  * 4. GARANTÍA MOBILIARIA: 1 factura con 1 rubro (Q100 fijo si mobile_guarantee_cost > 0)
  * 5. CUOTA 0: 1 factura con 2 rubros (interest_cost + extra_membership_cost)
  * 6. NOMBRAMIENTO: 1 factura con 1 rubro (Q150 fijo si appointment_cost > 0)
- * 7. COPIA DE LLAVE: 1 factura con 1 rubro (Q950 fijo si key_copy_cost > 0)
- * 8. SEGURO Y GASTOS ADMIN: 1 factura con 2 rubros (extra_insurance_cost + extra_membership_cost)
+ * 7. COPIA DE LLAVE: 1 factura con 1 rubro (valor de key_copy_diff_cost)
+ * 8. SEGURO Y GASTOS ADMIN: 1 factura con 2 rubros (extra_insurance_cost + extra_admin_cost)
  */
 function buildInvoices(
 	royalti: number | null,
@@ -508,16 +508,16 @@ function buildInvoices(
 		});
 	}
 
-	// 7. COPIA DE LLAVE - Q950 fijo si tiene costo (1 factura, 1 rubro)
-	const keyCopyCost = quotation.keyCopyCost
-		? Number(quotation.keyCopyCost)
+	// 7. COPIA DE LLAVE - Facturar el valor real de key_copy_diff_cost (1 factura, 1 rubro)
+	const keyCopyDiffCost = quotation.keyCopyDiffCost
+		? Number(quotation.keyCopyDiffCost)
 		: 0;
-	if (keyCopyCost > 0) {
+	if (keyCopyDiffCost > 0) {
 		invoices.push({
 			name: "Copia de Llave",
 			items: [
 				{
-					monto: FACTURACION_COPIA_LLAVE_COSTO,
+					monto: keyCopyDiffCost,
 					rubro: "Copia de llave - Duplicado de llave del vehículo",
 				},
 			],

@@ -18,6 +18,7 @@ export function GenerateComponent() {
     handlePrevious,
     handleStepClick,
     setStep3ValidWrapper,
+    resetWizard,
   } = useGenerateComponent();
 
   const steps: WizardStep[] = [
@@ -77,6 +78,7 @@ export function GenerateComponent() {
           onNext={handleNext}
           onPrevious={handlePrevious}
           onStepClick={handleStepClick}
+          onReset={resetWizard}
           canGoNext={validateStep(currentStep)}
           isLoading={isLoading}
           finishLabel={currentStep === 3 ? "Generar Documentos" : "Finalizar"}

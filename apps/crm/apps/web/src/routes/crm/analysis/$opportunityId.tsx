@@ -46,6 +46,7 @@ import {
 	TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { authClient } from "@/lib/auth-client";
+import { PERMISSIONS } from "@/lib/roles";
 import { client, orpc } from "@/utils/orpc";
 
 export const Route = createFileRoute("/crm/analysis/$opportunityId")({
@@ -330,10 +331,10 @@ function OpportunityDocumentsPage() {
 		setIsLeadModalOpen(true);
 	};
 
-	// Check role
+	// Check role (admin, analyst, sales_supervisor)
 	if (
 		userProfile.data &&
-		!["admin", "analyst"].includes(userProfile.data.role)
+		!PERMISSIONS.canAccessAnalysis(userProfile.data.role)
 	) {
 		navigate({ to: "/dashboard" });
 		return null;

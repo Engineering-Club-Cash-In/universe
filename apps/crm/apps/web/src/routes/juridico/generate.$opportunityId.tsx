@@ -70,7 +70,7 @@ function RouteComponent() {
 		},
 	});
 
-	// Generate contracts mutation (direct to API)
+	// Generate contracts mutation (direct to API - does NOT link to opportunity)
 	const generateMutation = useMutation({
 		mutationFn: async (data: {
 			contracts: Array<{
@@ -86,8 +86,6 @@ function RouteComponent() {
 		}) => {
 			return await client.generateContractsDirect({
 				...data,
-				opportunityId,
-				leadId: opportunity?.lead?.id,
 			});
 		},
 		onSuccess: (data) => {
@@ -99,6 +97,32 @@ function RouteComponent() {
 		},
 		onError: (error: Error) => {
 			toast.error(error.message || "Error al generar contratos");
+		},
+	});
+
+	// Link contracts to opportunity mutation
+	const linkContractsMutation = useMutation({
+		mutationFn: async (data: {
+			opportunityId: string;
+			leadId: string;
+			contracts: Array<{
+				contractType: string;
+				contractName: string;
+				documentLink?: string;
+				signingLinks?: string[];
+				templateId?: number;
+				apiResponse?: unknown;
+			}>;
+		}) => {
+			return await client.linkContractsToOpportunity(data);
+		},
+		onSuccess: (data) => {
+			toast.success(
+				data.message || "Contratos enlazados a la oportunidad exitosamente",
+			);
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al enlazar contratos");
 		},
 	});
 
@@ -212,6 +236,22 @@ function RouteComponent() {
 		}>;
 	}) => {
 		const result = await generateMutation.mutateAsync(data);
+		return result;
+	};
+
+	const handleLinkContracts = async (data: {
+		opportunityId: string;
+		leadId: string;
+		contracts: Array<{
+			contractType: string;
+			contractName: string;
+			documentLink?: string;
+			signingLinks?: string[];
+			templateId?: number;
+			apiResponse?: unknown;
+		}>;
+	}) => {
+		const result = await linkContractsMutation.mutateAsync(data);
 		return result;
 	};
 
@@ -350,8 +390,10 @@ function RouteComponent() {
 							leadId={opportunity?.lead?.id}
 							onGetDocumentsByDpi={handleGetDocumentsByDpi}
 							onGenerate={handleGenerate}
+							onLinkContracts={handleLinkContracts}
 							onBack={handleBack}
 							isGenerating={generateMutation.isPending}
+							isLinking={linkContractsMutation.isPending}
 						/>
 					</CardContent>
 				</Card>

@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Building, Mail, Phone, Users } from "lucide-react";
+import { Building, Loader2, Mail, Phone, Users } from "lucide-react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,7 +24,7 @@ import {
 	getStatusLabel,
 	getWorkTimeLabel,
 } from "@/lib/crm-formatters";
-import { orpc } from "@/utils/orpc";
+import { client, orpc } from "@/utils/orpc";
 
 // Type for the lead data
 export type LeadForModal = {
@@ -116,6 +117,39 @@ export function LeadDetailModal({
 			input: { leadId: lead?.id ?? "" },
 		}),
 		enabled: open && !!lead?.id,
+	});
+
+	const queryClient = useQueryClient();
+
+	const scoringFieldLabels: Record<string, string> = {
+		age: "Edad",
+		monthlyIncome: "Ingreso Mensual",
+		loanAmount: "Monto del Préstamo",
+		workTime: "Tiempo Laboral",
+		occupation: "Ocupación",
+		maritalStatus: "Estado Civil",
+	};
+
+	const scoreLeadMutation = useMutation({
+		mutationFn: (leadId: string) => client.scoreLead({ leadId }),
+		onSuccess: (data) => {
+			if (data.missingFields && data.missingFields.length > 0) {
+				const fieldNames = data.missingFields
+					.map((f: string) => scoringFieldLabels[f] || f)
+					.join(", ");
+				toast.warning(
+					`No se puede calcular el score. Faltan campos: ${fieldNames}`,
+				);
+				return;
+			}
+			toast.success("Score crediticio calculado exitosamente");
+			queryClient.invalidateQueries({
+				predicate: (query) => query.queryKey[0] === "getLeads",
+			});
+		},
+		onError: () => {
+			toast.error("Error al calcular el score");
+		},
 	});
 
 	if (!lead) return null;
@@ -550,9 +584,22 @@ export function LeadDetailModal({
 					</div>
 
 					{/* Scoring Section */}
-					{displayLead.score && (
-						<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+					<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+						<div className="flex items-center justify-between">
 							<h3 className="font-semibold text-base">Análisis de Riesgo</h3>
+							<Button
+								size="sm"
+								variant="outline"
+								disabled={scoreLeadMutation.isPending}
+								onClick={() => scoreLeadMutation.mutate(displayLead.id)}
+							>
+								{scoreLeadMutation.isPending && (
+									<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+								)}
+								{displayLead.score ? "Recalcular Score" : "Calcular Score"}
+							</Button>
+						</div>
+						{displayLead.score ? (
 							<div className="grid grid-cols-3 gap-4">
 								<div className="space-y-2">
 									<Label className="font-medium text-muted-foreground text-sm">
@@ -604,8 +651,12 @@ export function LeadDetailModal({
 									</p>
 								</div>
 							</div>
-						</div>
-					)}
+						) : (
+							<p className="text-muted-foreground text-sm">
+								Sin análisis de riesgo aún
+							</p>
+						)}
+					</div>
 
 					{/* Credit Analysis Section (Read-only view) */}
 					{creditAnalysisQuery.data && (

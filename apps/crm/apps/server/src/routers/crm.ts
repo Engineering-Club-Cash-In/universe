@@ -582,7 +582,7 @@ export const crmRouter = {
 
 			// Admin and juridico can update any lead, others only their own
 			const canUpdateAnyLead =
-				context.userRole === "admin" || context.userRole === "juridico";
+				context.userRole === "admin" || context.userRole === "juridico" || context.userRole === "sales_supervisor" || context.userRole === "analyst";
 			const whereClause = canUpdateAnyLead
 				? eq(leads.id, id)
 				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
@@ -4368,7 +4368,7 @@ export const crmRouter = {
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&
-						opp.cuotaMensual
+						opp.cuotaMensual 
 					),
 					// Campos adicionales para edición
 					categoria: opp.categoria,

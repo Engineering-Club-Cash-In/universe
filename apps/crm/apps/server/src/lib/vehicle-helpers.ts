@@ -5,11 +5,10 @@ import type { Vehicle } from "../db/schema/vehicles";
  * Aplica a todos los vehículos (nuevos y usados).
  */
 export function getMissingFieldsForContracts(
-	vehicle: Pick<Vehicle, "vinNumber" | "motorNumber" | "seats" | "vehicleUse">,
+	vehicle: Pick<Vehicle, "vinNumber" | "seats" | "vehicleUse">,
 ): string[] {
 	const requiredForContracts = [
 		{ field: "vinNumber" as const, label: "VIN/Chasis" },
-		{ field: "motorNumber" as const, label: "Número de Motor" },
 		{ field: "seats" as const, label: "Asientos" },
 		{ field: "vehicleUse" as const, label: "Uso (Particular/Comercial)" },
 	];
@@ -28,7 +27,6 @@ export function getMissingFieldsForCompletion(
 		Vehicle,
 		| "isNew"
 		| "vinNumber"
-		| "motorNumber"
 		| "seats"
 		| "vehicleUse"
 		| "licensePlate"
@@ -42,7 +40,6 @@ export function getMissingFieldsForCompletion(
 
 	const requiredForCompletion = [
 		{ field: "vinNumber" as const, label: "VIN/Chasis" },
-		{ field: "motorNumber" as const, label: "Número de Motor" },
 		{ field: "seats" as const, label: "Asientos" },
 		{ field: "vehicleUse" as const, label: "Uso (Particular/Comercial)" },
 		{ field: "licensePlate" as const, label: "Placa" },
@@ -60,7 +57,7 @@ export function getMissingFieldsForCompletion(
  * Verifica si un vehículo tiene los datos mínimos para generar contratos.
  */
 export function hasMinimumDataForContracts(
-	vehicle: Pick<Vehicle, "vinNumber" | "motorNumber" | "seats" | "vehicleUse">,
+	vehicle: Pick<Vehicle, "vinNumber" | "seats" | "vehicleUse">,
 ): boolean {
 	return getMissingFieldsForContracts(vehicle).length === 0;
 }
@@ -76,7 +73,6 @@ export function isNewVehicleDataComplete(
 		Vehicle,
 		| "isNew"
 		| "vinNumber"
-		| "motorNumber"
 		| "seats"
 		| "vehicleUse"
 		| "licensePlate"

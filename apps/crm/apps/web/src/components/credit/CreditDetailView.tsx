@@ -526,7 +526,7 @@ export function CreditDetailView({
 			const totalFinanced = quotation?.totalFinanced || "0";
 
 			// Actualizar el value de la oportunidad con el totalFinanced de la cotización
-			
+
 			await client.updateOpportunity({
 				id: opportunityId,
 				numeroCuotas: numeroCuotasValue,
@@ -534,7 +534,6 @@ export function CreditDetailView({
 				cuotaMensual: cuotaMensual,
 				value: totalFinanced,
 			});
-			
 
 			return client.approveCreditDetail({ opportunityId });
 		},

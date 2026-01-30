@@ -3,11 +3,14 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
-import { generatedLegalContracts } from "../db/schema/legal-contracts";
+import {
+	contractGenerationSnapshots,
+	generatedLegalContracts,
+} from "../db/schema/legal-contracts";
 import { vehicles } from "../db/schema/vehicles";
 import { juridicoProcedure } from "../lib/orpc";
 import {
@@ -478,6 +481,22 @@ export const contractGenerationRouter = {
 						apiResponse: z.unknown().optional(),
 					}),
 				),
+				// Datos opcionales para guardar snapshot de regeneración
+				contractDate: z.date().optional(),
+				generationData: z
+					.array(
+						z.object({
+							contractType: z.string(),
+							data: z.record(z.string(), z.string()),
+							emails: z.array(z.string()).optional(),
+							options: z.object({
+								gender: z.enum(["male", "female"]),
+								generatePdf: z.boolean(),
+								filenamePrefix: z.string(),
+							}),
+						}),
+					)
+					.optional(),
 			}),
 		)
 		.handler(async ({ input, context }) => {
@@ -512,6 +531,16 @@ export const contractGenerationRouter = {
 					}
 				}
 
+				// Guardar snapshot si se proporcionaron los datos de generación
+				if (input.generationData && input.contractDate) {
+					await db.insert(contractGenerationSnapshots).values({
+						opportunityId: input.opportunityId,
+						contractDate: input.contractDate,
+						data: input.generationData,
+						createdBy: context.userId,
+					});
+				}
+
 				return {
 					success: true,
 					linkedCount: savedContracts.length,
@@ -525,6 +554,195 @@ export const contractGenerationRouter = {
 						error instanceof Error
 							? error.message
 							: "Error al enlazar contratos a la oportunidad",
+				});
+			}
+		}),
+
+	/**
+	 * Obtiene el último snapshot de generación para una oportunidad
+	 */
+	getGenerationSnapshot: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [snapshot] = await db
+				.select()
+				.from(contractGenerationSnapshots)
+				.where(eq(contractGenerationSnapshots.opportunityId, input.opportunityId))
+				.orderBy(contractGenerationSnapshots.createdAt)
+				.limit(1);
+
+			return snapshot || null;
+		}),
+
+	/**
+	 * Regenera contratos con una nueva fecha
+	 * Borra los contratos del mismo tipo y genera nuevos
+	 */
+	regenerateContracts: juridicoProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				leadId: z.string().uuid(),
+				contractTypes: z.array(z.string()).min(1),
+				newDate: z.date(),
+				// Data de generación (contracts del snapshot)
+				generationData: z.array(
+					z.object({
+						contractType: z.string(),
+						data: z.record(z.string(), z.string()),
+						emails: z.array(z.string()).optional(),
+						options: z.object({
+							gender: z.enum(["male", "female"]),
+							generatePdf: z.boolean(),
+							filenamePrefix: z.string(),
+						}),
+					}),
+				),
+			}),
+		)
+		.handler(async ({ input, context }) => {
+			const { generateContractsBatch } = await import(
+				"../services/legal-docs-api"
+			);
+
+			try {
+				// 1. Filtrar solo los contratos de los tipos a regenerar
+				const contractsToRegenerate = input.generationData.filter((c) =>
+					input.contractTypes.includes(c.contractType),
+				);
+
+				if (contractsToRegenerate.length === 0) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: "No hay contratos para regenerar con los tipos especificados",
+					});
+				}
+
+				// 2. Actualizar la fecha en los datos de cada contrato
+				const contractsWithNewDate = contractsToRegenerate.map((contract) => {
+					const newData = { ...contract.data };
+
+					// Datos de la nueva fecha
+					const day = input.newDate.getDate();
+					const monthIndex = input.newDate.getMonth();
+					const year = input.newDate.getFullYear();
+					const yearShort = year.toString().slice(-2); // "26" para 2026
+
+					const monthNames = [
+						"enero", "febrero", "marzo", "abril", "mayo", "junio",
+						"julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+					];
+					const monthText = monthNames[monthIndex];
+
+					// Convertir día a texto
+					const dayText = numberToSpanishText(day);
+					// Convertir año corto a texto (ej: 26 -> "veintiséis")
+					const yearText = numberToSpanishText(Number.parseInt(yearShort));
+					// Año completo en texto (ej: 2026 -> "dos mil veintiséis")
+					const fullYearText = numberToSpanishText(year);
+
+					// Fecha completa en texto
+					const fullDateText = `${dayText} de ${monthText} de ${fullYearText}`;
+
+					// Actualizar SOLO campos de fecha del contrato (NO los de vencimiento)
+					if ("dia" in newData) newData.dia = day.toString();
+					if ("ano" in newData) newData.ano = yearShort;
+					if ("diaTexto" in newData) newData.diaTexto = dayText;
+					if ("mesTexto" in newData) newData.mesTexto = monthText;
+					if ("anoTexto" in newData) newData.anoTexto = yearText;
+					if ("fechaInicioContrato" in newData) newData.fechaInicioContrato = fullDateText;
+
+					return {
+						...contract,
+						data: newData,
+					};
+				});
+
+				// 3. Generar los nuevos contratos
+				const apiResult = await generateContractsBatch({
+					contracts: contractsWithNewDate,
+				});
+
+				if (!apiResult.results || apiResult.results.length === 0) {
+					throw new ORPCError("INTERNAL_SERVER_ERROR", {
+						message: "Error al generar los contratos",
+					});
+				}
+
+				// 4. Borrar los contratos existentes de los tipos regenerados
+				for (const contractType of input.contractTypes) {
+					await db
+						.delete(generatedLegalContracts)
+						.where(
+							and(
+								eq(generatedLegalContracts.opportunityId, input.opportunityId),
+								eq(generatedLegalContracts.contractType, contractType),
+							),
+						);
+				}
+
+				// 5. Insertar los nuevos contratos
+				const savedContracts: Array<{ id: string; contractType: string }> = [];
+				for (let i = 0; i < apiResult.results.length; i++) {
+					const contractResult = apiResult.results[i];
+					const originalContract = contractsWithNewDate[i];
+
+					if (contractResult.success) {
+						const [saved] = await db
+							.insert(generatedLegalContracts)
+							.values({
+								leadId: input.leadId,
+								opportunityId: input.opportunityId,
+								contractType: originalContract.contractType,
+								contractName:
+									contractResult.nameDocument?.[0]?.label || "Contrato",
+								clientSigningLink: contractResult.signing_links?.[0] || null,
+								representativeSigningLink:
+									contractResult.signing_links?.[1] || null,
+								additionalSigningLinks:
+									contractResult.signing_links?.slice(2) || null,
+								templateId: contractResult.templateId,
+								apiResponse: contractResult,
+								pdfLink: contractResult.linkDocument || null,
+								status: "pending",
+								generatedBy: context.userId,
+								generatedAt: new Date(),
+							})
+							.returning({ id: generatedLegalContracts.id });
+
+						if (saved) {
+							savedContracts.push({
+								id: saved.id,
+								contractType: originalContract.contractType,
+							});
+						}
+					}
+				}
+
+				// 6. Actualizar el snapshot con la nueva fecha
+				await db.insert(contractGenerationSnapshots).values({
+					opportunityId: input.opportunityId,
+					contractDate: input.newDate,
+					data: contractsWithNewDate,
+					createdBy: context.userId,
+				});
+
+				return {
+					success: true,
+					regeneratedCount: savedContracts.length,
+					contracts: savedContracts,
+					message: `Se regeneraron ${savedContracts.length} contrato(s) exitosamente`,
+				};
+			} catch (error) {
+				console.error("[regenerateContracts] Error:", error);
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message:
+						error instanceof Error
+							? error.message
+							: "Error al regenerar contratos",
 				});
 			}
 		}),
@@ -549,6 +767,63 @@ function getMonthNumber(monthName: string): number {
 		diciembre: 12,
 	};
 	return months[monthName.toLowerCase()] || 1;
+}
+
+/**
+ * Convierte un número a texto en español
+ */
+function numberToSpanishText(num: number): string {
+	const unidades = [
+		"", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve",
+		"diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete",
+		"dieciocho", "diecinueve", "veinte", "veintiuno", "veintidós", "veintitrés",
+		"veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve",
+	];
+
+	const decenas = [
+		"", "", "veinte", "treinta", "cuarenta", "cincuenta",
+		"sesenta", "setenta", "ochenta", "noventa",
+	];
+
+	const centenas = [
+		"", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos",
+		"seiscientos", "setecientos", "ochocientos", "novecientos",
+	];
+
+	if (num === 0) return "cero";
+	if (num === 100) return "cien";
+	if (num < 30) return unidades[num];
+
+	if (num < 100) {
+		const decena = Math.floor(num / 10);
+		const unidad = num % 10;
+		if (unidad === 0) return decenas[decena];
+		return `${decenas[decena]} y ${unidades[unidad]}`;
+	}
+
+	if (num < 1000) {
+		const centena = Math.floor(num / 100);
+		const resto = num % 100;
+		if (resto === 0) return num === 100 ? "cien" : centenas[centena];
+		return `${centenas[centena]} ${numberToSpanishText(resto)}`;
+	}
+
+	if (num < 2000) {
+		const resto = num % 1000;
+		if (resto === 0) return "mil";
+		return `mil ${numberToSpanishText(resto)}`;
+	}
+
+	if (num < 1000000) {
+		const miles = Math.floor(num / 1000);
+		const resto = num % 1000;
+		const milesText = numberToSpanishText(miles);
+		if (resto === 0) return `${milesText} mil`;
+		return `${milesText} mil ${numberToSpanishText(resto)}`;
+	}
+
+	// Para años como 2026
+	return num.toString();
 }
 
 /**

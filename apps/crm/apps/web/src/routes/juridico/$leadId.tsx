@@ -1,12 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, CheckCircle, Loader2, Plus, User } from "lucide-react";
+import { ArrowLeft, CheckCircle, Loader2, Plus, RefreshCw, User } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { ApproveOpportunityModal } from "@/components/juridico/ApproveOpportunityModal";
 import { ContractsList } from "@/components/juridico/ContractsList";
 import { CreateContractModal } from "@/components/juridico/CreateContractModal";
+import { RegenerateContractsModal } from "@/components/juridico/RegenerateContractsModal";
 import {
 	OpportunityDetailModal,
 	type OpportunityForModal,
@@ -46,6 +47,7 @@ function RouteComponent() {
 	const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
 	const [isApproveModalOpen, setIsApproveModalOpen] = useState(false);
+	const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
 	const [deletingContractId, setDeletingContractId] = useState<string | null>(
 		null,
 	);
@@ -131,6 +133,55 @@ function RouteComponent() {
 			input: { opportunityId: opportunityId ?? "" },
 		}),
 		enabled: canViewLegal && !!opportunityId,
+	});
+
+	// Obtener snapshot de generación para poder regenerar
+	const { data: generationSnapshot } = useQuery({
+		...orpc.getGenerationSnapshot.queryOptions({
+			input: { opportunityId: opportunityId ?? "" },
+		}),
+		enabled: canViewLegal && !!opportunityId,
+	});
+
+	// Mutación para regenerar contratos
+	const regenerateMutation = useMutation({
+		mutationFn: async ({
+			contractTypes,
+			newDate,
+		}: {
+			contractTypes: string[];
+			newDate: Date;
+		}) => {
+			if (!opportunityId || !generationSnapshot) {
+				throw new Error("No hay datos de generación disponibles");
+			}
+			return await client.regenerateContracts({
+				opportunityId,
+				leadId,
+				contractTypes,
+				newDate,
+				generationData: generationSnapshot.data as Array<{
+					contractType: string;
+					data: Record<string, string>;
+					emails?: string[];
+					options: {
+						gender: "male" | "female";
+						generatePdf: boolean;
+						filenamePrefix: string;
+					};
+				}>,
+			});
+		},
+		onSuccess: (data) => {
+			toast.success(data.message);
+			refetch();
+			queryClient.invalidateQueries({
+				queryKey: ["getGenerationSnapshot"],
+			});
+		},
+		onError: (error: Error) => {
+			toast.error(error.message || "Error al regenerar contratos");
+		},
 	});
 
 	// Redireccionar si no tiene permisos
@@ -267,6 +318,15 @@ function RouteComponent() {
 					</div>
 
 					<div className="flex gap-2">
+						{canCreateLegal && generationSnapshot && contracts && contracts.length > 0 && (
+							<Button
+								variant="outline"
+								onClick={() => setIsRegenerateModalOpen(true)}
+							>
+								<RefreshCw className="mr-2 h-4 w-4" />
+								Regenerar con nueva fecha
+							</Button>
+						)}
 						{canCreateLegal && (
 							<Button onClick={() => setIsCreateModalOpen(true)}>
 								<Plus className="mr-2 h-4 w-4" />
@@ -398,6 +458,23 @@ function RouteComponent() {
 				isLoading={approveMutation.isPending}
 				opportunityTitle={opportunityData?.title}
 			/>
+
+			{/* Modal para regenerar contratos */}
+			{contracts && (
+				<RegenerateContractsModal
+					open={isRegenerateModalOpen}
+					onOpenChange={setIsRegenerateModalOpen}
+					contracts={contracts.map((c) => ({
+						id: c.contract.id,
+						contractType: c.contract.contractType,
+						contractName: c.contract.contractName,
+					}))}
+					onRegenerate={async (contractTypes, newDate) => {
+						await regenerateMutation.mutateAsync({ contractTypes, newDate });
+					}}
+					isLoading={regenerateMutation.isPending}
+				/>
+			)}
 		</div>
 	);
 }

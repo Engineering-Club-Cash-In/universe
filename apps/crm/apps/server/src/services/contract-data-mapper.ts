@@ -582,7 +582,6 @@ export async function validateOpportunityForContracts(
 		missingVehicleFields.push("Vehículo no asociado");
 	} else {
 		if (!vehicle.vinNumber) missingVehicleFields.push("VIN/Chasis");
-		if (!vehicle.motorNumber) missingVehicleFields.push("Número de Motor");
 		if (!vehicle.seats) missingVehicleFields.push("Asientos");
 		if (!vehicle.vehicleUse)
 			missingVehicleFields.push("Uso (Particular/Comercial)");

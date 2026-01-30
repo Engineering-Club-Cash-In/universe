@@ -62,6 +62,7 @@ import {
 	getMissingFieldsForCompletion,
 	getMissingFieldsForContracts,
 } from "../lib/vehicle-helpers";
+import { scoreLead } from "../services/lead-scoring";
 
 /**
  * Helper function to check vehicle inspection status.
@@ -278,6 +279,9 @@ export const crmRouter = {
 				}
 			}
 
+			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
+			conditions.push(not(eq(leads.status, "migrate")));
+
 			const whereClause =
 				conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -408,6 +412,14 @@ export const crmRouter = {
 				? eq(leads.assignedTo, context.userId)
 				: undefined;
 
+		// Excluir leads migrados
+		const excludeMigrated = not(eq(leads.status, "migrate"));
+
+		// Combinar condiciones
+		const whereCondition = roleCondition
+			? and(roleCondition, excludeMigrated)
+			: excludeMigrated;
+
 		// Get counts for each status
 		const statusCounts = await db
 			.select({
@@ -415,7 +427,7 @@ export const crmRouter = {
 				count: count(),
 			})
 			.from(leads)
-			.where(roleCondition)
+			.where(whereCondition)
 			.groupBy(leads.status);
 
 		// Transform to object
@@ -571,7 +583,10 @@ export const crmRouter = {
 
 			// Admin and juridico can update any lead, others only their own
 			const canUpdateAnyLead =
-				context.userRole === "admin" || context.userRole === "juridico" || context.userRole === "sales_supervisor" || context.userRole === "analyst";
+				context.userRole === "admin" ||
+				context.userRole === "juridico" ||
+				context.userRole === "sales_supervisor" ||
+				context.userRole === "analyst";
 			const whereClause = canUpdateAnyLead
 				? eq(leads.id, id)
 				: and(eq(leads.id, id), eq(leads.assignedTo, context.userId));
@@ -730,7 +745,10 @@ export const crmRouter = {
 				.object({
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
-					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					// Excluir múltiples status
+					excludeStatuses: z
+						.array(z.enum(["open", "won", "lost", "on_hold", "migrate"]))
+						.optional(),
 					opportunityId: z.string().uuid().optional(),
 				})
 				.optional(),
@@ -752,6 +770,7 @@ export const crmRouter = {
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
+				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission
 				analysisStatus: opportunities.analysisStatus,
 				analysisRejectionCount: opportunities.analysisRejectionCount,
@@ -847,12 +866,16 @@ export const crmRouter = {
 						ilike(companies.name, `%${searchTerm}%`),
 						ilike(leads.firstName, `%${searchTerm}%`),
 						ilike(leads.lastName, `%${searchTerm}%`),
+						ilike(opportunities.numeroSifco, `%${searchTerm}%`),
 					),
 				);
 			}
 
-			if (input?.notStatus) {
-				conditions.push(not(eq(opportunities.status, input.notStatus)));
+			// Excluir múltiples status
+			if (input?.excludeStatuses && input.excludeStatuses.length > 0) {
+				conditions.push(
+					not(inArray(opportunities.status, input.excludeStatuses)),
+				);
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
@@ -2449,6 +2472,65 @@ export const crmRouter = {
 			};
 		}),
 
+	// Estadísticas de leads como clientes (totales globales, no paginados)
+	getLeadsAsClientsStats: crmProcedure.handler(async ({ context }) => {
+		// Get all stages with 100% closure
+		const closedStages = await db
+			.select({ id: salesStages.id })
+			.from(salesStages)
+			.where(gte(salesStages.closurePercentage, 100));
+
+		const closedStageIds = closedStages.map((s) => s.id);
+
+		// Build condition for closed opportunities
+		const closedOpportunityCondition = and(
+			isNotNull(opportunities.leadId),
+			or(
+				isNotNull(opportunities.numeroSifco),
+				closedStageIds.length > 0
+					? sql`${opportunities.stageId} IN (${sql.join(
+							closedStageIds.map((id) => sql`${id}`),
+							sql`, `,
+						)})`
+					: sql`false`,
+			),
+		);
+
+		// Get all closed opportunities with their values
+		const closedOpportunitiesData = await db
+			.select({
+				leadId: opportunities.leadId,
+				value: opportunities.value,
+			})
+			.from(opportunities)
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.where(
+				context.userRole !== "admin" && context.userRole !== "sales_supervisor"
+					? and(closedOpportunityCondition, eq(leads.assignedTo, context.userId))
+					: closedOpportunityCondition,
+			);
+
+		// Calculate stats
+		const uniqueLeadIds = new Set(
+			closedOpportunitiesData
+				.map((o) => o.leadId)
+				.filter((id): id is string => id !== null),
+		);
+
+		const totalClients = uniqueLeadIds.size;
+		const totalClosedOpportunities = closedOpportunitiesData.length;
+		const totalValue = closedOpportunitiesData.reduce(
+			(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
+			0,
+		);
+
+		return {
+			totalClients,
+			totalClosedOpportunities,
+			totalValue,
+		};
+	}),
+
 	createClient: crmProcedure
 		.input(
 			z.object({
@@ -3413,7 +3495,9 @@ export const crmRouter = {
 				// Recalculate vehicle section completion
 				checklistData.sections.vehiculo.completed =
 					vehicleInspected &&
-					(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
+					(checklistData.sections.vehiculo.documentos?.items?.length > 0
+						? (checklistData.sections.vehiculo.documentos?.completed ?? true)
+						: true) &&
 					(checklistData.sections.vehiculo.verificaciones?.completed ?? false);
 			}
 
@@ -3545,7 +3629,9 @@ export const crmRouter = {
 			// Recalculate vehicle section completion
 			checklistData.sections.vehiculo.completed =
 				vehicleInspected &&
-				(checklistData.sections.vehiculo.documentos?.items?.length > 0 ? (checklistData.sections.vehiculo.documentos?.completed ?? true) : true) &&
+				(checklistData.sections.vehiculo.documentos?.items?.length > 0
+					? (checklistData.sections.vehiculo.documentos?.completed ?? true)
+					: true) &&
 				checklistData.sections.vehiculo.verificaciones.completed;
 
 			// Recalculate client verificaciones completion
@@ -4290,7 +4376,7 @@ export const crmRouter = {
 					hasCreditData: !!(
 						opp.numeroCuotas &&
 						opp.tasaInteres &&
-						opp.cuotaMensual 
+						opp.cuotaMensual
 					),
 					// Campos adicionales para edición
 					categoria: opp.categoria,
@@ -4331,13 +4417,11 @@ export const crmRouter = {
 								isNew: vehicle.isNew,
 								hasRequiredData: !!(
 									vehicle.vinNumber &&
-									vehicle.motorNumber &&
 									vehicle.seats &&
 									vehicle.vehicleUse
 								),
 								missingFields: getMissingFieldsForContracts({
 									vinNumber: vehicle.vinNumber,
-									motorNumber: vehicle.motorNumber,
 									seats: vehicle.seats,
 									vehicleUse: vehicle.vehicleUse,
 								}),
@@ -4496,7 +4580,6 @@ export const crmRouter = {
 				const [vehicle] = await db
 					.select({
 						vinNumber: vehicles.vinNumber,
-						motorNumber: vehicles.motorNumber,
 						seats: vehicles.seats,
 						vehicleUse: vehicles.vehicleUse,
 					})
@@ -4580,5 +4663,17 @@ export const crmRouter = {
 				success: true,
 				message: "Inversionista asignado y oportunidad avanzada a 80%",
 			};
+		}),
+
+	// ── Credit Scoring ──────────────────────────────────────────────────
+	scoreLead: crmProcedure
+		.input(
+			z.object({
+				leadId: z.string().uuid(),
+				opportunityId: z.string().uuid().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			return await scoreLead(input.leadId, input.opportunityId);
 		}),
 };

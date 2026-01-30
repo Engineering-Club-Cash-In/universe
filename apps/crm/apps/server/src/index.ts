@@ -14,6 +14,7 @@ import {
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
+import { loadCarsController } from "./controllers/load-cars";
 import { otpController } from "./controllers/otp";
 import {
 	getLeadByEmail,
@@ -705,6 +706,9 @@ app.post("/info/check-liveness", async (c) => {
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
 
+// Load cars endpoint (for importing vehicles from Excel/JSON)
+app.post("/api/load-cars", loadCarsController);
+
 // Portal endpoints (protected with BETTER_SECRET_PORTAL token)
 app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);
 app.post("/api/portal/lead/update", validatePortalToken, updateLeadByEmail);
@@ -746,6 +750,31 @@ app.get("/upload-csv", async (c) => {
 		const result = await processCsvLeads();
 		return c.json(result);
 	} catch (err: any) {
+		return c.json({ error: err.message }, 500);
+	}
+});
+
+// Endpoint REST directo para migración masiva de créditos (más fácil de usar desde Postman)
+app.post("/api/migrate/creditos", async (c) => {
+	try {
+		const { migrarCreditos } = await import("./controllers/migrate-creditos");
+		const creditos = await c.req.json();
+		const resultado = await migrarCreditos(creditos);
+		return c.json(resultado);
+	} catch (err: any) {
+		console.error("[Migrate] Error:", err);
+		return c.json({ error: err.message }, 500);
+	}
+});
+
+// Endpoint para actualizar el value de oportunidades migradas desde cartera-back
+app.post("/api/migrate/actualizar-value", async (c) => {
+	try {
+		const { actualizarValueOportunidades } = await import("./controllers/migrate-creditos");
+		const resultado = await actualizarValueOportunidades();
+		return c.json(resultado);
+	} catch (err: any) {
+		console.error("[UpdateValue] Error:", err);
 		return c.json({ error: err.message }, 500);
 	}
 });

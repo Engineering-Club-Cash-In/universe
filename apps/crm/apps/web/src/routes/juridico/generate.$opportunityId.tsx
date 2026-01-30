@@ -292,6 +292,17 @@ function RouteComponent() {
 			templateId?: number;
 			apiResponse?: unknown;
 		}>;
+		contractDate?: Date;
+		generationData?: Array<{
+			contractType: string;
+			data: Record<string, string>;
+			emails?: string[];
+			options: {
+				gender: "male" | "female";
+				generatePdf: boolean;
+				filenamePrefix: string;
+			};
+		}>;
 	}) => {
 		const result = await linkContractsMutation.mutateAsync(data);
 		return result;

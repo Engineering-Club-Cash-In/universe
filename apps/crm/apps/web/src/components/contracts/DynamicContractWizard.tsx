@@ -8,7 +8,7 @@ import {
 	Loader2,
 	User,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -171,6 +171,17 @@ interface DynamicContractWizardProps {
 			signingLinks?: string[];
 			templateId?: number;
 			apiResponse?: unknown;
+		}>;
+		contractDate?: Date;
+		generationData?: Array<{
+			contractType: string;
+			data: Record<string, string>;
+			emails?: string[];
+			options: {
+				gender: "male" | "female";
+				generatePdf: boolean;
+				filenamePrefix: string;
+			};
 		}>;
 	}) => Promise<{ success: boolean; message: string }>;
 	onBack: () => void;
@@ -469,6 +480,20 @@ export function DynamicContractWizard({
 
 	const [generationResult, setGenerationResult] =
 		useState<GenerationResultWithData | null>(null);
+
+	// Store generation data for snapshot using ref to avoid state timing issues
+	const generationDataRef = useRef<
+		Array<{
+			contractType: string;
+			data: Record<string, string>;
+			emails?: string[];
+			options: {
+				gender: "male" | "female";
+				generatePdf: boolean;
+				filenamePrefix: string;
+			};
+		}>
+	>([]);
 
 	// Date configuration states
 	const [fechaVencimiento, setFechaVencimiento] = useState<string>("");
@@ -1237,6 +1262,9 @@ export function DynamicContractWizard({
 						},
 					}));
 
+				// Store generation data for snapshot (using ref for immediate availability)
+				generationDataRef.current = contracts;
+
 				const result = await onGenerate({ contracts });
 				setGenerationResult(result);
 				setStep(3);
@@ -1265,6 +1293,27 @@ export function DynamicContractWizard({
 		);
 		if (successfulContracts.length === 0) return;
 
+		// Extract contract date from fieldValues
+		let contractDate: Date = new Date(); // Default to current date
+		const dia = fieldValues.diaContrato || fieldValues.dia;
+		const mes = fieldValues.mesContrato || fieldValues.mesTexto;
+		const anio = fieldValues.anioContrato || fieldValues.ano;
+
+		console.log("[DynamicContractWizard] Date extraction:", { dia, mes, anio, fieldValues });
+		console.log("[DynamicContractWizard] generationDataRef:", generationDataRef.current);
+
+		if (dia && mes && anio) {
+			const monthIndex = monthsSpanish.indexOf(mes.toLowerCase());
+			if (monthIndex !== -1) {
+				// Usar el año tal como viene
+				contractDate = new Date(
+					Number.parseInt(anio),
+					monthIndex,
+					Number.parseInt(dia),
+				);
+			}
+		}
+
 		try {
 			await onLinkContracts({
 				opportunityId,
@@ -1277,6 +1326,8 @@ export function DynamicContractWizard({
 					templateId: c.templateId,
 					apiResponse: c.apiResponse,
 				})),
+				contractDate,
+				generationData: generationDataRef.current.length > 0 ? generationDataRef.current : undefined,
 			});
 			setShowLinkConfirmDialog(false);
 			onBack(); // Volver a la pantalla anterior después de enlazar

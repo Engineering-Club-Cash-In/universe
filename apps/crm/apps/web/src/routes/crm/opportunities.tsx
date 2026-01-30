@@ -676,7 +676,11 @@ function RouteComponent() {
 
 	const userProfile = useQuery(orpc.getUserProfile.queryOptions());
 	const opportunitiesQuery = useQuery({
-		...orpc.getOpportunities.queryOptions(),
+		...orpc.getOpportunities.queryOptions({
+			input: {
+				excludeStatuses: ["migrate"],
+			},
+		}),
 		enabled:
 			!!userProfile.data?.role &&
 			PERMISSIONS.canAccessCRM(userProfile.data.role) &&

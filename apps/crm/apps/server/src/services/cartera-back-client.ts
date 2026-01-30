@@ -670,7 +670,9 @@ export class CarteraBackClient {
 	 * @param input - Datos de la factura a generar
 	 * @returns Resultado de la operación
 	 */
-	async facturarGenerico(input: FacturarGenericoInput): Promise<FacturarGenericoResponse> {
+	async facturarGenerico(
+		input: FacturarGenericoInput,
+	): Promise<FacturarGenericoResponse> {
 		const response = await this.request<FacturarGenericoResponse>(
 			"/api/dte/facturar-generico",
 			{

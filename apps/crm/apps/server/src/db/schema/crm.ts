@@ -18,6 +18,7 @@ export const leadStatusEnum = pgEnum("lead_status", [
 	"qualified",
 	"unqualified",
 	"converted",
+	"migrate", // Leads cargados por migración masiva (no pasaron por el proceso normal)
 ]);
 export const leadSourceEnum = pgEnum("lead_source", [
 	"website",
@@ -62,6 +63,7 @@ export const opportunityStatusEnum = pgEnum("opportunity_status", [
 	"won",
 	"lost",
 	"on_hold",
+	"migrate", // Créditos cargados por migración masiva (no pasaron por el proceso normal)
 ]);
 export const clientStatusEnum = pgEnum("client_status", [
 	"active",

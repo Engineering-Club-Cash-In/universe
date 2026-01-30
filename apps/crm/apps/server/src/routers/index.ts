@@ -83,9 +83,11 @@ export const appRouter = {
 	getClients: crmRouter.getClients,
 	getClientsStats: crmRouter.getClientsStats,
 	getLeadsAsClients: crmRouter.getLeadsAsClients,
+	getLeadsAsClientsStats: crmRouter.getLeadsAsClientsStats,
 	createClient: crmRouter.createClient,
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
+	scoreLead: crmRouter.scoreLead,
 
 	// Vehicles routes
 	getVehicles: vehiclesRouter.getAll,

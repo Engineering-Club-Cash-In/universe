@@ -72,7 +72,7 @@ function RouteComponent() {
 			dpi: string;
 			documentNames: string[];
 		}) => {
-			return await client.getDocumentsByDpi({ dpi, documentNames });
+			return await client.getDocumentsByDpi({ dpi: dpi.replace(/\s/g, ""), documentNames });
 		},
 	});
 

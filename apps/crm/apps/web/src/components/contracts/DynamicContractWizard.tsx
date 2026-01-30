@@ -1724,13 +1724,11 @@ export function DynamicContractWizard({
 										<Link2 className="h-5 w-5 text-blue-600" />
 									</div>
 									<div>
-										<h4 className="font-semibold text-blue-800">
-											¿Qué sigue?
-										</h4>
+										<h4 className="font-semibold text-blue-800">¿Qué sigue?</h4>
 										<ul className="mt-1 list-inside list-disc space-y-1 text-blue-700 text-sm">
 											<li>
-												<strong>Revisa los documentos generados</strong> haciendo
-												clic en el botón morado "Ver PDF"
+												<strong>Revisa los documentos generados</strong>{" "}
+												haciendo clic en el botón morado "Ver PDF"
 											</li>
 											<li>
 												Si algún documento tiene errores, haz clic en "Corregir

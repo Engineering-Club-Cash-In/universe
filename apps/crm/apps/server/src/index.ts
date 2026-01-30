@@ -14,6 +14,7 @@ import {
 import { infornetController } from "./controllers/buro";
 import { processCsvLeads } from "./controllers/csv";
 import { livenessController } from "./controllers/liveness";
+import { loadCarsController } from "./controllers/load-cars";
 import { otpController } from "./controllers/otp";
 import {
 	getLeadByEmail,
@@ -704,6 +705,9 @@ app.post("/info/check-liveness", async (c) => {
 
 // REST endpoint for public lead creation (for external web forms)
 app.post("/api/public/lead", createPublicLead);
+
+// Load cars endpoint (for importing vehicles from Excel/JSON)
+app.post("/api/load-cars", loadCarsController);
 
 // Portal endpoints (protected with BETTER_SECRET_PORTAL token)
 app.get("/api/portal/lead", validatePortalToken, getLeadByEmail);

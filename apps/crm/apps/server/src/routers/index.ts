@@ -166,6 +166,8 @@ export const appRouter = {
 	linkContractsToOpportunity:
 		contractGenerationRouter.linkContractsToOpportunity,
 	getGeneratedContracts: contractGenerationRouter.getGeneratedContracts,
+	getGenerationSnapshot: contractGenerationRouter.getGenerationSnapshot,
+	regenerateContracts: contractGenerationRouter.regenerateContracts,
 
 	// Vendors routes
 	getVendors: vendorsRouter.getAll,

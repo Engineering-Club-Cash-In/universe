@@ -1,7 +1,7 @@
 import { openai } from "@ai-sdk/openai";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, not, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import {
@@ -51,6 +51,10 @@ export const vehiclesRouter = {
 					query: z.string().optional(),
 					status: z.string().optional(),
 					category: z.string().optional(),
+					// Excluir vehículos con cierto status
+					excludeStatus: z
+						.enum(["pending", "available", "sold", "maintenance", "auction"])
+						.optional(),
 				})
 				.optional(),
 		)
@@ -60,6 +64,7 @@ export const vehiclesRouter = {
 			const query = input?.query;
 			const status = input?.status;
 			const category = input?.category;
+			const excludeStatus = input?.excludeStatus;
 
 			// Build conditions
 			const conditions = [];
@@ -75,6 +80,11 @@ export const vehiclesRouter = {
 			}
 			if (status && status !== "all") {
 				conditions.push(eq(vehicles.status, status as any));
+			}
+
+			// Excluir vehículos con cierto status
+			if (excludeStatus) {
+				conditions.push(not(eq(vehicles.status, excludeStatus as any)));
 			}
 
 			// Category filters

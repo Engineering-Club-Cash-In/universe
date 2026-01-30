@@ -102,7 +102,7 @@ function RouteComponent() {
 	// Obtener oportunidades listas para contratos (90%+)
 	const { data: leadsWithContracts, isLoading } = useQuery({
 		...orpc.getOpportunitiesForContracts.queryOptions({
-			input: { closurePercentages: [90, 100] },
+			input: { closurePercentages: [90] },
 		}),
 
 		enabled: canViewLegal,

@@ -738,6 +738,7 @@ function QuoterPage() {
 			client.getVehicles({
 				limit: 50,
 				query: debouncedVehiclesSearch || undefined,
+				excludeStatus: "sold", // No mostrar vehículos vendidos en el cotizador
 			}),
 		enabled: !!session,
 	});
@@ -746,7 +747,7 @@ function QuoterPage() {
 		queryFn: () =>
 			client.getOpportunities({
 				search: debouncedOpportunitiesSearch || undefined,
-				notStatus: "won",
+				excludeStatuses: ["won", "migrate"], // No mostrar oportunidades ganadas o migradas
 			}),
 		enabled: !!session,
 	});

@@ -403,8 +403,8 @@ export async function mapOpportunityToContractData(
 				placasMayusculas: toUpperCase(vehicle.licensePlate || ""),
 				vin: vehicle.vinNumber || "",
 				vinMayusculas: toUpperCase(vehicle.vinNumber || ""),
-				motor: vehicle.motorNumber || "-",
-				motorMayusculas: toUpperCase(vehicle.motorNumber || "-"),
+				motor: vehicle.motorNumber || "",
+				motorMayusculas: toUpperCase(vehicle.motorNumber || ""),
 				serie: vehicle.series || undefined,
 				serieMayusculas: vehicle.series
 					? toUpperCase(vehicle.series)

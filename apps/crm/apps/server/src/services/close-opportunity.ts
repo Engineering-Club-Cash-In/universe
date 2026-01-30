@@ -19,14 +19,14 @@ import {
 } from "../db/schema";
 import { contratosFinanciamiento } from "../db/schema/cobros";
 import { clients, leads, opportunities } from "../db/schema/crm";
-import type { FacturaItem } from "../types/cartera-back";
 import { formatMissingFields, getMissingFields } from "../lib/vehicle-helpers";
+import type { FacturaItem } from "../types/cartera-back";
+import { carteraBackClient } from "./cartera-back-client";
 import {
 	type CreateCreditoResult,
 	createCreditoInCarteraBack,
 	isCarteraBackEnabled,
 } from "./cartera-back-integration";
-import { carteraBackClient } from "./cartera-back-client";
 
 // ============================================================================
 // CONSTANTS
@@ -336,7 +336,9 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 /**
  * Registra un log de sincronización de facturación
  */
-async function logInvoiceSyncOperation(log: NewCarteraBackSyncLog): Promise<void> {
+async function logInvoiceSyncOperation(
+	log: NewCarteraBackSyncLog,
+): Promise<void> {
 	try {
 		await db.insert(carteraBackSyncLog).values(log);
 	} catch (error) {
@@ -370,10 +372,7 @@ async function getLatestApprovedQuotation(
 
 		return quotation || null;
 	} catch (error) {
-		console.error(
-			"[CloseOpportunity] Error fetching latest quotation:",
-			error,
-		);
+		console.error("[CloseOpportunity] Error fetching latest quotation:", error);
 		return null;
 	}
 }
@@ -410,7 +409,9 @@ function buildInvoices(
 	}
 
 	if (!quotation) {
-		console.log("[CloseOpportunity] No quotation found, only royalty invoice will be generated");
+		console.log(
+			"[CloseOpportunity] No quotation found, only royalty invoice will be generated",
+		);
 		return invoices;
 	}
 
@@ -606,7 +607,8 @@ function generateInvoicesInBackground(params: GenerateInvoicesParams): void {
 					};
 
 					// Llamar al endpoint de facturación genérica
-					const response = await carteraBackClient.facturarGenerico(requestBody);
+					const response =
+						await carteraBackClient.facturarGenerico(requestBody);
 
 					// Registrar éxito en el log con el payload exacto enviado
 					await logInvoiceSyncOperation({
@@ -1106,9 +1108,7 @@ export async function closeOpportunity(
 				quotation,
 				userId,
 			});
-			console.log(
-				"[CloseOpportunity] Invoice generation queued in background",
-			);
+			console.log("[CloseOpportunity] Invoice generation queued in background");
 		}
 
 		// 4. Complete local operations in a transaction for atomicity

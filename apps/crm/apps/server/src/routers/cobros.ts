@@ -1428,11 +1428,26 @@ export const cobrosRouter = {
 						vehicleId: opportunities.vehicleId,
 						leadId: opportunities.leadId,
 						direccion: leads.direccion,
+						// Datos de la oportunidad (para fallback)
+						oportunidadNotes: opportunities.notes,
+						oportunidadCuotaMensual: opportunities.cuotaMensual,
+						oportunidadDiaPago: opportunities.diaPagoMensual,
+						oportunidadCreditType: opportunities.creditType,
 						// Datos del vehículo
 						vehiculoMarca: vehicles.make,
 						vehiculoModelo: vehicles.model,
 						vehiculoYear: vehicles.year,
 						vehiculoPlaca: vehicles.licensePlate,
+						vehiculoTipo: vehicles.vehicleType,
+						vehiculoMotor: vehicles.motorNumber,
+						vehiculoChasis: vehicles.series,
+						vehiculoAsientos: vehicles.seats,
+						vehiculoUso: vehicles.vehicleUse,
+						// Datos del seguro del vehículo
+						vehiculoNumeroPoliza: vehicles.numeroPoliza,
+						vehiculoFechaInicioSeguro: vehicles.fechaInicioSeguro,
+						vehiculoFechaVencimientoSeguro: vehicles.fechaVencimientoSeguro,
+						vehiculoMontoAsegurado: vehicles.montoAsegurado,
 						// Datos del lead
 						leadFirstName: leads.firstName,
 						leadLastName: leads.lastName,
@@ -1441,10 +1456,17 @@ export const cobrosRouter = {
 					})
 					.from(opportunities)
 					.leftJoin(vehicles, eq(opportunities.vehicleId, vehicles.id))
-					.leftJoin(clients, eq(opportunities.id, clients.opportunityId))
 					.leftJoin(leads, eq(opportunities.leadId, leads.id))
 					.where(eq(opportunities.numeroSifco, numeroSifco))
 					.limit(1);
+
+				// Datos extras de nuestra BD (para fallback si cartera no tiene)
+				let oportunidadData: {
+					notes: string | null;
+					cuotaMensual: string | null;
+					diaPago: number | null;
+					creditType: string | null;
+				} | null = null;
 
 				if (oportunidadResult.length > 0) {
 					const opp = oportunidadResult[0];
@@ -1453,6 +1475,16 @@ export const cobrosRouter = {
 						model: opp.vehiculoModelo,
 						year: opp.vehiculoYear,
 						licensePlate: opp.vehiculoPlaca,
+						tipo: opp.vehiculoTipo,
+						motor: opp.vehiculoMotor,
+						chasis: opp.vehiculoChasis,
+						asientos: opp.vehiculoAsientos,
+						uso: opp.vehiculoUso,
+						// Seguro
+						numeroPoliza: opp.vehiculoNumeroPoliza,
+						fechaInicioSeguro: opp.vehiculoFechaInicioSeguro,
+						fechaVencimientoSeguro: opp.vehiculoFechaVencimientoSeguro,
+						montoAsegurado: opp.vehiculoMontoAsegurado,
 					};
 					leadInfo = {
 						nombre:
@@ -1461,6 +1493,12 @@ export const cobrosRouter = {
 						telefono: opp.leadTelefono,
 					};
 					direccion = opp.direccion;
+					oportunidadData = {
+						notes: opp.oportunidadNotes,
+						cuotaMensual: opp.oportunidadCuotaMensual,
+						diaPago: opp.oportunidadDiaPago,
+						creditType: opp.oportunidadCreditType,
+					};
 				}
 
 				// 4. Buscar o crear caso de cobros automáticamente
@@ -1566,12 +1604,13 @@ export const cobrosRouter = {
 					proximoContacto: casoCobro?.proximoContacto || null,
 					metodoContactoProximo: null,
 
-					// Datos del contrato (de cartera-back)
-					montoFinanciado: creditoCompleto.credito.capital,
-					cuotaMensual: creditoCompleto.credito.cuota,
+					// Datos del contrato (cartera primero, fallback a nuestra BD)
+					montoFinanciado: creditoCompleto.credito.deudatotal,
+					cuotaMensual:
+						creditoCompleto.credito.cuota || oportunidadData?.cuotaMensual,
 					numeroCuotas: creditoCompleto.credito.plazo,
 					fechaInicio: creditoCompleto.credito.fecha_creacion,
-					diaPagoMensual: null, // Cartera-back no tiene día de pago específico
+					diaPagoMensual: oportunidadData?.diaPago || null,
 					estadoContrato,
 
 					// Datos del cliente (de cartera-back o lead)
@@ -1582,12 +1621,27 @@ export const cobrosRouter = {
 					vehiculoMarca: vehiculo?.make || "-",
 					vehiculoModelo: vehiculo?.model || "-",
 					vehiculoYear: vehiculo?.year || null,
-					vehiculoPlaca:
-						vehiculo?.licensePlate ||
-						creditoCompleto.credito.numero_credito_sifco, // Datos adicionales de Cartera-Back
+					vehiculoPlaca: vehiculo?.licensePlate || null,
+					vehiculoTipo: vehiculo?.tipo || null,
+					vehiculoMotor: vehiculo?.motor || null,
+					vehiculoChasis: vehiculo?.chasis || null,
+					vehiculoAsientos: vehiculo?.asientos || null,
+					vehiculoUso: vehiculo?.uso || null,
+					// Seguro del vehículo
+					vehiculoNumeroPoliza: vehiculo?.numeroPoliza || null,
+					vehiculoFechaInicioSeguro: vehiculo?.fechaInicioSeguro || null,
+					vehiculoFechaVencimientoSeguro:
+						vehiculo?.fechaVencimientoSeguro || null,
+					vehiculoMontoAsegurado: vehiculo?.montoAsegurado || null,
+
+					// Datos adicionales de Cartera-Back
 					numeroCreditoSifco: creditoCompleto.credito.numero_credito_sifco,
 					deudaTotal: creditoCompleto.credito.deudatotal,
 					asesor: null, // Cartera-back no devuelve asesor completo en endpoint /credito
+
+					// Notas de la oportunidad
+					oportunidadNotes: oportunidadData?.notes || null,
+					creditType: oportunidadData?.creditType || null,
 				};
 			} catch (error) {
 				console.error("[Cobros] Error obteniendo detalles de crédito:", error);

@@ -1,6 +1,5 @@
-import { Link } from "@tanstack/react-router";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ArrowUpDown, Eye } from "lucide-react";
+import { ArrowUpDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -203,26 +202,6 @@ export const columns: ColumnDef<ContratoCobranza>[] = [
 					? row.original.estadoMora || "al_dia"
 					: row.original.estadoContrato;
 			return getEstadoBadge(estadoVisual);
-		},
-	},
-	{
-		id: "acciones",
-		cell: ({ row }) => {
-			const linkId = row.original.numeroCredito || row.original.contratoId;
-			const tipoLink = row.original.casoCobroId ? "caso" : "contrato";
-
-			return (
-				<Link
-					to="/cobros/$id"
-					params={{ id: linkId }}
-					search={{ tipo: tipoLink }}
-				>
-					<Button variant="ghost" size="sm">
-						<Eye className="mr-2 h-4 w-4" />
-						Ver Detalles
-					</Button>
-				</Link>
-			);
 		},
 	},
 ];

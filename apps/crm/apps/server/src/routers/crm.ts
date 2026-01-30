@@ -279,6 +279,9 @@ export const crmRouter = {
 				}
 			}
 
+			// Excluir leads migrados (solo se muestran en la sección de clientes migrados)
+			conditions.push(not(eq(leads.status, "migrate")));
+
 			const whereClause =
 				conditions.length > 0 ? and(...conditions) : undefined;
 
@@ -409,6 +412,14 @@ export const crmRouter = {
 				? eq(leads.assignedTo, context.userId)
 				: undefined;
 
+		// Excluir leads migrados
+		const excludeMigrated = not(eq(leads.status, "migrate"));
+
+		// Combinar condiciones
+		const whereCondition = roleCondition
+			? and(roleCondition, excludeMigrated)
+			: excludeMigrated;
+
 		// Get counts for each status
 		const statusCounts = await db
 			.select({
@@ -416,7 +427,7 @@ export const crmRouter = {
 				count: count(),
 			})
 			.from(leads)
-			.where(roleCondition)
+			.where(whereCondition)
 			.groupBy(leads.status);
 
 		// Transform to object
@@ -734,7 +745,10 @@ export const crmRouter = {
 				.object({
 					leadId: z.string().uuid().optional(),
 					search: z.string().optional(),
-					notStatus: z.enum(["open", "won", "lost", "on_hold"]).optional(),
+					// Excluir múltiples status
+					excludeStatuses: z
+						.array(z.enum(["open", "won", "lost", "on_hold", "migrate"]))
+						.optional(),
 					opportunityId: z.string().uuid().optional(),
 				})
 				.optional(),
@@ -756,6 +770,7 @@ export const crmRouter = {
 				notes: opportunities.notes,
 				createdAt: opportunities.createdAt,
 				updatedAt: opportunities.updatedAt,
+				numeroSifco: opportunities.numeroSifco,
 				// Analysis status for tracking rejection/resubmission
 				analysisStatus: opportunities.analysisStatus,
 				analysisRejectionCount: opportunities.analysisRejectionCount,
@@ -851,12 +866,16 @@ export const crmRouter = {
 						ilike(companies.name, `%${searchTerm}%`),
 						ilike(leads.firstName, `%${searchTerm}%`),
 						ilike(leads.lastName, `%${searchTerm}%`),
+						ilike(opportunities.numeroSifco, `%${searchTerm}%`),
 					),
 				);
 			}
 
-			if (input?.notStatus) {
-				conditions.push(not(eq(opportunities.status, input.notStatus)));
+			// Excluir múltiples status
+			if (input?.excludeStatuses && input.excludeStatuses.length > 0) {
+				conditions.push(
+					not(inArray(opportunities.status, input.excludeStatuses)),
+				);
 			}
 
 			// Role-based filter: admin and sales_supervisor can see all, others only their own
@@ -2452,6 +2471,65 @@ export const crmRouter = {
 				offset,
 			};
 		}),
+
+	// Estadísticas de leads como clientes (totales globales, no paginados)
+	getLeadsAsClientsStats: crmProcedure.handler(async ({ context }) => {
+		// Get all stages with 100% closure
+		const closedStages = await db
+			.select({ id: salesStages.id })
+			.from(salesStages)
+			.where(gte(salesStages.closurePercentage, 100));
+
+		const closedStageIds = closedStages.map((s) => s.id);
+
+		// Build condition for closed opportunities
+		const closedOpportunityCondition = and(
+			isNotNull(opportunities.leadId),
+			or(
+				isNotNull(opportunities.numeroSifco),
+				closedStageIds.length > 0
+					? sql`${opportunities.stageId} IN (${sql.join(
+							closedStageIds.map((id) => sql`${id}`),
+							sql`, `,
+						)})`
+					: sql`false`,
+			),
+		);
+
+		// Get all closed opportunities with their values
+		const closedOpportunitiesData = await db
+			.select({
+				leadId: opportunities.leadId,
+				value: opportunities.value,
+			})
+			.from(opportunities)
+			.leftJoin(leads, eq(opportunities.leadId, leads.id))
+			.where(
+				context.userRole !== "admin" && context.userRole !== "sales_supervisor"
+					? and(closedOpportunityCondition, eq(leads.assignedTo, context.userId))
+					: closedOpportunityCondition,
+			);
+
+		// Calculate stats
+		const uniqueLeadIds = new Set(
+			closedOpportunitiesData
+				.map((o) => o.leadId)
+				.filter((id): id is string => id !== null),
+		);
+
+		const totalClients = uniqueLeadIds.size;
+		const totalClosedOpportunities = closedOpportunitiesData.length;
+		const totalValue = closedOpportunitiesData.reduce(
+			(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
+			0,
+		);
+
+		return {
+			totalClients,
+			totalClosedOpportunities,
+			totalValue,
+		};
+	}),
 
 	createClient: crmProcedure
 		.input(

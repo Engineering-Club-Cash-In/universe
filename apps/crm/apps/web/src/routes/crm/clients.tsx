@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-	ArrowUpRight,
 	Banknote,
 	Briefcase,
 	Calendar,
@@ -21,6 +20,10 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import {
+	OpportunityDetailModal,
+	type OpportunityForModal,
+} from "@/components/opportunity-detail-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -198,6 +201,11 @@ function RouteComponent() {
 	const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 	const [selectedClient, setSelectedClient] = useState<ClientData | null>(null);
 
+	// Opportunity modal state
+	const [isOpportunityModalOpen, setIsOpportunityModalOpen] = useState(false);
+	const [selectedOpportunityForModal, setSelectedOpportunityForModal] =
+		useState<OpportunityForModal | null>(null);
+
 	// Debounce search
 	useEffect(() => {
 		const timer = setTimeout(() => {
@@ -228,6 +236,20 @@ function RouteComponent() {
 			page,
 			pageSize,
 			debouncedSearch,
+		],
+	});
+
+	// Query para estadísticas globales (no paginadas)
+	const statsQuery = useQuery({
+		...orpc.getLeadsAsClientsStats.queryOptions(),
+		enabled:
+			!!userProfile.data?.role &&
+			PERMISSIONS.canAccessCRM(userProfile.data.role) &&
+			!!session?.user?.id,
+		queryKey: [
+			"getLeadsAsClientsStats",
+			session?.user?.id,
+			userProfile.data?.role,
 		],
 	});
 
@@ -285,7 +307,9 @@ function RouteComponent() {
 						<HandshakeIcon className="h-4 w-4 text-muted-foreground" />
 					</CardHeader>
 					<CardContent>
-						<div className="font-bold text-2xl">{totalRecords}</div>
+						<div className="font-bold text-2xl">
+							{statsQuery.data?.totalClients ?? 0}
+						</div>
 						<p className="text-muted-foreground text-xs">
 							Leads con créditos cerrados
 						</p>
@@ -300,10 +324,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							{clients.reduce(
-								(sum, c) => sum + (c.closedOpportunitiesCount || 0),
-								0,
-							)}
+							{statsQuery.data?.totalClosedOpportunities ?? 0}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							Total de créditos activos
@@ -317,10 +338,7 @@ function RouteComponent() {
 					</CardHeader>
 					<CardContent>
 						<div className="font-bold text-2xl">
-							Q
-							{clients
-								.reduce((sum, c) => sum + (c.totalClosedValue || 0), 0)
-								.toLocaleString()}
+							Q{(statsQuery.data?.totalValue ?? 0).toLocaleString()}
 						</div>
 						<p className="text-muted-foreground text-xs">
 							En créditos cerrados
@@ -1088,15 +1106,40 @@ function RouteComponent() {
 													variant="outline"
 													size="sm"
 													onClick={() => {
-														setIsDetailsDialogOpen(false);
-														navigate({
-															to: "/crm/opportunities",
-															search: { opportunityId: opp.id },
-														});
+														// Convertir la oportunidad al tipo esperado por el modal
+														const opportunityForModal: OpportunityForModal = {
+															id: opp.id,
+															title: opp.title,
+															value: opp.value,
+															creditType: opp.creditType,
+															status: opp.status,
+															expectedCloseDate: null,
+															createdAt: opp.createdAt,
+															lead: selectedClient
+																? {
+																		id: selectedClient.id,
+																		firstName: selectedClient.firstName,
+																		lastName: selectedClient.lastName,
+																		email: selectedClient.email,
+																		phone: selectedClient.phone,
+																		dpi: selectedClient.dpi,
+																	}
+																: null,
+															stage: opp.stage
+																? {
+																		id: opp.stage.id,
+																		name: opp.stage.name,
+																		closurePercentage: opp.stage.closurePercentage,
+																		color: opp.stage.color || "#888",
+																	}
+																: null,
+														};
+														setSelectedOpportunityForModal(opportunityForModal);
+														setIsOpportunityModalOpen(true);
 													}}
 													className="ml-4 shrink-0"
 												>
-													<ArrowUpRight className="mr-1 h-4 w-4" />
+													<Eye className="mr-1 h-4 w-4" />
 													Ver Oportunidad
 												</Button>
 											</div>
@@ -1108,6 +1151,15 @@ function RouteComponent() {
 					)}
 				</DialogContent>
 			</Dialog>
+
+			{/* Opportunity Detail Modal */}
+			<OpportunityDetailModal
+				open={isOpportunityModalOpen}
+				onOpenChange={setIsOpportunityModalOpen}
+				opportunity={selectedOpportunityForModal}
+				userRole={userProfile.data?.role}
+				readOnly
+			/>
 		</div>
 	);
 }

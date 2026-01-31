@@ -3,10 +3,11 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { quotations } from "../db/schema/quotations";
 import {
 	contractGenerationSnapshots,
 	generatedLegalContracts,
@@ -621,6 +622,16 @@ export const contractGenerationRouter = {
 					});
 				}
 
+				// 1.5 Obtener termMonths de la quotation más reciente asociada
+				const [quotation] = await db
+					.select({ termMonths: quotations.termMonths })
+					.from(quotations)
+					.where(eq(quotations.opportunityId, input.opportunityId))
+					.orderBy(desc(quotations.createdAt))
+					.limit(1);
+
+				const termMonths = quotation?.termMonths || 60; // Default 60 meses si no hay quotation
+
 				// 2. Actualizar la fecha en los datos de cada contrato
 				const contractsWithNewDate = contractsToRegenerate.map((contract) => {
 					const newData = { ...contract.data };
@@ -647,13 +658,48 @@ export const contractGenerationRouter = {
 					// Fecha completa en texto
 					const fullDateText = `${dayText} de ${monthText} de ${fullYearText}`;
 
-					// Actualizar SOLO campos de fecha del contrato (NO los de vencimiento)
+					// Actualizar campos de fecha del contrato
 					if ("dia" in newData) newData.dia = day.toString();
 					if ("ano" in newData) newData.ano = yearShort;
 					if ("diaTexto" in newData) newData.diaTexto = dayText;
 					if ("mesTexto" in newData) newData.mesTexto = monthText;
 					if ("anoTexto" in newData) newData.anoTexto = yearText;
 					if ("fechaInicioContrato" in newData) newData.fechaInicioContrato = fullDateText;
+
+					// === CALCULAR DÍA DE PAGO Y FECHA DE VENCIMIENTO ===
+					// Regla: Del 1 al 20 -> día 15, Del 21 al 31 -> último día del mes
+					let diaPago: string;
+					let diaVenc: number;
+
+					// Calcular mes de vencimiento (setear día 1 para evitar desbordamiento)
+					const fechaVenc = new Date(year, monthIndex, 1);
+					fechaVenc.setMonth(fechaVenc.getMonth() + termMonths);
+					const mesVenc = fechaVenc.getMonth();
+					const anioVenc = fechaVenc.getFullYear();
+
+					if (day <= 20) {
+						// Del 1 al 20: día de pago es "día quince"
+						diaPago = "día quince";
+						diaVenc = 15;
+					} else {
+						// Del 21 al 31: día de pago es "último día"
+						diaPago = "último día";
+						diaVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+					}
+
+					// Actualizar campos de día de pago
+					if ("diaPago" in newData) newData.diaPago = diaPago;
+
+					// Actualizar campos de fecha de vencimiento
+					const mesVencText = monthNames[mesVenc];
+					const anioVencShort = anioVenc.toString().slice(-2);
+
+					if ("diaVencimiento" in newData) newData.diaVencimiento = diaVenc.toString();
+					if ("mesVencimiento" in newData) newData.mesVencimiento = String(mesVenc + 1).padStart(2, "0");
+					if ("anoVencimiento" in newData) newData.anoVencimiento = anioVencShort;
+					if ("diaTextoVencimiento" in newData) newData.diaTextoVencimiento = numberToSpanishText(diaVenc);
+					if ("mesTextoVencimiento" in newData) newData.mesTextoVencimiento = mesVencText;
+					if ("anoTextoVencimiento" in newData) newData.anoTextoVencimiento = numberToSpanishText(Number.parseInt(anioVencShort));
 
 					return {
 						...contract,

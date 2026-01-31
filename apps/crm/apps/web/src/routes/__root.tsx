@@ -29,11 +29,11 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 	head: () => ({
 		meta: [
 			{
-				title: "My App",
+				title: "CRM - Club Cash in",
 			},
 			{
 				name: "description",
-				content: "My App is a web application",
+				content: "CRM para la gestión de clientes, vehículos y ventas de Club Cash in.",
 			},
 		],
 		links: [

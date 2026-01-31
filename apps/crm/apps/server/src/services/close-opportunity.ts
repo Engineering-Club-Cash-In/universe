@@ -54,9 +54,6 @@ export const FACTURACION_GARANTIA_MOBILIARIA_COSTO = 100;
 /** Costo fijo de nombramiento */
 export const FACTURACION_NOMBRAMIENTO_COSTO = 150;
 
-/** Costo fijo de copia de llave */
-export const FACTURACION_COPIA_LLAVE_COSTO = 950;
-
 /** Usuario por defecto para created_by en facturación */
 export const FACTURACION_CREATED_BY = 1;
 
@@ -309,12 +306,6 @@ function validateOpportunityForClose(opp: OpportunityData): string[] {
 	if (!opp.numeroCuotas) missingFields.push("número de cuotas");
 	if (!opp.tasaInteres) missingFields.push("tasa de interés");
 	if (!opp.cuotaMensual) missingFields.push("cuota mensual");
-
-	const seguro = opp.seguro ? Number.parseFloat(opp.seguro) : undefined;
-
-	if (seguro === undefined || seguro === null || seguro <= 0) {
-		missingFields.push("seguro (debe ser mayor a 0)");
-	}
 	if (!opp.categoria) missingFields.push("categoría del crédito");
 	if (!opp.nit) missingFields.push("NIT del cliente");
 

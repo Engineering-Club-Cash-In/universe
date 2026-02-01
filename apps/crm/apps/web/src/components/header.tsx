@@ -23,6 +23,7 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
+import { logo } from "@/assets";
 
 import { ModeToggle } from "./mode-toggle";
 import { Button } from "./ui/button";
@@ -57,9 +58,7 @@ export default function Header() {
 						to="/"
 						className="flex items-center gap-2 transition-opacity hover:opacity-80"
 					>
-						<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-							<TrendingUp className="h-5 w-5" />
-						</div>
+						<img src={logo} alt="CCI Logo" className="h-9 w-auto" />
 						<span className="hidden font-bold text-lg sm:inline-block">
 							CCI CRM
 						</span>

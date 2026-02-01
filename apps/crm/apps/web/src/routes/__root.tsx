@@ -17,6 +17,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { link, type orpc } from "@/utils/orpc";
 import type { appRouter } from "../../../server/src/routers";
+import { logo } from "@/assets";
 import "../index.css";
 
 export interface RouterAppContext {
@@ -39,7 +40,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 		links: [
 			{
 				rel: "icon",
-				href: "/favicon.ico",
+				href: logo,
 			},
 		],
 	}),

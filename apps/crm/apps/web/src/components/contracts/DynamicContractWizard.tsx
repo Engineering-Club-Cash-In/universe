@@ -450,7 +450,7 @@ function dpiToWords(dpi: string): string {
 	const palabras2 = dpiGroupToWords(grupo2);
 	const palabras3 = dpiGroupToWords(grupo3);
 
-	const texto = `${palabras1} ${palabras2} ${palabras3}`.toUpperCase();
+	const texto = `${palabras1} ${palabras2} ${palabras3}`.toLowerCase();
 	return `${texto} (${cleanDpi})`;
 }
 
@@ -725,14 +725,16 @@ export function DynamicContractWizard({
 			const { cliente, vehiculo, credito } = crmData;
 			const gender = cliente.genero || renapInfo?.gender || "M";
 
-			fieldsData.forEach((field) => {
-				const fieldKeyLower = field.key?.toLowerCase();
+		fieldsData.forEach((field) => {
+			const fieldKeyLower = field.key?.toLowerCase();
 
-				// === CLIENTE DATA (from CRM) ===
+						// === CLIENTE DATA (from CRM) ===
 				switch (fieldKeyLower) {
 					case "nombrecompleto":
 						if (cliente.nombreCompleto) {
-							initialValues[field.key] = cliente.nombreCompleto.toUpperCase();
+							initialValues[field.key] = renapInfo
+							? `${renapInfo.firstName} ${renapInfo.secondName} ${renapInfo.thirdName} ${renapInfo.firstLastName} ${renapInfo.secondLastName} ${renapInfo.marriedLastName}`.toUpperCase()
+							: cliente.nombreCompleto.toUpperCase();
 							return;
 						}
 						break;
@@ -768,7 +770,7 @@ export function DynamicContractWizard({
 						break;
 					case "profesion":
 						if (cliente.profesion) {
-							initialValues[field.key] = cliente.profesion.toLowerCase();
+							initialValues[field.key] = cliente.profesion.toLowerCase() || renapInfo?.ocupation.toLowerCase() || "";
 							return;
 						}
 						break;
@@ -878,7 +880,7 @@ export function DynamicContractWizard({
 				switch (fieldKeyLower) {
 					case "capitaladeudado":
 						if (credito.capitalAdeudado) {
-							initialValues[field.key] = moneyToText(credito.capitalAdeudado);
+							initialValues[field.key] = `${moneyToWords(credito.capitalAdeudado).toUpperCase()} (${moneyToText(credito.capitalAdeudado)})`;
 							return;
 						}
 						break;
@@ -892,7 +894,7 @@ export function DynamicContractWizard({
 					case "cuotasmensuales":
 					case "cuotamensual":
 						if (credito.cuotaMensual) {
-							initialValues[field.key] = moneyToText(credito.cuotaMensual);
+							initialValues[field.key] = `${moneyToWords(credito.cuotaMensual).toUpperCase()} (${moneyToText(credito.cuotaMensual)})`;
 							return;
 						}
 						break;
@@ -918,7 +920,7 @@ export function DynamicContractWizard({
 								minimumFractionDigits: 2,
 								maximumFractionDigits: 2,
 							});
-							initialValues[field.key] = `Q.${valorFormateado}`;
+							initialValues[field.key] = `${valorFormateado}`;
 							return;
 						}
 						break;

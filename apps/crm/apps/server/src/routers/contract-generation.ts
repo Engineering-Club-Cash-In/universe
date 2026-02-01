@@ -671,11 +671,31 @@ export const contractGenerationRouter = {
 					let diaPago: string;
 					let diaVenc: number;
 
-					// Calcular mes de vencimiento (setear día 1 para evitar desbordamiento)
-					const fechaVenc = new Date(year, monthIndex, 1);
-					fechaVenc.setMonth(fechaVenc.getMonth() + termMonths);
-					const mesVenc = fechaVenc.getMonth();
-					const anioVenc = fechaVenc.getFullYear();
+					// Obtener mes original del contrato para detectar si cambió
+					const mesContratoOriginalIndex = monthNames.findIndex(
+						(m) => m === newData.mesTexto?.toLowerCase()
+					);
+					const mesContratoCambio = mesContratoOriginalIndex !== -1 && mesContratoOriginalIndex !== monthIndex;
+
+					// Obtener mes y año de vencimiento original de los datos del contrato
+					const mesVencOriginal = newData.mesVencimiento ? Number.parseInt(newData.mesVencimiento) - 1 : null;
+					const anioVencOriginal = newData.anoVencimiento ? 2000 + Number.parseInt(newData.anoVencimiento) : null;
+
+					let mesVenc: number;
+					let anioVenc: number;
+
+					// Si el mes del contrato cambió, recalcular la fecha de vencimiento con termMonths
+					// Si no cambió, mantener el mes/año original y solo ajustar el día
+					if (mesContratoCambio || mesVencOriginal === null || anioVencOriginal === null) {
+						// Recalcular fecha de vencimiento basándose en termMonths
+						const fechaVenc = new Date(year, monthIndex + termMonths, 1);
+						mesVenc = fechaVenc.getMonth();
+						anioVenc = fechaVenc.getFullYear();
+					} else {
+						// Mantener mes/año original
+						mesVenc = mesVencOriginal;
+						anioVenc = anioVencOriginal;
+					}
 
 					if (day <= 20) {
 						// Del 1 al 20: día de pago es "día quince"
@@ -718,25 +738,26 @@ export const contractGenerationRouter = {
 					});
 				}
 
-				// 4. Borrar los contratos existentes de los tipos regenerados
-				for (const contractType of input.contractTypes) {
-					await db
-						.delete(generatedLegalContracts)
-						.where(
-							and(
-								eq(generatedLegalContracts.opportunityId, input.opportunityId),
-								eq(generatedLegalContracts.contractType, contractType),
-							),
-						);
-				}
-
-				// 5. Insertar los nuevos contratos
+				// 4. Procesar cada contrato: solo borrar e insertar si la generación fue exitosa
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
+				const failedContracts: string[] = [];
+
 				for (let i = 0; i < apiResult.results.length; i++) {
 					const contractResult = apiResult.results[i];
 					const originalContract = contractsWithNewDate[i];
 
 					if (contractResult.success) {
+						// Solo borrar el contrato anterior si la generación fue exitosa
+						await db
+							.delete(generatedLegalContracts)
+							.where(
+								and(
+									eq(generatedLegalContracts.opportunityId, input.opportunityId),
+									eq(generatedLegalContracts.contractType, originalContract.contractType),
+								),
+							);
+
+						// Insertar el nuevo contrato
 						const [saved] = await db
 							.insert(generatedLegalContracts)
 							.values({
@@ -765,22 +786,25 @@ export const contractGenerationRouter = {
 								contractType: originalContract.contractType,
 							});
 						}
+					} else {
+						// Registrar contratos que fallaron (no se borran)
+						failedContracts.push(originalContract.contractType);
 					}
 				}
 
-				// 6. Actualizar el snapshot con la nueva fecha
-				await db.insert(contractGenerationSnapshots).values({
-					opportunityId: input.opportunityId,
-					contractDate: input.newDate,
-					data: contractsWithNewDate,
-					createdBy: context.userId,
-				});
+				// Construir mensaje de resultado
+				let message = `Se regeneraron ${savedContracts.length} contrato(s) exitosamente`;
+				if (failedContracts.length > 0) {
+					message += `. Fallaron: ${failedContracts.join(", ")} (no fueron borrados)`;
+				}
 
 				return {
-					success: true,
+					success: savedContracts.length > 0,
 					regeneratedCount: savedContracts.length,
+					failedCount: failedContracts.length,
 					contracts: savedContracts,
-					message: `Se regeneraron ${savedContracts.length} contrato(s) exitosamente`,
+					failedContracts,
+					message,
 				};
 			} catch (error) {
 				console.error("[regenerateContracts] Error:", error);

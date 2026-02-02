@@ -218,8 +218,6 @@ export async function loadCarsController(c: Context) {
 					.values(inspectionData)
 					.returning();
 
-				
-
 				results.push({
 					success: true,
 					vehicle: newVehicle,
@@ -232,13 +230,13 @@ export async function loadCarsController(c: Context) {
 					},
 				});
 			} catch (error) {
-                console.error("Error procesando vehículo:", car.Placa, error);
+				console.error("Error procesando vehículo:", car.Placa, error);
 				const errorMessage =
 					error instanceof Error ? error.message : "Error desconocido";
 				const errorStack = error instanceof Error ? error.stack : "";
 				results.push({
 					success: false,
-                    error: errorMessage,
+					error: errorMessage,
 					errorStack: errorStack,
 					originalData: {
 						placa: car.Placa,

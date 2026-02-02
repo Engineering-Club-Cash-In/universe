@@ -770,7 +770,9 @@ app.post("/api/migrate/creditos", async (c) => {
 // Endpoint para actualizar el value de oportunidades migradas desde cartera-back
 app.post("/api/migrate/actualizar-value", async (c) => {
 	try {
-		const { actualizarValueOportunidades } = await import("./controllers/migrate-creditos");
+		const { actualizarValueOportunidades } = await import(
+			"./controllers/migrate-creditos"
+		);
 		const resultado = await actualizarValueOportunidades();
 		return c.json(resultado);
 	} catch (err: any) {

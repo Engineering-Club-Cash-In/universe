@@ -21,6 +21,7 @@ import {
 	Mail,
 	Plus,
 	RefreshCw,
+	Search,
 	Target,
 	Trash2,
 	TrendingUp,
@@ -28,7 +29,7 @@ import {
 	Users,
 	XCircle,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
@@ -437,6 +438,8 @@ function RouteComponent() {
 	const [vehiclesSearch, setVehiclesSearch] = useState("");
 	const [debouncedVehiclesSearch, setDebouncedVehiclesSearch] = useState("");
 	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
+	const [boardSearch, setBoardSearch] = useState("");
+	const debouncedBoardSearch = useDeferredValue(boardSearch);
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -1244,28 +1247,44 @@ function RouteComponent() {
 	};
 
 	// Group opportunities by stage
-	const opportunitiesByStage =
-		salesStagesQuery.data?.map((stage) => {
-			const stageOpportunities =
-				opportunitiesQuery.data?.filter(
-					(opp) =>
-						opp.stage?.id === stage.id &&
-						(stageFilter === "all" || opp.status === stageFilter) &&
-						(showLostOpportunities || opp.status !== "lost"),
-				) || [];
+	const opportunitiesByStage = useMemo(
+		() =>
+			salesStagesQuery.data?.map((stage) => {
+				const stageOpportunities =
+					opportunitiesQuery.data?.filter(
+						(opp) =>
+							opp.stage?.id === stage.id &&
+							(stageFilter === "all" || opp.status === stageFilter) &&
+							(showLostOpportunities || opp.status !== "lost") &&
+							(!debouncedBoardSearch.trim() ||
+								`${opp.lead?.firstName ?? ""} ${opp.lead?.lastName ?? ""}`
+									.toLowerCase()
+									.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+								(opp.title ?? "")
+									.toLowerCase()
+									.includes(debouncedBoardSearch.trim().toLowerCase())),
+					) || [];
 
-			const totalValue = stageOpportunities.reduce(
-				(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
-				0,
-			);
+				const totalValue = stageOpportunities.reduce(
+					(sum, opp) => sum + (Number.parseFloat(opp.value || "0") || 0),
+					0,
+				);
 
-			return {
-				stage,
-				opportunities: stageOpportunities,
-				totalValue,
-				count: stageOpportunities.length,
-			};
-		}) || [];
+				return {
+					stage,
+					opportunities: stageOpportunities,
+					totalValue,
+					count: stageOpportunities.length,
+				};
+			}) || [],
+		[
+			salesStagesQuery.data,
+			opportunitiesQuery.data,
+			stageFilter,
+			showLostOpportunities,
+			debouncedBoardSearch,
+		],
+	);
 
 	// Calculate comprehensive opportunities metrics
 	const totalOpportunities = opportunitiesQuery.data?.length || 0;
@@ -1451,6 +1470,15 @@ function RouteComponent() {
 			{/* Actions Bar */}
 			<div className="flex items-center justify-between">
 				<div className="flex gap-4">
+					<div className="relative">
+						<Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+						<Input
+							placeholder="Buscar por nombre, título..."
+							value={boardSearch}
+							onChange={(e) => setBoardSearch(e.target.value)}
+							className="w-[280px] pl-9 h-9"
+						/>
+					</div>
 					<Select value={stageFilter} onValueChange={setStageFilter}>
 						<SelectTrigger className="w-[180px]">
 							<Filter className="mr-2 h-4 w-4" />

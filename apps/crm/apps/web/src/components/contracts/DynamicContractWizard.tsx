@@ -1307,7 +1307,7 @@ export function DynamicContractWizard({
 							options: {
 								gender,
 								generatePdf: true,
-								filenamePrefix: `${opportunityId}_${doc.nombre_documento}`,
+								filenamePrefix: `${crmData.cliente.nombreCompleto}_${doc.nombre_documento}`,
 							},
 						};
 					});

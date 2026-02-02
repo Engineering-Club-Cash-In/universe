@@ -624,6 +624,14 @@ export const crmRouter = {
 				);
 			}
 
+			// Sync NIT to associated opportunities
+			if (updateData.nit !== undefined) {
+				await db
+					.update(opportunities)
+					.set({ nit: updateData.nit || null, updatedAt: new Date() })
+					.where(eq(opportunities.leadId, id));
+			}
+
 			return updatedLead[0];
 		}),
 
@@ -975,6 +983,7 @@ export const crmRouter = {
 			// If a lead is provided, get the company and source from the lead
 			let companyId = input.companyId;
 			let source = input.source;
+			let leadNit: string | null = null;
 			if (input.leadId) {
 				const lead = await db
 					.select()
@@ -989,6 +998,10 @@ export const crmRouter = {
 					if (!source && lead[0].source) {
 						source = lead[0].source;
 					}
+					// Copy NIT from lead to opportunity
+					if (lead[0].nit) {
+						leadNit = lead[0].nit;
+					}
 				}
 			}
 
@@ -998,6 +1011,7 @@ export const crmRouter = {
 					...input,
 					companyId,
 					source,
+					nit: leadNit,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)

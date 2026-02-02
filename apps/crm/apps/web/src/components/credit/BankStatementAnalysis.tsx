@@ -36,6 +36,8 @@ export function BankStatementAnalysis({
 	const [termMonths, setTermMonths] = useState("60");
 	const [maxDebtRatio, setMaxDebtRatio] = useState("0.2");
 	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.3");
+	const [attemptCount, setAttemptCount] = useState(0);
+	const [analysisSucceeded, setAnalysisSucceeded] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const analyzeMutation = useMutation({
@@ -72,6 +74,7 @@ export function BankStatementAnalysis({
 		},
 		onSuccess: () => {
 			toast.success("Análisis completado exitosamente");
+			setAnalysisSucceeded(true);
 			setFiles([]);
 			onAnalysisComplete?.();
 		},
@@ -243,18 +246,38 @@ export function BankStatementAnalysis({
 					type="button"
 					size="sm"
 					className="w-full"
-					onClick={() => analyzeMutation.mutate()}
-					disabled={files.length === 0 || analyzeMutation.isPending}
+					onClick={() => {
+						setAttemptCount((prev) => prev + 1);
+						analyzeMutation.mutate();
+					}}
+					disabled={
+						files.length === 0 ||
+						analyzeMutation.isPending ||
+						analysisSucceeded ||
+						attemptCount >= 2
+					}
 				>
 					{analyzeMutation.isPending ? (
 						<>
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 							Analizando con IA...
 						</>
+					) : attemptCount > 0 && !analysisSucceeded ? (
+						"Reintentar Análisis"
 					) : (
 						"Analizar"
 					)}
 				</Button>
+				{analysisSucceeded && (
+					<p className="text-center text-xs text-green-600">
+						Análisis completado exitosamente.
+					</p>
+				)}
+				{attemptCount >= 2 && !analysisSucceeded && (
+					<p className="text-center text-xs text-muted-foreground">
+						Se alcanzó el límite de intentos. Contacte al administrador.
+					</p>
+				)}
 			</CardContent>
 		</Card>
 	);

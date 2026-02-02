@@ -2,17 +2,16 @@
 """
 Script para transformar templates DOCX de singular a plural (múltiples deudores)
 
-Este script modifica templates DOCX plurales para:
-1. Cambiar pronombres de singular a plural (Yo → Nosotros, manifiesto → manifestamos)
+Este script toma los templates SINGULARES y genera los PLURALES:
+1. Cambiar pronombres de singular a plural (Yo → Nosotros/Nosotras)
 2. Agregar sintaxis de docxtemplater para loops de deudores adicionales
-3. Agregar firmas para cada deudor adicional
+3. Agregar firmas en formato de tabla (dos columnas)
 
 Uso:
     python scripts/prepare-plural-template.py
 """
 
 import zipfile
-import os
 import sys
 import re
 from pathlib import Path
@@ -20,34 +19,16 @@ from pathlib import Path
 # Configuración de rutas
 TEMPLATES_DIR = Path(__file__).parent.parent / 'templates'
 
-# Templates a procesar (carpeta/archivo)
+# Templates a procesar: (carpeta, archivo_singular, archivo_plural, is_female)
 TEMPLATES_TO_PROCESS = [
     {
         'folder': 'carta_carro_nuevo',
-        'files': [
-            'carta_carro_nuevo-plural.docx',
-            'carta_carro_nuevo-mujer-plural.docx'
+        'templates': [
+            ('carta_carro_nuevo.docx', 'carta_carro_nuevo-plural.docx', False),
+            ('carta_carro_nuevo-mujer.docx', 'carta_carro_nuevo-mujer-plural.docx', True),
         ]
     }
 ]
-
-BACKUP_SUFFIX = '_BEFORE_PLURAL'
-
-
-def create_backup(template_path: Path) -> Path:
-    """Crea un backup del template original"""
-    backup_path = template_path.with_name(
-        template_path.stem + BACKUP_SUFFIX + template_path.suffix
-    )
-
-    if backup_path.exists():
-        print(f"  ⚠ Backup ya existe: {backup_path.name}, saltando backup")
-        return backup_path
-
-    import shutil
-    shutil.copy2(template_path, backup_path)
-    print(f"  ✓ Backup creado: {backup_path.name}")
-    return backup_path
 
 
 def extract_docx_xml(docx_path: Path) -> dict:
@@ -79,21 +60,27 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
 
     # ==== PRONOMBRES Y VERBOS ====
 
-    # "Por este medio Yo" → "Por este medio Nosotros"
+    # "Por este medio Yo" → "Por este medio Nosotros/Nosotras"
+    if is_female:
+        nosotros = 'Nosotras'
+    else:
+        nosotros = 'Nosotros'
+
     if '>Por este medio Yo<' in xml or '>Por este medio Yo,' in xml:
-        xml = xml.replace('>Por este medio Yo,', '>Por este medio Nosotros,')
-        xml = xml.replace('>Por este medio Yo<', '>Por este medio Nosotros<')
-        changes.append('"Por este medio Yo" → "Por este medio Nosotros"')
+        xml = xml.replace('>Por este medio Yo,', f'>Por este medio {nosotros},')
+        xml = xml.replace('>Por este medio Yo<', f'>Por este medio {nosotros}<')
+        changes.append(f'"Por este medio Yo" → "Por este medio {nosotros}"')
 
     # "identificado" / "identificada" → "identificados" / "identificadas"
-    # El texto puede estar fragmentado en el XML, ej: ", identificad</w:t>...<w:t>o con"
+    # El texto puede estar fragmentado en el XML, ej: ", identificad</w:t>...<w:t>a</w:t>"
     if is_female:
         xml = xml.replace('>identificada<', '>identificadas<')
         xml = xml.replace(', identificada ', ', identificadas ')
         xml = xml.replace('>identificada con', '>identificadas con')
         xml = xml.replace('>, identificada<', '>, identificadas<')
         xml = xml.replace(', identificada<', ', identificadas<')
-        # Fragmento: ", identificad</w:t>...<w:t>a " - reemplazar solo la "a" suelta
+        # Fragmento: "identificad" + "a" en tags separadas (puede tener newlines)
+        xml = re.sub(r'(identificad</w:t>.*?<w:t[^>]*>)a(\s*</w:t>)', r'\1as\2', xml, flags=re.DOTALL)
         xml = re.sub(r'(identificad</w:t>.*?<w:t[^>]*>)a(\s)', r'\1as\2', xml, flags=re.DOTALL)
         changes.append('"identificada" → "identificadas"')
     else:
@@ -102,7 +89,8 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
         xml = xml.replace('>identificado con', '>identificados con')
         xml = xml.replace('>, identificado<', '>, identificados<')
         xml = xml.replace(', identificado<', ', identificados<')
-        # Fragmento: ", identificad</w:t>...<w:t>o " - reemplazar solo la "o" suelta
+        # Fragmento: "identificad" + "o" en tags separadas (puede tener newlines)
+        xml = re.sub(r'(identificad</w:t>.*?<w:t[^>]*>)o(\s*</w:t>)', r'\1os\2', xml, flags=re.DOTALL)
         xml = re.sub(r'(identificad</w:t>.*?<w:t[^>]*>)o(\s)', r'\1os\2', xml, flags=re.DOTALL)
         changes.append('"identificado" → "identificados"')
 
@@ -119,15 +107,9 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
     changes.append('"me suscribo" → "nos suscribimos"')
 
     # ==== AGREGAR LOOP PARA DEUDORES ADICIONALES ====
-    # Después del primer deudor, agregar el bloque de deudores adicionales
-
-    # Buscar el patrón del primer deudor y agregar el loop después
-    # El patrón es: "{nombreCompleto}, identificado(s)... –RENAP-"
-
     renap_pattern = '–RENAP-, República de Guatemala, Centroamérica'
 
     if renap_pattern in xml:
-        # Construir el bloque de deudor adicional
         if is_female:
             deudor_adicional_block = (
                 '{#deudoresAdicionales} y {nombreCompleto}, identificada con Documento Personal de Identificación, '
@@ -141,75 +123,85 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
                 '–RENAP-, República de Guatemala, Centroamérica{/deudoresAdicionales}'
             )
 
-        # Insertar después del primer RENAP
         xml = xml.replace(
             renap_pattern,
             renap_pattern + deudor_adicional_block,
-            1  # Solo la primera ocurrencia
+            1
         )
         changes.append('Agregado loop {#deudoresAdicionales}...{/deudoresAdicionales}')
 
-    # ==== AGREGAR FIRMAS ADICIONALES ====
-    # Agregar el bloque de firmas antes del cierre </w:body>
+    # ==== ELIMINAR FIRMA ORIGINAL Y AGREGAR LOOP DE FIRMAS ====
+    # Quitar todo desde F)____ hasta </w:body> y poner solo el cierre
+
+    # Buscar el texto F)____ y todo lo que sigue hasta </w:body>
+    xml = re.sub(
+        r'>F\)_{5,}[^<]*<.*?</w:body>',
+        '></w:t></w:r></w:p></w:body>',
+        xml,
+        flags=re.DOTALL
+    )
+    changes.append('Eliminada firma original del singular')
 
     body_close = '</w:body>'
     if body_close in xml:
-        # Crear bloque de firmas adicionales
-        firma_adicional = (
-            '<w:p w14:paraId="ADDFIRMA1" w14:textId="ADDFIRMA1" w:rsidR="00000000" w:rsidRDefault="00000000">'
-            '<w:r><w:t>{#deudoresAdicionales}</w:t></w:r>'
-            '</w:p>'
-            '<w:p w14:paraId="ADDFIRMA2" w14:textId="ADDFIRMA2" w:rsidR="00000000" w:rsidRDefault="00000000">'
-            '<w:r><w:t>F)________________________</w:t></w:r>'
-            '</w:p>'
-            '<w:p w14:paraId="ADDFIRMA3" w14:textId="ADDFIRMA3" w:rsidR="00000000" w:rsidRDefault="00000000">'
-            '<w:r><w:t>{nombreCompleto}</w:t></w:r>'
-            '</w:p>'
-            '<w:p w14:paraId="ADDFIRMA4" w14:textId="ADDFIRMA4" w:rsidR="00000000" w:rsidRDefault="00000000">'
-            '<w:r><w:t>{dpi}</w:t></w:r>'
-            '</w:p>'
-            '<w:p w14:paraId="ADDFIRMA5" w14:textId="ADDFIRMA5" w:rsidR="00000000" w:rsidRDefault="00000000">'
-            '<w:r><w:t>{/deudoresAdicionales}</w:t></w:r>'
-            '</w:p>'
+        # Loop de firmas simple (el deudor 1 se mete al array en el servicio)
+        firmas_loop = (
+            '<w:p><w:r><w:rPr>'
+            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
+            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+            '</w:rPr><w:t>{#firmantes}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>'
+            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
+            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+            '</w:rPr><w:t>F)________________________</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>'
+            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
+            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+            '</w:rPr><w:t>{nombreCompleto}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>'
+            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
+            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+            '</w:rPr><w:t>{dpi}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr></w:p>'
+            '<w:p><w:r><w:rPr>'
+            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
+            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
+            '</w:rPr><w:t>{/firmantes}</w:t></w:r></w:p>'
         )
-        xml = xml.replace(body_close, firma_adicional + body_close)
-        changes.append('Agregadas firmas para deudores adicionales')
+
+        xml = xml.replace(body_close, firmas_loop + body_close)
+        changes.append('Agregado loop de firmas {#firmantes}...{/firmantes}')
 
     return xml, changes
 
 
-def rebuild_docx(template_path: Path, modified_xml: str, all_files: dict) -> None:
-    """Reconstruye el DOCX con el XML modificado"""
-    temp_path = template_path.with_suffix('.tmp.docx')
-
-    with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+def save_docx(output_path: Path, modified_xml: str, all_files: dict) -> None:
+    """Guarda el DOCX con el XML modificado"""
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for name, content in all_files.items():
             if name != 'word/document.xml':
                 zip_file.writestr(name, content)
 
         zip_file.writestr('word/document.xml', modified_xml.encode('utf-8'))
 
-    temp_path.replace(template_path)
-    print(f"  ✓ Template actualizado: {template_path.name}")
+    print(f"  ✓ Generado: {output_path.name}")
 
 
-def process_template(template_path: Path, is_female: bool) -> bool:
-    """Procesa un template individual"""
-    print(f"\n📄 Procesando: {template_path.name}")
+def process_template(source_path: Path, output_path: Path, is_female: bool) -> bool:
+    """Procesa un template: lee el singular y genera el plural"""
+    print(f"\n📄 {source_path.name} → {output_path.name}")
 
-    if not template_path.exists():
-        print(f"  ❌ Error: Template no encontrado")
+    if not source_path.exists():
+        print(f"  ❌ Error: Template singular no encontrado")
         return False
 
-    # Paso 1: Backup
-    create_backup(template_path)
+    # Paso 1: Extraer XML del singular
+    print("  → Leyendo template singular...")
+    data = extract_docx_xml(source_path)
 
-    # Paso 2: Extraer XML
-    print("  → Extrayendo XML...")
-    data = extract_docx_xml(template_path)
-
-    # Paso 3: Aplicar reemplazos
-    print("  → Aplicando reemplazos plurales...")
+    # Paso 2: Aplicar reemplazos
+    print("  → Aplicando transformaciones plurales...")
     modified_xml, changes = apply_plural_replacements(data['document_xml'], is_female)
 
     if not changes:
@@ -220,16 +212,16 @@ def process_template(template_path: Path, is_female: bool) -> bool:
     for change in changes:
         print(f"    • {change}")
 
-    # Paso 4: Reconstruir DOCX
-    print("  → Reconstruyendo DOCX...")
-    rebuild_docx(template_path, modified_xml, data['all_files'])
+    # Paso 3: Guardar como nuevo archivo plural
+    print("  → Guardando template plural...")
+    save_docx(output_path, modified_xml, data['all_files'])
 
     return True
 
 
 def main():
     print("=" * 70)
-    print("  SCRIPT: Transformar Templates a Plural (Múltiples Deudores)")
+    print("  SCRIPT: Generar Templates Plurales desde Singulares")
     print("=" * 70)
 
     total_processed = 0
@@ -237,15 +229,15 @@ def main():
 
     for template_config in TEMPLATES_TO_PROCESS:
         folder = template_config['folder']
-        files = template_config['files']
+        templates = template_config['templates']
 
         print(f"\n📁 Carpeta: {folder}")
 
-        for filename in files:
-            template_path = TEMPLATES_DIR / folder / filename
-            is_female = 'mujer' in filename.lower()
+        for singular_file, plural_file, is_female in templates:
+            source_path = TEMPLATES_DIR / folder / singular_file
+            output_path = TEMPLATES_DIR / folder / plural_file
 
-            if process_template(template_path, is_female):
+            if process_template(source_path, output_path, is_female):
                 total_success += 1
             total_processed += 1
 

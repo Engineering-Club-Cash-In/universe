@@ -135,6 +135,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_CARRO_NUEVO,
       templateFilename: 'carta_carro_nuevo/carta_carro_nuevo.docx',
       templateFilenameFemale: 'carta_carro_nuevo/carta_carro_nuevo-mujer.docx',
+      templateFilenamePlural: 'carta_carro_nuevo/carta_carro_nuevo-plural.docx',
+      templateFilenameFemalePlural: 'carta_carro_nuevo/carta_carro_nuevo-mujer-plural.docx',
       description: 'Carta de conformidad para adquisición de carro nuevo',
       requiredFields: []
     });
@@ -312,7 +314,7 @@ export class ContractGeneratorService {
       contractType: ContractType;
       data: Record<string, any>;
       emails?: string[];
-      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female" };
+      options?: { generatePdf?: boolean; filenamePrefix?: string; gender?: "male" | "female"; isPlural?: boolean };
     }>
   ): Promise<{
     success: boolean;
@@ -396,12 +398,12 @@ export class ContractGeneratorService {
   public async generateContract(
     contractType: ContractType,
     data: Record<string, any>,
-    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[] } = { gender: "male" }
+    options: { gender?: "male" | "female"; generatePdf?: boolean; filenamePrefix?: string; emails?: string[]; isPlural?: boolean } = { gender: "male" }
   ): Promise<ContractGenerationResponse> {
     try {
       // 1. Obtener configuración del template
       const config = this.getTemplateConfig(contractType);
-      console.log(`📄 Generando contrato: ${config.description}`);
+      console.log(`📄 Generando contrato: ${config.description}${options.isPlural ? ' (PLURAL)' : ''}`);
 
       // 2. Validar campos requeridos
       const validation = this.validateRequiredFields(data, config.requiredFields);
@@ -414,12 +416,26 @@ export class ContractGeneratorService {
         };
       }
 
-      // 3. Cargar template
-      const templatePath = path.join(this.templatesDir, options.gender === "female" ? config.templateFilenameFemale : config.templateFilename);
+      // 3. Seleccionar template según género y plural
+      let templateFilename: string;
+      if (options.isPlural) {
+        // Template plural
+        if (options.gender === "female") {
+          templateFilename = config.templateFilenameFemalePlural || config.templateFilenameFemale;
+        } else {
+          templateFilename = config.templateFilenamePlural || config.templateFilename;
+        }
+      } else {
+        // Template singular
+        templateFilename = options.gender === "female" ? config.templateFilenameFemale : config.templateFilename;
+      }
+
+      // 4. Cargar template
+      const templatePath = path.join(this.templatesDir, templateFilename);
       const templateContent = await fs.readFile(templatePath, 'binary');
       const zip = new PizZip(templateContent);
 
-      // 4. Crear instancia de docxtemplater
+      // 5. Crear instancia de docxtemplater
       const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
         linebreaks: true,
@@ -438,8 +454,27 @@ export class ContractGeneratorService {
         }
       })
 
-      // 6. Renderizar con los datos
-      doc.render(data);
+      // 6. Preparar datos para renderizado
+      let renderData = { ...data };
+
+      // Si es plural, crear array de firmantes (deudor 1 + deudores adicionales)
+      if (options.isPlural) {
+        const deudor1 = {
+          nombreCompleto: data.nombreCompleto,
+          dpiTexto: data.dpiTexto,
+          dpi: data.dpi
+        };
+
+        const deudoresAdicionales = data.deudoresAdicionales || [];
+
+        // Array de firmantes = deudor 1 + deudores adicionales
+        renderData.firmantes = [deudor1, ...deudoresAdicionales];
+
+        console.log(`✓ Plural: ${renderData.firmantes.length} firmante(s) configurados`);
+      }
+
+      // 7. Renderizar con los datos
+      doc.render(renderData);
 
       // 7. Generar buffer del DOCX
       const docxBuffer = doc.getZip().generate({

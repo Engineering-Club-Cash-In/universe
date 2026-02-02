@@ -24,6 +24,7 @@
 		"pr": "bash ./create-pr.sh"
 	},
 	"dependencies": {
+		"@ai-sdk/google": "^3.0.20",
 		"@hookform/resolvers": "^5.2.1",
 		"@modelcontextprotocol/sdk": "^1.15.1",
 		"@orpc/client": "^1.6.6",

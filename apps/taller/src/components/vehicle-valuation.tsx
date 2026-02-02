@@ -70,6 +70,8 @@ export default function VehicleValuation({
   const { checklistItems, photos } = useInspection();
   const [aiValuation, setAiValuation] = useState<AIValuationResult | null>(null);
   const [loadingAI, setLoadingAI] = useState(false);
+  const [aiAttemptCount, setAiAttemptCount] = useState(0);
+  const [aiFailed, setAiFailed] = useState(false);
   const [scannerFile, setScannerFile] = useState<File | null>(null);
 
   const form = useForm<z.infer<typeof valuationSchema>>({
@@ -98,6 +100,8 @@ export default function VehicleValuation({
 
   const getAIValuation = async () => {
     setLoadingAI(true);
+    setAiAttemptCount(prev => prev + 1);
+    setAiFailed(false);
 
     try {
       // Call AI valuation endpoint with complete context
@@ -129,6 +133,7 @@ export default function VehicleValuation({
       
       toast.success("Valoración por IA completada");
     } catch (error) {
+      setAiFailed(true);
       toast.error("Error al obtener valoración por IA. Complete manualmente.");
       console.error(error);
     } finally {
@@ -155,23 +160,30 @@ export default function VehicleValuation({
         </CardHeader>
         <CardContent>
           {!aiValuation ? (
-            <Button 
-              onClick={getAIValuation}
-              disabled={loadingAI}
-              className="w-full"
-            >
-              {loadingAI ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Analizando vehículo...
-                </>
-              ) : (
-                <>
-                  <TrendingUp className="h-4 w-4 mr-2" />
-                  Obtener Valoración por IA
-                </>
+            <>
+              <Button
+                onClick={getAIValuation}
+                disabled={loadingAI || aiAttemptCount >= 2}
+                className="w-full"
+              >
+                {loadingAI ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Analizando vehículo...
+                  </>
+                ) : (
+                  <>
+                    <TrendingUp className="h-4 w-4 mr-2" />
+                    {aiAttemptCount > 0 ? 'Reintentar Valoración por IA' : 'Obtener Valoración por IA'}
+                  </>
+                )}
+              </Button>
+              {aiAttemptCount >= 2 && aiFailed && (
+                <p className="text-xs text-muted-foreground text-center mt-2">
+                  Se alcanzó el límite de intentos. Complete la valoración manualmente.
+                </p>
               )}
-            </Button>
+            </>
           ) : (
             <div className="space-y-4">
               <Alert className="border-green-200 bg-green-50">
@@ -180,7 +192,7 @@ export default function VehicleValuation({
                   <strong>Valoración Sugerida: Q{aiValuation.suggestedValue.toLocaleString()}</strong>
                 </AlertDescription>
               </Alert>
-              
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
                   <h4 className="font-medium mb-2">Análisis de Mercado:</h4>
@@ -195,14 +207,6 @@ export default function VehicleValuation({
                   </ul>
                 </div>
               </div>
-              
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => setAiValuation(null)}
-              >
-                Obtener Nueva Valoración
-              </Button>
             </div>
           )}
         </CardContent>

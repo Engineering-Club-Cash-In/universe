@@ -9,7 +9,7 @@
     "build": "tsc",
     "test": "bun test-contract.ts",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker-compose down",
+    "docker:down": "docker compose down",
     "docker:logs": "docker-compose logs -f gotenberg"
   },
   "keywords": [

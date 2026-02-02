@@ -144,34 +144,62 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
 
     body_close = '</w:body>'
     if body_close in xml:
-        # Loop de firmas simple (el deudor 1 se mete al array en el servicio)
-        firmas_loop = (
-            '<w:p><w:r><w:rPr>'
-            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
-            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-            '</w:rPr><w:t>{#firmantes}</w:t></w:r></w:p>'
+        # Tabla de 2 columnas para firmas (usando firmantesFilas del servicio TS)
+        # Cada fila tiene col1 y col2 (col2 puede estar vacía)
+        firmas_tabla = (
+            # Apertura del loop de filas
+            '<w:p><w:r><w:t>{#firmantesFilas}</w:t></w:r></w:p>'
+            # Tabla de 2 columnas sin bordes
+            '<w:tbl>'
+            '<w:tblPr>'
+            '<w:tblW w:w="5000" w:type="pct"/>'
+            '<w:tblBorders>'
+            '<w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/>'
+            '<w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/>'
+            '</w:tblBorders>'
+            '</w:tblPr>'
+            '<w:tblGrid><w:gridCol w:w="4500"/><w:gridCol w:w="4500"/></w:tblGrid>'
+            '<w:tr>'
+            # Columna 1 (siempre tiene firmante)
+            '<w:tc>'
+            '<w:tcPr><w:tcW w:w="2500" w:type="pct"/></w:tcPr>'
             '<w:p><w:pPr><w:jc w:val="center"/></w:pPr></w:p>'
-            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>'
-            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
-            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-            '</w:rPr><w:t>F)________________________</w:t></w:r></w:p>'
-            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>'
-            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
-            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-            '</w:rPr><w:t>{nombreCompleto}</w:t></w:r></w:p>'
-            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr>'
-            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
-            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-            '</w:rPr><w:t>{dpi}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>'
+            '<w:t>F)________________________</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>'
+            '<w:t>{col1nombreCompleto}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>'
+            '<w:t>{col1dpi}</w:t></w:r></w:p>'
             '<w:p><w:pPr><w:jc w:val="center"/></w:pPr></w:p>'
-            '<w:p><w:r><w:rPr>'
-            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
-            '<w:sz w:val="20"/><w:szCs w:val="20"/>'
-            '</w:rPr><w:t>{/firmantes}</w:t></w:r></w:p>'
+            '</w:tc>'
+            # Columna 2 (puede estar vacía - usar condicional)
+            '<w:tc>'
+            '<w:tcPr><w:tcW w:w="2500" w:type="pct"/></w:tcPr>'
+            '<w:p><w:r><w:t>{#tieneCol2}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>'
+            '<w:t>F)________________________</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>'
+            '<w:t>{col2nombreCompleto}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr>'
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>'
+            '<w:t>{col2dpi}</w:t></w:r></w:p>'
+            '<w:p><w:pPr><w:jc w:val="center"/></w:pPr></w:p>'
+            '<w:p><w:r><w:t>{/tieneCol2}</w:t></w:r></w:p>'
+            '</w:tc>'
+            '</w:tr>'
+            '</w:tbl>'
+            # Cierre del loop de filas
+            '<w:p><w:r><w:t>{/firmantesFilas}</w:t></w:r></w:p>'
         )
 
-        xml = xml.replace(body_close, firmas_loop + body_close)
-        changes.append('Agregado loop de firmas {#firmantes}...{/firmantes}')
+        xml = xml.replace(body_close, firmas_tabla + body_close)
+        changes.append('Agregada tabla de firmas 2 columnas {#firmantesFilas}')
 
     return xml, changes
 

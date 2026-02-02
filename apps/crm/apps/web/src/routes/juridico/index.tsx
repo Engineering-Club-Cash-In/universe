@@ -637,6 +637,7 @@ function RouteComponent() {
 													<Link
 														to="/juridico/$leadId"
 														params={{ leadId: lead.id }}
+														search={{ opportunityId: lead.lead.id }}
 														className="font-medium text-primary text-sm hover:underline"
 														onClick={(e) => e.stopPropagation()}
 													>

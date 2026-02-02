@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowLeft, CheckCircle, Loader2, Plus, RefreshCw, User } from "lucide-react";
+import {
+	ArrowLeft,
+	CheckCircle,
+	Loader2,
+	Plus,
+	RefreshCw,
+	User,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -318,15 +325,18 @@ function RouteComponent() {
 					</div>
 
 					<div className="flex gap-2">
-						{canCreateLegal && generationSnapshot && contracts && contracts.length > 0 && (
-							<Button
-								variant="outline"
-								onClick={() => setIsRegenerateModalOpen(true)}
-							>
-								<RefreshCw className="mr-2 h-4 w-4" />
-								Regenerar con nueva fecha
-							</Button>
-						)}
+						{canCreateLegal &&
+							generationSnapshot &&
+							contracts &&
+							contracts.length > 0 && (
+								<Button
+									variant="outline"
+									onClick={() => setIsRegenerateModalOpen(true)}
+								>
+									<RefreshCw className="mr-2 h-4 w-4" />
+									Regenerar con nueva fecha
+								</Button>
+							)}
 						{canCreateLegal && (
 							<Button onClick={() => setIsCreateModalOpen(true)}>
 								<Plus className="mr-2 h-4 w-4" />

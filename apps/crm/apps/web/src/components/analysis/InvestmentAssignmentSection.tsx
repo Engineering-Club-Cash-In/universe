@@ -321,12 +321,17 @@ export function InvestmentAssignmentSection() {
 		selectedInversionistas.every(
 			(inv) => inv.inversionista_id > 0 && inv.monto_aportado > 0,
 		);
+	// Validar que los montos sean exactamente iguales (solo si hay nuevos inversionistas)
+	const montosCoinciden =
+		selectedInversionistas.length === 0 ||
+		Math.abs(totalMonto - creditAmount) < 0.01;
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
 		selectedOpportunity.lead?.hasRequiredData &&
 		selectedOpportunity.vehicle?.hasRequiredData &&
-		selectedOpportunity.hasCreditData;
+		selectedOpportunity.hasCreditData &&
+		montosCoinciden;
 
 	// Get disabled reason for tooltip
 	const getDisabledReasons = () => {
@@ -363,6 +368,15 @@ export function InvestmentAssignmentSection() {
 
 		if (!selectedOpportunity.hasCreditData) {
 			reasons.push("Faltan datos del crédito (cuotas, tasa, monto)");
+		}
+
+		if (
+			selectedInversionistas.length > 0 &&
+			Math.abs(totalMonto - creditAmount) >= 0.01
+		) {
+			reasons.push(
+				`La suma de aportes (${formatCurrency(totalMonto)}) debe ser exactamente igual al capital del crédito (${formatCurrency(creditAmount)})`,
+			);
 		}
 
 		return reasons;
@@ -932,7 +946,7 @@ export function InvestmentAssignmentSection() {
 												</span>
 												<span
 													className={`font-bold ${
-														Math.abs(totalMonto - creditAmount) < 1
+														Math.abs(totalMonto - creditAmount) < 0.01
 															? "text-green-600"
 															: "text-orange-600"
 													}`}
@@ -944,10 +958,10 @@ export function InvestmentAssignmentSection() {
 												<span>Capital del crédito:</span>
 												<span>{formatCurrency(creditAmount)}</span>
 											</div>
-											{Math.abs(totalMonto - creditAmount) >= 1 && (
+											{Math.abs(totalMonto - creditAmount) >= 0.01 && (
 												<p className="mt-1 text-orange-600 text-xs">
-													La suma de aportes debe ser igual al capital del
-													crédito
+													La suma de aportes debe ser exactamente igual al capital del
+													crédito (diferencia: {formatCurrency(Math.abs(totalMonto - creditAmount))})
 												</p>
 											)}
 										</div>

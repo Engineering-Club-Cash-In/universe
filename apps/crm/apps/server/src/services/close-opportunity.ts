@@ -393,7 +393,7 @@ function buildInvoices(
 			items: [
 				{
 					monto: royalti,
-					rubro: "Royalty - Comisión por servicio de intermediación",
+					rubro: "Royalty",
 				},
 			],
 		});
@@ -416,7 +416,7 @@ function buildInvoices(
 			items: [
 				{
 					monto: FACTURACION_TRASPASO_COSTO,
-					rubro: "Traspaso de vehículo",
+					rubro: "Cargo por servicios",
 				},
 			],
 		});
@@ -432,7 +432,7 @@ function buildInvoices(
 			items: [
 				{
 					monto: leasingContractCost,
-					rubro: "Contrato de abogado - Servicios legales",
+					rubro: "Cargo por servicios",
 				},
 			],
 		});
@@ -448,7 +448,7 @@ function buildInvoices(
 			items: [
 				{
 					monto: FACTURACION_GARANTIA_MOBILIARIA_COSTO,
-					rubro: "Garantía mobiliaria - Inscripción de garantía",
+					rubro: "Cargo por servicios",
 				},
 			],
 		});
@@ -467,13 +467,13 @@ function buildInvoices(
 		if (interestCost > 0) {
 			cuota0Items.push({
 				monto: interestCost,
-				rubro: "Cuota 0 - Intereses anticipados",
+				rubro: "Gastos varios",
 			});
 		}
 		if (extraMembershipCost > 0) {
 			cuota0Items.push({
 				monto: extraMembershipCost,
-				rubro: "Cuota 0 - Membresía inicial",
+				rubro: "Gastos varios",
 			});
 		}
 		if (cuota0Items.length > 0) {
@@ -494,7 +494,7 @@ function buildInvoices(
 			items: [
 				{
 					monto: FACTURACION_NOMBRAMIENTO_COSTO,
-					rubro: "Nombramiento - Gestión de documentos legales",
+					rubro: "Cargo por servicios",
 				},
 			],
 		});
@@ -510,7 +510,7 @@ function buildInvoices(
 			items: [
 				{
 					monto: keyCopyDiffCost,
-					rubro: "Copia de llave - Duplicado de llave del vehículo",
+					rubro: "Cargo por servicios",
 				},
 			],
 		});
@@ -529,13 +529,13 @@ function buildInvoices(
 		if (extraInsuranceCost > 0) {
 			seguroGastosItems.push({
 				monto: extraInsuranceCost,
-				rubro: "Seguro - Prima de seguro vehicular",
+				rubro: "Gastos varios"
 			});
 		}
 		if (extraAdminCost > 0) {
 			seguroGastosItems.push({
 				monto: extraAdminCost,
-				rubro: "Gastos administrativos",
+				rubro: "Gastos varios",
 			});
 		}
 		if (seguroGastosItems.length > 0) {
@@ -999,9 +999,19 @@ export async function closeOpportunity(
 			};
 		}
 
+		let vehicleData: {
+			isNew: boolean;
+			vinNumber: string | null;
+			licensePlate: string | null;
+			origin: string | null;
+			fuelType: string | null;
+			transmission: string | null;
+			companyId: string | null;
+		} | undefined;
+
 		// Validate vehicle data completeness for new vehicles
 		if (opportunity.vehicleId) {
-			const [vehicleData] = await db
+			const [vehicleTemp] = await db
 				.select({
 					isNew: vehicles.isNew,
 					vinNumber: vehicles.vinNumber,
@@ -1009,10 +1019,12 @@ export async function closeOpportunity(
 					origin: vehicles.origin,
 					fuelType: vehicles.fuelType,
 					transmission: vehicles.transmission,
+					companyId: vehicles.companyId,
 				})
 				.from(vehicles)
 				.where(eq(vehicles.id, opportunity.vehicleId))
 				.limit(1);
+			vehicleData = vehicleTemp;
 
 			if (vehicleData?.isNew) {
 				const missingVehicleFields = getMissingFields(vehicleData);
@@ -1087,7 +1099,10 @@ export async function closeOpportunity(
 
 		// 3. Generate invoices in background (fire-and-forget)
 		// This runs asynchronously after the credit is created
-		if (isCarteraBackEnabled()) {
+		// Skip invoice generation if the vehicle belongs to a company (has companyId)
+		const vehicleHasCompany = opportunity.vehicleId && vehicleData?.companyId;
+		
+		if (isCarteraBackEnabled() && !vehicleHasCompany) {
 			const royalti = opportunity.royalti
 				? Number.parseFloat(opportunity.royalti)
 				: null;
@@ -1100,6 +1115,8 @@ export async function closeOpportunity(
 				userId,
 			});
 			console.log("[CloseOpportunity] Invoice generation queued in background");
+		} else if (vehicleHasCompany) {
+			console.log("[CloseOpportunity] Skipping invoice generation - vehicle belongs to a company");
 		}
 
 		// 4. Complete local operations in a transaction for atomicity

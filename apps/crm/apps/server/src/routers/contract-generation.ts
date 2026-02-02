@@ -7,11 +7,11 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
-import { quotations } from "../db/schema/quotations";
 import {
 	contractGenerationSnapshots,
 	generatedLegalContracts,
 } from "../db/schema/legal-contracts";
+import { quotations } from "../db/schema/quotations";
 import { vehicles } from "../db/schema/vehicles";
 import { juridicoProcedure } from "../lib/orpc";
 import {
@@ -572,7 +572,9 @@ export const contractGenerationRouter = {
 			const [snapshot] = await db
 				.select()
 				.from(contractGenerationSnapshots)
-				.where(eq(contractGenerationSnapshots.opportunityId, input.opportunityId))
+				.where(
+					eq(contractGenerationSnapshots.opportunityId, input.opportunityId),
+				)
 				.orderBy(contractGenerationSnapshots.createdAt)
 				.limit(1);
 
@@ -618,7 +620,8 @@ export const contractGenerationRouter = {
 
 				if (contractsToRegenerate.length === 0) {
 					throw new ORPCError("BAD_REQUEST", {
-						message: "No hay contratos para regenerar con los tipos especificados",
+						message:
+							"No hay contratos para regenerar con los tipos especificados",
 					});
 				}
 
@@ -643,8 +646,18 @@ export const contractGenerationRouter = {
 					const yearShort = year.toString().slice(-2); // "26" para 2026
 
 					const monthNames = [
-						"enero", "febrero", "marzo", "abril", "mayo", "junio",
-						"julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+						"enero",
+						"febrero",
+						"marzo",
+						"abril",
+						"mayo",
+						"junio",
+						"julio",
+						"agosto",
+						"septiembre",
+						"octubre",
+						"noviembre",
+						"diciembre",
 					];
 					const monthText = monthNames[monthIndex];
 
@@ -664,7 +677,8 @@ export const contractGenerationRouter = {
 					if ("diaTexto" in newData) newData.diaTexto = dayText;
 					if ("mesTexto" in newData) newData.mesTexto = monthText;
 					if ("anoTexto" in newData) newData.anoTexto = yearText;
-					if ("fechaInicioContrato" in newData) newData.fechaInicioContrato = fullDateText;
+					if ("fechaInicioContrato" in newData)
+						newData.fechaInicioContrato = fullDateText;
 
 					// === CALCULAR DÍA DE PAGO Y FECHA DE VENCIMIENTO ===
 					// Regla: Del 1 al 20 -> día 15, Del 21 al 31 -> último día del mes
@@ -673,20 +687,30 @@ export const contractGenerationRouter = {
 
 					// Obtener mes original del contrato para detectar si cambió
 					const mesContratoOriginalIndex = monthNames.findIndex(
-						(m) => m === newData.mesTexto?.toLowerCase()
+						(m) => m === newData.mesTexto?.toLowerCase(),
 					);
-					const mesContratoCambio = mesContratoOriginalIndex !== -1 && mesContratoOriginalIndex !== monthIndex;
+					const mesContratoCambio =
+						mesContratoOriginalIndex !== -1 &&
+						mesContratoOriginalIndex !== monthIndex;
 
 					// Obtener mes y año de vencimiento original de los datos del contrato
-					const mesVencOriginal = newData.mesVencimiento ? Number.parseInt(newData.mesVencimiento) - 1 : null;
-					const anioVencOriginal = newData.anoVencimiento ? 2000 + Number.parseInt(newData.anoVencimiento) : null;
+					const mesVencOriginal = newData.mesVencimiento
+						? Number.parseInt(newData.mesVencimiento) - 1
+						: null;
+					const anioVencOriginal = newData.anoVencimiento
+						? 2000 + Number.parseInt(newData.anoVencimiento)
+						: null;
 
 					let mesVenc: number;
 					let anioVenc: number;
 
 					// Si el mes del contrato cambió, recalcular la fecha de vencimiento con termMonths
 					// Si no cambió, mantener el mes/año original y solo ajustar el día
-					if (mesContratoCambio || mesVencOriginal === null || anioVencOriginal === null) {
+					if (
+						mesContratoCambio ||
+						mesVencOriginal === null ||
+						anioVencOriginal === null
+					) {
 						// Recalcular fecha de vencimiento basándose en termMonths
 						const fechaVenc = new Date(year, monthIndex + termMonths, 1);
 						mesVenc = fechaVenc.getMonth();
@@ -714,12 +738,20 @@ export const contractGenerationRouter = {
 					const mesVencText = monthNames[mesVenc];
 					const anioVencShort = anioVenc.toString().slice(-2);
 
-					if ("diaVencimiento" in newData) newData.diaVencimiento = diaVenc.toString();
-					if ("mesVencimiento" in newData) newData.mesVencimiento = String(mesVenc + 1).padStart(2, "0");
-					if ("anoVencimiento" in newData) newData.anoVencimiento = anioVencShort;
-					if ("diaTextoVencimiento" in newData) newData.diaTextoVencimiento = numberToSpanishText(diaVenc);
-					if ("mesTextoVencimiento" in newData) newData.mesTextoVencimiento = mesVencText;
-					if ("anoTextoVencimiento" in newData) newData.anoTextoVencimiento = numberToSpanishText(Number.parseInt(anioVencShort));
+					if ("diaVencimiento" in newData)
+						newData.diaVencimiento = diaVenc.toString();
+					if ("mesVencimiento" in newData)
+						newData.mesVencimiento = String(mesVenc + 1).padStart(2, "0");
+					if ("anoVencimiento" in newData)
+						newData.anoVencimiento = anioVencShort;
+					if ("diaTextoVencimiento" in newData)
+						newData.diaTextoVencimiento = numberToSpanishText(diaVenc);
+					if ("mesTextoVencimiento" in newData)
+						newData.mesTextoVencimiento = mesVencText;
+					if ("anoTextoVencimiento" in newData)
+						newData.anoTextoVencimiento = numberToSpanishText(
+							Number.parseInt(anioVencShort),
+						);
 
 					return {
 						...contract,
@@ -752,8 +784,14 @@ export const contractGenerationRouter = {
 							.delete(generatedLegalContracts)
 							.where(
 								and(
-									eq(generatedLegalContracts.opportunityId, input.opportunityId),
-									eq(generatedLegalContracts.contractType, originalContract.contractType),
+									eq(
+										generatedLegalContracts.opportunityId,
+										input.opportunityId,
+									),
+									eq(
+										generatedLegalContracts.contractType,
+										originalContract.contractType,
+									),
 								),
 							);
 
@@ -844,20 +882,62 @@ function getMonthNumber(monthName: string): number {
  */
 function numberToSpanishText(num: number): string {
 	const unidades = [
-		"", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve",
-		"diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete",
-		"dieciocho", "diecinueve", "veinte", "veintiuno", "veintidós", "veintitrés",
-		"veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve",
+		"",
+		"uno",
+		"dos",
+		"tres",
+		"cuatro",
+		"cinco",
+		"seis",
+		"siete",
+		"ocho",
+		"nueve",
+		"diez",
+		"once",
+		"doce",
+		"trece",
+		"catorce",
+		"quince",
+		"dieciséis",
+		"diecisiete",
+		"dieciocho",
+		"diecinueve",
+		"veinte",
+		"veintiuno",
+		"veintidós",
+		"veintitrés",
+		"veinticuatro",
+		"veinticinco",
+		"veintiséis",
+		"veintisiete",
+		"veintiocho",
+		"veintinueve",
 	];
 
 	const decenas = [
-		"", "", "veinte", "treinta", "cuarenta", "cincuenta",
-		"sesenta", "setenta", "ochenta", "noventa",
+		"",
+		"",
+		"veinte",
+		"treinta",
+		"cuarenta",
+		"cincuenta",
+		"sesenta",
+		"setenta",
+		"ochenta",
+		"noventa",
 	];
 
 	const centenas = [
-		"", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos",
-		"seiscientos", "setecientos", "ochocientos", "novecientos",
+		"",
+		"ciento",
+		"doscientos",
+		"trescientos",
+		"cuatrocientos",
+		"quinientos",
+		"seiscientos",
+		"setecientos",
+		"ochocientos",
+		"novecientos",
 	];
 
 	if (num === 0) return "cero";

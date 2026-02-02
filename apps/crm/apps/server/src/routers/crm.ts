@@ -2506,7 +2506,10 @@ export const crmRouter = {
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
 			.where(
 				context.userRole !== "admin" && context.userRole !== "sales_supervisor"
-					? and(closedOpportunityCondition, eq(leads.assignedTo, context.userId))
+					? and(
+							closedOpportunityCondition,
+							eq(leads.assignedTo, context.userId),
+						)
 					: closedOpportunityCondition,
 			);
 

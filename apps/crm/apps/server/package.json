@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"@ai-sdk/deepseek": "^1.0.18",
+		"@ai-sdk/google": "^2.0.0",
 		"@ai-sdk/openai": "^2.0.32",
 		"@aws-sdk/client-rekognition": "^3.888.0",
 		"@aws-sdk/client-s3": "^3.850.0",
@@ -26,6 +27,8 @@
 		"@modelcontextprotocol/sdk": "^1.0.0",
 		"@orpc/client": "^1.5.0",
 		"@orpc/server": "^1.5.0",
+		"@repo/infornet": "file:../../../../packages/infornet",
+		"@repo/sms": "file:../../../../packages/sms",
 		"@types/bcryptjs": "^3.0.0",
 		"ai": "^5.0.48",
 		"bcryptjs": "^3.0.2",
@@ -35,9 +38,7 @@
 		"drizzle-orm": "^0.44.2",
 		"hono": "^4.8.2",
 		"pg": "^8.14.1",
-		"zod": "^3.23.8",
-		"@repo/infornet": "file:../../../../packages/infornet",
-		"@repo/sms": "file:../../../../packages/sms"
+		"zod": "^3.23.8"
 	},
 	"devDependencies": {
 		"@types/bun": "^1.2.6",

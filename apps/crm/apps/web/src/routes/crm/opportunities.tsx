@@ -1471,12 +1471,12 @@ function RouteComponent() {
 			<div className="flex items-center justify-between">
 				<div className="flex gap-4">
 					<div className="relative">
-						<Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+						<Search className="absolute top-2.5 left-2.5 h-4 w-4 text-muted-foreground" />
 						<Input
 							placeholder="Buscar por nombre, título..."
 							value={boardSearch}
 							onChange={(e) => setBoardSearch(e.target.value)}
-							className="w-[280px] pl-9 h-9"
+							className="h-9 w-[280px] pl-9"
 						/>
 					</div>
 					<Select value={stageFilter} onValueChange={setStageFilter}>

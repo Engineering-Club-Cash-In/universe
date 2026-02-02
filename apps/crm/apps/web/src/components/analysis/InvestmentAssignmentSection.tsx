@@ -234,6 +234,12 @@ export function InvestmentAssignmentSection() {
 		(sum, inv) => sum + (inv.monto_aportado || 0),
 		0,
 	);
+	const totalMontoExistentes =
+		selectedOpportunity?.existingInvestors?.reduce(
+			(sum, inv) => sum + (inv.monto_aportado || 0),
+			0,
+		) || 0;
+	const totalMontoGeneral = totalMonto + totalMontoExistentes;
 	const creditAmount = selectedOpportunity?.value
 		? Number(selectedOpportunity.value)
 		: 0;
@@ -284,7 +290,15 @@ export function InvestmentAssignmentSection() {
 
 	// Handle assign and advance
 	const handleAssign = () => {
-		if (!selectedOpportunityId || selectedInversionistas.length === 0) return;
+		if (!selectedOpportunityId) return;
+
+		const hasExisting =
+			(selectedOpportunity?.existingInvestors?.length ?? 0) > 0;
+
+		if (selectedInversionistas.length === 0 && !hasExisting) {
+			toast.error("Debe agregar al menos un inversionista");
+			return;
+		}
 
 		// Validate investors have required data
 		const invalidInvestors = selectedInversionistas.filter(
@@ -321,12 +335,15 @@ export function InvestmentAssignmentSection() {
 		selectedInversionistas.every(
 			(inv) => inv.inversionista_id > 0 && inv.monto_aportado > 0,
 		);
+	// Validar que los montos sean exactamente iguales (siempre, con existentes + nuevos)
+	const montosCoinciden = Math.abs(totalMontoGeneral - creditAmount) < 0.01;
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
 		selectedOpportunity.lead?.hasRequiredData &&
 		selectedOpportunity.vehicle?.hasRequiredData &&
-		selectedOpportunity.hasCreditData;
+		selectedOpportunity.hasCreditData &&
+		montosCoinciden;
 
 	// Get disabled reason for tooltip
 	const getDisabledReasons = () => {
@@ -363,6 +380,12 @@ export function InvestmentAssignmentSection() {
 
 		if (!selectedOpportunity.hasCreditData) {
 			reasons.push("Faltan datos del crédito (cuotas, tasa, monto)");
+		}
+
+		if (Math.abs(totalMontoGeneral - creditAmount) >= 0.01) {
+			reasons.push(
+				`La suma de aportes (${formatCurrency(totalMontoGeneral)}) debe ser exactamente igual al capital del crédito (${formatCurrency(creditAmount)})`,
+			);
 		}
 
 		return reasons;
@@ -932,7 +955,7 @@ export function InvestmentAssignmentSection() {
 												</span>
 												<span
 													className={`font-bold ${
-														Math.abs(totalMonto - creditAmount) < 1
+														Math.abs(totalMonto - creditAmount) < 0.01
 															? "text-green-600"
 															: "text-orange-600"
 													}`}
@@ -944,10 +967,10 @@ export function InvestmentAssignmentSection() {
 												<span>Capital del crédito:</span>
 												<span>{formatCurrency(creditAmount)}</span>
 											</div>
-											{Math.abs(totalMonto - creditAmount) >= 1 && (
+											{Math.abs(totalMonto - creditAmount) >= 0.01 && (
 												<p className="mt-1 text-orange-600 text-xs">
-													La suma de aportes debe ser igual al capital del
-													crédito
+													La suma de aportes debe ser exactamente igual al capital del
+													crédito (diferencia: {formatCurrency(Math.abs(totalMonto - creditAmount))})
 												</p>
 											)}
 										</div>

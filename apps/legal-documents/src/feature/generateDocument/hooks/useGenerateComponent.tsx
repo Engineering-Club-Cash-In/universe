@@ -188,11 +188,13 @@ export function useGenerateComponent() {
           const genderSource = isVendedorDoc && vendedorGender ? vendedorGender : formData.renapData?.gender;
           const gender = genderSource === "M" ? "male" : "female";
 
+          const name = formData.fieldValues?.nombreCompleto || "" + "_";
+
           return {
             options: {
               generatePdf: true,
               gender,
-              filenamePrefix: document.nombre_documento + "_" + Date.now(),
+              filenamePrefix: name + document.nombre_documento + "_" + Date.now(),
             },
             // convertir el array de fields a un objeto key-value, incluyendo el DPI
             data: Object.assign({}, ...fields, { dpi: formData.dpi }),

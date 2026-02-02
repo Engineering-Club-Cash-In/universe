@@ -17,6 +17,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { link, type orpc } from "@/utils/orpc";
 import type { appRouter } from "../../../server/src/routers";
+import { logo } from "@/assets";
 import "../index.css";
 
 export interface RouterAppContext {
@@ -29,17 +30,17 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 	head: () => ({
 		meta: [
 			{
-				title: "My App",
+				title: "CRM - Club Cash in",
 			},
 			{
 				name: "description",
-				content: "My App is a web application",
+				content: "CRM para la gestión de clientes, vehículos y ventas de Club Cash in.",
 			},
 		],
 		links: [
 			{
 				rel: "icon",
-				href: "/favicon.ico",
+				href: logo,
 			},
 		],
 	}),

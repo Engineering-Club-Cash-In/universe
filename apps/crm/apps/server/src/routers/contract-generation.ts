@@ -3,10 +3,11 @@
  * Integra con legal-docs-blueprints API y API de documentos legales
  */
 import { ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { leads, opportunities, salesStages } from "../db/schema/crm";
+import { quotations } from "../db/schema/quotations";
 import {
 	contractGenerationSnapshots,
 	generatedLegalContracts,
@@ -621,6 +622,16 @@ export const contractGenerationRouter = {
 					});
 				}
 
+				// 1.5 Obtener termMonths de la quotation más reciente asociada
+				const [quotation] = await db
+					.select({ termMonths: quotations.termMonths })
+					.from(quotations)
+					.where(eq(quotations.opportunityId, input.opportunityId))
+					.orderBy(desc(quotations.createdAt))
+					.limit(1);
+
+				const termMonths = quotation?.termMonths || 60; // Default 60 meses si no hay quotation
+
 				// 2. Actualizar la fecha en los datos de cada contrato
 				const contractsWithNewDate = contractsToRegenerate.map((contract) => {
 					const newData = { ...contract.data };
@@ -647,13 +658,68 @@ export const contractGenerationRouter = {
 					// Fecha completa en texto
 					const fullDateText = `${dayText} de ${monthText} de ${fullYearText}`;
 
-					// Actualizar SOLO campos de fecha del contrato (NO los de vencimiento)
+					// Actualizar campos de fecha del contrato
 					if ("dia" in newData) newData.dia = day.toString();
 					if ("ano" in newData) newData.ano = yearShort;
 					if ("diaTexto" in newData) newData.diaTexto = dayText;
 					if ("mesTexto" in newData) newData.mesTexto = monthText;
 					if ("anoTexto" in newData) newData.anoTexto = yearText;
 					if ("fechaInicioContrato" in newData) newData.fechaInicioContrato = fullDateText;
+
+					// === CALCULAR DÍA DE PAGO Y FECHA DE VENCIMIENTO ===
+					// Regla: Del 1 al 20 -> día 15, Del 21 al 31 -> último día del mes
+					let diaPago: string;
+					let diaVenc: number;
+
+					// Obtener mes original del contrato para detectar si cambió
+					const mesContratoOriginalIndex = monthNames.findIndex(
+						(m) => m === newData.mesTexto?.toLowerCase()
+					);
+					const mesContratoCambio = mesContratoOriginalIndex !== -1 && mesContratoOriginalIndex !== monthIndex;
+
+					// Obtener mes y año de vencimiento original de los datos del contrato
+					const mesVencOriginal = newData.mesVencimiento ? Number.parseInt(newData.mesVencimiento) - 1 : null;
+					const anioVencOriginal = newData.anoVencimiento ? 2000 + Number.parseInt(newData.anoVencimiento) : null;
+
+					let mesVenc: number;
+					let anioVenc: number;
+
+					// Si el mes del contrato cambió, recalcular la fecha de vencimiento con termMonths
+					// Si no cambió, mantener el mes/año original y solo ajustar el día
+					if (mesContratoCambio || mesVencOriginal === null || anioVencOriginal === null) {
+						// Recalcular fecha de vencimiento basándose en termMonths
+						const fechaVenc = new Date(year, monthIndex + termMonths, 1);
+						mesVenc = fechaVenc.getMonth();
+						anioVenc = fechaVenc.getFullYear();
+					} else {
+						// Mantener mes/año original
+						mesVenc = mesVencOriginal;
+						anioVenc = anioVencOriginal;
+					}
+
+					if (day <= 20) {
+						// Del 1 al 20: día de pago es "día quince"
+						diaPago = "día quince";
+						diaVenc = 15;
+					} else {
+						// Del 21 al 31: día de pago es "último día"
+						diaPago = "último día";
+						diaVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+					}
+
+					// Actualizar campos de día de pago
+					if ("diaPago" in newData) newData.diaPago = diaPago;
+
+					// Actualizar campos de fecha de vencimiento
+					const mesVencText = monthNames[mesVenc];
+					const anioVencShort = anioVenc.toString().slice(-2);
+
+					if ("diaVencimiento" in newData) newData.diaVencimiento = diaVenc.toString();
+					if ("mesVencimiento" in newData) newData.mesVencimiento = String(mesVenc + 1).padStart(2, "0");
+					if ("anoVencimiento" in newData) newData.anoVencimiento = anioVencShort;
+					if ("diaTextoVencimiento" in newData) newData.diaTextoVencimiento = numberToSpanishText(diaVenc);
+					if ("mesTextoVencimiento" in newData) newData.mesTextoVencimiento = mesVencText;
+					if ("anoTextoVencimiento" in newData) newData.anoTextoVencimiento = numberToSpanishText(Number.parseInt(anioVencShort));
 
 					return {
 						...contract,
@@ -672,25 +738,26 @@ export const contractGenerationRouter = {
 					});
 				}
 
-				// 4. Borrar los contratos existentes de los tipos regenerados
-				for (const contractType of input.contractTypes) {
-					await db
-						.delete(generatedLegalContracts)
-						.where(
-							and(
-								eq(generatedLegalContracts.opportunityId, input.opportunityId),
-								eq(generatedLegalContracts.contractType, contractType),
-							),
-						);
-				}
-
-				// 5. Insertar los nuevos contratos
+				// 4. Procesar cada contrato: solo borrar e insertar si la generación fue exitosa
 				const savedContracts: Array<{ id: string; contractType: string }> = [];
+				const failedContracts: string[] = [];
+
 				for (let i = 0; i < apiResult.results.length; i++) {
 					const contractResult = apiResult.results[i];
 					const originalContract = contractsWithNewDate[i];
 
 					if (contractResult.success) {
+						// Solo borrar el contrato anterior si la generación fue exitosa
+						await db
+							.delete(generatedLegalContracts)
+							.where(
+								and(
+									eq(generatedLegalContracts.opportunityId, input.opportunityId),
+									eq(generatedLegalContracts.contractType, originalContract.contractType),
+								),
+							);
+
+						// Insertar el nuevo contrato
 						const [saved] = await db
 							.insert(generatedLegalContracts)
 							.values({
@@ -719,22 +786,25 @@ export const contractGenerationRouter = {
 								contractType: originalContract.contractType,
 							});
 						}
+					} else {
+						// Registrar contratos que fallaron (no se borran)
+						failedContracts.push(originalContract.contractType);
 					}
 				}
 
-				// 6. Actualizar el snapshot con la nueva fecha
-				await db.insert(contractGenerationSnapshots).values({
-					opportunityId: input.opportunityId,
-					contractDate: input.newDate,
-					data: contractsWithNewDate,
-					createdBy: context.userId,
-				});
+				// Construir mensaje de resultado
+				let message = `Se regeneraron ${savedContracts.length} contrato(s) exitosamente`;
+				if (failedContracts.length > 0) {
+					message += `. Fallaron: ${failedContracts.join(", ")} (no fueron borrados)`;
+				}
 
 				return {
-					success: true,
+					success: savedContracts.length > 0,
 					regeneratedCount: savedContracts.length,
+					failedCount: failedContracts.length,
 					contracts: savedContracts,
-					message: `Se regeneraron ${savedContracts.length} contrato(s) exitosamente`,
+					failedContracts,
+					message,
 				};
 			} catch (error) {
 				console.error("[regenerateContracts] Error:", error);

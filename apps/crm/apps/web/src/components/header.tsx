@@ -20,10 +20,10 @@ import {
 	UserCircle,
 	Users,
 } from "lucide-react";
+import { logo } from "@/assets";
 import { authClient } from "@/lib/auth-client";
 import { PERMISSIONS } from "@/lib/roles";
 import { orpc } from "@/utils/orpc";
-import { logo } from "@/assets";
 
 import { ModeToggle } from "./mode-toggle";
 import { Button } from "./ui/button";

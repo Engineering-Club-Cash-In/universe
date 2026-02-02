@@ -458,7 +458,9 @@ function delay(ms: number): Promise<void> {
  * consultando la deuda total desde cartera-back
  */
 export async function actualizarValueOportunidades(): Promise<UpdateValueResult> {
-	console.log("[UpdateValue] Iniciando actualización de values de oportunidades migradas");
+	console.log(
+		"[UpdateValue] Iniciando actualización de values de oportunidades migradas",
+	);
 
 	const resultado: UpdateValueResult = {
 		totalEncontradas: 0,
@@ -478,14 +480,13 @@ export async function actualizarValueOportunidades(): Promise<UpdateValueResult>
 		})
 		.from(opportunities)
 		.where(
-			and(
-				eq(opportunities.status, "migrate"),
-				isNull(opportunities.value)
-			)
+			and(eq(opportunities.status, "migrate"), isNull(opportunities.value)),
 		);
 
 	resultado.totalEncontradas = oportunidadesSinValue.length;
-	console.log(`[UpdateValue] Encontradas ${resultado.totalEncontradas} oportunidades sin value`);
+	console.log(
+		`[UpdateValue] Encontradas ${resultado.totalEncontradas} oportunidades sin value`,
+	);
 
 	// Delay entre peticiones para no sobrecargar cartera-back (500ms)
 	const DELAY_BETWEEN_REQUESTS = 500;
@@ -500,7 +501,9 @@ export async function actualizarValueOportunidades(): Promise<UpdateValueResult>
 
 		// Log de progreso cada 10 oportunidades
 		if (i > 0 && i % 10 === 0) {
-			console.log(`[UpdateValue] Progreso: ${i}/${oportunidadesSinValue.length} procesadas...`);
+			console.log(
+				`[UpdateValue] Progreso: ${i}/${oportunidadesSinValue.length} procesadas...`,
+			);
 		}
 
 		// Si no tiene numeroSifco, no podemos consultar cartera
@@ -516,7 +519,9 @@ export async function actualizarValueOportunidades(): Promise<UpdateValueResult>
 
 		try {
 			// Consultar cartera-back para obtener la deuda total
-			const creditoData = await carteraBackClient.getCredito(oportunidad.numeroSifco);
+			const creditoData = await carteraBackClient.getCredito(
+				oportunidad.numeroSifco,
+			);
 
 			if (!creditoData?.credito?.deudatotal) {
 				resultado.totalFallidas++;
@@ -544,16 +549,22 @@ export async function actualizarValueOportunidades(): Promise<UpdateValueResult>
 				valueNuevo: deudaTotal,
 			});
 
-			console.log(`[UpdateValue] Actualizada oportunidad ${oportunidad.id}: value=${deudaTotal}`);
+			console.log(
+				`[UpdateValue] Actualizada oportunidad ${oportunidad.id}: value=${deudaTotal}`,
+			);
 		} catch (error) {
 			resultado.totalFallidas++;
-			const errorMessage = error instanceof Error ? error.message : "Error desconocido";
+			const errorMessage =
+				error instanceof Error ? error.message : "Error desconocido";
 			resultado.errores.push({
 				opportunityId: oportunidad.id,
 				numeroSifco: oportunidad.numeroSifco,
 				error: errorMessage,
 			});
-			console.error(`[UpdateValue] Error actualizando ${oportunidad.id}:`, errorMessage);
+			console.error(
+				`[UpdateValue] Error actualizando ${oportunidad.id}:`,
+				errorMessage,
+			);
 		}
 	}
 

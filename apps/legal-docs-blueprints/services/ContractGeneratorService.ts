@@ -337,6 +337,7 @@ export class ContractGeneratorService {
       const { contractType, data, emails, options } = contracts[i];
 
       console.log(`[${i + 1}/${contracts.length}] Procesando contrato: ${contractType}`);
+      console.log(`  Options recibidas:`, JSON.stringify(options));
 
       try {
         const result = await this.generateContract(contractType, data, { ...options, emails });
@@ -431,6 +432,7 @@ export class ContractGeneratorService {
       }
 
       // 4. Cargar template
+      console.log(`  → Template seleccionado: ${templateFilename}`);
       const templatePath = path.join(this.templatesDir, templateFilename);
       const templateContent = await fs.readFile(templatePath, 'binary');
       const zip = new PizZip(templateContent);
@@ -468,9 +470,32 @@ export class ContractGeneratorService {
         const deudoresAdicionales = data.deudoresAdicionales || [];
 
         // Array de firmantes = deudor 1 + deudores adicionales
-        renderData.firmantes = [deudor1, ...deudoresAdicionales];
+        const firmantes = [deudor1, ...deudoresAdicionales];
 
-        console.log(`✓ Plural: ${renderData.firmantes.length} firmante(s) configurados`);
+        // Agrupar firmantes en filas de 2 columnas (aplanar datos para evitar problemas con parser)
+        const firmantesFilas: Array<{
+          col1nombreCompleto: string;
+          col1dpi: string;
+          col2nombreCompleto?: string;
+          col2dpi?: string;
+          tieneCol2: boolean;
+        }> = [];
+
+        for (let i = 0; i < firmantes.length; i += 2) {
+          const f1 = firmantes[i];
+          const f2 = firmantes[i + 1];
+          firmantesFilas.push({
+            col1nombreCompleto: f1.nombreCompleto,
+            col1dpi: f1.dpi,
+            col2nombreCompleto: f2?.nombreCompleto,
+            col2dpi: f2?.dpi,
+            tieneCol2: !!f2
+          });
+        }
+
+        renderData.firmantesFilas = firmantesFilas;
+        console.log(`✓ Plural: ${firmantes.length} firmante(s) en ${firmantesFilas.length} fila(s)`);
+        console.log(`  firmantesFilas:`, JSON.stringify(firmantesFilas, null, 2));
       }
 
       // 7. Renderizar con los datos

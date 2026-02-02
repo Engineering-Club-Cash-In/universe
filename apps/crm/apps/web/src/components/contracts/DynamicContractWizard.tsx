@@ -450,7 +450,7 @@ function dpiToWords(dpi: string): string {
 	const palabras2 = dpiGroupToWords(grupo2);
 	const palabras3 = dpiGroupToWords(grupo3);
 
-	const texto = `${palabras1} ${palabras2} ${palabras3}`.toUpperCase();
+	const texto = `${palabras1} ${palabras2} ${palabras3}`.toLowerCase();
 	return `${texto} (${cleanDpi})`;
 }
 
@@ -497,7 +497,7 @@ export function DynamicContractWizard({
 
 	// Date configuration states
 	const [fechaVencimiento, setFechaVencimiento] = useState<string>("");
-	const [diaPago, setDiaPago] = useState<string>("15"); // Default día 15
+	const [diaPago, setDiaPago] = useState<string>("día quince"); // Default día 15
 
 	// Months in Spanish for date conversion
 	const monthsSpanish = useMemo(
@@ -637,8 +637,7 @@ export function DynamicContractWizard({
 
 			// Día de pago
 			if (diaPagoVal) {
-				const diaPagoNum = Number.parseInt(diaPagoVal, 10);
-				updates.diaPago = numberToText(diaPagoNum);
+				updates.diaPago = diaPagoVal;
 			}
 
 			// Fecha de vencimiento
@@ -669,7 +668,28 @@ export function DynamicContractWizard({
 
 	const handleDiaPagoChange = (value: string) => {
 		setDiaPago(value);
-		updateDateFields(fechaVencimiento, value);
+
+		// Actualizar el día de la fecha de vencimiento según el día de pago
+		if (fechaVencimiento) {
+			const fecha = new Date(fechaVencimiento + "T00:00:00");
+			const anio = fecha.getFullYear();
+			const mes = fecha.getMonth();
+
+			let nuevoDia: number;
+			if (value === "último día") {
+				// Último día del mes
+				nuevoDia = new Date(anio, mes + 1, 0).getDate();
+			} else {
+				// Día 15
+				nuevoDia = 15;
+			}
+
+			const fechaStr = `${anio}-${String(mes + 1).padStart(2, "0")}-${String(nuevoDia).padStart(2, "0")}`;
+			setFechaVencimiento(fechaStr);
+			updateDateFields(fechaStr, value);
+		} else {
+			updateDateFields(fechaVencimiento, value);
+		}
 	};
 
 	// Format money to text (e.g., "CIENTO CINCUENTA MIL QUETZALES (Q150,000.00)")
@@ -705,14 +725,16 @@ export function DynamicContractWizard({
 			const { cliente, vehiculo, credito } = crmData;
 			const gender = cliente.genero || renapInfo?.gender || "M";
 
-			fieldsData.forEach((field) => {
-				const fieldKeyLower = field.key?.toLowerCase();
+		fieldsData.forEach((field) => {
+			const fieldKeyLower = field.key?.toLowerCase();
 
-				// === CLIENTE DATA (from CRM) ===
+						// === CLIENTE DATA (from CRM) ===
 				switch (fieldKeyLower) {
 					case "nombrecompleto":
 						if (cliente.nombreCompleto) {
-							initialValues[field.key] = cliente.nombreCompleto.toUpperCase();
+							initialValues[field.key] = renapInfo
+							? `${renapInfo.firstName} ${renapInfo.secondName} ${renapInfo.thirdName} ${renapInfo.firstLastName} ${renapInfo.secondLastName} ${renapInfo.marriedLastName}`.toUpperCase()
+							: cliente.nombreCompleto.toUpperCase();
 							return;
 						}
 						break;
@@ -748,7 +770,7 @@ export function DynamicContractWizard({
 						break;
 					case "profesion":
 						if (cliente.profesion) {
-							initialValues[field.key] = cliente.profesion.toLowerCase();
+							initialValues[field.key] = cliente.profesion.toLowerCase() || renapInfo?.ocupation.toLowerCase() || "";
 							return;
 						}
 						break;
@@ -858,7 +880,7 @@ export function DynamicContractWizard({
 				switch (fieldKeyLower) {
 					case "capitaladeudado":
 						if (credito.capitalAdeudado) {
-							initialValues[field.key] = moneyToText(credito.capitalAdeudado);
+							initialValues[field.key] = `${moneyToWords(credito.capitalAdeudado).toUpperCase()} (${moneyToText(credito.capitalAdeudado)})`;
 							return;
 						}
 						break;
@@ -872,7 +894,7 @@ export function DynamicContractWizard({
 					case "cuotasmensuales":
 					case "cuotamensual":
 						if (credito.cuotaMensual) {
-							initialValues[field.key] = moneyToText(credito.cuotaMensual);
+							initialValues[field.key] = `${moneyToWords(credito.cuotaMensual).toUpperCase()} (${moneyToText(credito.cuotaMensual)})`;
 							return;
 						}
 						break;
@@ -898,7 +920,7 @@ export function DynamicContractWizard({
 								minimumFractionDigits: 2,
 								maximumFractionDigits: 2,
 							});
-							initialValues[field.key] = `Q.${valorFormateado}`;
+							initialValues[field.key] = `${valorFormateado}`;
 							return;
 						}
 						break;
@@ -1052,13 +1074,33 @@ export function DynamicContractWizard({
 
 				// Auto-calculate fecha de vencimiento if we have credit data
 				if (crmData.credito?.mesesPrestamo) {
-					const fechaInicio = new Date();
-					fechaInicio.setMonth(
-						fechaInicio.getMonth() + crmData.credito.mesesPrestamo,
-					);
-					const fechaStr = fechaInicio.toISOString().split("T")[0];
+					const hoy = new Date();
+					const diaActual = hoy.getDate();
+
+					// Calcular mes de vencimiento (setear día 1 primero para evitar desbordamiento)
+					const fechaVenc = new Date();
+					fechaVenc.setDate(1);
+					fechaVenc.setMonth(fechaVenc.getMonth() + crmData.credito.mesesPrestamo + 1);
+					const mesVenc = fechaVenc.getMonth();
+					const anioVenc = fechaVenc.getFullYear();
+
+					let diaPagoDefault: string;
+					let diaVenc: number;
+
+					if (diaActual <= 20) {
+						// Del 1 al 20: día de pago es 15, vencimiento día 15 del mes siguiente
+						diaPagoDefault = "día quince";
+						diaVenc = 15;
+					} else {
+						// Del 21 al 31: día de pago es último día, vencimiento último día del mes siguiente
+						diaPagoDefault = "último día";
+						diaVenc = new Date(anioVenc, mesVenc + 1, 0).getDate();
+					}
+
+					const fechaStr = `${anioVenc}-${String(mesVenc + 1).padStart(2, "0")}-${String(diaVenc).padStart(2, "0")}`;
+					setDiaPago(diaPagoDefault);
 					setFechaVencimiento(fechaStr);
-					updateDateFields(fechaStr, diaPago);
+					updateDateFields(fechaStr, diaPagoDefault);
 				}
 			}
 		} catch (error) {
@@ -1249,18 +1291,26 @@ export function DynamicContractWizard({
 				const clientEmail = crmData.cliente.correo;
 				const contracts = documents
 					.filter((doc) => selectedDocuments.includes(doc.nombre_documento))
-					.map((doc) => ({
-						contractType: doc.nombre_documento,
-						data: fieldValues,
-						emails: clientEmail ? [clientEmail] : undefined,
-						options: {
-							gender: (crmData.cliente.genero === "F" ? "female" : "male") as
-								| "male"
-								| "female",
-							generatePdf: true,
-							filenamePrefix: `${opportunityId}_${doc.nombre_documento}`,
-						},
-					}));
+					.map((doc) => {
+						// Para declaracion_vendedor usar el género del vendedor
+						let gender: "male" | "female";
+						if (doc.nombre_documento === "declaracion_vendedor") {
+							gender = (fieldValues.genderVendedor === "female" ? "female" : "male");
+						} else {
+							gender = (crmData.cliente.genero === "F" ? "female" : "male");
+						}
+
+						return {
+							contractType: doc.nombre_documento,
+							data: fieldValues,
+							emails: clientEmail ? [clientEmail] : undefined,
+							options: {
+								gender,
+								generatePdf: true,
+								filenamePrefix: `${opportunityId}_${doc.nombre_documento}`,
+							},
+						};
+					});
 
 				// Store generation data for snapshot (using ref for immediate availability)
 				generationDataRef.current = contracts;
@@ -1526,20 +1576,13 @@ export function DynamicContractWizard({
 														}
 														className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 													>
-														{Array.from({ length: 31 }, (_, i) => i + 1).map(
-															(day) => (
-																<option key={day} value={day}>
-																	{day === 15 ? `${day} (Recomendado)` : day}
-																</option>
-															),
-														)}
-														<option value="ultimo">Último día del mes</option>
+														<option value="día quince">Día quince</option>
+														<option value="último día">Último día del mes</option>
 													</select>
 													<p className="text-muted-foreground text-xs">
 														Se usará: "
-														{fieldValues.diaPago ||
-															numberToText(Number(diaPago))}
-														"
+														{fieldValues.diaPago || "día quince"}"
+														
 													</p>
 												</div>
 												<div className="space-y-2">
@@ -1629,15 +1672,28 @@ export function DynamicContractWizard({
 																)}
 															</div>
 
-															{/* Input */}
-															<Input
-																value={fieldValues[field.key] || ""}
-																onChange={(e) =>
-																	handleFieldChange(field.key, e.target.value)
-																}
-																placeholder={`Ingresa ${field.name.toLowerCase()}`}
-																className={`h-9 bg-white text-sm ${hasError ? "border-red-500" : ""}`}
-															/>
+															{/* Input o Select según el campo */}
+															{field.key?.toLowerCase() === "gendervendedor" ? (
+																<select
+																	value={fieldValues[field.key] || "male"}
+																	onChange={(e) =>
+																		handleFieldChange(field.key, e.target.value)
+																	}
+																	className={`flex h-9 w-full rounded-md border border-input bg-white px-3 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${hasError ? "border-red-500" : ""}`}
+																>
+																	<option value="male">Masculino</option>
+																	<option value="female">Femenino</option>
+																</select>
+															) : (
+																<Input
+																	value={fieldValues[field.key] || ""}
+																	onChange={(e) =>
+																		handleFieldChange(field.key, e.target.value)
+																	}
+																	placeholder={`Ingresa ${field.name.toLowerCase()}`}
+																	className={`h-9 bg-white text-sm ${hasError ? "border-red-500" : ""}`}
+																/>
+															)}
 
 															{/* Error message */}
 															<div className="mt-1 min-h-[20px]">

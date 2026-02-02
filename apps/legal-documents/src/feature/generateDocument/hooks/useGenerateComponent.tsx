@@ -182,10 +182,16 @@ export function useGenerateComponent() {
             return { [field.key]: value };
           });
 
+          // Determinar el género: para "declaracion_vendedor" usar genderVendedor, sino usar el del cliente
+          const isVendedorDoc = document.nombre_documento === "declaracion_vendedor";
+          const vendedorGender = formData.fieldValues?.genderVendedor;
+          const genderSource = isVendedorDoc && vendedorGender ? vendedorGender : formData.renapData?.gender;
+          const gender = genderSource === "M" ? "male" : "female";
+
           return {
             options: {
               generatePdf: true,
-              gender: formData.renapData?.gender === "M" ? "male" : "female",
+              gender,
               filenamePrefix: document.nombre_documento + "_" + Date.now(),
             },
             // convertir el array de fields a un objeto key-value, incluyendo el DPI

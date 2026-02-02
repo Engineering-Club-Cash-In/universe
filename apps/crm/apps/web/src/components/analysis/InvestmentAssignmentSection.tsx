@@ -337,13 +337,15 @@ export function InvestmentAssignmentSection() {
 		);
 	// Validar que los montos sean exactamente iguales (siempre, con existentes + nuevos)
 	const montosCoinciden = Math.abs(totalMontoGeneral - creditAmount) < 0.01;
+	const hasValidNit = editNit.trim().length > 0;
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
 		selectedOpportunity.lead?.hasRequiredData &&
 		selectedOpportunity.vehicle?.hasRequiredData &&
 		selectedOpportunity.hasCreditData &&
-		montosCoinciden;
+		montosCoinciden &&
+		hasValidNit;
 
 	// Get disabled reason for tooltip
 	const getDisabledReasons = () => {
@@ -386,6 +388,10 @@ export function InvestmentAssignmentSection() {
 			reasons.push(
 				`La suma de aportes (${formatCurrency(totalMontoGeneral)}) debe ser exactamente igual al capital del crédito (${formatCurrency(creditAmount)})`,
 			);
+		}
+
+		if (!editNit.trim()) {
+			reasons.push("El NIT es obligatorio");
 		}
 
 		return reasons;
@@ -761,11 +767,12 @@ export function InvestmentAssignmentSection() {
 											</p>
 										</div>
 										<div>
-											<Label className="text-xs">NIT</Label>
+											<Label className="text-xs">NIT *</Label>
 											<Input
 												value={editNit}
 												onChange={(e) => setEditNit(e.target.value)}
 												placeholder="Ej: 12345678-9"
+												className={!editNit.trim() ? "border-orange-400" : ""}
 											/>
 										</div>
 									</div>

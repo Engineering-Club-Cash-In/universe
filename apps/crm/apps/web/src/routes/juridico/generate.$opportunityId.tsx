@@ -1,6 +1,12 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowLeft, Eye, FileSignature, Loader2 } from "lucide-react";
+import {
+	AlertTriangle,
+	ArrowLeft,
+	Eye,
+	FileSignature,
+	Loader2,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import {
@@ -72,7 +78,10 @@ function RouteComponent() {
 			dpi: string;
 			documentNames: string[];
 		}) => {
-			return await client.getDocumentsByDpi({ dpi: dpi.replace(/\s/g, ""), documentNames });
+			return await client.getDocumentsByDpi({
+				dpi: dpi.replace(/\s/g, ""),
+				documentNames,
+			});
 		},
 	});
 
@@ -433,13 +442,13 @@ function RouteComponent() {
 							<div>
 								<CardTitle>Generación de Documentos Legales</CardTitle>
 								<CardDescription>
-									Seleccione los documentos a generar. Los datos serán pre-llenados
-									automáticamente con la información del CRM.
+									Seleccione los documentos a generar. Los datos serán
+									pre-llenados automáticamente con la información del CRM.
 								</CardDescription>
 							</div>
 							<Button
-							variant="outline"
-							className="border-blue-500 text-blue-500 hover:bg-blue-50"
+								variant="outline"
+								className="border-blue-500 text-blue-500 hover:bg-blue-50"
 								onClick={() => setIsOpportunityModalOpen(true)}
 							>
 								<Eye className="mr-2 h-4 w-4" />

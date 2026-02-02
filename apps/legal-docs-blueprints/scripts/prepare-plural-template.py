@@ -27,7 +27,84 @@ TEMPLATES_TO_PROCESS = [
             ('carta_carro_nuevo.docx', 'carta_carro_nuevo-plural.docx', False),
             ('carta_carro_nuevo-mujer.docx', 'carta_carro_nuevo-mujer-plural.docx', True),
         ]
-    }
+    },
+    {
+        'folder': 'contrato_privado_uso_nuevo',
+        'templates': [
+            ('contrato_privado_uso_nuevo.docx', 'contrato_privado_uso_nuevo-plural.docx', False),
+            ('contrato_privado_uso_nuevo-mujer.docx', 'contrato_privado_uso_nuevo-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'contrato_uso_carro_usado',
+        'templates': [
+            ('contrato_uso_carro_usado.docx', 'contrato_uso_carro_usado-plural.docx', False),
+            ('contrato_uso_carro_usado-mujer.docx', 'contrato_uso_carro_usado-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'descargo_responsabilidades',
+        'templates': [
+            ('descargo_responsabilidades.docx', 'descargo_responsabilidades-plural.docx', False),
+            ('descargo_responsabilidades-mujer.docx', 'descargo_responsabilidades-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'pagare_unico_libre_protesto',
+        'templates': [
+            ('pagare_unico_libre_de_protesto.docx', 'pagare_unico_libre_de_protesto-plural.docx', False),
+            ('pagare_unico_libre_de_protesto-mujer.docx', 'pagare_unico_libre_de_protesto-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'carta_solicitud_traspaso_vehiculo',
+        'templates': [
+            ('carta_solicitud_traspaso_vehiculo.docx', 'carta_solicitud_traspaso_vehiculo-plural.docx', False),
+            ('carta_solicitud_traspaso_vehiculo-mujer.docx', 'carta_solicitud_traspaso_vehiculo-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'declaracion_vendedor',
+        'templates': [
+            ('declaracion_de_vendedor.docx', 'declaracion_de_vendedor-plural.docx', False),
+            ('declaracion_de_vendedor-mujer.docx', 'declaracion_de_vendedor-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'garantia_mobiliaria',
+        'templates': [
+            ('garantia_mobiliaria.docx', 'garantia_mobiliaria-plural.docx', False),
+            ('garantia_mobiliaria-mujer.docx', 'garantia_mobiliaria-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'solicitud_compra_vehiculo',
+        'templates': [
+            ('solicitud_compra_vehiculo.docx', 'solicitud_compra_vehiculo-plural.docx', False),
+            ('solicitud_compra_vehiculo-mujer.docx', 'solicitud_compra_vehiculo-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'carta_emision_cheques',
+        'templates': [
+            ('carta_emision_cheques.docx', 'carta_emision_cheques-plural.docx', False),
+            ('carta_emision_cheques-mujer.docx', 'carta_emision_cheques-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'carta_aceptacion_gps',
+        'templates': [
+            ('carta_aceptacion_gps.docx', 'carta_aceptacion_gps-plural.docx', False),
+            ('carta_aceptacion_gps-mujer.docx', 'carta_aceptacion_gps-mujer-plural.docx', True),
+        ]
+    },
+    {
+        'folder': 'reconocimiento_deuda',
+        'templates': [
+            ('reconocimiento_deuda_template.docx', 'reconocimiento_deuda_template-plural.docx', False),
+            ('reconocimiento_deuda_template-mujer.docx', 'reconocimiento_deuda_template-mujer-plural.docx', True),
+        ]
+    },
 ]
 
 
@@ -57,6 +134,7 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
     Retorna: (xml_modificado, lista_de_cambios)
     """
     changes = []
+    loop_added = False  # Flag para evitar agregar múltiples loops
 
     # ==== PRONOMBRES Y VERBOS ====
 
@@ -79,9 +157,7 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
         xml = xml.replace('>identificada con', '>identificadas con')
         xml = xml.replace('>, identificada<', '>, identificadas<')
         xml = xml.replace(', identificada<', ', identificadas<')
-        # Fragmento: "identificad" + "a" en tags separadas (puede tener newlines)
-        xml = re.sub(r'(identificad</w:t>.*?<w:t[^>]*>)a(\s*</w:t>)', r'\1as\2', xml, flags=re.DOTALL)
-        xml = re.sub(r'(identificad</w:t>.*?<w:t[^>]*>)a(\s)', r'\1as\2', xml, flags=re.DOTALL)
+        xml = xml.replace('identificada con Documento', 'identificadas con Documento')
         changes.append('"identificada" → "identificadas"')
     else:
         xml = xml.replace('>identificado<', '>identificados<')
@@ -106,19 +182,215 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
     xml = xml.replace('me suscribo', 'nos suscribimos')
     changes.append('"me suscribo" → "nos suscribimos"')
 
-    # ==== AGREGAR LOOP PARA DEUDORES ADICIONALES ====
+    # ==== REEMPLAZOS PARA CARTA_ACEPTACION_GPS ====
+    # "yo: " → "Nosotros/Nosotras: " (el texto puede estar fragmentado en XML)
+    # Y agregar loop de deudores después de {nombreCompleto}
+    if ', yo: </w:t' in xml or ', yo:</w:t' in xml or '>yo: </w:t' in xml:
+        xml = xml.replace(', yo: </w:t', f', {nosotros}: </w:t')
+        xml = xml.replace(', yo:</w:t', f', {nosotros}:</w:t')
+        xml = xml.replace('>yo: </w:t', f'>{nosotros}: </w:t')
+        changes.append(f'"yo:" → "{nosotros}:"')
+
+        # Agregar loop de deudoresAdicionales después del primer {nombreCompleto} en carta_aceptacion_gps
+        # Buscar el patrón: {nombreCompleto} </w:t>...<w:t>manifiesto
+        deudores_loop = '{nombreCompleto}{#deudoresAdicionales} y {nombreCompleto}{/deudoresAdicionales}'
+        # Reemplazar solo el primer {nombreCompleto} que va seguido de </w:t> y luego manifiesto
+        xml = re.sub(
+            r'(\{nombreCompleto\})(\s*</w:t>.*?<w:t[^>]*>manifiesto)',
+            rf'{deudores_loop}\2',
+            xml,
+            count=1,
+            flags=re.DOTALL
+        )
+        changes.append('Agregado loop deudoresAdicionales después de nombreCompleto')
+
+    # "manifiesto que estoy enterado y acepto" → "manifestamos que estamos enterados/enteradas y aceptamos"
+    if is_female:
+        xml = xml.replace('manifiesto que estoy enterada y acepto', 'manifestamos que estamos enteradas y aceptamos')
+        changes.append('"manifiesto que estoy enterada y acepto" → "manifestamos que estamos enteradas y aceptamos"')
+    else:
+        xml = xml.replace('manifiesto que estoy enterado y acepto', 'manifestamos que estamos enterados y aceptamos')
+        changes.append('"manifiesto que estoy enterado y acepto" → "manifestamos que estamos enterados y aceptamos"')
+
+    # "me someto expresamente" → "nos sometemos expresamente"
+    xml = xml.replace('me someto expresamente', 'nos sometemos expresamente')
+    changes.append('"me someto expresamente" → "nos sometemos expresamente"')
+
+    # "ACEPTO" → "ACEPTAMOS" (puede estar en medio del texto, no entre tags)
+    xml = xml.replace(' ACEPTO ', ' ACEPTAMOS ')
+    xml = xml.replace('>ACEPTO<', '>ACEPTAMOS<')
+    changes.append('"ACEPTO" → "ACEPTAMOS"')
+
+    # "acepto que me comprometo" → "aceptamos que nos comprometemos"
+    xml = xml.replace('acepto que me comprometo', 'aceptamos que nos comprometemos')
+    changes.append('"acepto que me comprometo" → "aceptamos que nos comprometemos"')
+
+    # "me comprometo a" → "nos comprometemos a"
+    xml = xml.replace('me comprometo a', 'nos comprometemos a')
+    changes.append('"me comprometo a" → "nos comprometemos a"')
+
+    # ==== REEMPLAZOS PARA CARTA_SOLICITUD_TRASPASO_VEHICULO ====
+    # Solo pide: nombreCompleto y dpiTexto
+    if 'Por este medio, yo' in xml and 'atentamente solicito y autorizo' in xml:
+        # "Por este medio, yo" → "Por este medio, Nosotros/Nosotras"
+        xml = xml.replace('Por este medio, yo', f'Por este medio, {nosotros}')
+        changes.append(f'"Por este medio, yo" → "Por este medio, {nosotros}"')
+
+        # "atentamente solicito y autorizo" → "atentamente solicitamos y autorizamos"
+        xml = xml.replace('atentamente solicito y autorizo', 'atentamente solicitamos y autorizamos')
+        changes.append('"atentamente solicito y autorizo" → "atentamente solicitamos y autorizamos"')
+
+        # Agregar loop simplificado después del primer RENAP (solo nombreCompleto y dpiTexto)
+        renap_traspaso = '–RENAP-, República de Guatemala, Centroamérica, atentamente'
+        if is_female:
+            loop_traspaso = (
+                '–RENAP-, República de Guatemala, Centroamérica'
+                '{#deudoresAdicionales} y {nombreCompleto}, identificada con DPI {dpiTexto}, '
+                'extendido por el Registro Nacional de las Personas –RENAP-, República de Guatemala, '
+                'Centroamérica{/deudoresAdicionales}, atentamente'
+            )
+        else:
+            loop_traspaso = (
+                '–RENAP-, República de Guatemala, Centroamérica'
+                '{#deudoresAdicionales} y {nombreCompleto}, identificado con DPI {dpiTexto}, '
+                'extendido por el Registro Nacional de las Personas –RENAP-, República de Guatemala, '
+                'Centroamérica{/deudoresAdicionales}, atentamente'
+            )
+        xml = xml.replace(renap_traspaso, loop_traspaso)
+        changes.append('Agregado loop deudoresAdicionales (solo nombreCompleto y dpiTexto)')
+        loop_added = True
+
+    # ==== REEMPLAZOS PARA DESCARGO_RESPONSABILIDADES ====
+    # Solo usa: nombreCompleto y dpiTexto
+    if 'DESCARGO DE RESPONSABILIDADES' in xml:
+        # El XML fragmenta el texto. Buscar {dpiTexto} e insertar loop después
+        # La coma y "a través" están en tags separados, así que buscamos hasta "a través"
+        if is_female:
+            loop_descargo = (
+                r'\1{#deudoresAdicionales}, y {nombreCompleto}, identificada con Documento Personal de Identificación, '
+                r'Código Único de Identificación: {dpiTexto}{/deudoresAdicionales}\2'
+            )
+        else:
+            loop_descargo = (
+                r'\1{#deudoresAdicionales}, y {nombreCompleto}, identificado con Documento Personal de Identificación, '
+                r'Código Único de Identificación: {dpiTexto}{/deudoresAdicionales}\2'
+            )
+        # Capturar {dpiTexto} y todo el XML hasta "a través de financiamiento"
+        descargo_pattern = r'(\{dpiTexto\})(</w:t>.*?a través de financiamiento)'
+        xml = re.sub(descargo_pattern, loop_descargo, xml, count=1, flags=re.DOTALL)
+        changes.append('Agregado loop deudoresAdicionales (nombreCompleto y dpiTexto)')
+        loop_added = True
+
+    # ==== REEMPLAZOS PARA SOLICITUD_COMPRA_VEHICULO ====
+    # Solo usa: nombreCompleto y dpiTexto
+    if 'SOLICITUD DE COMPRA DE VEHÍCULO' in xml:
+        # "Por este medio, yo" → "Por este medio, Nosotros/Nosotras:"
+        xml = xml.replace('Por este medio, yo', f'Por este medio, {nosotros}:')
+        changes.append(f'"Por este medio, yo" → "Por este medio, {nosotros}:"')
+
+        # Agregar loop después de {dpiTexto}
+        # El XML fragmenta: {dpiTexto}</w:t>...</w:r>...<w:t>, atentamente
+        if is_female:
+            loop_solicitud = (
+                r'\1{#deudoresAdicionales} y {nombreCompleto}, identificada con DPI {dpiTexto}{/deudoresAdicionales}\2'
+            )
+        else:
+            loop_solicitud = (
+                r'\1{#deudoresAdicionales} y {nombreCompleto}, identificado con DPI {dpiTexto}{/deudoresAdicionales}\2'
+            )
+        solicitud_pattern = r'(\{dpiTexto\})(</w:t>.*?, atentamente)'
+        xml = re.sub(solicitud_pattern, loop_solicitud, xml, count=1, flags=re.DOTALL)
+        changes.append('Agregado loop deudoresAdicionales (nombreCompleto y dpiTexto)')
+        loop_added = True
+
+    # ==== REEMPLAZOS PARA PAGARE_UNICO_LIBRE_PROTESTO ====
+    if 'PAGARE UNICO LIBRE DE PROTESTO' in xml:
+        # "Yo:" → "Nosotros:/Nosotras:"
+        xml = xml.replace('>Yo:<', f'>{nosotros}:<')
+        xml = xml.replace('>Yo: <', f'>{nosotros}: <')
+        changes.append(f'"Yo:" → "{nosotros}:"')
+
+        # Pronombres singulares a plurales
+        xml = xml.replace('me identifico', 'nos identificamos')
+        xml = xml.replace('de mi domicilio', 'de nuestro domicilio')
+        xml = xml.replace('fuero de mi domicilio', 'fuero de nuestro domicilio')
+        xml = xml.replace('de mi persona', 'de nuestras personas')
+        xml = xml.replace('yo, el avalista', f'{nosotros.lower()}, los avalistas')
+        xml = xml.replace('yo asumo', f'{nosotros.lower()} asumimos')
+        changes.append('Pronombres singulares → plurales')
+
+        # Agregar loop después del primer "–RENAP-, República de Guatemala, Centroamérica;"
+        # Buscar: Centroamérica; con dirección
+        if is_female:
+            loop_pagare = (
+                r'\1{#deudoresAdicionales} Y {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+                r'{profesion}, {nacionalidad}, de este domicilio, nos identificamos con Documento Personal de Identificación, '
+                r'Código Único de Identificación {dpiTexto}, extendido por el Registro Nacional de las Personas '
+                r'–RENAP-, República de Guatemala, Centroamérica;{/deudoresAdicionales}\2'
+            )
+        else:
+            loop_pagare = (
+                r'\1{#deudoresAdicionales} Y {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+                r'{profesion}, {nacionalidad}, de este domicilio, nos identificamos con Documento Personal de Identificación, '
+                r'Código Único de Identificación {dpiTexto}, extendido por el Registro Nacional de las Personas '
+                r'–RENAP-, República de Guatemala, Centroamérica;{/deudoresAdicionales}\2'
+            )
+        # Capturar "Centroamérica;" y todo hasta "con dirección"
+        pagare_pattern = r'(–RENAP-, República de Guatemala, Centroamérica;)(.*?con dirección)'
+        xml = re.sub(pagare_pattern, loop_pagare, xml, count=1, flags=re.DOTALL)
+        changes.append('Agregado loop deudoresAdicionales completo')
+        loop_added = True
+
+    # ==== REEMPLAZOS SIMPLES PARA CONTRATO_PRIVADO_USO (solo texto plano) ====
+    if 'CONTRATO DE USO DE BIEN MUEBLE' in xml:
+        # Cambiar señor/señora a plural PRIMERO
+        if is_female:
+            xml = xml.replace('a la señora', 'a las señoras')
+            xml = xml.replace('la señora', 'las señoras')
+            xml = xml.replace('La señora', 'Las señoras')
+            xml = xml.replace('por la señora', 'por las señoras')
+            changes.append('"señora" → "señoras"')
+        else:
+            xml = xml.replace('al señor', 'a los señores')
+            xml = xml.replace('el señor', 'los señores')
+            xml = xml.replace('El señor', 'Los señores')
+            xml = xml.replace('por el señor', 'por los señores')
+            changes.append('"señor" → "señores"')
+
+        # Agregar loop de nombres después de cada {nombreCompleto}
+        loop_suffix = '{#deudoresAdicionales} y {nombreCompleto}{/deudoresAdicionales}'
+
+        # Pasada 1: {nombreCompleto} fragmentado en XML
+        # <w:t>{</w:t>...<w:t>nombreCompleto</w:t>...<w:t>}</w:t></w:r>
+        nombre_frag_pattern = r'(<w:t>\{</w:t>.*?<w:t>nombreCompleto</w:t>.*?<w:t>\}[^<]*</w:t></w:r>)'
+        xml = re.sub(nombre_frag_pattern, r'\1' + loop_suffix, xml, flags=re.DOTALL)
+
+        # Pasada 2: {nombreCompleto} completo en un solo tag (no fragmentado)
+        # Solo reemplazar si NO está ya seguido por el loop
+        nombre_completo_pattern = r'(\{nombreCompleto\})(?!\{#deudoresAdicionales\})'
+        xml = re.sub(nombre_completo_pattern, r'\1' + loop_suffix, xml)
+
+        changes.append('Agregado loop de nombres adicionales en cada {nombreCompleto}')
+
+    # ==== AGREGAR LOOP PARA DEUDORES ADICIONALES (GENÉRICO) ====
+    # Solo si no se agregó un loop específico antes
+    # Los campos del deudor adicional son:
+    # - nombreCompleto, dpi, dpiTexto, edadTexto, estadoCivil, profesion, nacionalidad, correoElectronico
+    # No todos los contratos usan todos los campos, docxtemplater ignorará los que no estén en la plantilla
     renap_pattern = '–RENAP-, República de Guatemala, Centroamérica'
 
-    if renap_pattern in xml:
+    if renap_pattern in xml and not loop_added:
         if is_female:
             deudor_adicional_block = (
-                '{#deudoresAdicionales} y {nombreCompleto}, identificada con Documento Personal de Identificación, '
+                '{#deudoresAdicionales} y {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+                '{profesion}, {nacionalidad}, identificada con Documento Personal de Identificación, '
                 'Código Único de Identificación {dpiTexto}, extendido por el Registro Nacional de las Personas '
                 '–RENAP-, República de Guatemala, Centroamérica{/deudoresAdicionales}'
             )
         else:
             deudor_adicional_block = (
-                '{#deudoresAdicionales} y {nombreCompleto}, identificado con Documento Personal de Identificación, '
+                '{#deudoresAdicionales} y {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+                '{profesion}, {nacionalidad}, identificado con Documento Personal de Identificación, '
                 'Código Único de Identificación {dpiTexto}, extendido por el Registro Nacional de las Personas '
                 '–RENAP-, República de Guatemala, Centroamérica{/deudoresAdicionales}'
             )
@@ -252,12 +524,21 @@ def main():
     print("  SCRIPT: Generar Templates Plurales desde Singulares")
     print("=" * 70)
 
+    # Filtrar por carpeta si se especifica como argumento
+    folder_filter = sys.argv[1] if len(sys.argv) > 1 else None
+    if folder_filter:
+        print(f"\n⚡ Procesando solo: {folder_filter}")
+
     total_processed = 0
     total_success = 0
 
     for template_config in TEMPLATES_TO_PROCESS:
         folder = template_config['folder']
         templates = template_config['templates']
+
+        # Saltar si no coincide con el filtro
+        if folder_filter and folder != folder_filter:
+            continue
 
         print(f"\n📁 Carpeta: {folder}")
 

@@ -105,6 +105,12 @@ TEMPLATES_TO_PROCESS = [
             ('reconocimiento_deuda_template-mujer.docx', 'reconocimiento_deuda_template-mujer-plural.docx', True),
         ]
     },
+    {
+        'folder': 'cobertura_inrexsa',
+        'templates': [
+            ('cobertura_inrexsa.docx', 'cobertura_inrexsa-plural.docx', False),
+        ]
+    },
 ]
 
 
@@ -339,6 +345,147 @@ def apply_plural_replacements(xml: str, is_female: bool = False) -> tuple[str, l
         pagare_pattern = r'(–RENAP-, República de Guatemala, Centroamérica;)(.*?con dirección)'
         xml = re.sub(pagare_pattern, loop_pagare, xml, count=1, flags=re.DOTALL)
         changes.append('Agregado loop deudoresAdicionales completo')
+        loop_added = True
+
+    # ==== REEMPLAZOS PARA COBERTURA_INREXSA ====
+    # Solo usa: nombreCompleto (no tiene género)
+    if 'COBERTURA' in xml and 'INREXSA' in xml:
+        # El XML fragmenta "Nombre: " y "{nombreCompleto}" en tags separados
+        # Buscar nombreCompleto} y agregar el loop después
+        cobertura_pattern = r'(nombreCompleto\})(.*?Fecha:)'
+        cobertura_repl = r'\1{#deudoresAdicionales}/{nombreCompleto}{/deudoresAdicionales}\2'
+        xml = re.sub(cobertura_pattern, cobertura_repl, xml, count=1, flags=re.DOTALL)
+        changes.append('Agregado loop deudoresAdicionales (solo nombreCompleto)')
+        loop_added = True
+
+    # ==== REEMPLAZOS PARA GARANTIA_MOBILIARIA ====
+    if 'GARANTÍA MOBILIARIA' in xml or 'GARANTIA MOBILIARIA' in xml:
+        # 1. Agregar "b.1)" antes del primer {nombreCompleto} del deudor
+        # El XML tiene: <w:t>{nombreCompleto},</w:t>
+        # Reemplazar la primera ocurrencia para agregar b.1)
+        xml = xml.replace('<w:t>{nombreCompleto},</w:t>', '<w:t>b.1) {nombreCompleto},</w:t>', 1)
+        changes.append('Agregado b.1) antes del primer deudor')
+
+        # 2. Agregar loop b.2) después de "Centroamérica. En el transcurso"
+        # El texto está junto en un tag: "Centroamérica. En el transcurso"
+        garantia_loop = (
+            '{#deudoresAdicionales} b.2) {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+            '{profesion}, {nacionalidad}, de este domicilio, me identifico con Documento Personal de Identificación, '
+            'Código Único de Identificación {dpiTexto} extendido por el Registro Nacional de las Personas '
+            '–RENAP-, República de Guatemala, Centroamérica{/deudoresAdicionales}'
+        )
+        xml = xml.replace(
+            '–RENAP-, República de Guatemala, Centroamérica. En el transcurso',
+            '–RENAP-, República de Guatemala, Centroamérica' + garantia_loop + '. En el transcurso'
+        )
+        changes.append('Agregado loop b.2) para deudores adicionales')
+
+        # 3. "el Deudor o Deudor Garante" → "los Deudores o Deudor Garante"
+        # Las comillas son Unicode: " (U+201C) y " (U+201D)
+        xml = xml.replace('el "Deudor o Deudor Garante"', 'los "Deudores o Deudor Garante"')
+        changes.append('"el Deudor" → "los Deudores"')
+
+        # 2. "se me podrá denominar" → "se nos podrán denominar"
+        xml = xml.replace('se me podrá denominar', 'se nos podrán denominar')
+        changes.append('"se me podrá" → "se nos podrán"')
+
+        # 3. "Continúa declarando el señor" → "Continúan declarando los señores"
+        # El XML tiene: "Continúa declarando el señor </w:t>...<w:t>{nombreCompleto}"
+        xml = xml.replace('Continúa declarando el señor ', 'Continúan declarando los señores ')
+        changes.append('"Continúa declarando el señor" → "Continúan declarando los señores"')
+
+        # 4. "Continúa declarando " → "Continúan declarando los señores "
+        xml = xml.replace('Continúa declarando ', 'Continúan declarando los señores ')
+
+        # Agregar loop después de {nombreCompleto} en contextos de "Continúan declarando"
+        # Variante 1: {nombreCompleto}:</w:t>
+        xml = xml.replace('{nombreCompleto}:</w:t>', '{nombreCompleto}{#deudoresAdicionales} y {nombreCompleto}{/deudoresAdicionales}:</w:t>')
+        # Variante 2: {nombreCompleto}</w:t>...<w:t> que (sin dos puntos)
+        xml = xml.replace(
+            'los señores {nombreCompleto}</w:t>',
+            'los señores {nombreCompleto}{#deudoresAdicionales} y {nombreCompleto}{/deudoresAdicionales}</w:t>'
+        )
+        changes.append('Agregado loop en "Continúan declarando"')
+
+        # 5. "Asimismo, declara {debtor}" → "Asimismo, declaran los señores {nombreCompleto}..."
+        xml = xml.replace('Asimismo, declara {debtor}',
+                         'Asimismo, declaran los señores {nombreCompleto}{#deudoresAdicionales} y {nombreCompleto}{/deudoresAdicionales}')
+        changes.append('"declara {debtor}" → "declaran los señores"')
+
+        # 6. Correos electrónicos: {correo} → {correo}{#deudoresAdicionales} {correoElectronico}{/deudoresAdicionales}
+        xml = xml.replace(
+            'correos electrónicos {correo}',
+            'correos electrónicos {correo}{#deudoresAdicionales} {correoElectronico}{/deudoresAdicionales}'
+        )
+        changes.append('Agregado loop de correos electrónicos')
+
+        # 7. "El señor JOSÉ" no cambiar (es el acreedor)
+        # Pero cambiar referencias al deudor como "el Deudor" si es necesario
+
+        loop_added = True
+
+    # ==== REEMPLAZOS PARA RECONOCIMIENTO_DEUDA ====
+    if 'RECONOCIMIENTO DE DEUDA' in xml:
+        # 1. "Yo, " → "Nosotros, " con loop de nombres
+        # El XML tiene: >Yo, </w:t>...<w:t>nombreCompleto</w:t>
+        xml = xml.replace('>Yo, </w:t>', f'>{nosotros}, </w:t>')
+        xml = xml.replace('> Yo,</w:t>', f'> {nosotros},</w:t>')
+        xml = xml.replace('>CUARTA: Yo,</w:t>', f'>CUARTA: {nosotros},</w:t>')
+        changes.append(f'"Yo" → "{nosotros}"')
+
+        # 2. Agregar loop después de cada {nombreCompleto} en el documento
+        # Primero buscar el patrón fragmentado y agregar loop
+        loop_nombres = '{#deudoresAdicionales} y {nombreCompleto}{/deudoresAdicionales}'
+
+        # Variante: nombreCompleto</w:t> seguido de </w:r> (XML fragmentado)
+        nombre_pattern = r'(<w:t>nombreCompleto</w:t></w:r>)(?!\{#deudoresAdicionales\})'
+        xml = re.sub(nombre_pattern, r'\1' + loop_nombres, xml)
+
+        # También reemplazar {nombreCompleto} completo (solo si no está ya con loop y no está dentro de un loop)
+        # Evitar los que están precedidos por "y " (que son los del loop)
+        xml = re.sub(r'(?<!y )(\{nombreCompleto\})(?!\{#deudoresAdicionales\})', r'\1' + loop_nombres, xml)
+        changes.append('Agregado loop de nombres adicionales')
+
+        # 3. "denominándome indistintamente" → "denominándonos indistintamente"
+        xml = xml.replace('denominándome indistintamente', 'denominándonos indistintamente')
+        changes.append('"denominándome" → "denominándonos"')
+
+        # 4. "el deudor o parte deudora" → "los deudores o parte deudora"
+        # Las comillas son Unicode: " (U+201C) y " (U+201D)
+        xml = xml.replace('"el deudor o parte deudora"', '"los deudores o parte deudora"')
+        changes.append('"el deudor" → "los deudores"')
+
+        # 5. Agregar loop después del primer bloque de deudor (después de Centroamérica, pero antes de denominándonos)
+        # Buscar: Centroamérica, </w:t>...<w:t>denominándonos
+        if is_female:
+            loop_deuda = (
+                '{#deudoresAdicionales} Y {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+                '{profesion}, {nacionalidad}, identificada con Documento Personal de Identificación, '
+                'Código Único de Identificación {dpiTexto}, extendido por el Registro Nacional de las Personas '
+                '–RENAP-, República de Guatemala, Centroamérica,{/deudoresAdicionales}'
+            )
+        else:
+            loop_deuda = (
+                '{#deudoresAdicionales} Y {nombreCompleto}, de {edadTexto} años de edad, {estadoCivil}, '
+                '{profesion}, {nacionalidad}, identificado con Documento Personal de Identificación, '
+                'Código Único de Identificación {dpiTexto}, extendido por el Registro Nacional de las Personas '
+                '–RENAP-, República de Guatemala, Centroamérica,{/deudoresAdicionales}'
+            )
+        # El texto tiene: Centroamérica, </w:t>...<w:t>denominándonos
+        # El espacio puede estar dentro del tag o fuera
+        deuda_pattern = r'(–RENAP-, República de Guatemala, Centroamérica,\s*)(</w:t>.*?<w:t[^>]*>denominándonos)'
+        xml = re.sub(deuda_pattern, r'\1' + loop_deuda + r' \2', xml, count=1, flags=re.DOTALL)
+        changes.append('Agregado loop completo de deudores adicionales')
+
+        # 6. "me reconozco liso y llano deudor" → "nos reconocemos lisos y llanos deudores"
+        xml = xml.replace('me reconozco liso y llano deudor', 'nos reconocemos lisos y llanos deudores')
+        changes.append('"me reconozco" → "nos reconocemos"')
+
+        # 7. "me comprometo a pagar" → "nos comprometemos a pagar"
+        xml = xml.replace('me comprometo a pagar', 'nos comprometemos a pagar')
+        xml = xml.replace('me reconozco deudor', 'nos reconocemos deudores')
+        changes.append('"me comprometo" → "nos comprometemos"')
+
         loop_added = True
 
     # ==== REEMPLAZOS SIMPLES PARA CONTRATO_PRIVADO_USO (solo texto plano) ====

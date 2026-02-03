@@ -50,7 +50,9 @@ export class ContractGeneratorService {
       {
         type: ContractType.USO_CARRO_USADO,
         templateFilename: "contrato_uso_carro_usado/contrato_uso_carro_usado.docx",
-        templateFilenameFemale: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer.docx", 
+        templateFilenameFemale: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer.docx",
+        templateFilenamePlural: "contrato_uso_carro_usado/contrato_uso_carro_usado-plural.docx",
+        templateFilenameFemalePlural: "contrato_uso_carro_usado/contrato_uso_carro_usado-mujer-plural.docx",
         description: "Contrato privado de uso de bien mueble (vehículo usado)",
         requiredFields: [
           "nombreCompleto",
@@ -62,6 +64,8 @@ export class ContractGeneratorService {
       type: ContractType.RECONOCIMIENTO_DEUDA,
       templateFilename: 'reconocimiento_deuda/reconocimiento_deuda_template.docx',
       templateFilenameFemale: 'reconocimiento_deuda/reconocimiento_deuda_template-mujer.docx',
+      templateFilenamePlural: 'reconocimiento_deuda/reconocimiento_deuda_template-plural.docx',
+      templateFilenameFemalePlural: 'reconocimiento_deuda/reconocimiento_deuda_template-mujer-plural.docx',
       description: 'Contrato de reconocimiento de deuda',
       requiredFields: ['nombreCompleto']
     });
@@ -71,6 +75,8 @@ export class ContractGeneratorService {
       type: ContractType.GARANTIA_MOBILIARIA,
       templateFilename: 'garantia_mobiliaria/garantia_mobiliaria.docx',
       templateFilenameFemale: 'garantia_mobiliaria/garantia_mobiliaria-mujer.docx',
+      templateFilenamePlural: 'garantia_mobiliaria/garantia_mobiliaria-plural.docx',
+      templateFilenameFemalePlural: 'garantia_mobiliaria/garantia_mobiliaria-mujer-plural.docx',
       description: 'Contrato de garantía mobiliaria con vehículo',
       requiredFields: [
         'nombreCompleto',
@@ -82,6 +88,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_EMISION_CHEQUES,
       templateFilename: 'carta_emision_cheques/carta_emision_cheques.docx',
       templateFilenameFemale: 'carta_emision_cheques/carta_emision_cheques-mujer.docx',
+      templateFilenamePlural: 'carta_emision_cheques/carta_emision_cheques-plural.docx',
+      templateFilenameFemalePlural: 'carta_emision_cheques/carta_emision_cheques-mujer-plural.docx',
       description: 'Carta de emisión de cheques / Solicitud de desembolso',
       requiredFields: [
         'nombreCompleto',
@@ -93,17 +101,21 @@ export class ContractGeneratorService {
       type: ContractType.DESCARGO_RESPONSABILIDADES,
       templateFilename: 'descargo_responsabilidades/descargo_responsabilidades.docx',
       templateFilenameFemale: 'descargo_responsabilidades/descargo_responsabilidades-mujer.docx',
+      templateFilenamePlural: 'descargo_responsabilidades/descargo_responsabilidades-plural.docx',
+      templateFilenameFemalePlural: 'descargo_responsabilidades/descargo_responsabilidades-mujer-plural.docx',
       description: 'Descargo de responsabilidades de vehículo',
       requiredFields: [
         'nombreCompleto',
       ]
     });
 
-    // Registrar cobertura INREXSA
+    // Registrar cobertura INREXSA (no tiene género, solo singular y plural)
     this.registerTemplate({
       type: ContractType.COBERTURA_INREXSA,
-      templateFilename: 'cobertura_inrexsa.docx',
-      templateFilenameFemale: 'cobertura_inrexsa.docx',
+      templateFilename: 'cobertura_inrexsa/cobertura_inrexsa.docx',
+      templateFilenameFemale: 'cobertura_inrexsa/cobertura_inrexsa.docx',
+      templateFilenamePlural: 'cobertura_inrexsa/cobertura_inrexsa-plural.docx',
+      templateFilenameFemalePlural: 'cobertura_inrexsa/cobertura_inrexsa-plural.docx',
       description: 'Carta de cobertura INREXSA',
       requiredFields: [
         'nombreCompleto',
@@ -115,6 +127,8 @@ export class ContractGeneratorService {
       type: ContractType.PAGARE_UNICO_LIBRE_PROTESTO,
       templateFilename: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto.docx',
       templateFilenameFemale: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-mujer.docx',
+      templateFilenamePlural: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-plural.docx',
+      templateFilenameFemalePlural: 'pagare_unico_libre_protesto/pagare_unico_libre_de_protesto-mujer-plural.docx',
       description: 'Pagaré único libre de protesto',
       requiredFields: [
         'nombreCompleto',
@@ -124,6 +138,8 @@ export class ContractGeneratorService {
     // Registrar declaración de vendedor
     this.registerTemplate({
       type: ContractType.DECLARACION_DE_VENDEDOR,
+      templateFilenamePlural: 'declaracion_vendedor/declaracion_de_vendedor.docx',
+      templateFilenameFemalePlural: 'declaracion_vendedor/declaracion_de_vendedor-mujer.docx',
       templateFilename: 'declaracion_vendedor/declaracion_de_vendedor.docx',
       templateFilenameFemale: 'declaracion_vendedor/declaracion_de_vendedor-mujer.docx',
       description: 'Declaración de vendedor de vehículo',
@@ -145,6 +161,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_ACEPTACION_INSTALACION_GPS,
       templateFilename: 'carta_aceptacion_gps/carta_aceptacion_gps.docx',
       templateFilenameFemale: 'carta_aceptacion_gps/carta_aceptacion_gps-mujer.docx',
+      templateFilenamePlural: 'carta_aceptacion_gps/carta_aceptacion_gps-plural.docx',
+      templateFilenameFemalePlural: 'carta_aceptacion_gps/carta_aceptacion_gps-mujer-plural.docx',
       description: 'Carta de aceptación para instalación de GPS en vehículo',
       requiredFields: []
     }); 
@@ -153,6 +171,8 @@ export class ContractGeneratorService {
       type: ContractType.CARTA_SOLICITUD_TRASPASO_VEHICULO,
       templateFilename: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo.docx',
       templateFilenameFemale: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-mujer.docx',
+      templateFilenamePlural: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-plural.docx',
+      templateFilenameFemalePlural: 'carta_solicitud_traspaso_vehiculo/carta_solicitud_traspaso_vehiculo-mujer-plural.docx',
       description: 'Carta de solicitud de traspaso de vehículo',
       requiredFields: []
     });
@@ -161,6 +181,8 @@ export class ContractGeneratorService {
       type: ContractType.CONTRATO_PRIVADO_USO,
       templateFilename: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo.docx',
       templateFilenameFemale: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-mujer.docx',
+      templateFilenamePlural: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-plural.docx',
+      templateFilenameFemalePlural: 'contrato_privado_uso_nuevo/contrato_privado_uso_nuevo-mujer-plural.docx',
       description: 'Contrato privado de uso de bien mueble',
       requiredFields: []
     });
@@ -169,6 +191,8 @@ export class ContractGeneratorService {
       type: ContractType.SOLICITUD_COMPRA_VEHICULO,
       templateFilename: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo.docx',
       templateFilenameFemale: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer.docx',
+      templateFilenamePlural: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-plural.docx',
+      templateFilenameFemalePlural: 'solicitud_compra_vehiculo/solicitud_compra_vehiculo-mujer-plural.docx',
       description: 'Carta de solicitud de compra de vehículo',
       requiredFields: []
     });

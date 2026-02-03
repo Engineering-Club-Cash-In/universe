@@ -138,6 +138,7 @@ export const leads = pgTable("leads", {
 	phone: text("phone"),
 	age: integer("age"),
 	dpi: text("dpi"),
+	nit: text("nit"), // Tax identification number
 	direccion: text("direccion"),
 	departamento: text("departamento"), // Departamento de Guatemala
 	municipio: text("municipio"), // Municipio

@@ -3232,6 +3232,7 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			label: "Pago impuesto de circulación",
 		},
 		{ value: "consulta_sat", label: "Usuario de SAT (Propietario)" },
+		{ value: "usuario_sat_cliente", label: "Usuario de SAT (Cliente)" },
 		{
 			value: "consulta_garantias_mobiliarias",
 			label: "Consulta garantías mobiliarias",

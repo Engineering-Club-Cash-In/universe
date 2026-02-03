@@ -4,6 +4,7 @@ import { adminImportRouter } from "./admin-import";
 import { adminMiniagentRouter } from "./admin-miniagent";
 import { auctionRouter } from "./auctionVehicles"; // Import the auction router
 import { authRouter } from "./auth";
+import { bankAnalysisRouter } from "./bank-analysis";
 import { checksRouter } from "./checks";
 import { cobrosRouter } from "./cobros";
 import { contractGenerationRouter } from "./contract-generation";
@@ -88,6 +89,9 @@ export const appRouter = {
 	updateClient: crmRouter.updateClient,
 	getDashboardStats: crmRouter.getDashboardStats,
 	scoreLead: crmRouter.scoreLead,
+
+	// Bank Analysis routes (Análisis de estados de cuenta)
+	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,
 
 	// Vehicles routes
 	getVehicles: vehiclesRouter.getAll,

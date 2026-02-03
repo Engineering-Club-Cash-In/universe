@@ -1220,33 +1220,7 @@ function RouteComponent() {
 		}
 	}, [isDetailsDialogOpen, navigate, search.opportunityId]);
 
-	if (isPending || userProfile.isPending) {
-		return <div>Cargando...</div>;
-	}
-
-	if (
-		!userProfile.data?.role ||
-		!PERMISSIONS.canAccessCRM(userProfile.data.role)
-	) {
-		return null;
-	}
-
-	const getStatusBadgeColor = (status: string) => {
-		switch (status) {
-			case "open":
-				return "bg-blue-100 text-blue-800";
-			case "won":
-				return "bg-green-100 text-green-800";
-			case "lost":
-				return "bg-red-100 text-red-800";
-			case "on_hold":
-				return "bg-yellow-100 text-yellow-800";
-			default:
-				return "bg-gray-100 text-gray-800";
-		}
-	};
-
-	// Group opportunities by stage
+	// Group opportunities by stage - must be before early returns to follow hooks rules
 	const opportunitiesByStage = useMemo(
 		() =>
 			salesStagesQuery.data?.map((stage) => {
@@ -1285,6 +1259,32 @@ function RouteComponent() {
 			debouncedBoardSearch,
 		],
 	);
+
+	if (isPending || userProfile.isPending) {
+		return <div>Cargando...</div>;
+	}
+
+	if (
+		!userProfile.data?.role ||
+		!PERMISSIONS.canAccessCRM(userProfile.data.role)
+	) {
+		return null;
+	}
+
+	const getStatusBadgeColor = (status: string) => {
+		switch (status) {
+			case "open":
+				return "bg-blue-100 text-blue-800";
+			case "won":
+				return "bg-green-100 text-green-800";
+			case "lost":
+				return "bg-red-100 text-red-800";
+			case "on_hold":
+				return "bg-yellow-100 text-yellow-800";
+			default:
+				return "bg-gray-100 text-gray-800";
+		}
+	};
 
 	// Calculate comprehensive opportunities metrics
 	const totalOpportunities = opportunitiesQuery.data?.length || 0;

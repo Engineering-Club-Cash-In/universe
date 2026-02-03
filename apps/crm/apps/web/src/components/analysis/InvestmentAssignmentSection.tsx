@@ -94,7 +94,13 @@ export function InvestmentAssignmentSection() {
 	// Estados para campos adicionales del detalle de crédito
 	const [editDireccion, setEditDireccion] = useState<string>("");
 	const [editNit, setEditNit] = useState<string>("");
-	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(15);
+	// Default: si estamos del 1-20 del mes es 15, si es 21-31 es último día (31)
+	const getDefaultDiaPago = () => {
+		const today = new Date();
+		const dayOfMonth = today.getDate();
+		return dayOfMonth <= 20 ? 15 : 31;
+	};
+	const [editDiaPagoMensual, setEditDiaPagoMensual] = useState<number>(getDefaultDiaPago);
 
 	// Función para calcular la categoría automáticamente basándose en creditType y vehicle.isNew
 	const getAutomaticCategoria = (
@@ -180,8 +186,8 @@ export function InvestmentAssignmentSection() {
 			setEditDireccion(selectedOpportunity.lead?.direccion || "");
 			// NIT: usar el de la oportunidad si existe
 			setEditNit(selectedOpportunity.nit || "");
-			// Día de pago: usar el de la oportunidad o 15 por default
-			setEditDiaPagoMensual(selectedOpportunity.diaPagoMensual || 15);
+			// Día de pago: usar el de la oportunidad o calcular default según fecha actual
+			setEditDiaPagoMensual(selectedOpportunity.diaPagoMensual || getDefaultDiaPago());
 			// Limpiar inversionistas seleccionados
 			setSelectedInversionistas([]);
 		}
@@ -337,13 +343,15 @@ export function InvestmentAssignmentSection() {
 		);
 	// Validar que los montos sean exactamente iguales (siempre, con existentes + nuevos)
 	const montosCoinciden = Math.abs(totalMontoGeneral - creditAmount) < 0.01;
+	const hasValidNit = editNit.trim().length > 0;
 	const canAssign =
 		selectedOpportunity &&
 		(hasExistingInvestors || hasNewInvestors) &&
 		selectedOpportunity.lead?.hasRequiredData &&
 		selectedOpportunity.vehicle?.hasRequiredData &&
 		selectedOpportunity.hasCreditData &&
-		montosCoinciden;
+		montosCoinciden &&
+		hasValidNit;
 
 	// Get disabled reason for tooltip
 	const getDisabledReasons = () => {
@@ -386,6 +394,10 @@ export function InvestmentAssignmentSection() {
 			reasons.push(
 				`La suma de aportes (${formatCurrency(totalMontoGeneral)}) debe ser exactamente igual al capital del crédito (${formatCurrency(creditAmount)})`,
 			);
+		}
+
+		if (!editNit.trim()) {
+			reasons.push("El NIT es obligatorio");
 		}
 
 		return reasons;
@@ -761,11 +773,12 @@ export function InvestmentAssignmentSection() {
 											</p>
 										</div>
 										<div>
-											<Label className="text-xs">NIT</Label>
+											<Label className="text-xs">NIT *</Label>
 											<Input
 												value={editNit}
 												onChange={(e) => setEditNit(e.target.value)}
 												placeholder="Ej: 12345678-9"
+												className={!editNit.trim() ? "border-orange-400" : ""}
 											/>
 										</div>
 									</div>
@@ -783,13 +796,8 @@ export function InvestmentAssignmentSection() {
 												<SelectValue placeholder="Seleccionar día" />
 											</SelectTrigger>
 											<SelectContent>
-												{Array.from({ length: 31 }, (_, i) => i + 1).map(
-													(day) => (
-														<SelectItem key={day} value={day.toString()}>
-															{day}
-														</SelectItem>
-													),
-												)}
+												<SelectItem value="15">15</SelectItem>
+												<SelectItem value="31">Último día del mes</SelectItem>
 											</SelectContent>
 										</Select>
 									</div>

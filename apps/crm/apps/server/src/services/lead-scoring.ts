@@ -5,18 +5,18 @@ import { leads, opportunities } from "../db/schema/crm";
 // ── Interfaces ──────────────────────────────────────────────────────────
 
 export interface ClientData {
-	age: number;
-	income: number;
-	loan_amount: number;
-	credit_card: number;
-	own_home: number;
-	own_vehicle: number;
-	work_time: number;
-	occupation: number;
-	marital_status: number;
-	dependents: number;
-	loan_purpose: number;
-	num_credits: number;
+	EDAD: number;
+	SUELDO: number;
+	PRECIO_PRODUCTO: number;
+	TARJETA_DE_CREDITO: number;
+	VIVIENDA_PROPIA: number;
+	VEHICULO_PROPIO: number;
+	ANTIGUEDAD: number;
+	OCUPACION: number;
+	ESTADO_CIVIL: number;
+	DEPENDIENTES_ECONOMICOS: number;
+	UTILIZACION_DINERO: number;
+	TIPO_DE_COMPRAS: number;
 }
 
 export interface CreditScoreResponse {
@@ -59,6 +59,11 @@ function encodeLoanPurpose(value: string | null | undefined): number {
 	return 1; // business
 }
 
+function encodeCreditType(value: string | null | undefined): number {
+	if (!value || value === "autocompra") return 0;
+	return 1; // sobre_vehiculo
+}
+
 function encodeAge(age: number | null | undefined): number | null {
 	if (age == null) return null;
 	if (age < 30) return 0;
@@ -87,6 +92,7 @@ export function mapLeadToScoringInput(
 		dependents: number | null;
 	},
 	loanPurpose?: string | null,
+	creditType?: string | null,
 ): MappingResult {
 	const missing: string[] = [];
 
@@ -117,18 +123,18 @@ export function mapLeadToScoringInput(
 
 	return {
 		data: {
-			age: encodedAge,
-			income: Number.parseFloat(lead.monthlyIncome!),
-			loan_amount: Number.parseFloat(lead.loanAmount!),
-			credit_card: encodeBool(lead.hasCreditCard),
-			own_home: encodeBool(lead.ownsHome),
-			own_vehicle: encodeBool(lead.ownsVehicle),
-			work_time: encodedWorkTime,
-			occupation: encodedOccupation,
-			marital_status: encodedMaritalStatus,
-			dependents: lead.dependents ?? 0,
-			loan_purpose: encodeLoanPurpose(loanPurpose),
-			num_credits: 0,
+			EDAD: encodedAge,
+			SUELDO: Number.parseFloat(lead.monthlyIncome!),
+			PRECIO_PRODUCTO: Number.parseFloat(lead.loanAmount!),
+			TARJETA_DE_CREDITO: encodeBool(lead.hasCreditCard),
+			VIVIENDA_PROPIA: encodeBool(lead.ownsHome),
+			VEHICULO_PROPIO: encodeBool(lead.ownsVehicle),
+			ANTIGUEDAD: encodedWorkTime,
+			OCUPACION: encodedOccupation,
+			ESTADO_CIVIL: encodedMaritalStatus,
+			DEPENDIENTES_ECONOMICOS: lead.dependents ?? 0,
+			UTILIZACION_DINERO: encodeLoanPurpose(loanPurpose),
+			TIPO_DE_COMPRAS: encodeCreditType(creditType),
 		},
 		missingFields: [],
 	};
@@ -142,6 +148,7 @@ const SCORING_API_URL =
 export async function predictCreditScore(
 	data: ClientData,
 ): Promise<CreditScoreResponse> {
+	console.log(JSON.stringify(data, null, 2));
 	const response = await fetch(SCORING_API_URL, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
@@ -160,70 +167,94 @@ export async function predictCreditScore(
 // ── Orchestrator ────────────────────────────────────────────────────────
 
 export async function scoreLead(leadId: string, opportunityId?: string) {
-	// 1. Fetch lead
-	const [lead] = await db
-		.select({
-			age: leads.age,
-			monthlyIncome: leads.monthlyIncome,
-			loanAmount: leads.loanAmount,
-			hasCreditCard: leads.hasCreditCard,
-			ownsHome: leads.ownsHome,
-			ownsVehicle: leads.ownsVehicle,
-			workTime: leads.workTime,
-			occupation: leads.occupation,
-			maritalStatus: leads.maritalStatus,
-			dependents: leads.dependents,
-		})
-		.from(leads)
-		.where(eq(leads.id, leadId))
-		.limit(1);
+	console.log("[scoreLead] Starting", { leadId, opportunityId });
 
-	if (!lead) {
-		throw new Error(`Lead ${leadId} not found`);
-	}
-
-	// 2. Get loanPurpose from opportunity if provided
-	let loanPurpose: string | null = null;
-	if (opportunityId) {
-		const [opp] = await db
-			.select({ loanPurpose: opportunities.loanPurpose })
-			.from(opportunities)
-			.where(eq(opportunities.id, opportunityId))
+	try {
+		// 1. Fetch lead
+		console.log("[scoreLead] Step 1: Fetching lead...");
+		const [lead] = await db
+			.select({
+				age: leads.age,
+				monthlyIncome: leads.monthlyIncome,
+				loanAmount: leads.loanAmount,
+				hasCreditCard: leads.hasCreditCard,
+				ownsHome: leads.ownsHome,
+				ownsVehicle: leads.ownsVehicle,
+				workTime: leads.workTime,
+				occupation: leads.occupation,
+				maritalStatus: leads.maritalStatus,
+				dependents: leads.dependents,
+			})
+			.from(leads)
+			.where(eq(leads.id, leadId))
 			.limit(1);
-		loanPurpose = opp?.loanPurpose ?? null;
-	}
 
-	// 3. Map to ML input
-	const { data, missingFields } = mapLeadToScoringInput(lead, loanPurpose);
+		console.log("[scoreLead] Lead fetched:", lead ? "found" : "not found");
 
-	if (!data) {
+		if (!lead) {
+			throw new Error(`Lead ${leadId} not found`);
+		}
+
+		// 2. Get loanPurpose and creditType from opportunity if provided
+		let loanPurpose: string | null = null;
+		let creditType: string | null = null;
+		if (opportunityId) {
+			console.log("[scoreLead] Step 2: Fetching opportunity...");
+			const [opp] = await db
+				.select({
+					loanPurpose: opportunities.loanPurpose,
+					creditType: opportunities.creditType,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, opportunityId))
+				.limit(1);
+			loanPurpose = opp?.loanPurpose ?? null;
+			creditType = opp?.creditType ?? null;
+			console.log("[scoreLead] loanPurpose:", loanPurpose, "creditType:", creditType);
+		}
+
+		// 3. Map to ML input
+		console.log("[scoreLead] Step 3: Mapping to ML input...");
+		const { data, missingFields } = mapLeadToScoringInput(lead, loanPurpose, creditType);
+		console.log("[scoreLead] Mapped data:", { hasData: !!data, missingFields });
+
+		if (!data) {
+			console.log("[scoreLead] No data, returning early with missingFields");
+			return {
+				score: null,
+				fit: null,
+				scoredAt: null,
+				missingFields,
+			};
+		}
+
+		// 4. Call ML model
+		console.log("[scoreLead] Step 4: Calling ML model with data:", data);
+		const result = await predictCreditScore(data);
+		console.log("[scoreLead] ML result:", result);
+
+		// 5. Update lead in DB
+		console.log("[scoreLead] Step 5: Updating lead in DB...");
+		const scoredAt = new Date();
+		await db
+			.update(leads)
+			.set({
+				score: String(result.probability),
+				fit: result.fit,
+				scoredAt,
+				updatedAt: scoredAt,
+			})
+			.where(eq(leads.id, leadId));
+
+		console.log("[scoreLead] Success!");
 		return {
-			score: null,
-			fit: null,
-			scoredAt: null,
-			missingFields,
-		};
-	}
-
-	// 4. Call ML model
-	const result = await predictCreditScore(data);
-
-	// 5. Update lead in DB
-	const scoredAt = new Date();
-	await db
-		.update(leads)
-		.set({
-			score: String(result.probability),
+			score: result.probability,
 			fit: result.fit,
 			scoredAt,
-			updatedAt: scoredAt,
-		})
-		.where(eq(leads.id, leadId));
-
-	return {
-		score: result.probability,
-		fit: result.fit,
-		scoredAt,
-		missingFields: [] as string[],
-	};
+			missingFields: [] as string[],
+		};
+	} catch (error) {
+		console.error("[scoreLead] ERROR:", error);
+		throw error;
+	}
 }

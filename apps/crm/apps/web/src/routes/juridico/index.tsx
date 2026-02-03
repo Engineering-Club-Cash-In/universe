@@ -358,7 +358,7 @@ function RouteComponent() {
 
 							{/* Barra de búsqueda */}
 							<div className="relative">
-								<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+								<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 								<Input
 									placeholder="Buscar por título, nombre o DPI..."
 									value={opportunitiesSearchQuery}
@@ -550,7 +550,7 @@ function RouteComponent() {
 
 							{/* Barra de búsqueda */}
 							<div className="relative">
-								<Search className="absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+								<Search className="-translate-y-1/2 absolute top-1/2 left-3 h-4 w-4 text-muted-foreground" />
 								<Input
 									placeholder="Buscar por nombre, DPI o email..."
 									value={searchQuery}

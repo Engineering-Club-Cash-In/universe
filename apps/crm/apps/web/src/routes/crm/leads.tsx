@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -2597,6 +2598,14 @@ function RouteComponent() {
 										</Button>
 									)}
 								</div>
+
+								{/* Análisis automático con IA */}
+								{selectedLead?.id && (
+									<BankStatementAnalysis
+										leadId={selectedLead.id}
+										onAnalysisComplete={() => creditAnalysisQuery.refetch()}
+									/>
+								)}
 
 								{isEditingCreditAnalysis ? (
 									<form

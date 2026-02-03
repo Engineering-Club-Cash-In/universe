@@ -77,6 +77,39 @@ import {
 } from "@/lib/vehicle-utils";
 import { client, orpc } from "@/utils/orpc";
 
+// Helper para renderizar el badge del estado del vehículo
+const renderVehicleStatusBadge = (status: string) => {
+	const statusConfig: Record<string, { label: string; className: string }> = {
+		pending: {
+			label: "Pendiente",
+			className: "border-yellow-300 bg-yellow-100 text-yellow-800",
+		},
+		available: {
+			label: "Disponible",
+			className: "border-green-300 bg-green-100 text-green-800",
+		},
+		sold: {
+			label: "Vendido",
+			className: "border-purple-300 bg-purple-100 text-purple-800",
+		},
+		maintenance: {
+			label: "Mantenimiento",
+			className: "border-orange-300 bg-orange-100 text-orange-800",
+		},
+		auction: {
+			label: "En Remate",
+			className: "border-red-300 bg-red-100 text-red-800",
+		},
+	};
+
+	const config = statusConfig[status] || statusConfig.pending;
+	return (
+		<Badge variant="outline" className={config.className}>
+			{config.label}
+		</Badge>
+	);
+};
+
 export const Route = createFileRoute("/vehicles/")({
 	component: VehiclesDashboard,
 	validateSearch: (search: Record<string, unknown>) => {
@@ -308,6 +341,7 @@ function VehiclesDashboard() {
 		transmission: "",
 		kmMileage: 0,
 		isNew: false,
+		status: "pending" as "pending" | "available" | "sold" | "maintenance" | "auction",
 		// Campos para contratos legales
 		seats: null as number | null,
 		doors: null as number | null,
@@ -334,6 +368,7 @@ function VehiclesDashboard() {
 					fuelType: data.fuelType || null,
 					transmission: data.transmission || null,
 					kmMileage: data.kmMileage,
+					status: data.status,
 					// Campos para contratos legales
 					seats: data.seats,
 					doors: data.doors,
@@ -565,12 +600,17 @@ function VehiclesDashboard() {
 														<TableCell>
 															<div className="flex flex-col gap-1">
 																{renderNewVehicleBadges(vehicle)}
-																{latestInspection
-																	? renderInspectionStatusBadge(
-																			latestInspection.status,
-																		)
-																	: !vehicle.isNew &&
-																		renderInspectionStatusBadge("pending")}
+																{renderVehicleStatusBadge(vehicle.status || "pending")}
+																{latestInspection && (
+																	<span className="text-muted-foreground text-xs">
+																		Inspección:{" "}
+																		{latestInspection.status === "approved"
+																			? "Aprobada"
+																			: latestInspection.status === "rejected"
+																				? "Rechazada"
+																				: "Pendiente"}
+																	</span>
+																)}
 																{(vehicle as any).hasPaymentAgreement && (
 																	<Badge
 																		variant="outline"
@@ -647,6 +687,7 @@ function VehiclesDashboard() {
 																					vehicle.transmission || "",
 																				kmMileage: vehicle.kmMileage || 0,
 																				isNew: vehicle.isNew || false,
+																				status: vehicle.status || "pending",
 																				// Campos para contratos legales
 																				seats: vehicle.seats ?? null,
 																				doors: vehicle.doors ?? null,
@@ -925,6 +966,7 @@ function VehiclesDashboard() {
 											transmission: selectedVehicle.transmission || "",
 											kmMileage: selectedVehicle.kmMileage || 0,
 											isNew: selectedVehicle.isNew || false,
+											status: selectedVehicle.status || "pending",
 											seats: selectedVehicle.seats ?? null,
 											doors: selectedVehicle.doors ?? null,
 											axles: selectedVehicle.axles ?? 2,
@@ -1806,6 +1848,59 @@ function VehiclesDashboard() {
 										placeholder="0"
 									/>
 								</div>
+							</div>
+						</div>
+
+						{/* Estado del Vehículo */}
+						<div className="space-y-4">
+							<h4 className="font-medium text-sm">Estado del Vehículo</h4>
+							<div className="space-y-2">
+								<Label htmlFor="edit-status">Estado *</Label>
+								<Select
+									value={editVehicleForm.status}
+									onValueChange={(value: "pending" | "available" | "sold" | "maintenance" | "auction") =>
+										setEditVehicleForm({
+											...editVehicleForm,
+											status: value,
+										})
+									}
+								>
+									<SelectTrigger>
+										<SelectValue placeholder="Seleccionar estado" />
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="pending">
+											<div className="flex flex-col">
+												<span className="font-medium">Pendiente</span>
+												<span className="text-muted-foreground text-xs">En espera o Próximo a la venta</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="available">
+											<div className="flex flex-col">
+												<span className="font-medium">Disponible</span>
+												<span className="text-muted-foreground text-xs">Listo para venta o financiamiento</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="sold">
+											<div className="flex flex-col">
+												<span className="font-medium">Vendido</span>
+												<span className="text-muted-foreground text-xs">Vehículo ya fue vendido/financiado</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="maintenance">
+											<div className="flex flex-col">
+												<span className="font-medium">En Mantenimiento</span>
+												<span className="text-muted-foreground text-xs">En reparación o servicio técnico</span>
+											</div>
+										</SelectItem>
+										<SelectItem value="auction">
+											<div className="flex flex-col">
+												<span className="font-medium">En Remate</span>
+												<span className="text-muted-foreground text-xs">Disponible para subasta/remate</span>
+											</div>
+										</SelectItem>
+									</SelectContent>
+								</Select>
 							</div>
 						</div>
 

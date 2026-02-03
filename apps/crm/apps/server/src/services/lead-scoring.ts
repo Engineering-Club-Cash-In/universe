@@ -5,18 +5,18 @@ import { leads, opportunities } from "../db/schema/crm";
 // ── Interfaces ──────────────────────────────────────────────────────────
 
 export interface ClientData {
-	age: number;
-	income: number;
-	loan_amount: number;
-	credit_card: number;
-	own_home: number;
-	own_vehicle: number;
-	work_time: number;
-	occupation: number;
-	marital_status: number;
-	dependents: number;
-	loan_purpose: number;
-	num_credits: number;
+	EDAD: number;
+	SUELDO: number;
+	PRECIO_PRODUCTO: number;
+	TARJETA_DE_CREDITO: number;
+	VIVIENDA_PROPIA: number;
+	VEHICULO_PROPIO: number;
+	ANTIGUEDAD: number;
+	OCUPACION: number;
+	ESTADO_CIVIL: number;
+	DEPENDIENTES_ECONOMICOS: number;
+	UTILIZACION_DINERO: number;
+	TIPO_DE_COMPRAS: number;
 }
 
 export interface CreditScoreResponse {
@@ -59,6 +59,11 @@ function encodeLoanPurpose(value: string | null | undefined): number {
 	return 1; // business
 }
 
+function encodeCreditType(value: string | null | undefined): number {
+	if (!value || value === "autocompra") return 0;
+	return 1; // sobre_vehiculo
+}
+
 function encodeAge(age: number | null | undefined): number | null {
 	if (age == null) return null;
 	if (age < 30) return 0;
@@ -87,6 +92,7 @@ export function mapLeadToScoringInput(
 		dependents: number | null;
 	},
 	loanPurpose?: string | null,
+	creditType?: string | null,
 ): MappingResult {
 	const missing: string[] = [];
 
@@ -117,18 +123,18 @@ export function mapLeadToScoringInput(
 
 	return {
 		data: {
-			age: encodedAge,
-			income: Number.parseFloat(lead.monthlyIncome!),
-			loan_amount: Number.parseFloat(lead.loanAmount!),
-			credit_card: encodeBool(lead.hasCreditCard),
-			own_home: encodeBool(lead.ownsHome),
-			own_vehicle: encodeBool(lead.ownsVehicle),
-			work_time: encodedWorkTime,
-			occupation: encodedOccupation,
-			marital_status: encodedMaritalStatus,
-			dependents: lead.dependents ?? 0,
-			loan_purpose: encodeLoanPurpose(loanPurpose),
-			num_credits: 0,
+			EDAD: encodedAge,
+			SUELDO: Number.parseFloat(lead.monthlyIncome!),
+			PRECIO_PRODUCTO: Number.parseFloat(lead.loanAmount!),
+			TARJETA_DE_CREDITO: encodeBool(lead.hasCreditCard),
+			VIVIENDA_PROPIA: encodeBool(lead.ownsHome),
+			VEHICULO_PROPIO: encodeBool(lead.ownsVehicle),
+			ANTIGUEDAD: encodedWorkTime,
+			OCUPACION: encodedOccupation,
+			ESTADO_CIVIL: encodedMaritalStatus,
+			DEPENDIENTES_ECONOMICOS: lead.dependents ?? 0,
+			UTILIZACION_DINERO: encodeLoanPurpose(loanPurpose),
+			TIPO_DE_COMPRAS: encodeCreditType(creditType),
 		},
 		missingFields: [],
 	};
@@ -182,19 +188,28 @@ export async function scoreLead(leadId: string, opportunityId?: string) {
 		throw new Error(`Lead ${leadId} not found`);
 	}
 
-	// 2. Get loanPurpose from opportunity if provided
+	// 2. Get loanPurpose and creditType from opportunity if provided
 	let loanPurpose: string | null = null;
+	let creditType: string | null = null;
 	if (opportunityId) {
 		const [opp] = await db
-			.select({ loanPurpose: opportunities.loanPurpose })
+			.select({
+				loanPurpose: opportunities.loanPurpose,
+				creditType: opportunities.creditType,
+			})
 			.from(opportunities)
 			.where(eq(opportunities.id, opportunityId))
 			.limit(1);
 		loanPurpose = opp?.loanPurpose ?? null;
+		creditType = opp?.creditType ?? null;
 	}
 
 	// 3. Map to ML input
-	const { data, missingFields } = mapLeadToScoringInput(lead, loanPurpose);
+	const { data, missingFields } = mapLeadToScoringInput(
+		lead,
+		loanPurpose,
+		creditType,
+	);
 
 	if (!data) {
 		return {

@@ -174,21 +174,87 @@ export async function createPublicLead(c: Context) {
 	try {
 		const body = await c.req.json();
 
-		// Validate required fields
-		if (
-			!body.firstName ||
-			!body.lastName ||
-			!body.email ||
-			!body.dpi ||
-			body.dpi.trim() === ""
-		) {
+		// Validate required fields (DPI es opcional)
+		if (!body.firstName || !body.lastName || !body.email) {
 			return c.json(
 				{
 					success: false,
-					error: "Faltan campos requeridos: Nombre, Apellido o Email o DPI",
+					error: "Faltan campos requeridos: Nombre, Apellido o Email",
 				},
 				400,
 			);
+		}
+
+		const hasDpi = body.dpi && body.dpi.trim() !== "";
+
+		// Si no tiene DPI, solo verificar por email y crear lead sin oportunidad
+		if (!hasDpi) {
+			// Verificar si ya existe un lead con el mismo email
+			const existingLeadByEmail = await db
+				.select()
+				.from(leads)
+				.where(eq(leads.email, body.email))
+				.limit(1);
+
+			if (existingLeadByEmail.length > 0) {
+				return c.json(
+					{
+						success: true,
+						data: existingLeadByEmail[0],
+						message: "Lead ya existe con el mismo email",
+					},
+					200,
+				);
+			}
+
+			// Obtener usuario de ventas con menos leads asignados
+			const salesUserForLead = await getSalesUserWithLeastLeads();
+
+			if (!salesUserForLead) {
+				return c.json(
+					{
+						success: false,
+						error: "No hay usuario de ventas disponible para asignar",
+					},
+					500,
+				);
+			}
+
+			// Crear el lead sin oportunidad (para importación masiva)
+			const [newLead] = await db
+				.insert(leads)
+				.values({
+					firstName: body.firstName,
+					lastName: body.lastName,
+					email: body.email,
+					phone: body.phone,
+					age: body.age,
+					dpi: null,
+					clientType: body.clientType || "individual",
+					maritalStatus: body.maritalStatus,
+					dependents: body.dependents ?? 0,
+					monthlyIncome: body.monthlyIncome?.toString(),
+					loanAmount: body.loanAmount?.toString(),
+					occupation: body.occupation,
+					workTime: body.workTime,
+					ownsHome: body.ownsHome ?? false,
+					ownsVehicle: body.ownsVehicle ?? false,
+					hasCreditCard: body.hasCreditCard ?? false,
+					jobTitle: body.jobTitle,
+					notes: body.notes,
+					source: body.source || "website",
+					status: "new",
+					assignedTo: salesUserForLead.id,
+					createdBy: salesUserForLead.id,
+					updatedAt: new Date(),
+				})
+				.returning();
+
+			return c.json({
+				success: true,
+				data: newLead,
+				message: "Lead creado sin DPI (importación)",
+			});
 		}
 
 		// Check if lead already exists with same email or DPI

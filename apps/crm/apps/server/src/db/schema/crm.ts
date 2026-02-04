@@ -210,6 +210,7 @@ export const coDebtors = pgTable("co_debtors", {
 	fullName: text("full_name").notNull(), // Nombre completo
 	dpi: text("dpi").notNull(), // DPI
 	age: integer("age"), // Edad
+	gender: text("gender"), // Género ('male' | 'female')
 	maritalStatus: maritalStatusEnum("marital_status"), // Estado civil
 	profession: text("profession"), // Profesión
 	nationality: text("nationality"), // Nacionalidad

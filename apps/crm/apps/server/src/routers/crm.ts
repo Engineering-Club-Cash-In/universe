@@ -4812,6 +4812,7 @@ export const crmRouter = {
 				fullName: z.string().min(1, "El nombre completo es requerido"),
 				dpi: z.string().min(1, "El DPI es requerido"),
 				age: z.number().int().positive().optional(),
+				gender: z.enum(["male", "female"]).optional(),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.optional(),
@@ -4844,6 +4845,7 @@ export const crmRouter = {
 					fullName: input.fullName,
 					dpi: input.dpi,
 					age: input.age,
+					gender: input.gender,
 					maritalStatus: input.maritalStatus,
 					profession: input.profession,
 					nationality: input.nationality,
@@ -4864,6 +4866,7 @@ export const crmRouter = {
 				fullName: z.string().min(1, "El nombre completo es requerido").optional(),
 				dpi: z.string().min(1, "El DPI es requerido").optional(),
 				age: z.number().int().positive().nullable().optional(),
+				gender: z.enum(["male", "female"]).nullable().optional(),
 				maritalStatus: z
 					.enum(["single", "married", "divorced", "widowed"])
 					.nullable()

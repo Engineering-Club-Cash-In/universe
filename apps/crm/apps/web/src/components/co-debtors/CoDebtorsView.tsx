@@ -68,11 +68,18 @@ const occupationLabels: Record<string, string> = {
 	employee: "Empleado",
 };
 
+// Labels para género
+const genderLabels: Record<string, string> = {
+	male: "Masculino",
+	female: "Femenino",
+};
+
 // Tipo para el formulario
 interface CoDebtorFormData {
 	fullName: string;
 	dpi: string;
 	age: string;
+	gender: "" | "male" | "female";
 	maritalStatus: "" | "single" | "married" | "divorced" | "widowed";
 	profession: string;
 	nationality: string;
@@ -86,6 +93,7 @@ const emptyFormData: CoDebtorFormData = {
 	fullName: "",
 	dpi: "",
 	age: "",
+	gender: "",
 	maritalStatus: "",
 	profession: "",
 	nationality: "",
@@ -270,6 +278,12 @@ function CoDebtorCard({
 					{coDebtor.age && (
 						<div>
 							<span className="text-muted-foreground">Edad:</span> {coDebtor.age} años
+						</div>
+					)}
+					{coDebtor.gender && (
+						<div>
+							<span className="text-muted-foreground">Género:</span>{" "}
+							{genderLabels[coDebtor.gender]}
 						</div>
 					)}
 					{coDebtor.maritalStatus && (
@@ -698,6 +712,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			fullName: formData.fullName,
 			dpi: formData.dpi,
 			age: formData.age ? Number.parseInt(formData.age, 10) : undefined,
+			gender: formData.gender || undefined,
 			maritalStatus: formData.maritalStatus || undefined,
 			profession: formData.profession || undefined,
 			nationality: formData.nationality || undefined,
@@ -719,6 +734,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			fullName: formData.fullName,
 			dpi: formData.dpi,
 			age: formData.age ? Number.parseInt(formData.age, 10) : null,
+			gender: formData.gender || null,
 			maritalStatus: formData.maritalStatus || null,
 			profession: formData.profession || null,
 			nationality: formData.nationality || null,
@@ -740,6 +756,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 			fullName: coDebtor.fullName,
 			dpi: coDebtor.dpi,
 			age: coDebtor.age?.toString() || "",
+			gender: (coDebtor.gender || "") as CoDebtorFormData["gender"],
 			maritalStatus: (coDebtor.maritalStatus ||
 				"") as CoDebtorFormData["maritalStatus"],
 			profession: coDebtor.profession || "",
@@ -806,6 +823,27 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 				</div>
 
 				<div className="space-y-2">
+					<Label htmlFor="gender">Género</Label>
+					<Select
+						value={formData.gender}
+						onValueChange={(value) =>
+							setFormData((prev) => ({
+								...prev,
+								gender: value as CoDebtorFormData["gender"],
+							}))
+						}
+					>
+						<SelectTrigger>
+							<SelectValue placeholder="Seleccionar" />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="male">Masculino</SelectItem>
+							<SelectItem value="female">Femenino</SelectItem>
+						</SelectContent>
+					</Select>
+				</div>
+
+				<div className="space-y-2">
 					<Label htmlFor="maritalStatus">Estado civil</Label>
 					<Select
 						value={formData.maritalStatus}
@@ -827,7 +865,10 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 						</SelectContent>
 					</Select>
 				</div>
+				
+			</div>
 
+			<div className="grid grid-cols-3 gap-4">
 				<div className="space-y-2">
 					<Label htmlFor="nationality">Nacionalidad</Label>
 					<Input
@@ -839,9 +880,7 @@ export function CoDebtorsView({ opportunityId }: CoDebtorsViewProps) {
 						placeholder="Ej: Guatemalteca"
 					/>
 				</div>
-			</div>
 
-			<div className="grid grid-cols-2 gap-4">
 				<div className="space-y-2">
 					<Label htmlFor="profession">Profesión</Label>
 					<Input

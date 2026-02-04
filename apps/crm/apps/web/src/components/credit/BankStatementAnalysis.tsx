@@ -47,7 +47,9 @@ export function BankStatementAnalysis({
 		queryFn: () => client.getCreditAnalysisByLeadId({ leadId }),
 	});
 
-	const hasSuccessfulAnalysis = existingAnalysis?.analyzedAt !== null;
+	// Verificar si hay un análisis exitoso (analyzedAt debe existir y no ser null)
+	const hasSuccessfulAnalysis =
+		existingAnalysis != null && existingAnalysis.analyzedAt != null;
 	const attemptCount = existingAnalysis?.attemptCount ?? 0;
 	const canAnalyze =
 		!hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;

@@ -7,38 +7,12 @@ import {
 	formatGuatemalaDate,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import type { client } from "@/utils/orpc";
 
-export interface OpportunityTableRow {
-	id: string;
-	title: string;
-	value: string | null;
-	status: string;
-	probability: number | null;
-	expectedCloseDate: Date | string | null;
-	createdAt: Date | string;
-	stage: {
-		id: string;
-		name: string;
-		closurePercentage: number;
-		color: string;
-	} | null;
-	lead: {
-		id: string;
-		firstName: string;
-		lastName: string;
-	} | null;
-	vehicle: {
-		id: string;
-		make: string;
-		model: string;
-		year: string;
-	} | null;
-	assignedUser: {
-		id: string;
-		name: string;
-	} | null;
-	analysisStatus?: string;
-}
+// Tipo inferido directamente del cliente ORPC - fuente única de verdad
+export type Opportunity = Awaited<
+	ReturnType<typeof client.getOpportunities>
+>[number];
 
 function getStatusBadgeColor(status: string): string {
 	switch (status) {
@@ -62,7 +36,7 @@ function getStageBadgeStyle(closurePercentage: number): string {
 	return "bg-gray-100 text-gray-800";
 }
 
-export const opportunitiesColumns: ColumnDef<OpportunityTableRow>[] = [
+export const opportunitiesColumns: ColumnDef<Opportunity>[] = [
 	{
 		accessorKey: "title",
 		header: ({ column }) => (

@@ -18,6 +18,8 @@ import {
 	FileText,
 	Filter,
 	History,
+	Kanban,
+	List,
 	Mail,
 	Plus,
 	RefreshCw,
@@ -36,6 +38,7 @@ import { z } from "zod";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
+import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -75,6 +78,10 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import {
+	type Opportunity,
+	opportunitiesColumns,
+} from "@/lib/opportunities/columns";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import {
 	getMissingFieldsForNewVehicle,
@@ -336,88 +343,8 @@ export const Route = createFileRoute("/crm/opportunities")({
 	}).parse,
 });
 
-export interface IOpportunity {
-	id: string;
-	title: string;
-	value: string | null;
-	tasaInteres: string | null;
-	numeroCuotas: number | null;
-	cuotaMensual: string | null;
-	royalti: string | null;
-	porcentajeRoyalti: string | null;
-	gps: string | null;
-	seguro: string | null;
-	membresiaPago: string | null;
-	nit: string | null;
-	// direccion: string | null;
-	inversionistas: string | null;
-	status: string;
-	source?:
-		| "website"
-		| "referral"
-		| "cold_call"
-		| "email"
-		| "social_media"
-		| "event"
-		| "other"
-		| null;
-	loanPurpose?: "personal" | "business" | null;
-	creditType?: "autocompra" | "sobre_vehiculo" | null;
-	creditDetailApproved?: boolean | null;
-	creditDetailApprovedBy?: string | null;
-	creditDetailApprovedAt?: Date | string | null;
-	stage: any;
-	vehicleId: string | null;
-	expectedCloseDate: Date | string | null;
-	probability: number | null;
-	notes: string | null;
-	createdAt: Date | string;
-	updatedAt: Date | string;
-	asesorId: number | null;
-	fechaInicio: Date | string | null;
-	diaPagoMensual: number | null;
-	categoria: any;
-	reserva: string | null;
-	rubros: string | null;
-	leadId: string | null;
-	company: any;
-	assignedUser: any;
-	lead?: {
-		id: string;
-		firstName: string;
-		middleName?: string | null;
-		lastName: string;
-		email?: string | null;
-		secondLastName?: string | null;
-		age?: number | null;
-		departamento?: string | null;
-		municipio?: string | null;
-		direccion?: string | null;
-		zona?: string | null;
-	} | null;
-	vehicle?: {
-		id: string;
-		make: string;
-		model: string;
-		year: string;
-		licensePlate: string | null;
-		color: string | null;
-		plate: string | null;
-		origin: string | null;
-		isNew: boolean;
-		fuelType: string | null;
-		transmission: string | null;
-		vinNumber: string | null;
-		vendor?: {
-			id: string;
-			name: string;
-			phone: string;
-			dpi: string;
-			vendorType: string;
-			companyName: string | null;
-		} | null;
-	} | null;
-}
+// IOpportunity es un alias de Opportunity para compatibilidad con código existente
+export type IOpportunity = Opportunity;
 
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
@@ -429,7 +356,7 @@ function RouteComponent() {
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
 	const [selectedOpportunity, setSelectedOpportunity] =
-		useState<IOpportunity | null>(null);
+		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
@@ -442,6 +369,16 @@ function RouteComponent() {
 	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
 	const [boardSearch, setBoardSearch] = useState("");
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
+	// View toggle: "kanban" or "table" - persist in localStorage
+	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
+		if (typeof window !== "undefined") {
+			const saved = localStorage.getItem("opportunities-view-mode");
+			return saved === "table" ? "table" : "kanban";
+		}
+		return "kanban";
+	});
+	// Filtro por etapa (stage ID) para vista tabla
+	const [stageIdFilter, setStageIdFilter] = useState<string>("all");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -465,6 +402,12 @@ function RouteComponent() {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [vehiclesSearch]);
+
+	// Handler para cambiar vista y persistir en localStorage
+	const handleViewModeChange = (mode: "kanban" | "table") => {
+		setViewMode(mode);
+		localStorage.setItem("opportunities-view-mode", mode);
+	};
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
@@ -525,7 +468,7 @@ function RouteComponent() {
 		});
 	};
 
-	const handleOpportunityClick = async (opportunity: any) => {
+	const handleOpportunityClick = async (opportunity: Opportunity) => {
 		setSelectedOpportunity(opportunity);
 		setIsDetailsDialogOpen(true);
 
@@ -1091,7 +1034,6 @@ function RouteComponent() {
 					(opp) => opp.id === variables.id,
 				);
 				if (updatedOpportunity) {
-					// @ts-expect-error
 					setSelectedOpportunity(updatedOpportunity);
 				}
 
@@ -1201,7 +1143,6 @@ function RouteComponent() {
 				(opp) => opp.id === search.opportunityId,
 			);
 			if (opportunity) {
-				// @ts-expect-error
 				setSelectedOpportunity(opportunity);
 				setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
@@ -1500,9 +1441,39 @@ function RouteComponent() {
 						onClick={() => setShowLostOpportunities(!showLostOpportunities)}
 						className="gap-2"
 					>
-						<span className="h-2 w-2 rounded-full bg-red-500" />
+						<span
+							className="h-2 w-2 rounded-full bg-red-500"
+							aria-hidden="true"
+						/>
 						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
 					</Button>
+					{/* View Toggle */}
+					<div
+						className="flex rounded-md border"
+						role="group"
+						aria-label="Cambiar vista"
+					>
+						<Button
+							variant={viewMode === "kanban" ? "default" : "ghost"}
+							size="sm"
+							onClick={() => handleViewModeChange("kanban")}
+							className="rounded-r-none"
+							aria-label="Vista Kanban"
+							aria-pressed={viewMode === "kanban"}
+						>
+							<Kanban className="h-4 w-4" aria-hidden="true" />
+						</Button>
+						<Button
+							variant={viewMode === "table" ? "default" : "ghost"}
+							size="sm"
+							onClick={() => handleViewModeChange("table")}
+							className="rounded-l-none border-l"
+							aria-label="Vista Tabla"
+							aria-pressed={viewMode === "table"}
+						>
+							<List className="h-4 w-4" aria-hidden="true" />
+						</Button>
+					</div>
 				</div>
 
 				<Dialog
@@ -2054,21 +2025,6 @@ function RouteComponent() {
 													<span className="font-medium">
 														{selectedOpportunity.assignedUser.name ||
 															"Usuario sin nombre"}
-													</span>
-												</div>
-											</div>
-										)}
-
-										{/* Source */}
-										{selectedOpportunity.source && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Fuente
-												</Label>
-												<div className="flex items-center gap-3">
-													<Target className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
-														{getSourceLabel(selectedOpportunity.source)}
 													</span>
 												</div>
 											</div>
@@ -2997,7 +2953,7 @@ function RouteComponent() {
 
 													if (!selectedOpportunity.vehicleId)
 														missingFields.push("vehículo");
-													if (!selectedOpportunity.leadId)
+													if (!selectedOpportunity.lead)
 														missingFields.push("lead/contacto");
 													if (!selectedOpportunity.value)
 														missingFields.push("valor del crédito");
@@ -3045,23 +3001,92 @@ function RouteComponent() {
 				</Dialog>
 			</div>
 
-			{/* Enhanced Opportunities Kanban View */}
-			<div className="flex items-start gap-6 overflow-x-auto pb-4">
-				{opportunitiesByStage.map(
-					({ stage, opportunities, totalValue, count }) => (
-						<DroppableStageColumn
-							key={stage.id}
-							stage={stage}
-							opportunities={opportunities}
-							totalValue={totalValue}
-							count={count}
-							getStatusBadgeColor={getStatusBadgeColor}
-							onDropOpportunity={handleDropOpportunity}
-							onOpportunityClick={handleOpportunityClick}
-						/>
-					),
-				)}
-			</div>
+			{/* Conditional View: Kanban or Table */}
+			{viewMode === "kanban" ? (
+				<div className="flex items-start gap-6 overflow-x-auto pb-4">
+					{opportunitiesByStage.map(
+						({ stage, opportunities, totalValue, count }) => (
+							<DroppableStageColumn
+								key={stage.id}
+								stage={stage}
+								opportunities={opportunities}
+								totalValue={totalValue}
+								count={count}
+								getStatusBadgeColor={getStatusBadgeColor}
+								onDropOpportunity={handleDropOpportunity}
+								onOpportunityClick={handleOpportunityClick}
+							/>
+						),
+					)}
+				</div>
+			) : (
+				<DataTable
+					columns={opportunitiesColumns}
+					data={
+						opportunitiesQuery.data?.filter(
+							(opp) =>
+								// Filtro por estado (del Select del toolbar)
+								(stageFilter === "all" || opp.status === stageFilter) &&
+								// Filtro por etapa (de los badges)
+								(stageIdFilter === "all" || opp.stage?.id === stageIdFilter) &&
+								// Filtro de perdidas
+								(showLostOpportunities || opp.status !== "lost") &&
+								// Filtro de búsqueda
+								(!debouncedBoardSearch.trim() ||
+									`${opp.lead?.firstName ?? ""} ${opp.lead?.lastName ?? ""}`
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									(opp.title ?? "")
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase())),
+						) ?? []
+					}
+					isLoading={opportunitiesQuery.isLoading}
+					searchPlaceholder="Buscar oportunidades..."
+					onRowClick={handleOpportunityClick}
+					filterContent={
+						<div className="flex flex-wrap items-center gap-2">
+							<span className="font-medium text-muted-foreground text-sm">
+								Filtrar por etapa:
+							</span>
+							<Badge
+								variant={stageIdFilter === "all" ? "default" : "outline"}
+								className="cursor-pointer"
+								onClick={() => setStageIdFilter("all")}
+							>
+								Todas
+							</Badge>
+							{salesStagesQuery.data?.map((stage) => {
+								const count =
+									opportunitiesQuery.data?.filter(
+										(opp) =>
+											opp.stage?.id === stage.id &&
+											(stageFilter === "all" || opp.status === stageFilter) &&
+											(showLostOpportunities || opp.status !== "lost"),
+									).length ?? 0;
+								const isActive = stageIdFilter === stage.id;
+								return (
+									<Badge
+										key={stage.id}
+										variant={isActive ? "default" : "outline"}
+										className="cursor-pointer tabular-nums transition-colors hover:bg-muted"
+										style={{
+											borderColor: isActive ? undefined : stage.color,
+											backgroundColor: isActive ? stage.color : undefined,
+											color: isActive ? "white" : undefined,
+										}}
+										onClick={() =>
+											setStageIdFilter(isActive ? "all" : stage.id)
+										}
+									>
+										{stage.closurePercentage}% ({count})
+									</Badge>
+								);
+							})}
+						</div>
+					}
+				/>
+			)}
 		</div>
 	);
 }

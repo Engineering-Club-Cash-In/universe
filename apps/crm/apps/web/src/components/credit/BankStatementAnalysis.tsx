@@ -24,12 +24,14 @@ import { client } from "@/utils/orpc";
 const MAX_AI_ATTEMPTS = 2;
 
 interface BankStatementAnalysisProps {
-	leadId: string;
+	leadId?: string;
+	coDebtorId?: string;
 	onAnalysisComplete?: () => void;
 }
 
 export function BankStatementAnalysis({
 	leadId,
+	coDebtorId,
 	onAnalysisComplete,
 }: BankStatementAnalysisProps) {
 	const [files, setFiles] = useState<File[]>([]);
@@ -41,10 +43,18 @@ export function BankStatementAnalysis({
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const queryClient = useQueryClient();
 
+	const queryKey = leadId
+		? ["creditAnalysis", "lead", leadId]
+		: ["creditAnalysis", "coDebtor", coDebtorId];
+
 	// Obtener estado del análisis desde el servidor
 	const { data: existingAnalysis, isLoading: isLoadingAnalysis } = useQuery({
-		queryKey: ["creditAnalysis", leadId],
-		queryFn: () => client.getCreditAnalysisByLeadId({ leadId }),
+		queryKey,
+		queryFn: () =>
+			client.getCreditAnalysisByLeadId(
+				leadId ? { leadId } : { coDebtorId: coDebtorId! },
+			),
+		enabled: !!(leadId || coDebtorId),
 	});
 
 	// Verificar si hay un análisis exitoso (analyzedAt debe existir y no ser null)
@@ -78,7 +88,7 @@ export function BankStatementAnalysis({
 			);
 
 			return client.analyzeBankStatements({
-				leadId,
+				...(leadId ? { leadId } : { coDebtorId: coDebtorId! }),
 				files: filePayloads,
 				annualRate: Number.parseFloat(annualRate),
 				termMonths: Number.parseInt(termMonths),
@@ -90,13 +100,13 @@ export function BankStatementAnalysis({
 			toast.success("Análisis completado exitosamente");
 			setFiles([]);
 			// Invalidar query para obtener estado actualizado del servidor
-			queryClient.invalidateQueries({ queryKey: ["creditAnalysis", leadId] });
+			queryClient.invalidateQueries({ queryKey });
 			onAnalysisComplete?.();
 		},
 		onError: (error) => {
 			toast.error(`Error al analizar: ${error.message}`);
 			// Invalidar query para obtener el contador actualizado
-			queryClient.invalidateQueries({ queryKey: ["creditAnalysis", leadId] });
+			queryClient.invalidateQueries({ queryKey });
 		},
 	});
 

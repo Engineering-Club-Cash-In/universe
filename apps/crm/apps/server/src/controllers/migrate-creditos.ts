@@ -10,6 +10,10 @@ import { leads, opportunities, salesStages } from "../db/schema/crm";
 import { vehicles } from "../db/schema/vehicles";
 import { carteraBackClient } from "../services/cartera-back-client";
 
+// Tipo para cliente de DB que puede ser el db normal o una transacción
+// Usamos Pick para seleccionar solo los métodos que necesitamos
+type DbClient = Pick<typeof db, "select" | "insert" | "update" | "delete">;
+
 // Tipo del crédito de entrada
 interface CreditoInput {
 	placa?: string | null;
@@ -214,16 +218,21 @@ function parseFecha(fechaStr: string | null | undefined): Date | null {
 
 /**
  * Procesa un crédito individual
+ * @param tx - Transacción opcional. Si se proporciona, usa la transacción; si no, usa db directamente.
  */
 async function procesarCredito(
 	credito: CreditoInput,
 	defaultUserId: string,
 	defaultStageId: string,
+	tx?: DbClient,
 ): Promise<{ success: boolean; error?: string; yaExiste?: boolean }> {
+	// Usar la transacción si se proporciona, sino usar db directamente
+	const dbClient = tx ?? db;
+
 	try {
 		// Verificar si ya existe
 		if (credito.numero_prestamo) {
-			const [existente] = await db
+			const [existente] = await dbClient
 				.select({ id: opportunities.id })
 				.from(opportunities)
 				.where(eq(opportunities.numeroSifco, credito.numero_prestamo))
@@ -242,7 +251,7 @@ async function procesarCredito(
 				: null;
 
 		// 1. Crear Lead
-		const [nuevoLead] = await db
+		const [nuevoLead] = await dbClient
 			.insert(leads)
 			.values({
 				firstName: nombreParseado.firstName,
@@ -278,34 +287,80 @@ async function procesarCredito(
 			}
 		}
 
-		const [nuevoVehiculo] = await db
-			.insert(vehicles)
-			.values({
-				make: credito.marca || "N/A",
-				model: credito.linea_estilo || "N/A",
-				year: vehicleYear,
-				color: "N/A",
-				vehicleType: credito.tipo || "N/A",
-				licensePlate: credito.placa || null,
-				motorNumber: credito.motor || null,
-				series: credito.chasis || null,
-				seats: vehicleSeats,
-				vehicleUse: credito.uso || null,
-				numeroPoliza: credito.no_poliza_vehiculo || null,
-				fechaInicioSeguro: parseFecha(credito.vigencia_inicial),
-				fechaVencimientoSeguro: parseFecha(credito.vigencia_final),
-				montoAsegurado: credito.suma_asegurada
-					? credito.suma_asegurada.toString()
-					: null,
-				status: "sold",
-			})
-			.returning({ id: vehicles.id });
+		// Verificar si ya existe un vehículo con la misma placa
+		let vehiculoId: string;
+
+		if (credito.placa) {
+			const [vehiculoExistente] = await dbClient
+				.select({ id: vehicles.id })
+				.from(vehicles)
+				.where(eq(vehicles.licensePlate, credito.placa))
+				.limit(1);
+
+			if (vehiculoExistente) {
+				// Reutilizar vehículo existente
+				vehiculoId = vehiculoExistente.id;
+				console.log(
+					`[Migrate] Vehículo con placa ${credito.placa} ya existe, reutilizando ID: ${vehiculoId}`,
+				);
+			} else {
+				// Crear nuevo vehículo
+				const [nuevoVehiculo] = await dbClient
+					.insert(vehicles)
+					.values({
+						make: credito.marca || "N/A",
+						model: credito.linea_estilo || "N/A",
+						year: vehicleYear,
+						color: "N/A",
+						vehicleType: credito.tipo || "N/A",
+						licensePlate: credito.placa,
+						motorNumber: credito.motor || null,
+						series: credito.chasis || null,
+						seats: vehicleSeats,
+						vehicleUse: credito.uso || null,
+						numeroPoliza: credito.no_poliza_vehiculo || null,
+						fechaInicioSeguro: parseFecha(credito.vigencia_inicial),
+						fechaVencimientoSeguro: parseFecha(credito.vigencia_final),
+						montoAsegurado: credito.suma_asegurada
+							? credito.suma_asegurada.toString()
+							: null,
+						status: "sold",
+					})
+					.returning({ id: vehicles.id });
+				vehiculoId = nuevoVehiculo.id;
+			}
+		} else {
+			// Sin placa, crear vehículo nuevo
+			const [nuevoVehiculo] = await dbClient
+				.insert(vehicles)
+				.values({
+					make: credito.marca || "N/A",
+					model: credito.linea_estilo || "N/A",
+					year: vehicleYear,
+					color: "N/A",
+					vehicleType: credito.tipo || "N/A",
+					licensePlate: null,
+					motorNumber: credito.motor || null,
+					series: credito.chasis || null,
+					seats: vehicleSeats,
+					vehicleUse: credito.uso || null,
+					numeroPoliza: credito.no_poliza_vehiculo || null,
+					fechaInicioSeguro: parseFecha(credito.vigencia_inicial),
+					fechaVencimientoSeguro: parseFecha(credito.vigencia_final),
+					montoAsegurado: credito.suma_asegurada
+						? credito.suma_asegurada.toString()
+						: null,
+					status: "sold",
+				})
+				.returning({ id: vehicles.id });
+			vehiculoId = nuevoVehiculo.id;
+		}
 
 		// 3. Crear Oportunidad
-		await db.insert(opportunities).values({
+		await dbClient.insert(opportunities).values({
 			title: `Crédito ${credito.numero_prestamo}`,
 			leadId: nuevoLead.id,
-			vehicleId: nuevoVehiculo.id,
+			vehicleId: vehiculoId,
 			creditType: convertirTipoPrestamo(credito.tipo_de_prestamo),
 			stageId: defaultStageId,
 			assignedTo: defaultUserId,
@@ -331,21 +386,15 @@ async function procesarCredito(
 
 /**
  * Función principal de migración
+ * SIEMPRE usa transacción - si algo falla, se hace rollback de todo
+ * @param creditos - Array de créditos a migrar
  */
 export async function migrarCreditos(
 	creditos: CreditoInput[],
 ): Promise<MigrationResult> {
-	console.log(`[Migrate] Iniciando migración de ${creditos.length} créditos`);
-
-	const resultado: MigrationResult = {
-		totalRecibidos: creditos.length,
-		totalProcesados: 0,
-		totalExitosos: 0,
-		totalFallidos: 0,
-		totalIgnorados: 0,
-		errores: [],
-		ignorados: [],
-	};
+	console.log(
+		`[Migrate] Iniciando migración de ${creditos.length} créditos (con transacción)`,
+	);
 
 	if (!Array.isArray(creditos) || creditos.length === 0) {
 		throw new Error("El array de créditos está vacío o no es válido");
@@ -371,60 +420,156 @@ export async function migrarCreditos(
 		);
 	}
 
-	// Procesar cada crédito
-	for (let i = 0; i < creditos.length; i++) {
-		const credito = creditos[i];
+	console.log("[Migrate] Ejecutando migración con transacción...");
 
-		// Ignorar si encontrado_en_cobros es false
-		if (credito.encontrado_en_cobros === false) {
-			resultado.totalIgnorados++;
-			resultado.ignorados.push({
-				index: i,
-				razon: "encontrado_en_cobros = false",
-			});
-			continue;
-		}
+	const resultado: MigrationResult = {
+		totalRecibidos: creditos.length,
+		totalProcesados: 0,
+		totalExitosos: 0,
+		totalFallidos: 0,
+		totalIgnorados: 0,
+		errores: [],
+		ignorados: [],
+	};
 
-		// Ignorar si no tiene numero_prestamo
-		if (!credito.numero_prestamo) {
-			resultado.totalIgnorados++;
-			resultado.ignorados.push({
-				index: i,
-				razon: "Sin número de préstamo",
-			});
-			continue;
-		}
+	try {
+		await db.transaction(async (tx) => {
+			// Procesar cada crédito dentro de la transacción
+			for (let i = 0; i < creditos.length; i++) {
+				const credito = creditos[i];
 
-		resultado.totalProcesados++;
-		const resultadoProceso = await procesarCredito(
-			credito,
-			defaultUser.id,
-			defaultStage.id,
+				// Ignorar si encontrado_en_cobros es false
+				if (credito.encontrado_en_cobros === false) {
+					resultado.totalIgnorados++;
+					resultado.ignorados.push({
+						index: i,
+						razon: "encontrado_en_cobros = false",
+					});
+					continue;
+				}
+
+				// Ignorar si no tiene numero_prestamo
+				if (!credito.numero_prestamo) {
+					resultado.totalIgnorados++;
+					resultado.ignorados.push({
+						index: i,
+						razon: "Sin número de préstamo",
+					});
+					continue;
+				}
+
+				resultado.totalProcesados++;
+
+				// Pasar la transacción a procesarCredito
+				const resultadoProceso = await procesarCredito(
+					credito,
+					defaultUser.id,
+					defaultStage.id,
+					tx,
+				);
+
+				if (resultadoProceso.success) {
+					resultado.totalExitosos++;
+				} else if (resultadoProceso.yaExiste) {
+					resultado.totalIgnorados++;
+					resultado.ignorados.push({
+						index: i,
+						razon: `numeroSifco ${credito.numero_prestamo} ya existe en BD`,
+					});
+				} else {
+					// Si hay cualquier error, hacer rollback inmediato
+					resultado.totalFallidos++;
+					resultado.errores.push({
+						index: i,
+						numeroPrestamo: credito.numero_prestamo,
+						error: resultadoProceso.error || "Error desconocido",
+					});
+
+					throw new Error(
+						`Error en crédito ${credito.numero_prestamo}: ${resultadoProceso.error}. Haciendo rollback de toda la migración.`,
+					);
+				}
+			}
+
+			console.log(
+				`[Migrate] Transacción completada exitosamente: ${resultado.totalExitosos} créditos migrados`,
+			);
+		});
+
+		console.log(
+			`[Migrate] Completado con transacción: ${resultado.totalExitosos} exitosos, ${resultado.totalFallidos} fallidos, ${resultado.totalIgnorados} ignorados`,
 		);
 
-		if (resultadoProceso.success) {
-			resultado.totalExitosos++;
-		} else if (resultadoProceso.yaExiste) {
-			resultado.totalIgnorados++;
-			resultado.ignorados.push({
-				index: i,
-				razon: `numeroSifco ${credito.numero_prestamo} ya existe en BD`,
-			});
-		} else {
-			resultado.totalFallidos++;
-			resultado.errores.push({
-				index: i,
-				numeroPrestamo: credito.numero_prestamo,
-				error: resultadoProceso.error || "Error desconocido",
-			});
-		}
+		return resultado;
+	} catch (error) {
+		const errorMessage =
+			error instanceof Error ? error.message : "Error desconocido";
+
+		console.error(`[Migrate] ROLLBACK ejecutado: ${errorMessage}`);
+
+		// Retornar resultado con información del rollback
+		return {
+			...resultado,
+			totalExitosos: 0, // Se hizo rollback, ninguno fue exitoso
+			errores: [
+				...resultado.errores,
+				{
+					index: -1,
+					numeroPrestamo: "ROLLBACK",
+					error: `Transacción cancelada: ${errorMessage}. Todos los cambios fueron revertidos.`,
+				},
+			],
+		};
 	}
+}
 
-	console.log(
-		`[Migrate] Completado: ${resultado.totalExitosos} exitosos, ${resultado.totalFallidos} fallidos, ${resultado.totalIgnorados} ignorados`,
-	);
+/**
+ * Resultado de la limpieza de migración
+ */
+interface CleanupResult {
+	opportunitiesDeleted: number;
+	vehiclesDeleted: number;
+	leadsDeleted: number;
+	message: string;
+}
 
-	return resultado;
+/**
+ * Elimina TODOS los datos migrados (leads, vehículos y oportunidades con status='migrate')
+ * CUIDADO: Esta operación es irreversible
+ */
+export async function limpiarMigracion(): Promise<CleanupResult> {
+	console.log("[Cleanup] Iniciando limpieza de datos migrados...");
+
+	// Usar transacción para asegurar que todo se elimine o nada
+	return await db.transaction(async (tx) => {
+		// 1. Eliminar oportunidades migradas (tienen FK a leads y vehicles)
+		const deletedOpportunities = await tx
+			.delete(opportunities)
+			.where(eq(opportunities.status, "migrate"))
+			.returning({ id: opportunities.id });
+
+		// 2. Eliminar vehículos migrados (color = 'N/A')
+		const deletedVehicles = await tx
+			.delete(vehicles)
+			.where(eq(vehicles.color, "N/A"))
+			.returning({ id: vehicles.id });
+
+		// 3. Eliminar leads migrados
+		const deletedLeads = await tx
+			.delete(leads)
+			.where(eq(leads.status, "migrate"))
+			.returning({ id: leads.id });
+
+		const result: CleanupResult = {
+			opportunitiesDeleted: deletedOpportunities.length,
+			vehiclesDeleted: deletedVehicles.length,
+			leadsDeleted: deletedLeads.length,
+			message: `Limpieza completada: ${deletedOpportunities.length} oportunidades, ${deletedVehicles.length} vehículos, ${deletedLeads.length} leads eliminados`,
+		};
+
+		console.log(`[Cleanup] ${result.message}`);
+		return result;
+	});
 }
 
 // Resultado de la actualización de values

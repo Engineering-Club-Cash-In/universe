@@ -11,9 +11,10 @@ export const s3 = new S3Client({
 });
 
 export async function uploadFileController({ request, set }: any) {
+  try {
   const form = await request.formData();
   const file = form.get("file");
-
+  console.log("Received file:", file);
   if (!file || !(file instanceof Blob)) {
     set.status = 400;
     return { error: "No file uploaded" };
@@ -40,5 +41,10 @@ export async function uploadFileController({ request, set }: any) {
   );
 
   const url = `${process.env.R2_ENDPOINT}/${process.env.R2_BUCKET}/${filename}`;
-  return { success: true, url, filename };
+  return { success: true, url, filename };}
+  catch (error) {
+    console.error("Error uploading file:", error);
+    set.status = 500;
+    return { error: "Error uploading file" };
+  }
 }

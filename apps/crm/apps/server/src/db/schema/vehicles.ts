@@ -32,6 +32,12 @@ export const inspectionStatusEnum = pgEnum("inspection_status", [
 	"auction", // vehículo enviado a remate
 ]);
 
+// Enum for 360 inspection items status
+export const inspection360StatusEnum = pgEnum("inspection_360_status", [
+	"ok",
+	"bad",
+]);
+
 // Vehicle owner type - determines document requirements
 export const vehicleOwnerTypeEnum = pgEnum("vehicle_owner_type", [
 	"individual", // Persona individual
@@ -276,7 +282,7 @@ export const vehicleInspection360Items = pgTable("vehicle_inspection_360_items",
 	area: text("area").notNull(), // "Motor y Transmisión", "Frenos"...
 	checkpoint: text("checkpoint").notNull(), // "Verificar fugas...", "Nivel de aceite..."
 
-	status: text("status").notNull(), // "ok", "bad"
+	status: inspection360StatusEnum("status").notNull(), // "ok", "bad"
 	comment: text("comment"), // Obligatorio si status="bad"
 
 	createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -372,6 +378,16 @@ export const vehicleDocumentsRelations = relations(
 	}),
 );
 
+export const vehicleInspection360ItemsRelations = relations(
+	vehicleInspection360Items,
+	({ one }) => ({
+		inspection: one(vehicleInspections, {
+			fields: [vehicleInspection360Items.inspectionId],
+			references: [vehicleInspections.id],
+		}),
+	}),
+);
+
 // Export types for TypeScript
 export type VehicleVendor = typeof vehicleVendors.$inferSelect;
 export type NewVehicleVendor = typeof vehicleVendors.$inferInsert;
@@ -389,6 +405,11 @@ export type InspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferSelect;
 export type NewInspectionChecklistItem =
 	typeof inspectionChecklistItems.$inferInsert;
+
+export type VehicleInspection360Item =
+	typeof vehicleInspection360Items.$inferSelect;
+export type NewVehicleInspection360Item =
+	typeof vehicleInspection360Items.$inferInsert;
 
 export type VehicleDocument = typeof vehicleDocuments.$inferSelect;
 export type NewVehicleDocument = typeof vehicleDocuments.$inferInsert;

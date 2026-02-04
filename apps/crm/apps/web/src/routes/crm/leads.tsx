@@ -2847,7 +2847,7 @@ function RouteComponent() {
 											</Button>
 										</div>
 									</form>
-								) : creditAnalysisQuery.data ? (
+								) : creditAnalysisQuery.data?.analyzedAt ? (
 									<>
 										{/* Income and Expenses Summary */}
 										<div className="grid grid-cols-2 gap-6">

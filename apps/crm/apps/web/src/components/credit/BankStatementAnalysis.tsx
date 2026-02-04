@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
 	ChevronDown,
 	ChevronUp,
@@ -21,6 +21,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { client } from "@/utils/orpc";
 
+const MAX_AI_ATTEMPTS = 2;
+
 interface BankStatementAnalysisProps {
 	leadId: string;
 	onAnalysisComplete?: () => void;
@@ -36,9 +38,19 @@ export function BankStatementAnalysis({
 	const [termMonths, setTermMonths] = useState("60");
 	const [maxDebtRatio, setMaxDebtRatio] = useState("0.2");
 	const [maxVariableDebtRatio, setMaxVariableDebtRatio] = useState("0.3");
-	const [attemptCount, setAttemptCount] = useState(0);
-	const [analysisSucceeded, setAnalysisSucceeded] = useState(false);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const queryClient = useQueryClient();
+
+	// Obtener estado del análisis desde el servidor
+	const { data: existingAnalysis, isLoading: isLoadingAnalysis } = useQuery({
+		queryKey: ["creditAnalysis", leadId],
+		queryFn: () => client.getCreditAnalysisByLeadId({ leadId }),
+	});
+
+	const hasSuccessfulAnalysis = existingAnalysis?.analyzedAt !== null;
+	const attemptCount = existingAnalysis?.attemptCount ?? 0;
+	const canAnalyze =
+		!hasSuccessfulAnalysis && attemptCount < MAX_AI_ATTEMPTS;
 
 	const analyzeMutation = useMutation({
 		mutationFn: async () => {
@@ -74,12 +86,15 @@ export function BankStatementAnalysis({
 		},
 		onSuccess: () => {
 			toast.success("Análisis completado exitosamente");
-			setAnalysisSucceeded(true);
 			setFiles([]);
+			// Invalidar query para obtener estado actualizado del servidor
+			queryClient.invalidateQueries({ queryKey: ["creditAnalysis", leadId] });
 			onAnalysisComplete?.();
 		},
 		onError: (error) => {
 			toast.error(`Error al analizar: ${error.message}`);
+			// Invalidar query para obtener el contador actualizado
+			queryClient.invalidateQueries({ queryKey: ["creditAnalysis", leadId] });
 		},
 	});
 
@@ -246,36 +261,39 @@ export function BankStatementAnalysis({
 					type="button"
 					size="sm"
 					className="w-full"
-					onClick={() => {
-						setAttemptCount((prev) => prev + 1);
-						analyzeMutation.mutate();
-					}}
+					onClick={() => analyzeMutation.mutate()}
 					disabled={
+						isLoadingAnalysis ||
 						files.length === 0 ||
 						analyzeMutation.isPending ||
-						analysisSucceeded ||
-						attemptCount >= 2
+						!canAnalyze
 					}
 				>
-					{analyzeMutation.isPending ? (
+					{isLoadingAnalysis ? (
+						<>
+							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
+							Cargando...
+						</>
+					) : analyzeMutation.isPending ? (
 						<>
 							<Loader2 className="mr-2 h-4 w-4 animate-spin" />
 							Analizando con IA...
 						</>
-					) : attemptCount > 0 && !analysisSucceeded ? (
-						"Reintentar Análisis"
+					) : attemptCount > 0 && !hasSuccessfulAnalysis ? (
+						`Reintentar Análisis (${attemptCount}/${MAX_AI_ATTEMPTS})`
 					) : (
 						"Analizar"
 					)}
 				</Button>
-				{analysisSucceeded && (
+				{hasSuccessfulAnalysis && (
 					<p className="text-center text-xs text-green-600">
 						Análisis completado exitosamente.
 					</p>
 				)}
-				{attemptCount >= 2 && !analysisSucceeded && (
+				{!hasSuccessfulAnalysis && attemptCount >= MAX_AI_ATTEMPTS && (
 					<p className="text-center text-xs text-muted-foreground">
-						Se alcanzó el límite de intentos. Contacte al administrador.
+						Se alcanzó el límite de {MAX_AI_ATTEMPTS} intentos. Contacte al
+						administrador.
 					</p>
 				)}
 			</CardContent>

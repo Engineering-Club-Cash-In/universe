@@ -811,6 +811,63 @@ export function CreditDetailView({
 
 				{/* TAB 1: Detalle Vehículo (Interno) */}
 				<TabsContent value="interno" className="mt-4 space-y-4">
+					{/* Términos del Crédito - Resumen de cotización */}
+					{quotation && (
+						<Card>
+							<CardHeader className="pb-3">
+								<div className="flex items-center gap-2">
+									<Calculator className="h-5 w-5 text-muted-foreground" />
+									<CardTitle className="text-lg">Términos del Crédito</CardTitle>
+									{quotation.status === "accepted" && (
+										<Badge
+											variant="outline"
+											className="ml-2 border-green-500 bg-green-50 text-green-700"
+										>
+											Cotización Aceptada
+										</Badge>
+									)}
+								</div>
+							</CardHeader>
+							<CardContent>
+								<div className="grid grid-cols-4 gap-6">
+									<div>
+										<p className="text-muted-foreground text-sm">
+											Valor del Vehículo
+										</p>
+										<p className="mt-1 font-semibold text-lg">
+											{formatCurrency(quotation.vehicleValue)}
+										</p>
+									</div>
+									<div>
+										<p className="text-muted-foreground text-sm">
+											Monto Asegurado
+										</p>
+										<p className="mt-1 font-semibold text-lg">
+											{formatCurrency(quotation.insuredAmount)}
+										</p>
+									</div>
+									<div>
+										<p className="text-muted-foreground text-sm">Enganche</p>
+										<p className="mt-1 font-semibold text-lg">
+											{formatCurrency(quotation.downPayment)}{" "}
+											<span className="font-normal text-muted-foreground text-sm">
+												({formatPercent(quotation.downPaymentPercentage)})
+											</span>
+										</p>
+									</div>
+									<div>
+										<p className="text-muted-foreground text-sm">
+											Total Financiado
+										</p>
+										<p className="mt-1 font-semibold text-lg">
+											{formatCurrency(quotation.totalFinanced)}
+										</p>
+									</div>
+								</div>
+							</CardContent>
+						</Card>
+					)}
+
 					<Card>
 						<CardHeader className="pb-3">
 							<div className="flex items-center justify-between">

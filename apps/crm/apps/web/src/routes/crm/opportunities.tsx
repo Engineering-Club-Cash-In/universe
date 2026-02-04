@@ -18,6 +18,8 @@ import {
 	FileText,
 	Filter,
 	History,
+	Kanban,
+	List,
 	Mail,
 	Plus,
 	RefreshCw,
@@ -34,6 +36,7 @@ import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
+import { DataTable } from "@/components/data-table";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +76,7 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
+import { opportunitiesColumns } from "@/lib/opportunities/columns";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import {
 	getMissingFieldsForNewVehicle,
@@ -440,6 +444,16 @@ function RouteComponent() {
 	const [showLostOpportunities, setShowLostOpportunities] = useState(false);
 	const [boardSearch, setBoardSearch] = useState("");
 	const debouncedBoardSearch = useDeferredValue(boardSearch);
+	// View toggle: "kanban" or "table" - persist in localStorage
+	const [viewMode, setViewMode] = useState<"kanban" | "table">(() => {
+		if (typeof window !== "undefined") {
+			const saved = localStorage.getItem("opportunities-view-mode");
+			return saved === "table" ? "table" : "kanban";
+		}
+		return "kanban";
+	});
+	// Filtro por etapa (stage ID) para vista tabla
+	const [stageIdFilter, setStageIdFilter] = useState<string>("all");
 	const processedCompanyIdRef = useRef<string | null>(null);
 	const processedOpportunityIdRef = useRef<string | null>(null);
 	const prevOpenRef = useRef(isCreateDialogOpen);
@@ -463,6 +477,12 @@ function RouteComponent() {
 		}, 300);
 		return () => clearTimeout(timer);
 	}, [vehiclesSearch]);
+
+	// Handler para cambiar vista y persistir en localStorage
+	const handleViewModeChange = (mode: "kanban" | "table") => {
+		setViewMode(mode);
+		localStorage.setItem("opportunities-view-mode", mode);
+	};
 
 	const handleDropOpportunity = (opportunityId: string, newStageId: string) => {
 		// Find the opportunity and the target stage
@@ -1498,9 +1518,39 @@ function RouteComponent() {
 						onClick={() => setShowLostOpportunities(!showLostOpportunities)}
 						className="gap-2"
 					>
-						<span className="h-2 w-2 rounded-full bg-red-500" />
+						<span
+							className="h-2 w-2 rounded-full bg-red-500"
+							aria-hidden="true"
+						/>
 						{showLostOpportunities ? "Ocultando perdidas" : "Mostrar perdidas"}
 					</Button>
+					{/* View Toggle */}
+					<div
+						className="flex rounded-md border"
+						role="group"
+						aria-label="Cambiar vista"
+					>
+						<Button
+							variant={viewMode === "kanban" ? "default" : "ghost"}
+							size="sm"
+							onClick={() => handleViewModeChange("kanban")}
+							className="rounded-r-none"
+							aria-label="Vista Kanban"
+							aria-pressed={viewMode === "kanban"}
+						>
+							<Kanban className="h-4 w-4" aria-hidden="true" />
+						</Button>
+						<Button
+							variant={viewMode === "table" ? "default" : "ghost"}
+							size="sm"
+							onClick={() => handleViewModeChange("table")}
+							className="rounded-l-none border-l"
+							aria-label="Vista Tabla"
+							aria-pressed={viewMode === "table"}
+						>
+							<List className="h-4 w-4" aria-hidden="true" />
+						</Button>
+					</div>
 				</div>
 
 				<Dialog
@@ -3030,23 +3080,92 @@ function RouteComponent() {
 				</Dialog>
 			</div>
 
-			{/* Enhanced Opportunities Kanban View */}
-			<div className="flex items-start gap-6 overflow-x-auto pb-4">
-				{opportunitiesByStage.map(
-					({ stage, opportunities, totalValue, count }) => (
-						<DroppableStageColumn
-							key={stage.id}
-							stage={stage}
-							opportunities={opportunities}
-							totalValue={totalValue}
-							count={count}
-							getStatusBadgeColor={getStatusBadgeColor}
-							onDropOpportunity={handleDropOpportunity}
-							onOpportunityClick={handleOpportunityClick}
-						/>
-					),
-				)}
-			</div>
+			{/* Conditional View: Kanban or Table */}
+			{viewMode === "kanban" ? (
+				<div className="flex items-start gap-6 overflow-x-auto pb-4">
+					{opportunitiesByStage.map(
+						({ stage, opportunities, totalValue, count }) => (
+							<DroppableStageColumn
+								key={stage.id}
+								stage={stage}
+								opportunities={opportunities}
+								totalValue={totalValue}
+								count={count}
+								getStatusBadgeColor={getStatusBadgeColor}
+								onDropOpportunity={handleDropOpportunity}
+								onOpportunityClick={handleOpportunityClick}
+							/>
+						),
+					)}
+				</div>
+			) : (
+				<DataTable
+					columns={opportunitiesColumns}
+					data={
+						opportunitiesQuery.data?.filter(
+							(opp) =>
+								// Filtro por estado (del Select del toolbar)
+								(stageFilter === "all" || opp.status === stageFilter) &&
+								// Filtro por etapa (de los badges)
+								(stageIdFilter === "all" || opp.stage?.id === stageIdFilter) &&
+								// Filtro de perdidas
+								(showLostOpportunities || opp.status !== "lost") &&
+								// Filtro de búsqueda
+								(!debouncedBoardSearch.trim() ||
+									`${opp.lead?.firstName ?? ""} ${opp.lead?.lastName ?? ""}`
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase()) ||
+									(opp.title ?? "")
+										.toLowerCase()
+										.includes(debouncedBoardSearch.trim().toLowerCase())),
+						) ?? []
+					}
+					isLoading={opportunitiesQuery.isLoading}
+					searchPlaceholder="Buscar oportunidades..."
+					onRowClick={handleOpportunityClick}
+					filterContent={
+						<div className="flex flex-wrap items-center gap-2">
+							<span className="font-medium text-muted-foreground text-sm">
+								Filtrar por etapa:
+							</span>
+							<Badge
+								variant={stageIdFilter === "all" ? "default" : "outline"}
+								className="cursor-pointer"
+								onClick={() => setStageIdFilter("all")}
+							>
+								Todas
+							</Badge>
+							{salesStagesQuery.data?.map((stage) => {
+								const count =
+									opportunitiesQuery.data?.filter(
+										(opp) =>
+											opp.stage?.id === stage.id &&
+											(stageFilter === "all" || opp.status === stageFilter) &&
+											(showLostOpportunities || opp.status !== "lost"),
+									).length ?? 0;
+								const isActive = stageIdFilter === stage.id;
+								return (
+									<Badge
+										key={stage.id}
+										variant={isActive ? "default" : "outline"}
+										className="cursor-pointer tabular-nums transition-colors hover:bg-muted"
+										style={{
+											borderColor: isActive ? undefined : stage.color,
+											backgroundColor: isActive ? stage.color : undefined,
+											color: isActive ? "white" : undefined,
+										}}
+										onClick={() =>
+											setStageIdFilter(isActive ? "all" : stage.id)
+										}
+									>
+										{stage.closurePercentage}% ({count})
+									</Badge>
+								);
+							})}
+						</div>
+					}
+				/>
+			)}
 		</div>
 	);
 }

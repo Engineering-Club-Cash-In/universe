@@ -33,6 +33,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
+import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -1891,9 +1892,10 @@ function RouteComponent() {
 									}
 								}}
 							>
-								<TabsList className="grid w-full grid-cols-4">
+								<TabsList className="grid w-full grid-cols-5">
 									<TabsTrigger value="details">Detalles</TabsTrigger>
 									<TabsTrigger value="documents">Documentos</TabsTrigger>
+									<TabsTrigger value="coDebtors">Co-firmantes</TabsTrigger>
 									<TabsTrigger value="credit">Credito</TabsTrigger>
 									<TabsTrigger value="history">Historial</TabsTrigger>
 								</TabsList>
@@ -2456,6 +2458,13 @@ function RouteComponent() {
 
 								<TabsContent value="documents" className="mt-6 space-y-4">
 									<DocumentsManager opportunityId={selectedOpportunity.id} />
+								</TabsContent>
+
+								<TabsContent value="coDebtors" className="mt-6 space-y-4">
+									<CoDebtorsView
+										opportunityId={selectedOpportunity.id}
+										opportunity={selectedOpportunity}
+									/>
 								</TabsContent>
 
 								<TabsContent value="credit" className="mt-6 space-y-4">

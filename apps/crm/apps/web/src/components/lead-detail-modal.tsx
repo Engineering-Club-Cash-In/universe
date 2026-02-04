@@ -36,6 +36,7 @@ export type LeadForModal = {
 	email: string | null;
 	phone?: string | null;
 	dpi?: string | null;
+	nit?: string | null;
 	age?: number | null;
 	clientType?: string | null;
 	maritalStatus?: string | null;
@@ -166,6 +167,7 @@ export function LeadDetailModal({
 				email: fullLead.email,
 				phone: fullLead.phone,
 				dpi: fullLead.dpi,
+				nit: fullLead.nit,
 				age: fullLead.age,
 				clientType: fullLead.clientType,
 				maritalStatus: fullLead.maritalStatus,
@@ -260,6 +262,14 @@ export function LeadDetailModal({
 									</Label>
 									<p className="text-sm">
 										{displayLead.dpi || "No especificado"}
+									</p>
+								</div>
+								<div>
+									<Label className="font-medium text-muted-foreground text-sm">
+										NIT
+									</Label>
+									<p className="text-sm">
+										{displayLead.nit || "No especificado"}
 									</p>
 								</div>
 								<div>

@@ -304,6 +304,7 @@ export const crmRouter = {
 					phone: leads.phone,
 					age: leads.age,
 					dpi: leads.dpi,
+					nit: leads.nit,
 					clientType: leads.clientType,
 					maritalStatus: leads.maritalStatus,
 					birthDate: leads.birthDate,
@@ -370,6 +371,7 @@ export const crmRouter = {
 					email: leads.email,
 					phone: leads.phone,
 					dpi: leads.dpi,
+					nit: leads.nit,
 					status: leads.status,
 					source: leads.source,
 					assignedTo: leads.assignedTo,
@@ -462,6 +464,7 @@ export const crmRouter = {
 				phone: z.string().min(1, "Phone is required"),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				nit: z.string().optional(),
 				direccion: z.string().optional(),
 				departamento: z.string().optional(),
 				municipio: z.string().optional(),
@@ -535,6 +538,7 @@ export const crmRouter = {
 				phone: z.string().optional(),
 				age: z.number().int().positive().optional(),
 				dpi: z.string().optional(),
+				nit: z.string().optional(),
 				direccion: z.string().optional(),
 				departamento: z.string().optional(),
 				municipio: z.string().optional(),
@@ -618,6 +622,14 @@ export const crmRouter = {
 				throw new Error(
 					"Lead not found or you don't have permission to update it",
 				);
+			}
+
+			// Sync NIT to associated opportunities
+			if (updateData.nit !== undefined) {
+				await db
+					.update(opportunities)
+					.set({ nit: updateData.nit || null, updatedAt: new Date() })
+					.where(eq(opportunities.leadId, id));
 			}
 
 			return updatedLead[0];
@@ -971,6 +983,7 @@ export const crmRouter = {
 			// If a lead is provided, get the company and source from the lead
 			let companyId = input.companyId;
 			let source = input.source;
+			let leadNit: string | null = null;
 			if (input.leadId) {
 				const lead = await db
 					.select()
@@ -985,6 +998,10 @@ export const crmRouter = {
 					if (!source && lead[0].source) {
 						source = lead[0].source;
 					}
+					// Copy NIT from lead to opportunity
+					if (lead[0].nit) {
+						leadNit = lead[0].nit;
+					}
 				}
 			}
 
@@ -994,6 +1011,7 @@ export const crmRouter = {
 					...input,
 					companyId,
 					source,
+					nit: leadNit,
 					assignedTo,
 					expectedCloseDate: input.expectedCloseDate
 						? new Date(input.expectedCloseDate)
@@ -1486,6 +1504,7 @@ export const crmRouter = {
 						lastName: leads.lastName,
 						secondLastName: leads.secondLastName,
 						dpi: leads.dpi,
+						nit: leads.nit,
 						email: leads.email,
 						phone: leads.phone,
 						age: leads.age,
@@ -2321,6 +2340,7 @@ export const crmRouter = {
 					email: leads.email,
 					phone: leads.phone,
 					dpi: leads.dpi,
+					nit: leads.nit,
 					age: leads.age,
 					clientType: leads.clientType,
 					maritalStatus: leads.maritalStatus,
@@ -2506,7 +2526,10 @@ export const crmRouter = {
 			.leftJoin(leads, eq(opportunities.leadId, leads.id))
 			.where(
 				context.userRole !== "admin" && context.userRole !== "sales_supervisor"
-					? and(closedOpportunityCondition, eq(leads.assignedTo, context.userId))
+					? and(
+							closedOpportunityCondition,
+							eq(leads.assignedTo, context.userId),
+						)
 					: closedOpportunityCondition,
 			);
 

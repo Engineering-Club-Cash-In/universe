@@ -22,6 +22,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
+import { BankStatementAnalysis } from "@/components/credit/BankStatementAnalysis";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -285,6 +286,7 @@ function RouteComponent() {
 			phone: "",
 			age: "",
 			dpi: "",
+			nit: "",
 			direccion: "",
 			departamento: "",
 			municipio: "",
@@ -363,6 +365,7 @@ function RouteComponent() {
 				occupation: value.occupation || undefined,
 				workTime: value.workTime || undefined,
 				dpi: value.dpi || undefined,
+				nit: value.nit || undefined,
 				middleName: value.middleName || undefined,
 				secondLastName: value.secondLastName || undefined,
 				direccion: value.direccion || undefined,
@@ -670,6 +673,7 @@ function RouteComponent() {
 				editingLead.age ? String(editingLead.age) : "",
 			);
 			createLeadForm.setFieldValue("dpi", editingLead.dpi || "");
+			createLeadForm.setFieldValue("nit", (editingLead as any).nit || "");
 			createLeadForm.setFieldValue(
 				"clientType",
 				(editingLead as any).clientType || "individual",
@@ -1319,6 +1323,27 @@ function RouteComponent() {
 																	field.handleChange(e.target.value)
 																}
 																placeholder="0000 00000 0000"
+															/>
+														</div>
+													)}
+												</createLeadForm.Field>
+											</div>
+										</div>
+										<div className="grid grid-cols-2 gap-4">
+											<div>
+												<createLeadForm.Field name="nit">
+													{(field) => (
+														<div className="space-y-2">
+															<Label htmlFor={field.name}>NIT</Label>
+															<Input
+																id={field.name}
+																name={field.name}
+																value={field.state.value}
+																onBlur={field.handleBlur}
+																onChange={(e) =>
+																	field.handleChange(e.target.value)
+																}
+																placeholder="0000000-0"
 															/>
 														</div>
 													)}
@@ -2573,6 +2598,14 @@ function RouteComponent() {
 										</Button>
 									)}
 								</div>
+
+								{/* Análisis automático con IA */}
+								{selectedLead?.id && (
+									<BankStatementAnalysis
+										leadId={selectedLead.id}
+										onAnalysisComplete={() => creditAnalysisQuery.refetch()}
+									/>
+								)}
 
 								{isEditingCreditAnalysis ? (
 									<form

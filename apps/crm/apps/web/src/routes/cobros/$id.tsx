@@ -921,7 +921,9 @@ function RouteComponent() {
 							</div>
 							{caso.creditType && (
 								<div>
-									<p className="text-muted-foreground text-sm">Tipo de Crédito</p>
+									<p className="text-muted-foreground text-sm">
+										Tipo de Crédito
+									</p>
 									<p className="font-medium">
 										{caso.creditType === "autocompra"
 											? "Autocompra"
@@ -1018,7 +1020,8 @@ function RouteComponent() {
 											<div>
 												<p className="text-muted-foreground">Monto Asegurado</p>
 												<p className="font-medium">
-													Q{Number(caso.vehiculoMontoAsegurado).toLocaleString()}
+													Q
+													{Number(caso.vehiculoMontoAsegurado).toLocaleString()}
 												</p>
 											</div>
 										)}

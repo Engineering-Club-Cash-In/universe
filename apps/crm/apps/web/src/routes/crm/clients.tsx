@@ -1129,7 +1129,8 @@ function RouteComponent() {
 																? {
 																		id: opp.stage.id,
 																		name: opp.stage.name,
-																		closurePercentage: opp.stage.closurePercentage,
+																		closurePercentage:
+																			opp.stage.closurePercentage,
 																		color: opp.stage.color || "#888",
 																	}
 																: null,

@@ -89,7 +89,9 @@ export function RegenerateContractsModal({
 				<div className="space-y-4 py-4">
 					{/* Selector de fecha */}
 					<div className="space-y-2">
-						<label className="font-medium text-sm">Nueva fecha del contrato</label>
+						<label className="font-medium text-sm">
+							Nueva fecha del contrato
+						</label>
 						<Popover>
 							<PopoverTrigger asChild>
 								<Button
@@ -146,7 +148,9 @@ export function RegenerateContractsModal({
 									<Checkbox
 										id={contract.contractType}
 										checked={selectedTypes.includes(contract.contractType)}
-										onCheckedChange={() => handleToggleType(contract.contractType)}
+										onCheckedChange={() =>
+											handleToggleType(contract.contractType)
+										}
 									/>
 									<label
 										htmlFor={contract.contractType}

@@ -111,7 +111,6 @@ export function getMissingFields(
 	const missing: string[] = [];
 
 	if (!vehicle.vinNumber) missing.push("VIN");
-	if (!vehicle.licensePlate) missing.push("Placa");
 	if (!vehicle.origin) missing.push("Origen");
 	if (!vehicle.fuelType) missing.push("Tipo de combustible");
 	if (!vehicle.transmission) missing.push("Transmisión");

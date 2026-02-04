@@ -11,13 +11,13 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { useState } from "react";
+import { logo } from "@/assets";
 import Header from "@/components/header";
 import Loader from "@/components/loader";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { link, type orpc } from "@/utils/orpc";
 import type { appRouter } from "../../../server/src/routers";
-import { logo } from "@/assets";
 import "../index.css";
 
 export interface RouterAppContext {
@@ -34,7 +34,8 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 			},
 			{
 				name: "description",
-				content: "CRM para la gestión de clientes, vehículos y ventas de Club Cash in.",
+				content:
+					"CRM para la gestión de clientes, vehículos y ventas de Club Cash in.",
 			},
 		],
 		links: [

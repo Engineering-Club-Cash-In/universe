@@ -4,11 +4,8 @@ import {
 	AlertCircle,
 	ArrowLeft,
 	CheckCircle,
-	ChevronLeft,
-	ChevronRight,
 	FileText,
 	Loader2,
-	Receipt,
 	XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -216,19 +213,6 @@ function OpportunityDocumentsPage() {
 		},
 		enabled: !!opportunityId,
 	});
-
-	// Obtener cotizaciones de la oportunidad
-	const quotationsQuery = useQuery({
-		...orpc.listQuotationsByOpportunity.queryOptions({
-			input: { opportunityId },
-		}),
-		enabled: !!opportunityId,
-	});
-
-	// Obtener la cotización aceptada o la más reciente
-	const activeQuotation =
-		quotationsQuery.data?.find((q) => q.status === "accepted") ??
-		quotationsQuery.data?.[0];
 
 	const canApprove =
 		(validation.data?.canApprove ?? false) &&
@@ -509,107 +493,6 @@ function OpportunityDocumentsPage() {
 					</div>
 				</CardContent>
 			</Card>
-
-			{/* Términos del Crédito - Cotización */}
-			{activeQuotation && (
-				<Card>
-					<CardHeader className="pb-3">
-						<div className="flex items-center gap-2">
-							<Receipt className="h-5 w-5 text-muted-foreground" />
-							<CardTitle className="text-lg">Términos del Crédito</CardTitle>
-							{activeQuotation.status === "accepted" && (
-								<Badge variant="default" className="ml-2">
-									Aceptada
-								</Badge>
-							)}
-						</div>
-					</CardHeader>
-					<CardContent>
-						<div className="flex items-center gap-2">
-							<Button
-								variant="ghost"
-								size="icon"
-								className="h-8 w-8 shrink-0"
-								disabled
-							>
-								<ChevronLeft className="h-4 w-4" />
-							</Button>
-							<div className="grid flex-1 grid-cols-4 gap-6">
-								<div>
-									<p className="text-muted-foreground text-sm">
-										Valor del Vehículo
-									</p>
-									<p className="mt-1 font-semibold text-lg">
-										Q{" "}
-										{Number(activeQuotation.vehicleValue).toLocaleString(
-											"es-GT",
-											{
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											},
-										)}
-									</p>
-								</div>
-								<div>
-									<p className="text-muted-foreground text-sm">
-										Monto Asegurado
-									</p>
-									<p className="mt-1 font-semibold text-lg">
-										Q{" "}
-										{Number(activeQuotation.insuredAmount).toLocaleString(
-											"es-GT",
-											{
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											},
-										)}
-									</p>
-								</div>
-								<div>
-									<p className="text-muted-foreground text-sm">Enganche</p>
-									<p className="mt-1 font-semibold text-lg">
-										Q{" "}
-										{Number(activeQuotation.downPayment).toLocaleString(
-											"es-GT",
-											{
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											},
-										)}{" "}
-										<span className="font-normal text-muted-foreground text-sm">
-											({Number(activeQuotation.downPaymentPercentage).toFixed(2)}
-											%)
-										</span>
-									</p>
-								</div>
-								<div>
-									<p className="text-muted-foreground text-sm">
-										Total Financiado
-									</p>
-									<p className="mt-1 font-semibold text-lg">
-										Q{" "}
-										{Number(activeQuotation.totalFinanced).toLocaleString(
-											"es-GT",
-											{
-												minimumFractionDigits: 2,
-												maximumFractionDigits: 2,
-											},
-										)}
-									</p>
-								</div>
-							</div>
-							<Button
-								variant="ghost"
-								size="icon"
-								className="h-8 w-8 shrink-0"
-								disabled
-							>
-								<ChevronRight className="h-4 w-4" />
-							</Button>
-						</div>
-					</CardContent>
-				</Card>
-			)}
 
 			{/* Checklist */}
 			<AnalysisChecklistView

@@ -1304,9 +1304,9 @@ export async function liquidarCuotasPorCredito(
         .update(creditos_inversionistas)
         .set({
           monto_aportado: capitalTotal.toFixed(2),
-          porcentaje_cash_in: porcentajeCashIn.toFixed(2),
+          porcentaje_cash_in: porcentajeCashIn.toString(),
           porcentaje_participacion_inversionista:
-            porcentajeInversionista.toFixed(2),
+            porcentajeInversionista.toString(),
           cuota_inversionista: nuevaCuotaInversionista.toString(),
           monto_inversionista: nuevoMontoInversionista,
           monto_cash_in: nuevoMontoCashIn,

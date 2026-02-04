@@ -10,7 +10,7 @@ import { z } from "zod";
 import { promises as fs } from "fs";
 import { mapPagosPorCreditos } from "../migration/migration";
 import { authMiddleware } from "./midleware";
-import { exportPagosConInversionistasExcel, exportPagosToExcel } from "../controllers/reports";
+import { exportPagosConInversionistasExcel, exportPagosAdvisorExcel, exportPagosToExcel } from "../controllers/reports";
 import { actualizarCuentaPago, aplicarPagoAlCredito, insertPayment } from "../controllers/registerPayment";
 import { eq } from "drizzle-orm";
 import { db } from "../database";
@@ -189,6 +189,26 @@ export const paymentRouter = new Elysia()
           validationStatus
         } = query;
 
+        // ✅ Si viene reportAdvisor=true, generamos el reporte Excel de asesores (sin inversionistas)
+        if (query.reportAdvisor === true) {
+          const result = await exportPagosAdvisorExcel({
+            page,
+            pageSize,
+            numeroCredito,
+            dia,
+            mes,
+            anio,
+            inversionistaId,
+            usuarioNombre,
+            validationStatus,
+          });
+          set.status = 200;
+          return {
+            message: "📊 Reporte Excel de asesores generado correctamente",
+            ...result,
+          };
+        }
+
         // ✅ Si viene excel=true, generamos el reporte Excel
         if (excel === true) {
           const result = await exportPagosConInversionistasExcel({
@@ -248,6 +268,7 @@ export const paymentRouter = new Elysia()
         anio: t.Optional(t.Integer({ minimum: 2000, maximum: 2100 })),
         inversionistaId: t.Optional(t.Integer({ minimum: 1 })),
         excel: t.Optional(t.Boolean({ default: false })),
+        reportAdvisor: t.Optional(t.Boolean({ default: false })),
         usuarioNombre: t.Optional(t.String()),
         validationStatus: t.Optional(t.String()),
       }),

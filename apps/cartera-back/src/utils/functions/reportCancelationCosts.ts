@@ -49,10 +49,15 @@ function setThinBottomBorder(row: ExcelJS.Row) {
   });
 }
 
+function gtq(v: string | number | null | undefined): string {
+  const n = toNum(v);
+  return "Q" + n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 /**
  * Build "DETALLE DE COSTOS - PRÉSTAMO" (peach theme).
- * Columns:
- *  No. | Mes | Seguro | GPS | Otros | Capital pendiente de pago | Total a cancelar
+ * Unified table: Capital row + Garantía mobiliaria row + cuotas + TOTALES
+ * Columns: No. | Mes | Seguro | GPS | Otros | Total a cancelar
  */
 export async function buildCostDetailWorkbookPeach(
   data: GetCreditDTO,
@@ -67,8 +72,7 @@ export async function buildCostDetailWorkbookPeach(
     views: [{ state: "frozen", ySplit: 11 }],
   });
 
-  // ✅ Column widths - REMOVIMOS columna de capital
-  // No., Mes, Seguro, GPS, Otros, Total a cancelar
+  // Column widths: No., Mes, Seguro, GPS, Otros, Total a cancelar
   [7, 12, 14, 12, 14, 18].forEach((w, i) => (ws.getColumn(i + 1).width = w));
 
   // Optional logo
@@ -78,23 +82,21 @@ export async function buildCostDetailWorkbookPeach(
   }
 
   // Titles
-  ws.mergeCells("C1:F1"); // ✅ Ajustado a 6 columnas
+  ws.mergeCells("C1:F1");
   ws.getCell("C1").value = "DETALLE DE COSTOS";
   ws.getCell("C1").font = { bold: true, size: 18, color: { argb: PEACH.title } };
   ws.getCell("C1").alignment = { vertical: "middle" };
 
-  ws.mergeCells("C2:F2"); // ✅ Ajustado a 6 columnas
+  ws.mergeCells("C2:F2");
   ws.getCell("C2").value = "PRÉSTAMO";
   ws.getCell("C2").font = { bold: true, size: 14, color: { argb: PEACH.title } };
   ws.getCell("C2").alignment = { vertical: "middle" };
 
-  // Left card: client/credit info
+  // Left card: only Cliente, Préstamo No., Moneda
   const info: [string, string][] = [
     ["Cliente", data.header.usuario],
     ["Préstamo No.", data.header.numero_credito_sifco],
     ["Moneda", data.header.moneda],
-    ["Tipo de crédito", data.header.tipo_credito],
-    ["DATOS DEL VEHÍCULO", ""],
   ];
 
   let r = 4;
@@ -107,110 +109,97 @@ export async function buildCostDetailWorkbookPeach(
     r++;
   }
 
-  // ✅ Right card: Capital + Total a pagar + Con extras
-  const saldoBase = toNum(data.header.saldo_total);
-  const extrasTotal = toNum(data.header.extras_total);
-  
-  // Calcular total de costos de la tabla
-  let totalCostos = 0;
-  for (const it of data.cuotas_atrasadas.items) {
-    const seguro = toNum((it as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
-    const gps = toNum((it as any).gps ?? (data as any).header?.gps ?? 0);
-    const otros = toNum(it.otros ?? 0);
-    totalCostos += seguro + gps + otros;
+  // Closure data for garantía mobiliaria
+  const closureData = data.closure;
+  let garantiaMobiliaria = 0;
+  if (closureData?.kind === "CANCELACION") {
+    garantiaMobiliaria = toNum(closureData.garantia_mobiliaria);
   }
-  
-  const totalAPagar = saldoBase + totalCostos;
-  const totalConExtras = totalAPagar + extrasTotal;
 
-  ws.mergeCells("F4:F4");
-  ws.getCell("F4").value = "Capital";
+  const saldoBase = toNum(data.header.saldo_total);
+
+  // Compute totals from cuotas
+  let totalSeguro = 0;
+  let totalGPS = 0;
+  let totalOtros = 0;
+
+  for (const it of data.cuotas_atrasadas.items) {
+    totalSeguro += toNum((it as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
+    totalGPS += toNum((it as any).gps ?? (data as any).header?.gps ?? 0);
+    totalOtros += toNum(it.otros ?? 0);
+  }
+
+  const totalCostos = totalSeguro + totalGPS + totalOtros;
+  const totalConExtras = saldoBase + garantiaMobiliaria + totalCostos;
+
+  // Right card: only "Total a cancelar"
+  ws.getCell("F4").value = "Total a cancelar";
   ws.getCell("F4").font = { bold: true, color: { argb: PEACH.slate } };
   ws.getCell("F4").alignment = { horizontal: "center" };
 
-  ws.getCell("F5").value = saldoBase;
+  ws.getCell("F5").value = totalConExtras;
   ws.getCell("F5").numFmt = '"Q"#,##0.00';
   ws.getCell("F5").font = { bold: true, size: 14, color: { argb: PEACH.accent } };
   ws.getCell("F5").alignment = { horizontal: "center" };
 
-  ws.mergeCells("F7:F7");
-  ws.getCell("F7").value = "Total a pagar";
-  ws.getCell("F7").font = { bold: true, color: { argb: PEACH.slate } };
-  ws.getCell("F7").alignment = { horizontal: "center" };
-
-  ws.getCell("F8").value = totalAPagar;
-  ws.getCell("F8").numFmt = '"Q"#,##0.00';
-  ws.getCell("F8").font = { bold: true, size: 14, color: { argb: "FFDC2626" } }; // rojo
-  ws.getCell("F8").alignment = { horizontal: "center" };
-
-  if (extrasTotal !== 0) {
-    ws.mergeCells("F9:F9");
-    ws.getCell("F9").value = "Con extras";
-    ws.getCell("F9").font = { bold: true, color: { argb: PEACH.slate } };
-    ws.getCell("F9").alignment = { horizontal: "center" };
-
-    ws.getCell("F10").value = totalConExtras;
-    ws.getCell("F10").numFmt = '"Q"#,##0.00';
-    ws.getCell("F10").font = { bold: true, size: 14, color: { argb: "FF059669" } }; // verde
-    ws.getCell("F10").alignment = { horizontal: "center" };
-  }
-
-  // ✅ Header row for the cost table - SIN columna de capital
+  // Header row
   let row = 11;
   const head = ws.getRow(row);
-  head.values = [
-    "No.",
-    "Mes",
-    "Seguro",
-    "GPS",
-    "Otros",
-    "Total a cancelar",
-  ];
+  head.values = ["No.", "Mes", "Seguro", "GPS", "Otros", "Total a cancelar"];
   styleHeaderRow(head);
 
-  // Body rows
+  // Capital row
+  row++;
+  const capitalRow = ws.getRow(row);
+  ws.mergeCells(`A${row}:E${row}`);
+  capitalRow.getCell(1).value = "Capital";
+  capitalRow.getCell(1).font = { bold: true, color: { argb: PEACH.text } };
+  capitalRow.getCell(1).alignment = { horizontal: "left" };
+  capitalRow.getCell(6).value = saldoBase;
+  capitalRow.getCell(6).numFmt = '"Q"#,##0.00';
+  capitalRow.getCell(6).font = { bold: true, color: { argb: PEACH.accent } };
+  capitalRow.getCell(6).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF0E6" } };
+  setThinBottomBorder(capitalRow);
+
+  // Garantía mobiliaria row
+  if (garantiaMobiliaria !== 0) {
+    row++;
+    const gmRow = ws.getRow(row);
+    ws.mergeCells(`A${row}:D${row}`);
+    gmRow.getCell(1).value = "Garantía mobiliaria";
+    gmRow.getCell(1).font = { bold: true, color: { argb: PEACH.text } };
+    gmRow.getCell(1).alignment = { horizontal: "left" };
+    gmRow.getCell(5).value = garantiaMobiliaria;
+    gmRow.getCell(5).numFmt = '"Q"#,##0.00';
+    gmRow.getCell(6).value = garantiaMobiliaria;
+    gmRow.getCell(6).numFmt = '"Q"#,##0.00';
+    gmRow.getCell(6).font = { bold: true, color: { argb: PEACH.accent } };
+    gmRow.getCell(6).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFF0E6" } };
+    setThinBottomBorder(gmRow);
+  }
+
+  // Cuota rows
   if (data.cuotas_atrasadas.items.length === 0) {
     row++;
-    ws.mergeCells(`A${row}:F${row}`); // ✅ 6 columnas
+    ws.mergeCells(`A${row}:F${row}`);
     ws.getCell(`A${row}`).value = "Sin cuotas atrasadas";
     ws.getCell(`A${row}`).alignment = { horizontal: "center" };
     ws.getCell(`A${row}`).font = { italic: true, color: { argb: PEACH.slate } };
   } else {
-    let totalSeguro = 0;
-    let totalGPS = 0;
-    let totalOtros = 0;
-    let totalCancelar = 0;
-
     for (const it of data.cuotas_atrasadas.items) {
       row++;
 
       const seguro = toNum((it as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
       const gps = toNum((it as any).gps ?? (data as any).header?.gps ?? 0);
       const otros = toNum(it.otros ?? 0);
-      
-      // ✅ Total a cancelar = solo seguro + gps + otros
       const totalFila = seguro + gps + otros;
 
-      totalSeguro += seguro;
-      totalGPS += gps;
-      totalOtros += otros;
-      totalCancelar += totalFila;
-
       const rr = ws.getRow(row);
-      rr.values = [
-        it.no,
-        it.mes,
-        seguro,
-        gps,
-        otros,
-        totalFila, // ✅ Solo costos
-      ];
+      rr.values = [it.no, it.mes, seguro, gps, otros, totalFila];
 
-      // Currency format for numeric columns
       [3, 4, 5, 6].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
       rr.getCell(6).font = { bold: true, color: { argb: PEACH.accent } };
 
-      // Zebra striping
       if (row % 2 === 0) {
         for (let c = 1; c <= 6; c++) {
           rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: PEACH.zebra } };
@@ -218,90 +207,48 @@ export async function buildCostDetailWorkbookPeach(
       }
       setThinBottomBorder(rr);
     }
-
-    // ✅ Totals row
-    row++;
-    const totalRow = ws.getRow(row);
-    totalRow.getCell(1).value = "TOTALES:";
-    totalRow.getCell(1).font = { bold: true, color: { argb: PEACH.title } };
-    totalRow.getCell(1).alignment = { horizontal: "right" };
-    ws.mergeCells(`A${row}:B${row}`);
-    
-    totalRow.getCell(3).value = totalSeguro;
-    totalRow.getCell(4).value = totalGPS;
-    totalRow.getCell(5).value = totalOtros;
-    totalRow.getCell(6).value = totalCancelar;
-    
-    [3, 4, 5, 6].forEach((i) => {
-      totalRow.getCell(i).numFmt = '"Q"#,##0.00';
-      totalRow.getCell(i).font = { bold: true, color: { argb: PEACH.accent } };
-      totalRow.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE4D6" } };
-    });
   }
 
-  // ===== Montos adicionales (sección peach) =====
-  row += 2;
-  ws.mergeCells(`A${row}:F${row}`); // ✅ 6 columnas
-  ws.getCell(`A${row}`).value = "Montos adicionales";
-  ws.getCell(`A${row}`).font = { bold: true, size: 12, color: { argb: PEACH.title } };
-
+  // TOTALES row
   row++;
-  const eHead = ws.getRow(row);
-  eHead.values = ["#", "Concepto", "Monto", "Fecha", "", ""];
-  styleHeaderRow(eHead);
+  const totalRow = ws.getRow(row);
+  totalRow.getCell(1).value = "TOTALES:";
+  totalRow.getCell(1).font = { bold: true, color: { argb: PEACH.title } };
+  totalRow.getCell(1).alignment = { horizontal: "right" };
+  ws.mergeCells(`A${row}:B${row}`);
 
-  if (data.extras.total_items > 0) {
-    for (let i = 0; i < data.extras.items.length; i++) {
-      const e = data.extras.items[i];
-      row++;
-      const rr = ws.getRow(row);
-      rr.values = [
-        i + 1,
-        e.concepto,
-        toNum(e.monto),
-        e.fecha_registro ? String(e.fecha_registro).slice(0, 10) : "-",
-      ];
-      rr.getCell(3).numFmt = '"Q"#,##0.00';
-      setThinBottomBorder(rr);
-    }
-    row++;
-    ws.mergeCells(`A${row}:E${row}`); // ✅ Ajustado
-    ws.getCell(`A${row}`).value = "Total extras:";
-    ws.getCell(`A${row}`).alignment = { horizontal: "right" };
-    ws.getCell(`A${row}`).font = { bold: true, color: { argb: PEACH.slate } };
+  totalRow.getCell(3).value = totalSeguro;
+  totalRow.getCell(4).value = totalGPS;
+  totalRow.getCell(5).value = totalOtros + garantiaMobiliaria;
+  totalRow.getCell(6).value = totalConExtras;
 
-    ws.getCell(`F${row}`).value = extrasTotal;
-    ws.getCell(`F${row}`).numFmt = '"Q"#,##0.00';
-    ws.getCell(`F${row}`).font = { bold: true, color: { argb: PEACH.accent } };
-  } else {
-    row++;
-    ws.mergeCells(`A${row}:F${row}`); // ✅ 6 columnas
-    ws.getCell(`A${row}`).value = "Sin extras registrados";
-    ws.getCell(`A${row}`).alignment = { horizontal: "center" };
-    ws.getCell(`A${row}`).font = { italic: true, color: { argb: PEACH.slate } };
-  }
+  [3, 4, 5, 6].forEach((i) => {
+    totalRow.getCell(i).numFmt = '"Q"#,##0.00';
+    totalRow.getCell(i).font = { bold: true, color: { argb: PEACH.accent } };
+    totalRow.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFE4D6" } };
+  });
 
   const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
   return Buffer.from(arr);
 }
 
-function gtq(v: string | number | null | undefined): string {
-  const n = toNum(v);
-  return "Q" + n.toLocaleString("es-GT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-/** PDF: DETALLE DE COSTOS (durazno) — con “Con extras”, logo y Montos adicionales */
+/** PDF: DETALLE DE COSTOS (durazno) — Unified table with Capital + Garantía mobiliaria */
 export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
   const saldoBase = Number(data.header.saldo_total || 0);
-  const extrasTotal = Number(data.header.extras_total || 0);
 
-  // ✅ Totales de la tabla (solo costos: seguro + gps + otros)
+  // Closure data for garantía mobiliaria
+  const closureData = data.closure;
+  let garantiaMobiliaria = 0;
+  if (closureData?.kind === "CANCELACION") {
+    garantiaMobiliaria = Number(closureData.garantia_mobiliaria || 0);
+  }
+
+  // Totales de la tabla (solo costos: seguro + gps + otros)
   const totales = data.cuotas_atrasadas.items.reduce(
     (acc, r) => {
       const seguro = Number((r as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
       const gps = Number((r as any).gps ?? (data as any).header?.gps ?? 0);
       const otros = Number(r.otros ?? 0);
-      
-      // ✅ Total a cancelar de esta fila = solo seguro + gps + otros
       const totalFila = seguro + gps + otros;
 
       return {
@@ -311,25 +258,16 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
         total_cancelar: acc.total_cancelar + totalFila,
       };
     },
-    {
-      seguro: 0,
-      gps: 0,
-      otros: 0,
-      total_cancelar: 0,
-    }
+    { seguro: 0, gps: 0, otros: 0, total_cancelar: 0 }
   );
 
-  // ✅ Total a pagar = Capital + Total de costos
-  const totalAPagar = saldoBase + totales.total_cancelar;
-  const totalConExtras = totalAPagar + extrasTotal;
+  const totalConExtras = saldoBase + garantiaMobiliaria + totales.total_cancelar;
 
-  // ✅ Filas de la tabla
+  // Filas de cuotas
   const rows = data.cuotas_atrasadas.items.map((r) => {
     const seguro = Number((r as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
     const gps = Number((r as any).gps ?? (data as any).header?.gps ?? 0);
     const otros = Number(r.otros ?? 0);
-    
-    // ✅ Total de esta fila = solo seguro + gps + otros
     const totalFila = seguro + gps + otros;
 
     return `
@@ -343,41 +281,35 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
       </tr>`;
   }).join("");
 
-  // ✅ Fila de totales
+  // Capital row
+  const capitalRow = `
+    <tr style="background:#FFF0E6;">
+      <td colspan="5" style="font-weight:700;color:#D86B3A;">Capital</td>
+      <td class="total" style="font-weight:800;">${gtq(saldoBase)}</td>
+    </tr>`;
+
+  // Garantía mobiliaria row
+  const garantiaRow = garantiaMobiliaria !== 0
+    ? `
+    <tr style="background:#FFF0E6;">
+      <td colspan="4" style="font-weight:700;color:#D86B3A;">Garantía mobiliaria</td>
+      <td>${gtq(garantiaMobiliaria)}</td>
+      <td class="total" style="font-weight:800;">${gtq(garantiaMobiliaria)}</td>
+    </tr>`
+    : "";
+
+  // Fila de totales
   const totalesRow = `
     <tr class="totales-row">
       <td colspan="2" style="text-align:right;font-weight:700;background:#FFE4D6;color:#D86B3A;">TOTALES:</td>
       <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.seguro)}</td>
       <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.gps)}</td>
-      <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.otros)}</td>
-      <td class="total" style="font-weight:800;background:#FFE4D6;font-size:14px;">${gtq(totales.total_cancelar)}</td>
+      <td style="font-weight:700;background:#FFE4D6;">${gtq(totales.otros + garantiaMobiliaria)}</td>
+      <td class="total" style="font-weight:800;background:#FFE4D6;font-size:14px;">${gtq(totalConExtras)}</td>
     </tr>
   `;
 
   const empty = `<tr><td colspan="6" class="tbl-note">Sin cuotas atrasadas</td></tr>`;
-
-  // Sección de Montos adicionales
-  const extrasBlock = data.extras.total_items > 0
-    ? `
-      <div class="extras">
-        <h3>Montos adicionales</h3>
-        <table>
-          <thead>
-            <tr><th>#</th><th>Concepto</th><th>Monto</th><th>Fecha</th></tr>
-          </thead>
-          <tbody>
-            ${data.extras.items.map((e, i) => `
-              <tr>
-                <td>${i + 1}</td>
-                <td>${e.concepto}</td>
-                <td class="total">${gtq(e.monto)}</td>
-                <td>${e.fecha_registro ? String(e.fecha_registro).slice(0, 10) : "-"}</td>
-              </tr>`).join("")}
-          </tbody>
-        </table>
-        <div class="extras-total">Total extras: <strong>${gtq(extrasTotal)}</strong></div>
-      </div>`
-    : "";
 
   return `
 <!DOCTYPE html>
@@ -419,8 +351,6 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
   td.total{ font-weight:800; color:var(--peach-title); }
   .tbl-note{ text-align:center; color:#7c8591; padding:10px 0; }
 
-  h3{ margin:16px 0 8px; color:var(--peach-title); }
-  .extras-total{ margin-top:6px; text-align:right; color:var(--peach-title); }
   .foot{ display:flex; justify-content:space-between; margin-top:10px; font-size:11px; color:#64748b; }
 </style>
 </head>
@@ -443,25 +373,13 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
       <dt>Cliente</dt><dd>${data.header.usuario}</dd>
       <dt>Préstamo No.</dt><dd>${data.header.numero_credito_sifco}</dd>
       <dt>Moneda</dt><dd>${data.header.moneda}</dd>
-      <dt>Tipo de crédito</dt><dd>${data.header.tipo_credito}</dd>
-      <dt>DATOS DEL VEHÍCULO</dt><dd></dd>
     </dl>
   </div>
 
   <div class="box saldo">
     <div>
-      <small>Capital</small>
-      <div class="num">${gtq(saldoBase)}</div>
-      <div style="border-top:2px solid var(--line);margin:8px 0;"></div>
-      <small>Total a pagar</small>
-      <div class="num" style="color:#dc2626;">${gtq(totalAPagar)}</div>
-      ${
-        extrasTotal !== 0
-          ? `<div style="border-top:2px solid var(--line);margin:8px 0;"></div>
-             <small>Con extras</small>
-             <div class="num" style="color:#059669;">${gtq(totalConExtras)}</div>`
-          : ""
-      }
+      <small>Total a cancelar</small>
+      <div class="num">${gtq(totalConExtras)}</div>
     </div>
   </div>
 </div>
@@ -478,12 +396,12 @@ export function renderCostDetailHTMLPeach(data: GetCreditDTO, logoUrl: string) {
     </tr>
   </thead>
   <tbody>
+    ${capitalRow}
+    ${garantiaRow}
     ${rows || empty}
     ${data.cuotas_atrasadas.items.length ? totalesRow : ""}
   </tbody>
 </table>
-
-${extrasBlock}
 
 <div class="foot">
   <div>Generado por Club Cashin.com</div>

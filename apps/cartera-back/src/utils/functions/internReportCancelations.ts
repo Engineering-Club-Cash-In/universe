@@ -22,6 +22,7 @@ const GREEN = {
   border:   "FFB7D3B7",
   white:    "FFFFFFFF",
   text:     "FF0F172A",
+  cardBg:   "FFF0FFF0",
 };
 
 function styleHeaderRow(row: ExcelJS.Row) {
@@ -85,13 +86,11 @@ export async function buildCancelationWorkbookDetailedGreen(
   ws.getCell("C2").font = { bold: true, size: 14, color: { argb: GREEN.title } };
   ws.getCell("C2").alignment = { vertical: "middle" };
 
-  // Card: client/credit info (rows 4..8)
+  // Card: client/credit info (rows 4..6) - sin tipo_credito ni observaciones
   const info: [string, string][] = [
     ["Cliente", data.header.usuario],
     ["Préstamo No.", data.header.numero_credito_sifco],
     ["Moneda", data.header.moneda],
-    ["Tipo de crédito", data.header.tipo_credito],
-    ["Observaciones", data.header.observaciones || "-"],
   ];
 
   let r = 4;
@@ -105,53 +104,44 @@ export async function buildCancelationWorkbookDetailedGreen(
     r++;
   }
 
-  // ✅ Card: Capital + Total a pagar + Con extras (right)
+  // Card: Total a cancelar (right)
   const saldoBase = toNum(data.header.saldo_total);
   const extrasTotal = toNum(data.header.extras_total);
-  
-  // Calcular totales de la tabla
+
+  // Rubros fijos de cancelación
+  const closureData = data.closure;
+  const rubrosFijos: Array<{ concepto: string; monto: number }> = [];
+  let totalRubrosFijos = 0;
+  if (closureData?.kind === "CANCELACION") {
+    const t = toNum(closureData.traspaso);
+    const g = toNum(closureData.garantia_mobiliaria);
+    const o = toNum(closureData.otros);
+    if (t > 0) rubrosFijos.push({ concepto: "Traspaso", monto: t });
+    if (g > 0) rubrosFijos.push({ concepto: "Garantía mobiliaria", monto: g });
+    if (o > 0) rubrosFijos.push({ concepto: "Otros", monto: o });
+    totalRubrosFijos = t + g + o;
+  }
+
+  // Calcular totales de la tabla (ya incluye cuota actual)
   let totalTabla = 0;
   for (const it of data.cuotas_atrasadas.items) {
     totalTabla += toNum(it.total_cancelar ?? 0);
   }
-  
+
+  const totalOtros = totalRubrosFijos + extrasTotal;
   const totalAPagar = saldoBase + totalTabla;
-  const totalConExtras = totalAPagar + extrasTotal;
+  const totalConExtras = totalAPagar + totalOtros;
 
   ws.mergeCells("H4:J4");
-  ws.getCell("H4").value = "Capital";
+  ws.getCell("H4").value = "Total a cancelar";
   ws.getCell("H4").font = { bold: true, color: { argb: GREEN.title } };
   ws.getCell("H4").alignment = { horizontal: "center" };
 
   ws.mergeCells("H5:J5");
-  ws.getCell("H5").value = saldoBase;
+  ws.getCell("H5").value = totalConExtras;
   ws.getCell("H5").numFmt = '"Q"#,##0.00';
-  ws.getCell("H5").font = { bold: true, size: 14, color: { argb: GREEN.accent } };
+  ws.getCell("H5").font = { bold: true, size: 14, color: { argb: "FFDC2626" } };
   ws.getCell("H5").alignment = { horizontal: "center" };
-
-  ws.mergeCells("H6:J6");
-  ws.getCell("H6").value = "Total a pagar";
-  ws.getCell("H6").font = { bold: true, color: { argb: GREEN.title } };
-  ws.getCell("H6").alignment = { horizontal: "center" };
-
-  ws.mergeCells("H7:J7");
-  ws.getCell("H7").value = totalAPagar;
-  ws.getCell("H7").numFmt = '"Q"#,##0.00';
-  ws.getCell("H7").font = { bold: true, size: 14, color: { argb: "FFDC2626" } }; // rojo
-  ws.getCell("H7").alignment = { horizontal: "center" };
-
-  if (extrasTotal !== 0) {
-    ws.mergeCells("H8:J8");
-    ws.getCell("H8").value = "Con extras";
-    ws.getCell("H8").font = { bold: true, color: { argb: GREEN.title } };
-    ws.getCell("H8").alignment = { horizontal: "center" };
-
-    ws.mergeCells("H9:J9");
-    ws.getCell("H9").value = totalConExtras;
-    ws.getCell("H9").numFmt = '"Q"#,##0.00';
-    ws.getCell("H9").font = { bold: true, size: 14, color: { argb: "FF059669" } }; // verde
-    ws.getCell("H9").alignment = { horizontal: "center" };
-  }
 
   // Header row for the detailed table
   let row = 11;
@@ -170,7 +160,43 @@ export async function buildCancelationWorkbookDetailedGreen(
   ];
   styleHeaderRow(head);
 
-  // ✅ Render rows con totales
+  // Fila de Capital
+  row++;
+  const capitalRow = ws.getRow(row);
+  ws.mergeCells(`A${row}:I${row}`);
+  capitalRow.getCell(1).value = "Capital";
+  capitalRow.getCell(1).font = { bold: true, color: { argb: GREEN.title } };
+  capitalRow.getCell(10).value = saldoBase;
+  capitalRow.getCell(10).numFmt = '"Q"#,##0.00';
+  capitalRow.getCell(10).font = { bold: true, color: { argb: GREEN.accent } };
+  for (let c = 1; c <= 10; c++) {
+    capitalRow.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN.cardBg } };
+  }
+  setThinBottomBorder(capitalRow);
+
+  // Filas desglose de Otros (rubros fijos + extras)
+  const allOtrosItems = [
+    ...rubrosFijos.map((rf) => ({ concepto: rf.concepto, monto: rf.monto })),
+    ...data.extras.items.map((e) => ({ concepto: e.concepto, monto: toNum(e.monto) })),
+  ];
+  for (const item of allOtrosItems) {
+    row++;
+    const rr = ws.getRow(row);
+    ws.mergeCells(`A${row}:H${row}`);
+    rr.getCell(1).value = item.concepto;
+    rr.getCell(1).font = { bold: true, color: { argb: GREEN.title } };
+    rr.getCell(9).value = item.monto;
+    rr.getCell(9).numFmt = '"Q"#,##0.00';
+    rr.getCell(10).value = item.monto;
+    rr.getCell(10).numFmt = '"Q"#,##0.00';
+    rr.getCell(10).font = { bold: true, color: { argb: GREEN.accent } };
+    for (let c = 1; c <= 10; c++) {
+      rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN.cardBg } };
+    }
+    setThinBottomBorder(rr);
+  }
+
+  // Render cuota rows
   if (data.cuotas_atrasadas.items.length === 0) {
     row++;
     ws.mergeCells(`A${row}:J${row}`);
@@ -224,11 +250,9 @@ export async function buildCancelationWorkbookDetailedGreen(
         total,
       ];
 
-      // Currency format columns 3..10
       for (let i = 3; i <= 10; i++) rr.getCell(i).numFmt = '"Q"#,##0.00';
       rr.getCell(10).font = { bold: true, color: { argb: GREEN.accent } };
 
-      // Zebra striping
       if (row % 2 === 0) {
         for (let c = 1; c <= 10; c++) {
           rr.getCell(c).fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN.zebra } };
@@ -237,7 +261,7 @@ export async function buildCancelationWorkbookDetailedGreen(
       setThinBottomBorder(rr);
     }
 
-    // ✅ Totals row
+    // Totals row
     row++;
     const totalRow = ws.getRow(row);
     totalRow.getCell(1).value = "TOTALES:";
@@ -250,14 +274,14 @@ export async function buildCancelationWorkbookDetailedGreen(
     totalRow.getCell(5).value = totales.gps;
     totalRow.getCell(6).value = totales.membresia;
     totalRow.getCell(7).value = totales.mora;
-    totalRow.getCell(8).value = totales.otros;
+    totalRow.getCell(8).value = totales.otros + totalOtros;
     totalRow.getCell(9).value = totales.capital_pendiente;
-    totalRow.getCell(10).value = totales.total_cancelar;
+    totalRow.getCell(10).value = totalConExtras;
 
     for (let i = 3; i <= 10; i++) {
       totalRow.getCell(i).numFmt = '"Q"#,##0.00';
       totalRow.getCell(i).font = { bold: true, color: { argb: GREEN.accent } };
-      totalRow.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC8E6C9" } }; // verde claro
+      totalRow.getCell(i).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC8E6C9" } };
     }
   }
 
@@ -321,14 +345,11 @@ export async function fetchImageBase64(url?: string): Promise<{ data: string; ex
   }
 }
 
-// Sustituye tu render actual por este (mismo nombre si quieres reemplazar):
-// Sustituye tu render actual por este (mismo nombre si quieres reemplazar):
 export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: string) {
   const saldoBase = Number(data.header.saldo_total || 0);
   const extrasTotal = Number(data.header.extras_total || 0);
-  const saldoConExtras = Number(data.header.saldo_total_con_extras || 0);
 
-  // ✅ Calcular totales de cada columna
+  // Calcular totales de cada columna
   const totales = data.cuotas_atrasadas.items.reduce(
     (acc, r) => {
       const seguro = Number((r as any).seguro ?? (data as any).header?.seguro_10_cuotas ?? 0);
@@ -358,9 +379,22 @@ export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: 
     }
   );
 
-  // ✅ Total a pagar = Capital + Total de la tabla
+  // Rubros fijos de cancelación
+  const closureData = data.closure;
+  const rubrosFijos: Array<{ concepto: string; monto: number }> = [];
+  if (closureData?.kind === "CANCELACION") {
+    const t = Number(closureData.traspaso || 0);
+    const g = Number(closureData.garantia_mobiliaria || 0);
+    const o = Number(closureData.otros || 0);
+    if (t > 0) rubrosFijos.push({ concepto: "Traspaso", monto: t });
+    if (g > 0) rubrosFijos.push({ concepto: "Garantía mobiliaria", monto: g });
+    if (o > 0) rubrosFijos.push({ concepto: "Otros", monto: o });
+  }
+  const totalRubrosFijos = rubrosFijos.reduce((s, rf) => s + rf.monto, 0);
+
+  const totalOtros = totalRubrosFijos + extrasTotal;
   const totalAPagar = saldoBase + totales.total_cancelar;
-  const totalConExtras = totalAPagar + extrasTotal;
+  const totalConExtras = totalAPagar + totalOtros;
 
   // rows con columnas desglosadas
   const rows = data.cuotas_atrasadas.items
@@ -385,7 +419,7 @@ export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: 
     })
     .join("");
 
-  // ✅ Fila de totales
+  // Fila de totales
   const totalesRow = `
     <tr class="totales-row">
       <td colspan="2" style="text-align:right;font-weight:700;background:#C8E6C9;color:#2F6B2F;">TOTALES:</td>
@@ -394,9 +428,9 @@ export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: 
       <td style="font-weight:700;background:#C8E6C9;">${gtq(totales.gps)}</td>
       <td style="font-weight:700;background:#C8E6C9;">${gtq(totales.membresia)}</td>
       <td style="font-weight:700;background:#C8E6C9;">${gtq(totales.mora)}</td>
-      <td style="font-weight:700;background:#C8E6C9;">${gtq(totales.otros)}</td>
+      <td style="font-weight:700;background:#C8E6C9;">${gtq(totales.otros + totalOtros)}</td>
       <td style="font-weight:700;background:#C8E6C9;">${gtq(totales.capital_pendiente)}</td>
-      <td class="total" style="font-weight:800;background:#C8E6C9;font-size:14px;">${gtq(totales.total_cancelar)}</td>
+      <td class="total" style="font-weight:800;background:#C8E6C9;font-size:14px;">${gtq(totalConExtras)}</td>
     </tr>
   `;
 
@@ -438,15 +472,15 @@ export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: 
 <meta charset="utf-8" />
 <title>Detalle de Cancelación</title>
 <style>
-  /* ======== Paleta verde (manteniendo el mismo layout) ======== */
+  /* ======== Paleta verde ======== */
   :root{
-    --navy:#2F6B2F;        /* títulos */
-    --green:#2E7D32;       /* acentos */
-    --head:#5B8C5B;        /* thead */
+    --navy:#2F6B2F;
+    --green:#2E7D32;
+    --head:#5B8C5B;
     --text:#0F172A;
     --slate:#334155;
-    --card:#F2FFF2;        /* fondos claros */
-    --line:#B7D3B7;        /* bordes */
+    --card:#F2FFF2;
+    --line:#B7D3B7;
     --white:#FFFFFF;
     --zebra:#F7FFF7;
   }
@@ -504,25 +538,13 @@ export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: 
       <dt>Cliente</dt><dd>${data.header.usuario}</dd>
       <dt>Préstamo No.</dt><dd>${data.header.numero_credito_sifco}</dd>
       <dt>Moneda</dt><dd>${data.header.moneda}</dd>
-      <dt>Tipo de crédito</dt><dd>${data.header.tipo_credito}</dd>
-      <dt>Observaciones</dt><dd>${data.header.observaciones || "-"}</dd>
     </dl>
   </div>
 
   <div class="box saldo">
     <div style="text-align:center;">
-      <small>Capital</small>
-      <div class="num">${gtq(saldoBase)}</div>
-      <div style="border-top:2px solid #B7D3B7;margin:8px 0;"></div>
-      <small>Total a pagar</small>
-      <div class="num" style="color:#dc2626;">${gtq(totalAPagar)}</div>
-      ${
-        extrasTotal !== 0
-          ? `<div style="border-top:2px solid #B7D3B7;margin:8px 0;"></div>
-             <small>Con extras</small>
-             <div class="num" style="color:#059669;">${gtq(totalConExtras)}</div>`
-          : ""
-      }
+      <small>Total a cancelar</small>
+      <div class="num" style="color:#dc2626;">${gtq(totalConExtras)}</div>
     </div>
   </div>
 </div>
@@ -543,6 +565,22 @@ export function renderCancelationHTMLDetailedGreen(data: GetCreditDTO, logoUrl: 
     </tr>
   </thead>
   <tbody>
+    <tr style="background:#F2FFF2;">
+      <td colspan="9" style="font-weight:700;color:#2F6B2F;">Capital</td>
+      <td class="total" style="font-weight:800;">${gtq(saldoBase)}</td>
+    </tr>
+    ${rubrosFijos.map((rf) => `
+    <tr style="background:#F2FFF2;">
+      <td colspan="8" style="font-weight:700;color:#2F6B2F;">${rf.concepto}</td>
+      <td>${gtq(rf.monto)}</td>
+      <td class="total" style="font-weight:800;">${gtq(rf.monto)}</td>
+    </tr>`).join("")}
+    ${data.extras.items.map((e) => `
+    <tr style="background:#F2FFF2;">
+      <td colspan="8" style="font-weight:700;color:#2F6B2F;">${e.concepto}</td>
+      <td>${gtq(e.monto)}</td>
+      <td class="total" style="font-weight:800;">${gtq(e.monto)}</td>
+    </tr>`).join("")}
     ${
       rows ||
       `<tr><td colspan="10" class="tbl-note">Sin cuotas atrasadas</td></tr>`

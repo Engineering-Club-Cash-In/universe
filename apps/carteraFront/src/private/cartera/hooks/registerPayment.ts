@@ -105,6 +105,8 @@ const [convenioActivoInfo, setConvenioActivoInfo] = useState<{
   console.log(user)
   // Formik
   const formik = useFormik<PagoFormValues>({
+    validateOnChange: false,
+    validateOnBlur: true,
     initialValues: {
       credito_id: 0,
       usuario_id: 0,
@@ -411,7 +413,7 @@ const abonosRealizados = dataCuotaActual ? (
 ) : 0;
 
 // 🔥 Cuota menos los abonos ya hechos = lo que falta por pagar
-const cuotaComparar = Math.max(0, cuota );
+const cuotaComparar = Math.max(0,cuota - abonosRealizados );
 
 console.log("=== VALIDACIÓN DE EXCEDENTES ===");
 console.log("Monto boleta real (redondeado):", montoRedondeado);

@@ -278,9 +278,10 @@ const insertCreditAndRelated = async (creditData: CreditData): Promise<{
   const asesor_id = await getAsesorConMenorCarga();
   console.log(`✅ Asesor asignado automáticamente: ${asesor_id}`);
 
-  const formatCredit = creditData.inversionistas.some(
-    (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
-  ) ? "Pool" : "Individual";
+  const formatCredit = creditData.inversionistas.length > 1 &&
+    creditData.inversionistas.some(
+      (inv: Inversionista) => Number(inv.porcentaje_inversion) > 1
+    ) ? "Pool" : "Individual";
 
   const creditDataForInsert: CreditDataForInsert = {
     usuario_id: user.usuario_id,

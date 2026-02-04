@@ -6,6 +6,7 @@ import {
   creditos_inversionistas,
   cuotas_credito,
   pagos_credito,
+  usuarios,
 } from "../database/db";
 import z from "zod";
 import { consultarEstadoCuentaPrestamo } from "../services/sifcoIntegrations";
@@ -52,10 +53,10 @@ const updateInstallments = async ({
               .select({ id: creditos.credito_id })
               .from(creditos)
               .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
-              .limit(1)
+              .limit(1),
           ),
-          eq(pagos_credito.pagado, all)
-        )
+          eq(pagos_credito.pagado, all),
+        ),
       )
       .orderBy(pagos_credito.cuota_id),
   ]);
@@ -65,7 +66,7 @@ const updateInstallments = async ({
   // 2️⃣ Validaciones
   if (!credito) {
     throw new Error(
-      `No se encontró el crédito con número SIFCO: ${numero_credito_sifco}`
+      `No se encontró el crédito con número SIFCO: ${numero_credito_sifco}`,
     );
   }
 
@@ -109,16 +110,14 @@ const updateInstallments = async ({
       datos: {
         cuota: cuotaMensual.toString(),
         cuota_interes: cuotaInteresCredito,
-        pago_del_mes: cuotaMensual.toString(),
-        capital_restante: abonoCapital.round(2).toString(),
+        capital_restante: capitalEnMemoria.round(2).toString(),
         interes_restante: interesMes.round(2).toString(),
         iva_12_restante: ivaMes.round(2).toString(),
         seguro_restante: seguroFijoPorMes.toString(),
         gps_restante: gpsFijoPorMes.toString(),
         total_restante: capitalEnMemoria.round(2).toString(),
         membresias: membresiasFijoPorMes.toString(),
-        membresias_pago: membresiasFijoPorMes.toString(),
-        membresias_mes: membresiasFijoPorMes.toString(),
+        
       },
     };
   });
@@ -130,7 +129,7 @@ const updateInstallments = async ({
       db
         .update(pagos_credito)
         .set(datos)
-        .where(eq(pagos_credito.pago_id, pago_id))
+        .where(eq(pagos_credito.pago_id, pago_id)),
     ),
     // Actualizar el crédito
     db
@@ -140,11 +139,117 @@ const updateInstallments = async ({
   ]);
 
   console.log(
-    `✅ Se actualizaron ${pagosNoPagados.length} cuotas para el crédito ${numero_credito_sifco}`
+    `✅ Se actualizaron ${pagosNoPagados.length} cuotas para el crédito ${numero_credito_sifco}`,
   );
 };
 
 export { updateInstallments };
+
+// ========================================
+// RECALCULAR CUOTA CON FÓRMULA PMT
+// ========================================
+
+function calculateMonthlyPayment(
+  principal: number,
+  monthlyRate: number,
+  termMonths: number,
+  insuranceCost: number,
+  gpsCost: number,
+  membresiasCost: number,
+): number {
+  const r = (monthlyRate / 100) * 1.12;
+  if (r === 0)
+    return principal / termMonths + insuranceCost + gpsCost + membresiasCost;
+  const factor = (1 + r) ** termMonths;
+  const baseMonthlyPayment = (principal * (r * factor)) / (factor - 1);
+  return baseMonthlyPayment + insuranceCost + gpsCost + membresiasCost;
+}
+
+const recalculateQuotaSchema = z.object({
+  numero_credito_sifco: z.string().min(1),
+});
+
+export const recalculateQuota = async ({ body, set }: any) => {
+  try {
+    const parseResult = recalculateQuotaSchema.safeParse(body);
+    if (!parseResult.success) {
+      set.status = 400;
+      return {
+        message: "Validation failed",
+        errors: parseResult.error.flatten().fieldErrors,
+      };
+    }
+
+    const { numero_credito_sifco } = parseResult.data;
+
+    // 1. Buscar el crédito
+    const [credito] = await db
+      .select()
+      .from(creditos)
+      .where(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      .limit(1);
+
+    if (!credito) {
+      set.status = 404;
+      return { message: "Crédito no encontrado" };
+    }
+
+    const capital = Number(credito.capital);
+    const monthlyRate = Number(credito.porcentaje_interes);
+    const termMonths = Number(credito.plazo);
+    const insuranceCost = Number(credito.seguro_10_cuotas ?? 0);
+    const gpsCost = Number(credito.gps ?? 0);
+    const membresiasCost = Number(credito.membresias_pago ?? 0);
+
+    // 2. Calcular nueva cuota con PMT
+    const nuevaCuota = Number(
+      new Big(
+        calculateMonthlyPayment(
+          capital,
+          monthlyRate,
+          termMonths,
+          insuranceCost,
+          gpsCost,
+          membresiasCost,
+        ),
+      ).round(2),
+    );
+
+    // 3. Actualizar el crédito con la nueva cuota
+    await db
+      .update(creditos)
+      .set({
+        cuota: nuevaCuota.toString(),
+      })
+      .where(eq(creditos.credito_id, credito.credito_id));
+
+    // 4. Actualizar las cuotas pendientes con updateInstallments
+    await updateInstallments({
+      numero_credito_sifco,
+      nueva_cuota: nuevaCuota,
+    });
+
+    set.status = 200;
+    return {
+      success: true,
+      message: "Cuota recalculada y cuotas actualizadas correctamente",
+      data: {
+        numero_credito_sifco,
+        capital: capital.toString(),
+        nueva_cuota: nuevaCuota.toString(),
+        porcentaje_interes: monthlyRate.toString(),
+        plazo: termMonths,
+      },
+    };
+  } catch (error) {
+    console.error("Error en recalculateQuota:", error);
+    set.status = 500;
+    return {
+      message: "Error al recalcular la cuota",
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
 
 // ========================================
 // TIPOS E INTERFACES
@@ -163,8 +268,8 @@ const creditUpdateSchema = z.object({
         inversionista_id: z.number().int().positive(),
         monto_aportado: z.number().positive(),
         porcentaje_cash_in: z.number().min(0).max(100),
-        porcentaje_inversion: z.number().min(0).max(100), 
-      })
+        porcentaje_inversion: z.number().min(0).max(100),
+      }),
     )
     .min(0),
   capital: z.number().nonnegative(),
@@ -172,6 +277,13 @@ const creditUpdateSchema = z.object({
   seguro_10_cuotas: z.number().min(0),
   membresias_pago: z.number().min(0),
   otros: z.number().min(0),
+  // Campos de usuario
+  nombre: z.string().max(200).optional(),
+  nit: z.string().max(30).optional(),
+  direccion: z.string().max(300).optional(),
+  saldo_a_favor: z.number().min(0).optional(),
+  // Formato de crédito manual
+  formato_credito: z.string().max(50).optional(),
 });
 
 type CreditUpdateData = z.infer<typeof creditUpdateSchema>;
@@ -197,7 +309,7 @@ interface SetContext {
  */
 const validateInvestorsPercentages = (
   inversionistas: CreditUpdateData["inversionistas"],
-  set: SetContext
+  set: SetContext,
 ): ValidationResult => {
   for (const inv of inversionistas) {
     const total =
@@ -216,18 +328,17 @@ const validateInvestorsPercentages = (
   return { success: true };
 };
 
- 
 /**
  * Valida que la suma de montos aportados coincida con el capital
  */
 const validateInvestorsCapital = (
   inversionistas: CreditUpdateData["inversionistas"],
   capital: number,
-  set: SetContext
+  set: SetContext,
 ): ValidationResult => {
   const totalMontoAportado = inversionistas.reduce(
     (acc: Big, inv) => acc.plus(inv.monto_aportado ?? 0),
-    new Big(0)
+    new Big(0),
   );
   const totalMontoAportadoRedondeado = totalMontoAportado.round(2);
 
@@ -312,7 +423,7 @@ function calcularDeudaTotal({
  */
 const detectDebtAffectingChanges = (
   fieldsToUpdate: Partial<CreditUpdateData>,
-  current: any
+  current: any,
 ): boolean => {
   const camposQueModificanDeuda = [
     "capital",
@@ -322,6 +433,7 @@ const detectDebtAffectingChanges = (
     "otros",
     "cuota",
     "plazo",
+    
   ];
 
   return camposQueModificanDeuda.some((campo) => {
@@ -349,7 +461,7 @@ const detectDebtAffectingChanges = (
  */
 const updateInitialQuotaOtros = async (
   credito_id: number,
-  otros: number
+  otros: number,
 ): Promise<void> => {
   const cuotaInicial = await db
     .select({ id: cuotas_credito.cuota_id })
@@ -357,8 +469,8 @@ const updateInitialQuotaOtros = async (
     .where(
       and(
         eq(cuotas_credito.credito_id, credito_id),
-        eq(cuotas_credito.numero_cuota, 0)
-      )
+        eq(cuotas_credito.numero_cuota, 0),
+      ),
     );
 
   if (cuotaInicial.length) {
@@ -383,7 +495,7 @@ const updateInvestors = async (
   current: any,
   numero_credito_sifco: string,
   seguro: number,
-  membresias: number
+  membresias: number,
 ): Promise<void> => {
   if (inversionistas.length === 0) return;
 
@@ -391,181 +503,201 @@ const updateInvestors = async (
   await db
     .delete(creditos_inversionistas)
     .where(eq(creditos_inversionistas.credito_id, credito_id));
-    console.log(current.capital,"current values ")
+  console.log(current.capital, "current values ");
 
   // 🔥 OBTENER CAPITAL Y CUOTA TOTAL DEL CRÉDITO
-  const capitalTotal =new Big(current?.capital)
-  const cuotaTotal = new Big(current?.cuota)
+  const capitalTotal = new Big(current?.capital);
+  const cuotaTotal = new Big(current?.cuota);
 
   console.log(`💰 Capital Total: Q${capitalTotal.toFixed(2)}`);
   console.log(`📊 Cuota Total: Q${cuotaTotal.toFixed(2)}`);
 
   // Preparar datos de nuevos inversionistas
   const creditosInversionistasData = inversionistas.map((inv, index, arr) => {
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`📊 PROCESANDO INVERSIONISTA #${index + 1}`);
-  console.log(`${"=".repeat(60)}`);
-  
-  const montoAportado = new Big(inv.monto_aportado);
-  const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
-  const porcentajeInversion = new Big(inv.porcentaje_inversion);
-  
-  console.log(`🆔 ID Inversionista: ${inv.inversionista_id}`);
-  console.log(`💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
-  console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
-  
-  // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
-  const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
-  
-  console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
-  console.log(`   Fórmula: (${montoAportado.toFixed(2)} / ${capitalTotal.toFixed(2)}) * 100`);
-  console.log(`   Resultado: ${porcentajeParticipacion.toFixed(4)}%`);
-  
-  // 🔥 PASO 1: RESTAR CARGOS DE LA CUOTA TOTAL
-  console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
-  console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
-  console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
-  console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
-  
-  const cuotaSinCargos = cuotaTotal
-    .minus(seguro)
-    .minus(membresias);
-  
-  console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
-  console.log(`   Fórmula: ${cuotaTotal.toFixed(2)} - ${seguro.toFixed(2)} - ${membresias.toFixed(2)}`);
-  
-  // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
-  console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
-  console.log(`   Fórmula: ${cuotaSinCargos.toFixed(2)} * (${porcentajeParticipacion.toFixed(4)}% / 100)`);
-  
-  const cuotaBase = cuotaSinCargos
-    .times(porcentajeParticipacion.div(100))
-    .round(2);
-  
-  console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
-  
-  // 🔥 ENCONTRAR AL INVERSIONISTA CON MAYOR MONTO APORTADO
-  console.log(`\n🔍 BUSCANDO INVERSIONISTA CON MAYOR MONTO APORTADO:`);
-  
-  arr.forEach((invTemp, idx) => {
-    const montoTemp = new Big(invTemp.monto_aportado);
-    console.log(`   [${idx + 1}] ID ${invTemp.inversionista_id}: Q${montoTemp.toFixed(2)}`);
-  });
-  
-  const inversionistaMayor = arr.reduce((max, current) => 
-    new Big(current.monto_aportado).gt(new Big(max.monto_aportado)) ? current : max
-  );
-  
-  console.log(`   🏆 Mayor encontrado: ID ${inversionistaMayor.inversionista_id} con Q${new Big(inversionistaMayor.monto_aportado).toFixed(2)}`);
-  
-  const esMayor = inv.inversionista_id === inversionistaMayor.inversionista_id;
-  
-  console.log(`   ¿Es este inversionista el mayor? ${esMayor ? '✅ SÍ' : '❌ NO'}`);
-  
-  // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + MEMBRESÍA
-  let cuotaInversionista = cuotaBase;
-  
-  console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
-  
-  if (esMayor) {
-    console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
-    console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
-    console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
-    console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
-    
-    cuotaInversionista = cuotaBase
-      .plus(seguro)
-      .plus(membresias)
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`📊 PROCESANDO INVERSIONISTA #${index + 1}`);
+    console.log(`${"=".repeat(60)}`);
+
+    const montoAportado = new Big(inv.monto_aportado);
+    const porcentajeCashIn = new Big(inv.porcentaje_cash_in);
+    const porcentajeInversion = new Big(inv.porcentaje_inversion);
+
+    console.log(`🆔 ID Inversionista: ${inv.inversionista_id}`);
+    console.log(`💰 Monto Aportado: Q${montoAportado.toFixed(2)}`);
+    console.log(`💵 Capital Total del Crédito: Q${capitalTotal.toFixed(2)}`);
+
+    // 🔥 CALCULAR PORCENTAJE DE PARTICIPACIÓN
+    const porcentajeParticipacion = montoAportado.div(capitalTotal).times(100);
+
+    console.log(`\n📐 CÁLCULO DE PARTICIPACIÓN:`);
+    console.log(
+      `   Fórmula: (${montoAportado.toFixed(2)} / ${capitalTotal.toFixed(2)}) * 100`,
+    );
+    console.log(`   Resultado: ${porcentajeParticipacion.toFixed(4)}%`);
+
+    // 🔥 PASO 1: RESTAR CARGOS DE LA CUOTA TOTAL
+    console.log(`\n💳 CUOTA TOTAL Y CARGOS:`);
+    console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
+    console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+    console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
+
+    const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+
+    console.log(`   = Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
+    console.log(
+      `   Fórmula: ${cuotaTotal.toFixed(2)} - ${seguro.toFixed(2)} - ${membresias.toFixed(2)}`,
+    );
+
+    // 🔥 PASO 2: MULTIPLICAR POR EL PORCENTAJE
+    console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
+    console.log(
+      `   Fórmula: ${cuotaSinCargos.toFixed(2)} * (${porcentajeParticipacion.toFixed(4)}% / 100)`,
+    );
+
+    const cuotaBase = cuotaSinCargos
+      .times(porcentajeParticipacion.div(100))
       .round(2);
-    
-    console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
-    console.log(`   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`);
-  } else {
-    console.log(`   📍 Inversionista normal (no es el mayor)`);
-    console.log(`   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`);
-    console.log(`   (No se suman cargos)`);
-  }
-  
-  // Calcular interés sobre el monto aportado
-  console.log(`\n💹 CÁLCULO DE INTERESES:`);
-  const interes = new Big(
-    updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0
-  );
-  console.log(`   Tasa de Interés: ${interes.toFixed(2)}%`);
-  console.log(`   Monto Aportado: Q${montoAportado.toFixed(2)}`);
-  
-  const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
-  console.log(`   Interés Calculado: Q${newCuotaInteres.toFixed(2)}`);
-  console.log(`   Fórmula: ${montoAportado.toFixed(2)} * (${interes.toFixed(2)}% / 100)`);
 
-  // Distribución del interés entre inversionista y cash-in
-  console.log(`\n📊 DISTRIBUCIÓN DE INTERÉS:`);
-  console.log(`   % Inversionista: ${porcentajeInversion.toFixed(2)}%`);
-  console.log(`   % Cash-In: ${porcentajeCashIn.toFixed(2)}%`);
-  
-  const montoInversionista = newCuotaInteres
-    .times(porcentajeInversion)
-    .div(100)
-    .round(2);
-  
-  const montoCashIn = newCuotaInteres
-    .times(porcentajeCashIn)
-    .div(100)
-    .round(2);
-  
-  console.log(`   Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
-  console.log(`   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeInversion.toFixed(2)}% / 100)`);
-  console.log(`   Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
-  console.log(`   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeCashIn.toFixed(2)}% / 100)`);
+    console.log(`   Cuota Base Calculada: Q${cuotaBase.toFixed(2)}`);
 
-  // Calcular IVAs
-  console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
-  
-  const ivaInversionista = montoInversionista.gt(0)
-    ? montoInversionista.times(0.12).round(2)
-    : new Big(0);
-  
-  const ivaCashIn = montoCashIn.gt(0)
-    ? montoCashIn.times(0.12).round(2)
-    : new Big(0);
-  
-  if (montoInversionista.gt(0)) {
-    console.log(`   IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
-    console.log(`   Fórmula: ${montoInversionista.toFixed(2)} * 0.12`);
-  } else {
-    console.log(`   IVA Inversionista: Q0.00 (sin monto)`);
-  }
-  
-  if (montoCashIn.gt(0)) {
-    console.log(`   IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
-    console.log(`   Fórmula: ${montoCashIn.toFixed(2)} * 0.12`);
-  } else {
-    console.log(`   IVA Cash-In: Q0.00 (sin monto)`);
-  }
+    // 🔥 ENCONTRAR AL INVERSIONISTA CON MAYOR MONTO APORTADO
+    console.log(`\n🔍 BUSCANDO INVERSIONISTA CON MAYOR MONTO APORTADO:`);
 
-  console.log(`\n✅ RESUMEN FINAL:`);
-  console.log(`   - Cuota Inversionista: Q${cuotaInversionista.toFixed(2)}`);
-  console.log(`   - Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
-  console.log(`   - IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
-  console.log(`   - Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
-  console.log(`   - IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
-  console.log(`${"=".repeat(60)}\n`);
+    arr.forEach((invTemp, idx) => {
+      const montoTemp = new Big(invTemp.monto_aportado);
+      console.log(
+        `   [${idx + 1}] ID ${invTemp.inversionista_id}: Q${montoTemp.toFixed(2)}`,
+      );
+    });
 
-  return {
-    credito_id: credito_id,
-    inversionista_id: inv.inversionista_id,
-    monto_aportado: montoAportado.toString(),
-    porcentaje_cash_in: porcentajeCashIn.toString(),
-    porcentaje_participacion_inversionista: porcentajeInversion.toString(),
-    monto_inversionista: montoInversionista.toString(),
-    monto_cash_in: montoCashIn.toString(),
-    iva_inversionista: ivaInversionista.toString(),
-    iva_cash_in: ivaCashIn.toString(),
-    fecha_creacion: new Date(),
-    cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
-    numero_credito_sifco: numero_credito_sifco ?? undefined,
-  };
-});
+    const inversionistaMayor = arr.reduce((max, current) =>
+      new Big(current.monto_aportado).gt(new Big(max.monto_aportado))
+        ? current
+        : max,
+    );
+
+    console.log(
+      `   🏆 Mayor encontrado: ID ${inversionistaMayor.inversionista_id} con Q${new Big(inversionistaMayor.monto_aportado).toFixed(2)}`,
+    );
+
+    const esMayor =
+      inv.inversionista_id === inversionistaMayor.inversionista_id;
+
+    console.log(
+      `   ¿Es este inversionista el mayor? ${esMayor ? "✅ SÍ" : "❌ NO"}`,
+    );
+
+    // 🔥 PASO 3: SI ES EL MAYOR, SUMARLE SEGURO + MEMBRESÍA
+    let cuotaInversionista = cuotaBase;
+
+    console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
+
+    if (esMayor) {
+      console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
+      console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
+      console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
+      console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
+
+      cuotaInversionista = cuotaBase.plus(seguro).plus(membresias).round(2);
+
+      console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
+      console.log(
+        `   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`,
+      );
+    } else {
+      console.log(`   📍 Inversionista normal (no es el mayor)`);
+      console.log(
+        `   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`,
+      );
+      console.log(`   (No se suman cargos)`);
+    }
+
+    // Calcular interés sobre el monto aportado
+    console.log(`\n💹 CÁLCULO DE INTERESES:`);
+    const interes = new Big(
+      updateFields.porcentaje_interes ?? current?.porcentaje_interes ?? 0,
+    );
+    console.log(`   Tasa de Interés: ${interes.toFixed(2)}%`);
+    console.log(`   Monto Aportado: Q${montoAportado.toFixed(2)}`);
+
+    const newCuotaInteres = montoAportado.times(interes.div(100)).round(2);
+    console.log(`   Interés Calculado: Q${newCuotaInteres.toFixed(2)}`);
+    console.log(
+      `   Fórmula: ${montoAportado.toFixed(2)} * (${interes.toFixed(2)}% / 100)`,
+    );
+
+    // Distribución del interés entre inversionista y cash-in
+    console.log(`\n📊 DISTRIBUCIÓN DE INTERÉS:`);
+    console.log(`   % Inversionista: ${porcentajeInversion.toFixed(2)}%`);
+    console.log(`   % Cash-In: ${porcentajeCashIn.toFixed(2)}%`);
+
+    const montoInversionista = newCuotaInteres
+      .times(porcentajeInversion)
+      .div(100)
+      .round(2);
+
+    const montoCashIn = newCuotaInteres
+      .times(porcentajeCashIn)
+      .div(100)
+      .round(2);
+
+    console.log(`   Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
+    console.log(
+      `   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeInversion.toFixed(2)}% / 100)`,
+    );
+    console.log(`   Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
+    console.log(
+      `   Fórmula: ${newCuotaInteres.toFixed(2)} * (${porcentajeCashIn.toFixed(2)}% / 100)`,
+    );
+
+    // Calcular IVAs
+    console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
+
+    const ivaInversionista = montoInversionista.gt(0)
+      ? montoInversionista.times(0.12).round(2)
+      : new Big(0);
+
+    const ivaCashIn = montoCashIn.gt(0)
+      ? montoCashIn.times(0.12).round(2)
+      : new Big(0);
+
+    if (montoInversionista.gt(0)) {
+      console.log(`   IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
+      console.log(`   Fórmula: ${montoInversionista.toFixed(2)} * 0.12`);
+    } else {
+      console.log(`   IVA Inversionista: Q0.00 (sin monto)`);
+    }
+
+    if (montoCashIn.gt(0)) {
+      console.log(`   IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
+      console.log(`   Fórmula: ${montoCashIn.toFixed(2)} * 0.12`);
+    } else {
+      console.log(`   IVA Cash-In: Q0.00 (sin monto)`);
+    }
+
+    console.log(`\n✅ RESUMEN FINAL:`);
+    console.log(`   - Cuota Inversionista: Q${cuotaInversionista.toFixed(2)}`);
+    console.log(`   - Monto Inversionista: Q${montoInversionista.toFixed(2)}`);
+    console.log(`   - IVA Inversionista: Q${ivaInversionista.toFixed(2)}`);
+    console.log(`   - Monto Cash-In: Q${montoCashIn.toFixed(2)}`);
+    console.log(`   - IVA Cash-In: Q${ivaCashIn.toFixed(2)}`);
+    console.log(`${"=".repeat(60)}\n`);
+
+    return {
+      credito_id: credito_id,
+      inversionista_id: inv.inversionista_id,
+      monto_aportado: montoAportado.toString(),
+      porcentaje_cash_in: porcentajeCashIn.toString(),
+      porcentaje_participacion_inversionista: porcentajeInversion.toString(),
+      monto_inversionista: montoInversionista.toString(),
+      monto_cash_in: montoCashIn.toString(),
+      iva_inversionista: ivaInversionista.toString(),
+      iva_cash_in: ivaCashIn.toString(),
+      fecha_creacion: new Date(),
+      cuota_inversionista: cuotaInversionista.toString(), // 🔥 CON LÓGICA CORRECTA
+      numero_credito_sifco: numero_credito_sifco ?? undefined,
+    };
+  });
 
   // Insertar nuevos inversionistas
   if (creditosInversionistasData.length > 0) {
@@ -622,6 +754,11 @@ export const updateCredit = async ({ body, set }: any) => {
       cuota,
       numero_credito_sifco,
       asesor_id,
+      nombre,
+      nit,
+      direccion,
+      saldo_a_favor,
+      formato_credito,
       ...fieldsToUpdate
     } = parseResult.data;
 
@@ -637,8 +774,8 @@ export const updateCredit = async ({ body, set }: any) => {
             "MOROSO",
             "PENDIENTE_CANCELACION",
             "EN_CONVENIO",
-          ])
-        )
+          ]),
+        ),
       )
       .limit(1);
 
@@ -650,25 +787,40 @@ export const updateCredit = async ({ body, set }: any) => {
     // 3. Validar inversionistas
     const percentagesValidation = validateInvestorsPercentages(
       inversionistas,
-      set
+      set,
     );
     if (!percentagesValidation.success) {
       return percentagesValidation.error;
     }
 
+    // 3.5 Actualizar datos del usuario si se enviaron
+    const userFields: Record<string, string> = {};
+    if (nombre !== undefined) userFields.nombre = nombre;
+    if (nit !== undefined) userFields.nit = nit;
+    if (direccion !== undefined) userFields.direccion = direccion;
+    if (saldo_a_favor !== undefined)
+      userFields.saldo_a_favor = saldo_a_favor.toString();
 
-    
+    if (Object.keys(userFields).length > 0) {
+      await db
+        .update(usuarios)
+        .set(userFields)
+        .where(eq(usuarios.usuario_id, current.usuario_id));
+    }
 
     // 4. Preparar campos de actualización
     const updateFields: any = { ...fieldsToUpdate };
 
-    const formatCredit = inversionistas.some(
-      (inv) => Number(inv.porcentaje_inversion) > 0
-    )
-      ? "Pool"
-      : "Individual";
-
-    updateFields.formato_credito = formatCredit;
+    if (formato_credito !== undefined) {
+      updateFields.formato_credito = formato_credito;
+    } else {
+      const formatCredit = inversionistas.some(
+        (inv) => Number(inv.porcentaje_inversion) > 0,
+      )
+        ? "Pool"
+        : "Individual";
+      updateFields.formato_credito = formatCredit;
+    }
     if (mora !== undefined) updateFields.mora = mora.toString();
     if (cuota !== undefined) updateFields.cuota = cuota.toString();
     if (numero_credito_sifco !== undefined) {
@@ -731,19 +883,14 @@ export const updateCredit = async ({ body, set }: any) => {
       updateFields.seguro_10_cuotas =
         fieldsToUpdate.seguro_10_cuotas ?? current.seguro_10_cuotas;
 
+     
+
       // Actualizar "otros" en la cuota inicial si cambió
       if (otrosModificado) {
         await updateInitialQuotaOtros(credito_id, fieldsToUpdate.otros);
       }
 
-      // Actualizar pagos si la cuota cambió
-      if (cuota !== undefined && !new Big(cuota).eq(new Big(current.cuota))) {
-        await updateInstallments({
-          numero_credito_sifco:
-            numero_credito_sifco ?? current.numero_credito_sifco,
-          nueva_cuota: cuota,
-        });
-      }
+    
     }
 
     updateFields.membresias =
@@ -756,6 +903,13 @@ export const updateCredit = async ({ body, set }: any) => {
       .where(eq(creditos.credito_id, credito_id))
       .returning();
 
+
+       await updateInstallments({
+        numero_credito_sifco:
+          numero_credito_sifco ?? current.numero_credito_sifco,
+        nueva_cuota: cuota,
+      });
+
     // 9. Actualizar inversionistas
     await updateInvestors(
       credito_id,
@@ -764,7 +918,7 @@ export const updateCredit = async ({ body, set }: any) => {
       current,
       numero_credito_sifco ?? current.numero_credito_sifco,
       Number(updateFields.seguro_10_cuotas ?? current.seguro_10_cuotas),
-      Number(updateFields.membresias_pago ?? current.membresias_pago)
+      Number(updateFields.membresias_pago ?? current.membresias_pago),
     );
 
     set.status = 200;
@@ -787,11 +941,13 @@ export const updateAllInstallments = async ({
 
     // 1️⃣ Query optimizada con construcción condicional más limpia
     const whereConditions = numero_credito_sifco
-      ? and(
-    
-          eq(creditos.numero_credito_sifco, numero_credito_sifco)
-        )
-      : eq(creditos.statusCredit, "ACTIVO");
+      ? and(eq(creditos.numero_credito_sifco, numero_credito_sifco))
+      : inArray(creditos.statusCredit, [
+          "ACTIVO",
+          "MOROSO",
+          "PENDIENTE_CANCELACION",
+          "EN_CONVENIO",
+        ]);
 
     // 2️⃣ Query única con límite condicional inline
     let query = db
@@ -818,14 +974,14 @@ export const updateAllInstallments = async ({
     }
 
     console.log(
-      `📋 Total de créditos a actualizar: ${creditosAActualizar.length}\n`
+      `📋 Total de créditos a actualizar: ${creditosAActualizar.length}\n`,
     );
 
     // 4️⃣ Procesamiento con Promise.allSettled (paralelo en lugar de secuencial)
     const resultados = await Promise.allSettled(
       creditosAActualizar.map(async (credito) => {
         console.log(
-          `⏳ Procesando: ${credito.numero_credito_sifco} - Cuota: Q${credito.cuota}`
+          `⏳ Procesando: ${credito.numero_credito_sifco} - Cuota: Q${credito.cuota}`,
         );
 
         await updateInstallments({
@@ -834,16 +990,16 @@ export const updateAllInstallments = async ({
         });
 
         console.log(
-          `   ✅ ${credito.numero_credito_sifco} actualizado correctamente\n`
+          `   ✅ ${credito.numero_credito_sifco} actualizado correctamente\n`,
         );
         return credito.numero_credito_sifco;
-      })
+      }),
     );
 
     // 5️⃣ Análisis de resultados más eficiente
     const exitosos = resultados.filter((r) => r.status === "fulfilled");
     const fallidos = resultados.filter(
-      (r) => r.status === "rejected"
+      (r) => r.status === "rejected",
     ) as PromiseRejectedResult[];
 
     const errores = fallidos.map((resultado, idx) => ({

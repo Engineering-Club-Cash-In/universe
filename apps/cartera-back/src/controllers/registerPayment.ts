@@ -1427,13 +1427,14 @@ if (creditoInfo.credito.statusCredit === "EN_CONVENIO") {
         },
       };
     } else {
+      const newSaldoAFavor = saldoAFavor.plus(disponible_restante);
       await db
         .update(usuarios)
-        .set({ saldo_a_favor: disponible_para_cuotasPosteriores.toString() })
+        .set({ saldo_a_favor: newSaldoAFavor.toString() })
         .where(eq(usuarios.usuario_id, credito.usuario_id));
 
       console.log(
-        `✅ Saldo a favor del usuario quedó en $${disponible_para_cuotasPosteriores.toString()}`
+        `✅ Saldo a favor del usuario quedó en $${newSaldoAFavor.toString()}`
       );
       console.log("✅ Pago realizado con éxito");
 

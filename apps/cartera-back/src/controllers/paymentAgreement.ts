@@ -11,9 +11,10 @@ import {
   creditos_inversionistas,
   boletas,
   convenio_cuotas,
+  moras_credito,
 } from "../database/db";
 import Big from "big.js";
-import { condonarMora } from "./latefee";
+import { createMora } from "./latefee";
 import { getPagosDelMesActual } from "./payments";
 import { creditRouter } from "../routers";
 
@@ -117,13 +118,14 @@ export async function createPaymentAgreement(
     console.log("✅ Paso 4: Verificando que todos los pagos pertenezcan al crédito...");
     
     const allFromSameCredit = pagos.every(
-      (item) => item.pago.credito_id === credit_id
+      (item) => (item.pago.credito_id ?? item.cuota.credito_id) === credit_id
     );
-
+    console.log("📊 Crédito esperado:", credit_id);
+    console.log("📊 Créditos en pagos:", pagos.map(p => p.pago.credito_id ?? p.cuota.credito_id));
     if (!allFromSameCredit) {
       console.error("❌ Pagos de diferentes créditos detectados!");
       console.error("Crédito esperado:", credit_id);
-      console.error("Créditos en pagos:", pagos.map(p => p.pago.credito_id));
+      console.error("Créditos en pagos:", pagos.map(p => p.pago.credito_id ?? p.cuota.credito_id));
       throw new Error("Todos los pagos deben pertenecer al mismo crédito");
     }
 
@@ -237,7 +239,7 @@ export async function createPaymentAgreement(
         monto_pendiente: total_agreement_amount.toString(),
         pagos_realizados: 0,
         pagos_pendientes: number_of_months,
-        activo: true,
+        activo: false,
         completado: false,
         motivo: reason,
         observaciones: observations,
@@ -273,63 +275,47 @@ export async function createPaymentAgreement(
     // 📅 CREAR LAS CUOTAS DEL CONVENIO
     // ============================================
     console.log("✅ Paso 12: Creando las cuotas del convenio...");
-    
-    const fechaCreacion = new Date();
-    const diaCreacion = fechaCreacion.getDate();
-    
-    // Determinar la fecha de vencimiento de la primera cuota
-    let primeraFechaVencimiento = new Date(fechaCreacion);
-    
-    if (diaCreacion > 15) {
-      // Si es después del 15, vence el 30 del mes actual
-      primeraFechaVencimiento.setDate(30);
-      console.log("📆 Primera cuota vencerá el día 30 (creado después del 15)");
-    } else {
-      // Si es el 15 o antes, vence el 15 del mes actual
-      primeraFechaVencimiento.setDate(15);
-      console.log("📆 Primera cuota vencerá el día 15 (creado el 15 o antes)");
-    }
-    
-    console.log("📅 Fecha de creación del convenio:", fechaCreacion.toISOString());
-    console.log("📅 Primera fecha de vencimiento:", primeraFechaVencimiento.toISOString());
-    
-    // Crear todas las cuotas del convenio
+
+    // Obtener las cuotas pendientes del crédito para usar sus fechas de vencimiento
+    const cuotasPendientesCredito = await db
+      .select({
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+      })
+      .from(cuotas_credito)
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, credit_id),
+          eq(cuotas_credito.pagado, false)
+        )
+      )
+      .orderBy(cuotas_credito.numero_cuota)
+      .limit(number_of_months);
+
+    console.log(`📅 Cuotas pendientes del crédito encontradas: ${cuotasPendientesCredito.length}`);
+
     const cuotasConvenio = [];
-    
+
     for (let i = 0; i < number_of_months; i++) {
-      const fechaVencimiento = new Date(primeraFechaVencimiento);
-      
-      if (i > 0) {
-        // Para las cuotas siguientes, alternamos entre 15 y 30
-        if (primeraFechaVencimiento.getDate() === 15) {
-          // Si la primera vence el 15, la siguiente es el 30 del mismo mes
-          // Luego 15 del siguiente, 30 del siguiente, etc.
-          const mesesAAgregar = Math.floor(i / 2);
-          const dia = i % 2 === 1 ? 30 : 15;
-          
-          fechaVencimiento.setMonth(primeraFechaVencimiento.getMonth() + mesesAAgregar);
-          fechaVencimiento.setDate(dia);
-        } else {
-          // Si la primera vence el 30, la siguiente es el 15 del mes siguiente
-          // Luego 30, 15, 30, etc.
-          const mesesAAgregar = Math.floor((i + 1) / 2);
-          const dia = i % 2 === 0 ? 15 : 30;
-          
-          fechaVencimiento.setMonth(primeraFechaVencimiento.getMonth() + mesesAAgregar);
-          fechaVencimiento.setDate(dia);
-        }
+      // Usar la fecha de vencimiento de la cuota del crédito si existe
+      const fechaVencimiento = cuotasPendientesCredito[i]
+        ? cuotasPendientesCredito[i].fecha_vencimiento
+        : null;
+
+      if (!fechaVencimiento) {
+        console.log(`⚠️ No hay cuota pendiente #${i + 1} en el crédito, se omite`);
+        continue;
       }
-      
+
       cuotasConvenio.push({
         convenio_id: agreement.convenio_id,
         numero_cuota: i + 1,
-        fecha_vencimiento: fechaVencimiento.toISOString(),
+        fecha_vencimiento: fechaVencimiento,
         fecha_pago: null, // NULL = no pagada
       });
-      
-      console.log(`📋 Cuota ${i + 1}: Vence el ${fechaVencimiento.toISOString().split('T')[0]}`);
+
+      console.log(`📋 Cuota ${i + 1}: Vence el ${fechaVencimiento}`);
     }
-    
+
     await db.insert(convenio_cuotas).values(cuotasConvenio);
     
     console.log("✅ Cuotas del convenio creadas exitosamente!");
@@ -343,15 +329,25 @@ export async function createPaymentAgreement(
     console.log("🔥 Estado nuevo: EN_CONVENIO");
     console.log("🔥 Convenio ID:", agreement.convenio_id);
   // ============================================
-    // 💸 CONDONAR LA MORA
+    // 💸 ELIMINAR MORA ACTIVA (si existe)
     // ============================================
-    console.log("✅ Paso 13: Condonando mora del crédito...");
-    
-    await condonarMora({
-      credito_id: credit_id,
-      motivo: "Condonación de mora por creación de convenio de pago",
-      usuario_email: usuario.email,
-    });
+    console.log("✅ Paso 13: Eliminando mora activa del crédito (si existe)...");
+
+    const morasEliminadas = await db
+      .delete(moras_credito)
+      .where(
+        and(
+          eq(moras_credito.credito_id, credit_id),
+          eq(moras_credito.activa, true)
+        )
+      )
+      .returning();
+
+    if (morasEliminadas.length > 0) {
+      console.log(`✅ Se eliminaron ${morasEliminadas.length} mora(s) activa(s)`);
+    } else {
+      console.log("ℹ️ No había moras activas para eliminar");
+    }
     const resultadoUpdate = await db
       .update(creditos)
       .set({
@@ -372,10 +368,6 @@ export async function createPaymentAgreement(
     }
 
     console.log("🔥 ========== FIN ACTUALIZACIÓN DE ESTADO ==========");
-
-  
-
-    console.log("✅ Mora condonada exitosamente");
 
     // ============================================
     // 🎉 RESPUESTA EXITOSA
@@ -1391,13 +1383,109 @@ export async function processConvenioCuotas(
 
 export const updateConvenioStatus = async (
   convenio_id: number,
-  status:boolean
+  status: boolean
 ) => {
   try {
-    await db.update(convenios_pago)
+    // 1. Obtener el convenio para saber el credito_id
+    const [convenio] = await db
+      .select({ credito_id: convenios_pago.credito_id })
+      .from(convenios_pago)
+      .where(eq(convenios_pago.convenio_id, convenio_id));
+
+    if (!convenio) {
+      return { success: false, message: "Convenio no encontrado" };
+    }
+
+    const creditoId = convenio.credito_id;
+
+    // 2. Si status = false, ELIMINAR el convenio y procesar mora
+    if (!status) {
+      console.log("🔴 Eliminando convenio y procesando mora...");
+
+      // Eliminar cuotas del convenio
+      await db
+        .delete(convenio_cuotas)
+        .where(eq(convenio_cuotas.convenio_id, convenio_id));
+      console.log("✅ Cuotas del convenio eliminadas");
+
+      // Eliminar pagos asociados al convenio (pivot)
+      await db
+        .delete(convenios_pagos_resume)
+        .where(eq(convenios_pagos_resume.convenio_id, convenio_id));
+      console.log("✅ Relación pagos-convenio eliminada");
+
+      // Eliminar el convenio
+      await db
+        .delete(convenios_pago)
+        .where(eq(convenios_pago.convenio_id, convenio_id));
+      console.log("✅ Convenio eliminado");
+
+      // Obtener el capital del crédito para calcular mora
+      const [credito] = await db
+        .select({ capital: creditos.capital })
+        .from(creditos)
+        .where(eq(creditos.credito_id, creditoId));
+
+      if (!credito) {
+        return { success: false, message: "Crédito no encontrado" };
+      }
+
+      // Contar cuotas atrasadas (vencidas y no pagadas)
+      const hoy = new Date().toISOString().slice(0, 10);
+
+      const cuotasAtrasadas = await db
+        .select({ cuota_id: cuotas_credito.cuota_id })
+        .from(cuotas_credito)
+        .where(
+          and(
+            eq(cuotas_credito.credito_id, creditoId),
+            eq(cuotas_credito.pagado, false),
+            lte(cuotas_credito.fecha_vencimiento, hoy)
+          )
+        );
+
+      const numCuotasAtrasadas = cuotasAtrasadas.length;
+
+      console.log(`📊 Cuotas atrasadas encontradas: ${numCuotasAtrasadas}`);
+
+      if (numCuotasAtrasadas > 0) {
+        // Calcular mora: capital * 1.12% * cuotas_atrasadas
+        const capital = new Big(credito.capital);
+        const porcentaje = new Big("0.0112");
+        const montoMora = capital.times(porcentaje).times(numCuotasAtrasadas);
+
+        console.log(`💰 Monto mora calculado: Q${montoMora.toFixed(2)}`);
+
+        // Crear la mora (esto también pone el crédito en MOROSO)
+        const resultMora = await createMora({
+          credito_id: creditoId,
+          monto_mora: Number(montoMora.toFixed(2)),
+          cuotas_atrasadas: numCuotasAtrasadas,
+        });
+
+        console.log("✅ Resultado createMora:", resultMora);
+      } else {
+        // Si no hay cuotas atrasadas, solo cambiar a ACTIVO
+        await db
+          .update(creditos)
+          .set({ statusCredit: "ACTIVO" })
+          .where(eq(creditos.credito_id, creditoId));
+
+        console.log("✅ Crédito actualizado a ACTIVO (sin cuotas atrasadas)");
+      }
+
+      return { success: true, message: "Convenio eliminado exitosamente" };
+    }
+
+    // Si status = true, solo activar el convenio
+    await db
+      .update(convenios_pago)
       .set({ activo: status, updated_at: new Date() })
       .where(eq(convenios_pago.convenio_id, convenio_id));
-    return { success: true, message: "Convenio status updated successfully" };
+
+    return { success: true, message: "Convenio activado exitosamente" };
   } catch (error) {
     console.error("Error updating convenio status:", error);
-    return { success: false, message: "Error updating convenio status", error };   } }
+    return { success: false, message: "Error updating convenio status", error };
+  }
+}

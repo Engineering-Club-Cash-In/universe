@@ -124,6 +124,7 @@ export function PaymentsTable() {
   const { handleReverse, reversePago } = usePagoForm();
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [isDownloadingExcel, setIsDownloadingExcel] = useState(false);
+  const [isDownloadingAdvisor, setIsDownloadingAdvisor] = useState(false);
   const isMobile = useIsMobile();
   const { investors } = useCatalogs() as {
     investors: Investor[];
@@ -214,22 +215,21 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
       },
       onError: (error: any) => {
         setGenerandoFacturaId(null);
-        
+
         const errorData = error?.response?.data;
-        
+
         if (errorData?.facturasExistentes) {
           // Error específico: Ya tiene facturas
-          alert(
-            `⚠️ ${errorData.message}\n` +
-            `Facturas: ${errorData.facturasExistentes.map((f: any) => `${f.serie}-${f.numero}`).join(", ")}`
-       
-          );
+          toast.warning(errorData.message, {
+            description: `Facturas: ${errorData.facturasExistentes.map((f: any) => `${f.serie}-${f.numero}`).join(", ")}`,
+            duration: 5000,
+          });
         } else if (errorData?.message) {
           // Otros errores del backend
-         alert(`❌ ${errorData.message}` );
+          toast.error(errorData.message);
         } else {
           // Error genérico
-          alert("❌ Error al generar facturas electrónicas");
+          toast.error("Error al generar facturas electrónicas");
         }
       }
     },
@@ -356,16 +356,47 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     }
   };
 
+  const handleDownloadAdvisorExcel = async () => {
+    try {
+      setIsDownloadingAdvisor(true);
+      toast.loading("Generando reporte de asesores...", { id: "advisor-download" });
+
+      const response = await getPagosConInversionistasService({
+        page,
+        pageSize,
+        numeroCredito: sifco || undefined,
+        dia,
+        mes,
+        anio,
+        inversionistaId,
+        usuarioNombre: usuarioNombre || undefined,
+        reportAdvisor: true,
+      });
+
+      if (response.excelUrl) {
+        window.open(response.excelUrl, "_blank");
+        toast.success("Reporte de asesores generado", { id: "advisor-download" });
+      } else {
+        toast.error("No se pudo generar el reporte", { id: "advisor-download" });
+      }
+    } catch (error: any) {
+      console.error("Error al generar reporte asesores:", error);
+      toast.error("Error al generar el reporte", { id: "advisor-download" });
+    } finally {
+      setIsDownloadingAdvisor(false);
+    }
+  };
+
   const handleOpenBoleta = (boleta?: any[] | { urlBoleta?: string } | null) => {
     if (!boleta) {
-      alert("⚠️ No hay boleta disponible para este pago.");
+      toast.warning("No hay boleta disponible para este pago");
       return;
     }
 
     let url;
     if (Array.isArray(boleta)) {
       if (boleta.length === 0) {
-        alert("⚠️ No hay boleta disponible para este pago.");
+        toast.warning("No hay boleta disponible para este pago");
         return;
       }
       const first = boleta[0];
@@ -375,7 +406,7 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
     }
 
     if (!url) {
-      alert("⚠️ Boleta sin URL válida.");
+      toast.warning("Boleta sin URL válida");
       return;
     }
     window.open(url, "_blank");
@@ -600,19 +631,32 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                       ))}
                     </div>
 
-                    {/* Botón Excel */}
-                    <div className="flex justify-end pt-4 border-t border-blue-100">
+                    {/* Botones Excel */}
+                    <div className="flex justify-end gap-3 pt-4 border-t border-blue-100">
                       <Button
-                        onClick={handleDownloadExcel}
-                        disabled={isDownloadingExcel}
+                        onClick={handleDownloadAdvisorExcel}
+                        disabled={isDownloadingAdvisor}
                         size="lg"
-                        className="gap-2 shadow-sm bg-blue-600 hover:bg-blue-700 text-white transition-all"
+                        className="gap-2 shadow-sm bg-green-600 hover:bg-green-700 text-white transition-all"
                       >
                         <Download className="h-5 w-5" />
-                        {isDownloadingExcel
+                        {isDownloadingAdvisor
                           ? "Generando..."
-                          : "Descargar Reporte Excel"}
+                          : "Reporte Asesores"}
                       </Button>
+                      {user?.role === "ADMIN" && (
+                        <Button
+                          onClick={handleDownloadExcel}
+                          disabled={isDownloadingExcel}
+                          size="lg"
+                          className="gap-2 shadow-sm bg-blue-600 hover:bg-blue-700 text-white transition-all"
+                        >
+                          <Download className="h-5 w-5" />
+                          {isDownloadingExcel
+                            ? "Generando..."
+                            : "Descargar Reporte Excel"}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -756,16 +800,32 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             ? "Validando..."
                             : "Validar Pago"}
                     </button>
-<button
-  onClick={() => aplicarPago(pago.pagoId)}
-  disabled={
-    user?.role !== "ADMIN" ||
-    isPending ||
-    pago.validationStatus === "validated" ||
-    !tieneCuentaAsignada(pago)
-  }
->Generar F</button>
-                    {/* 🆕 GENERAR FACTURA */}
+{/* Generar Factura */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setGenerandoFacturaId(pago.pagoId);
+                        handleFacturarPago(pago.pagoId, e);
+                      }}
+                      disabled={
+                        user?.role !== "ADMIN" ||
+                        facturarPago.isPending ||
+                        generandoFacturaId === pago.pagoId
+                      }
+                      className={`font-semibold flex items-center gap-1 ${
+                        user?.role !== "ADMIN"
+                          ? "text-gray-400 cursor-not-allowed opacity-50"
+                          : "text-purple-700 hover:text-purple-900"
+                      }`}
+                      title={
+                        user?.role !== "ADMIN" ? "Solo administradores" : ""
+                      }
+                    >
+                      <Receipt className="w-4 h-4" />
+                      {generandoFacturaId === pago.pagoId
+                        ? "Generando..."
+                        : "Generar Factura"}
+                    </button>
 
                     {/* Revertir */}
                     <button
@@ -906,8 +966,12 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                           value: pago.numeroautorizacion || "—",
                         },
                         {
+                          label: "Fecha Boleta",
+                          value: pago.fechaBoleta ? formatDate(pago.fechaBoleta) : "—",
+                        },
+                        {
                           label: "Registrado por",
-                          value: pago.registerBy || "—",
+                          value: pago.registerByNombre || pago.registerBy || "—",
                         },
                       ]
                         .filter(Boolean)
@@ -1166,6 +1230,47 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
 
                             <DropdownMenuSeparator className="bg-gray-200 my-1" />
 
+                            {/* Generar Factura */}
+                            <DropdownMenuItem
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (user?.role === "ADMIN") {
+                                  setGenerandoFacturaId(pago.pagoId);
+                                  handleFacturarPago(pago.pagoId, e);
+                                }
+                              }}
+                              disabled={
+                                user?.role !== "ADMIN" ||
+                                facturarPago.isPending ||
+                                generandoFacturaId === pago.pagoId
+                              }
+                              className={`cursor-pointer py-2.5 px-3 flex items-center rounded-lg transition ${
+                                user?.role !== "ADMIN"
+                                  ? "opacity-50 text-gray-400 bg-gray-50"
+                                  : "text-purple-700 hover:text-purple-900 hover:bg-purple-50"
+                              }`}
+                            >
+                              <Receipt
+                                className={`w-4 h-4 mr-2 flex-shrink-0 ${
+                                  user?.role !== "ADMIN"
+                                    ? "text-gray-400"
+                                    : "text-purple-600"
+                                }`}
+                              />
+                              <span className="font-semibold">
+                                {generandoFacturaId === pago.pagoId
+                                  ? "Generando..."
+                                  : "Generar Factura"}
+                              </span>
+                              {user?.role !== "ADMIN" && (
+                                <span className="ml-auto text-xs text-gray-400 font-normal">
+                                  Admin
+                                </span>
+                              )}
+                            </DropdownMenuItem>
+
+                            <DropdownMenuSeparator className="bg-gray-200 my-1" />
+
                             {/* Ver Facturas */}
                             <DropdownMenuItem
                               onClick={(e) => {
@@ -1320,8 +1425,12 @@ const handleFacturarPago = (pagoId: number, e?: React.MouseEvent) => {
                             value: pago.numeroautorizacion || "—",
                           },
                           {
+                            label: "Fecha Boleta",
+                            value: pago.fechaBoleta ? formatDate(pago.fechaBoleta) : "—",
+                          },
+                          {
                             label: "Registrado por",
-                            value: pago.registerBy || "—",
+                            value: pago.registerByNombre || pago.registerBy || "—",
                           },
                           {
                             label: "Cuenta Destino",

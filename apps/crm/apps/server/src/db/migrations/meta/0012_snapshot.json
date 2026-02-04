@@ -1,5 +1,5 @@
 {
-  "id": "d06c8119-61f4-480f-a96f-dea7a34c83fa",
+  "id": "b22f92d1-0722-42f5-a670-a4aef82f074d",
   "prevId": "c19e90cb-32c8-46b6-8480-ebbebcada2c5",
   "version": "7",
   "dialect": "postgresql",
@@ -5704,7 +5704,8 @@
         },
         "status": {
           "name": "status",
-          "type": "text",
+          "type": "inspection_360_status",
+          "typeSchema": "public",
           "primaryKey": false,
           "notNull": true
         },
@@ -6939,6 +6940,14 @@
         "panel",
         "camion",
         "microbus"
+      ]
+    },
+    "public.inspection_360_status": {
+      "name": "inspection_360_status",
+      "schema": "public",
+      "values": [
+        "ok",
+        "bad"
       ]
     },
     "public.inspection_status": {

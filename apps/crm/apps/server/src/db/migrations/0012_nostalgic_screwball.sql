@@ -1,6 +1,7 @@
 CREATE TYPE "public"."analysis_status" AS ENUM('not_applicable', 'pending', 'rejected', 'resubmitted', 'approved');--> statement-breakpoint
 CREATE TYPE "public"."credit_category" AS ENUM('Contraseña', 'CV Vehículo', 'CV Vehículo nuevo', 'Fiduciario', 'Hipotecario', 'Vehículo');--> statement-breakpoint
 CREATE TYPE "public"."disbursement_verification_type" AS ENUM('traspaso_realizado', 'documentos_enviados_asesor', 'documentos_firmados_recibidos', 'copia_llave_recibida', 'enganche_validado', 'listo_desembolsar');--> statement-breakpoint
+CREATE TYPE "public"."inspection_360_status" AS ENUM('ok', 'bad');--> statement-breakpoint
 ALTER TYPE "public"."user_role" ADD VALUE 'sales_supervisor' BEFORE 'analyst';--> statement-breakpoint
 ALTER TYPE "public"."user_role" ADD VALUE 'cobros_supervisor' BEFORE 'juridico';--> statement-breakpoint
 ALTER TYPE "public"."lead_status" ADD VALUE 'migrate';--> statement-breakpoint
@@ -113,7 +114,7 @@ CREATE TABLE "vehicle_inspection_360_items" (
 	"inspection_id" uuid NOT NULL,
 	"area" text NOT NULL,
 	"checkpoint" text NOT NULL,
-	"status" text NOT NULL,
+	"status" "inspection_360_status" NOT NULL,
 	"comment" text,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp

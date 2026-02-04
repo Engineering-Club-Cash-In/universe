@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { CoDebtorsView } from "@/components/co-debtors/CoDebtorsView";
+import { ConsolidatedCreditSummary } from "@/components/credit/ConsolidatedCreditSummary";
 import { CreditDetailView } from "@/components/credit/CreditDetailView";
 import { NotesTimeline } from "@/components/notes-timeline";
 import { Badge } from "@/components/ui/badge";
@@ -2166,6 +2167,11 @@ function RouteComponent() {
 											</span>
 										</div>
 									</div>
+
+									{/* Consolidated Credit Analysis Summary */}
+									<ConsolidatedCreditSummary
+										opportunityId={selectedOpportunity.id}
+									/>
 
 									{/* Contracts Section */}
 									{userProfile.data?.role &&

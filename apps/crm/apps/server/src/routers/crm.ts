@@ -4920,4 +4920,161 @@ export const crmRouter = {
 
 			return { success: true, message: "Co-deudor eliminado correctamente" };
 		}),
+
+	// ── Análisis de Capacidad de Pago Consolidado ────────────────────────
+	getConsolidatedCreditAnalysis: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// 1. Obtener la oportunidad con el leadId
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					leadId: opportunities.leadId,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// 2. Obtener análisis del lead (si existe)
+			let leadAnalysis = null;
+			if (opportunity.leadId) {
+				const [analysis] = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, opportunity.leadId))
+					.limit(1);
+				leadAnalysis = analysis || null;
+			}
+
+			// 3. Obtener co-deudores de la oportunidad
+			const coDebtorsList = await db
+				.select()
+				.from(coDebtors)
+				.where(eq(coDebtors.opportunityId, input.opportunityId));
+
+			// 4. Obtener análisis de cada co-deudor
+			const coDebtorsWithAnalysis = await Promise.all(
+				coDebtorsList.map(async (coDebtor) => {
+					const [analysis] = await db
+						.select()
+						.from(creditAnalysis)
+						.where(eq(creditAnalysis.coDebtorId, coDebtor.id))
+						.limit(1);
+					return {
+						coDebtor,
+						analysis: analysis || null,
+					};
+				}),
+			);
+
+			// 5. Calcular totales consolidados
+			const parseDecimal = (value: string | null | undefined): number => {
+				if (!value) return 0;
+				const num = Number.parseFloat(value);
+				return Number.isNaN(num) ? 0 : num;
+			};
+
+			// Datos del lead
+			const leadData = {
+				monthlyFixedIncome: parseDecimal(leadAnalysis?.monthlyFixedIncome),
+				monthlyVariableIncome: parseDecimal(leadAnalysis?.monthlyVariableIncome),
+				monthlyFixedExpenses: parseDecimal(leadAnalysis?.monthlyFixedExpenses),
+				monthlyVariableExpenses: parseDecimal(leadAnalysis?.monthlyVariableExpenses),
+				economicAvailability: parseDecimal(leadAnalysis?.economicAvailability),
+				minPayment: parseDecimal(leadAnalysis?.minPayment),
+				maxPayment: parseDecimal(leadAnalysis?.maxPayment),
+				adjustedPayment: parseDecimal(leadAnalysis?.adjustedPayment),
+				maxCreditAmount: parseDecimal(leadAnalysis?.maxCreditAmount),
+				hasAnalysis: leadAnalysis?.analyzedAt != null,
+			};
+
+			// Suma de co-deudores
+			const coDebtorsTotals = coDebtorsWithAnalysis.reduce(
+				(acc, { analysis }) => {
+					if (analysis?.analyzedAt) {
+						acc.monthlyFixedIncome += parseDecimal(analysis.monthlyFixedIncome);
+						acc.monthlyVariableIncome += parseDecimal(analysis.monthlyVariableIncome);
+						acc.monthlyFixedExpenses += parseDecimal(analysis.monthlyFixedExpenses);
+						acc.monthlyVariableExpenses += parseDecimal(analysis.monthlyVariableExpenses);
+						acc.economicAvailability += parseDecimal(analysis.economicAvailability);
+						acc.minPayment += parseDecimal(analysis.minPayment);
+						acc.maxPayment += parseDecimal(analysis.maxPayment);
+						acc.adjustedPayment += parseDecimal(analysis.adjustedPayment);
+						acc.maxCreditAmount += parseDecimal(analysis.maxCreditAmount);
+						acc.count += 1;
+					}
+					return acc;
+				},
+				{
+					monthlyFixedIncome: 0,
+					monthlyVariableIncome: 0,
+					monthlyFixedExpenses: 0,
+					monthlyVariableExpenses: 0,
+					economicAvailability: 0,
+					minPayment: 0,
+					maxPayment: 0,
+					adjustedPayment: 0,
+					maxCreditAmount: 0,
+					count: 0,
+				},
+			);
+
+			// Totales consolidados (lead + co-deudores)
+			const consolidated = {
+				monthlyFixedIncome: leadData.monthlyFixedIncome + coDebtorsTotals.monthlyFixedIncome,
+				monthlyVariableIncome: leadData.monthlyVariableIncome + coDebtorsTotals.monthlyVariableIncome,
+				monthlyFixedExpenses: leadData.monthlyFixedExpenses + coDebtorsTotals.monthlyFixedExpenses,
+				monthlyVariableExpenses: leadData.monthlyVariableExpenses + coDebtorsTotals.monthlyVariableExpenses,
+				economicAvailability: leadData.economicAvailability + coDebtorsTotals.economicAvailability,
+				minPayment: leadData.minPayment + coDebtorsTotals.minPayment,
+				maxPayment: leadData.maxPayment + coDebtorsTotals.maxPayment,
+				adjustedPayment: leadData.adjustedPayment + coDebtorsTotals.adjustedPayment,
+				maxCreditAmount: leadData.maxCreditAmount + coDebtorsTotals.maxCreditAmount,
+				totalIncome:
+					leadData.monthlyFixedIncome +
+					leadData.monthlyVariableIncome +
+					coDebtorsTotals.monthlyFixedIncome +
+					coDebtorsTotals.monthlyVariableIncome,
+				totalExpenses:
+					leadData.monthlyFixedExpenses +
+					leadData.monthlyVariableExpenses +
+					coDebtorsTotals.monthlyFixedExpenses +
+					coDebtorsTotals.monthlyVariableExpenses,
+			};
+
+			return {
+				lead: {
+					hasAnalysis: leadData.hasAnalysis,
+					...leadData,
+				},
+				coDebtors: coDebtorsWithAnalysis.map(({ coDebtor, analysis }) => ({
+					id: coDebtor.id,
+					fullName: coDebtor.fullName,
+					hasAnalysis: analysis?.analyzedAt != null,
+					monthlyFixedIncome: parseDecimal(analysis?.monthlyFixedIncome),
+					monthlyVariableIncome: parseDecimal(analysis?.monthlyVariableIncome),
+					monthlyFixedExpenses: parseDecimal(analysis?.monthlyFixedExpenses),
+					monthlyVariableExpenses: parseDecimal(analysis?.monthlyVariableExpenses),
+					economicAvailability: parseDecimal(analysis?.economicAvailability),
+					minPayment: parseDecimal(analysis?.minPayment),
+					maxPayment: parseDecimal(analysis?.maxPayment),
+					adjustedPayment: parseDecimal(analysis?.adjustedPayment),
+					maxCreditAmount: parseDecimal(analysis?.maxCreditAmount),
+				})),
+				coDebtorsCount: coDebtorsList.length,
+				coDebtorsWithAnalysisCount: coDebtorsTotals.count,
+				consolidated,
+				hasAnyAnalysis: leadData.hasAnalysis || coDebtorsTotals.count > 0,
+			};
+		}),
 };

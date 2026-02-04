@@ -94,6 +94,7 @@ export const appRouter = {
 	createCoDebtor: crmRouter.createCoDebtor,
 	updateCoDebtor: crmRouter.updateCoDebtor,
 	deleteCoDebtor: crmRouter.deleteCoDebtor,
+	getConsolidatedCreditAnalysis: crmRouter.getConsolidatedCreditAnalysis,
 
 	// Bank Analysis routes (Análisis de estados de cuenta)
 	analyzeBankStatements: bankAnalysisRouter.analyzeBankStatements,

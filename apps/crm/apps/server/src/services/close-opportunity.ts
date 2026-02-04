@@ -285,6 +285,17 @@ function parseRubros(
 }
 
 /**
+ * Cleans a NIT string by removing dashes, spaces, and non-alphanumeric characters
+ * @param nit - The NIT string to clean
+ * @returns Cleaned NIT with only alphanumeric characters, or undefined if empty
+ */
+function cleanNit(nit: string | null | undefined): string | undefined {
+	if (!nit) return undefined;
+	const cleaned = nit.replace(/[-\s]/g, "").trim();
+	return cleaned || undefined;
+}
+
+/**
  * Generates a unique credit number using UUID
  * Format: CRM-{uuid} (e.g., CRM-550e8400-e29b-41d4-a716-446655440000)
  */
@@ -762,7 +773,7 @@ async function createCredit(
 			seguro_10_cuotas: seguro,
 			gps: gps,
 			categoria: opportunity.categoria ?? undefined,
-			nit: opportunity.nit ?? undefined,
+			nit: cleanNit(opportunity.nit),
 			royalti: royalti,
 			porcentaje_royalti: porcentajeRoyalti,
 			reserva: reserva,
@@ -1109,7 +1120,7 @@ export async function closeOpportunity(
 
 			generateInvoicesInBackground({
 				opportunityId,
-				nit: opportunity.nit || "CF",
+				nit: cleanNit(opportunity.nit) || "CF",
 				royalti,
 				quotation,
 				userId,

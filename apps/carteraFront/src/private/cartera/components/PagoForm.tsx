@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar, AlertCircle } from "lucide-react";
+import { DollarSign, Percent, Info, FileText, Building2, CheckCircle2, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { MiniCardCredito } from "./cardInfo";
 import { OpcionesExcesoModal } from "./excessModal";
@@ -89,11 +89,18 @@ export function PagoForm() {
   const [modalConfirmacionOpen, setModalConfirmacionOpen] = useState(false);
 
   // 🎯 Handler para abrir el modal
-  const handleAbrirConfirmacion = (e: React.MouseEvent) => {
+  const handleAbrirConfirmacion = async (e: React.MouseEvent) => {
     e.preventDefault();
 
-    // Validar antes de abrir el modal
-    if (!formik.isValid && Object.keys(formik.errors).length > 0) {
+    // Validar explícitamente antes de abrir el modal
+    const errors = await formik.validateForm();
+
+    if (Object.keys(errors).length > 0) {
+      // Marcar todos los campos como touched para mostrar errores inline
+      formik.setTouched(
+        Object.keys(errors).reduce((acc, key) => ({ ...acc, [key]: true }), {})
+      );
+
       const nombresAmigables: Record<string, string> = {
         monto_boleta: "Monto Boleta",
         fecha_boleta: "Fecha Boleta",
@@ -103,7 +110,7 @@ export function PagoForm() {
         usuario_id: "Usuario",
       };
 
-      const errores = Object.entries(formik.errors)
+      const errores = Object.entries(errors)
         .map(([campo, mensaje]) => {
           const nombreCampo = nombresAmigables[campo] || campo;
           return `• ${nombreCampo}: ${mensaje}`;
@@ -523,12 +530,12 @@ export function PagoForm() {
                   value={formik.values.banco_id?.toString() || ""}
                   onValueChange={(value) => {
                     formik.setFieldValue("banco_id", Number(value));
-                    formik.setFieldTouched("banco_id", true);
+                    formik.setFieldTouched("banco_id", true, false);
                   }}
                   disabled={loadingBancos}
                 >
                   <SelectTrigger className={`w-full border rounded-lg px-4 py-3 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg bg-white [&>span]:text-gray-900 ${
-                    formik.errors.banco_id && formik.touched.banco_id
+                    formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id
                       ? "border-red-500 focus:ring-red-500"
                       : "border-gray-300"
                   }`}>
@@ -549,7 +556,7 @@ export function PagoForm() {
                     ))}
                   </SelectContent>
                 </Select>
-                {formik.errors.banco_id && formik.touched.banco_id && (
+                {formik.errors.banco_id && formik.touched.banco_id && !formik.values.banco_id && (
                   <div className="text-red-500 text-sm mt-1">
                     {formik.errors.banco_id}
                   </div>
@@ -593,10 +600,10 @@ export function PagoForm() {
                   value={formik.values.fecha_boleta}
                   onChange={(value) => {
                     formik.setFieldValue("fecha_boleta", value);
-                    formik.setFieldTouched("fecha_boleta", true);
+                    formik.setFieldTouched("fecha_boleta", true, false);
                   }}
                 />
-                {formik.errors.fecha_boleta && formik.touched.fecha_boleta && (
+                {formik.errors.fecha_boleta && formik.touched.fecha_boleta && formik.values.fecha_boleta === "" && (
                   <div className="text-red-500 text-sm mt-1">
                     {formik.errors.fecha_boleta}
                   </div>

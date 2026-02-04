@@ -11,8 +11,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useFormik } from "formik";
+import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import { useUpdateCredit } from "../hooks/updateCredit";
+import { useRecalculateQuota } from "../hooks/recalculateQuota";
 import type {
   InversionistaPayload,
   UpdateCreditBody,
@@ -47,6 +49,7 @@ const creditFields = [
   "otros",
   "seguro_10_cuotas",
   "membresias_pago",
+  "formato_credito",
 ] as const;
 
 type CreditField = (typeof creditFields)[number];
@@ -62,6 +65,22 @@ const fieldLabels: Record<CreditField, string> = {
   seguro_10_cuotas: "Seguro 10 cuotas",
   membresias_pago: "Membresías pago",
   asesor_id: "Asesor",
+  formato_credito: "Formato Crédito",
+};
+
+const userFields = [
+  "nombre",
+  "nit",
+  "direccion",
+  "saldo_a_favor",
+] as const;
+
+type UserField = (typeof userFields)[number];
+const userFieldLabels: Record<UserField, string> = {
+  nombre: "Nombre",
+  nit: "NIT",
+  direccion: "Dirección",
+  saldo_a_favor: "Saldo a Favor (Q)",
 };
 
 export function ModalEditCredit({
@@ -74,6 +93,7 @@ export function ModalEditCredit({
   advisorsOptions,
 }: ModalEditCreditProps) {
   const { mutate: updateCredit, isPending } = useUpdateCredit();
+  const { mutate: recalculateQuota, isPending: isRecalculating } = useRecalculateQuota();
 
   // Preparamos los valores iniciales de inversionistas asegurando que siempre tienen todos los campos necesarios
   const parsedInvestors =
@@ -110,16 +130,13 @@ export function ModalEditCredit({
     },
     onSubmit: (values) => {
       if (Object.keys(formik.errors).length > 0) {
-        window.alert(
-          "Por favor corrige los siguientes errores:\n\n" +
-            Object.entries(formik.errors)
-              .map(([field, error]) =>
-                Array.isArray(error)
-                  ? error.map((e) => `- ${field}: ${e}`).join("\n")
-                  : `- ${field}: ${error}`
-              )
-              .join("\n")
-        );
+        Object.entries(formik.errors).forEach(([, error]) => {
+          if (Array.isArray(error)) {
+            error.forEach((e) => toast.error(String(e)));
+          } else {
+            toast.error(String(error));
+          }
+        });
         return;
       }
       const payload: UpdateCreditBody = {
@@ -141,6 +158,17 @@ export function ModalEditCredit({
         seguro_10_cuotas: Number(values.seguro_10_cuotas ?? 0),
         membresias_pago: Number(values.membresias_pago ?? 0),
 
+        // Campos de usuario
+        nombre: values.nombre ?? undefined,
+        nit: values.nit ?? undefined,
+        direccion: values.direccion ?? undefined,
+        saldo_a_favor: values.saldo_a_favor !== undefined && values.saldo_a_favor !== null
+          ? Number(values.saldo_a_favor)
+          : undefined,
+
+        // Formato de crédito
+        formato_credito: values.formato_credito ?? undefined,
+
         inversionistas: values.investors.map((i: InvestorItem) => ({
           inversionista_id: Number(i.inversionista_id),
           monto_aportado: Number(i.monto_aportado),
@@ -157,7 +185,7 @@ export function ModalEditCredit({
           const mensaje =
             error?.response?.data?.message ||
             "Ocurrió un error inesperado al guardar los cambios.";
-          window.alert("Error en el guardado:\n\n" + mensaje);
+          toast.error(mensaje);
         },
       });
     },
@@ -203,6 +231,25 @@ export function ModalEditCredit({
           className="flex-1 overflow-y-auto px-6 pb-4"
           style={{ maxHeight: "66vh", minHeight: 0 }}
         >
+          <Button
+            type="button"
+            disabled={isRecalculating || !initialValues?.numero_credito_sifco}
+            className="w-full mb-4 bg-green-600 text-white font-bold hover:bg-green-700"
+            onClick={() => {
+              const sifco = String(initialValues?.numero_credito_sifco ?? "");
+              if (!sifco) return;
+              recalculateQuota(
+                { numero_credito_sifco: sifco },
+                {
+                  onSuccess: () => {
+                    onSuccess();
+                  },
+                }
+              );
+            }}
+          >
+            {isRecalculating ? "Recalculando..." : "Recalcular Cuota"}
+          </Button>
           <form
             onSubmit={formik.handleSubmit}
             className="flex flex-col"
@@ -239,6 +286,27 @@ export function ModalEditCredit({
                     );
                   }
 
+                  // ✅ Renderizado especial para formato_credito como select
+                  if (name === "formato_credito") {
+                    return (
+                      <div key={name} className="flex flex-col gap-1">
+                        <Label className="text-gray-700 font-medium">
+                          {fieldLabels[name]}
+                        </Label>
+                        <select
+                          name={name}
+                          value={formik.values[name] ?? ""}
+                          onChange={formik.handleChange}
+                          className="w-full border rounded-lg px-3 py-2 bg-blue-50 border-blue-200 text-gray-800 h-10"
+                        >
+                          <option value="">Seleccione formato</option>
+                          <option value="Pool">Pool</option>
+                          <option value="Individual">Individual</option>
+                        </select>
+                      </div>
+                    );
+                  }
+
                   // ✅ Renderizado normal para los demás campos
                   return (
                     <div key={name} className="flex flex-col gap-1">
@@ -251,6 +319,7 @@ export function ModalEditCredit({
                             "observaciones",
                             "no_poliza",
                             "numero_credito_sifco",
+                            "formato_credito",
                           ].includes(name)
                             ? "text"
                             : "number"
@@ -264,6 +333,7 @@ export function ModalEditCredit({
                             "observaciones",
                             "no_poliza",
                             "numero_credito_sifco",
+                            "formato_credito",
                           ].includes(name)
                             ? undefined
                             : 0
@@ -273,6 +343,31 @@ export function ModalEditCredit({
                     </div>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Datos del usuario */}
+            <div className="space-y-4 mt-4">
+              <h3 className="text-lg font-bold text-blue-800 mb-2">
+                Datos del Usuario
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {userFields.map((name) => (
+                  <div key={name} className="flex flex-col gap-1">
+                    <Label className="text-gray-700 font-medium">
+                      {userFieldLabels[name]}
+                    </Label>
+                    <Input
+                      type={name === "saldo_a_favor" ? "number" : "text"}
+                      name={name}
+                      value={formik.values[name] ?? ""}
+                      onChange={formik.handleChange}
+                      className="bg-blue-50 border-blue-200 text-gray-800"
+                      min={name === "saldo_a_favor" ? 0 : undefined}
+                      step="any"
+                    />
+                  </div>
+                ))}
               </div>
             </div>
 

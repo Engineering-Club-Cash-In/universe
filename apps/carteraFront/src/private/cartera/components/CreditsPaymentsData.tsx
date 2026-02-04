@@ -34,13 +34,14 @@ import { useCatalogs } from "../hooks/catalogs";
 import type { Investor } from "../services/services";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModalCancelCredit } from "./modalCreditCancel";
-import { openReportInNewTab, useActivateCredit } from "../hooks/cancelCredit";
+import { openReportInNewTab, useActivateCredit, useToggleCancelacionActivo } from "../hooks/cancelCredit";
 import { useIsMobile } from "../hooks/useIsMobile";
 import { useAuth } from "@/Provider/authProvider";
 import { ModalCreateMora } from "./createMoraModal";
 import { useReport } from "../hooks/reports";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { usePaymentAgreements,useTogglePaymentAgreementStatus } from "../hooks/paymentagreement";
+import { toast } from "sonner";
 
 export function ListaCreditosPagos() {
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
@@ -146,12 +147,13 @@ export function ListaCreditosPagos() {
         onSuccess: (response) => {
           if (response.url) {
             openReportInNewTab(response.url);
+            toast.success("Reporte generado correctamente");
           } else {
-            alert("No se generó la URL del reporte");
+            toast.error("No se generó la URL del reporte");
           }
         },
         onError: (err: any) => {
-          alert(err?.message || `Error al generar reporte ${reportType}`);
+          toast.error(err?.message || `Error al generar reporte ${reportType}`);
         },
       }
     );
@@ -162,7 +164,7 @@ export function ListaCreditosPagos() {
     reportCancelationIntern.status === "pending" ||
     reportCostDetail.status === "pending";
 
-  const handleOpenEdit = (credit: any, inversionistas: any) => {
+  const handleOpenEdit = (credit: any, inversionistas: any, usuario?: any) => {
     console.log(credit);
     setCreditToEdit({
       capital: credit.capital,
@@ -178,6 +180,11 @@ export function ListaCreditosPagos() {
       membresias_pago: credit.membresias_pago ?? 0,
       gps: credit.gps ?? 0,
       asesor_id: credit.asesor_id,
+      formato_credito: credit.formato_credito ?? "",
+      nombre: usuario?.nombre ?? (usuario?.nombres ? `${usuario.nombres} ${usuario.apellidos ?? ""}`.trim() : ""),
+      nit: usuario?.nit ?? "",
+      direccion: usuario?.direccion ?? "",
+      saldo_a_favor: usuario?.saldo_a_favor ?? 0,
     });
 
     setInvestorsToEdit(
@@ -208,6 +215,7 @@ export function ListaCreditosPagos() {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedCreditId, setSelectedCreditId] = useState<number | null>(null);
   const activateCreditMutation = useActivateCredit();
+  const toggleCancelacionMutation = useToggleCancelacionActivo();
 
   // Cuando das click en el botón, setea el crédito a cancelar y abre el modal
   const handleOpenModal = (creditId: number) => {
@@ -516,12 +524,13 @@ export function ListaCreditosPagos() {
               if (response.data && "excelUrl" in response.data) {
                 const url = (response.data as any).excelUrl;
                 window.open(url, "_blank");
+                toast.success("Excel generado correctamente");
               } else {
-                alert("No se pudo generar el Excel 😢");
+                toast.error("No se pudo generar el Excel");
               }
             } catch (err) {
               console.error("❌ Error generando Excel:", err);
-              alert("Error al generar el Excel");
+              toast.error("Error al generar el Excel");
             } finally {
               handleExcel(false);
             }
@@ -559,6 +568,10 @@ export function ListaCreditosPagos() {
           user={user}
           canViewReports={canViewReports}
           canCreateConvenio={canCreateConvenio}
+          canCancel={canCancel}
+          canActivate={canActivate}
+          toggleCancelacionMutation={toggleCancelacionMutation}
+          refetch={refetch}
         />
       ) : (
         <DesktopView
@@ -574,6 +587,7 @@ export function ListaCreditosPagos() {
           setReportModalOpen={setReportModalOpen}
           handleActivarConvenio={handleActivarConvenio}
           activateCreditMutation={activateCreditMutation}
+          toggleCancelacionMutation={toggleCancelacionMutation}
           user={user}
           canViewReports={canViewReports}
           canEdit={canEdit}
@@ -581,6 +595,7 @@ export function ListaCreditosPagos() {
           canActivate={canActivate}
           canViewPayments={canViewPayments}
           canCreateConvenio={canCreateConvenio}
+          refetch={refetch}
         />
       )}
 
@@ -825,10 +840,10 @@ export function ListaCreditosPagos() {
 // 🆕 Componente para mostrar info de convenio
 // 🆕 Componente para mostrar info de convenio
 // 🆕 Componente para mostrar info de convenio
-function ConvenioInfo({ creditId }: { creditId: number }) {
+function ConvenioInfo({ creditId, isAdmin }: { creditId: number; isAdmin: boolean }) {
 
   // Usamos el hook para traer los convenios de este crédito
-  const { data, isLoading } = usePaymentAgreements(
+  const { data, isLoading, refetch } = usePaymentAgreements(
     { credit_id: creditId },
     { enabled: !!creditId }
   );
@@ -837,12 +852,20 @@ function ConvenioInfo({ creditId }: { creditId: number }) {
   // 🆕 Hook para toggle del convenio
   const toggleMutation = useTogglePaymentAgreementStatus();
 
-  // 🆕 Handler para activar/desactivar convenio
-  const handleToggleConvenio = (convenioId: number, activo: boolean) => {
-    toggleMutation.mutate({
-      convenio_id: convenioId,
-      activo: !activo, // Invertimos el estado actual
-    });
+  // 🆕 Handler para activar convenio
+  const handleActivarConvenio = (convenioId: number) => {
+    toggleMutation.mutate(
+      { convenio_id: convenioId, activo: true },
+      { onSuccess: () => refetch() }
+    );
+  };
+
+  // 🆕 Handler para rechazar/desactivar convenio
+  const handleRechazarConvenio = (convenioId: number) => {
+    toggleMutation.mutate(
+      { convenio_id: convenioId, activo: false },
+      { onSuccess: () => refetch() }
+    );
   };
 
   if (isLoading) {
@@ -864,33 +887,55 @@ function ConvenioInfo({ creditId }: { creditId: number }) {
 
   return (
     <div className="bg-orange-50 rounded-2xl p-4">
-      {/* Header con botón */}
+      {/* Header con botones */}
       <div className="flex items-center justify-between mb-3">
         <h4 className="text-lg font-extrabold text-orange-800">
           Detalles del Convenio de Pago
         </h4>
-        <Button
-          variant="outline"
-          size="sm"
-          className={`${
-            convenio.activo
-              ? "bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
-              : "bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
-          } font-semibold`}
-          onClick={() => handleToggleConvenio(convenio.convenio_id, convenio.activo)}
-          disabled={toggleMutation.isPending}
-        >
-          {toggleMutation.isPending ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin mr-1" />
-              Procesando...
-            </>
-          ) : convenio.activo ? (
-            "🔴 Desactivar"
-          ) : (
-            "✅ Activar"
-          )}
-        </Button>
+        {/* Solo admin puede ver estos botones */}
+        {isAdmin && (
+          <div className="flex gap-2">
+            {/* Botón Activar - deshabilitado si ya está activo */}
+            <Button
+              variant="outline"
+              size="sm"
+              className={`font-semibold ${
+                convenio.activo
+                  ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed"
+                  : "bg-green-50 hover:bg-green-100 text-green-700 border-green-300"
+              }`}
+              onClick={() => handleActivarConvenio(convenio.convenio_id)}
+              disabled={toggleMutation.isPending || convenio.activo}
+            >
+              {toggleMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                  ...
+                </>
+              ) : (
+                "✅ Activar"
+              )}
+            </Button>
+
+            {/* Botón Rechazar - siempre habilitado */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="font-semibold bg-red-50 hover:bg-red-100 text-red-700 border-red-300"
+              onClick={() => handleRechazarConvenio(convenio.convenio_id)}
+              disabled={toggleMutation.isPending}
+            >
+              {toggleMutation.isPending ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                  ...
+                </>
+              ) : (
+                "🔴 Rechazar"
+              )}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 text-center">
@@ -969,6 +1014,10 @@ function MobileView({
   user,
   canViewReports,
   canCreateConvenio,
+  canCancel,
+  canActivate,
+  toggleCancelacionMutation,
+  refetch,
 }: any) {
   return (
     <div className="space-y-4">
@@ -1047,20 +1096,46 @@ function MobileView({
             >
               <Eye className="w-4 h-4 mr-1" /> Ver pagos
             </Button>
-            <Button
-              variant="outline"
-              className="text-red-700 border-red-300 hover:bg-red-50"
-              onClick={() => handleOpenModal(item.creditos.credito_id)}
-            >
-              <XCircle className="w-4 h-4 mr-1" /> Cancelar
-            </Button>
+            {canCancel(item.creditos.statusCredit) && (
+              <Button
+                variant="outline"
+                className="text-red-700 border-red-300 hover:bg-red-50"
+                onClick={() => handleOpenModal(item.creditos.credito_id)}
+              >
+                <XCircle className="w-4 h-4 mr-1" /> Cancelar
+              </Button>
+            )}
+            {canActivate(item.creditos.statusCredit) && user?.role === "ADMIN" && (
+              <Button
+                variant="outline"
+                className="text-green-700 border-green-300 hover:bg-green-50"
+                onClick={() =>
+                  toggleCancelacionMutation.mutate(
+                    { creditId: item.creditos.credito_id, activo: true },
+                    {
+                      onSuccess: () => {
+                        toast.success("Cancelación activada correctamente");
+                        refetch();
+                      },
+                      onError: (err: any) => {
+                        toast.error(err?.message || "Error al activar cancelación");
+                      }
+                    }
+                  )
+                }
+                disabled={toggleCancelacionMutation.isPending}
+              >
+                <FileCheck className="w-4 h-4 mr-1" />
+                {toggleCancelacionMutation.isPending ? "Activando..." : "Activar Cancelación"}
+              </Button>
+            )}
             {user?.role === "ADMIN" && (
               <>
                 <Button
                   variant="outline"
                   className="text-yellow-700 border-yellow-300 hover:bg-yellow-50"
                   onClick={() =>
-                    handleOpenEdit(item.creditos, item.inversionistas)
+                    handleOpenEdit(item.creditos, item.inversionistas, item.usuarios)
                   }
                 >
                   <Pencil className="w-4 h-4 mr-1" /> Editar
@@ -1103,7 +1178,7 @@ function MobileView({
 
               {/* 🆕 Info de convenio si está EN_CONVENIO */}
               {item.creditos.statusCredit === "EN_CONVENIO" && (
-                <ConvenioInfo creditId={item.creditos.credito_id} />
+                <ConvenioInfo creditId={item.creditos.credito_id} isAdmin={user?.role === "ADMIN"} />
               )}
 
               {/* Mora */}
@@ -1148,6 +1223,7 @@ function DesktopView({
   setReportModalOpen,
   handleActivarConvenio,
   activateCreditMutation,
+  toggleCancelacionMutation,
   user,
   canViewReports,
   canEdit,
@@ -1155,6 +1231,7 @@ function DesktopView({
   canActivate,
   canViewPayments,
   canCreateConvenio,
+  refetch,
 }: any) {
   return (
 <div className="w-full max-w-7xl mx-auto">
@@ -1268,7 +1345,8 @@ function DesktopView({
                               onClick={() =>
                                 handleOpenEdit(
                                   item.creditos,
-                                  item.inversionistas
+                                  item.inversionistas,
+                                  item.usuarios
                                 )
                               }
                             >
@@ -1277,8 +1355,7 @@ function DesktopView({
                             </Button>
                           )}
 
-                        {canCancel(item.creditos.statusCredit) &&
-                          user?.role === "ADMIN" && (
+                        {canCancel(item.creditos.statusCredit) && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -1324,20 +1401,56 @@ function DesktopView({
 
                         {canActivate(item.creditos.statusCredit) &&
                           user?.role === "ADMIN" && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
-                              onClick={() =>
-                                activateCreditMutation.mutate({
-                                  creditId: item.creditos.credito_id,
-                                  accion: "ACTIVAR",
-                                })
-                              }
-                            >
-                              <RefreshCw className="w-4 h-4" />
-                              Activar
-                            </Button>
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex items-center gap-1 text-green-700 border-green-300 hover:bg-green-50"
+                                onClick={() =>
+                                  toggleCancelacionMutation.mutate(
+                                    { creditId: item.creditos.credito_id, activo: true },
+                                    {
+                                      onSuccess: () => {
+                                        toast.success("Cancelación activada correctamente");
+                                        refetch();
+                                      },
+                                      onError: (err: any) => {
+                                        toast.error(err?.message || "Error al activar cancelación");
+                                      }
+                                    }
+                                  )
+                                }
+                                disabled={toggleCancelacionMutation.isPending}
+                              >
+                                <FileCheck className="w-4 h-4" />
+                                {toggleCancelacionMutation.isPending ? "Activando..." : "Activar Cancelación"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex items-center gap-1 text-blue-700 border-blue-300 hover:bg-blue-50"
+                                onClick={() =>
+                                  activateCreditMutation.mutate(
+                                    {
+                                      creditId: item.creditos.credito_id,
+                                      accion: "ACTIVAR",
+                                    },
+                                    {
+                                      onSuccess: () => {
+                                        toast.success("Crédito reactivado correctamente");
+                                        refetch();
+                                      },
+                                      onError: (err: any) => {
+                                        toast.error(err?.message || "Error al reactivar crédito");
+                                      }
+                                    }
+                                  )
+                                }
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                Reactivar Crédito
+                              </Button>
+                            </>
                           )}
 
                         {(canEdit(item.creditos.statusCredit) ||
@@ -1367,7 +1480,7 @@ function DesktopView({
                       {/* 🆕 Info de convenio si está EN_CONVENIO */}
                       {item.creditos.statusCredit === "EN_CONVENIO" && (
                         <div className="col-span-full">
-                          <ConvenioInfo creditId={item.creditos.credito_id} />
+                          <ConvenioInfo creditId={item.creditos.credito_id} isAdmin={user?.role === "ADMIN"} />
                         </div>
                       )}
 

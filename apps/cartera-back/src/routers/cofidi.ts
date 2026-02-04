@@ -1,6 +1,7 @@
 // src/controllers/dte.controller.ts
 
 import { Elysia, t } from "elysia";
+import jwt from "jsonwebtoken";
 import { SATClientService } from "../cofidi/satClientService";
 import { DTEService } from "../cofidi/dteService";
 import { generarHTMLFacturaPro } from "../cofidi/functions";
@@ -13,9 +14,11 @@ import {
   pagos_credito_inversionistas,
   usuarios,
 } from "../database/db";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, sql } from "drizzle-orm";
 import { NITSoapClient } from "../cofidi/nitGenerator";
 import { SAT_CONFIG, CLUB_CASHIN_CONFIG, COFIDI_CONFIG } from "../utils/functions/const";
+
+const JWT_SECRET = process.env.JWT_SECRET || "supersecreto";
 
 function generarIdInternoRandom(): string {
   return Math.floor(10000000 + Math.random() * 90000000).toString();
@@ -83,6 +86,7 @@ if (facturasExistentes.length > 0) {
           abono_gps: pagos_credito.abono_gps,
           membresias_pago: pagos_credito.membresias_pago,
           mora: pagos_credito.mora,
+          otros: pagos_credito.otros,
 
           abono_interes: pagos_credito.abono_interes,
           abono_iva_12: pagos_credito.abono_iva_12,
@@ -175,6 +179,16 @@ if (facturasExistentes.length > 0) {
       const Big = (await import("big.js")).default;
       Big.DP = 20;
       Big.RM = Big.roundHalfUp;
+
+      // 🔍 DEBUG: Ver qué valores tiene el pago
+      console.log("\n🔍 ========== DEBUG VALORES DEL PAGO ==========");
+      console.log(`   📦 mora: "${pagoData.mora}" (tipo: ${typeof pagoData.mora})`);
+      console.log(`   📦 abono_seguro: "${pagoData.abono_seguro}" (tipo: ${typeof pagoData.abono_seguro})`);
+      console.log(`   📦 abono_gps: "${pagoData.abono_gps}" (tipo: ${typeof pagoData.abono_gps})`);
+      console.log(`   📦 membresias_pago: "${pagoData.membresias_pago}" (tipo: ${typeof pagoData.membresias_pago})`);
+      console.log(`   📦 abono_interes: "${pagoData.abono_interes}"`);
+      console.log(`   📦 abono_iva_12: "${pagoData.abono_iva_12}"`);
+      console.log("===============================================\n");
 
       // ============================================
       // 🔥 FUNCIÓN HELPER PARA CALCULAR IVA CORRECTO
@@ -285,16 +299,12 @@ if (facturasExistentes.length > 0) {
         } catch (error: any) {
           console.error(`   ❌ Error factura mora:`, error.message);
 
-          set.status = 500;
-          return {
-            success: false,
-            error: error.message || "Error al generar factura de mora",
-            detalles: {
-              tipo_factura: "MORA",
-              pago_id,
-              error_original: error.stack,
-            },
-          };
+          // 🔥 Ya no retorna - agrega el error y continúa con las demás facturas
+          facturasGeneradas.push({
+            tipo: "ERROR",
+            concepto: "MORA",
+            error: error.message,
+          });
         }
       }
 
@@ -448,16 +458,92 @@ if (facturasExistentes.length > 0) {
         } catch (error: any) {
           console.error(`   ❌ Error factura otros servicios:`, error.message);
 
-          set.status = 500;
-          return {
-            success: false,
-            error: error.message || "Error al generar factura de otros servicios",
-            detalles: {
-              tipo_factura: "OTROS_SERVICIOS",
-              pago_id,
-              error_original: error.stack,
-            },
-          };
+          // 🔥 Ya no retorna - agrega el error y continúa con las demás facturas
+          facturasGeneradas.push({
+            tipo: "ERROR",
+            concepto: "OTROS_SERVICIOS",
+            error: error.message,
+          });
+        }
+      }
+
+      // ============================================
+      // 5.5️⃣ FACTURA DE OTROS (INDEPENDIENTE)
+      // ============================================
+      if (pagoData.otros && parseFloat(pagoData.otros) > 0) {
+        console.log("\n💼 Generando factura de OTROS...");
+
+        const calcOtros = calcularIvaExacto(parseFloat(pagoData.otros));
+
+        console.log(`   📦 OTROS: Q${calcOtros.total}`);
+        console.log(`      Precio: Q${calcOtros.precioUnitario}`);
+        console.log(`      Base: Q${calcOtros.montoGravable}`);
+        console.log(`      IVA: Q${calcOtros.montoImpuesto}`);
+
+        const itemsOtros = [
+          {
+            numeroLinea: 1,
+            bienOServicio: "B",
+            cantidad: 1,
+            unidadMedida: "UND",
+            descripcion: "GASTOS VARIOS",
+            precioUnitario: calcOtros.precioUnitario,
+            precio: calcOtros.precio,
+            descuento: 0,
+            impuestos: [
+              {
+                nombreCorto: "IVA",
+                codigoUnidadGravable: 1,
+                montoGravable: calcOtros.montoGravable,
+                montoImpuesto: calcOtros.montoImpuesto,
+              },
+            ],
+            total: calcOtros.total,
+          },
+        ];
+
+        const fechaVencimientoOtros = pagoData.fecha_vencimiento
+          ? new Date(pagoData.fecha_vencimiento).toISOString().split("T")[0]
+          : pagoData.fecha_pago
+            ? new Date(pagoData.fecha_pago).toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0];
+
+        const complementosOtros = [
+          {
+            tipo: "cambiario",
+            abonos: [
+              {
+                numeroAbono: 1,
+                fechaVencimiento: fechaVencimientoOtros,
+                montoAbono: calcOtros.total,
+              },
+            ],
+          },
+        ];
+
+        try {
+          const facturaOtros = await certificarFacturaHelper({
+            pago_id,
+            receptor,
+            items: itemsOtros,
+            complementos: complementosOtros,
+            created_by,
+          });
+
+          facturasGeneradas.push({
+            tipo: "OTROS",
+            ...facturaOtros,
+          });
+
+          console.log(`   ✅ Factura otros: ${facturaOtros.serie}-${facturaOtros.numero}`);
+        } catch (error: any) {
+          console.error(`   ❌ Error factura otros:`, error.message);
+
+          facturasGeneradas.push({
+            tipo: "ERROR",
+            concepto: "OTROS",
+            error: error.message,
+          });
         }
       }
 
@@ -1811,7 +1897,318 @@ if (facturasExistentes.length > 0) {
         pagoId: t.String(),
       }),
     }
+  )
+
+  // ============================================
+  // 🔥 POST - Facturar Genérico (sin pago asociado)
+  // ============================================
+  .post(
+    "/facturar-generico",
+    async ({ body, set, request }) => {
+      try {
+        const { nit, items: itemsInput, created_by: bodyCreatedBy } = body;
+
+        // Si no viene created_by en el body, extraerlo del token
+        let created_by = bodyCreatedBy;
+        if (!created_by) {
+          const authHeader = request.headers.get("Authorization");
+          if (authHeader && authHeader.startsWith("Bearer ")) {
+            try {
+              const token = authHeader.replace("Bearer ", "").trim();
+              const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
+              created_by = decoded.id;
+              console.log(`🔐 Usuario extraído del token: ${created_by}`);
+            } catch (tokenError) {
+              console.error("⚠️ Error decodificando token:", tokenError);
+            }
+          }
+        }
+
+        console.log("🔥 ========== FACTURANDO GENÉRICO ==========");
+        console.log(`📝 NIT: ${nit} | Items: ${itemsInput.length} | Usuario: ${created_by || "N/A"}`);
+
+        // ============================================
+        // 1️⃣ CONSULTAR NIT EN COFIDI PARA OBTENER NOMBRE
+        // ============================================
+        let nombreReceptor = "CONSUMIDOR FINAL";
+
+        if (nit && nit !== "CF") {
+          try {
+            const nitClient = new NITSoapClient(COFIDI_CONFIG.endpointUrl);
+            const resultadoNit = await nitClient.consultarNIT({
+              nit: nit,
+              entity: COFIDI_CONFIG.entity,
+              requestor: COFIDI_CONFIG.requestor,
+            });
+
+            if (resultadoNit.success && resultadoNit.nombre) {
+              nombreReceptor = resultadoNit.nombre;
+              console.log(`✅ NIT encontrado: ${nombreReceptor}`);
+            } else {
+              console.log(`⚠️ NIT no encontrado, usando: ${nombreReceptor}`);
+            }
+          } catch (nitError) {
+            console.error("❌ Error consultando NIT:", nitError);
+            // Continuamos con "CONSUMIDOR FINAL"
+          }
+        }
+
+        // ============================================
+        // 2️⃣ CONSTRUIR RECEPTOR
+        // ============================================
+        const receptor = {
+          idReceptor: nit || "CF",
+          nombreReceptor: nombreReceptor,
+        };
+
+        console.log(`👤 Receptor: ${receptor.nombreReceptor} (${receptor.idReceptor})`);
+
+        // ============================================
+        // 3️⃣ CONSTRUIR ITEMS CON IVA CALCULADO
+        // ============================================
+        const Big = (await import("big.js")).default;
+        Big.DP = 20;
+        Big.RM = Big.roundHalfUp;
+
+        const calcularIvaExacto = (totalConIva: number) => {
+          const total = new Big(totalConIva);
+          const montoGravable = total.div("1.12").round(2, Big.roundHalfUp);
+          const montoImpuesto = montoGravable.times("0.12").round(2, Big.roundHalfUp);
+          const totalCalculado = montoGravable.plus(montoImpuesto);
+          const diferencia = total.minus(totalCalculado);
+
+          let montoGravableFinal = montoGravable;
+          if (!diferencia.eq(0)) {
+            montoGravableFinal = montoGravable.plus(diferencia);
+          }
+
+          return {
+            precioUnitario: parseFloat(total.toFixed(2)),
+            precio: parseFloat(total.toFixed(2)),
+            montoGravable: parseFloat(montoGravableFinal.toFixed(2)),
+            montoImpuesto: parseFloat(montoImpuesto.toFixed(2)),
+            total: parseFloat(total.toFixed(2)),
+          };
+        };
+
+        let totalFactura = new Big(0);
+        const itemsFactura = itemsInput.map((item, index) => {
+          const calc = calcularIvaExacto(item.monto);
+          totalFactura = totalFactura.plus(calc.total);
+
+          console.log(`   📦 Item ${index + 1}: ${item.rubro} - Q${calc.total}`);
+
+          return {
+            numeroLinea: index + 1,
+            bienOServicio: "B",
+            cantidad: 1,
+            unidadMedida: "UND",
+            descripcion: item.rubro,
+            precioUnitario: calc.precioUnitario,
+            precio: calc.precio,
+            descuento: 0,
+            impuestos: [
+              {
+                nombreCorto: "IVA",
+                codigoUnidadGravable: 1,
+                montoGravable: calc.montoGravable,
+                montoImpuesto: calc.montoImpuesto,
+              },
+            ],
+            total: calc.total,
+          };
+        });
+
+        console.log(`💰 Total factura: Q${totalFactura.toFixed(2)}`);
+
+        // ============================================
+        // 4️⃣ CONSTRUIR COMPLEMENTOS (1 ABONO, FECHA HOY)
+        // ============================================
+        const fechaHoy = new Date().toISOString().split("T")[0];
+
+        const complementos = [
+          {
+            tipo: "cambiario",
+            abonos: [
+              {
+                numeroAbono: 1,
+                fechaVencimiento: fechaHoy,
+                montoAbono: parseFloat(totalFactura.toFixed(2)),
+              },
+            ],
+          },
+        ];
+
+        // ============================================
+        // 5️⃣ CERTIFICAR FACTURA
+        // ============================================
+        const resultado = await certificarFacturaHelper({
+          pago_id: null,
+          receptor,
+          items: itemsFactura,
+          complementos,
+          created_by,
+        });
+
+        console.log("🎉 ========== FACTURA GENÉRICA GENERADA ==========");
+        console.log(`✅ Serie: ${resultado.serie}-${resultado.numero}`);
+        console.log(`✅ UUID: ${resultado.uuid}`);
+
+        return {
+          success: true,
+          data: {
+            factura_id: resultado.factura_id,
+            serie: resultado.serie,
+            numero: resultado.numero,
+            uuid: resultado.uuid,
+            monto_total: resultado.monto_total,
+            monto_iva: resultado.monto_iva,
+            pdf_url: resultado.pdfUrl,
+            receptor: resultado.receptor,
+            items_facturados: itemsInput.length,
+          },
+          mensaje: `Factura ${resultado.serie}-${resultado.numero} generada exitosamente`,
+        };
+
+      } catch (error) {
+        console.error("❌ Error facturando genérico:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: (error as Error).message,
+          stack: (error as Error).stack,
+        };
+      }
+    },
+    {
+      body: t.Object({
+        nit: t.String(),
+        items: t.Array(
+          t.Object({
+            monto: t.Number(),
+            rubro: t.String(),
+          })
+        ),
+        created_by: t.Optional(t.Number()),
+      }),
+    }
+  )
+
+  // ============================================
+  // 🔥 GET - Obtener facturas por usuario o NIT
+  // ============================================
+  .get(
+    "/facturas-genericas",
+    async ({ query, set }) => {
+      try {
+        const { created_by, nit, page = "1", limit = "10" } = query;
+
+        // Paginación
+        const pageNum = Math.max(1, parseInt(page));
+        const limitNum = Math.min(100, Math.max(1, parseInt(limit))); // Max 100 por página
+        const offset = (pageNum - 1) * limitNum;
+
+        console.log("📋 ========== BUSCANDO FACTURAS ==========");
+        console.log(`👤 Usuario: ${created_by || "N/A"} | 🏷️ NIT: ${nit || "N/A"}`);
+        console.log(`📄 Página: ${pageNum} | Límite: ${limitNum}`);
+
+        // Construir condiciones dinámicamente
+        const conditions = [eq(facturas_electronicas.status, "ACTIVA")];
+
+        if (created_by) {
+          conditions.push(eq(facturas_electronicas.created_by, parseInt(created_by)));
+        }
+
+        if (nit) {
+          conditions.push(eq(facturas_electronicas.receptor_nit, nit));
+        }
+
+        // Contar total de registros
+        const [{ count: totalCount }] = await db
+          .select({ count: sql<number>`count(*)::int` })
+          .from(facturas_electronicas)
+          .where(and(...conditions));
+
+        // Obtener facturas paginadas
+        const facturas = await db
+          .select({
+            factura_id: facturas_electronicas.factura_id,
+            pago_id: facturas_electronicas.pago_id,
+            serie: facturas_electronicas.serie,
+            numero: facturas_electronicas.numero,
+            uuid: facturas_electronicas.uuid,
+            tipo_documento: facturas_electronicas.tipo_documento,
+            monto_total: facturas_electronicas.monto_total,
+            monto_iva: facturas_electronicas.monto_iva,
+            pdf_url: facturas_electronicas.pdf_url,
+            receptor_nit: facturas_electronicas.receptor_nit,
+            receptor_nombre: facturas_electronicas.receptor_nombre,
+            fecha_emision: facturas_electronicas.fecha_emision,
+            fecha_certificacion: facturas_electronicas.fecha_certificacion,
+            status: facturas_electronicas.status,
+            created_by: facturas_electronicas.created_by,
+            created_at: facturas_electronicas.created_at,
+          })
+          .from(facturas_electronicas)
+          .where(and(...conditions))
+          .orderBy(desc(facturas_electronicas.fecha_emision))
+          .limit(limitNum)
+          .offset(offset);
+
+        console.log(`✅ ${facturas.length} facturas en página ${pageNum}`);
+
+        // Calcular totales de la página
+        const montoTotalPagina = facturas.reduce(
+          (sum, f) => sum + parseFloat(f.monto_total as string),
+          0
+        );
+
+        const totalPages = Math.ceil(totalCount / limitNum);
+
+        return {
+          success: true,
+          data: {
+            pagination: {
+              total_items: totalCount,
+              total_pages: totalPages,
+              current_page: pageNum,
+              per_page: limitNum,
+              has_next: pageNum < totalPages,
+              has_prev: pageNum > 1,
+            },
+            monto_total_pagina: montoTotalPagina.toFixed(2),
+            filtros: {
+              created_by: created_by || null,
+              nit: nit || null,
+            },
+            facturas: facturas.map((f) => ({
+              ...f,
+              es_generica: f.pago_id === null,
+              link_pdf: f.pdf_url,
+            })),
+          },
+          mensaje: `Página ${pageNum} de ${totalPages} (${totalCount} factura(s) total)`,
+        };
+
+      } catch (error) {
+        console.error("❌ Error buscando facturas:", error);
+        set.status = 500;
+        return {
+          success: false,
+          error: (error as Error).message,
+        };
+      }
+    },
+    {
+      query: t.Object({
+        created_by: t.Optional(t.String()),
+        nit: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+    }
   );
+
 // ============================================
 // 🔥 FUNCIÓN HELPER PARA CERTIFICAR FACTURA
 // ============================================
@@ -1822,7 +2219,7 @@ async function certificarFacturaHelper({
   complementos,
   created_by,
 }: {
-  pago_id: number;
+  pago_id?: number | null;
   receptor: any;
   items: any[];
   complementos: any[];
@@ -2017,11 +2414,12 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
           granTotal: parseFloat(totales["dte:GranTotal"]),
         },
 
-        abonos: abonos.map((abono: any) => ({
+        // 🔥 Si no hay pago_id (factura genérica), no mostrar plan de pagos
+        abonos: pago_id ? abonos.map((abono: any) => ({
           numero: abono["cfc:NumeroAbono"],
           fechaVencimiento: abono["cfc:FechaVencimiento"],
           monto: parseFloat(abono["cfc:MontoAbono"]),
-        })),
+        })) : [],
 
         certificador: {
           nit: certificacion["dte:NITCertificador"],
@@ -2104,7 +2502,7 @@ const fechaHoraEmision = fechaGuatemala.toISOString().substring(0, 19);
     const [facturaGuardada] = await db
       .insert(facturas_electronicas)
       .values({
-        pago_id: pago_id,
+        pago_id: pago_id ?? null,
         serie: resultado.serie,
         numero: resultado.numero.toString(),
         uuid: resultado.uuid,

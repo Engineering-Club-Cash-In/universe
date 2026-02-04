@@ -1,11 +1,23 @@
-import schedule from 'node-schedule'; 
+import schedule from 'node-schedule';
 import { procesarMoras } from './src/controllers/latefee';
+import { upsertEfectividadAsesores } from './src/controllers/paymentsByAdvisor';
+
+const TZ_GUATEMALA = 'America/Guatemala';
+
+function getFechaGuatemala() {
+  const now = new Date();
+  const guate = new Date(now.toLocaleString('en-US', { timeZone: TZ_GUATEMALA }));
+  return {
+    dia: guate.getDate(),
+    mes: guate.getMonth() + 1,
+    anio: guate.getFullYear(),
+  };
+}
 
 export function iniciarTareasProgramadas() {
-  // 🌙 Ejecutar a las 11:59 PM Guatemala = 5:59 AM UTC
-  // (23:59 Guatemala + 6 horas = 05:59 UTC del día siguiente)
-  schedule.scheduleJob('59 5 * * *', async () => {
-    console.log('🕐 Ejecutando procesarMoras a las 11:59 PM Guatemala (5:59 AM UTC)...');
+  // 🌙 procesarMoras - 11:59 PM hora Guatemala (sin importar dónde esté el server)
+  schedule.scheduleJob({ rule: '59 23 * * *', tz: TZ_GUATEMALA }, async () => {
+    console.log('🕐 Ejecutando procesarMoras a las 11:59 PM Guatemala...');
     try {
       await procesarMoras();
       console.log('✅ procesarMoras ejecutado correctamente');
@@ -14,5 +26,17 @@ export function iniciarTareasProgramadas() {
     }
   });
 
-  console.log('✅ Tareas programadas iniciadas (horario ajustado a UTC)');
+  // 📊 Efectividad asesores - 11:00 PM hora Guatemala
+  schedule.scheduleJob({ rule: '0 23 * * *', tz: TZ_GUATEMALA }, async () => {
+    const { dia, mes, anio } = getFechaGuatemala();
+    console.log(`📊 Ejecutando upsertEfectividadAsesores para ${dia}/${mes}/${anio}...`);
+    try {
+      const result = await upsertEfectividadAsesores(dia, mes, anio);
+      console.log('✅ upsertEfectividadAsesores:', result.ok ? 'OK' : result.error);
+    } catch (error) {
+      console.error('❌ Error al ejecutar upsertEfectividadAsesores:', error);
+    }
+  });
+
+  console.log('✅ Tareas programadas iniciadas (horario Guatemala)');
 }

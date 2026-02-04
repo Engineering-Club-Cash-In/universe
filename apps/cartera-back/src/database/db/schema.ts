@@ -16,6 +16,7 @@
     bigint,
     index,
   } from "drizzle-orm/pg-core";
+  import { sql } from "drizzle-orm";
   export enum CategoriaUsuario {
     CV_VEHICULO_NUEVO = "CV Vehículo nuevo",
     VEHICULO = "Vehículo",
@@ -305,9 +306,9 @@
       cuota_inversionista: numeric("cuota_inversionista", { precision: 18, scale: 2 }).notNull(),
       credito_id: integer("credito_id").notNull().references(() => creditos.credito_id),
       inversionista_id: integer("inversionista_id").notNull().references(() => inversionistas.inversionista_id),
-      porcentaje_participacion_inversionista: numeric("porcentaje_participacion_inversionista", { precision: 5, scale: 2 }).notNull(),
+      porcentaje_participacion_inversionista: numeric("porcentaje_participacion_inversionista").notNull(),
       monto_aportado: numeric("monto_aportado", { precision: 18, scale: 2 }).notNull(),
-      porcentaje_cash_in: numeric("porcentaje_cash_in", { precision: 5, scale: 2 }).notNull().default("0"),
+      porcentaje_cash_in: numeric("porcentaje_cash_in").notNull().default("0"),
       iva_inversionista: numeric("iva_inversionista", { precision: 18, scale: 2 }).notNull().default("0"),
       iva_cash_in: numeric("iva_cash_in", { precision: 18 }).notNull().default("0"),
       fecha_creacion: timestamp("fecha_creacion", { withTimezone: true }).notNull().$default(() => new Date()),
@@ -330,6 +331,11 @@
       precision: 18,
       scale: 2,
     }).notNull(), // Monto total del crédito al momento de la cancelación
+    activo: boolean("activo").notNull().default(false), // Si la cancelación está activa
+    traspaso: numeric("traspaso", { precision: 18, scale: 2 }).default("0"),
+    garantia_mobiliaria: numeric("garantia_mobiliaria", { precision: 18, scale: 2 }).default("0"),
+    otros: numeric("otros", { precision: 18, scale: 2 }).default("0"),
+    created_at: timestamp("created_at", { withTimezone: true }).default(sql`NOW() AT TIME ZONE 'America/Guatemala'`),
   });
 
   export const bad_debts = customSchema.table("bad_debts", {
@@ -585,11 +591,10 @@
 
   export const facturas_electronicas = customSchema.table("facturas_electronicas", {
     factura_id: serial("factura_id").primaryKey(),
-    
-    // 🔥 CAMBIO: Ahora enlazamos por PAGO en lugar de CRÉDITO
+
+    // 🔥 Opcional: puede ser null para facturas genéricas (sin pago asociado)
     pago_id: integer("pago_id")
-      .notNull() // 👈 OBLIGATORIO
-      .references(() => pagos_credito.pago_id, { onDelete: "cascade" }),
+      .references(() => pagos_credito.pago_id, { onDelete: "set null" }),
     
     // Datos del DTE
     serie: varchar("serie", { length: 50 }).notNull(),
@@ -722,3 +727,49 @@
       fechaIdx: index("idx_liquidaciones_fecha").on(table.fecha_liquidacion),
     })
   );
+
+  // ========================================
+  // HISTORIAL DE EFECTIVIDAD POR ASESOR
+  // ========================================
+  export const efectividad_asesores = customSchema.table("efectividad_asesores", {
+    efectividad_id: serial("efectividad_id").primaryKey(),
+
+    // ID del asesor al que pertenece este registro
+    asesor_id: integer("asesor_id")
+      .notNull()
+      .references(() => asesores.asesor_id),
+    // ID del crédito (enlaza a la tabla creditos, null si el asesor no tuvo cuotas ese día)
+    credito_id: integer("credito_id")
+      .references(() => creditos.credito_id),
+
+    // Día de vencimiento consultado (1-31)
+    dia: integer("dia").notNull(),
+    // Mes consultado (1-12)
+    mes: integer("mes").notNull(),
+    // Año consultado (ej: 2026)
+    anio: integer("anio").notNull(),
+    // Fecha completa en timezone Guatemala (para queries y orden)
+    fecha: timestamp("fecha", { withTimezone: true }).notNull(),
+
+    // === COBRO DEL DÍA: cuántas cuotas vencían ese día y cuántas se cobraron ===
+    // Total de cuotas que vencen ese día para este asesor
+    total_cuotas: integer("total_cuotas").notNull().default(0),
+    // Cuotas que ya fueron pagadas (se actualiza cada vez que corre el job)
+    cuotas_pagadas: integer("cuotas_pagadas").notNull().default(0),
+    // Cuotas que siguen sin pagar
+    cuotas_pendientes: integer("cuotas_pendientes").notNull().default(0),
+    // Dinero total esperado ese día (cuota + convenio si aplica)
+    monto_esperado: numeric("monto_esperado", { precision: 18, scale: 2 }).notNull().default("0"),
+    // Dinero efectivamente cobrado
+    monto_cobrado: numeric("monto_cobrado", { precision: 18, scale: 2 }).notNull().default("0"),
+    // Dinero que falta por cobrar
+    monto_pendiente: numeric("monto_pendiente", { precision: 18, scale: 2 }).notNull().default("0"),
+
+    // === EFECTIVIDAD ===
+    // % de efectividad de ese día específico (cuotas_pagadas / total_cuotas * 100)
+    efectividad_dia: numeric("efectividad_dia", { precision: 5, scale: 2 }).notNull().default("0"),
+    // % de efectividad acumulada del asesor en el mes (suma de todos los días del mes hasta hoy)
+    efectividad: numeric("efectividad", { precision: 5, scale: 2 }).notNull().default("0"),
+
+    created_at: timestamp("created_at").defaultNow(),
+  });

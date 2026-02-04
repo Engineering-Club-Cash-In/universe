@@ -64,24 +64,33 @@ export const getCreditoByNumero = async (numero_credito_sifco: string) => {
     const currentCredit = creditoData[0];
     const creditoId = currentCredit.creditos.credito_id;
 
-    // 2. Si el crédito está cancelado, traer la info de cancelación y retornar flujo especial
+    // 2. Si el crédito está cancelado o pendiente de cancelación, verificar si hay cancelación activa
     if (
       currentCredit.creditos.statusCredit === "CANCELADO" ||
       currentCredit.creditos.statusCredit === "PENDIENTE_CANCELACION"
     ) {
-      // Buscar la info de cancelación
+      // Buscar la info de cancelación (solo si está activa)
       const cancelacion = await db
         .select()
         .from(credit_cancelations)
-        .where(eq(credit_cancelations.credit_id, creditoId))
+        .where(
+          and(
+            eq(credit_cancelations.credit_id, creditoId),
+            eq(credit_cancelations.activo, true)
+          )
+        )
         .limit(1);
 
-      return {
-        credito: currentCredit.creditos,
-        usuario: currentCredit.usuarios,
-        cancelacion: cancelacion[0] || null,
-        flujo: "CANCELADO",
-      };
+      // Solo retornar flujo CANCELADO si hay una cancelación activa
+      if (cancelacion.length > 0) {
+        return {
+          credito: currentCredit.creditos,
+          usuario: currentCredit.usuarios,
+          cancelacion: cancelacion[0],
+          flujo: "CANCELADO",
+        };
+      }
+      // Si no hay cancelación activa, continuar con el flujo normal
     }
 
     // 2. Consultar todas las cuotas pagadas (pagado = true)
@@ -849,7 +858,11 @@ export async function getCreditosWithUserByMesAnio(
       const cancelacionesRaw = await db
         .select()
         .from(credit_cancelations)
-        .where(inArray(credit_cancelations.credit_id, canceladosIds));
+        .where(
+          and(
+            inArray(credit_cancelations.credit_id, canceladosIds), 
+          )
+        );
         
       cancelacionesRaw.forEach((row) => {
         cancelacionesMap[row.credit_id] = {
@@ -1053,7 +1066,7 @@ export async function cancelCredit(creditId: number) {
     }
     const hoy = new Date();
 
-    // 2. Obtener cuotas pendientes
+    // 2. Obtener cuotas pendientes (vencidas y no pagadas)
     const cuotasPendientes = await db
       .select({
         cuota_id: cuotas_credito.cuota_id,
@@ -1078,6 +1091,35 @@ export async function cancelCredit(creditId: number) {
       )
       .orderBy(asc(cuotas_credito.numero_cuota));
 
+    // 3. Obtener la cuota actual (primera cuota con fecha >= hoy)
+    const [cuotaActual] = await db
+      .select({
+        cuota_id: cuotas_credito.cuota_id,
+        numero_cuota: cuotas_credito.numero_cuota,
+        fecha_vencimiento: cuotas_credito.fecha_vencimiento,
+        // 🔥 RESTANTES de la cuota actual
+        capital_restante: pagos_credito.capital_restante,
+        interes_restante: pagos_credito.interes_restante,
+        iva_12_restante: pagos_credito.iva_12_restante,
+        seguro_restante: pagos_credito.seguro_restante,
+        gps_restante: pagos_credito.gps_restante,
+        membresias_restante: pagos_credito.membresias,
+      })
+      .from(cuotas_credito)
+      .innerJoin(
+        pagos_credito,
+        eq(pagos_credito.cuota_id, cuotas_credito.cuota_id)
+      )
+      .where(
+        and(
+          eq(cuotas_credito.credito_id, creditId),
+          gt(cuotas_credito.numero_cuota, 0),
+          gte(cuotas_credito.fecha_vencimiento, hoy.toISOString().slice(0, 10))
+        )
+      )
+      .orderBy(cuotas_credito.fecha_vencimiento)
+      .limit(1);
+
     const [morasCredito] = await db
       .select()
       .from(moras_credito)
@@ -1089,31 +1131,60 @@ export async function cancelCredit(creditId: number) {
       );
     const numeroCuotasPendientes = cuotasPendientes.length;
 
-    // 3. Calcular montos
+    // 4. Calcular montos base (cuotas vencidas)
     const capitalActual = new Big(credit.capital ?? 0);
     const cuotaInteres = new Big(credit.cuota_interes ?? 0);
-    const membresiasPago = new Big(credit.membresias_pago ?? 0);
+    const membresiasPago = new Big(credit.membresias ?? 0);
     const seguro10Cuotas = new Big(credit.seguro_10_cuotas ?? 0);
     const iva12 = new Big(credit.iva_12 ?? 0);
 
     const totalInteresesPendientes = cuotaInteres.times(numeroCuotasPendientes);
-    const totalMembresiasPendientes = membresiasPago.times(
-      numeroCuotasPendientes
-    );
+    const totalMembresiasPendientes = membresiasPago.times(numeroCuotasPendientes);
     const totalSeguroPendiente = seguro10Cuotas.times(numeroCuotasPendientes);
     const totalIvaPendiente = iva12.times(numeroCuotasPendientes);
 
-    // 4. Devolver la info
+    // 5. Obtener restantes de la cuota actual
+    const restantesCuotaActual = {
+      capital: new Big(cuotaActual?.capital_restante ?? 0),
+      interes: new Big(cuotaActual?.interes_restante ?? 0),
+      iva: new Big(cuotaActual?.iva_12_restante ?? 0),
+      seguro: new Big(cuotaActual?.seguro_restante ?? 0),
+      gps: new Big(cuotaActual?.gps_restante ?? 0),
+      membresias: new Big(cuotaActual?.membresias_restante ?? 0),
+    };
+
+    // 6. Sumar restantes de cuota actual a los totales
+    const totalInteresesConRestante = totalInteresesPendientes.plus(restantesCuotaActual.interes);
+    const totalMembresiaConRestante = totalMembresiasPendientes.plus(restantesCuotaActual.membresias);
+    const totalSeguroConRestante = totalSeguroPendiente.plus(restantesCuotaActual.seguro);
+    const totalIvaConRestante = totalIvaPendiente.plus(restantesCuotaActual.iva);
+    const totalGpsRestante = restantesCuotaActual.gps;
+
+    // 7. Devolver la info
     return {
       message: "Resumen del crédito a cancelar",
       credito: {
         capital_actual: capitalActual.toFixed(2),
-        total_intereses_pendientes: totalInteresesPendientes.toFixed(2),
-        total_membresias_pendientes: totalMembresiasPendientes.toFixed(2),
-        total_seguro_pendiente: totalSeguroPendiente.toFixed(2),
-        total_iva_pendiente: totalIvaPendiente.toFixed(2),
-        cuotas_pendientes: numeroCuotasPendientes,
+        total_intereses_pendientes: totalInteresesConRestante.toFixed(2),
+        total_membresias_pendientes: totalMembresiaConRestante.toFixed(2),
+        total_seguro_pendiente: totalSeguroConRestante.toFixed(2),
+        total_iva_pendiente: totalIvaConRestante.toFixed(2),
+        total_gps_pendiente: totalGpsRestante.toFixed(2),
+        cuotas_pendientes: cuotasPendientes.length,
         mora: morasCredito ? morasCredito.monto_mora : 0,
+        // 🔥 Info de la cuota actual (para debug/referencia)
+        cuota_actual: cuotaActual ? {
+          numero_cuota: cuotaActual.numero_cuota,
+          fecha_vencimiento: cuotaActual.fecha_vencimiento,
+          restantes: {
+            capital: restantesCuotaActual.capital.toFixed(2),
+            interes: restantesCuotaActual.interes.toFixed(2),
+            iva: restantesCuotaActual.iva.toFixed(2),
+            seguro: restantesCuotaActual.seguro.toFixed(2),
+            gps: restantesCuotaActual.gps.toFixed(2),
+            membresias: restantesCuotaActual.membresias.toFixed(2),
+          },
+        } : null,
       },
     };
   } catch (error) {
@@ -1143,6 +1214,9 @@ const AccionCreditoParamsSchema = z.object({
     "MOROSO",
   ]),
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
+  traspaso: z.number().optional(),
+  garantia_mobiliaria: z.number().optional(),
+  otros: z.number().optional(),
 });
 
 const STATUS_MAP = {
@@ -1169,6 +1243,9 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
     monto_cancelacion,
     accion,
     montosAdicionales,
+    traspaso,
+    garantia_mobiliaria,
+    otros,
   } = AccionCreditoParamsSchema.parse(input);
 
   // Guard rails for actions that require motivo + monto
@@ -1220,6 +1297,9 @@ export async function actualizarEstadoCredito(input: AccionCreditoParams) {
           motivo: motivo!, // validated above
           observaciones: observaciones ?? "",
           monto_cancelacion: monto_cancelacion!.toString(),
+          traspaso: (traspaso ?? 0).toString(),
+          garantia_mobiliaria: (garantia_mobiliaria ?? 0).toString(),
+          otros: (otros ?? 0).toString(),
         });
 
         return {
@@ -2393,3 +2473,53 @@ export const getCreditStats = async (email?: string): Promise<CreditStatsRespons
     porEstado: statsPerEstado,
   };
 };
+
+// ============================================
+// 🔥 Activar/Desactivar Cancelación de Crédito
+// ============================================
+export async function toggleCancelacionActivo(params: {
+  creditId: number;
+  activo: boolean;
+}) {
+  const { creditId, activo } = params;
+
+  try {
+    // 1. Verificar que existe la cancelación
+    const [cancelacion] = await db
+      .select()
+      .from(credit_cancelations)
+      .where(eq(credit_cancelations.credit_id, creditId))
+      .limit(1);
+
+    if (!cancelacion) {
+      return {
+        success: false,
+        message: "No existe una cancelación para este crédito.",
+      };
+    }
+
+    // 2. Actualizar el estado
+    await db
+      .update(credit_cancelations)
+      .set({ activo })
+      .where(eq(credit_cancelations.credit_id, creditId));
+
+    console.log(`✅ Cancelación de crédito ${creditId} ${activo ? "ACTIVADA" : "DESACTIVADA"}`);
+
+    return {
+      success: true,
+      message: `Cancelación ${activo ? "activada" : "desactivada"} exitosamente.`,
+      data: {
+        credit_id: creditId,
+        activo,
+      },
+    };
+  } catch (error) {
+    console.error("❌ Error actualizando estado de cancelación:", error);
+    return {
+      success: false,
+      message: "Error actualizando estado de cancelación",
+      error: String(error),
+    };
+  }
+}

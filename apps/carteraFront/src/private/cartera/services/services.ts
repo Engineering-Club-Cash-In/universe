@@ -625,7 +625,15 @@ export interface UpdateCreditBody {
   membresias_pago?: number;
   reserva?: number;
   seguro_10_cuotas?: number;
-  
+
+  // Campos de usuario
+  nombre?: string;
+  nit?: string;
+  direccion?: string;
+  saldo_a_favor?: number;
+
+  // Formato de crédito
+  formato_credito?: string;
 
   // Inversionistas nuevos
   inversionistas?: InversionistaPayload[];
@@ -925,7 +933,10 @@ export interface CancelCreditPayload {
   motivo: string;
   observaciones?: string;
   monto_cancelacion: number;
-    montosAdicionales?: MontoAdicional[];
+  traspaso?: number;
+  garantia_mobiliaria?: number;
+  otros?: number;
+  montosAdicionales?: MontoAdicional[];
 }
 export interface PendingCancelCreditPayload {
   creditId: number;
@@ -933,6 +944,9 @@ export interface PendingCancelCreditPayload {
   motivo: string;
   observaciones?: string;
   monto_cancelacion: number;
+  traspaso?: number;
+  garantia_mobiliaria?: number;
+  otros?: number;
   montosAdicionales?: MontoAdicional[];
 }
 export interface ActivateCreditPayload {
@@ -944,8 +958,11 @@ export interface BadDebtCreditPayload {
   accion: "INCOBRABLE";
   motivo: string;
   observaciones?: string;
-  monto_cancelacion: number; // Puedes llamarlo monto_incobrable si quieres ser más explícito
-    montosAdicionales?: MontoAdicional[];
+  monto_cancelacion: number;
+  traspaso?: number;
+  garantia_mobiliaria?: number;
+  otros?: number;
+  montosAdicionales?: MontoAdicional[];
 }
 
 
@@ -1372,7 +1389,9 @@ export interface PagoDataInvestor {
   pagoConvenio: number | null;
   observaciones: string | null;
   registerBy: string | null;
+  registerByNombre: string | null;
   bancoNombre: string | null;
+  fechaBoleta: string | null;
   numeroautorizacion: string | null;
   validationStatus: string;
 
@@ -1434,7 +1453,8 @@ export interface GetPagosParams {
   inversionistaId?: number;
   excel?: boolean;
   usuarioNombre?: string;
-  validationStatus?: string; // 🆕 Filtro por estado de validación
+  validationStatus?: string;
+  reportAdvisor?: boolean;
 }
 
 /**
@@ -2344,4 +2364,225 @@ export const getBoletas = async (filters?: GetBoletasFilters) => {
       error.response?.data?.message || "Error al obtener boletas"
     );
   }
+};
+
+// ============================================
+// 🔥 FACTURAR GENÉRICO - TYPES Y SERVICIO
+// ============================================
+
+export interface FacturarGenericoItem {
+  monto: number;
+  rubro: string;
+}
+
+export interface FacturarGenericoRequest {
+  nit: string;
+  items: FacturarGenericoItem[];
+  created_by: number;
+}
+
+export interface FacturarGenericoResponse {
+  success: boolean;
+  data?: {
+    factura_id: number;
+    serie: string;
+    numero: string;
+    uuid: string;
+    monto_total: number;
+    monto_iva: number;
+    pdf_url: string;
+    receptor: {
+      idReceptor: string;
+      nombreReceptor: string;
+    };
+    items_facturados: number;
+  };
+  mensaje?: string;
+  error?: string;
+  stack?: string;
+}
+
+export const facturarGenerico = async (
+  data: FacturarGenericoRequest
+): Promise<FacturarGenericoResponse> => {
+  const response = await api.post('/api/dte/facturar-generico', data);
+  return response.data;
+};
+
+// ============================================
+// 🔥 OBTENER FACTURAS GENÉRICAS - TYPES Y SERVICIO
+// ============================================
+
+export interface FacturaGenericaItem {
+  factura_id: number;
+  pago_id: number | null;
+  serie: string;
+  numero: string;
+  uuid: string;
+  tipo_documento: string;
+  monto_total: string;
+  monto_iva: string;
+  pdf_url: string;
+  receptor_nit: string;
+  receptor_nombre: string;
+  fecha_emision: string;
+  fecha_certificacion: string;
+  status: string;
+  created_by: number | null;
+  created_at: string;
+  es_generica: boolean;
+  link_pdf: string;
+}
+
+export interface GetFacturasGenericasParams {
+  created_by?: number;
+  nit?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface FacturasGenericasPagination {
+  total_items: number;
+  total_pages: number;
+  current_page: number;
+  per_page: number;
+  has_next: boolean;
+  has_prev: boolean;
+}
+
+export interface GetFacturasGenericasResponse {
+  success: boolean;
+  data?: {
+    pagination: FacturasGenericasPagination;
+    monto_total_pagina: string;
+    filtros: {
+      created_by: string | null;
+      nit: string | null;
+    };
+    facturas: FacturaGenericaItem[];
+  };
+  mensaje?: string;
+  error?: string;
+}
+
+export const getFacturasGenericas = async (
+  params: GetFacturasGenericasParams
+): Promise<GetFacturasGenericasResponse> => {
+  const queryParams: Record<string, string> = {};
+
+  if (params.created_by) {
+    queryParams.created_by = params.created_by.toString();
+  }
+  if (params.nit) {
+    queryParams.nit = params.nit;
+  }
+  if (params.page) {
+    queryParams.page = params.page.toString();
+  }
+  if (params.limit) {
+    queryParams.limit = params.limit.toString();
+  }
+
+  const response = await api.get('/api/dte/facturas-genericas', { params: queryParams });
+  return response.data;
+};
+
+// ============================================
+// 🔄 TOGGLE CANCELACION ACTIVO
+// ============================================
+
+export interface ToggleCancelacionActivoPayload {
+  creditId: number;
+  activo: boolean;
+}
+
+export interface ToggleCancelacionActivoResponse {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
+export const toggleCancelacionActivoService = async (
+  payload: ToggleCancelacionActivoPayload
+): Promise<ToggleCancelacionActivoResponse> => {
+  const { data } = await api.post<ToggleCancelacionActivoResponse>(
+    '/cancelacion/toggle-activo',
+    payload
+  );
+  return data;
+};
+
+// Recalcular cuota
+export interface RecalculateQuotaPayload {
+  numero_credito_sifco: string;
+}
+
+export async function recalculateQuotaService(payload: RecalculateQuotaPayload) {
+  const { data } = await api.post(`${API_URL}/recalculate-quota`, payload);
+  return data;
+}
+
+// ============================================
+// Efectividad de Asesores
+// ============================================
+
+export interface EfectividadTotales {
+  total_cuotas: number;
+  cuotas_pagadas: number;
+  cuotas_pendientes: number;
+  monto_esperado: string;
+  monto_cobrado: string;
+  monto_pendiente: string;
+  efectividad: string;
+}
+
+export interface EfectividadCredito {
+  asesor_id: number;
+  asesor_nombre: string;
+  credito_id: number;
+  numero_credito_sifco: string;
+  usuario_nombre: string;
+  statusCredit: string;
+  total_cuotas: string;
+  cuotas_pagadas: string;
+  cuotas_pendientes: string;
+  monto_esperado: string;
+  monto_cobrado: string;
+  monto_pendiente: string;
+  efectividad: string;
+}
+
+export interface EfectividadAsesor {
+  asesor_id: number;
+  asesor_nombre: string;
+  totales: EfectividadTotales;
+  creditos: EfectividadCredito[];
+}
+
+export interface EfectividadAsesoresResponse {
+  ok: boolean;
+  mes: number;
+  anio: number;
+  asesor_id: number | null;
+  total_asesores: number;
+  data: EfectividadAsesor[];
+}
+
+export const getEfectividadAsesores = async (params: {
+  dia?: number;
+  mes: number;
+  anio: number;
+  asesor_id?: number;
+}): Promise<EfectividadAsesoresResponse> => {
+  const query = new URLSearchParams({
+    mes: params.mes.toString(),
+    anio: params.anio.toString(),
+  });
+  if (params.dia) query.set("dia", params.dia.toString());
+  if (params.asesor_id) query.set("asesor_id", params.asesor_id.toString());
+
+  const { data } = await api.get<EfectividadAsesoresResponse>(
+    `/efectividad-asesores/consulta?${query}`
+  );
+  return data;
 };

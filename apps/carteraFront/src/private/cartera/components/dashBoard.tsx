@@ -6,6 +6,7 @@ import {
   LogOut,
   Landmark,
   ChevronDown,
+  Receipt,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
@@ -88,7 +89,21 @@ const menuOptions = [
     label: "Convenios",
     icon: <ListOrdered className="h-5 w-5" />,
     path: "/convenios",
+    roles: ["ADMIN", "ASESOR"],
+  },
+  {
+    key: "facturas-genericas",
+    label: "Facturas Genéricas",
+    icon: <Receipt className="h-5 w-5" />,
+    path: "/facturas-genericas",
     roles: ["ADMIN"],
+  },
+  {
+    key: "efectividad-asesores",
+    label: "Efectividad",
+    icon: <ListOrdered className="h-5 w-5" />,
+    path: "/efectividad-asesores",
+    roles: ["ADMIN", "ASESOR"],
   },
 ];
 

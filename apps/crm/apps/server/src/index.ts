@@ -755,10 +755,19 @@ app.get("/upload-csv", async (c) => {
 });
 
 // Endpoint REST directo para migración masiva de créditos (más fácil de usar desde Postman)
+// SIEMPRE usa transacción - si algo falla, se hace rollback de todo
 app.post("/api/migrate/creditos", async (c) => {
 	try {
 		const { migrarCreditos } = await import("./controllers/migrate-creditos");
 		const creditos = await c.req.json();
+
+		if (!Array.isArray(creditos)) {
+			return c.json(
+				{ error: "Formato inválido. Enviar un array de créditos." },
+				400,
+			);
+		}
+
 		const resultado = await migrarCreditos(creditos);
 		return c.json(resultado);
 	} catch (err: any) {
@@ -780,6 +789,20 @@ app.post("/api/migrate/actualizar-value", async (c) => {
 		return c.json({ error: err.message }, 500);
 	}
 });
+
+// Endpoint para hacer rollback/limpieza de TODOS los datos migrados
+// CUIDADO: Elimina todos los leads, vehículos y oportunidades con status='migrate'
+app.delete("/api/migrate/cleanup", async (c) => {
+	try {
+		const { limpiarMigracion } = await import("./controllers/migrate-creditos");
+		const resultado = await limpiarMigracion();
+		return c.json(resultado);
+	} catch (err: any) {
+		console.error("[Cleanup] Error:", err);
+		return c.json({ error: err.message }, 500);
+	}
+});
+
 
 export default {
 	port: process.env.PORT || 3000,

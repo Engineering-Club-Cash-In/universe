@@ -224,7 +224,7 @@ function CoDebtorCard({
 
 	return (
 		<Card>
-			<CardHeader className="pb-3">
+			<CardHeader className="">
 				<div className="flex items-start justify-between">
 					<div className="flex items-center gap-3">
 						<div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -301,14 +301,10 @@ function CoDebtorCard({
 				{/* Capacidad de pago - Collapsible */}
 				<Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
 					<CollapsibleTrigger asChild>
-						<Button
-							variant="outline"
-							className="w-full justify-between"
-							size="sm"
-						>
+						<div className="flex w-full cursor-pointer items-center justify-between rounded-lg border bg-muted/50 px-4 py-3 transition-colors hover:bg-muted">
 							<div className="flex items-center gap-2">
-								<Calculator className="h-4 w-4" />
-								<span>Capacidad de Pago</span>
+								<Calculator className="h-4 w-4 text-primary" />
+								<span className="font-medium text-sm">Capacidad de Pago</span>
 								{hasAnalysis && (
 									<span className="rounded-full bg-green-100 px-2 py-0.5 text-green-700 text-xs">
 										Analizado
@@ -316,18 +312,20 @@ function CoDebtorCard({
 								)}
 							</div>
 							{isExpanded ? (
-								<ChevronUp className="h-4 w-4" />
+								<ChevronUp className="h-4 w-4 text-muted-foreground" />
 							) : (
-								<ChevronDown className="h-4 w-4" />
+								<ChevronDown className="h-4 w-4 text-muted-foreground" />
 							)}
-						</Button>
+						</div>
 					</CollapsibleTrigger>
 					<CollapsibleContent className="mt-3 space-y-4">
-						{/* Análisis con IA */}
-						<BankStatementAnalysis
-							coDebtorId={coDebtor.id}
-							onAnalysisComplete={() => creditAnalysisQuery.refetch()}
-						/>
+						{/* Análisis con IA - solo mostrar si no hay análisis exitoso */}
+						{!hasAnalysis && (
+							<BankStatementAnalysis
+								coDebtorId={coDebtor.id}
+								onAnalysisComplete={() => creditAnalysisQuery.refetch()}
+							/>
+						)}
 
 						{/* Análisis manual o resultados */}
 						<div className="rounded-lg border bg-muted/30 p-4">

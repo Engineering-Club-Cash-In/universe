@@ -57,7 +57,7 @@ function normalizarPorcentaje(valor: string | number | null | undefined): Big {
   // Si es menor a 1, ya está en formato decimal (0.20 = 20%)
   if (num.lt(1)) {
     console.log(
-      `      🔧 Porcentaje ya en decimal: ${valor} → ${num.toString()}`
+      `      🔧 Porcentaje ya en decimal: ${valor} → ${num.toString()}`,
     );
     return num; // Ya está como 0.20, usar directo
   }
@@ -65,7 +65,7 @@ function normalizarPorcentaje(valor: string | number | null | undefined): Big {
   // Si es >= 1, está como entero (20 = 20%), dividir entre 100
   const decimal = num.div(100);
   console.log(
-    `      🔧 Porcentaje convertido: ${valor} → ${decimal.toString()}`
+    `      🔧 Porcentaje convertido: ${valor} → ${decimal.toString()}`,
   );
   return decimal;
 }
@@ -74,7 +74,7 @@ function normalizarPorcentaje(valor: string | number | null | undefined): Big {
 function escribirLogAdvertencias(
   tipo: "ADVERTENCIA" | "ERROR" | "RELACION_CREADA",
   mensaje: string,
-  data?: any
+  data?: any,
 ) {
   const timestamp = new Date().toISOString();
   const logEntry = {
@@ -212,7 +212,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
 
   if (usuarios_encontrados.length > 0) {
     console.log(
-      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta`
+      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta`,
     );
     return usuarios_encontrados;
   }
@@ -229,19 +229,19 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
             ${usuarios.nombre},
             'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'),
           'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u'), 'ñ', 'n')
-      ) = LOWER(${nombreLimpio})`
+      ) = LOWER(${nombreLimpio})`,
     );
 
   if (usuarios_encontrados.length > 0) {
     console.log(
-      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta sin tildes`
+      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda exacta sin tildes`,
     );
     return usuarios_encontrados;
   }
 
   // ESTRATEGIA 1.75: 🆕 Búsqueda donde nombre del Excel está AL INICIO del nombre de BD (para mancomunados)
   console.log(
-    `   🎯 Estrategia 1.75: Búsqueda al inicio del nombre (para mancomunados)...`
+    `   🎯 Estrategia 1.75: Búsqueda al inicio del nombre (para mancomunados)...`,
   );
   usuarios_encontrados = await db
     .select()
@@ -253,18 +253,18 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
             ${usuarios.nombre},
             'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'),
           'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u'), 'ñ', 'n')
-      ) LIKE LOWER(${nombreLimpio + "%"})`
+      ) LIKE LOWER(${nombreLimpio + "%"})`,
     );
 
   if (usuarios_encontrados.length > 0) {
     console.log(
-      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda al inicio`
+      `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda al inicio`,
     );
 
     // Si encontró solo uno, retornar inmediatamente
     if (usuarios_encontrados.length === 1) {
       console.log(
-        `   ✅ Usuario único encontrado: ${usuarios_encontrados[0].nombre}`
+        `   ✅ Usuario único encontrado: ${usuarios_encontrados[0].nombre}`,
       );
       return usuarios_encontrados;
     }
@@ -302,14 +302,14 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
     console.log(`   📊 Usuarios ordenados por score:`);
     usuariosConScore.forEach((u, idx) => {
       console.log(
-        `      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`
+        `      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`,
       );
     });
 
     // Si el mejor tiene score alto, retornar solo ese
     if (usuariosConScore[0].score >= 0.7) {
       console.log(
-        `   ✅ Usuario con mejor score: ${usuariosConScore[0].nombre}`
+        `   ✅ Usuario con mejor score: ${usuariosConScore[0].nombre}`,
       );
       return [usuariosConScore[0]];
     }
@@ -331,7 +331,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
     .select()
     .from(usuarios)
     .where(
-      sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + nombreLimpio + "%"})`
+      sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + nombreLimpio + "%"})`,
     );
 
   if (usuarios_encontrados.length > 0) {
@@ -346,7 +346,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
         .split(" ")
         .filter((p) => p.length > 2);
       const palabrasEncontradas = palabrasBuscadas.filter((palabra) =>
-        nombreBD.includes(palabra)
+        nombreBD.includes(palabra),
       ).length;
       const scoreCoincidencia = palabrasEncontradas / palabrasBuscadas.length;
 
@@ -355,7 +355,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
         1 - diffLongitud / Math.max(nombreBD.length, nombreBuscado.length);
 
       const scoreInicio = nombreBD.startsWith(
-        nombreBuscado.split(" ")[0].toLowerCase()
+        nombreBuscado.split(" ")[0].toLowerCase(),
       )
         ? 1
         : 0;
@@ -377,13 +377,13 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
     console.log(`   📊 Usuarios ordenados por score:`);
     usuariosConScore.forEach((u, idx) => {
       console.log(
-        `      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`
+        `      ${idx + 1}. ${u.nombre} (score: ${u.score.toFixed(2)})`,
       );
     });
 
     if (usuariosConScore[0].score >= 0.6) {
       console.log(
-        `   ✅ Usuario con mejor score (${usuariosConScore[0].score.toFixed(2)}): ${usuariosConScore[0].nombre}`
+        `   ✅ Usuario con mejor score (${usuariosConScore[0].score.toFixed(2)}): ${usuariosConScore[0].nombre}`,
       );
       return [usuariosConScore[0]];
     }
@@ -414,13 +414,13 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
       .where(
         and(
           sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + primeraPalabra + "%"})`,
-          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + ultimaPalabra + "%"})`
-        )
+          sql`LOWER(${usuarios.nombre}) LIKE LOWER(${"%" + ultimaPalabra + "%"})`,
+        ),
       );
 
     if (usuarios_encontrados.length > 0) {
       console.log(
-        `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda por partes`
+        `   ✅ Encontrados ${usuarios_encontrados.length} con búsqueda por partes`,
       );
       return usuarios_encontrados;
     }
@@ -433,15 +433,15 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
       .select()
       .from(usuarios)
       .where(
-        sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) > 0.3`
+        sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) > 0.3`,
       )
       .orderBy(
-        sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) DESC`
+        sql`SIMILARITY(LOWER(${usuarios.nombre}), LOWER(${nombreLimpio})) DESC`,
       );
 
     if (usuarios_encontrados.length > 0) {
       console.log(
-        `   ✅ Encontrados ${usuarios_encontrados.length} con similitud`
+        `   ✅ Encontrados ${usuarios_encontrados.length} con similitud`,
       );
       usuarios_encontrados.forEach((u, idx) => {
         console.log(`      ${idx + 1}. ${u.nombre}`);
@@ -465,7 +465,7 @@ async function buscarUsuarioPermisivo(nombre_usuario: string) {
 
     if (usuarios_encontrados.length > 0 && usuarios_encontrados.length < 10) {
       console.log(
-        `   ✅ Encontrados ${usuarios_encontrados.length} con palabra "${palabra}"`
+        `   ✅ Encontrados ${usuarios_encontrados.length} con palabra "${palabra}"`,
       );
       return usuarios_encontrados;
     }
@@ -502,7 +502,7 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
 
   if (inversionistas_encontrados.length > 0) {
     console.log(
-      `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta`
+      `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta`,
     );
     return inversionistas_encontrados;
   }
@@ -519,12 +519,12 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
             ${inversionistas.nombre},
             'á', 'a'), 'é', 'e'), 'í', 'i'), 'ó', 'o'), 'ú', 'u'),
           'Á', 'a'), 'É', 'e'), 'Í', 'i'), 'Ó', 'o'), 'Ú', 'u')
-      ) = LOWER(${nombreLimpio})`
+      ) = LOWER(${nombreLimpio})`,
     );
 
   if (inversionistas_encontrados.length > 0) {
     console.log(
-      `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta sin tildes`
+      `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda exacta sin tildes`,
     );
     return inversionistas_encontrados;
   }
@@ -535,12 +535,12 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
     .select()
     .from(inversionistas)
     .where(
-      sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + nombreLimpio + "%"})`
+      sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + nombreLimpio + "%"})`,
     );
 
   if (inversionistas_encontrados.length > 0) {
     console.log(
-      `   ✅ Encontrados ${inversionistas_encontrados.length} con LIKE`
+      `   ✅ Encontrados ${inversionistas_encontrados.length} con LIKE`,
     );
 
     // Calcular score de similitud
@@ -552,7 +552,7 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
         .split(" ")
         .filter((p) => p.length > 2);
       const palabrasEncontradas = palabrasBuscadas.filter((palabra) =>
-        nombreBD.includes(palabra)
+        nombreBD.includes(palabra),
       ).length;
       const scoreCoincidencia = palabrasEncontradas / palabrasBuscadas.length;
 
@@ -561,7 +561,7 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
         1 - diffLongitud / Math.max(nombreBD.length, nombreBuscado.length);
 
       const scoreInicio = nombreBD.startsWith(
-        nombreBuscado.split(" ")[0].toLowerCase()
+        nombreBuscado.split(" ")[0].toLowerCase(),
       )
         ? 1
         : 0;
@@ -577,13 +577,13 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
     console.log(`   📊 Inversionistas ordenados por score:`);
     inversionistasConScore.forEach((inv, idx) => {
       console.log(
-        `      ${idx + 1}. ${inv.nombre} (score: ${inv.score.toFixed(2)})`
+        `      ${idx + 1}. ${inv.nombre} (score: ${inv.score.toFixed(2)})`,
       );
     });
 
     if (inversionistasConScore[0].score >= 0.6) {
       console.log(
-        `   ✅ Inversionista con mejor score: ${inversionistasConScore[0].nombre}`
+        `   ✅ Inversionista con mejor score: ${inversionistasConScore[0].nombre}`,
       );
       return [inversionistasConScore[0]];
     }
@@ -610,13 +610,13 @@ async function buscarInversionistaPermisivo(nombre_inversionista: string) {
       .where(
         and(
           sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + primeraPalabra + "%"})`,
-          sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + ultimaPalabra + "%"})`
-        )
+          sql`LOWER(${inversionistas.nombre}) LIKE LOWER(${"%" + ultimaPalabra + "%"})`,
+        ),
       );
 
     if (inversionistas_encontrados.length > 0) {
       console.log(
-        `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda por partes`
+        `   ✅ Encontrados ${inversionistas_encontrados.length} con búsqueda por partes`,
       );
       return inversionistas_encontrados;
     }
@@ -653,7 +653,7 @@ function obtenerRangoDelMes(cuota_mes: string): {
 
   if (partes.length !== 2) {
     throw new Error(
-      `Formato inválido: "${cuota_mes}". Esperado: "mes. año" (ej: "oct. 25")`
+      `Formato inválido: "${cuota_mes}". Esperado: "mes. año" (ej: "oct. 25")`,
     );
   }
 
@@ -668,7 +668,7 @@ function obtenerRangoDelMes(cuota_mes: string): {
 
   if (mesNumero === undefined) {
     throw new Error(
-      `Mes no reconocido: "${mesTexto}". Use formato de 3 letras (ej: "oct", "ago")`
+      `Mes no reconocido: "${mesTexto}". Use formato de 3 letras (ej: "oct", "ago")`,
     );
   }
 
@@ -690,7 +690,7 @@ const guardarRelacionesFallidas = async (
   usuario: { nombre: string; usuario_id: number },
   inversionista: { nombre: string; inversionista_id: number },
   capital: string,
-  mes: string
+  mes: string,
 ) => {
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -719,11 +719,11 @@ const guardarRelacionesFallidas = async (
       relaciones_fallidas: relacionesFallidas,
       resumen: {
         creditos_sin_relacion: relacionesFallidas.filter(
-          (r) => r.razon === "No existe la relación"
+          (r) => r.razon === "No existe la relación",
         ).length,
         total_inversionistas_alternativos: relacionesFallidas.reduce(
           (sum, r) => sum + r.inversionistas_existentes.length,
-          0
+          0,
         ),
       },
     };
@@ -755,12 +755,12 @@ interface LiquidarCuotasPorCreditoInput {
 }
 
 export async function liquidarCuotasPorCredito(
-  input: LiquidarCuotasPorCreditoInput
+  input: LiquidarCuotasPorCreditoInput,
 ) {
   try {
     console.log("🔥 ========== INICIANDO LIQUIDACIÓN POR CRÉDITO ==========");
     console.log(
-      `🔧 MODO CREAR RELACIONES: ${CREAR_RELACIONES_AUTOMATICAMENTE ? "ACTIVADO ✅" : "DESACTIVADO ❌"}`
+      `🔧 MODO CREAR RELACIONES: ${CREAR_RELACIONES_AUTOMATICAMENTE ? "ACTIVADO ✅" : "DESACTIVADO ❌"}`,
     );
     console.log("📝 Input:", JSON.stringify(input, null, 2));
 
@@ -849,7 +849,7 @@ export async function liquidarCuotasPorCredito(
     // 2️⃣ BUSCAR INVERSIONISTA DIRECTO POR ID
     // ============================================
     console.log(
-      `\n🔍 Buscando inversionista por ID: ${input.inversionista_id}...`
+      `\n🔍 Buscando inversionista por ID: ${input.inversionista_id}...`,
     );
 
     const inversionistaResult = await db
@@ -921,8 +921,8 @@ export async function liquidarCuotasPorCredito(
           eq(cuotas_credito.credito_id, credito.credito_id),
           gte(cuotas_credito.fecha_vencimiento, rangoMes.inicio),
           lte(cuotas_credito.fecha_vencimiento, rangoMes.fin),
-          gte(cuotas_credito.numero_cuota, 0)
-        )
+          gte(cuotas_credito.numero_cuota, 0),
+        ),
       )
       .orderBy(cuotas_credito.numero_cuota);
 
@@ -952,8 +952,8 @@ export async function liquidarCuotasPorCredito(
         .where(
           and(
             eq(cuotas_credito.credito_id, credito.credito_id),
-            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar)
-          )
+            lte(cuotas_credito.numero_cuota, numeroCuotaALiquidar),
+          ),
         )
         .returning();
 
@@ -974,9 +974,9 @@ export async function liquidarCuotasPorCredito(
           eq(creditos_inversionistas.credito_id, credito.credito_id),
           eq(
             creditos_inversionistas.inversionista_id,
-            inversionista.inversionista_id
-          )
-        )
+            inversionista.inversionista_id,
+          ),
+        ),
       );
 
     let relacionCreada = false;
@@ -990,34 +990,144 @@ export async function liquidarCuotasPorCredito(
         console.log(`\n🔥 ========== CREANDO RELACIÓN ==========`);
 
         const porcentajeInteres = new Big(credito.porcentaje_interes || 0).div(
-          100
+          100,
+        );
+
+        // 🔥 OBTENER TODOS LOS INVERSIONISTAS DEL CRÉDITO PARA ENCONTRAR AL MAYOR
+        console.log(
+          `\n🔍 BUSCANDO INVERSIONISTA CON MAYOR MONTO APORTADO EN EL CRÉDITO:`,
+        );
+
+        const inversionistasDelCredito = await db
+          .select({
+            inversionista_id: creditos_inversionistas.inversionista_id,
+            monto_aportado: creditos_inversionistas.monto_aportado,
+          })
+          .from(creditos_inversionistas)
+          .where(eq(creditos_inversionistas.credito_id, credito.credito_id));
+
+        // Agregar el inversionista actual a la lista para la comparación
+        const todosInversionistas = [
+          ...inversionistasDelCredito.map((inv) => ({
+            inversionista_id: inv.inversionista_id,
+            monto_aportado: new Big(inv.monto_aportado || 0),
+          })),
+          {
+            inversionista_id: inversionista.inversionista_id,
+            monto_aportado: capitalTotal,
+          },
+        ];
+
+        console.log(`   📋 Inversionistas encontrados:`);
+        todosInversionistas.forEach((inv, idx) => {
+          console.log(
+            `   [${idx + 1}] ID ${inv.inversionista_id}: Q${inv.monto_aportado.toFixed(2)}`,
+          );
+        });
+
+        const inversionistaMayor = todosInversionistas.reduce((max, current) =>
+          current.monto_aportado.gt(max.monto_aportado) ? current : max,
+        );
+
+        console.log(
+          `   🏆 Mayor encontrado: ID ${inversionistaMayor.inversionista_id} con Q${inversionistaMayor.monto_aportado.toFixed(2)}`,
+        );
+
+        const esMayor =
+          inversionista.inversionista_id ===
+          inversionistaMayor.inversionista_id;
+        console.log(
+          `   ¿Es este inversionista el mayor? ${esMayor ? "✅ SÍ" : "❌ NO"}`,
         );
 
         // 🔥 CALCULAR CUOTA DEL INVERSIONISTA
+        console.log(`\n💳 CÁLCULO DE CUOTA DEL INVERSIONISTA:`);
+
         const cuotaTotal = new Big(credito.cuota || 0);
+        const seguro = new Big(credito.seguro_10_cuotas || 0);
+        const membresias = new Big(credito.membresias_pago || 0);
+
+        console.log(`   Cuota Total: Q${cuotaTotal.toFixed(2)}`);
+        console.log(`   - Seguro: Q${seguro.toFixed(2)}`);
+        console.log(`   - Membresía: Q${membresias.toFixed(2)}`);
+
         const porcentajeParticipacion = capitalTotal
           .div(new Big(credito.capital))
           .times(100);
-        const cuotaInversionista = cuotaTotal
-          .minus(credito.seguro_10_cuotas)
-          .minus(credito.membresias_pago)
+
+        console.log(`\n📐 PARTICIPACIÓN:`);
+        console.log(`   💰 Capital total crédito: Q${credito.capital}`);
+        console.log(`   💰 Capital aportado: Q${capitalTotal.toFixed(2)}`);
+        console.log(
+          `   📊 % Participación: ${porcentajeParticipacion.toFixed(4)}%`,
+        );
+        console.log(
+          `   Fórmula: (${capitalTotal.toFixed(2)} / ${credito.capital}) * 100`,
+        );
+
+        // 🔥 PASO 1: RESTAR CARGOS
+        const cuotaSinCargos = cuotaTotal.minus(seguro).minus(membresias);
+
+        console.log(`\n🔢 PASO 1: RESTAR CARGOS`);
+        console.log(`   Cuota sin cargos: Q${cuotaSinCargos.toFixed(2)}`);
+        console.log(
+          `   Fórmula: ${cuotaTotal.toFixed(2)} - ${seguro.toFixed(2)} - ${membresias.toFixed(2)}`,
+        );
+
+        // 🔥 PASO 2: MULTIPLICAR POR PORCENTAJE
+        const cuotaBase = cuotaSinCargos
           .times(porcentajeParticipacion.div(100))
           .round(2);
 
-        console.log(`   💰 Capital total crédito: ${credito.capital}`);
-        console.log(`   💰 Capital aportado: ${capitalTotal.toFixed(2)}`);
+        console.log(`\n🔢 PASO 2: MULTIPLICAR POR PORCENTAJE`);
+        console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
         console.log(
-          `   📊 % Participación: ${porcentajeParticipacion.toFixed(2)}%`
-        );
-        console.log(
-          `   💵 Cuota inversionista: ${cuotaInversionista.toFixed(2)}`
+          `   Fórmula: ${cuotaSinCargos.toFixed(2)} * (${porcentajeParticipacion.toFixed(4)}% / 100)`,
         );
 
+        // 🔥 PASO 3: SI ES EL MAYOR, SUMAR CARGOS
+        let cuotaInversionista = cuotaBase;
+
+        console.log(`\n🎯 PASO 3: CALCULAR CUOTA FINAL`);
+
+        if (esMayor) {
+          console.log(`   🏆 ESTE ES EL INVERSIONISTA MAYOR`);
+          console.log(`   Cuota Base: Q${cuotaBase.toFixed(2)}`);
+          console.log(`   + Seguro: Q${seguro.toFixed(2)}`);
+          console.log(`   + Membresía: Q${membresias.toFixed(2)}`);
+
+          cuotaInversionista = cuotaBase.plus(seguro).plus(membresias).round(2);
+
+          console.log(`   = Cuota Final: Q${cuotaInversionista.toFixed(2)}`);
+          console.log(
+            `   Fórmula: ${cuotaBase.toFixed(2)} + ${seguro.toFixed(2)} + ${membresias.toFixed(2)}`,
+          );
+        } else {
+          console.log(`   📍 Inversionista normal (no es el mayor)`);
+          console.log(
+            `   Cuota Final = Cuota Base: Q${cuotaInversionista.toFixed(2)}`,
+          );
+          console.log(`   (No se suman cargos)`);
+        }
+
+        console.log(`\n💹 CÁLCULO DE INTERESES:`);
+        console.log(
+          `   Tasa de Interés: ${new Big(credito.porcentaje_interes || 0).toFixed(2)}%`,
+        );
+        console.log(`   Capital Aportado: Q${capitalTotal.toFixed(2)}`);
+
         const cuotaInteres = capitalTotal.times(porcentajeInteres);
+
+        console.log(`   Interés Calculado: Q${cuotaInteres.toFixed(2)}`);
+        console.log(
+          `   Fórmula: ${capitalTotal.toFixed(2)} * ${porcentajeInteres.toFixed(4)}`,
+        );
 
         // 🔥 USAR PORCENTAJE DEL EXCEL O DEFAULT
         let porcentajeInversionista: number;
         let porcentajeCashIn: number;
+
+        console.log(`\n📊 DISTRIBUCIÓN DE INTERÉS:`);
 
         if (
           input.porcentaje_inversor !== undefined &&
@@ -1026,31 +1136,60 @@ export async function liquidarCuotasPorCredito(
           porcentajeInversionista = input.porcentaje_inversor;
           porcentajeCashIn = 100 - porcentajeInversionista;
           console.log(
-            `   📊 % Inversor (del Excel): ${porcentajeInversionista}%`
+            `   ✅ % Inversor (del Excel): ${porcentajeInversionista}%`,
           );
-          console.log(`   📊 % Cash-In (calculado): ${porcentajeCashIn}%`);
+          console.log(`   ✅ % Cash-In (calculado): ${porcentajeCashIn}%`);
         } else {
           // Valores por defecto
           porcentajeCashIn = 28;
           porcentajeInversionista = 72;
           console.log(
-            `   📊 % Inversor (default): ${porcentajeInversionista}%`
+            `   📌 % Inversor (default): ${porcentajeInversionista}%`,
           );
-          console.log(`   📊 % Cash-In (default): ${porcentajeCashIn}%`);
+          console.log(`   📌 % Cash-In (default): ${porcentajeCashIn}%`);
         }
 
         const montoInversionista = cuotaInteres
           .times(porcentajeInversionista)
           .div(100)
           .toFixed(2);
+
         const montoCashIn = cuotaInteres
           .times(porcentajeCashIn)
           .div(100)
           .toFixed(2);
+
+        console.log(`   Monto Inversionista: Q${montoInversionista}`);
+        console.log(
+          `   Fórmula: ${cuotaInteres.toFixed(2)} * (${porcentajeInversionista}% / 100)`,
+        );
+        console.log(`   Monto Cash-In: Q${montoCashIn}`);
+        console.log(
+          `   Fórmula: ${cuotaInteres.toFixed(2)} * (${porcentajeCashIn}% / 100)`,
+        );
+
         const ivaInversionista = new Big(montoInversionista)
           .times(0.12)
           .toFixed(2);
         const ivaCashIn = new Big(montoCashIn).times(0.12).toFixed(2);
+
+        console.log(`\n🧾 CÁLCULO DE IVA (12%):`);
+        console.log(`   IVA Inversionista: Q${ivaInversionista}`);
+        console.log(`   Fórmula: ${montoInversionista} * 0.12`);
+        console.log(`   IVA Cash-In: Q${ivaCashIn}`);
+        console.log(`   Fórmula: ${montoCashIn} * 0.12`);
+
+        console.log(`\n✅ RESUMEN FINAL ANTES DE INSERTAR:`);
+        console.log(
+          `   - Cuota Inversionista: Q${cuotaInversionista.toFixed(2)}`,
+        );
+        console.log(`   - Monto Inversionista: Q${montoInversionista}`);
+        console.log(`   - IVA Inversionista: Q${ivaInversionista}`);
+        console.log(`   - Monto Cash-In: Q${montoCashIn}`);
+        console.log(`   - IVA Cash-In: Q${ivaCashIn}`);
+        console.log(
+          `   - % Participación: ${porcentajeParticipacion.toFixed(4)}%`,
+        );
 
         // 🔥 INSERTAR
         await db.insert(creditos_inversionistas).values({
@@ -1066,6 +1205,9 @@ export async function liquidarCuotasPorCredito(
           iva_inversionista: ivaInversionista,
           iva_cash_in: ivaCashIn,
         });
+
+        console.log(`\n✅ Relación credito-inversionista creada exitosamente`);
+        console.log(`${"=".repeat(60)}\n`);
 
         console.log(`✅ RELACIÓN CREADA`);
         relacionCreada = true;
@@ -1099,10 +1241,10 @@ export async function liquidarCuotasPorCredito(
 
       console.log(`   💰 NUEVO Monto aportado: ${capitalTotal.toFixed(2)}`);
       console.log(
-        `   📊 % Participación: ${porcentajeParticipacion.toFixed(2)}%`
+        `   📊 % Participación: ${porcentajeParticipacion.toFixed(2)}%`,
       );
       console.log(
-        `   💵 NUEVA Cuota inversionista: ${nuevaCuotaInversionista.toFixed(2)}`
+        `   💵 NUEVA Cuota inversionista: ${nuevaCuotaInversionista.toFixed(2)}`,
       );
 
       // 🔥 USAR PORCENTAJE DEL EXCEL O EL QUE YA EXISTE EN BD
@@ -1116,18 +1258,18 @@ export async function liquidarCuotasPorCredito(
         porcentajeInversionista = new Big(input.porcentaje_inversor);
         porcentajeCashIn = new Big(100).minus(porcentajeInversionista);
         console.log(
-          `   📊 % Inversor (del Excel): ${porcentajeInversionista.toFixed(2)}%`
+          `   📊 % Inversor (del Excel): ${porcentajeInversionista.toFixed(2)}%`,
         );
         console.log(
-          `   📊 % Cash-In (calculado): ${porcentajeCashIn.toFixed(2)}%`
+          `   📊 % Cash-In (calculado): ${porcentajeCashIn.toFixed(2)}%`,
         );
       } else {
         porcentajeCashIn = normalizarPorcentaje(relacion.porcentaje_cash_in);
         porcentajeInversionista = normalizarPorcentaje(
-          relacion.porcentaje_participacion_inversionista
+          relacion.porcentaje_participacion_inversionista,
         );
         console.log(
-          `   📊 % Inversor (de BD): ${porcentajeInversionista.toFixed(2)}%`
+          `   📊 % Inversor (de BD): ${porcentajeInversionista.toFixed(2)}%`,
         );
         console.log(`   📊 % Cash-In (de BD): ${porcentajeCashIn.toFixed(2)}%`);
       }
@@ -1162,9 +1304,9 @@ export async function liquidarCuotasPorCredito(
         .update(creditos_inversionistas)
         .set({
           monto_aportado: capitalTotal.toFixed(2),
-          porcentaje_cash_in: porcentajeCashIn.toFixed(2),
+          porcentaje_cash_in: porcentajeCashIn.toString(),
           porcentaje_participacion_inversionista:
-            porcentajeInversionista.toFixed(2),
+            porcentajeInversionista.toString(),
           cuota_inversionista: nuevaCuotaInversionista.toString(),
           monto_inversionista: nuevoMontoInversionista,
           monto_cash_in: nuevoMontoCashIn,
@@ -1177,9 +1319,9 @@ export async function liquidarCuotasPorCredito(
             eq(creditos_inversionistas.credito_id, credito.credito_id),
             eq(
               creditos_inversionistas.inversionista_id,
-              inversionista.inversionista_id
-            )
-          )
+              inversionista.inversionista_id,
+            ),
+          ),
         );
 
       console.log(`✅ RELACIÓN ACTUALIZADA`);
@@ -1237,7 +1379,7 @@ const prepararURLsBoletas = (url_boletas: string[]): string[] => {
 
   if (!r2BaseUrl) {
     throw new Error(
-      "URL_PUBLIC_R2 no está configurado en las variables de entorno"
+      "URL_PUBLIC_R2 no está configurado en las variables de entorno",
     );
   }
 
@@ -1278,7 +1420,7 @@ export interface UpdateBoletaInput {
   fecha_procesado?: Date;
 }
 export async function createBoleta(
-  data: CreateBoletaInput
+  data: CreateBoletaInput,
 ): Promise<CreateBoletaResponse> {
   try {
     console.log("\n📝 ========== CREANDO BOLETA ==========");
@@ -1303,7 +1445,7 @@ export async function createBoleta(
 
     if (!inversionista) {
       console.error(
-        `❌ Inversionista con ID ${data.inversionista_id} no existe`
+        `❌ Inversionista con ID ${data.inversionista_id} no existe`,
       );
       return {
         success: false,
@@ -1363,7 +1505,7 @@ export async function createBoleta(
     console.log(`   Inversionista: ${inversionista.nombre}`);
     console.log(`   URL: ${nuevaBoleta.boleta_url}`);
     console.log(
-      `   Monto: ${nuevaBoleta.monto_boleta ? `Q${nuevaBoleta.monto_boleta}` : "No especificado"}`
+      `   Monto: ${nuevaBoleta.monto_boleta ? `Q${nuevaBoleta.monto_boleta}` : "No especificado"}`,
     );
     console.log(`   Estado: ${nuevaBoleta.estado}`);
     console.log(`   Fecha: ${nuevaBoleta.fecha_subida}`);
@@ -1405,8 +1547,8 @@ export async function getBoletaById(boleta_id: number) {
         inversionistas,
         eq(
           boletasPagoInversionista.inversionista_id,
-          inversionistas.inversionista_id
-        )
+          inversionistas.inversionista_id,
+        ),
       )
       .where(eq(boletasPagoInversionista.boleta_id, boleta_id))
       .limit(1);
@@ -1440,7 +1582,7 @@ export async function getAllBoletas(filters?: {
 
     if (filters?.inversionista_id) {
       conditions.push(
-        eq(boletasPagoInversionista.inversionista_id, filters.inversionista_id)
+        eq(boletasPagoInversionista.inversionista_id, filters.inversionista_id),
       );
     }
 
@@ -1462,8 +1604,8 @@ export async function getAllBoletas(filters?: {
         inversionistas,
         eq(
           boletasPagoInversionista.inversionista_id,
-          inversionistas.inversionista_id
-        )
+          inversionistas.inversionista_id,
+        ),
       )
       .where(whereCondition)
       .orderBy(desc(boletasPagoInversionista.fecha_subida))
@@ -1484,7 +1626,7 @@ export async function getAllBoletas(filters?: {
 export async function getBoletasPendientes(inversionista_id?: number) {
   try {
     console.log(
-      `📋 Obteniendo boletas PENDIENTES${inversionista_id ? ` para inversionista ${inversionista_id}` : ""}`
+      `📋 Obteniendo boletas PENDIENTES${inversionista_id ? ` para inversionista ${inversionista_id}` : ""}`,
     );
 
     return await getAllBoletas({
@@ -1607,7 +1749,7 @@ export async function deleteBoleta(boleta_id: number) {
     // 2️⃣ Verificar que NO esté PROCESADA
     if (boletaExiste[0].estado === "PROCESADO") {
       throw new Error(
-        `No se puede eliminar una boleta PROCESADA. Boleta ID: ${boleta_id}`
+        `No se puede eliminar una boleta PROCESADA. Boleta ID: ${boleta_id}`,
       );
     }
 
@@ -1631,13 +1773,13 @@ export async function deleteBoleta(boleta_id: number) {
 export async function getBoletasStats(inversionista_id?: number) {
   try {
     console.log(
-      `📊 Obteniendo estadísticas de boletas${inversionista_id ? ` para inversionista ${inversionista_id}` : ""}`
+      `📊 Obteniendo estadísticas de boletas${inversionista_id ? ` para inversionista ${inversionista_id}` : ""}`,
     );
 
     const conditions: any[] = [];
     if (inversionista_id) {
       conditions.push(
-        eq(boletasPagoInversionista.inversionista_id, inversionista_id)
+        eq(boletasPagoInversionista.inversionista_id, inversionista_id),
       );
     }
     const whereCondition =
@@ -1706,11 +1848,11 @@ interface LiquidacionBatchInput {
   liquidaciones: LiquidacionBatchItem[];
 }
 export async function liquidarCuotasBatchInteligente(
-  input: LiquidacionBatchInput
+  input: LiquidacionBatchInput,
 ) {
   try {
     console.log(
-      "🔥 ========== INICIANDO LIQUIDACIÓN BATCH INTELIGENTE =========="
+      "🔥 ========== INICIANDO LIQUIDACIÓN BATCH INTELIGENTE ==========",
     );
     console.log(`👤 Inversionista: ${input.nombre_inversionista}`);
     console.log(`📊 Total liquidaciones: ${input.liquidaciones.length}`);
@@ -1747,14 +1889,14 @@ export async function liquidarCuotasBatchInteligente(
       console.log("⚠️ Múltiples inversionistas encontrados:");
       inversionistasEncontrados.forEach((inv, idx) => {
         console.log(
-          `   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`
+          `   ${idx + 1}. ${inv.nombre} (ID: ${inv.inversionista_id})`,
         );
       });
 
       const matchExacto = inversionistasEncontrados.find(
         (inv) =>
           inv.nombre.trim().toLowerCase() ===
-          nombre_inversionista.trim().toLowerCase()
+          nombre_inversionista.trim().toLowerCase(),
       );
 
       if (matchExacto) {
@@ -1762,7 +1904,7 @@ export async function liquidarCuotasBatchInteligente(
         inversionista = matchExacto;
       } else {
         console.log(
-          `⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${inversionistasEncontrados[0].nombre}`
+          `⚠️ Sin match exacto, TOMANDO EL PRIMERO: ${inversionistasEncontrados[0].nombre}`,
         );
         inversionista = inversionistasEncontrados[0];
       }
@@ -1771,7 +1913,7 @@ export async function liquidarCuotasBatchInteligente(
     }
 
     console.log(
-      `✅ Inversionista seleccionado: ${inversionista.nombre} (ID: ${inversionista.inversionista_id})`
+      `✅ Inversionista seleccionado: ${inversionista.nombre} (ID: ${inversionista.inversionista_id})`,
     );
 
     // ============================================
@@ -1791,14 +1933,14 @@ export async function liquidarCuotasBatchInteligente(
       .from(creditos_inversionistas)
       .innerJoin(
         creditos,
-        eq(creditos.credito_id, creditos_inversionistas.credito_id)
+        eq(creditos.credito_id, creditos_inversionistas.credito_id),
       )
       .innerJoin(usuarios, eq(usuarios.usuario_id, creditos.usuario_id))
       .where(
         eq(
           creditos_inversionistas.inversionista_id,
-          inversionista.inversionista_id
-        )
+          inversionista.inversionista_id,
+        ),
       );
 
     console.log(`📊 Relaciones actuales en BD: ${relacionesActuales.length}`);
@@ -1820,7 +1962,7 @@ export async function liquidarCuotasBatchInteligente(
     // 🔥 CREAR DOS MAPS:
     // 1. Por CREDITO_ID (para tracking de eliminaciones)
     const mapRelacionesPorCredito = new Map(
-      relacionesActuales.map((r) => [r.credito_id, r])
+      relacionesActuales.map((r) => [r.credito_id, r]),
     );
 
     // 2. Por USUARIO (puede tener múltiples créditos) - Array de relaciones
@@ -1853,7 +1995,7 @@ export async function liquidarCuotasBatchInteligente(
 
     console.log(`📊 Map por crédito: ${mapRelacionesPorCredito.size} créditos`);
     console.log(
-      `📊 Map por usuario: ${mapRelacionesPorUsuario.size} keys únicas`
+      `📊 Map por usuario: ${mapRelacionesPorUsuario.size} keys únicas`,
     );
 
     // 🔥 Mostrar desglose si hay usuarios con múltiples créditos
@@ -1868,7 +2010,7 @@ export async function liquidarCuotasBatchInteligente(
         console.log(`   👤 ${nombreOriginal}: ${relaciones.length} créditos`);
         relaciones.forEach((rel) => {
           console.log(
-            `      - Crédito ${rel.numero_credito} (ID: ${rel.credito_id}) - Q${rel.monto_aportado}`
+            `      - Crédito ${rel.numero_credito} (ID: ${rel.credito_id}) - Q${rel.monto_aportado}`,
           );
         });
       }
@@ -1896,7 +2038,7 @@ export async function liquidarCuotasBatchInteligente(
         ? ` 📊 ${liquidacion.porcentaje_inversor}%`
         : "";
       console.log(
-        `\n[${i + 1}/${liquidaciones.length}] 👤 ${liquidacion.nombre_usuario} - 📅 ${liquidacion.cuota_mes} - 💰 Q${liquidacion.capital.toFixed(2)} ${liquidacion.meses_en_credito === 1 ? "🆕 (MES 1)" : ""}${indicadorPorcentaje}`
+        `\n[${i + 1}/${liquidaciones.length}] 👤 ${liquidacion.nombre_usuario} - 📅 ${liquidacion.cuota_mes} - 💰 Q${liquidacion.capital.toFixed(2)} ${liquidacion.meses_en_credito === 1 ? "🆕 (MES 1)" : ""}${indicadorPorcentaje}`,
       );
 
       // 🔥 BUSCAR EN LAS RELACIONES EXISTENTES POR NOMBRE DE USUARIO NORMALIZADO
@@ -1907,7 +2049,7 @@ export async function liquidarCuotasBatchInteligente(
         if (relacionesUsuario.length > 0) {
           // ✅ ENCONTRAMOS AL USUARIO EN LAS RELACIONES EXISTENTES
           console.log(
-            `   ✅ Usuario encontrado en relaciones (${relacionesUsuario.length} crédito${relacionesUsuario.length > 1 ? "s" : ""})`
+            `   ✅ Usuario encontrado en relaciones (${relacionesUsuario.length} crédito${relacionesUsuario.length > 1 ? "s" : ""})`,
           );
 
           // 🎯 Estrategia: usar el PRIMER crédito
@@ -1918,12 +2060,12 @@ export async function liquidarCuotasBatchInteligente(
             relacionesUsuario.forEach((rel, idx) => {
               const marca = idx === 0 ? "👉" : "  ";
               console.log(
-                `      ${marca} Crédito ${rel.numero_credito} (ID: ${rel.credito_id}) - Q${rel.monto_aportado}`
+                `      ${marca} Crédito ${rel.numero_credito} (ID: ${rel.credito_id}) - Q${rel.monto_aportado}`,
               );
             });
           } else {
             console.log(
-              `   📋 Crédito: ${relacionExistente.numero_credito} (ID: ${relacionExistente.credito_id})`
+              `   📋 Crédito: ${relacionExistente.numero_credito} (ID: ${relacionExistente.credito_id})`,
             );
           }
 
@@ -1966,13 +2108,13 @@ export async function liquidarCuotasBatchInteligente(
         } else {
           // ❌ NO ENCONTRAMOS AL USUARIO EN LAS RELACIONES EXISTENTES
           console.log(
-            `   ⚠️ Usuario NO tiene relación con ${inversionista.nombre}`
+            `   ⚠️ Usuario NO tiene relación con ${inversionista.nombre}`,
           );
           console.log(`   🔍 Buscando usuario en sistema...`);
 
           // 🔥 BUSCAR USUARIO EN LA BASE DE DATOS
           const usuariosEncontrados = await buscarUsuarioPermisivo(
-            liquidacion.nombre_usuario
+            liquidacion.nombre_usuario,
           );
 
           if (usuariosEncontrados.length === 0) {
@@ -1992,7 +2134,7 @@ export async function liquidarCuotasBatchInteligente(
 
           const usuario = usuariosEncontrados[0];
           console.log(
-            `   ✅ Usuario encontrado: ${usuario.nombre} (ID: ${usuario.usuario_id})`
+            `   ✅ Usuario encontrado: ${usuario.nombre} (ID: ${usuario.usuario_id})`,
           );
 
           // 🔥 BUSCAR CRÉDITOS DEL USUARIO
@@ -2020,7 +2162,7 @@ export async function liquidarCuotasBatchInteligente(
           const creditoParaUsar = creditosUsuario[0];
           console.log(`   📋 Créditos disponibles: ${creditosUsuario.length}`);
           console.log(
-            `   👉 Usando crédito: ${creditoParaUsar.numero_credito_sifco} (ID: ${creditoParaUsar.credito_id})`
+            `   👉 Usando crédito: ${creditoParaUsar.numero_credito_sifco} (ID: ${creditoParaUsar.credito_id})`,
           );
 
           // 🔥 MARCAR COMO PROCESADO
@@ -2082,7 +2224,7 @@ export async function liquidarCuotasBatchInteligente(
     // ============================================
     console.log(`\n🧹 ========== LIMPIANDO RELACIONES HUÉRFANAS ==========`);
     console.log(
-      `   📊 Créditos procesados en Excel: ${creditosProcesados.size}`
+      `   📊 Créditos procesados en Excel: ${creditosProcesados.size}`,
     );
     console.log(`   📊 Créditos en BD: ${mapRelacionesPorCredito.size}`);
 
@@ -2096,14 +2238,14 @@ export async function liquidarCuotasBatchInteligente(
         console.log(`\n   ➖ ELIMINANDO relación huérfana:`);
         console.log(`      Usuario: ${relacion.usuario_nombre}`);
         console.log(
-          `      Crédito: ${relacion.numero_credito} (ID: ${creditoId})`
+          `      Crédito: ${relacion.numero_credito} (ID: ${creditoId})`,
         );
         console.log(`      Monto aportado: Q${relacion.monto_aportado}`);
 
         await db
           .delete(creditos_inversionistas)
           .where(
-            eq(creditos_inversionistas.id, relacion.credito_inversionista_id)
+            eq(creditos_inversionistas.id, relacion.credito_inversionista_id),
           );
 
         eliminados++;

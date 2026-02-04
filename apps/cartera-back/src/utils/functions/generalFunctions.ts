@@ -34,7 +34,6 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
   // ✅ Asegurar que sean números
   const saldoBase = Number(data.header.saldo_total || 0);
   const extrasTotal = Number(data.header.extras_total || 0);
-  const saldoConExtras = Number(data.header.saldo_total_con_extras || 0);
 
   // ✅ Calcular totales de cada columna
   const totales = data.cuotas_atrasadas.items.reduce(
@@ -43,7 +42,6 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
       servicios: acc.servicios + Number(r.servicios || 0),
       mora: acc.mora + Number(r.mora || 0),
       otros: acc.otros + Number(r.otros || 0),
-      capital_pendiente: acc.capital_pendiente + Number(r.capital_pendiente || 0),
       total_cancelar: acc.total_cancelar + Number(r.total_cancelar || 0),
     }),
     {
@@ -51,16 +49,30 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
       servicios: 0,
       mora: 0,
       otros: 0,
-      capital_pendiente: 0,
       total_cancelar: 0,
     }
   );
 
-  // ✅ Total a pagar = Capital + Total de la tabla (asegurando números)
+  // ✅ Total a pagar = Capital + Total de la tabla
   const totalAPagar = Number(saldoBase) + Number(totales.total_cancelar);
-  
-  // ✅ Con extras
-  const totalConExtras = Number(totalAPagar) + Number(extrasTotal);
+
+  // Rubros fijos de cancelación
+  const closureData = data.closure;
+  const rubrosFijos: Array<{ concepto: string; monto: number }> = [];
+  if (closureData?.kind === "CANCELACION") {
+    const t = Number(closureData.traspaso || 0);
+    const g = Number(closureData.garantia_mobiliaria || 0);
+    const o = Number(closureData.otros || 0);
+    if (t > 0) rubrosFijos.push({ concepto: "Traspaso", monto: t });
+    if (g > 0) rubrosFijos.push({ concepto: "Garantía mobiliaria", monto: g });
+    if (o > 0) rubrosFijos.push({ concepto: "Otros", monto: o });
+  }
+  const totalRubrosFijos = rubrosFijos.reduce((s, r) => s + r.monto, 0);
+
+  // ✅ Otros = rubros fijos + extras dinámicos
+  const totalOtros = totalRubrosFijos + Number(extrasTotal);
+  // ✅ Con extras + rubros fijos
+  const totalConExtras = Number(totalAPagar) + totalOtros;
 
   const rows = data.cuotas_atrasadas.items
     .map(
@@ -72,7 +84,6 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
         <td>${gtq(r.servicios)}</td>
         <td>${gtq(r.mora)}</td>
         <td>${gtq(r.otros)}</td>
-        <td>${gtq(r.capital_pendiente)}</td>
         <td class="total">${gtq(r.total_cancelar)}</td>
       </tr>
     `
@@ -86,42 +97,12 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
       <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.interes)}</td>
       <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.servicios)}</td>
       <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.mora)}</td>
-      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.otros)}</td>
-      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.capital_pendiente)}</td>
-      <td class="total" style="font-weight:800;background:#e0f2fe;font-size:14px;">${gtq(totales.total_cancelar)}</td>
+      <td style="font-weight:700;background:#e0f2fe;">${gtq(totales.otros + totalOtros)}</td>
+      <td class="total" style="font-weight:800;background:#e0f2fe;font-size:14px;">${gtq(totalConExtras)}</td>
     </tr>
   `;
 
-  const extrasBlock =
-    data.extras.total_items > 0
-      ? `
-        <div class="extras">
-          <h3>Montos adicionales</h3>
-          <table>
-            <thead>
-              <tr><th>#</th><th>Concepto</th><th>Monto</th><th>Fecha</th></tr>
-            </thead>
-            <tbody>
-              ${data.extras.items
-                .map(
-                  (e, i) => `
-                    <tr>
-                      <td>${i + 1}</td>
-                      <td>${e.concepto}</td>
-                      <td class="total">${gtq(e.monto)}</td>
-                      <td>${e.fecha_registro ? String(e.fecha_registro).slice(0, 10) : "-"}</td>
-                    </tr>
-                  `
-                )
-                .join("")}
-            </tbody>
-          </table>
-          <div class="extras-total">
-            Total extras: <strong>${gtq(extrasTotal)}</strong>
-          </div>
-        </div>
-      `
-      : "";
+
 
   return `
 <!DOCTYPE html>
@@ -171,7 +152,7 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
       <div style="font-size:14px;font-weight:700;color:#0F1B4C;">PRÉSTAMO</div>
     </div>
   </div>
-  <div style="text-align:right;font-size:11px;color:#64748b;">${new Date().toLocaleString("es-GT")}</div>
+  <div style="text-align:right;font-size:11px;color:#64748b;">${new Date().toLocaleDateString("es-GT", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</div>
 </div>
 
 <div class="summary">
@@ -180,25 +161,13 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
       <dt>Cliente</dt><dd>${data.header.usuario}</dd>
       <dt>Préstamo No.</dt><dd>${data.header.numero_credito_sifco}</dd>
       <dt>Moneda</dt><dd>${data.header.moneda}</dd>
-      <dt>Tipo de crédito</dt><dd>${data.header.tipo_credito}</dd>
-      <dt>Observaciones</dt><dd>${data.header.observaciones || "-"}</dd>
     </dl>
   </div>
 
   <div class="box saldo">
     <div style="text-align:center;">
-      <small>Capital</small>
-      <div class="num">${gtq(saldoBase)}</div>
-      <div style="border-top:2px solid #cbd5e1;margin:8px 0;"></div>
-      <small>Total a pagar</small>
-      <div class="num" style="color:#dc2626;">${gtq(totalAPagar)}</div>
-      ${
-        extrasTotal !== 0
-          ? `<div style="border-top:2px solid #cbd5e1;margin:8px 0;"></div>
-             <small>Con extras</small>
-             <div class="num" style="color:#059669;">${gtq(totalConExtras)}</div>`
-          : ""
-      }
+      <small>Total a cancelar</small>
+      <div class="num" style="color:#dc2626;">${gtq(totalConExtras)}</div>
     </div>
   </div>
 </div>
@@ -208,21 +177,27 @@ export function renderCancelationHTML(data: GetCreditDTO, logoUrl: string) {
     <tr>
       <th>No.</th>
       <th>Mes</th>
-      <th>Interés</th>
+      <th>Intereses</th>
       <th>Servicios</th>
       <th>Mora</th>
-      <th>OTROS</th>
-      <th>Capital pendiente de pago</th>
+      <th>Otros</th>
       <th>Total a cancelar</th>
     </tr>
   </thead>
   <tbody>
-    ${rows || `<tr><td colspan="8" style="text-align:center;color:#7c8591;">Sin cuotas atrasadas</td></tr>`}
+    <tr style="background:#f0f6ff;">
+      <td colspan="6" style="font-weight:700;color:#0F1B4C;">Capital</td>
+      <td class="total" style="font-weight:800;">${gtq(saldoBase)}</td>
+    </tr>
+    ${rows || `<tr><td colspan="7" style="text-align:center;color:#7c8591;">Sin cuotas atrasadas</td></tr>`}
+    <tr style="background:#f0f6ff;">
+      <td colspan="5" style="font-weight:700;color:#0F1B4C;">Otros</td>
+      <td>${gtq(totalOtros)}</td>
+      <td class="total" style="font-weight:800;">${gtq(totalOtros)}</td>
+    </tr>
     ${totalesRow}
   </tbody>
 </table>
-
-${extrasBlock}
 
 <div class="foot">
   <div>Generado por Club Cashin.com</div>
@@ -255,8 +230,8 @@ const COLOR = {
   zebra: "FFF9FBFF",
 };
 
-function styleHeaderRow(row: ExcelJS.Row) {
-  for (let i = 1; i <= 8; i++) {
+function styleHeaderRow(row: ExcelJS.Row, cols = 7) {
+  for (let i = 1; i <= cols; i++) {
     const c = row.getCell(i);
     c.font = { bold: true, color: { argb: COLOR.white } };
     c.fill = {
@@ -329,8 +304,8 @@ export async function buildCancelationWorkbook(
   const ws = wb.addWorksheet("Cancelación", {
     properties: { defaultRowHeight: 18 },
   });
-  // anchos buscando similitud al PDF
-  [8, 18, 14, 14, 14, 12, 24, 18].forEach(
+  // anchos buscando similitud al PDF (6 columnas)
+  [8, 18, 14, 14, 12, 12, 18].forEach(
     (w, i) => (ws.getColumn(i + 1).width = w)
   );
 
@@ -341,7 +316,7 @@ export async function buildCancelationWorkbook(
     ws.addImage(imgId, 'A1:B2');
   }
 
-  ws.mergeCells("C1:H1");
+  ws.mergeCells("C1:G1");
   ws.getCell("C1").value = "DETALLE DE CANCELACIÓN";
   ws.getCell("C1").font = {
     bold: true,
@@ -350,14 +325,14 @@ export async function buildCancelationWorkbook(
   };
   ws.getCell("C1").alignment = { vertical: "middle" };
 
-  ws.mergeCells("C2:H2");
+  ws.mergeCells("C2:G2");
   ws.getCell("C2").value = "PRÉSTAMO";
   ws.getCell("C2").font = { bold: true, size: 14, color: { argb: COLOR.navy } };
   ws.getCell("C2").alignment = { vertical: "middle" };
 
   // ── tarjetas (sin merges grandes; solo pintamos el bloque)
   paintCard(ws, "A3:D9");
-  paintCard(ws, "E3:H9");
+  paintCard(ws, "E3:G9");
 
   // tarjeta izquierda: info
   const info: [string, string][] = [
@@ -376,51 +351,42 @@ export async function buildCancelationWorkbook(
     r++;
   }
 
-  // ✅ tarjeta derecha: Capital + Total a pagar + Con extras
+  // ✅ tarjeta derecha: Capital + Total a cancelar
   const saldoBase = toNum(data.header.saldo_total);
   const extrasTotal = toNum(data.header.extras_total);
-  
-  // Calcular total de la tabla
+
+  // Rubros fijos de cancelación
+  const closureData = data.closure;
+  const rubrosFijos: Array<{ concepto: string; monto: number }> = [];
+  let totalRubrosFijos = 0;
+  if (closureData?.kind === "CANCELACION") {
+    const t = toNum(closureData.traspaso);
+    const g = toNum(closureData.garantia_mobiliaria);
+    const o = toNum(closureData.otros);
+    if (t > 0) rubrosFijos.push({ concepto: "Traspaso", monto: t });
+    if (g > 0) rubrosFijos.push({ concepto: "Garantía mobiliaria", monto: g });
+    if (o > 0) rubrosFijos.push({ concepto: "Otros", monto: o });
+    totalRubrosFijos = t + g + o;
+  }
+
+  // Calcular total de la tabla (ya incluye cuota actual)
   let totalTabla = 0;
   for (const it of data.cuotas_atrasadas.items) {
     totalTabla += toNum(it.total_cancelar ?? 0);
   }
-  
+
+  const totalOtros = totalRubrosFijos + extrasTotal;
   const totalAPagar = saldoBase + totalTabla;
-  const totalConExtras = totalAPagar + extrasTotal;
+  const totalConExtras = totalAPagar + totalOtros;
 
-  ws.getCell("E4").value = "Capital";
-  ws.getCell("E4").font = { bold: true, color: { argb: COLOR.slate } };
-  ws.getCell("E4").alignment = { horizontal: "center" };
-  ws.mergeCells("F4:H4");
-  ws.getCell("F4").value = saldoBase;
-  ws.getCell("F4").numFmt = '"Q"#,##0.00';
-  ws.getCell("F4").font = { bold: true, size: 14, color: { argb: COLOR.blue } };
-  ws.getCell("F4").alignment = { horizontal: "center" };
-
-  ws.getCell("E5").value = "Total a pagar";
+  ws.getCell("E5").value = "Total a cancelar";
   ws.getCell("E5").font = { bold: true, color: { argb: COLOR.slate } };
   ws.getCell("E5").alignment = { horizontal: "center" };
-  ws.mergeCells("F5:H5");
-  ws.getCell("F5").value = totalAPagar;
+  ws.mergeCells("F5:G5");
+  ws.getCell("F5").value = totalConExtras;
   ws.getCell("F5").numFmt = '"Q"#,##0.00';
   ws.getCell("F5").font = { bold: true, size: 14, color: { argb: "FFDC2626" } }; // rojo
   ws.getCell("F5").alignment = { horizontal: "center" };
-
-  if (extrasTotal !== 0) {
-    ws.getCell("E7").value = "Con extras";
-    ws.getCell("E7").font = { bold: true, color: { argb: COLOR.slate } };
-    ws.getCell("E7").alignment = { horizontal: "center" };
-    ws.mergeCells("F7:H7");
-    ws.getCell("F7").value = totalConExtras;
-    ws.getCell("F7").numFmt = '"Q"#,##0.00';
-    ws.getCell("F7").font = {
-      bold: true,
-      size: 14,
-      color: { argb: "FF059669" }, // verde
-    };
-    ws.getCell("F7").alignment = { horizontal: "center" };
-  }
 
   // ── tabla cuotas atrasadas
   let row = 11;
@@ -428,19 +394,36 @@ export async function buildCancelationWorkbook(
   head.values = [
     "No.",
     "Mes",
-    "Interés",
+    "Intereses",
     "Servicios",
     "Mora",
-    "OTROS",
-    "Capital pendiente de pago",
+    "Otros",
     "Total a cancelar",
   ];
   styleHeaderRow(head);
 
+  // Fila de Capital
+  row++;
+  const capitalRow = ws.getRow(row);
+  ws.mergeCells(`A${row}:F${row}`);
+  capitalRow.getCell(1).value = "Capital";
+  capitalRow.getCell(1).font = { bold: true, color: { argb: COLOR.navy } };
+  capitalRow.getCell(7).value = saldoBase;
+  capitalRow.getCell(7).numFmt = '"Q"#,##0.00';
+  capitalRow.getCell(7).font = { bold: true, color: { argb: COLOR.blue } };
+  for (let c = 1; c <= 7; c++) {
+    capitalRow.getCell(c).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: COLOR.cardBg },
+    };
+  }
+  setThinBottomBorder(capitalRow);
+
   if (data.cuotas_atrasadas.items.length === 0) {
     row++;
-    ws.mergeCells(`A${row}:H${row}`);
-    ws.getCell(`A${row}`).value = "Sin cuotas atrasadas";
+    ws.mergeCells(`A${row}:G${row}`);
+    ws.getCell(`A${row}`).value = "Sin cuotas";
     ws.getCell(`A${row}`).alignment = { horizontal: "center" };
     ws.getCell(`A${row}`).font = { italic: true, color: { argb: "FF7C8591" } };
   } else {
@@ -450,25 +433,22 @@ export async function buildCancelationWorkbook(
       servicios: 0,
       mora: 0,
       otros: 0,
-      capital_pendiente: 0,
       total_cancelar: 0,
     };
 
     for (const it of data.cuotas_atrasadas.items) {
       row++;
-      
+
       const interes = toNum(it.interes);
       const servicios = toNum(it.servicios);
       const mora = toNum(it.mora);
       const otros = toNum(it.otros);
-      const capital = toNum(it.capital_pendiente);
       const total = toNum(it.total_cancelar);
 
       totales.interes += interes;
       totales.servicios += servicios;
       totales.mora += mora;
       totales.otros += otros;
-      totales.capital_pendiente += capital;
       totales.total_cancelar += total;
 
       const rr = ws.getRow(row);
@@ -479,13 +459,12 @@ export async function buildCancelationWorkbook(
         servicios,
         mora,
         otros,
-        capital,
         total,
       ];
-      [3, 4, 5, 6, 7, 8].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
-      rr.getCell(8).font = { bold: true, color: { argb: COLOR.blue } };
+      [3, 4, 5, 6, 7].forEach((i) => (rr.getCell(i).numFmt = '"Q"#,##0.00'));
+      rr.getCell(7).font = { bold: true, color: { argb: COLOR.blue } };
       if (row % 2 === 0) {
-        for (let c = 1; c <= 8; c++) {
+        for (let c = 1; c <= 7; c++) {
           rr.getCell(c).fill = {
             type: "pattern",
             pattern: "solid",
@@ -495,6 +474,26 @@ export async function buildCancelationWorkbook(
       }
       setThinBottomBorder(rr);
     }
+
+    // Fila de Otros
+    row++;
+    const otrosRow = ws.getRow(row);
+    ws.mergeCells(`A${row}:E${row}`);
+    otrosRow.getCell(1).value = "Otros";
+    otrosRow.getCell(1).font = { bold: true, color: { argb: COLOR.navy } };
+    otrosRow.getCell(6).value = totalOtros;
+    otrosRow.getCell(6).numFmt = '"Q"#,##0.00';
+    otrosRow.getCell(7).value = totalOtros;
+    otrosRow.getCell(7).numFmt = '"Q"#,##0.00';
+    otrosRow.getCell(7).font = { bold: true, color: { argb: COLOR.blue } };
+    for (let c = 1; c <= 7; c++) {
+      otrosRow.getCell(c).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: COLOR.cardBg },
+      };
+    }
+    setThinBottomBorder(otrosRow);
 
     // ✅ Fila de totales
     row++;
@@ -507,11 +506,10 @@ export async function buildCancelationWorkbook(
     totalRow.getCell(3).value = totales.interes;
     totalRow.getCell(4).value = totales.servicios;
     totalRow.getCell(5).value = totales.mora;
-    totalRow.getCell(6).value = totales.otros;
-    totalRow.getCell(7).value = totales.capital_pendiente;
-    totalRow.getCell(8).value = totales.total_cancelar;
+    totalRow.getCell(6).value = totales.otros + totalOtros;
+    totalRow.getCell(7).value = totalConExtras;
 
-    [3, 4, 5, 6, 7, 8].forEach((i) => {
+    [3, 4, 5, 6, 7].forEach((i) => {
       totalRow.getCell(i).numFmt = '"Q"#,##0.00';
       totalRow.getCell(i).font = { bold: true, color: { argb: COLOR.blue } };
       totalRow.getCell(i).fill = {
@@ -524,52 +522,6 @@ export async function buildCancelationWorkbook(
 
   // congelar encabezado hasta la fila de header de tabla
   ws.views = [{ state: "frozen", ySplit: 11 }];
-
-  // ── sección extras
-  row += 2;
-  ws.mergeCells(`A${row}:H${row}`);
-  ws.getCell(`A${row}`).value = "Montos adicionales";
-  ws.getCell(`A${row}`).font = {
-    bold: true,
-    size: 12,
-    color: { argb: COLOR.navy },
-  };
-
-  row++;
-  const eHead = ws.getRow(row);
-  eHead.values = ["#", "Concepto", "Monto", "Fecha", "", "", "", ""];
-  styleHeaderRow(eHead);
-
-  if (data.extras.total_items > 0) {
-    for (let i = 0; i < data.extras.items.length; i++) {
-      const e = data.extras.items[i];
-      row++;
-      const rr = ws.getRow(row);
-      rr.values = [
-        i + 1,
-        e.concepto,
-        toNum(e.monto),
-        e.fecha_registro ? String(e.fecha_registro).slice(0, 10) : "-",
-      ];
-      rr.getCell(3).numFmt = '"Q"#,##0.00';
-      setThinBottomBorder(rr);
-    }
-    row++;
-    ws.mergeCells(`A${row}:G${row}`);
-    ws.getCell(`A${row}`).value = "Total extras:";
-    ws.getCell(`A${row}`).alignment = { horizontal: "right" };
-    ws.getCell(`A${row}`).font = { bold: true, color: { argb: COLOR.navy } };
-
-    ws.getCell(`H${row}`).value = extrasTotal;
-    ws.getCell(`H${row}`).numFmt = '"Q"#,##0.00';
-    ws.getCell(`H${row}`).font = { bold: true, color: { argb: COLOR.blue } };
-  } else {
-    row++;
-    ws.mergeCells(`A${row}:H${row}`);
-    ws.getCell(`A${row}`).value = "Sin extras registrados";
-    ws.getCell(`A${row}`).alignment = { horizontal: "center" };
-    ws.getCell(`A${row}`).font = { italic: true, color: { argb: "FF7C8591" } };
-  }
 
   // buffer XLSX
   const arr = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
@@ -603,3 +555,10 @@ export function toBigExcel(value: any, fallback: string | number = "0"): Big {
 
   return new Big(str);
 }
+
+
+export const convertirAHoraGuatemala = (fechaString: string): Date => {
+  const fecha = new Date(fechaString);
+  // Guatemala está en UTC-6
+  return new Date(fecha.toLocaleString('en-US', { timeZone: 'America/Guatemala' }));
+};

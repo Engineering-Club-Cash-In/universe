@@ -115,12 +115,8 @@ export default function UsersManager() {
   };
 
   return (
-    <div
-  className={`
-    flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-2 overflow-auto py-2
-    ${isMobile ? "" : "overflow-x-auto"}
-  `}
->
+  <div className="fixed inset-x-0 top-16 xl:top-20 bottom-0 flex flex-col items-center justify-start bg-gradient-to-br from-blue-50 to-white px-4 sm:px-6 lg:px-8 overflow-auto pt-8 pb-8">
+   
       <div className="p-6 bg-white rounded-md shadow-md w-full max-w-6xl">
         <h2 className="text-2xl font-bold text-blue-600 mb-4">
           Gestión de Usuarios (Asesores & Contabilidad)

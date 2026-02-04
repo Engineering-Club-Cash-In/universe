@@ -6,6 +6,7 @@ import {
   LogOut,
   Landmark,
   ChevronDown,
+  Receipt,
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useState } from "react";
@@ -88,7 +89,21 @@ const menuOptions = [
     label: "Convenios",
     icon: <ListOrdered className="h-5 w-5" />,
     path: "/convenios",
+    roles: ["ADMIN", "ASESOR"],
+  },
+  {
+    key: "facturas-genericas",
+    label: "Facturas Genéricas",
+    icon: <Receipt className="h-5 w-5" />,
+    path: "/facturas-genericas",
     roles: ["ADMIN"],
+  },
+  {
+    key: "efectividad-asesores",
+    label: "Efectividad",
+    icon: <ListOrdered className="h-5 w-5" />,
+    path: "/efectividad-asesores",
+    roles: ["ADMIN", "ASESOR"],
   },
 ];
 
@@ -109,12 +124,11 @@ export function DashBoardCartera() {
 
   return (
     <>
-      {/* 🔥 NAVBAR HORIZONTAL - DESKTOP */}
-<nav className="hidden lg:flex sticky top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg h-16">
- 
-        <div className="w-full max-w-[1920px] mx-auto px-6 flex items-center justify-between">
+      {/* 🔥 NAVBAR DESKTOP (1280px+) - 100% ANCHO, CENTRADO */}
+      <nav className="hidden xl:flex fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg">
+        <div className="w-full px-6 flex items-center justify-center gap-4 py-3 min-h-[64px]">
           {/* Logo */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center flex-shrink-0">
             <img
               src="/logo-cashin.png"
               alt="Club Cashin Logo"
@@ -123,28 +137,28 @@ export function DashBoardCartera() {
             />
           </div>
 
-          {/* Menu Items - Horizontal */}
-          <div className="flex items-center gap-2 flex-1 justify-center">
+          {/* Menu Items - Centrado con wrap */}
+          <div className="flex items-center justify-center gap-2 flex-wrap flex-1">
             {filteredOptions.map((opt) => (
               <button
                 key={opt.key}
                 onClick={() => navigate(opt.path)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap ${
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap text-sm ${
                   location.pathname === opt.path
                     ? "bg-blue-600 text-white shadow-md scale-105"
                     : "text-gray-700 hover:bg-blue-100 hover:scale-105"
                 }`}
               >
                 {opt.icon}
-                <span className="text-sm">{opt.label}</span>
+                <span>{opt.label}</span>
               </button>
             ))}
           </div>
 
           {/* User Info + Logout */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-shrink-0">
             {user && (
-              <div className="bg-blue-50 rounded-lg px-4 py-2 border border-blue-200">
+              <div className="bg-blue-50 rounded-lg px-3 py-2 border border-blue-200">
                 <p className="text-sm font-semibold text-gray-900">
                   {user.email.split("@")[0]}
                 </p>
@@ -154,7 +168,7 @@ export function DashBoardCartera() {
 
             <button
               onClick={handleLogout}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-red-600 font-medium hover:bg-red-50 transition-all duration-200"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-red-600 font-medium hover:bg-red-50 transition-all duration-200"
             >
               <LogOut className="h-5 w-5" />
               <span className="text-sm">Salir</span>
@@ -163,9 +177,9 @@ export function DashBoardCartera() {
         </div>
       </nav>
 
-      {/* 🔥 NAVBAR MOBILE - Con Hamburguesa */}<nav className="lg:hidden sticky top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg h-16">
-
-        <div className="w-full px-4 flex items-center justify-between h-full">
+      {/* 🔥 NAVBAR MOBILE/TABLET (hasta 1280px) - 100% ANCHO, CENTRADO */}
+      <nav className="xl:hidden fixed top-0 left-0 right-0 z-40 bg-gradient-to-r from-white via-blue-50 to-white border-b-4 border-blue-600 shadow-lg h-16">
+        <div className="w-full h-full px-4 flex items-center justify-between">
           {/* Hamburguesa */}
           <button
             className="p-2 rounded-lg bg-white shadow-md border border-blue-100 hover:shadow-xl hover:scale-105 transition-all duration-200"
@@ -176,12 +190,14 @@ export function DashBoardCartera() {
           </button>
 
           {/* Logo centrado */}
-          <img
-            src="/logo-cashin.png"
-            alt="Club Cashin Logo"
-            className="h-8 drop-shadow-md"
-            style={{ objectFit: "contain" }}
-          />
+          <div className="absolute left-1/2 -translate-x-1/2">
+            <img
+              src="/logo-cashin.png"
+              alt="Club Cashin Logo"
+              className="h-8 drop-shadow-md"
+              style={{ objectFit: "contain" }}
+            />
+          </div>
 
           {/* User Dropdown */}
           {user && (
@@ -218,9 +234,9 @@ export function DashBoardCartera() {
         </div>
       </nav>
 
-      {/* 🔥 DRAWER MOBILE - Igual que antes */}
+      {/* 🔥 DRAWER MOBILE/TABLET */}
       {menuOpen && (
-        <div className="fixed inset-0 z-50 flex lg:hidden">
+        <div className="fixed inset-0 z-50 flex xl:hidden">
           {/* Overlay */}
           <div
             className="fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm animate-fadeIn"
@@ -297,9 +313,6 @@ export function DashBoardCartera() {
           </aside>
         </div>
       )}
-
-      {/* 🔥 SPACER para que el contenido no quede debajo del navbar */}
-     
     </>
   );
 }

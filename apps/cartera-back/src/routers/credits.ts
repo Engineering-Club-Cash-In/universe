@@ -5,11 +5,13 @@ import {
   cancelCredit,
   getCreditoByNumero,
   getCreditosIncobrables,
-  getCreditosWithUserByMesAnio, 
-  mergeCreditosAndUpdate, 
+  getCreditosWithUserByMesAnio,
+  mergeCreditosAndUpdate,
   resetCredit,
-  getCreditStats, 
+  getCreditStats,
+  toggleCancelacionActivo,
 } from "../controllers/credits";
+import { getCuotasPorDiaYAsesor, upsertEfectividadAsesores, getEfectividadAsesores } from "../controllers/paymentsByAdvisor";
 import { z } from "zod";
 import { getCreditWithCancellationDetails } from "../controllers/cancelCredit";
 import puppeteer from "puppeteer";
@@ -36,7 +38,8 @@ import {
 import { authMiddleware } from "./midleware";
 import { getCreditosWithUserByMesAnioExcel } from "../controllers/reports";
 import { insertCredit } from "../controllers/createCredit";
-import {  updateAllInstallments, updateCredit } from "../controllers/updateCredit";
+import {  updateAllInstallments, updateCredit, recalculateQuota } from "../controllers/updateCredit";
+import { updateDueDates, updateSingleDueDate, fixCreditosWithoutFebruary } from "../controllers/updateDueDate";
 import { creditos, cuotas_credito } from "../database/db";
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../database"; 
@@ -70,6 +73,9 @@ const RouterBodySchema = z.object({
     "MOROSO"
   ]),
   montosAdicionales: z.array(MontoAdicionalSchema).optional(),
+  traspaso: z.number().optional(),
+  garantia_mobiliaria: z.number().optional(),
+  otros: z.number().optional(),
 });
 export const creditRouter = new Elysia()
  
@@ -262,6 +268,32 @@ export const creditRouter = new Elysia()
       return { message: "Error cancelando crédito", error: String(error) };
     }
   })
+
+  // 🔥 Toggle estado activo de cancelación
+  .post(
+    "/cancelacion/toggle-activo",
+    async ({ body, set }) => {
+      const { creditId, activo } = body;
+      try {
+        const result = await toggleCancelacionActivo({ creditId, activo });
+        if (!result.success) {
+          set.status = 400;
+          return result;
+        }
+        return result;
+      } catch (error) {
+        set.status = 500;
+        return { message: "Error actualizando estado de cancelación", error: String(error) };
+      }
+    },
+    {
+      body: t.Object({
+        creditId: t.Number(),
+        activo: t.Boolean(),
+      }),
+    }
+  )
+
   .post("/creditAction", async ({ body, set }) => {
     // 1) Validación de body
     const parse = RouterBodySchema.safeParse(body);
@@ -280,6 +312,9 @@ export const creditRouter = new Elysia()
       monto_cancelacion,
       accion,
       montosAdicionales,
+      traspaso,
+      garantia_mobiliaria,
+      otros,
     } = parse.data;
 
     // 2) Reglas de negocio: acciones que requieren motivo + monto
@@ -309,6 +344,9 @@ export const creditRouter = new Elysia()
         accion,
         // Nuevo: pasar montos adicionales (opcional)
         montosAdicionales,
+        traspaso,
+        garantia_mobiliaria,
+        otros,
       });
 
       if (!result.ok) set.status = 400; // error del servicio
@@ -1006,4 +1044,200 @@ export const creditRouter = new Elysia()
         }),
       }),
     },
-  })  
+  })
+  // ========================================
+  // ENDPOINT: ACTUALIZAR FECHAS DE VENCIMIENTO
+  // ========================================
+  .post("/update-due-dates", updateDueDates, {
+    body: t.Object({
+      creditos: t.Array(
+        t.Object({
+          numero_credito_sifco: t.String({ minLength: 1 }),
+          dia_pago: t.Number({ minimum: 1, maximum: 31 }),
+        })
+      ),
+    }),
+    detail: {
+      summary: "Actualizar fechas de vencimiento (batch)",
+      description: `
+        Actualiza el día de vencimiento de las cuotas NO PAGADAS para múltiples créditos.
+
+        **Proceso:**
+        1. Recibe un array de {numero_credito_sifco, dia_pago}
+        2. Por cada crédito, busca las cuotas donde pagado = false
+        3. Actualiza fecha_vencimiento cambiando solo el día
+        4. Si el día excede los días del mes, usa el último día del mes
+
+        **Ejemplo de body:**
+        \`\`\`json
+        {
+          "creditos": [
+            {"numero_credito_sifco": "01010214113080", "dia_pago": 15},
+            {"numero_credito_sifco": "01010214104860", "dia_pago": 30}
+          ]
+        }
+        \`\`\`
+      `,
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  .post("/update-single-due-date", updateSingleDueDate, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+      dia_pago: t.Number({ minimum: 1, maximum: 31 }),
+    }),
+    detail: {
+      summary: "Actualizar fecha de vencimiento (individual)",
+      description: "Actualiza el día de vencimiento para un solo crédito",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  .post("/recalculate-quota", recalculateQuota, {
+    body: t.Object({
+      numero_credito_sifco: t.String({ minLength: 1 }),
+    }),
+    detail: {
+      summary: "Recalcular cuota mensual con fórmula PMT",
+      description: "Recalcula la cuota mensual usando la fórmula PMT de Excel basándose en el capital actual, tasa de interés, plazo, seguro, GPS y membresías del crédito. Actualiza el crédito y todas las cuotas pendientes.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: ARREGLAR CRÉDITOS SIN FEBRERO
+  // ========================================
+  .post("/fix-february", async ({ query, set }) => {
+    const anio = query.anio ? Number(query.anio) : 2026;
+    return fixCreditosWithoutFebruary({ anio, set });
+  }, {
+    query: t.Object({
+      anio: t.Optional(t.String()),
+    }),
+    detail: {
+      summary: "Arreglar créditos sin cuota en febrero",
+      description: "Busca créditos activos/morosos/en_convenio que no tienen cuota en febrero del año especificado y recalcula sus fechas de vencimiento basándose en la última cuota pagada.",
+      tags: ["Créditos", "Cuotas"],
+    },
+  })
+  // ========================================
+  // ENDPOINT: CUOTAS POR DÍA Y ASESOR
+  // ========================================
+  .get("/cuotas-por-dia", async ({ query, set }) => {
+    const { dia, mes, anio, asesor_id } = query as Record<string, string>;
+
+    if (!dia || !mes || !anio) {
+      set.status = 400;
+      return { message: "Faltan parámetros requeridos: 'dia', 'mes', 'anio'" };
+    }
+
+    const diaNum = Number(dia);
+    const mesNum = Number(mes);
+    const anioNum = Number(anio);
+
+    if (isNaN(diaNum) || diaNum < 1 || diaNum > 31) {
+      set.status = 400;
+      return { message: "El parámetro 'dia' debe ser un número entre 1 y 31" };
+    }
+    if (isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+      set.status = 400;
+      return { message: "El parámetro 'mes' debe ser un número entre 1 y 12" };
+    }
+    if (isNaN(anioNum) || anioNum < 2000) {
+      set.status = 400;
+      return { message: "El parámetro 'anio' debe ser un año válido" };
+    }
+
+    const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
+    if (asesor_id && isNaN(asesorIdNum!)) {
+      set.status = 400;
+      return { message: "El parámetro 'asesor_id' debe ser un número válido" };
+    }
+
+    try {
+      const result = await getCuotasPorDiaYAsesor(diaNum, mesNum, anioNum, asesorIdNum);
+      if (!result.ok) set.status = 500;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error obteniendo cuotas por día", error: String(error) };
+    }
+  })
+  // ========================================
+  // ENDPOINT: UPSERT EFECTIVIDAD ASESORES
+  // ========================================
+  .get("/efectividad-asesores", async ({ query, set }) => {
+    const { dia, mes, anio } = query as Record<string, string>;
+
+    if (!dia || !mes || !anio) {
+      set.status = 400;
+      return { message: "Faltan parámetros requeridos: 'dia', 'mes', 'anio'" };
+    }
+
+    const diaNum = Number(dia);
+    const mesNum = Number(mes);
+    const anioNum = Number(anio);
+
+    if (isNaN(diaNum) || diaNum < 1 || diaNum > 31) {
+      set.status = 400;
+      return { message: "El parámetro 'dia' debe ser un número entre 1 y 31" };
+    }
+    if (isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+      set.status = 400;
+      return { message: "El parámetro 'mes' debe ser un número entre 1 y 12" };
+    }
+    if (isNaN(anioNum) || anioNum < 2000) {
+      set.status = 400;
+      return { message: "El parámetro 'anio' debe ser un año válido" };
+    }
+
+    try {
+      const result = await upsertEfectividadAsesores(diaNum, mesNum, anioNum);
+      if (!result.ok) set.status = 500;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error actualizando efectividad", error: String(error) };
+    }
+  })
+  // ========================================
+  // ENDPOINT: CONSULTAR EFECTIVIDAD ASESORES
+  // ========================================
+  .get("/efectividad-asesores/consulta", async ({ query, set }) => {
+    const { dia, mes, anio, asesor_id } = query as Record<string, string>;
+
+    if (!mes || !anio) {
+      set.status = 400;
+      return { message: "Faltan parámetros requeridos: 'mes', 'anio'" };
+    }
+
+    const mesNum = Number(mes);
+    const anioNum = Number(anio);
+    const diaNum = dia ? Number(dia) : undefined;
+
+    if (dia && (isNaN(diaNum!) || diaNum! < 1 || diaNum! > 31)) {
+      set.status = 400;
+      return { message: "El parámetro 'dia' debe ser un número entre 1 y 31" };
+    }
+    if (isNaN(mesNum) || mesNum < 1 || mesNum > 12) {
+      set.status = 400;
+      return { message: "El parámetro 'mes' debe ser un número entre 1 y 12" };
+    }
+    if (isNaN(anioNum) || anioNum < 2000) {
+      set.status = 400;
+      return { message: "El parámetro 'anio' debe ser un año válido" };
+    }
+
+    const asesorIdNum = asesor_id ? Number(asesor_id) : undefined;
+    if (asesor_id && isNaN(asesorIdNum!)) {
+      set.status = 400;
+      return { message: "El parámetro 'asesor_id' debe ser un número válido" };
+    }
+
+    try {
+      const result = await getEfectividadAsesores(mesNum, anioNum, asesorIdNum, diaNum);
+      if (!result.ok) set.status = 500;
+      return result;
+    } catch (error) {
+      set.status = 500;
+      return { message: "Error consultando efectividad", error: String(error) };
+    }
+  })

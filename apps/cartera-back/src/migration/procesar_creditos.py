@@ -13,9 +13,11 @@ CARPETA_EXCELS = r"C:\Users\Kelvin Palacios\Documents\analis de datos"
 ARCHIVO_EXCEL = "Cartera Préstamos (Cash-In) NUEVA 3.0.xlsx"
 # 📅 Hojas a procesar (orden cronológico inverso - más reciente primero)
 HOJAS_A_PROCESAR = [   
-    "Diciembre 2025", 
+     
+    "Diciembre 2025",
     "Enero 2026",
     "Febrero 2026",
+    "Marzo 2026",
 ]
 
 # 🔥 MODO PRUEBA
@@ -300,11 +302,11 @@ def detectar_pools_raros(
     col_credito: str, 
     col_nombre: str, 
     col_numero: str, 
-    col_formato: str = None  # Opcional ahora
+    col_formato: str = None
 ) -> Dict[str, List[str]]:
     """
-    Pool raro = MISMO CLIENTE + MISMO # + SIN variaciones (_2, _3)
-    NO importa si está marcado como "pool" o no
+    Pool raro = MISMO CLIENTE (normalizado) + MISMO # + SIN variaciones (_2, _3)
+    Normaliza nombres quitando "/" y espacios extra
     """
     logger.subtitulo("🔍 DETECTANDO POOLS RAROS", "🔍")
     
@@ -313,12 +315,10 @@ def detectar_pools_raros(
         logger.warning("⚠️ No se encontró columna #, no se pueden detectar pools")
         return {}
     
-    logger.info("Criterio: MISMO CLIENTE + MISMO # + sin variaciones")
+    logger.info("Criterio: MISMO CLIENTE (normalizado) + MISMO # + sin variaciones")
+    logger.info("Normalización: quitar '/' y espacios extras\n")
     
-    # 🔥 NO filtrar por "pool" en formato, analizar TODAS las filas
-    logger.info("\n🔎 Analizando TODAS las filas sin filtro de formato...")
-    
-    # Agrupar por CLIENTE + NÚMERO
+    # 🔥 AGRUPAR POR: cliente_normalizado + numero_cuota
     grupos = defaultdict(list)
     registros_analizados = 0
     
@@ -333,14 +333,26 @@ def detectar_pools_raros(
         if '_' in credito_raw:
             continue
         
+        # 🔥 NORMALIZAR NOMBRE DE CLIENTE
         nombre_cliente = str(row[col_nombre]).strip()
+        
+        # Quitar todo después del "/" (co-deudores, etc.)
+        if '/' in nombre_cliente:
+            nombre_cliente = nombre_cliente.split('/')[0].strip()
+        
+        # Normalizar espacios extras
+        nombre_cliente = ' '.join(nombre_cliente.split())
+        
+        # Convertir a mayúsculas para comparar
+        nombre_cliente = nombre_cliente.upper()
+        
         numero = str(row[col_numero]).strip()
         
         # Validar número
         if not numero or numero == 'nan' or numero == '':
             continue
         
-        # Crear clave única: cliente||numero
+        # 🔥 Crear clave única: cliente_normalizado||numero
         clave = f"{nombre_cliente}||{numero}"
         grupos[clave].append(credito_raw)
         registros_analizados += 1
@@ -377,7 +389,6 @@ def detectar_pools_raros(
         logger.warning(f"\n🔥 Total pools raros: {len(pools_raros_por_cliente)} grupos")
     
     return pools_raros_por_cliente
-
 # ============================================
 # 🔍 VALIDAR PORCENTAJES
 # ============================================
@@ -431,13 +442,20 @@ def validar_porcentajes(fila: Dict[str, Any], credito_sifco: str) -> Dict[str, A
 # ============================================
 def leer_hoja_excel(
     archivo_path: str,
-    nombre_hoja: str
+    nombre_hoja: str,
+    solo_pools_raros: bool = True
 ) -> Dict[str, Dict[str, Any]]:
     """
     Lee una hoja específica del Excel y agrupa filas por crédito.
     🔥 NORMALIZA todos los pools (normales y raros) al creditoBase
+
+    Parámetro:
+    - solo_pools_raros:
+        • False (default): procesa TODO (comportamiento actual)
+        • True: SOLO procesa pools raros (ignora individuales y pools normales)
     """
     logger.titulo(f"PROCESANDO HOJA: {nombre_hoja}")
+    logger.info(f"🧪 Modo solo_pools_raros = {solo_pools_raros}")
     
     try:
         # Leer Excel sin headers primero para buscarlos
@@ -478,7 +496,13 @@ def leer_hoja_excel(
         col_inversionista = None
         
         for col in df.columns:
-            col_normalizado = str(col).lower().replace('#', '').replace('crédito', 'credito').strip()
+            col_normalizado = (
+                str(col)
+                .lower()
+                .replace('#', '')
+                .replace('crédito', 'credito')
+                .strip()
+            )
             
             if not col_credito and 'credito' in col_normalizado and 'sifco' in col_normalizado:
                 col_credito = col
@@ -488,7 +512,7 @@ def leer_hoja_excel(
                 col_nombre = col
                 logger.success(f"✅ Columna nombre/cliente: '{col}'")
             
-            if not col_numero and col_normalizado == '' and col == '#':
+            if not col_numero and col == '#':
                 col_numero = col
                 logger.success(f"✅ Columna número (#): '{col}'")
             
@@ -507,20 +531,6 @@ def leer_hoja_excel(
             logger.error("❌ CRÍTICO: No se encontró columna de CréditoSIFCO")
             return {}
         
-        if not col_nombre:
-            logger.warning("⚠️ No se encontró columna de Nombre/Cliente")
-        
-        if not col_numero:
-            logger.warning("⚠️ No se encontró columna de Número (#)")
-            logger.warning("   Esto impedirá detectar pools raros")
-        
-        if not col_formato:
-            logger.warning("⚠️ No se encontró columna de Formato crédito")
-            logger.warning("   Esto impedirá detectar pools raros")
-        
-        if not col_inversionista:
-            logger.warning("⚠️ No se encontró columna de Inversionista")
-        
         # Limpiar DataFrame
         logger.info("\n🧹 Limpiando datos...")
         df_clean = df.dropna(subset=[col_credito])
@@ -534,7 +544,10 @@ def leer_hoja_excel(
         # 🔥 DETECTAR POOLS RAROS
         pools_raros = {}
         if col_formato and col_numero:
-            pools_raros = detectar_pools_raros(df_clean, col_credito, col_nombre, col_numero, col_formato)
+            pools_raros = detectar_pools_raros(
+                df_clean, col_credito, col_nombre, col_numero, col_formato
+            )
+            logger.info(f"🟡 Pools raros detectados: {len(pools_raros)}")
         else:
             logger.warning("\n⚠️ SALTANDO DETECCIÓN DE POOLS RAROS (faltan columnas)")
         
@@ -543,66 +556,81 @@ def leer_hoja_excel(
         logger.indent()
         
         creditos_data = {}
-        warnings_globales = []
-        
         filas_procesadas = 0
         filas_skipped = 0
         
-        for idx, row in df_clean.iterrows():
+        for _, row in df_clean.iterrows():
             numero_credito_raw = str(row[col_credito]).strip()
-            
-            if not numero_credito_raw or numero_credito_raw == '':
+            if not numero_credito_raw:
                 filas_skipped += 1
                 continue
             
-            cliente = str(row[col_nombre]).strip() if col_nombre and row[col_nombre] else "Cliente Desconocido"
+            cliente = (
+                str(row[col_nombre]).strip()
+                if col_nombre and row[col_nombre]
+                else "Cliente Desconocido"
+            )
             numero = str(row[col_numero]).strip() if col_numero and row[col_numero] else ""
             
-            # Convertir fila con mapeo
+            # =============================
+            # 🔥 NORMALIZACIÓN DE CLIENTE
+            # =============================
+            cliente_norm = cliente
+            if '/' in cliente_norm:
+                cliente_norm = cliente_norm.split('/')[0].strip()
+            cliente_norm = ' '.join(cliente_norm.split()).upper()
+            
+            # =============================
+            # 🔥 DETERMINAR TIPO DE CRÉDITO
+            # =============================
+            
+            es_pool_normal = '_' in numero_credito_raw
+            clave_pool = f"{cliente_norm}||{numero}" if numero else None
+            es_pool_raro = (
+                clave_pool
+                and clave_pool in pools_raros
+                and numero_credito_raw in pools_raros[clave_pool]
+            )
+            
+            # 🔥 FILTRO POR MODO
+            if solo_pools_raros and not es_pool_raro:
+                filas_skipped += 1
+                continue
+            
+            # =============================
+            # 🔥 NORMALIZAR CRÉDITO
+            # =============================
+            
+            if es_pool_raro:
+                numero_credito_base = pools_raros[clave_pool][0]
+                numero_credito_final = numero_credito_base
+                logger.warning(f"🟡 Pool raro: {numero_credito_raw} → Base: {numero_credito_base}")
+            
+            elif es_pool_normal:
+                if solo_pools_raros:
+                    filas_skipped += 1
+                    continue
+                numero_credito_base = numero_credito_raw.split('_')[0]
+                numero_credito_final = numero_credito_base
+            
+            else:
+                if solo_pools_raros:
+                    filas_skipped += 1
+                    continue
+                numero_credito_base = numero_credito_raw
+                numero_credito_final = numero_credito_raw
+            
+            # =============================
+            # 🔥 MAPEAR FILA
+            # =============================
+            
             fila_dict = {}
             for col in df.columns:
-                valor = row[col]
                 nombre_campo = MAPEO_COLUMNAS.get(col, col)
-                fila_dict[nombre_campo] = convertir_valor(nombre_campo, valor)
+                fila_dict[nombre_campo] = convertir_valor(nombre_campo, row[col])
             
-            # 🔍 VALIDAR PORCENTAJES
-            validacion = validar_porcentajes(fila_dict, numero_credito_raw)
-            if not validacion['valido']:
-                warnings_globales.extend(validacion['warnings'])
+            fila_dict['CreditoSIFCO'] = numero_credito_final
             
-            # Usar fila corregida
-            fila_dict = validacion['fila_corregida']
-            
-            # ============================================
-            # 🔥 DETERMINAR AGRUPACIÓN Y NORMALIZACIÓN
-            # ============================================
-            
-            # Caso 1: Pool normal (ya tiene _2, _3, etc.)
-            if '_' in numero_credito_raw:
-                numero_credito_base = numero_credito_raw.split('_')[0]
-                numero_credito_final = numero_credito_base  # 🔥 Normalizar
-                
-                logger.debug(f"🟢 Pool normal: {numero_credito_raw} → Base: {numero_credito_base}")
-            
-            # Caso 2: Pool raro (mismo # mismo cliente)
-            else:
-                # 🔥 Buscar por clave única (cliente + número)
-                clave_pool = f"{cliente}||{numero}" if numero else None
-                
-                if clave_pool and clave_pool in pools_raros and numero_credito_raw in pools_raros[clave_pool]:
-                    creditos_del_pool = pools_raros[clave_pool]
-                    numero_credito_base = creditos_del_pool[0]  # Primer crédito como base
-                    numero_credito_final = creditos_del_pool[0]  # 🔥 TODOS usan el primero
-                    
-                    logger.warning(f"🟡 Pool raro: {numero_credito_raw} → Base: {numero_credito_base}")
-                else:
-                    # Crédito individual
-                    numero_credito_base = numero_credito_raw
-                    numero_credito_final = numero_credito_raw
-                    
-                    logger.debug(f"🔵 Individual: {numero_credito_raw}")
-            
-            # Crear/actualizar grupo
             if numero_credito_base not in creditos_data:
                 creditos_data[numero_credito_base] = {
                     'creditoBase': numero_credito_base,
@@ -610,70 +638,15 @@ def leer_hoja_excel(
                     'filas': []
                 }
             
-            # 🔥 Agregar fila con CreditoSIFCO normalizado
-            fila_dict['CreditoSIFCO'] = numero_credito_final
             creditos_data[numero_credito_base]['filas'].append(fila_dict)
-            
             filas_procesadas += 1
         
         logger.dedent()
         
-        logger.success(f"\n✅ AGRUPACIÓN COMPLETADA:")
+        logger.success("\n✅ AGRUPACIÓN COMPLETADA:")
         logger.info(f"   • Filas procesadas: {filas_procesadas}", indent=1)
         logger.info(f"   • Filas ignoradas: {filas_skipped}", indent=1)
         logger.info(f"   • Créditos únicos: {len(creditos_data)}", indent=1)
-        
-        # Estadísticas de agrupación
-        pools_normales = 0
-        pools_raros_convertidos = 0
-        individuales = 0
-        
-        for credito_key, credito_data in creditos_data.items():
-            num_filas = len(credito_data['filas'])
-            
-            if num_filas > 1:
-                # Verificar si era pool raro
-                cliente_credito = credito_data['cliente']
-                
-                # Buscar en pools raros
-                es_pool_raro = False
-                for clave_pool in pools_raros.keys():
-                    if cliente_credito in clave_pool and credito_key in pools_raros[clave_pool]:
-                        es_pool_raro = True
-                        break
-                
-                if es_pool_raro:
-                    pools_raros_convertidos += 1
-                else:
-                    pools_normales += 1
-            else:
-                individuales += 1
-        
-        logger.info(f"\n📊 ESTADÍSTICAS:")
-        logger.info(f"   🔵 Créditos individuales: {individuales}", indent=1)
-        logger.info(f"   🟢 Pools normales: {pools_normales}", indent=1)
-        logger.info(f"   🟡 Pools raros normalizados: {pools_raros_convertidos}", indent=1)
-        
-        if warnings_globales:
-            logger.warning(f"\n⚠️ Total de warnings: {len(warnings_globales)}")
-        
-        # Mostrar ejemplos
-        logger.info(f"\n📋 PRIMEROS 5 CRÉDITOS AGRUPADOS:")
-        logger.indent()
-        
-        for credito_key, credito_data in list(creditos_data.items())[:5]:
-            creditos_en_filas = set(f.get('CreditoSIFCO', '') for f in credito_data['filas'])
-            inversionistas_en_pool = set(f.get('Inversionista', 'N/A') for f in credito_data['filas'])
-            
-            logger.info(f"📋 {credito_data['creditoBase']}: {credito_data['cliente']}")
-            logger.info(f"   Filas: {len(credito_data['filas'])}", indent=1)
-            logger.info(f"   CreditoSIFCO en filas: {', '.join(sorted(creditos_en_filas))}", indent=1)
-            logger.info(f"   Inversionistas: {', '.join(sorted(inversionistas_en_pool))}", indent=1)
-        
-        logger.dedent()
-        
-        if len(creditos_data) > 5:
-            logger.info(f"... y {len(creditos_data) - 5} créditos más\n")
         
         return creditos_data
         
@@ -954,9 +927,1352 @@ def procesar_multiples_hojas(api_endpoint: str, modo_nombre: str):
     
     logger.separador()
     logger.success(f"\n✅ Logs guardados en: {ARCHIVO_LOG}")
+# 🎯 PROCESAR CRÉDITOS ESPECÍFICOS (MODO 3)
+# ============================================ 
+def procesar_creditos_especificos(api_endpoint: str, modo_nombre: str, lista_creditos: list[str]):
+    """
+    Procesa solo los créditos indicados:
+    - Busca en TODAS las hojas
+    - Respeta pools (creditoBase)
+    - Permite buscar por RAW o BASE
+    - Envía a la API solo una vez por crédito agrupado
+    """
 
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+
+    # -------------------------
+    # Normalización inicial
+    # -------------------------
+    lista_buscados = {c.strip().upper() for c in lista_creditos}
+
+    logger.info(f"🎯 Créditos a buscar: {len(lista_buscados)}")
+    for c in sorted(lista_buscados):
+        logger.info(f"   • {c}")
+    logger.separador()
+
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+
+    xls = pd.ExcelFile(archivo_path)
+    hojas_disponibles = set(xls.sheet_names)
+
+    stats = {
+        "hojas_procesadas": 0,
+        "creditos_buscados": len(lista_buscados),
+        "creditos_encontrados": 0,
+        "creditos_no_encontrados": [],
+        "procesados": 0,
+        "exitosos": 0,
+        "fallidos": 0,
+    }
+
+    creditos_encontrados: dict[str, dict] = {}
+    mapa_raw_a_base: dict[str, str] = {}
+
+    # -------------------------
+    # FASE 1: BÚSQUEDA
+    # -------------------------
+    logger.titulo("🔍 BÚSQUEDA EN HOJAS")
+
+    for hoja in HOJAS_A_PROCESAR:
+        if hoja not in hojas_disponibles:
+            logger.warning(f"⚠️ Hoja '{hoja}' no encontrada")
+            continue
+
+        logger.subtitulo(f"📋 Procesando hoja: {hoja}")
+        creditos_data = leer_hoja_excel(archivo_path, hoja)
+
+        if not creditos_data:
+            logger.warning("⚠️ Sin datos")
+            continue
+
+        stats["hojas_procesadas"] += 1
+
+        for credito_key, info in creditos_data.items():
+            credito_base = credito_key.strip().upper()
+
+            # Todos los SIFCO del pool
+            sifcos_pool = {
+                str(f.get("CreditoSIFCO", "")).strip().upper()
+                for f in info["filas"]
+            }
+
+            # Mapear RAW → BASE
+            for sifco in sifcos_pool:
+                mapa_raw_a_base[sifco] = credito_base
+            mapa_raw_a_base[credito_base] = credito_base
+
+            # ¿Algún buscado cae en este pool?
+            match = lista_buscados & (sifcos_pool | {credito_base})
+
+            if match and credito_base not in creditos_encontrados:
+                buscado = sorted(match)[0]
+
+                logger.success(f"✅ ENCONTRADO: {buscado}")
+                logger.info(f"   → Base: {credito_base}", indent=1)
+                logger.info(f"   → Cliente: {info['cliente'][:40]}...", indent=1)
+                logger.info(f"   → Filas: {len(info['filas'])}", indent=1)
+
+                creditos_encontrados[credito_base] = {
+                    "data": info,
+                    "hoja": hoja,
+                    "credito_buscado": buscado,
+                }
+                stats["creditos_encontrados"] += 1
+
+    # -------------------------
+    # RESUMEN DE BÚSQUEDA
+    # -------------------------
+    encontrados = {v["credito_buscado"] for v in creditos_encontrados.values()}
+    stats["creditos_no_encontrados"] = sorted(lista_buscados - encontrados)
+
+    logger.separador("=")
+    logger.titulo("🎯 RESUMEN DE BÚSQUEDA")
+    logger.info(f"📋 Hojas procesadas: {stats['hojas_procesadas']}")
+    logger.info(f"🔍 Buscados: {stats['creditos_buscados']}")
+    logger.success(f"✅ Encontrados: {stats['creditos_encontrados']}")
+
+    if stats["creditos_no_encontrados"]:
+        logger.warning(f"❌ NO encontrados: {len(stats['creditos_no_encontrados'])}")
+        for c in stats["creditos_no_encontrados"]:
+            logger.warning(f"   • {c}")
+
+    if not creditos_encontrados:
+        logger.error("❌ No se encontró ningún crédito")
+        return
+
+    # -------------------------
+    # FASE 2: ENVÍO A API
+    # -------------------------
+    logger.titulo("🚀 ENVÍO A LA API")
+
+    for idx, (base, info) in enumerate(creditos_encontrados.items(), 1):
+        logger.subtitulo(f"📦 Crédito {idx}/{len(creditos_encontrados)}")
+        logger.info(f"🔍 Buscado: {info['credito_buscado']}")
+        logger.info(f"📂 Hoja: {info['hoja']}")
+        logger.info(f"🧱 Base: {base}")
+
+        resultado = enviar_credito_a_api(info["data"], api_endpoint)
+        stats["procesados"] += 1
+
+        if resultado.get("success"):
+            stats["exitosos"] += 1
+        else:
+            stats["fallidos"] += 1
+
+    # -------------------------
+    # RESUMEN FINAL
+    # -------------------------
+    logger.separador("=")
+    logger.titulo("🎉 RESUMEN FINAL")
+    logger.info(f"📤 Procesados: {stats['procesados']}")
+    logger.success(f"✅ Exitosos: {stats['exitosos']}")
+    logger.error(f"❌ Fallidos: {stats['fallidos']}")
+    logger.success(f"📄 Logs: {ARCHIVO_LOG}")
+
+    """
+    Procesa solo los créditos que estén en la lista
+    Usa leer_hoja_excel (que YA funciona) y filtra los créditos buscados
+    """
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}")
+    logger.separador()
+    
+    # 🔥 NORMALIZAR lista de créditos buscados (UPPERCASE para comparar)
+    lista_creditos_normalizada = set(c.strip().upper() for c in lista_creditos)
+    
+    logger.info("📋 Créditos específicos a procesar:")
+    for cred in sorted(lista_creditos_normalizada):
+        logger.info(f"   • {cred}")
+    logger.separador()
+    
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+    
+    try:
+        xls = pd.ExcelFile(archivo_path)
+        hojas_disponibles = xls.sheet_names
+        logger.info(f"📋 Hojas disponibles: {len(hojas_disponibles)}")
+    except Exception as e:
+        logger.error(f"❌ Error leyendo archivo: {e}")
+        return
+    
+    stats_globales = {
+        'hojas_procesadas': 0,
+        'creditos_buscados': len(lista_creditos_normalizada),
+        'creditos_encontrados': 0,
+        'creditos_no_encontrados_excel': [],
+        'creditos_procesados': 0,
+        'creditos_exitosos': 0,
+        'creditos_fallidos': 0,
+        'inversionistas_no_encontrados': []
+    }
+    
+    creditos_encontrados = {}  # key = creditoBase, value = {data, hoja, credito_buscado}
+    
+    # 🔍 BUSCAR EN TODAS LAS HOJAS
+    logger.titulo("🔍 BÚSQUEDA EN HOJAS")
+    
+    for nombre_hoja in HOJAS_A_PROCESAR:
+        if nombre_hoja not in hojas_disponibles:
+            logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
+            continue
+        
+        logger.separador("─")
+        logger.subtitulo(f"📋 Procesando: {nombre_hoja}")
+        
+        # 🔥 USAR EL MÉTODO QUE YA FUNCIONA
+        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
+        
+        if not creditos_data:
+            logger.warning(f"⚠️ No se encontraron datos en {nombre_hoja}")
+            continue
+        
+        stats_globales['hojas_procesadas'] += 1
+        logger.info(f"✅ Créditos agrupados: {len(creditos_data)}")
+        
+        encontrados_en_esta_hoja = 0
+        
+        # 🎯 FILTRAR solo los créditos que estamos buscando
+        for credito_key, credito_info in creditos_data.items():
+            
+            # Normalizar credito_key
+            credito_key_norm = credito_key.strip().upper()
+            
+            # Obtener todos los CreditoSIFCO de las filas (ya normalizados por leer_hoja_excel)
+            creditos_en_filas = set(
+                str(f.get('CreditoSIFCO', '')).strip().upper() 
+                for f in credito_info['filas']
+            )
+            
+            # 🔥 BUSCAR MATCH con cualquier crédito de la lista
+            credito_match = None
+            for credito_buscado in lista_creditos_normalizada:
+                if (credito_buscado == credito_key_norm or 
+                    credito_buscado in creditos_en_filas or
+                    credito_key_norm.startswith(credito_buscado) or
+                    credito_buscado.startswith(credito_key_norm)):
+                    
+                    credito_match = credito_buscado
+                    break
+            
+            # Si encontramos match y no lo hemos agregado antes
+            if credito_match and credito_key not in creditos_encontrados:
+                logger.success(f"✅ ENCONTRADO: {credito_match}")
+                logger.info(f"   → Agrupado como: {credito_key}", indent=1)
+                logger.info(f"   → Cliente: {credito_info['cliente'][:50]}...", indent=1)
+                logger.info(f"   → Filas: {len(credito_info['filas'])}", indent=1)
+                
+                creditos_encontrados[credito_key] = {
+                    'data': credito_info,
+                    'hoja': nombre_hoja,
+                    'credito_buscado': credito_match
+                }
+                stats_globales['creditos_encontrados'] += 1
+                encontrados_en_esta_hoja += 1
+        
+        logger.info(f"\n📊 Encontrados en {nombre_hoja}: {encontrados_en_esta_hoja}")
+    
+    # 🔥 RESUMEN DE BÚSQUEDA
+    logger.separador("=")
+    logger.titulo("🎯 RESUMEN DE BÚSQUEDA")
+    logger.info(f"📋 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"🔍 Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    # Detectar NO encontrados
+    creditos_encontrados_set = set(v['credito_buscado'] for v in creditos_encontrados.values())
+    creditos_no_encontrados = lista_creditos_normalizada - creditos_encontrados_set
+    
+    if creditos_no_encontrados:
+        logger.warning(f"❌ NO encontrados: {len(creditos_no_encontrados)}")
+        stats_globales['creditos_no_encontrados_excel'] = list(creditos_no_encontrados)
+        logger.indent()
+        for cred in sorted(creditos_no_encontrados):
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador("=")
+    
+    if not creditos_encontrados:
+        logger.error("\n❌ No se encontró ningún crédito")
+        logger.error("   Verificá que los números sean correctos")
+        return
+    
+    # 🚀 ENVIAR A LA API UNO POR UNO
+    logger.titulo("🚀 ENVÍO A LA API")
+    logger.info(f"📤 Créditos a enviar: {len(creditos_encontrados)}\n")
+    
+    for idx, (credito_key, info) in enumerate(creditos_encontrados.items(), 1):
+        logger.separador("─")
+        logger.subtitulo(f"📋 Crédito {idx}/{len(creditos_encontrados)}")
+        logger.info(f"🔍 Buscado: {info['credito_buscado']}")
+        logger.info(f"📂 Hoja: {info['hoja']}")
+        
+        # 🔥 ENVIAR USANDO EL MÉTODO QUE YA FUNCIONA
+        resultado = enviar_credito_a_api(info['data'], api_endpoint)
+        
+        stats_globales['creditos_procesados'] += 1
+        
+        if resultado.get('success'):
+            stats_globales['creditos_exitosos'] += 1
+            
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado['inversionistas_no_encontrados']
+                if no_encontrados:
+                    stats_globales['inversionistas_no_encontrados'].extend([
+                        {
+                            'credito': info['data']['creditoBase'],
+                            'cliente': info['data']['cliente'],
+                            'inversionista': inv
+                        }
+                        for inv in no_encontrados
+                    ])
+        else:
+            stats_globales['creditos_fallidos'] += 1
+        
+        logger.separador("─")
+    
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL")
+    logger.separador("=")
+    
+    logger.subtitulo("📊 BÚSQUEDA:")
+    logger.info(f"   Hojas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"   Buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    if stats_globales['creditos_no_encontrados_excel']:
+        logger.warning(f"   ❌ NO encontrados: {len(stats_globales['creditos_no_encontrados_excel'])}")
+    
+    logger.separador()
+    logger.subtitulo("🚀 ENVÍO:")
+    logger.info(f"   Procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    if stats_globales['inversionistas_no_encontrados']:
+        logger.separador()
+        logger.warning(f"⚠️ INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            logger.warning(f"\n❌ {inversionista}")
+            for cred in creditos:
+                logger.warning(f"   - {cred['credito']} ({cred['cliente'][:40]}...)")
+    
+    logger.separador("=")
+    logger.success(f"\n✅ Logs: {ARCHIVO_LOG}")
+    """
+    Procesa solo los créditos que estén en la lista
+    SIMPLE: Busca por creditoBase directo
+    """
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}")
+    logger.separador()
+    
+    # 🔥 NORMALIZAR lista de créditos buscados
+    lista_creditos_normalizada = set(c.strip().upper() for c in lista_creditos)
+    
+    logger.info("📋 Créditos específicos a procesar (normalizados):")
+    for cred in sorted(lista_creditos_normalizada):
+        logger.info(f"   • {cred}")
+    logger.separador()
+    
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+    
+    try:
+        xls = pd.ExcelFile(archivo_path)
+        hojas_disponibles = xls.sheet_names
+        logger.info(f"📋 Hojas disponibles: {len(hojas_disponibles)}")
+    except Exception as e:
+        logger.error(f"❌ Error leyendo archivo: {e}")
+        return
+    
+    stats_globales = {
+        'hojas_procesadas': 0,
+        'creditos_buscados': len(lista_creditos_normalizada),
+        'creditos_encontrados': 0,
+        'creditos_no_encontrados_excel': [],
+        'creditos_procesados': 0,
+        'creditos_exitosos': 0,
+        'creditos_fallidos': 0,
+        'inversionistas_no_encontrados': []
+    }
+    
+    creditos_encontrados = {}
+    
+    # 🔍 BUSCAR EN TODAS LAS HOJAS
+    logger.titulo("🔍 BÚSQUEDA EN HOJAS")
+    
+    for nombre_hoja in HOJAS_A_PROCESAR:
+        if nombre_hoja not in hojas_disponibles:
+            logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
+            continue
+        
+        logger.separador("─")
+        logger.subtitulo(f"📋 Procesando: {nombre_hoja}")
+        
+        # 🔥 USAR leer_hoja_excel (que ya busca headers correctamente)
+        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
+        
+        if not creditos_data:
+            logger.warning(f"⚠️ No se encontraron datos en {nombre_hoja}")
+            continue
+        
+        stats_globales['hojas_procesadas'] += 1
+        logger.info(f"✅ Créditos agrupados: {len(creditos_data)}")
+        
+        encontrados_en_esta_hoja = 0
+        
+        # 🔥 BUSCAR DIRECTAMENTE EN LAS KEYS
+        for credito_key, credito_info in creditos_data.items():
+            
+            # Normalizar la key
+            credito_key_normalizado = credito_key.strip().upper()
+            
+            # 🔥 MATCH DIRECTO: ¿Está en la lista?
+            if credito_key_normalizado in lista_creditos_normalizada:
+                
+                logger.success(f"✅ ENCONTRADO: {credito_key_normalizado}")
+                logger.info(f"   → Cliente: {credito_info['cliente'][:50]}...", indent=1)
+                logger.info(f"   → Filas: {len(credito_info['filas'])}", indent=1)
+                
+                # Guardar
+                creditos_encontrados[credito_key] = {
+                    'data': credito_info,
+                    'hoja': nombre_hoja,
+                    'credito_buscado': credito_key_normalizado
+                }
+                stats_globales['creditos_encontrados'] += 1
+                encontrados_en_esta_hoja += 1
+        
+        logger.info(f"\n📊 Encontrados en {nombre_hoja}: {encontrados_en_esta_hoja}")
+    
+    # 🔥 RESUMEN DE BÚSQUEDA
+    logger.separador("=")
+    logger.titulo("🎯 RESUMEN DE BÚSQUEDA")
+    logger.info(f"📋 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"🔍 Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    # Detectar NO encontrados
+    creditos_encontrados_set = set(v['credito_buscado'] for v in creditos_encontrados.values())
+    creditos_no_encontrados = lista_creditos_normalizada - creditos_encontrados_set
+    
+    if creditos_no_encontrados:
+        logger.warning(f"❌ NO encontrados: {len(creditos_no_encontrados)}")
+        stats_globales['creditos_no_encontrados_excel'] = list(creditos_no_encontrados)
+        logger.indent()
+        for cred in sorted(creditos_no_encontrados):
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador("=")
+    
+    if not creditos_encontrados:
+        logger.error("\n❌ No se encontró ningún crédito")
+        return
+    
+    # 🚀 ENVIAR A LA API
+    logger.titulo("🚀 ENVÍO A LA API")
+    logger.info(f"📤 Créditos a enviar: {len(creditos_encontrados)}\n")
+    
+    for idx, (credito_key, info) in enumerate(creditos_encontrados.items(), 1):
+        logger.separador("─")
+        logger.subtitulo(f"📋 Crédito {idx}/{len(creditos_encontrados)}")
+        logger.info(f"🔍 Buscado: {info['credito_buscado']}")
+        logger.info(f"📂 Hoja: {info['hoja']}")
+        
+        resultado = enviar_credito_a_api(info['data'], api_endpoint)
+        
+        stats_globales['creditos_procesados'] += 1
+        
+        if resultado.get('success'):
+            stats_globales['creditos_exitosos'] += 1
+            
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado['inversionistas_no_encontrados']
+                if no_encontrados:
+                    stats_globales['inversionistas_no_encontrados'].extend([
+                        {
+                            'credito': info['data']['creditoBase'],
+                            'cliente': info['data']['cliente'],
+                            'inversionista': inv
+                        }
+                        for inv in no_encontrados
+                    ])
+        else:
+            stats_globales['creditos_fallidos'] += 1
+        
+        logger.separador("─")
+    
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL")
+    logger.separador("=")
+    
+    logger.subtitulo("📊 BÚSQUEDA:")
+    logger.info(f"   Hojas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"   Buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    if stats_globales['creditos_no_encontrados_excel']:
+        logger.warning(f"   ❌ NO encontrados: {len(stats_globales['creditos_no_encontrados_excel'])}")
+    
+    logger.separador()
+    logger.subtitulo("🚀 ENVÍO:")
+    logger.info(f"   Procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    if stats_globales['inversionistas_no_encontrados']:
+        logger.separador()
+        logger.warning(f"⚠️ INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            logger.warning(f"\n❌ {inversionista}")
+            for cred in creditos:
+                logger.warning(f"   - {cred['credito']} ({cred['cliente'][:40]}...)")
+    
+    logger.separador("=")
+    logger.success(f"\n✅ Logs: {ARCHIVO_LOG}")
+    """
+    Procesa solo los créditos que estén en la lista
+    SIMPLE: Busca por creditoBase directo
+    """
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}")
+    logger.separador()
+    
+    # 🔥 NORMALIZAR lista de créditos buscados
+    lista_creditos_normalizada = set(c.strip().upper() for c in lista_creditos)
+    
+    logger.info("📋 Créditos específicos a procesar (normalizados):")
+    for cred in sorted(lista_creditos_normalizada):
+        logger.info(f"   • {cred}")
+    logger.separador()
+    
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+    
+    try:
+        xls = pd.ExcelFile(archivo_path)
+        hojas_disponibles = xls.sheet_names
+        logger.info(f"📋 Hojas disponibles: {len(hojas_disponibles)}")
+    except Exception as e:
+        logger.error(f"❌ Error leyendo archivo: {e}")
+        return
+    
+    stats_globales = {
+        'hojas_procesadas': 0,
+        'creditos_buscados': len(lista_creditos_normalizada),
+        'creditos_encontrados': 0,
+        'creditos_no_encontrados_excel': [],
+        'creditos_procesados': 0,
+        'creditos_exitosos': 0,
+        'creditos_fallidos': 0,
+        'inversionistas_no_encontrados': []
+    }
+    
+    creditos_encontrados = {}
+    
+    # 🔍 BUSCAR EN TODAS LAS HOJAS
+    logger.titulo("🔍 BÚSQUEDA EN HOJAS")
+    
+    for nombre_hoja in HOJAS_A_PROCESAR:
+        if nombre_hoja not in hojas_disponibles:
+            logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
+            continue
+        
+        logger.separador("─")
+        logger.subtitulo(f"📋 Procesando: {nombre_hoja}")
+        
+        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
+        
+        if not creditos_data:
+            logger.warning(f"⚠️ No se encontraron datos en {nombre_hoja}")
+            continue
+        
+        stats_globales['hojas_procesadas'] += 1
+        logger.info(f"✅ Créditos agrupados: {len(creditos_data)}")
+        
+        encontrados_en_esta_hoja = 0
+        
+        # 🔥 BUSCAR DIRECTAMENTE EN LAS KEYS
+        for credito_key, credito_info in creditos_data.items():
+            
+            # Normalizar la key
+            credito_key_normalizado = credito_key.strip().upper()
+            
+            # 🔥 MATCH DIRECTO: ¿Está en la lista?
+            if credito_key_normalizado in lista_creditos_normalizada:
+                
+                logger.success(f"✅ ENCONTRADO: {credito_key_normalizado}")
+                logger.info(f"   → Cliente: {credito_info['cliente'][:50]}...", indent=1)
+                logger.info(f"   → Filas: {len(credito_info['filas'])}", indent=1)
+                
+                # Guardar
+                creditos_encontrados[credito_key] = {
+                    'data': credito_info,
+                    'hoja': nombre_hoja,
+                    'credito_buscado': credito_key_normalizado
+                }
+                stats_globales['creditos_encontrados'] += 1
+                encontrados_en_esta_hoja += 1
+        
+        logger.info(f"\n📊 Encontrados en {nombre_hoja}: {encontrados_en_esta_hoja}")
+    
+    # 🔥 RESUMEN DE BÚSQUEDA
+    logger.separador("=")
+    logger.titulo("🎯 RESUMEN DE BÚSQUEDA")
+    logger.info(f"📋 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"🔍 Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    # Detectar NO encontrados
+    creditos_encontrados_set = set(v['credito_buscado'] for v in creditos_encontrados.values())
+    creditos_no_encontrados = lista_creditos_normalizada - creditos_encontrados_set
+    
+    if creditos_no_encontrados:
+        logger.warning(f"❌ NO encontrados: {len(creditos_no_encontrados)}")
+        stats_globales['creditos_no_encontrados_excel'] = list(creditos_no_encontrados)
+        logger.indent()
+        for cred in sorted(creditos_no_encontrados):
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador("=")
+    
+    if not creditos_encontrados:
+        logger.error("\n❌ No se encontró ningún crédito")
+        return
+    
+    # 🚀 ENVIAR A LA API
+    logger.titulo("🚀 ENVÍO A LA API")
+    logger.info(f"📤 Créditos a enviar: {len(creditos_encontrados)}\n")
+    
+    for idx, (credito_key, info) in enumerate(creditos_encontrados.items(), 1):
+        logger.separador("─")
+        logger.subtitulo(f"📋 Crédito {idx}/{len(creditos_encontrados)}")
+        logger.info(f"🔍 Buscado: {info['credito_buscado']}")
+        logger.info(f"📂 Hoja: {info['hoja']}")
+        
+        resultado = enviar_credito_a_api(info['data'], api_endpoint)
+        
+        stats_globales['creditos_procesados'] += 1
+        
+        if resultado.get('success'):
+            stats_globales['creditos_exitosos'] += 1
+            
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado['inversionistas_no_encontrados']
+                if no_encontrados:
+                    stats_globales['inversionistas_no_encontrados'].extend([
+                        {
+                            'credito': info['data']['creditoBase'],
+                            'cliente': info['data']['cliente'],
+                            'inversionista': inv
+                        }
+                        for inv in no_encontrados
+                    ])
+        else:
+            stats_globales['creditos_fallidos'] += 1
+        
+        logger.separador("─")
+    
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL")
+    logger.separador("=")
+    
+    logger.subtitulo("📊 BÚSQUEDA:")
+    logger.info(f"   Hojas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"   Buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    if stats_globales['creditos_no_encontrados_excel']:
+        logger.warning(f"   ❌ NO encontrados: {len(stats_globales['creditos_no_encontrados_excel'])}")
+    
+    logger.separador()
+    logger.subtitulo("🚀 ENVÍO:")
+    logger.info(f"   Procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    if stats_globales['inversionistas_no_encontrados']:
+        logger.separador()
+        logger.warning(f"⚠️ INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            logger.warning(f"\n❌ {inversionista}")
+            for cred in creditos:
+                logger.warning(f"   - {cred['credito']} ({cred['cliente'][:40]}...)")
+    
+    logger.separador("=")
+    logger.success(f"\n✅ Logs: {ARCHIVO_LOG}")
+    """
+    Procesa solo los créditos que estén en la lista
+    Busca en TODAS las hojas, detecta pools, agrupa y envía
+    """
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}")
+    logger.separador()
+    
+    # 🔥 NORMALIZAR lista de créditos buscados
+    lista_creditos_normalizada = [c.strip().upper() for c in lista_creditos]
+    
+    logger.info("📋 Créditos específicos a procesar (normalizados):")
+    for cred in lista_creditos_normalizada:
+        logger.info(f"   • {cred}")
+    logger.separador()
+    
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+    
+    try:
+        xls = pd.ExcelFile(archivo_path)
+        hojas_disponibles = xls.sheet_names
+        logger.info(f"📋 Hojas disponibles: {len(hojas_disponibles)}")
+    except Exception as e:
+        logger.error(f"❌ Error leyendo archivo: {e}")
+        return
+    
+    stats_globales = {
+        'hojas_procesadas': 0,
+        'creditos_buscados': len(lista_creditos_normalizada),
+        'creditos_encontrados': 0,
+        'creditos_no_encontrados_excel': [],
+        'creditos_procesados': 0,
+        'creditos_exitosos': 0,
+        'creditos_fallidos': 0,
+        'inversionistas_no_encontrados': []
+    }
+    
+    creditos_encontrados = {}
+    
+    # 🔍 BUSCAR EN TODAS LAS HOJAS
+    logger.titulo("🔍 BÚSQUEDA EN HOJAS")
+    
+    for nombre_hoja in HOJAS_A_PROCESAR:
+        if nombre_hoja not in hojas_disponibles:
+            logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
+            continue
+        
+        logger.separador("─")
+        logger.subtitulo(f"📋 Procesando: {nombre_hoja}")
+        
+        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
+        
+        if not creditos_data:
+            logger.warning(f"⚠️ No se encontraron datos en {nombre_hoja}")
+            continue
+        
+        stats_globales['hojas_procesadas'] += 1
+        logger.info(f"✅ Créditos agrupados: {len(creditos_data)}")
+        
+        encontrados_en_esta_hoja = 0
+        
+        # 🎯 BUSCAR cada crédito en los datos agrupados
+        for credito_buscado in lista_creditos_normalizada:
+            
+            # 🔥 Iterar TODOS los créditos agrupados
+            for credito_key, credito_info in creditos_data.items():
+                
+                # Normalizar credito_key para comparar
+                credito_key_normalizado = credito_key.strip().upper()
+                
+                # Obtener todos los CreditoSIFCO de las filas
+                creditos_sifco_en_filas = set(
+                    str(f.get('CreditoSIFCO', '')).strip().upper() 
+                    for f in credito_info['filas']
+                )
+                
+                # 🔥 MATCH con normalización
+                match_encontrado = (
+                    credito_buscado in creditos_sifco_en_filas or
+                    credito_buscado == credito_key_normalizado or
+                    credito_buscado in credito_key_normalizado or
+                    credito_key_normalizado in credito_buscado or
+                    # 🔥 También buscar sin normalizar (por si acaso)
+                    credito_buscado.strip() == credito_key.strip()
+                )
+                
+                # 🔥 Solo agregar UNA VEZ (usar credito_buscado como key para evitar duplicados)
+                if match_encontrado and credito_buscado not in [v['credito_buscado'] for v in creditos_encontrados.values()]:
+                    logger.success(f"✅ ENCONTRADO: {credito_buscado}")
+                    logger.info(f"   → Agrupado como: {credito_key}", indent=1)
+                    logger.info(f"   → Cliente: {credito_info['cliente'][:50]}...", indent=1)
+                    logger.info(f"   → Filas: {len(credito_info['filas'])}", indent=1)
+                    
+                    # Usar credito_key como key del dict (único por crédito base)
+                    creditos_encontrados[credito_key] = {
+                        'data': credito_info,
+                        'hoja': nombre_hoja,
+                        'credito_buscado': credito_buscado
+                    }
+                    stats_globales['creditos_encontrados'] += 1
+                    encontrados_en_esta_hoja += 1
+                    break  # Ya encontramos este credito_buscado, salir del loop de credito_key
+        
+        logger.info(f"\n📊 Encontrados en {nombre_hoja}: {encontrados_en_esta_hoja}")
+    
+    # 🔥 RESUMEN DE BÚSQUEDA
+    logger.separador("=")
+    logger.titulo("🎯 RESUMEN DE BÚSQUEDA")
+    logger.info(f"📋 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"🔍 Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    # Detectar NO encontrados
+    creditos_encontrados_set = set(v['credito_buscado'] for v in creditos_encontrados.values())
+    creditos_no_encontrados = [
+        c for c in lista_creditos_normalizada 
+        if c not in creditos_encontrados_set
+    ]
+    
+    if creditos_no_encontrados:
+        logger.warning(f"❌ NO encontrados: {len(creditos_no_encontrados)}")
+        stats_globales['creditos_no_encontrados_excel'] = creditos_no_encontrados
+        logger.indent()
+        for cred in creditos_no_encontrados:
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador("=")
+    
+    if not creditos_encontrados:
+        logger.error("\n❌ No se encontró ningún crédito")
+        return
+    
+    # 🚀 ENVIAR A LA API
+    logger.titulo("🚀 ENVÍO A LA API")
+    logger.info(f"📤 Créditos a enviar: {len(creditos_encontrados)}\n")
+    
+    for idx, (credito_key, info) in enumerate(creditos_encontrados.items(), 1):
+        logger.separador("─")
+        logger.subtitulo(f"📋 Crédito {idx}/{len(creditos_encontrados)}")
+        logger.info(f"🔍 Buscado: {info['credito_buscado']}")
+        logger.info(f"📂 Hoja: {info['hoja']}")
+        
+        resultado = enviar_credito_a_api(info['data'], api_endpoint)
+        
+        stats_globales['creditos_procesados'] += 1
+        
+        if resultado.get('success'):
+            stats_globales['creditos_exitosos'] += 1
+            
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado['inversionistas_no_encontrados']
+                if no_encontrados:
+                    stats_globales['inversionistas_no_encontrados'].extend([
+                        {
+                            'credito': info['data']['creditoBase'],
+                            'cliente': info['data']['cliente'],
+                            'inversionista': inv
+                        }
+                        for inv in no_encontrados
+                    ])
+        else:
+            stats_globales['creditos_fallidos'] += 1
+        
+        logger.separador("─")
+    
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL")
+    logger.separador("=")
+    
+    logger.subtitulo("📊 BÚSQUEDA:")
+    logger.info(f"   Hojas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"   Buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    if stats_globales['creditos_no_encontrados_excel']:
+        logger.warning(f"   ❌ NO encontrados: {len(stats_globales['creditos_no_encontrados_excel'])}")
+    
+    logger.separador()
+    logger.subtitulo("🚀 ENVÍO:")
+    logger.info(f"   Procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    if stats_globales['inversionistas_no_encontrados']:
+        logger.separador()
+        logger.warning(f"⚠️ INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            logger.warning(f"\n❌ {inversionista}")
+            for cred in creditos:
+                logger.warning(f"   - {cred['credito']} ({cred['cliente'][:40]}...)")
+    
+    logger.separador("=")
+    logger.success(f"\n✅ Logs: {ARCHIVO_LOG}")
+    """
+    Procesa solo los créditos que estén en la lista
+    Busca en TODAS las hojas, detecta pools, agrupa y envía
+    """
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"📅 Hojas a procesar: {len(HOJAS_A_PROCESAR)}")
+    logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}")
+    logger.separador()
+    
+    # Mostrar lista de créditos
+    logger.info("📋 Créditos específicos a procesar:")
+    for cred in lista_creditos:
+        logger.info(f"   • {cred}")
+    logger.separador()
+    
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+    
+    try:
+        xls = pd.ExcelFile(archivo_path)
+        hojas_disponibles = xls.sheet_names
+        logger.info(f"📋 Hojas disponibles en el archivo:")
+        for hoja in hojas_disponibles:
+            logger.info(f"   - {hoja}")
+        logger.info("")
+    except Exception as e:
+        logger.error(f"❌ Error leyendo archivo: {e}")
+        return
+    
+    stats_globales = {
+        'hojas_procesadas': 0,
+        'creditos_buscados': len(lista_creditos),
+        'creditos_encontrados': 0,
+        'creditos_no_encontrados_excel': [],
+        'creditos_procesados': 0,
+        'creditos_exitosos': 0,
+        'creditos_fallidos': 0,
+        'inversionistas_no_encontrados': []
+    }
+    
+    creditos_encontrados = {}
+    
+    # 🔍 BUSCAR EN TODAS LAS HOJAS
+    logger.titulo("🔍 FASE 1: BÚSQUEDA EN HOJAS")
+    
+    for nombre_hoja in HOJAS_A_PROCESAR:
+        if nombre_hoja not in hojas_disponibles:
+            logger.warning(f"⚠️ Hoja '{nombre_hoja}' no encontrada, saltando...")
+            continue
+        
+        logger.separador("─")
+        logger.subtitulo(f"📋 Procesando hoja: {nombre_hoja}")
+        
+        creditos_data = leer_hoja_excel(archivo_path, nombre_hoja)
+        
+        if not creditos_data:
+            logger.warning(f"⚠️ No se encontraron datos en la hoja {nombre_hoja}")
+            continue
+        
+        stats_globales['hojas_procesadas'] += 1
+        logger.info(f"✅ Créditos agrupados en esta hoja: {len(creditos_data)}")
+        
+        # 🎯 FILTRAR solo los créditos de la lista
+        encontrados_en_esta_hoja = 0
+        
+        for credito_key, credito_info in creditos_data.items():
+            # Verificar si alguna fila del crédito agrupado matchea con la lista
+            creditos_sifco_en_filas = set(
+                f.get('CreditoSIFCO', '') for f in credito_info['filas']
+            )
+            
+            # 🔥 BUSCAR MATCH CON CUALQUIER CRÉDITO DE LA LISTA
+            for credito_buscado in lista_creditos:
+                # Match encontrado si:
+                # 1. El crédito buscado está en los CreditoSIFCO de las filas
+                # 2. El crédito buscado es igual a la clave (credito_key)
+                # 3. La clave está dentro del crédito buscado (para variaciones)
+                # 4. El crédito buscado está dentro de la clave (para pools raros)
+                
+                match_encontrado = (
+                    credito_buscado in creditos_sifco_en_filas or
+                    credito_buscado == credito_key or
+                    credito_key in credito_buscado or
+                    credito_buscado in credito_key
+                )
+                
+                # 🔥 Solo agregar si NO lo hemos encontrado antes
+                if match_encontrado and credito_key not in creditos_encontrados:
+                    logger.success(f"✅ ENCONTRADO: {credito_buscado}")
+                    logger.info(f"   → Agrupado como: {credito_key}", indent=1)
+                    logger.info(f"   → Cliente: {credito_info['cliente']}", indent=1)
+                    logger.info(f"   → Filas en pool: {len(credito_info['filas'])}", indent=1)
+                    logger.debug(f"   → CreditoSIFCO en filas: {creditos_sifco_en_filas}", indent=1)
+                    
+                    creditos_encontrados[credito_key] = {
+                        'data': credito_info,
+                        'hoja': nombre_hoja,
+                        'credito_buscado': credito_buscado
+                    }
+                    stats_globales['creditos_encontrados'] += 1
+                    encontrados_en_esta_hoja += 1
+                    break  # Ya encontramos este credito_key, salir del loop de creditos_buscado
+        
+        logger.info(f"\n📊 Encontrados en {nombre_hoja}: {encontrados_en_esta_hoja}")
+    
+    # 🔥 RESUMEN DE BÚSQUEDA (FUERA del loop de hojas)
+    logger.separador("=")
+    logger.titulo("🎯 RESUMEN DE BÚSQUEDA")
+    logger.info(f"📋 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"🔍 Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"✅ Encontrados en Excel: {stats_globales['creditos_encontrados']}")
+    
+    # Detectar NO encontrados
+    creditos_no_encontrados = [
+        c for c in lista_creditos 
+        if not any(
+            c in k or 
+            c == v['credito_buscado'] or 
+            k in c or 
+            c == credito_info.get('data', {}).get('creditoBase', '')
+            for k, v in creditos_encontrados.items()
+            for credito_info in [v]
+        )
+    ]
+    
+    if creditos_no_encontrados:
+        logger.warning(f"❌ NO encontrados en Excel: {len(creditos_no_encontrados)}")
+        stats_globales['creditos_no_encontrados_excel'] = creditos_no_encontrados
+        logger.indent()
+        for cred in creditos_no_encontrados:
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador("=")
+    
+    if not creditos_encontrados:
+        logger.error("\n❌ No se encontró ningún crédito de la lista en el Excel")
+        logger.error("   Verificá que:")
+        logger.error("   1. Los números de crédito sean correctos")
+        logger.error("   2. Estén en las hojas configuradas en HOJAS_A_PROCESAR")
+        logger.error("   3. No tengan espacios o caracteres especiales")
+        return
+    
+    # 🚀 ENVIAR A LA API
+    logger.titulo("🚀 FASE 2: ENVÍO A LA API")
+    logger.info(f"📤 Créditos a enviar: {len(creditos_encontrados)}\n")
+    
+    for idx, (credito_key, info) in enumerate(creditos_encontrados.items(), 1):
+        logger.separador("─")
+        logger.subtitulo(f"📋 Crédito {idx}/{len(creditos_encontrados)}")
+        logger.info(f"🔍 Buscado originalmente: {info['credito_buscado']}")
+        logger.info(f"📂 Origen: Hoja '{info['hoja']}'")
+        logger.info(f"🔢 Agrupado como: {credito_key}")
+        
+        resultado = enviar_credito_a_api(info['data'], api_endpoint)
+        
+        stats_globales['creditos_procesados'] += 1
+        
+        if resultado.get('success'):
+            stats_globales['creditos_exitosos'] += 1
+            
+            # Recopilar inversionistas no encontrados
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado['inversionistas_no_encontrados']
+                if no_encontrados:
+                    stats_globales['inversionistas_no_encontrados'].extend([
+                        {
+                            'credito': info['data']['creditoBase'],
+                            'cliente': info['data']['cliente'],
+                            'inversionista': inv
+                        }
+                        for inv in no_encontrados
+                    ])
+        else:
+            stats_globales['creditos_fallidos'] += 1
+        
+        logger.separador("─")
+    
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL - MODO ESPECÍFICO")
+    logger.separador("=")
+    
+    logger.subtitulo("📊 BÚSQUEDA EN EXCEL:")
+    logger.info(f"   Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"   Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    if stats_globales['creditos_no_encontrados_excel']:
+        logger.warning(f"   ❌ NO encontrados: {len(stats_globales['creditos_no_encontrados_excel'])}")
+        logger.indent()
+        for cred in stats_globales['creditos_no_encontrados_excel']:
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador()
+    logger.subtitulo("🚀 ENVÍO A LA API:")
+    logger.info(f"   Créditos procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    # Mostrar inversionistas no encontrados
+    if stats_globales['inversionistas_no_encontrados']:
+        logger.separador()
+        logger.warning(f"⚠️ INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        logger.separador()
+        
+        # Agrupar por inversionista
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            logger.warning(f"\n❌ {inversionista}")
+            for cred in creditos:
+                logger.warning(f"   - {cred['credito']} ({cred['cliente']})")
+    
+    logger.separador("=")
+    logger.success(f"\n✅ Logs guardados en: {ARCHIVO_LOG}")
+    logger.separador()
+    """
+    Procesa solo los créditos que estén en la lista
+    Busca en TODAS las hojas, detecta pools, agrupa y envía
+    """
+    modo_texto = "🧪 MODO PRUEBA" if MODO_PRUEBA else "🎯 MODO ESPECÍFICO"
+    
+    logger.titulo(f"{modo_texto} - {modo_nombre}")
+    logger.info(f"📂 Carpeta: {CARPETA_EXCELS}")
+    logger.info(f"📄 Archivo: {ARCHIVO_EXCEL}")
+    logger.info(f"🔗 API: {api_endpoint}")
+    logger.info(f"📅 Hojas a procesar: {len(HOJAS_A_PROCESAR)}")
+    logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}")
+    logger.separador()
+    
+    # Mostrar lista de créditos
+    logger.info("📋 Créditos específicos a procesar:")
+    for cred in lista_creditos:
+        logger.info(f"   • {cred}")
+    logger.separador()
+    
+    archivo_path = os.path.join(CARPETA_EXCELS, ARCHIVO_EXCEL)
+    
+    if not os.path.exists(archivo_path):
+        logger.error(f"❌ Archivo no encontrado: {archivo_path}")
+        return
+    
+    try:
+        xls = pd.ExcelFile(archivo_path)
+        hojas_disponibles = xls.sheet_names
+        logger.info(f"📋 Hojas disponibles en el archivo:")
+        for hoja in hojas_disponibles:
+            logger.info(f"   - {hoja}")
+        logger.info("")
+    except Exception as e:
+        logger.error(f"❌ Error leyendo archivo: {e}")
+        return
+    
+    stats_globales = {
+        'hojas_procesadas': 0,
+        'creditos_buscados': len(lista_creditos),
+        'creditos_encontrados': 0,
+        'creditos_no_encontrados_excel': [],
+        'creditos_procesados': 0,
+        'creditos_exitosos': 0,
+        'creditos_fallidos': 0,
+        'inversionistas_no_encontrados': []
+    }
+    
+    creditos_encontrados = {}
+    
+    # 🔍 BUSCAR EN TODAS LAS HOJAS
+
+    for nombre_hoja in HOJAS_A_PROCESAR:
+        logger.info(f"\n📋 Hoja: {nombre_hoja}")
+        
+        try:
+            df = pd.read_excel(archivo_path, sheet_name=nombre_hoja)
+            
+            # Buscar columna de crédito
+            col_credito = None
+            for col in df.columns:
+                if 'credito' in str(col).lower() and 'sifco' in str(col).lower():
+                    col_credito = col
+                    break
+            
+            if not col_credito:
+                logger.warning(f"⚠️ No se encontró columna de crédito en {nombre_hoja}")
+                continue
+            
+            # Buscar cada crédito
+            for credito_buscar in lista_creditos:
+                filas_encontradas = df[df[col_credito].astype(str).str.contains(credito_buscar, na=False)]
+                
+                if len(filas_encontradas) > 0:
+                    logger.success(f"✅ {credito_buscar} → Encontrado en {len(filas_encontradas)} fila(s)")
+                    for idx, row in filas_encontradas.iterrows():
+                        logger.info(f"   Fila {idx}: {row[col_credito]}", indent=1)
+        
+        except Exception as e:
+            logger.error(f"Error en {nombre_hoja}: {e}")
+    
+    # 🔥 PROCESAR LOS CRÉDITOS ENCONTRADOS
+    logger.separador("=")
+    logger.success(f"\n🎯 RESUMEN DE BÚSQUEDA:")
+    logger.info(f"   Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados: {stats_globales['creditos_encontrados']}")
+    
+    # Detectar NO encontrados
+    creditos_no_encontrados = [
+        c for c in lista_creditos 
+        if not any(c in k or c == v['credito_buscado'] or k in c
+                  for k, v in creditos_encontrados.items())
+    ]
+    
+    if creditos_no_encontrados:
+        logger.warning(f"   ❌ NO encontrados en Excel: {len(creditos_no_encontrados)}")
+        stats_globales['creditos_no_encontrados_excel'] = creditos_no_encontrados
+        logger.indent()
+        for cred in creditos_no_encontrados:
+            logger.warning(f"• {cred}")
+        logger.dedent()
+    
+    logger.separador("=")
+    
+    if not creditos_encontrados:
+        logger.error("\n❌ No se encontró ningún crédito de la lista en el Excel")
+        return
+    
+    # 🚀 ENVIAR A LA API
+    logger.info(f"\n🚀 PROCESANDO {len(creditos_encontrados)} CRÉDITO(S)...\n")
+    
+    for credito_key, info in creditos_encontrados.items():
+        logger.separador("─")
+        logger.info(f"📋 Origen: Hoja '{info['hoja']}'")
+        logger.info(f"🔍 Buscado: {info['credito_buscado']}")
+        
+        resultado = enviar_credito_a_api(info['data'], api_endpoint)
+        
+        stats_globales['creditos_procesados'] += 1
+        
+        if resultado.get('success'):
+            stats_globales['creditos_exitosos'] += 1
+            
+            if 'inversionistas_no_encontrados' in resultado:
+                no_encontrados = resultado['inversionistas_no_encontrados']
+                if no_encontrados:
+                    stats_globales['inversionistas_no_encontrados'].extend([
+                        {
+                            'credito': info['data']['creditoBase'],
+                            'cliente': info['data']['cliente'],
+                            'inversionista': inv
+                        }
+                        for inv in no_encontrados
+                    ])
+        else:
+            stats_globales['creditos_fallidos'] += 1
+        
+        logger.separador("─")
+    
+    # RESUMEN FINAL
+    logger.titulo("🎉 RESUMEN FINAL - MODO ESPECÍFICO")
+    logger.info(f"📊 Hojas procesadas: {stats_globales['hojas_procesadas']}")
+    logger.info(f"🔍 Créditos buscados: {stats_globales['creditos_buscados']}")
+    logger.success(f"   ✅ Encontrados en Excel: {stats_globales['creditos_encontrados']}")
+    if stats_globales['creditos_no_encontrados_excel']:
+        logger.warning(f"   ❌ NO encontrados en Excel: {len(stats_globales['creditos_no_encontrados_excel'])}")
+    logger.info(f"\n📋 Créditos procesados: {stats_globales['creditos_procesados']}")
+    logger.success(f"   ✅ Exitosos: {stats_globales['creditos_exitosos']}")
+    logger.error(f"   ❌ Fallidos: {stats_globales['creditos_fallidos']}")
+    
+    # Mostrar inversionistas no encontrados
+    if stats_globales['inversionistas_no_encontrados']:
+        logger.separador()
+        logger.warning(f"⚠️ INVERSIONISTAS NO ENCONTRADOS: {len(stats_globales['inversionistas_no_encontrados'])}")
+        logger.separador()
+        
+        por_inversionista = defaultdict(list)
+        for item in stats_globales['inversionistas_no_encontrados']:
+            por_inversionista[item['inversionista']].append({
+                'credito': item['credito'],
+                'cliente': item['cliente']
+            })
+        
+        for inversionista, creditos in sorted(por_inversionista.items()):
+            logger.warning(f"\n❌ {inversionista}")
+            for cred in creditos:
+                logger.warning(f"   - {cred['credito']} ({cred['cliente']})")
+    
+    logger.separador()
+    logger.success(f"\n✅ Logs guardados en: {ARCHIVO_LOG}")
 # ============================================
 # 🎯 MENÚ PRINCIPAL
+# ============================================
+# ============================================
+# 🎯 MENÚ PRINCIPAL (ACTUALIZADO)
 # ============================================
 def mostrar_menu():
     """Muestra el menú de opciones y retorna la selección del usuario"""
@@ -968,13 +2284,16 @@ def mostrar_menu():
     print("   2️⃣  Procesar SOLO INVERSIONISTAS (crédito debe existir)")
     print("      └─ Endpoint: /processInvestorsOnly")
     print("      └─ NO toca SIFCO, solo actualiza inversionistas del crédito\n")
+    print("   3️⃣  Procesar CRÉDITOS ESPECÍFICOS (desde lista de errores)")  # 👈 NUEVA OPCIÓN
+    print("      └─ Busca créditos específicos en Excel")
+    print("      └─ Detecta pools, agrupa y envía a la API\n")
     print("   0️⃣  Salir\n")
     logger.separador()
     
     while True:
-        respuesta = input("\n👉 Ingresá tu opción (1/2/0): ").strip()
+        respuesta = input("\n👉 Ingresá tu opción (1/2/3/0): ").strip()  # 👈 AGREGADO EL 3
         
-        if respuesta in ['1', '2', '0']:
+        if respuesta in ['1', '2', '3', '0']:  # 👈 AGREGADO EL 3
             logger.info(f"Usuario seleccionó opción: {respuesta}")
             return respuesta
         else:
@@ -985,7 +2304,7 @@ def mostrar_menu():
 # ============================================
 if __name__ == "__main__":
     logger.titulo("🔥 PROCESADOR UNIFICADO - POOLS NORMALES Y RAROS")
-    logger.warning("⚠️  Asegurate que tu backend Elysia esté corriendo en el puerto 7000\n")
+    logger.warning("⚠️ Asegurate que tu backend Elysia esté corriendo en el puerto 7000\n")
     
     if MODO_PRUEBA:
         logger.warning(f"🧪 MODO PRUEBA ACTIVADO")
@@ -999,6 +2318,23 @@ if __name__ == "__main__":
         logger.info(f"   (Se usarán automáticamente cuando aparezcan de nuevo)\n")
     
     logger.success(f"📝 Los logs se guardarán en: {ARCHIVO_LOG}\n")
+    
+    # 🔥 ARRAY DE CRÉDITOS CON ERRORES (HARD-CODED)
+    CREDITOS_CON_ERRORES = [
+        "01010214113080",
+        "01010214104860",
+        "01010214108880",
+        "01010214112940",
+        "01010214115390",
+        "01010214115130",
+        "01010214105300",
+        "01010214105290",
+        "01010214109390",
+        "01010214108500",
+        "01010214117400",
+        "01010214105880",
+        "01010202109070"
+    ]
     
     try:
         while True:
@@ -1023,7 +2359,7 @@ if __name__ == "__main__":
                 api_endpoint = "http://localhost:7000/processInvestorsOnly"
                 modo_nombre = "Solo Inversionistas (sin SIFCO)"
                 
-                logger.warning("\n⚠️  IMPORTANTE:")
+                logger.warning("\n⚠️ IMPORTANTE:")
                 logger.warning("   - Los créditos DEBEN existir en la base de datos")
                 logger.warning("   - Solo se actualizarán los inversionistas")
                 logger.warning("   - NO se consultará SIFCO\n")
@@ -1037,6 +2373,151 @@ if __name__ == "__main__":
                 else:
                     logger.warning("\n❌ Operación cancelada por el usuario")
             
+            # 🔥 NUEVO MODO 3 - CRÉDITOS ESPECÍFICOS
+            elif opcion == '3':
+                logger.success("\n✅ Modo seleccionado: CRÉDITOS ESPECÍFICOS")
+                
+                logger.info("\n📋 Opciones de entrada:\n")
+                print("   1. Usar lista hard-coded de 13 créditos con errores")
+                print("   2. Pegar JSON de errores")
+                print("      • Formato 1: {\"detalleErrores\": [{\"numeroPrestamo\": \"...\"}, ...]}")
+                print("      • Formato 2: [{\"numeroPrestamo\": \"...\"}, ...] (array directo)")
+                print("   3. Ingresar lista manual de créditos (separados por comas)")
+                print("   4. Leer desde archivo JSON\n")
+                
+                sub_opcion = input("👉 Elegí una opción (1/2/3/4): ").strip()
+                
+                lista_creditos = []
+                
+                if sub_opcion == '1':
+                    # 🔥 USAR LISTA HARD-CODED
+                    lista_creditos = CREDITOS_CON_ERRORES.copy()
+                    logger.success(f"✅ Usando lista hard-coded: {len(lista_creditos)} créditos")
+                    logger.info("\n📋 Créditos a procesar:")
+                    for cred in lista_creditos:
+                        logger.info(f"   • {cred}")
+                
+                elif sub_opcion == '2':
+                    logger.info("\n📝 Pegá el JSON y presioná ENTER dos veces:")
+                    logger.info("(Acepta array directo o con wrapper 'detalleErrores')\n")
+                    
+                    lineas = []
+                    while True:
+                        linea = input()
+                        if linea.strip() == '':
+                            break
+                        lineas.append(linea)
+                    
+                    json_texto = '\n'.join(lineas)
+                    
+                    try:
+                        data = json.loads(json_texto)
+                        
+                        # 🔥 SOPORTAR DOS FORMATOS
+                        if isinstance(data, list):
+                            # Formato directo: [{...}, {...}]
+                            lista_creditos = [
+                                item['numeroPrestamo'] 
+                                for item in data
+                                if isinstance(item, dict) and 'numeroPrestamo' in item
+                            ]
+                            logger.success(f"✅ Array directo detectado")
+                        elif isinstance(data, dict) and 'detalleErrores' in data:
+                            # Formato con wrapper: {"detalleErrores": [{...}]}
+                            lista_creditos = [
+                                item['numeroPrestamo'] 
+                                for item in data['detalleErrores']
+                                if 'numeroPrestamo' in item
+                            ]
+                            logger.success(f"✅ Formato con 'detalleErrores' detectado")
+                        else:
+                            logger.error("❌ Formato JSON no reconocido")
+                            logger.error("   Esperado: array directo o {\"detalleErrores\": [...]}")
+                            continue
+                        
+                        logger.success(f"✅ Se encontraron {len(lista_creditos)} créditos")
+                        
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ Error parseando JSON: {e}")
+                        continue
+                
+                elif sub_opcion == '3':
+                    logger.info("\n📝 Ingresá los números de crédito separados por comas:")
+                    entrada = input("👉 ").strip()
+                    lista_creditos = [c.strip() for c in entrada.split(',') if c.strip()]
+                    logger.success(f"✅ Se ingresaron {len(lista_creditos)} créditos")
+                
+                elif sub_opcion == '4':
+                    logger.info("\n📝 Ingresá la ruta del archivo JSON:")
+                    ruta_archivo = input("👉 ").strip()
+                    
+                    try:
+                        with open(ruta_archivo, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        
+                        # 🔥 SOPORTAR DOS FORMATOS
+                        if isinstance(data, list):
+                            lista_creditos = [
+                                item['numeroPrestamo'] 
+                                for item in data
+                                if isinstance(item, dict) and 'numeroPrestamo' in item
+                            ]
+                            logger.success(f"✅ Array directo detectado")
+                        elif isinstance(data, dict) and 'detalleErrores' in data:
+                            lista_creditos = [
+                                item['numeroPrestamo'] 
+                                for item in data['detalleErrores']
+                                if 'numeroPrestamo' in item
+                            ]
+                            logger.success(f"✅ Formato con 'detalleErrores' detectado")
+                        else:
+                            logger.error("❌ Formato JSON no reconocido")
+                            continue
+                        
+                        logger.success(f"✅ Se encontraron {len(lista_creditos)} créditos")
+                        
+                    except FileNotFoundError:
+                        logger.error(f"❌ Archivo no encontrado: {ruta_archivo}")
+                        continue
+                    except json.JSONDecodeError as e:
+                        logger.error(f"❌ Error parseando JSON: {e}")
+                        continue
+                else:
+                    logger.warning("❌ Opción inválida")
+                    continue
+                
+                if not lista_creditos:
+                    logger.error("❌ No se ingresaron créditos")
+                    continue
+                
+                # Elegir endpoint
+                logger.info("\n🔗 Seleccioná el endpoint:\n")
+                print("   1. /processUniqueCredit (SIFCO + Inversionistas)")
+                print("   2. /processInvestorsOnly (Solo Inversionistas)\n")
+                
+                endpoint_opcion = input("👉 Elegí (1/2): ").strip()
+                
+                if endpoint_opcion == '1':
+                    api_endpoint = "http://localhost:7000/processUniqueCredit"
+                    modo_nombre = "Específicos - Completos (SIFCO + Inversionistas)"
+                elif endpoint_opcion == '2':
+                    api_endpoint = "http://localhost:7000/processInvestorsOnly"
+                    modo_nombre = "Específicos - Solo Inversionistas"
+                else:
+                    logger.warning("❌ Opción inválida")
+                    continue
+                
+                logger.info(f"\n📊 Endpoint: {api_endpoint}")
+                logger.info(f"🎯 Créditos a buscar: {len(lista_creditos)}\n")
+                
+                confirmacion = input("¿Continuar? (s/n): ").strip().lower()
+                
+                if confirmacion == 's':
+                    procesar_creditos_especificos(api_endpoint, modo_nombre, lista_creditos)
+                    input("\n✅ Proceso completado. Presiona ENTER para volver al menú...")
+                else:
+                    logger.warning("\n❌ Operación cancelada")
+                
     except KeyboardInterrupt:
         logger.warning("\n\n⚠️ Proceso interrumpido por el usuario (Ctrl+C)")
     except Exception as e:

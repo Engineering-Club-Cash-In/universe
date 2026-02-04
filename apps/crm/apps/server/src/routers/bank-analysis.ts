@@ -4,7 +4,7 @@ import { generateObject } from "ai";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
-import { creditAnalysis, leads } from "../db/schema/crm";
+import { coDebtors, creditAnalysis, leads } from "../db/schema/crm";
 import {
 	BANK_ANALYSIS_PROMPT,
 	bankStatementAnalysisSchema,
@@ -38,45 +38,66 @@ function getBase64SizeInBytes(base64Data: string): number {
 export const bankAnalysisRouter = {
 	analyzeBankStatements: crmProcedure
 		.input(
-			z.object({
-				leadId: z.string().uuid(),
-				files: z
-					.array(
-						z.object({
-							name: z.string(),
-							data: z.string(), // base64
-							mimeType: z.string().default("application/pdf"),
-						}),
-					)
-					.min(1)
-					.max(3),
-				annualRate: z.number().default(0.18),
-				termMonths: z.number().int().min(12).max(120).default(60),
-				maxDebtRatio: z.number().min(0).max(1).default(0.2),
-				maxVariableDebtRatio: z.number().min(0).max(1).default(0.3),
-			}),
+			z
+				.object({
+					leadId: z.string().uuid().optional(),
+					coDebtorId: z.string().uuid().optional(),
+					files: z
+						.array(
+							z.object({
+								name: z.string(),
+								data: z.string(), // base64
+								mimeType: z.string().default("application/pdf"),
+							}),
+						)
+						.min(1)
+						.max(3),
+					annualRate: z.number().default(0.18),
+					termMonths: z.number().int().min(12).max(120).default(60),
+					maxDebtRatio: z.number().min(0).max(1).default(0.2),
+					maxVariableDebtRatio: z.number().min(0).max(1).default(0.3),
+				})
+				.refine((data) => data.leadId || data.coDebtorId, {
+					message: "Debe proporcionar leadId o coDebtorId",
+				}),
 		)
 		.handler(async ({ input, context }) => {
-			// 1. Verificar que el lead existe y el usuario tiene acceso
-			const lead = await db
-				.select()
-				.from(leads)
-				.where(eq(leads.id, input.leadId))
-				.limit(1);
+			const isForLead = !!input.leadId;
 
-			if (lead.length === 0) {
-				throw new ORPCError("NOT_FOUND", {
-					message: "Lead no encontrado",
-				});
-			}
+			// 1. Verificar que el lead/co-deudor existe y el usuario tiene acceso
+			if (isForLead) {
+				const lead = await db
+					.select()
+					.from(leads)
+					.where(eq(leads.id, input.leadId!))
+					.limit(1);
 
-			if (
-				context.userRole === "sales" &&
-				lead[0].assignedTo !== context.userId
-			) {
-				throw new ORPCError("FORBIDDEN", {
-					message: "No tienes permiso para analizar este lead",
-				});
+				if (lead.length === 0) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Lead no encontrado",
+					});
+				}
+
+				if (
+					context.userRole === "sales" &&
+					lead[0].assignedTo !== context.userId
+				) {
+					throw new ORPCError("FORBIDDEN", {
+						message: "No tienes permiso para analizar este lead",
+					});
+				}
+			} else {
+				const coDebtor = await db
+					.select()
+					.from(coDebtors)
+					.where(eq(coDebtors.id, input.coDebtorId!))
+					.limit(1);
+
+				if (coDebtor.length === 0) {
+					throw new ORPCError("NOT_FOUND", {
+						message: "Co-deudor no encontrado",
+					});
+				}
 			}
 
 			// 2. Validar archivos: tamaño máximo y formato PDF
@@ -97,7 +118,10 @@ export const bankAnalysisRouter = {
 			}
 
 			// 3. Incremento atómico del contador para evitar race conditions
-			// Intentar actualizar registro existente con condiciones atómicas
+			const whereCondition = isForLead
+				? eq(creditAnalysis.leadId, input.leadId!)
+				: eq(creditAnalysis.coDebtorId, input.coDebtorId!);
+
 			const updateResult = await db
 				.update(creditAnalysis)
 				.set({
@@ -106,7 +130,7 @@ export const bankAnalysisRouter = {
 				})
 				.where(
 					and(
-						eq(creditAnalysis.leadId, input.leadId),
+						whereCondition,
 						lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
 						isNull(creditAnalysis.analyzedAt),
 					),
@@ -126,18 +150,18 @@ export const bankAnalysisRouter = {
 				const existing = await db
 					.select()
 					.from(creditAnalysis)
-					.where(eq(creditAnalysis.leadId, input.leadId))
+					.where(whereCondition)
 					.limit(1);
 
 				if (existing.length === 0) {
 					// No existe, crear nuevo registro
+					const insertValues = isForLead
+						? { leadId: input.leadId!, attemptCount: 1, createdBy: context.userId }
+						: { coDebtorId: input.coDebtorId!, attemptCount: 1, createdBy: context.userId };
+
 					const insertResult = await db
 						.insert(creditAnalysis)
-						.values({
-							leadId: input.leadId,
-							attemptCount: 1,
-							createdBy: context.userId,
-						})
+						.values(insertValues)
 						.onConflictDoNothing() // En caso de race condition en insert
 						.returning({ attemptCount: creditAnalysis.attemptCount });
 
@@ -151,7 +175,7 @@ export const bankAnalysisRouter = {
 							})
 							.where(
 								and(
-									eq(creditAnalysis.leadId, input.leadId),
+									whereCondition,
 									lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
 									isNull(creditAnalysis.analyzedAt),
 								),
@@ -171,8 +195,7 @@ export const bankAnalysisRouter = {
 					// Existe pero no se pudo actualizar
 					if (existing[0].analyzedAt !== null) {
 						throw new ORPCError("PRECONDITION_FAILED", {
-							message:
-								"Ya existe un análisis exitoso para este lead. No se permiten más intentos.",
+							message: `Ya existe un análisis exitoso para este ${isForLead ? "lead" : "co-deudor"}. No se permiten más intentos.`,
 						});
 					}
 					throw new ORPCError("PRECONDITION_FAILED", {
@@ -271,7 +294,7 @@ export const bankAnalysisRouter = {
 					analyzedAt: new Date(),
 					updatedAt: new Date(),
 				})
-				.where(eq(creditAnalysis.leadId, input.leadId));
+				.where(whereCondition);
 
 			// 8. Retornar resultados
 			return {

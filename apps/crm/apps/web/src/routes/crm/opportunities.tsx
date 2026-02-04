@@ -3249,6 +3249,47 @@ function DocumentsManager({ opportunityId }: { opportunityId: string }) {
 			value: "enganche",
 			label: "Comprobante de enganche",
 		},
+		// === Verificaciones de Cliente ===
+		{ value: "rtu_cliente", label: "RTU (Cliente)" },
+		{
+			value: "omisos_incumplimientos_cliente",
+			label: "Omisos e Incumplimientos (Cliente)",
+		},
+		{ value: "infornet", label: "Infornet" },
+		{ value: "confirmacion_referencias", label: "Confirmación de Referencias" },
+		{ value: "visita_domiciliar", label: "Visita Domiciliar" },
+		{ value: "redes_sociales_internet", label: "Redes Sociales - Internet" },
+		// === Verificaciones de Vehículo / Propietario ===
+		{ value: "rtu_propietario", label: "RTU (Propietario)" },
+		{
+			value: "omisos_incumplimientos_propietario",
+			label: "Omisos e Incumplimientos (Propietario)",
+		},
+		{ value: "garantia_mobiliaria_sat", label: "Garantía Mobiliaria (SAT)" },
+		{
+			value: "garantia_mobiliaria_dpi",
+			label: "Garantía Mobiliaria (DPI Propietario)",
+		},
+		{
+			value: "garantia_mobiliaria_nit",
+			label: "Garantía Mobiliaria (NIT Propietario)",
+		},
+		{ value: "garantia_mobiliaria_serie", label: "Garantía Mobiliaria (SERIE)" },
+		{ value: "multas_vehiculo", label: "Multas del Vehículo" },
+		// === Documentos Etapa 90% (Cierre) ===
+		{ value: "seguro_vehiculo", label: "Seguro del Vehículo" },
+		{
+			value: "inscripcion_garantia_mobiliaria",
+			label: "Inscripción Garantía Mobiliaria",
+		},
+		{ value: "traspaso", label: "Traspaso" },
+		{
+			value: "documentos_firmados_vendedor",
+			label: "Documentos Firmados por Vendedor",
+		},
+		{ value: "copia_llave", label: "Copia de Llave" },
+		{ value: "confirmacion_enganche", label: "Confirmación de Enganche" },
+		{ value: "desembolso", label: "Desembolso" },
 		// Otro
 		{ value: "other", label: "Otro" },
 	];

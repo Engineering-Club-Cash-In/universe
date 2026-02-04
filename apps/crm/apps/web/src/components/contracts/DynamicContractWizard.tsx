@@ -7,8 +7,9 @@ import {
 	Link2,
 	Loader2,
 	User,
+	Users,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -79,6 +80,19 @@ export interface Field {
 	is_double_line: boolean;
 }
 
+// Co-debtor data from database
+export interface CoDebtorData {
+	id: string;
+	fullName: string;
+	dpi: string;
+	age?: number | null;
+	gender?: string | null;
+	maritalStatus?: string | null;
+	profession?: string | null;
+	nationality?: string | null;
+	email?: string | null;
+}
+
 // CRM data that we already have
 export interface CRMData {
 	cliente: {
@@ -115,6 +129,7 @@ export interface CRMData {
 		porcentajeInteres?: number;
 		porcentajeMora?: number;
 	};
+	coDebtors?: CoDebtorData[];
 }
 
 interface GenerationResult {
@@ -123,6 +138,19 @@ interface GenerationResult {
 	successCount: number;
 	failCount: number;
 	results: ContractResult[];
+}
+
+// Editable fields for additional debtors
+interface EditableCoDebtorFields {
+	id: string;
+	nombreCompleto: string;
+	dpi: string;
+	dpiTexto: string;
+	edadTexto: string;
+	estadoCivil: string;
+	profesion: string;
+	nacionalidad: string;
+	correoElectronico: string;
 }
 
 // Extended result with data needed for linking
@@ -157,6 +185,7 @@ interface DynamicContractWizardProps {
 			options: {
 				gender: "male" | "female";
 				generatePdf: boolean;
+				isPlural?: boolean;
 				filenamePrefix: string;
 			};
 		}>;
@@ -180,6 +209,7 @@ interface DynamicContractWizardProps {
 			options: {
 				gender: "male" | "female";
 				generatePdf: boolean;
+				isPlural?: boolean;
 				filenamePrefix: string;
 			};
 		}>;
@@ -435,6 +465,90 @@ function moneyToWords(amount: number): string {
 	return resultado.trim();
 }
 
+// Convert age number to text in Spanish
+function numberToTextForAge(num: number): string {
+	if (num < 0 || num > 99) return num.toString();
+
+	const basicNumbers: Record<number, string> = {
+		0: "cero",
+		1: "uno",
+		2: "dos",
+		3: "tres",
+		4: "cuatro",
+		5: "cinco",
+		6: "seis",
+		7: "siete",
+		8: "ocho",
+		9: "nueve",
+		10: "diez",
+		11: "once",
+		12: "doce",
+		13: "trece",
+		14: "catorce",
+		15: "quince",
+		16: "dieciséis",
+		17: "diecisiete",
+		18: "dieciocho",
+		19: "diecinueve",
+		20: "veinte",
+		21: "veintiuno",
+		22: "veintidós",
+		23: "veintitrés",
+		24: "veinticuatro",
+		25: "veinticinco",
+		26: "veintiséis",
+		27: "veintisiete",
+		28: "veintiocho",
+		29: "veintinueve",
+		30: "treinta",
+	};
+
+	if (basicNumbers[num] !== undefined) return basicNumbers[num];
+
+	if (num > 30) {
+		const tens = Math.floor(num / 10);
+		const units = num % 10;
+
+		const tensText: Record<number, string> = {
+			3: "treinta",
+			4: "cuarenta",
+			5: "cincuenta",
+			6: "sesenta",
+			7: "setenta",
+			8: "ochenta",
+			9: "noventa",
+		};
+		const unitsText: Record<number, string> = {
+			1: "uno",
+			2: "dos",
+			3: "tres",
+			4: "cuatro",
+			5: "cinco",
+			6: "seis",
+			7: "siete",
+			8: "ocho",
+			9: "nueve",
+		};
+
+		if (units === 0) return tensText[tens] || num.toString();
+		return `${tensText[tens]} y ${unitsText[units]}`;
+	}
+
+	return num.toString();
+}
+
+// Map marital status enum to Spanish text
+function mapMaritalStatus(status: string | null | undefined): string {
+	if (!status) return "";
+	const map: Record<string, string> = {
+		single: "soltero",
+		married: "casado",
+		divorced: "divorciado",
+		widowed: "viudo",
+	};
+	return map[status] || status.toLowerCase();
+}
+
 // Convert DPI to words in uppercase with number in parentheses
 function dpiToWords(dpi: string): string {
 	const cleanDpi = dpi.replace(/\D/g, "");
@@ -481,6 +595,9 @@ export function DynamicContractWizard({
 	const [generationResult, setGenerationResult] =
 		useState<GenerationResultWithData | null>(null);
 
+	// State for editable co-debtor fields
+	const [coDebtorFields, setCoDebtorFields] = useState<EditableCoDebtorFields[]>([]);
+
 	// Store generation data for snapshot using ref to avoid state timing issues
 	const generationDataRef = useRef<
 		Array<{
@@ -490,6 +607,7 @@ export function DynamicContractWizard({
 			options: {
 				gender: "male" | "female";
 				generatePdf: boolean;
+				isPlural?: boolean;
 				filenamePrefix: string;
 			};
 		}>
@@ -498,6 +616,24 @@ export function DynamicContractWizard({
 	// Date configuration states
 	const [fechaVencimiento, setFechaVencimiento] = useState<string>("");
 	const [diaPago, setDiaPago] = useState<string>("día quince"); // Default día 15
+
+	// Initialize co-debtor editable fields from CRM data
+	useEffect(() => {
+		if (crmData.coDebtors && crmData.coDebtors.length > 0) {
+			const initialFields = crmData.coDebtors.map((cd) => ({
+				id: cd.id,
+				nombreCompleto: cd.fullName?.toUpperCase() || "",
+				dpi: cd.dpi || "",
+				dpiTexto: cd.dpi ? dpiToWords(cd.dpi) : "",
+				edadTexto: cd.age ? numberToTextForAge(cd.age) : "",
+				estadoCivil: mapMaritalStatus(cd.maritalStatus),
+				profesion: cd.profession?.toLowerCase() || "",
+				nacionalidad: cd.nationality?.toLowerCase() || "",
+				correoElectronico: cd.email || "",
+			}));
+			setCoDebtorFields(initialFields);
+		}
+	}, [crmData.coDebtors]);
 
 	// Months in Spanish for date conversion
 	const monthsSpanish = useMemo(
@@ -1296,25 +1432,69 @@ export function DynamicContractWizard({
 			try {
 				// Build contracts payload
 				const clientEmail = crmData.cliente.correo;
+				const hasCoDebtors = coDebtorFields.length > 0;
+
+				// Build deudoresAdicionales array from editable co-debtor fields
+				const deudoresAdicionales = coDebtorFields.map((cd) => ({
+					nombreCompleto: cd.nombreCompleto,
+					dpi: cd.dpi,
+					dpiTexto: cd.dpiTexto,
+					edadTexto: cd.edadTexto,
+					estadoCivil: cd.estadoCivil,
+					profesion: cd.profesion,
+					nacionalidad: cd.nacionalidad,
+				}));
+
+				// Collect all emails (lead + co-debtors)
+				const allEmails: string[] = [];
+				if (clientEmail) allEmails.push(clientEmail);
+				coDebtorFields.forEach((cd) => {
+					if (cd.correoElectronico) allEmails.push(cd.correoElectronico);
+				});
+
+				// Determine combined gender: if any male (lead or co-debtor), use "male"
+				// Only use "female" if ALL are female
+				const leadIsMale = crmData.cliente.genero !== "F";
+				const anyCoDebtorIsMale = crmData.coDebtors?.some(
+					(cd) => cd.gender === "male" || !cd.gender,
+				);
+				const combinedGenderIsMale = leadIsMale || anyCoDebtorIsMale;
+
 				const contracts = documents
 					.filter((doc) => selectedDocuments.includes(doc.nombre_documento))
 					.map((doc) => {
-						// Para declaracion_vendedor usar el género del vendedor
+						const isVendorDeclaration =
+							doc.nombre_documento === "declaracion_vendedor";
+
+						// Para declaracion_vendedor usar el género del vendedor y nunca plural
 						let gender: "male" | "female";
-						if (doc.nombre_documento === "declaracion_vendedor") {
+						let isPlural = false;
+
+						if (isVendorDeclaration) {
 							gender =
 								fieldValues.genderVendedor === "female" ? "female" : "male";
+							// Vendor declaration is always singular
+							isPlural = false;
 						} else {
-							gender = crmData.cliente.genero === "F" ? "female" : "male";
+							// For other contracts, use combined gender and plural if there are co-debtors
+							gender = combinedGenderIsMale ? "male" : "female";
+							isPlural = hasCoDebtors;
+						}
+
+						// Build contract data with deudoresAdicionales
+						const contractData: Record<string, unknown> = { ...fieldValues };
+						if (hasCoDebtors && !isVendorDeclaration) {
+							contractData.deudoresAdicionales = deudoresAdicionales;
 						}
 
 						return {
 							contractType: doc.nombre_documento,
-							data: fieldValues,
-							emails: clientEmail ? [clientEmail] : undefined,
+							data: contractData as Record<string, string>,
+							emails: allEmails.length > 0 ? allEmails : undefined,
 							options: {
 								gender,
 								generatePdf: true,
+								isPlural,
 								filenamePrefix: `${crmData.cliente.nombreCompleto}_${doc.nombre_documento}`,
 							},
 						};
@@ -1737,6 +1917,177 @@ export function DynamicContractWizard({
 													</p>
 												</div>
 											)}
+										</CardContent>
+									</Card>
+								)}
+
+								{/* Co-Debtors Section */}
+								{coDebtorFields.length > 0 && (
+									<Card className="border-purple-200 bg-purple-50/30">
+										<CardHeader>
+											<CardTitle className="flex items-center gap-2">
+												<Users className="h-5 w-5 text-purple-600" />
+												Deudores Adicionales ({coDebtorFields.length})
+											</CardTitle>
+											<p className="text-muted-foreground text-sm">
+												Estos datos se incluirán en los contratos como co-deudores
+											</p>
+										</CardHeader>
+										<CardContent className="space-y-6">
+											{coDebtorFields.map((coDebtor, index) => (
+												<div
+													key={coDebtor.id}
+													className="rounded-lg border bg-white p-4"
+												>
+													<h4 className="mb-4 font-semibold text-purple-700">
+														Co-deudor {index + 1}: {coDebtor.nombreCompleto || "Sin nombre"}
+													</h4>
+													<div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+														<div className="space-y-2">
+															<Label htmlFor={`cd-dpi-${coDebtor.id}`}>DPI</Label>
+															<Input
+																id={`cd-dpi-${coDebtor.id}`}
+																value={coDebtor.dpi}
+																onChange={(e) => {
+																	const newDpi = e.target.value;
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? {
+																						...cd,
+																						dpi: newDpi,
+																						dpiTexto: dpiToWords(newDpi),
+																					}
+																				: cd,
+																		),
+																	);
+																}}
+																className="bg-white"
+															/>
+														</div>
+														<div className="space-y-2">
+															<Label htmlFor={`cd-dpiTexto-${coDebtor.id}`}>
+																DPI en Texto
+															</Label>
+															<Input
+																id={`cd-dpiTexto-${coDebtor.id}`}
+																value={coDebtor.dpiTexto}
+																onChange={(e) => {
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? { ...cd, dpiTexto: e.target.value }
+																				: cd,
+																		),
+																	);
+																}}
+																className="bg-white"
+															/>
+														</div>
+														<div className="space-y-2">
+															<Label htmlFor={`cd-edad-${coDebtor.id}`}>
+																Edad en Texto
+															</Label>
+															<Input
+																id={`cd-edad-${coDebtor.id}`}
+																value={coDebtor.edadTexto}
+																onChange={(e) => {
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? { ...cd, edadTexto: e.target.value }
+																				: cd,
+																		),
+																	);
+																}}
+																placeholder="ej: treinta y cinco"
+																className="bg-white"
+															/>
+														</div>
+														<div className="space-y-2">
+															<Label htmlFor={`cd-estadoCivil-${coDebtor.id}`}>
+																Estado Civil
+															</Label>
+															<Input
+																id={`cd-estadoCivil-${coDebtor.id}`}
+																value={coDebtor.estadoCivil}
+																onChange={(e) => {
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? { ...cd, estadoCivil: e.target.value }
+																				: cd,
+																		),
+																	);
+																}}
+																placeholder="ej: soltero, casado"
+																className="bg-white"
+															/>
+														</div>
+														<div className="space-y-2">
+															<Label htmlFor={`cd-profesion-${coDebtor.id}`}>
+																Profesión
+															</Label>
+															<Input
+																id={`cd-profesion-${coDebtor.id}`}
+																value={coDebtor.profesion}
+																onChange={(e) => {
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? { ...cd, profesion: e.target.value }
+																				: cd,
+																		),
+																	);
+																}}
+																placeholder="ej: comerciante"
+																className="bg-white"
+															/>
+														</div>
+														<div className="space-y-2">
+															<Label htmlFor={`cd-nacionalidad-${coDebtor.id}`}>
+																Nacionalidad
+															</Label>
+															<Input
+																id={`cd-nacionalidad-${coDebtor.id}`}
+																value={coDebtor.nacionalidad}
+																onChange={(e) => {
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? { ...cd, nacionalidad: e.target.value }
+																				: cd,
+																		),
+																	);
+																}}
+																placeholder="ej: guatemalteco"
+																className="bg-white"
+															/>
+														</div>
+														<div className="space-y-2 md:col-span-2">
+															<Label htmlFor={`cd-correo-${coDebtor.id}`}>
+																Correo Electrónico
+															</Label>
+															<Input
+																id={`cd-correo-${coDebtor.id}`}
+																type="email"
+																value={coDebtor.correoElectronico}
+																onChange={(e) => {
+																	setCoDebtorFields((prev) =>
+																		prev.map((cd) =>
+																			cd.id === coDebtor.id
+																				? { ...cd, correoElectronico: e.target.value }
+																				: cd,
+																		),
+																	);
+																}}
+																placeholder="correo@ejemplo.com"
+																className="bg-white"
+															/>
+														</div>
+													</div>
+												</div>
+											))}
 										</CardContent>
 									</Card>
 								)}

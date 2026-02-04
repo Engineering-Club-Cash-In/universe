@@ -372,11 +372,28 @@ export const contractGenerationRouter = {
 				contracts: z.array(
 					z.object({
 						contractType: z.string(),
-						data: z.record(z.string(), z.string()),
+						data: z.record(z.string(), z.unknown()).and(
+							z.object({
+								deudoresAdicionales: z
+									.array(
+										z.object({
+											nombreCompleto: z.string(),
+											dpi: z.string(),
+											dpiTexto: z.string(),
+											edadTexto: z.string().optional(),
+											estadoCivil: z.string().optional(),
+											profesion: z.string().optional(),
+											nacionalidad: z.string().optional(),
+										}),
+									)
+									.optional(),
+							}),
+						),
 						emails: z.array(z.string()).optional(),
 						options: z.object({
 							gender: z.enum(["male", "female"]),
 							generatePdf: z.boolean().default(true),
+							isPlural: z.boolean().optional(),
 							filenamePrefix: z.string(),
 						}),
 					}),

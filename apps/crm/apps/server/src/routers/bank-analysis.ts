@@ -1,7 +1,7 @@
 import { google } from "@ai-sdk/google";
 import { ORPCError } from "@orpc/server";
 import { generateObject } from "ai";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
 import { creditAnalysis, leads } from "../db/schema/crm";
@@ -11,6 +11,29 @@ import {
 } from "../lib/bank-analysis-schema";
 import { calculateCreditCapacity } from "../lib/financial-math";
 import { crmProcedure } from "../lib/orpc";
+
+const MAX_AI_ATTEMPTS = 2;
+const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024; // 15MB por archivo
+const AI_TIMEOUT_MS = 120_000; // 2 minutos timeout para la IA
+
+// Validar que el archivo es un PDF verificando los magic bytes
+function isValidPdf(base64Data: string): boolean {
+	try {
+		const buffer = Buffer.from(base64Data, "base64");
+		// PDF magic bytes: %PDF (0x25 0x50 0x44 0x46)
+		return buffer.length >= 4 && buffer.subarray(0, 4).toString() === "%PDF";
+	} catch {
+		return false;
+	}
+}
+
+// Obtener tamaño del archivo en bytes desde base64
+function getBase64SizeInBytes(base64Data: string): number {
+	// Base64 encoding: cada 4 caracteres = 3 bytes
+	// Ajustar por padding (=)
+	const padding = (base64Data.match(/=/g) || []).length;
+	return Math.floor((base64Data.length * 3) / 4) - padding;
+}
 
 export const bankAnalysisRouter = {
 	analyzeBankStatements: crmProcedure
@@ -56,37 +79,169 @@ export const bankAnalysisRouter = {
 				});
 			}
 
-			// 2. Construir content parts con los PDFs
+			// 2. Validar archivos: tamaño máximo y formato PDF
+			for (const file of input.files) {
+				const fileSize = getBase64SizeInBytes(file.data);
+				if (fileSize > MAX_FILE_SIZE_BYTES) {
+					const maxSizeMB = MAX_FILE_SIZE_BYTES / (1024 * 1024);
+					const fileSizeMB = (fileSize / (1024 * 1024)).toFixed(1);
+					throw new ORPCError("BAD_REQUEST", {
+						message: `El archivo "${file.name}" (${fileSizeMB}MB) excede el tamaño máximo permitido de ${maxSizeMB}MB.`,
+					});
+				}
+				if (!isValidPdf(file.data)) {
+					throw new ORPCError("BAD_REQUEST", {
+						message: `El archivo "${file.name}" no es un PDF válido.`,
+					});
+				}
+			}
+
+			// 3. Incremento atómico del contador para evitar race conditions
+			// Intentar actualizar registro existente con condiciones atómicas
+			const updateResult = await db
+				.update(creditAnalysis)
+				.set({
+					attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+					updatedAt: new Date(),
+				})
+				.where(
+					and(
+						eq(creditAnalysis.leadId, input.leadId),
+						lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
+						isNull(creditAnalysis.analyzedAt),
+					),
+				)
+				.returning({
+					id: creditAnalysis.id,
+					attemptCount: creditAnalysis.attemptCount,
+				});
+
+			let currentAttemptCount: number;
+
+			if (updateResult.length > 0) {
+				// Registro existente actualizado exitosamente
+				currentAttemptCount = updateResult[0].attemptCount;
+			} else {
+				// No se actualizó: o no existe, o ya tiene análisis, o alcanzó el límite
+				const existing = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, input.leadId))
+					.limit(1);
+
+				if (existing.length === 0) {
+					// No existe, crear nuevo registro
+					const insertResult = await db
+						.insert(creditAnalysis)
+						.values({
+							leadId: input.leadId,
+							attemptCount: 1,
+							createdBy: context.userId,
+						})
+						.onConflictDoNothing() // En caso de race condition en insert
+						.returning({ attemptCount: creditAnalysis.attemptCount });
+
+					if (insertResult.length === 0) {
+						// Hubo conflict, reintentar el update
+						const retryUpdate = await db
+							.update(creditAnalysis)
+							.set({
+								attemptCount: sql`${creditAnalysis.attemptCount} + 1`,
+								updatedAt: new Date(),
+							})
+							.where(
+								and(
+									eq(creditAnalysis.leadId, input.leadId),
+									lt(creditAnalysis.attemptCount, MAX_AI_ATTEMPTS),
+									isNull(creditAnalysis.analyzedAt),
+								),
+							)
+							.returning({ attemptCount: creditAnalysis.attemptCount });
+
+						if (retryUpdate.length === 0) {
+							throw new ORPCError("PRECONDITION_FAILED", {
+								message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos o ya existe un análisis exitoso.`,
+							});
+						}
+						currentAttemptCount = retryUpdate[0].attemptCount;
+					} else {
+						currentAttemptCount = insertResult[0].attemptCount;
+					}
+				} else {
+					// Existe pero no se pudo actualizar
+					if (existing[0].analyzedAt !== null) {
+						throw new ORPCError("PRECONDITION_FAILED", {
+							message:
+								"Ya existe un análisis exitoso para este lead. No se permiten más intentos.",
+						});
+					}
+					throw new ORPCError("PRECONDITION_FAILED", {
+						message: `Se alcanzó el límite de ${MAX_AI_ATTEMPTS} intentos de análisis. Contacte al administrador.`,
+					});
+				}
+			}
+
+			// 4. Construir content parts con los PDFs
 			const fileParts = input.files.map((file) => ({
 				type: "file" as const,
 				data: Buffer.from(file.data, "base64"),
-				mediaType: file.mimeType as "application/pdf",
+				mediaType: "application/pdf" as const,
 				filename: file.name,
 			}));
 
-			// 3. Llamar a Gemini con generateObject
-			const { object: analysis } = await generateObject({
-				model: google("gemini-3-flash-preview"),
-				schema: bankStatementAnalysisSchema,
-				messages: [
-					{
-						role: "system",
-						content: BANK_ANALYSIS_PROMPT,
-					},
-					{
-						role: "user",
-						content: [
-							{
-								type: "text",
-								text: "Analiza los siguientes estados de cuenta bancarios:",
-							},
-							...fileParts,
-						],
-					},
-				],
-			});
+			// 5. Llamar a Gemini con generateObject (aquí es donde cuesta dinero)
+			let analysis: Awaited<
+				ReturnType<typeof generateObject<typeof bankStatementAnalysisSchema>>
+			>["object"];
 
-			// 4. Calcular capacidad crediticia
+			try {
+				const result = await generateObject({
+					model: google("gemini-3-flash-preview"),
+					schema: bankStatementAnalysisSchema,
+					abortSignal: AbortSignal.timeout(AI_TIMEOUT_MS),
+					messages: [
+						{
+							role: "system",
+							content: BANK_ANALYSIS_PROMPT,
+						},
+						{
+							role: "user",
+							content: [
+								{
+									type: "text",
+									text: "Analiza los siguientes estados de cuenta bancarios:",
+								},
+								...fileParts,
+							],
+						},
+					],
+				});
+				analysis = result.object;
+			} catch (error) {
+				// El intento ya se contó, informar al usuario del error
+				const isTimeout =
+					error instanceof Error && error.name === "TimeoutError";
+				console.error("Error en análisis de IA:", {
+					leadId: input.leadId,
+					attemptCount: currentAttemptCount,
+					isTimeout,
+					error: error instanceof Error ? error.message : String(error),
+				});
+
+				const remainingAttempts = MAX_AI_ATTEMPTS - currentAttemptCount;
+				const timeoutMsg = isTimeout
+					? "El análisis tardó demasiado tiempo. "
+					: "";
+				throw new ORPCError("INTERNAL_SERVER_ERROR", {
+					message: `${timeoutMsg}Error al analizar los documentos (intento ${currentAttemptCount}/${MAX_AI_ATTEMPTS}). ${
+						remainingAttempts > 0
+							? `Puede intentar ${remainingAttempts} vez más.`
+							: "Se agotaron los intentos disponibles. Contacte al administrador."
+					}`,
+				});
+			}
+
+			// 6. Calcular capacidad crediticia
 			const creditCapacity = calculateCreditCapacity(analysis, {
 				annualRate: input.annualRate,
 				termMonths: input.termMonths,
@@ -94,49 +249,31 @@ export const bankAnalysisRouter = {
 				maxVariableDebtRatio: input.maxVariableDebtRatio,
 			});
 
-			// 5. Upsert en tabla creditAnalysis
-			const dataForDb = {
-				fullAnalysis: JSON.stringify(analysis),
-				monthlyFixedIncome:
-					analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
-				monthlyVariableIncome:
-					analysis.promedio_mensual.promedio_ingresos_variables.toString(),
-				monthlyFixedExpenses:
-					analysis.promedio_mensual.promedio_gastos_fijos.toString(),
-				monthlyVariableExpenses:
-					analysis.promedio_mensual.promedio_gastos_variables.toString(),
-				economicAvailability:
-					analysis.promedio_mensual.disponibilidad_economica.toString(),
-				minPayment: creditCapacity.minPayment.toString(),
-				maxPayment: creditCapacity.maxPayment.toString(),
-				adjustedPayment: creditCapacity.adjustedPayment.toString(),
-				maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
-				analyzedAt: new Date(),
-			};
+			// 7. Actualizar con los resultados del análisis exitoso
+			await db
+				.update(creditAnalysis)
+				.set({
+					fullAnalysis: JSON.stringify(analysis),
+					monthlyFixedIncome:
+						analysis.promedio_mensual.promedio_ingresos_fijos.toString(),
+					monthlyVariableIncome:
+						analysis.promedio_mensual.promedio_ingresos_variables.toString(),
+					monthlyFixedExpenses:
+						analysis.promedio_mensual.promedio_gastos_fijos.toString(),
+					monthlyVariableExpenses:
+						analysis.promedio_mensual.promedio_gastos_variables.toString(),
+					economicAvailability:
+						analysis.promedio_mensual.disponibilidad_economica.toString(),
+					minPayment: creditCapacity.minPayment.toString(),
+					maxPayment: creditCapacity.maxPayment.toString(),
+					adjustedPayment: creditCapacity.adjustedPayment.toString(),
+					maxCreditAmount: creditCapacity.maxCreditAmount.toString(),
+					analyzedAt: new Date(),
+					updatedAt: new Date(),
+				})
+				.where(eq(creditAnalysis.leadId, input.leadId));
 
-			const existing = await db
-				.select()
-				.from(creditAnalysis)
-				.where(eq(creditAnalysis.leadId, input.leadId))
-				.limit(1);
-
-			if (existing.length > 0) {
-				await db
-					.update(creditAnalysis)
-					.set({
-						...dataForDb,
-						updatedAt: new Date(),
-					})
-					.where(eq(creditAnalysis.leadId, input.leadId));
-			} else {
-				await db.insert(creditAnalysis).values({
-					leadId: input.leadId,
-					...dataForDb,
-					createdBy: context.userId,
-				});
-			}
-
-			// 6. Retornar resultados
+			// 8. Retornar resultados
 			return {
 				analysis,
 				creditCapacity,

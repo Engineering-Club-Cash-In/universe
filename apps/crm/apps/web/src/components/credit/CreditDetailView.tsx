@@ -747,7 +747,7 @@ export function CreditDetailView({
 	// Información del lead (deudor)
 	const lead = opportunity.lead;
 	const nombreDeudor = lead
-		? `${lead.firstName} ${lead.middleName || ""} ${lead.lastName} ${lead.secondLastName || ""}`
+		? `${lead.firstName} ${(lead as { middleName?: string }).middleName || ""} ${lead.lastName} ${(lead as { secondLastName?: string }).secondLastName || ""}`
 				.trim()
 				.replace(/\s+/g, " ")
 		: "No asignado";
@@ -817,7 +817,9 @@ export function CreditDetailView({
 							<CardHeader className="pb-3">
 								<div className="flex items-center gap-2">
 									<Calculator className="h-5 w-5 text-muted-foreground" />
-									<CardTitle className="text-lg">Términos del Crédito</CardTitle>
+									<CardTitle className="text-lg">
+										Términos del Crédito
+									</CardTitle>
 									{quotation.status === "accepted" && (
 										<Badge
 											variant="outline"

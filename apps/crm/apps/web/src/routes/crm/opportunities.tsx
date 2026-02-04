@@ -76,7 +76,10 @@ import {
 	getSourceLabel,
 	getStatusLabel,
 } from "@/lib/crm-formatters";
-import { opportunitiesColumns } from "@/lib/opportunities/columns";
+import {
+	type Opportunity,
+	opportunitiesColumns,
+} from "@/lib/opportunities/columns";
 import { getRoleLabel, PERMISSIONS } from "@/lib/roles";
 import {
 	getMissingFieldsForNewVehicle,
@@ -338,88 +341,8 @@ export const Route = createFileRoute("/crm/opportunities")({
 	}).parse,
 });
 
-export interface IOpportunity {
-	id: string;
-	title: string;
-	value: string | null;
-	tasaInteres: string | null;
-	numeroCuotas: number | null;
-	cuotaMensual: string | null;
-	royalti: string | null;
-	porcentajeRoyalti: string | null;
-	gps: string | null;
-	seguro: string | null;
-	membresiaPago: string | null;
-	nit: string | null;
-	// direccion: string | null;
-	inversionistas: string | null;
-	status: string;
-	source?:
-		| "website"
-		| "referral"
-		| "cold_call"
-		| "email"
-		| "social_media"
-		| "event"
-		| "other"
-		| null;
-	loanPurpose?: "personal" | "business" | null;
-	creditType?: "autocompra" | "sobre_vehiculo" | null;
-	creditDetailApproved?: boolean | null;
-	creditDetailApprovedBy?: string | null;
-	creditDetailApprovedAt?: Date | string | null;
-	stage: any;
-	vehicleId: string | null;
-	expectedCloseDate: Date | string | null;
-	probability: number | null;
-	notes: string | null;
-	createdAt: Date | string;
-	updatedAt: Date | string;
-	asesorId: number | null;
-	fechaInicio: Date | string | null;
-	diaPagoMensual: number | null;
-	categoria: any;
-	reserva: string | null;
-	rubros: string | null;
-	leadId: string | null;
-	company: any;
-	assignedUser: any;
-	lead?: {
-		id: string;
-		firstName: string;
-		middleName?: string | null;
-		lastName: string;
-		email?: string | null;
-		secondLastName?: string | null;
-		age?: number | null;
-		departamento?: string | null;
-		municipio?: string | null;
-		direccion?: string | null;
-		zona?: string | null;
-	} | null;
-	vehicle?: {
-		id: string;
-		make: string;
-		model: string;
-		year: string;
-		licensePlate: string | null;
-		color: string | null;
-		plate: string | null;
-		origin: string | null;
-		isNew: boolean;
-		fuelType: string | null;
-		transmission: string | null;
-		vinNumber: string | null;
-		vendor?: {
-			id: string;
-			name: string;
-			phone: string;
-			dpi: string;
-			vendorType: string;
-			companyName: string | null;
-		} | null;
-	} | null;
-}
+// IOpportunity es un alias de Opportunity para compatibilidad con código existente
+export type IOpportunity = Opportunity;
 
 function RouteComponent() {
 	const { data: session, isPending } = authClient.useSession();
@@ -431,7 +354,7 @@ function RouteComponent() {
 	const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 	const [isChangeStageDialogOpen, setIsChangeStageDialogOpen] = useState(false);
 	const [selectedOpportunity, setSelectedOpportunity] =
-		useState<IOpportunity | null>(null);
+		useState<Opportunity | null>(null);
 	const [selectedStage, setSelectedStage] = useState<string>("");
 	const [stageFilter, setStageFilter] = useState<string>("all");
 	const [opportunityHistory, setOpportunityHistory] = useState<any[]>([]);
@@ -543,7 +466,7 @@ function RouteComponent() {
 		});
 	};
 
-	const handleOpportunityClick = async (opportunity: any) => {
+	const handleOpportunityClick = async (opportunity: Opportunity) => {
 		setSelectedOpportunity(opportunity);
 		setIsDetailsDialogOpen(true);
 
@@ -1109,7 +1032,6 @@ function RouteComponent() {
 					(opp) => opp.id === variables.id,
 				);
 				if (updatedOpportunity) {
-					// @ts-expect-error
 					setSelectedOpportunity(updatedOpportunity);
 				}
 
@@ -1219,7 +1141,6 @@ function RouteComponent() {
 				(opp) => opp.id === search.opportunityId,
 			);
 			if (opportunity) {
-				// @ts-expect-error
 				setSelectedOpportunity(opportunity);
 				setIsDetailsDialogOpen(true);
 				processedOpportunityIdRef.current = search.opportunityId;
@@ -2101,21 +2022,6 @@ function RouteComponent() {
 													<span className="font-medium">
 														{selectedOpportunity.assignedUser.name ||
 															"Usuario sin nombre"}
-													</span>
-												</div>
-											</div>
-										)}
-
-										{/* Source */}
-										{selectedOpportunity.source && (
-											<div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-												<Label className="font-semibold text-muted-foreground text-sm">
-													Fuente
-												</Label>
-												<div className="flex items-center gap-3">
-													<Target className="h-5 w-5 text-muted-foreground" />
-													<span className="font-medium">
-														{getSourceLabel(selectedOpportunity.source)}
 													</span>
 												</div>
 											</div>
@@ -3032,7 +2938,7 @@ function RouteComponent() {
 
 													if (!selectedOpportunity.vehicleId)
 														missingFields.push("vehículo");
-													if (!selectedOpportunity.leadId)
+													if (!selectedOpportunity.lead)
 														missingFields.push("lead/contacto");
 													if (!selectedOpportunity.value)
 														missingFields.push("valor del crédito");

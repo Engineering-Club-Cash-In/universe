@@ -201,13 +201,36 @@ export const legalDocuments = pgTable("legal_documents", {
 
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+// Co-debtors table - Co-deudores/Co-firmantes de oportunidades
+export const coDebtors = pgTable("co_debtors", {
+	id: uuid("id").primaryKey().defaultRandom(),
+	opportunityId: uuid("opportunity_id")
+		.notNull()
+		.references(() => opportunities.id, { onDelete: "cascade" }),
+	fullName: text("full_name").notNull(), // Nombre completo
+	dpi: text("dpi").notNull(), // DPI
+	age: integer("age"), // Edad
+	gender: text("gender"), // Género ('male' | 'female')
+	maritalStatus: maritalStatusEnum("marital_status"), // Estado civil
+	profession: text("profession"), // Profesión
+	nationality: text("nationality"), // Nacionalidad
+	email: text("email"), // Correo electrónico
+	phone: text("phone"), // Número de teléfono
+	occupation: occupationTypeEnum("occupation"), // Ocupación (owner/employee)
+	notes: text("notes"), // Notas
+	score: decimal("score", { precision: 3, scale: 2 }), // Score de crédito
+	fit: boolean("fit").default(false), // Si califica
+	scoredAt: timestamp("scored_at"), // Fecha de evaluación
+	createdAt: timestamp("created_at").notNull().defaultNow(),
+	updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 // Credit Analysis table - Análisis de capacidad de pago
 export const creditAnalysis = pgTable("credit_analysis", {
 	id: uuid("id").primaryKey().defaultRandom(),
-	leadId: uuid("lead_id")
-		.notNull()
-		.references(() => leads.id)
-		.unique(),
+	// El análisis puede ser de un lead O de un co-deudor (uno de los dos debe estar presente)
+	leadId: uuid("lead_id").references(() => leads.id),
+	coDebtorId: uuid("co_debtor_id").references(() => coDebtors.id),
 	// Resumen de análisis completo (JSON)
 	fullAnalysis: text("full_analysis"), // JSON string with complete bank analysis
 	// Promedios mensuales

@@ -23,6 +23,7 @@ import {
 import { user } from "../db/schema/auth";
 import {
 	clients,
+	coDebtors,
 	companies,
 	creditAnalysis,
 	leads,
@@ -637,72 +638,92 @@ export const crmRouter = {
 
 	// Credit Analysis
 	getCreditAnalysisByLeadId: crmProcedure
-		.input(z.object({ leadId: z.string().uuid() }))
+		.input(
+			z
+				.object({
+					leadId: z.string().uuid().optional(),
+					coDebtorId: z.string().uuid().optional(),
+				})
+				.refine((data) => data.leadId || data.coDebtorId, {
+					message: "Debe proporcionar leadId o coDebtorId",
+				}),
+		)
 		.handler(async ({ input, context }) => {
-			// Check if user has access to the lead
-			const lead = await db
-				.select()
-				.from(leads)
-				.where(eq(leads.id, input.leadId))
-				.limit(1);
+			// Si es búsqueda por leadId
+			if (input.leadId) {
+				const lead = await db
+					.select()
+					.from(leads)
+					.where(eq(leads.id, input.leadId))
+					.limit(1);
 
-			if (lead.length === 0) {
-				throw new Error("Lead not found");
+				if (lead.length === 0) {
+					throw new Error("Lead not found");
+				}
+
+				// Sales users can only see analysis for their assigned leads
+				if (
+					context.userRole === "sales" &&
+					lead[0].assignedTo !== context.userId
+				) {
+					throw new Error("You don't have permission to view this analysis");
+				}
+
+				const analysis = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, input.leadId))
+					.limit(1);
+
+				return analysis[0] || null;
 			}
 
-			// Sales users can only see analysis for their assigned leads
-			if (
-				context.userRole === "sales" &&
-				lead[0].assignedTo !== context.userId
-			) {
-				throw new Error("You don't have permission to view this analysis");
+			// Si es búsqueda por coDebtorId
+			if (input.coDebtorId) {
+				const coDebtor = await db
+					.select()
+					.from(coDebtors)
+					.where(eq(coDebtors.id, input.coDebtorId))
+					.limit(1);
+
+				if (coDebtor.length === 0) {
+					throw new Error("Co-deudor no encontrado");
+				}
+
+				const analysis = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.coDebtorId, input.coDebtorId))
+					.limit(1);
+
+				return analysis[0] || null;
 			}
 
-			const analysis = await db
-				.select()
-				.from(creditAnalysis)
-				.where(eq(creditAnalysis.leadId, input.leadId))
-				.limit(1);
-
-			return analysis[0] || null;
+			return null;
 		}),
 
 	upsertCreditAnalysis: crmProcedure
 		.input(
-			z.object({
-				leadId: z.string().uuid(),
-				monthlyFixedIncome: z.number().min(0).optional(),
-				monthlyVariableIncome: z.number().min(0).optional(),
-				monthlyFixedExpenses: z.number().min(0).optional(),
-				monthlyVariableExpenses: z.number().min(0).optional(),
-				economicAvailability: z.number().optional(),
-				minPayment: z.number().min(0).optional(),
-				maxPayment: z.number().min(0).optional(),
-				adjustedPayment: z.number().min(0).optional(),
-				maxCreditAmount: z.number().min(0).optional(),
-			}),
+			z
+				.object({
+					leadId: z.string().uuid().optional(),
+					coDebtorId: z.string().uuid().optional(),
+					monthlyFixedIncome: z.number().min(0).optional(),
+					monthlyVariableIncome: z.number().min(0).optional(),
+					monthlyFixedExpenses: z.number().min(0).optional(),
+					monthlyVariableExpenses: z.number().min(0).optional(),
+					economicAvailability: z.number().optional(),
+					minPayment: z.number().min(0).optional(),
+					maxPayment: z.number().min(0).optional(),
+					adjustedPayment: z.number().min(0).optional(),
+					maxCreditAmount: z.number().min(0).optional(),
+				})
+				.refine((data) => data.leadId || data.coDebtorId, {
+					message: "Debe proporcionar leadId o coDebtorId",
+				}),
 		)
 		.handler(async ({ input, context }) => {
-			const { leadId, ...analysisData } = input;
-
-			// Check if user has access to the lead
-			const lead = await db
-				.select()
-				.from(leads)
-				.where(eq(leads.id, leadId))
-				.limit(1);
-
-			if (lead.length === 0) {
-				throw new Error("Lead not found");
-			}
-
-			// Sales users can only update analysis for their assigned leads
-			if (
-				context.userRole === "sales" &&
-				lead[0].assignedTo !== context.userId
-			) {
-				throw new Error("You don't have permission to update this analysis");
-			}
+			const { leadId, coDebtorId, ...analysisData } = input;
 
 			// Convert numbers to strings for decimal fields
 			const dataForDb = {
@@ -718,36 +739,103 @@ export const crmRouter = {
 				maxCreditAmount: analysisData.maxCreditAmount?.toString(),
 			};
 
-			// Check if analysis already exists
-			const existing = await db
-				.select()
-				.from(creditAnalysis)
-				.where(eq(creditAnalysis.leadId, leadId))
-				.limit(1);
+			// Si es para un lead
+			if (leadId) {
+				const lead = await db
+					.select()
+					.from(leads)
+					.where(eq(leads.id, leadId))
+					.limit(1);
 
-			if (existing.length > 0) {
-				// Update existing
-				const updated = await db
-					.update(creditAnalysis)
-					.set({
-						...dataForDb,
-						updatedAt: new Date(),
-					})
+				if (lead.length === 0) {
+					throw new Error("Lead not found");
+				}
+
+				// Sales users can only update analysis for their assigned leads
+				if (
+					context.userRole === "sales" &&
+					lead[0].assignedTo !== context.userId
+				) {
+					throw new Error(
+						"You don't have permission to update this analysis",
+					);
+				}
+
+				// Check if analysis already exists
+				const existing = await db
+					.select()
+					.from(creditAnalysis)
 					.where(eq(creditAnalysis.leadId, leadId))
+					.limit(1);
+
+				if (existing.length > 0) {
+					const updated = await db
+						.update(creditAnalysis)
+						.set({
+							...dataForDb,
+							updatedAt: new Date(),
+						})
+						.where(eq(creditAnalysis.leadId, leadId))
+						.returning();
+					return updated[0];
+				}
+
+				const created = await db
+					.insert(creditAnalysis)
+					.values({
+						leadId,
+						...dataForDb,
+						createdBy: context.userId,
+						analyzedAt: new Date(),
+					})
 					.returning();
-				return updated[0];
+				return created[0];
 			}
-			// Create new
-			const created = await db
-				.insert(creditAnalysis)
-				.values({
-					leadId,
-					...dataForDb,
-					createdBy: context.userId,
-					analyzedAt: new Date(),
-				})
-				.returning();
-			return created[0];
+
+			// Si es para un co-deudor
+			if (coDebtorId) {
+				const coDebtor = await db
+					.select()
+					.from(coDebtors)
+					.where(eq(coDebtors.id, coDebtorId))
+					.limit(1);
+
+				if (coDebtor.length === 0) {
+					throw new Error("Co-deudor no encontrado");
+				}
+
+				// Check if analysis already exists
+				const existing = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.coDebtorId, coDebtorId))
+					.limit(1);
+
+				if (existing.length > 0) {
+					const updated = await db
+						.update(creditAnalysis)
+						.set({
+							...dataForDb,
+							updatedAt: new Date(),
+						})
+						.where(eq(creditAnalysis.coDebtorId, coDebtorId))
+						.returning();
+					return updated[0];
+				}
+
+				const created = await db
+					.insert(creditAnalysis)
+					.values({
+						coDebtorId,
+						...dataForDb,
+						createdBy: context.userId,
+						analyzedAt: new Date(),
+					})
+					.returning();
+				return created[0];
+			}
+
+			throw new Error("Debe proporcionar leadId o coDebtorId");
 		}),
 
 	// Opportunities
@@ -4698,5 +4786,298 @@ export const crmRouter = {
 		)
 		.handler(async ({ input }) => {
 			return await scoreLead(input.leadId, input.opportunityId);
+		}),
+
+	// ── Co-Debtors (Co-deudores) ─────────────────────────────────────────
+	getCoDebtorsByOpportunity: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const coDebtorsList = await db
+				.select()
+				.from(coDebtors)
+				.where(eq(coDebtors.opportunityId, input.opportunityId))
+				.orderBy(coDebtors.createdAt);
+
+			return coDebtorsList;
+		}),
+
+	createCoDebtor: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+				fullName: z.string().min(1, "El nombre completo es requerido"),
+				dpi: z.string().min(1, "El DPI es requerido"),
+				age: z.number().int().positive().optional(),
+				gender: z.enum(["male", "female"]).optional(),
+				maritalStatus: z
+					.enum(["single", "married", "divorced", "widowed"])
+					.optional(),
+				profession: z.string().optional(),
+				nationality: z.string().optional(),
+				email: z.string().email("Email inválido").optional(),
+				phone: z.string().optional(),
+				occupation: z.enum(["owner", "employee"]).optional(),
+				notes: z.string().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// Verificar que la oportunidad existe
+			const [opportunity] = await db
+				.select({ id: opportunities.id })
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			const [newCoDebtor] = await db
+				.insert(coDebtors)
+				.values({
+					opportunityId: input.opportunityId,
+					fullName: input.fullName,
+					dpi: input.dpi,
+					age: input.age,
+					gender: input.gender,
+					maritalStatus: input.maritalStatus,
+					profession: input.profession,
+					nationality: input.nationality,
+					email: input.email,
+					phone: input.phone,
+					occupation: input.occupation,
+					notes: input.notes,
+				})
+				.returning();
+
+			return newCoDebtor;
+		}),
+
+	updateCoDebtor: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+				fullName: z.string().min(1, "El nombre completo es requerido").optional(),
+				dpi: z.string().min(1, "El DPI es requerido").optional(),
+				age: z.number().int().positive().nullable().optional(),
+				gender: z.enum(["male", "female"]).nullable().optional(),
+				maritalStatus: z
+					.enum(["single", "married", "divorced", "widowed"])
+					.nullable()
+					.optional(),
+				profession: z.string().nullable().optional(),
+				nationality: z.string().nullable().optional(),
+				email: z.string().email("Email inválido").nullable().optional(),
+				phone: z.string().nullable().optional(),
+				occupation: z.enum(["owner", "employee"]).nullable().optional(),
+				notes: z.string().nullable().optional(),
+				score: z.string().nullable().optional(),
+				fit: z.boolean().nullable().optional(),
+				scoredAt: z.date().nullable().optional(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const { id, ...updateData } = input;
+
+			const [updatedCoDebtor] = await db
+				.update(coDebtors)
+				.set({
+					...updateData,
+					updatedAt: new Date(),
+				})
+				.where(eq(coDebtors.id, id))
+				.returning();
+
+			if (!updatedCoDebtor) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Co-deudor no encontrado",
+				});
+			}
+
+			return updatedCoDebtor;
+		}),
+
+	deleteCoDebtor: crmProcedure
+		.input(
+			z.object({
+				id: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			const [deletedCoDebtor] = await db
+				.delete(coDebtors)
+				.where(eq(coDebtors.id, input.id))
+				.returning();
+
+			if (!deletedCoDebtor) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Co-deudor no encontrado",
+				});
+			}
+
+			return { success: true, message: "Co-deudor eliminado correctamente" };
+		}),
+
+	// ── Análisis de Capacidad de Pago Consolidado ────────────────────────
+	getConsolidatedCreditAnalysis: crmProcedure
+		.input(
+			z.object({
+				opportunityId: z.string().uuid(),
+			}),
+		)
+		.handler(async ({ input }) => {
+			// 1. Obtener la oportunidad con el leadId
+			const [opportunity] = await db
+				.select({
+					id: opportunities.id,
+					leadId: opportunities.leadId,
+				})
+				.from(opportunities)
+				.where(eq(opportunities.id, input.opportunityId))
+				.limit(1);
+
+			if (!opportunity) {
+				throw new ORPCError("NOT_FOUND", {
+					message: "Oportunidad no encontrada",
+				});
+			}
+
+			// 2. Obtener análisis del lead (si existe)
+			let leadAnalysis = null;
+			if (opportunity.leadId) {
+				const [analysis] = await db
+					.select()
+					.from(creditAnalysis)
+					.where(eq(creditAnalysis.leadId, opportunity.leadId))
+					.limit(1);
+				leadAnalysis = analysis || null;
+			}
+
+			// 3. Obtener co-deudores de la oportunidad
+			const coDebtorsList = await db
+				.select()
+				.from(coDebtors)
+				.where(eq(coDebtors.opportunityId, input.opportunityId));
+
+			// 4. Obtener análisis de cada co-deudor
+			const coDebtorsWithAnalysis = await Promise.all(
+				coDebtorsList.map(async (coDebtor) => {
+					const [analysis] = await db
+						.select()
+						.from(creditAnalysis)
+						.where(eq(creditAnalysis.coDebtorId, coDebtor.id))
+						.limit(1);
+					return {
+						coDebtor,
+						analysis: analysis || null,
+					};
+				}),
+			);
+
+			// 5. Calcular totales consolidados
+			const parseDecimal = (value: string | null | undefined): number => {
+				if (!value) return 0;
+				const num = Number.parseFloat(value);
+				return Number.isNaN(num) ? 0 : num;
+			};
+
+			// Datos del lead
+			const leadData = {
+				monthlyFixedIncome: parseDecimal(leadAnalysis?.monthlyFixedIncome),
+				monthlyVariableIncome: parseDecimal(leadAnalysis?.monthlyVariableIncome),
+				monthlyFixedExpenses: parseDecimal(leadAnalysis?.monthlyFixedExpenses),
+				monthlyVariableExpenses: parseDecimal(leadAnalysis?.monthlyVariableExpenses),
+				economicAvailability: parseDecimal(leadAnalysis?.economicAvailability),
+				minPayment: parseDecimal(leadAnalysis?.minPayment),
+				maxPayment: parseDecimal(leadAnalysis?.maxPayment),
+				adjustedPayment: parseDecimal(leadAnalysis?.adjustedPayment),
+				maxCreditAmount: parseDecimal(leadAnalysis?.maxCreditAmount),
+				hasAnalysis: leadAnalysis?.analyzedAt != null,
+			};
+
+			// Suma de co-deudores
+			const coDebtorsTotals = coDebtorsWithAnalysis.reduce(
+				(acc, { analysis }) => {
+					if (analysis?.analyzedAt) {
+						acc.monthlyFixedIncome += parseDecimal(analysis.monthlyFixedIncome);
+						acc.monthlyVariableIncome += parseDecimal(analysis.monthlyVariableIncome);
+						acc.monthlyFixedExpenses += parseDecimal(analysis.monthlyFixedExpenses);
+						acc.monthlyVariableExpenses += parseDecimal(analysis.monthlyVariableExpenses);
+						acc.economicAvailability += parseDecimal(analysis.economicAvailability);
+						acc.minPayment += parseDecimal(analysis.minPayment);
+						acc.maxPayment += parseDecimal(analysis.maxPayment);
+						acc.adjustedPayment += parseDecimal(analysis.adjustedPayment);
+						acc.maxCreditAmount += parseDecimal(analysis.maxCreditAmount);
+						acc.count += 1;
+					}
+					return acc;
+				},
+				{
+					monthlyFixedIncome: 0,
+					monthlyVariableIncome: 0,
+					monthlyFixedExpenses: 0,
+					monthlyVariableExpenses: 0,
+					economicAvailability: 0,
+					minPayment: 0,
+					maxPayment: 0,
+					adjustedPayment: 0,
+					maxCreditAmount: 0,
+					count: 0,
+				},
+			);
+
+			// Totales consolidados (lead + co-deudores)
+			const consolidated = {
+				monthlyFixedIncome: leadData.monthlyFixedIncome + coDebtorsTotals.monthlyFixedIncome,
+				monthlyVariableIncome: leadData.monthlyVariableIncome + coDebtorsTotals.monthlyVariableIncome,
+				monthlyFixedExpenses: leadData.monthlyFixedExpenses + coDebtorsTotals.monthlyFixedExpenses,
+				monthlyVariableExpenses: leadData.monthlyVariableExpenses + coDebtorsTotals.monthlyVariableExpenses,
+				economicAvailability: leadData.economicAvailability + coDebtorsTotals.economicAvailability,
+				minPayment: leadData.minPayment + coDebtorsTotals.minPayment,
+				maxPayment: leadData.maxPayment + coDebtorsTotals.maxPayment,
+				adjustedPayment: leadData.adjustedPayment + coDebtorsTotals.adjustedPayment,
+				maxCreditAmount: leadData.maxCreditAmount + coDebtorsTotals.maxCreditAmount,
+				totalIncome:
+					leadData.monthlyFixedIncome +
+					leadData.monthlyVariableIncome +
+					coDebtorsTotals.monthlyFixedIncome +
+					coDebtorsTotals.monthlyVariableIncome,
+				totalExpenses:
+					leadData.monthlyFixedExpenses +
+					leadData.monthlyVariableExpenses +
+					coDebtorsTotals.monthlyFixedExpenses +
+					coDebtorsTotals.monthlyVariableExpenses,
+			};
+
+			return {
+				lead: {
+					hasAnalysis: leadData.hasAnalysis,
+					...leadData,
+				},
+				coDebtors: coDebtorsWithAnalysis.map(({ coDebtor, analysis }) => ({
+					id: coDebtor.id,
+					fullName: coDebtor.fullName,
+					hasAnalysis: analysis?.analyzedAt != null,
+					monthlyFixedIncome: parseDecimal(analysis?.monthlyFixedIncome),
+					monthlyVariableIncome: parseDecimal(analysis?.monthlyVariableIncome),
+					monthlyFixedExpenses: parseDecimal(analysis?.monthlyFixedExpenses),
+					monthlyVariableExpenses: parseDecimal(analysis?.monthlyVariableExpenses),
+					economicAvailability: parseDecimal(analysis?.economicAvailability),
+					minPayment: parseDecimal(analysis?.minPayment),
+					maxPayment: parseDecimal(analysis?.maxPayment),
+					adjustedPayment: parseDecimal(analysis?.adjustedPayment),
+					maxCreditAmount: parseDecimal(analysis?.maxCreditAmount),
+				})),
+				coDebtorsCount: coDebtorsList.length,
+				coDebtorsWithAnalysisCount: coDebtorsTotals.count,
+				consolidated,
+				hasAnyAnalysis: leadData.hasAnalysis || coDebtorsTotals.count > 0,
+			};
 		}),
 };

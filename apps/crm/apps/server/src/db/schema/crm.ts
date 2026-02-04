@@ -236,8 +236,10 @@ export const creditAnalysis = pgTable("credit_analysis", {
 	maxPayment: decimal("max_payment", { precision: 12, scale: 2 }),
 	adjustedPayment: decimal("adjusted_payment", { precision: 12, scale: 2 }),
 	maxCreditAmount: decimal("max_credit_amount", { precision: 12, scale: 2 }),
+	// Control de intentos de análisis con IA (cada llamada a IA cuesta dinero)
+	attemptCount: integer("attempt_count").notNull().default(0), // Se incrementa al llamar a la IA
 	// Metadata
-	analyzedAt: timestamp("analyzed_at").notNull().defaultNow(),
+	analyzedAt: timestamp("analyzed_at"), // null hasta que haya un análisis exitoso
 	createdAt: timestamp("created_at").notNull().defaultNow(),
 	updatedAt: timestamp("updated_at").notNull().defaultNow(),
 	createdBy: text("created_by")

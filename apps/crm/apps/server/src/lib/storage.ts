@@ -30,6 +30,66 @@ export const r2Client = new S3Client({
 	},
 });
 
+// =============================================================================
+// SIGNED URL CACHE
+// =============================================================================
+// Cache signed URLs to avoid regenerating them on every request.
+// URLs are valid for 1 hour, cache expires 5 minutes before to ensure validity.
+
+interface CachedSignedUrl {
+	url: string;
+	expiresAt: number;
+}
+
+const signedUrlCache = new Map<string, CachedSignedUrl>();
+const SIGNED_URL_EXPIRY = 3600; // 1 hour in seconds
+const CACHE_TTL_MS = (SIGNED_URL_EXPIRY - 300) * 1000; // 55 minutes in ms (5 min buffer)
+const CACHE_CLEANUP_INTERVAL = 10 * 60 * 1000; // Cleanup every 10 minutes
+
+// Periodic cleanup of expired cache entries
+setInterval(() => {
+	const now = Date.now();
+	let cleaned = 0;
+	for (const [key, value] of signedUrlCache.entries()) {
+		if (now >= value.expiresAt) {
+			signedUrlCache.delete(key);
+			cleaned++;
+		}
+	}
+	if (cleaned > 0) {
+		console.log(`[R2 Cache] Cleaned ${cleaned} expired signed URLs. Cache size: ${signedUrlCache.size}`);
+	}
+}, CACHE_CLEANUP_INTERVAL);
+
+/**
+ * Get a cached signed URL or generate a new one
+ */
+async function getCachedSignedUrl(bucket: string, key: string): Promise<string> {
+	const cacheKey = `${bucket}/${key}`;
+	const cached = signedUrlCache.get(cacheKey);
+	const now = Date.now();
+
+	// Return cached URL if still valid
+	if (cached && now < cached.expiresAt) {
+		return cached.url;
+	}
+
+	// Generate new signed URL
+	const command = new GetObjectCommand({
+		Bucket: bucket,
+		Key: key,
+	});
+	const url = await getSignedUrl(r2Client, command, { expiresIn: SIGNED_URL_EXPIRY });
+
+	// Cache the URL
+	signedUrlCache.set(cacheKey, {
+		url,
+		expiresAt: now + CACHE_TTL_MS,
+	});
+
+	return url;
+}
+
 // Generar un nombre único para el archivo
 export function generateUniqueFilename(originalName: string): string {
 	const timestamp = Date.now();
@@ -103,15 +163,9 @@ export async function uploadVehiclePhotoToR2(
 	return { key, url: publicUrl };
 }
 
-// Obtener URL firmada para un archivo
+// Obtener URL firmada para un archivo (con cache)
 export async function getFileUrl(key: string): Promise<string> {
-	const command = new GetObjectCommand({
-		Bucket: R2_BUCKET_NAME,
-		Key: key,
-	});
-
-	// Generar URL firmada válida por 1 hora
-	return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
+	return getCachedSignedUrl(R2_BUCKET_NAME, key);
 }
 
 // Validar formato de R2 key con bucket incluido
@@ -143,19 +197,12 @@ function validateR2KeyFormat(fullKey: string): { bucket: string; key: string } {
 	return { bucket, key };
 }
 
-// obtener URL firmada para un archivo que tiene el bucket al inicio de la key
+// obtener URL firmada para un archivo que tiene el bucket al inicio de la key (con cache)
 export async function getFileUrlWithBucketInKey(
 	fullKey: string,
 ): Promise<string> {
 	const { bucket, key } = validateR2KeyFormat(fullKey);
-
-	const command = new GetObjectCommand({
-		Bucket: bucket,
-		Key: key,
-	});
-
-	// Generar URL firmada válida por 1 hora
-	return await getSignedUrl(r2Client, command, { expiresIn: 3600 });
+	return getCachedSignedUrl(bucket, key);
 }
 
 // Eliminar archivo de R2

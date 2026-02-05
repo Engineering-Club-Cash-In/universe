@@ -190,7 +190,7 @@ app.post("/api/upload-vehicle-video", async (c) => {
 		const context = await createContext({ context: c });
 
 		// Video endpoint authentication
-		if (!context.session?.user?.id) {
+		if (!context.session?.user?.id || !context.session?.user?.role) {
 			return c.json({ error: "No autorizado" }, 401);
 		}
 
@@ -203,9 +203,12 @@ app.post("/api/upload-vehicle-video", async (c) => {
 		const title = formData.get("title") as string;
 		const description = formData.get("description") as string | null;
 
-		if (!file || !vehicleId || !category) {
+		if (!file || !vehicleId || !category || !videoType || !title) {
 			return c.json(
-				{ error: "Faltan campos requeridos (file, vehicleId, category)" },
+				{
+					error:
+						"Faltan campos requeridos (file, vehicleId, category, videoType, title)",
+				},
 				400,
 			);
 		}

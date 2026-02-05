@@ -12,6 +12,7 @@ import {
 	HandshakeIcon,
 	Scale,
 	Target,
+	Trophy,
 	TrendingUp,
 	Users,
 } from "lucide-react";
@@ -122,7 +123,7 @@ function RouteComponent() {
 			{userRole === ROLES.ADMIN && crmStats.data && (
 				<div className="space-y-4">
 					<h2 className="font-semibold text-2xl">Resumen Global del CRM</h2>
-					<div className="grid gap-4 md:grid-cols-4">
+					<div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 						<Card>
 							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 								<CardTitle className="font-medium text-sm">
@@ -169,20 +170,30 @@ function RouteComponent() {
 								</p>
 							</CardContent>
 						</Card>
-						<Card>
+						<Card className="border-green-200 bg-green-50/50">
 							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 								<CardTitle className="font-medium text-sm">
-									Total de Usuarios
+									Créditos Colocados
 								</CardTitle>
-								<Building className="h-4 w-4 text-muted-foreground" />
+								<Trophy className="h-4 w-4 text-green-600" />
 							</CardHeader>
 							<CardContent>
-								<div className="font-bold text-2xl">
-									{adminData.data?.adminStats.totalUsers || 0}
+								<div className="font-bold text-2xl text-green-700">
+									{crmStats.data.placedCount || 0}
 								</div>
-								<p className="text-muted-foreground text-xs">
-									Usuarios del sistema
-								</p>
+							</CardContent>
+						</Card>
+						<Card className="border-green-200 bg-green-50/50">
+							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+								<CardTitle className="font-medium text-sm">
+									Monto Colocado
+								</CardTitle>
+								<Banknote className="h-4 w-4 text-green-600" />
+							</CardHeader>
+							<CardContent>
+								<div className="font-bold text-2xl text-green-700">
+									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+								</div>
 							</CardContent>
 						</Card>
 					</div>
@@ -194,7 +205,7 @@ function RouteComponent() {
 					<h2 className="font-semibold text-2xl text-blue-600">
 						Mi Rendimiento de Ventas
 					</h2>
-					<div className="grid gap-4 md:grid-cols-3">
+					<div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 						<Card>
 							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 								<CardTitle className="font-medium text-sm">
@@ -241,6 +252,32 @@ function RouteComponent() {
 								</p>
 							</CardContent>
 						</Card>
+						<Card className="border-green-200 bg-green-50/50">
+							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+								<CardTitle className="font-medium text-sm">
+									Mis Colocados
+								</CardTitle>
+								<Trophy className="h-4 w-4 text-green-600" />
+							</CardHeader>
+							<CardContent>
+								<div className="font-bold text-2xl text-green-700">
+									{crmStats.data.placedCount || 0}
+								</div>
+							</CardContent>
+						</Card>
+						<Card className="border-green-200 bg-green-50/50">
+							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+								<CardTitle className="font-medium text-sm">
+									Mi Monto Colocado
+								</CardTitle>
+								<Banknote className="h-4 w-4 text-green-600" />
+							</CardHeader>
+							<CardContent>
+								<div className="font-bold text-2xl text-green-700">
+									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+								</div>
+							</CardContent>
+						</Card>
 					</div>
 				</div>
 			)}
@@ -251,7 +288,7 @@ function RouteComponent() {
 					<h2 className="font-semibold text-2xl text-indigo-600">
 						Panel de Supervisor de Ventas
 					</h2>
-					<div className="grid gap-4 md:grid-cols-3">
+					<div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
 						<Card>
 							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
 								<CardTitle className="font-medium text-sm">
@@ -298,6 +335,32 @@ function RouteComponent() {
 								<p className="text-muted-foreground text-xs">
 									Clientes del equipo
 								</p>
+							</CardContent>
+						</Card>
+						<Card className="border-green-200 bg-green-50/50">
+							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+								<CardTitle className="font-medium text-sm">
+									Créditos Colocados
+								</CardTitle>
+								<Trophy className="h-4 w-4 text-green-600" />
+							</CardHeader>
+							<CardContent>
+								<div className="font-bold text-2xl text-green-700">
+									{crmStats.data.placedCount || 0}
+								</div>
+							</CardContent>
+						</Card>
+						<Card className="border-green-200 bg-green-50/50">
+							<CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+								<CardTitle className="font-medium text-sm">
+									Monto Colocado
+								</CardTitle>
+								<Banknote className="h-4 w-4 text-green-600" />
+							</CardHeader>
+							<CardContent>
+								<div className="font-bold text-2xl text-green-700">
+									Q{(crmStats.data.placedAmount || 0).toLocaleString()}
+								</div>
 							</CardContent>
 						</Card>
 					</div>

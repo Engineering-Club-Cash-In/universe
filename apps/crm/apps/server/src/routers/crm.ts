@@ -11,6 +11,7 @@ import {
 	not,
 	or,
 	sql,
+	sum,
 } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db";
@@ -2727,33 +2728,69 @@ export const crmRouter = {
 
 	// Dashboard stats
 	getDashboardStats: crmProcedure.handler(async ({ context }) => {
+		// Helper: get placed credits stats (stage >= 90%) with optional user filter
+		const getPlacedCreditsStats = async (userId?: string) => {
+			const placedStages = await db
+				.select({ id: salesStages.id })
+				.from(salesStages)
+				.where(gte(salesStages.closurePercentage, 90));
+
+			const placedStageIds = placedStages.map((s) => s.id);
+
+			if (placedStageIds.length === 0) {
+				return { placedCount: 0, placedAmount: 0 };
+			}
+
+			const conditions = [inArray(opportunities.stageId, placedStageIds)];
+			if (userId) {
+				conditions.push(eq(opportunities.assignedTo, userId));
+			}
+
+			const [result] = await db
+				.select({
+					placedCount: count(),
+					placedAmount: sum(opportunities.value),
+				})
+				.from(opportunities)
+				.where(and(...conditions));
+
+			return {
+				placedCount: result?.placedCount || 0,
+				placedAmount: Number.parseFloat(result?.placedAmount || "0") || 0,
+			};
+		};
+
 		if (context.userRole === "admin") {
-			// Admin gets global stats
 			const [totalLeads] = await db.select({ count: count() }).from(leads);
 			const [totalOpportunities] = await db
 				.select({ count: count() })
 				.from(opportunities);
 			const [totalClients] = await db.select({ count: count() }).from(clients);
+			const placed = await getPlacedCreditsStats();
 
 			return {
 				totalLeads: totalLeads?.count || 0,
 				totalOpportunities: totalOpportunities?.count || 0,
 				totalClients: totalClients?.count || 0,
+				placedCount: placed.placedCount,
+				placedAmount: placed.placedAmount,
 			};
 		}
 
 		if (context.userRole === "sales_supervisor") {
-			// Sales Supervisor gets team totals (all sales users' stats)
 			const [totalLeads] = await db.select({ count: count() }).from(leads);
 			const [totalOpportunities] = await db
 				.select({ count: count() })
 				.from(opportunities);
 			const [totalClients] = await db.select({ count: count() }).from(clients);
+			const placed = await getPlacedCreditsStats();
 
 			return {
 				teamLeads: totalLeads?.count || 0,
 				teamOpportunities: totalOpportunities?.count || 0,
 				teamClients: totalClients?.count || 0,
+				placedCount: placed.placedCount,
+				placedAmount: placed.placedAmount,
 			};
 		}
 
@@ -2770,11 +2807,14 @@ export const crmRouter = {
 			.select({ count: count() })
 			.from(clients)
 			.where(eq(clients.assignedTo, context.userId));
+		const placed = await getPlacedCreditsStats(context.userId);
 
 		return {
 			myLeads: myLeads?.count || 0,
 			myOpportunities: myOpportunities?.count || 0,
 			myClients: myClients?.count || 0,
+			placedCount: placed.placedCount,
+			placedAmount: placed.placedAmount,
 		};
 	}),
 
@@ -5081,7 +5121,6 @@ export const crmRouter = {
 
 			return {
 				lead: {
-					hasAnalysis: leadData.hasAnalysis,
 					...leadData,
 				},
 				coDebtors: coDebtorsWithAnalysis.map(({ coDebtor, analysis }) => ({
